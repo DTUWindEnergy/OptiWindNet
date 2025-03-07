@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
-# https://github.com/mdealencar/interarray
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 from collections import defaultdict
 from itertools import chain

@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
-# https://github.com/mdealencar/interarray
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 # author, version, license, and long description
 __version__ = '0.0.1'
@@ -9,7 +9,7 @@ __doc__ = """
 `interarray` implements extensions to the Esau-Williams heuristic for the
 capacitaded minimum spanning tree (CMST) problem.
 
-https://github.com/mdealencar/interarray
+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 """
 
 __license__ = "LGPL-2.1-or-later"
