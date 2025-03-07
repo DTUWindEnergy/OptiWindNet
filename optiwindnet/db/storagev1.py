@@ -13,8 +13,8 @@ import networkx as nx
 import numpy as np
 from pony import orm
 
-from .interarraylib import calcload, site_fingerprint
-from .utils import NodeTagger
+from ..interarraylib import calcload, site_fingerprint
+from ..utils import NodeTagger
 
 F = NodeTagger()
 
