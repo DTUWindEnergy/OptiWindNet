@@ -10,14 +10,14 @@ import numpy as np
 from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 
-from .geometric import (angle, angle_helpers, apply_edge_exemptions, assign_root,
-                        is_bunch_split_by_corner, is_crossing,
-                        is_same_side)
-from .crossings import edge_crossings
-from .mesh import make_planar_embedding
-from .utils import Alerter, NodeStr, NodeTagger
+from ..geometric import (angle, angle_helpers, apply_edge_exemptions, assign_root,
+                         is_bunch_split_by_corner, is_crossing,
+                         is_same_side)
+from ..crossings import edge_crossings
+from ..mesh import make_planar_embedding
+from ..utils import Alerter, NodeStr, NodeTagger
 from .priorityqueue import PriorityQueue
-from .interarraylib import L_from_G, fun_fingerprint
+from ..interarraylib import L_from_G, fun_fingerprint
 
 
 F = NodeTagger()

@@ -8,25 +8,23 @@ import numpy as np
 import networkx as nx
 from scipy.stats import rankdata
 
-from .mesh import delaunay
-from .geometric import (angle, apply_edge_exemptions, assign_root, is_crossing,
-                        complete_graph, is_same_side, angle_helpers)
-from .crossings import edge_crossings
-from .utils import NodeTagger
+from ..mesh import delaunay
+from ..geometric import (angle, apply_edge_exemptions, assign_root, complete_graph,
+                         is_crossing, is_same_side, angle_helpers)
+from ..crossings import edge_crossings
+from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
 
 
 F = NodeTagger()
 
 
-def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
+def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
          debug=False, weightfun=None, weight_attr='length'):
-    '''Non-branching Esau-Williams heuristic for C-MST
+    '''Crossing Preventing Esau-Williams heuristic for C-MST
     inputs:
     G_base: networkx.Graph
     c: capacity
-    rootlust: weight of the reduction of gate length in calculating savings
-      (use some value between 0 and 1, e.g. 0.6)
     returns G_cmst: networkx.Graph'''
 
     start_time = time.perf_counter()
@@ -41,6 +39,7 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
     # BEGIN: prepare auxiliary graph with all allowed edges and metrics
     if delaunay_based:
         A = delaunay(G_base, bind2root=True)
+        P = A.graph['planar']
         diagonals = A.graph['diagonals']
         #  A = delaunay_deprecated(G_base)
         #  triangles = A.graph['triangles']
@@ -57,7 +56,7 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
         A = complete_graph(G_base)
 
     assign_root(A)
-    d2roots = A.graph['d2roots']
+    d2roots = A.graph.get('d2roots')
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
     _, anglesRank, anglesXhp, anglesYhp = angle_helpers(G_base)
 
@@ -73,9 +72,9 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
 
     # BEGIN: create initial star graph
     G = nx.create_empty_copy(G_base)
-    G.add_weighted_edges_from(((n, r, d2roots[n, r]) for n, r in
-                               A.nodes(data='root') if n >= 0),
-                              weight=weight_attr)
+    G.add_weighted_edges_from(
+        ((n, r, d2roots[n, r]) for n, r in A.nodes(data='root') if n >= 0),
+        weight=weight_attr)
     # END: create initial star graph
 
     # BEGIN: helper data structures
@@ -85,8 +84,6 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
     subtrees = np.array([{n} for n in range(T)])
     # <Gate>: maps nodes to their gates
     Gate = np.array([n for n in range(T)])
-    # <Tail>: maps nodes to their component's tail
-    Tail = np.array([n for n in range(T)])
 
     # mappings from components (identified by their gates)
     # <ComponIn>: maps component to set of components queued to merge in
@@ -105,7 +102,6 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
     # <gates2upd8>: deque for components that need to go through
     # gates2upd8 = deque()
     gates2upd8 = set()
-    gates2retry = []
     # <edges2ban>: deque for edges that should not be considered anymore
     # edges2ban = deque()
     # TODO: this is not being used, decide what to do about it
@@ -160,29 +156,21 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
         forbidden.add(gate)
         d2root = d2roots[gate, A.nodes[gate]['root']]
         capacity_left = capacity - len(subtrees[gate])
-        root_lust = rootlust*len(subtrees[gate])/capacity
         weighted_edges = []
         edges2discard = []
-        for u in set((gate, Tail[gate])):
+        for u in subtrees[gate]:
             for v in A[u]:
-                if (Gate[v] in forbidden
-                        or len(subtrees[v]) > capacity_left):
+                if (Gate[v] in forbidden or
+                        len(subtrees[v]) > capacity_left):
                     # useless edges
                     edges2discard.append((u, v))
-                elif v != Tail[v]:
-                    if v != Gate[v]:
-                        # useless edges
-                        edges2discard.append((u, v))
                 else:
                     W = A[u][v][weight_attr]
                     # if W <= d2root:  # TODO: what if I use <= instead of <?
                     if W < d2root:
-                        d2rGain = d2root - d2roots[Gate[v], A.nodes[Gate[v]]['root']]
                         # useful edges
                         tiebreaker = d2rootsRank[v, A[u][v]['root']]
-                        weighted_edges.append((W - d2rGain*root_lust,
-                                               tiebreaker, u, v))
-                        # weighted_edges.append((W, tiebreaker, u, v))
+                        weighted_edges.append((W, tiebreaker, u, v))
         return weighted_edges, edges2discard
 
     def sort_union_choices(weighted_edges):
@@ -255,8 +243,8 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
                     found = False
                     break
             # for pending in PendingG:
-                # print(f'<pending> processing '
-                      # f'pending [{F[pending]}]')
+                #  print(f'<pending> processing '
+                #        f'pending [{F[pending]}]')
                 # find_option4gate(pending)
             if found:
                 break
@@ -296,14 +284,9 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
                 # definitive gates at iteration 0 do not cross any other edges
                 # they are not included in Final_G because the algorithm
                 # considers the gates extending to infinity (not really)
-                if len(A.edges(gate)):
-                    # there is at least one usable edge
-                    # maybe its target will become a tail later
-                    gates2retry.append(gate)
-                else:
-                    root = A.nodes[gate]['root']
-                    make_gate_final(root, gate)
-                    check_heap4crossings(root, gate)
+                root = A.nodes[gate]['root']
+                make_gate_final(root, gate)
+                check_heap4crossings(root, gate)
             debug and print('<cancelling>', F[gate])
             if gate in pq.tags:
                 # i=0 gates and check_heap4crossings reverse_entry
@@ -324,8 +307,8 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
                 prevented_crossings += 1
                 ban_queued_edge(g2drop, u, v)
 
-    def ban_queued_edge(g2drop, u, v, remove_from_A=True):
-        if ((u, v) in A.edges) and remove_from_A:
+    def ban_queued_edge(g2drop, u, v):
+        if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
             debug and print('<<<< UNLIKELY <ban_queued_edge()> '
@@ -390,11 +373,6 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
         if gates2upd8:
             debug and print('gates2upd8:', ', '.join(F[gate] for gate in
                                                      gates2upd8))
-        retrylist = gates2retry.copy()
-        gates2retry.clear()
-        for gate in retrylist:
-            if gate in A:
-                find_option4gate(gate)
         while gates2upd8:
             # find_option4gate(gates2upd8.popleft())
             find_option4gate(gates2upd8.pop())
@@ -415,7 +393,6 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
         if delaunay_based:
             # look for crossing edges within the neighborhood of (u, v)
             # faster, but only works if using the expanded delaunay edges
-            #  eX = edge_crossings(u, v, G, triangles, triangles_exp)
             eX = edge_crossings(u, v, G, diagonals)
         else:
             # when using the edges of a complete graph
@@ -457,11 +434,6 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
             # abort_edge_addition(g2drop, u, v)
             prevented_crossings += 1
             ban_queued_edge(g2drop, u, v)
-            continue
-
-        if v != Tail[v]:
-            #find_option4gate(g2drop)
-            ban_queued_edge(g2drop, u, v, remove_from_A=False)
             continue
 
         g2keep = Gate[v]
@@ -529,11 +501,6 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
             continue
 
         # edge addition starts here
-        # newTail = Tail[g2drop] if u == g2drop else Tail[u]
-        newTail = Tail[g2drop] if u == g2drop else g2drop
-        for n in subtrees[v]:
-            Tail[n] = newTail
-
         subtree = subtrees[v]
         subtree |= subtrees[u]
         G.remove_edge(A.nodes[u]['root'], g2drop)
@@ -551,9 +518,6 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
         ComponHiLim[g2keep] = newHi
         ComponLoLim[g2keep] = newLo
 
-        if u != g2drop:
-            for n in subtrees[u]:
-                Tail[n] = newTail
         # assign root, gate and subtree to the newly added nodes
         for n in subtrees[u]:
             A.nodes[n]['root'] = root
@@ -564,6 +528,7 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
                         f'heap top: <{F[pq[0][-2]]}>, '
                         f'«{chr(8211).join([F[x] for x in pq[0][-1]])}»'
                         f' {pq[0][0]:.1e}' if pq else 'heap EMPTY')
+        #  G.add_edge(u, v, **A.edges[u, v])
         G.add_edge(u, v, **{weight_attr: A[u][v][weight_attr]})
         log.append((i, 'addE', (u, v)))
         # remove from consideration edges internal to subtrees
@@ -620,8 +585,8 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
     G.graph['iterations'] = i
     G.graph['prevented_crossings'] = prevented_crossings
     G.graph['capacity'] = capacity
-    G.graph['creator'] = 'NBEW'
-    G.graph['edges_fun'] = NBEW
+    G.graph['creator'] = 'CPEW'
+    G.graph['edges_fun'] = CPEW
     G.graph['creation_options'] = options
     G.graph['runtime_unit'] = 's'
     G.graph['runtime'] = time.perf_counter() - start_time

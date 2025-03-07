@@ -1,73 +1,60 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import operator
 import time
 
 import numpy as np
 import networkx as nx
 from scipy.stats import rankdata
 
-from .mesh import delaunay
-from .geometric import (angle, apply_edge_exemptions, assign_root, is_crossing,
-                        complete_graph, is_same_side, angle_helpers)
-from .utils import NodeTagger
+from ..geometric import angle, assign_root
+from ..crossings import edge_crossings
+from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
-
+from ..interarraylib import calcload
 
 F = NodeTagger()
 
 
-def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
-              debug=False, weightfun=None, weight_attr='length'):
-    '''Classic Esau-Williams heuristic for C-MST
-    inputs:
-    G_base: networkx.Graph
-    c: capacity
-    returns G_cmst: networkx.Graph'''
+def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx.Graph:
+    '''Modified Esau-Williams heuristic for C-MST with limited crossings
+    
+    Args:
+        A: available edges graph
+        capacity: maximum link capacity
+        maxiter: fail-safe to avoid locking in an infinite loop
+
+    Returns:
+        Solution topology.
+    '''
 
     start_time = time.perf_counter()
-    # grab relevant options to store in the graph later
-    options = dict(delaunay_based=delaunay_based)
+    R, T = (Aʹ.graph[k] for k in 'RT')
+    diagonals = Aʹ.graph['diagonals']
+    d2roots = Aʹ.graph['d2roots']
+    S = nx.Graph(
+        R=R, T=T,
+        capacity=capacity,
+        handle=Aʹ.graph['handle'],
+        creator='EW_presolver',
+        edges_fun=EW_presolver,
+        creation_options={},
+    )
+    A = Aʹ.copy()
 
-    R = G_base.graph['R']
-    T = G_base.graph['T']
     roots = range(-R, 0)
-    VertexC = G_base.graph['VertexC']
-    d2roots = G_base.graph.get('d2roots')
-
-    # BEGIN: prepare auxiliary graph with all allowed edges and metrics
-    if delaunay_based:
-        A = delaunay(G_base, bind2root=True)
-        # apply weightfun on all delaunay edges
-        if weightfun is not None:
-            apply_edge_exemptions(A)
-        # TODO: decide whether to keep this 'else' (to get edge arcs)
-        # else:
-            # apply_edge_exemptions(A)
-    else:
-        A = complete_graph(G_base)
+    VertexC = A.graph['VertexC']
 
     assign_root(A)
-    d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
-    _, anglesRank, anglesXhp, anglesYhp = angle_helpers(G_base)
 
-    if weightfun is not None:
-        options['weightfun'] = weightfun.__name__
-        options['weight_attr'] = weight_attr
-        for u, v, data in A.edges(data=True):
-            data[weight_attr] = weightfun(data)
     # removing root nodes from A to speedup find_option4gate
     # this may be done because G already starts with gates
     A.remove_nodes_from(roots)
     # END: prepare auxiliary graph with all allowed edges and metrics
 
     # BEGIN: create initial star graph
-    G = nx.create_empty_copy(G_base)
-    G.add_weighted_edges_from(((n, r, d2roots[n, r]) for n, r in
-                               A.nodes(data='root') if n >= 0),
-                              weight=weight_attr)
+    S.add_edges_from(((n, r) for n, r in A.nodes(data='root')))
     # END: create initial star graph
 
     # BEGIN: helper data structures
@@ -84,61 +71,36 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
     ComponLoLim = np.arange(T)  # most CW node
     ComponHiLim = np.arange(T)  # most CCW node
 
-    # mappings from roots
-    # <Final_G>: set of gates of finished components (one set per root)
-    Final_G = np.array([set() for _ in range(R)])
-
     # other structures
     # <pq>: queue prioritized by lowest tradeoff length
     pq = PriorityQueue()
     # find_option4gate()
     # <gates2upd8>: deque for components that need to go through
+    # gates2upd8 = deque()
     gates2upd8 = set()
+    # <edges2ban>: deque for edges that should not be considered anymore
+    # edges2ban = deque()
+    # TODO: this is not being used, decide what to do about it
+    edges2ban = set()
+    # TODO: edges{T,C,V} could be used to vectorize the edge crossing detection
+    # <edgesN>: array of nodes of the edges of G (T×2)
+    # <edgesC>: array of node coordinates for edges of G (T×2×2)
+    # <edgesV>: array of vectors of the edges of G (T×2)
     # <i>: iteration counter
     i = 0
+    # <prevented_crossing>: counter for edges discarded due to crossings
+    prevented_crossings = 0
     # END: helper data structures
 
-    def is_rank_within(rank, lowRank, highRank, anglesWrap,
-                       touch_is_cross=False):
-        less = operator.le if touch_is_cross else operator.lt
-        if anglesWrap:
-            return less(rank, lowRank) or less(highRank, rank)
-        else:
-            return less(lowRank, rank) and less(rank, highRank)
-
-    def is_crossing_gate(root, gate, u, v, touch_is_cross=False):
-        '''choices for `less`:
-        -> operator.lt: touching is not crossing
-        -> operator.le: touching is crossing'''
-        gaterank = anglesRank[gate, root]
-        uR, vR = anglesRank[u, root], anglesRank[v, root]
-        highRank, lowRank = (uR, vR) if uR >= vR else (vR, uR)
-        Xhp = anglesXhp[[u, v], root]
-        uYhp, vYhp = anglesYhp[[u, v], root]
-        if is_rank_within(gaterank, lowRank, highRank,
-                          not any(Xhp) and uYhp != vYhp, touch_is_cross):
-            if not is_same_side(*VertexC[[u, v, root, gate]]):
-                # crossing gate
-                debug and print(f'<crossing> discarding '
-                                f'«{F[u]}–{F[v]}»: would cross'
-                                f'gate <{F[gate]}>')
-                return True
-        return False
-
-    def make_gate_final(root, g2keep):
-        Final_G[root].add(g2keep)
-        log.append((i, 'finalG', (g2keep, root)))
-        debug and print(f'<final> gate '
-                        f'[{F[g2keep]}] added')
-
-    def component_merging_choices(gate, forbidden=None):
+    def component_merging_edge(gate, forbidden=None, margin=1.02):
         # gather all the edges leaving the subtree of gate
         if forbidden is None:
             forbidden = set()
         forbidden.add(gate)
-        d2root = d2roots[gate, A.nodes[gate]['root']]
         capacity_left = capacity - len(subtrees[gate])
-        weighted_edges = []
+        choices = []
+        gate_d2root = d2roots[gate, A.nodes[gate]['root']]
+        #  weighted_edges = []
         edges2discard = []
         for u in subtrees[gate]:
             for v in A[u]:
@@ -147,76 +109,50 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
                     # useless edges
                     edges2discard.append((u, v))
                 else:
-                    W = A[u][v][weight_attr]
-                    # if W <= d2root:  # TODO: what if I use <= instead of <?
-                    if W < d2root:
+                    W = A[u][v]['length']
+                    # DEVIATION FROM Esau-Williams: slack
+                    if W <= gate_d2root:
                         # useful edges
-                        tiebreaker = d2rootsRank[v, A[u][v]['root']]
-                        weighted_edges.append((W, tiebreaker, u, v))
-        return weighted_edges, edges2discard
-
-    def sort_union_choices(weighted_edges):
-        # this function could be outside esauwilliams()
-        unordchoices = np.array(
-            weighted_edges,
-            dtype=[('weight', np.float64),
-                   ('vd2rootR', np.int_),
-                   ('u', np.int_),
-                   ('v', np.int_)])
-        # result = np.argsort(unordchoices, order=['weight'])
-        # unordchoices  = unordchoices[result]
-
-        # DEVIATION FROM Esau-Williams
-        # rounding of weight to make ties more likely
-        # tie-breaking by proximity of 'v' node to root
-        # purpose is to favor radial alignment of components
-        tempchoices = unordchoices.copy()
-        # tempchoices['weight'] /= tempchoices['weight'].min()
-        # tempchoices['weight'] = (20*tempchoices['weight']).round()  # 5%
-
-        result = np.argsort(tempchoices, order=['weight', 'vd2rootR'])
-        choices = unordchoices[result]
-        return choices
+                        # v's proximity to root is used as tie-breaker
+                        choices.append(
+                            (W, d2rootsRank[v, A.nodes[v]['root']], u, v))
+        if not choices:
+            return None, 0., edges2discard
+        choices.sort()
+        best_W, best_rank, *best_edge = choices[0]
+        for W, rank, *edge in choices[1:]:
+            if W > margin*best_W:
+                # no more edges within margin
+                break
+            if  rank < best_rank:
+                best_W, best_rank, best_edge = W, rank, edge
+        tradeoff = best_W - gate_d2root
+        return best_edge, tradeoff, edges2discard
 
     def find_option4gate(gate):
         debug and print(f'<find_option4gate> starting... gate = '
                         f'<{F[gate]}>')
-        # () get component expansion edges with weight
-        weighted_edges, edges2discard = component_merging_choices(gate)
+        if edges2ban:
+            debug and print(f'<<<<<<<edges2ban>>>>>>>>>>> _{len(edges2ban)}_')
+        while edges2ban:
+            # edge2ban = edges2ban.popleft()
+            edge2ban = edges2ban.pop()
+            ban_queued_edge(*edge2ban)
+        # () get component expansion edge with weight
+        edge, tradeoff, edges2discard = component_merging_edge(gate)
         # discard useless edges
         A.remove_edges_from(edges2discard)
-        # () sort choices
-        choices = sort_union_choices(weighted_edges) if weighted_edges else []
-        # () check gate crossings
-        # choice = first_non_crossing(choices, gate)
-        if len(choices) > 0:
-            weight, _, u, v = choices[0]
-            choice = (weight, u, v)
-        else:
-            choice = False
-        if choice:
+        if edge is not None:
             # merging is better than gate, submit entry to pq
-            weight, u, v = choice
             # tradeoff calculation
-            tradeoff = weight - d2roots[gate, A.nodes[gate]['root']]
-            pq.add(tradeoff, gate, (u, v))
-            ComponIn[Gate[v]].add(gate)
+            pq.add(tradeoff, gate, edge)
+            ComponIn[Gate[edge[1]]].add(gate)
             debug and print(f'<pushed> g2drop <{F[gate]}>, '
-                            f'«{F[u]}–{F[v]}», tradeoff = {tradeoff:.1e}')
+                            f'«{F[edge[0]]}–{F[edge[1]]}», tradeoff = {tradeoff:.1e}')
         else:
             # no viable edge is better than gate for this node
-            # this becomes a final gate
-            if i:  # run only if not at i = 0
-                # definitive gates at iteration 0 do not cross any other edges
-                # they are not included in Final_G because the algorithm
-                # considers the gates extending to infinity (not really)
-                root = A.nodes[gate]['root']
-                make_gate_final(root, gate)
-                # check_heap4crossings(root, gate)
             debug and print('<cancelling>', F[gate])
             if gate in pq.tags:
-                # i=0 gates and check_heap4crossings reverse_entry
-                # may leave accepting gates out of pq
                 pq.cancel(gate)
 
     def ban_queued_edge(g2drop, u, v):
@@ -257,22 +193,12 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
 
         # END: block to be simplified
 
-    # TODO: check if this function is necessary (not used)
-    def abort_edge_addition(g2drop, u, v):
-        if (u, v) in A.edges:
-            A.remove_edge(u, v)
-        else:
-            print('<<<< UNLIKELY <abort_edge_addition()> '
-                  f'({F[u]}, {F[v]}) not in A.edges >>>>')
-        ComponIn[Gate[v]].remove(g2drop)
-        find_option4gate(g2drop)
-
     # initialize pq
     for n in range(T):
         find_option4gate(n)
 
     log = []
-    G.graph['log'] = log
+    S.graph['log'] = log
     loop = True
     # BEGIN: main loop
     while loop:
@@ -295,6 +221,25 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
         debug and print(f'<popped> «{F[u]}–{F[v]}»,'
                         f' g2drop: <{F[g2drop]}>')
 
+        # TODO: main loop should do only
+        # - pop from pq
+        # - check if adding edge would block some component
+        # - add edge
+        # - call find_option4gate for everyone affected
+
+        # check if (u, v) crosses an existing edge
+        # look for crossing edges within the neighborhood of (u, v)
+        # this works for expanded delaunay edges (see CPEW for all edges)
+        eX = edge_crossings(u, v, S, diagonals)
+
+        if eX:
+            debug and print(f'<edge_crossing> discarding {(F[u], F[v])}: would cross'
+                            f' {[(F[s], F[t]) for s, t in eX]}')
+            # abort_edge_addition(g2drop, u, v)
+            prevented_crossings += 1
+            ban_queued_edge(g2drop, u, v)
+            continue
+
         g2keep = Gate[v]
         root = A.nodes[g2keep]['root']
 
@@ -313,7 +258,7 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
         # edge addition starts here
         subtree = subtrees[v]
         subtree |= subtrees[u]
-        G.remove_edge(A.nodes[u]['root'], g2drop)
+        S.remove_edge(A.nodes[u]['root'], g2drop)
         log.append((i, 'remE', (A.nodes[u]['root'], g2drop)))
 
         g2keep_entry = pq.tags.get(g2keep)
@@ -338,7 +283,8 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
                         f'heap top: <{F[pq[0][-2]]}>, '
                         f'«{chr(8211).join([F[x] for x in pq[0][-1]])}»'
                         f' {pq[0][0]:.1e}' if pq else 'heap EMPTY')
-        G.add_edge(u, v, **{weight_attr: A[u][v][weight_attr]})
+        #  G.add_edge(u, v, **A.edges[u, v])
+        S.add_edge(u, v)
         log.append((i, 'addE', (u, v)))
         # remove from consideration edges internal to subtrees
         A.remove_edge(u, v)
@@ -347,41 +293,42 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
         if capacity_left > 0:
             for gate in list(ComponIn[g2keep]):
                 if len(subtrees[gate]) > capacity_left:
+                    # TODO: think about why a discard was needed
+                    # ComponIn[g2keep].remove(gate)
                     ComponIn[g2keep].discard(gate)
+                    # find_option4gate(gate)
+                    # gates2upd8.append(gate)
                     gates2upd8.add(gate)
             for gate in ComponIn[g2drop] - ComponIn[g2keep]:
                 if len(subtrees[gate]) > capacity_left:
+                    # find_option4gate(gate)
+                    # gates2upd8.append(gate)
                     gates2upd8.add(gate)
                 else:
                     ComponIn[g2keep].add(gate)
+            # ComponIn[g2drop] = None
+            # find_option4gate(g2keep)
+            # gates2upd8.append(g2keep)
             gates2upd8.add(g2keep)
         else:
             # max capacity reached: subtree full
             if g2keep in pq.tags:  # if required because of i=0 gates
                 pq.cancel(g2keep)
-            make_gate_final(root, g2keep)
             # don't consider connecting to this full subtree nodes anymore
             A.remove_nodes_from(subtree)
             for gate in ComponIn[g2drop] | ComponIn[g2keep]:
+                # find_option4gate(gate)
+                # gates2upd8.append(gate)
                 gates2upd8.add(gate)
+            # ComponIn[g2drop] = None
+            # ComponIn[g2keep] = None
     # END: main loop
 
-    if debug:
-        not_marked = []
-        for root in roots:
-            for gate in G[root]:
-                if gate not in Final_G[root]:
-                    not_marked.append(gate)
-        not_marked and print('@@@@ WARNING: gates '
-                             f'<{", ".join([F[gate] for gate in not_marked])}'
-                             '> were not marked as final @@@@')
-
+    calcload(S)
     # algorithm finished, store some info in the graph object
-    G.graph['iterations'] = i
-    G.graph['capacity'] = capacity
-    G.graph['creator'] = 'ClassicEW'
-    G.graph['edges_fun'] = ClassicEW
-    G.graph['creation_options'] = options
-    G.graph['runtime_unit'] = 's'
-    G.graph['runtime'] = time.perf_counter() - start_time
-    return G
+    S.graph.update(
+        iterations=i,
+        prevented_crossings=prevented_crossings,
+        runtime=time.perf_counter() - start_time,
+    )
+    return S
