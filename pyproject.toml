@@ -1,5 +1,5 @@
 [project]
-name = "interarray"
+name = "optiwindnet"
 description = "Tools for optimizing the electrical cable network (collection system) for offshore wind power plants."
 authors = [   { name="DTU Wind Energy"},   { name="Mauricio Souza de Alencar", email="ma___@dtu.dk" }, ]
 dynamic = ["version"]

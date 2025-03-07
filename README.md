@@ -1,12 +1,12 @@
-interarray
-==========
+OptiWindNet
+===========
 
 Tool for designing and optimizing the electrical cable network (collection system) for offshore wind power plants.
 
-About interarray
-----------------
+About OptiWindNet
+-----------------
 
-``interarray`` provides a framework to obtain optimal or near-optimal cable routes for a given turbine layout within the cable-laying boundaries. It provides high-level access to heuristic, meta-heuristic and mathematical optimization approaches to the problem.
+``optiwindnet`` provides a framework to obtain optimal or near-optimal cable routes for a given turbine layout within the cable-laying boundaries. It provides high-level access to heuristic, meta-heuristic and mathematical optimization approaches to the problem.
 
 The design of the collection system is subject to constraints:
 - circuits can only branch inside a wind turbine, if at all;
@@ -18,9 +18,9 @@ This problem has similarities with two classic operations research problems:
 - The capacitated minimum spanning tree problem (CMSTP);
 - The open and capacitated vehicle routing problem (OCVRP);
 
-Neither of the classic formulations consider route crossings, which is the main achievement of ``interarray``. Whether the approach is via the CMSTP or via the OCVRP depends on the viability of branching the circuits on turbines.
+Neither of the classic formulations consider route crossings, which is the main achievement of ``optiwindnet``. Whether the approach is via the CMSTP or via the OCVRP depends on the viability of branching the circuits on turbines.
 
-The heuristics are based on extensions to the Esau-Williams heuristic (for the CMSTP). The meta-heuristic is [implemented elsewhere](https://github.com/vidalt/HGS-CVRP), of which `interarray` is just a user. The mathematical optimization uses mixed-integer linear programming (MILP) models, which can be solved using Google's OR-Tools or by calling solvers via ``pyomo``, e.g.: Coin-OR Branch-and-Cut (CBC), IBM's CPLEX, Gurobi, HiGHS, SCIP, among others.
+The heuristics are based on extensions to the Esau-Williams heuristic (for the CMSTP). The meta-heuristic is [implemented elsewhere](https://github.com/vidalt/HGS-CVRP), of which `optiwindnet` is just a user. The mathematical optimization uses mixed-integer linear programming (MILP) models, which can be solved using Google's OR-Tools or by calling solvers via ``pyomo``, e.g.: Coin-OR Branch-and-Cut (CBC), IBM's CPLEX, Gurobi, HiGHS, SCIP, among others.
 
 
 Requirements
@@ -45,27 +45,27 @@ pip install -r requirements.txt
 ### Setup environment with conda
 
 ```
-conda env create --name «env_interarray» --file environment.yml
-conda activate «env_interarray»
+conda env create --name «env_optiwindnet» --file environment.yml
+conda activate «env_optiwindnet»
 ```
 
 
 Installation
 ------------
 
-``interarray`` is not yet a proper python package. For the time being:
+``optiwindnet`` is not yet a proper python package. For the time being:
 
 ```
-git clone https://github.com/mdealencar/interarray.git
+git clone https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
 ```
 
-And add the `interarray` folder to somewhere Python looks for packages.
+And add the `optiwindnet` folder to somewhere Python looks for packages.
 
 
 Solvers
 -------
 
-The installation procedure above enables using the heuristics and the meta-heuristic within ``interarray``. To benefit from mathematical optimization, at least one MILP solver is necessary. Activate your python environment and choose either the `pip` or the `conda` command.
+The installation procedure above enables using the heuristics and the meta-heuristic within ``optiwindnet``. To benefit from mathematical optimization, at least one MILP solver is necessary. Activate your python environment and choose either the `pip` or the `conda` command.
 
 See the MILP [notebooks](notebooks) for relevant parameters when calling each solver.
 
