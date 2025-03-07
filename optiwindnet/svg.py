@@ -254,8 +254,7 @@ def svgplot(G, landscape=True, dark=None, infobox: bool = True,
     graphElements.append(svgnodesE)
 
     # oss nodes
-    svgrootsE = svg.G(
-        id='OSSgrp',
+    svgrootsE = svg.G(id='OSSgrp',
         elements=[svg.Use(href='#oss', x=VertexS[r, 0] - root_side/2,
                           y=VertexS[r, 1] - root_side/2)
                   for r in range(-R, 0)])
@@ -263,6 +262,16 @@ def svgplot(G, landscape=True, dark=None, infobox: bool = True,
 
     # Defs (i.e. reusable elements)
     reusableE = [
+        svg.Filter(id='bg_textbox',
+            x=svg.Length(-5, '%'), y=svg.Length(-5, '%'),
+            width=svg.Length(110, '%'), height=svg.Length(110, '%'),
+            elements=[
+                svg.FeFlood(flood_color=border_face,
+                            flood_opacity=0.7, result='bg'),
+                svg.FeMerge(elements=[svg.FeMergeNode(in_='bg'),
+                                      svg.FeMergeNode(in_='SourceGraphic')])
+            ]
+        ),
         svg.Circle(id='wtg', stroke=node_edge, stroke_width=2, r=node_size),
         svg.Rect(id='oss', fill=root_color, stroke=node_edge, stroke_width=2,
                  width=root_side, height=root_side),
@@ -280,7 +289,7 @@ def svgplot(G, landscape=True, dark=None, infobox: bool = True,
 
     # Infobox
     if infobox and G.graph.get('has_loads', False):
-        w_drawn = round(W*scale + 2*margin)
+        right_anchor = round(W*scale + margin)
         desc_lines = describe_G(G)[::-1]
 
         if github_bugfix:
@@ -290,13 +299,15 @@ def svgplot(G, landscape=True, dark=None, infobox: bool = True,
                           for l in desc_lines]
 
         linesE = [
-            svg.TSpan(x=w_drawn, dx=svg.Length(-0.2, 'em'),
-                      dy=svg.Length((-1.2 if i else -0.2), 'em'), text=line)
+            svg.TSpan(x=right_anchor,# dx=svg.Length(-0.2, 'em'),
+                      dy=svg.Length((-1.3 if i else -0.), 'em'), text=line)
             for i, line in enumerate(desc_lines)
         ]
         rootElements.append(
-            svg.Text(x=w_drawn, y=h, elements=linesE, fill=text_color, font_size=40,
-                     text_anchor='end', font_family='sans-serif')
+            svg.Text(x=right_anchor, y=h - margin, elements=linesE, fill=text_color,
+                     font_size=40,
+                     text_anchor='end', font_family='sans-serif',
+                     filter='url(#bg_textbox)')
         )
 
     # Aggregate all elements in the SVG figure.
