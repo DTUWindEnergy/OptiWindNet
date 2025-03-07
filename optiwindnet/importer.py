@@ -389,7 +389,7 @@ def load_repository(handles2names=(
         ('.yaml', _site_handles_yaml),
         ('.osm.pbf', _site_handles_pbf),
         )) -> NamedTuple:
-    base_dir = files('interarray.data')
+    base_dir = files(__package__ + '.data')
     if isinstance(handles2names, dict):
         # assume all files have .yaml extension
         return namedtuple('SiteRepository', handles2name)(

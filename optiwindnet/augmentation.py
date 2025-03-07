@@ -10,7 +10,7 @@ from .utils import NodeTagger
 import numpy as np
 import numba as nb
 import networkx as nx
-from interarray.geometric import area_from_polygon_vertices
+from .geometric import area_from_polygon_vertices
 
 F = NodeTagger()
 

@@ -1130,7 +1130,6 @@ def delaunay(L: nx.Graph, bind2root: bool = False) -> nx.Graph:
 
 
 def A_graph(G_base, delaunay_based=True, weightfun=None, weight_attr='weight'):
-    # TODO: refactor to be compatible with interarray.mesh's delaunay()
     '''
     Return the "available edges" graph that is the base for edge search in
     Esau-Williams. If `delaunay_based` is True, the edges are the expanded
