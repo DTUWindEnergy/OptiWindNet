@@ -56,7 +56,7 @@ Installation
 ``optiwindnet`` is not yet a proper python package. For the time being:
 
 ```
-git clone https://github.com/mdealencar/optiwindnet.git
+git clone https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
 ```
 
 And add the `optiwindnet` folder to somewhere Python looks for packages.
