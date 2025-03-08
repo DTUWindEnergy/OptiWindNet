@@ -13,6 +13,39 @@ from .geometric import rotate
 from .interarraylib import describe_G
 
 
+# monkey-patch svg.py until PR makes its way to PyPI
+# https://github.com/orsinium-labs/svg.py/pull/16
+from dataclasses import dataclass
+from typing import Literal
+@dataclass
+class G(
+    svg.Element,
+    svg._mixins.GraphicsElementEvents,
+    svg._mixins.Color,
+    svg._mixins.Graphics,
+    svg._mixins.FillStroke,
+):
+    """The <g> SVG element is a container used to group other SVG elements.
+
+    Transformations applied to the <g> element are performed on its child elements,
+    and its attributes are inherited by its children. It can also group multiple elements
+    to be referenced later with the <use> element.
+
+    https://developer.mozilla.org/en-US/docs/Web/SVG/Element/g
+    """
+    element_name = "g"
+    transform: list[svg.Transform] | None = None
+    class_: list[str] | None = None
+    mask: str | None = None
+    opacity: svg._types.Number | None = None
+    clip_path: str | None = None
+    fill_rule: Literal["evenodd", "nonzero", "inherit"] | None = None
+    fill_opacity: svg._types.Number | None = None
+    fill: str | None = None
+
+svg.G = G
+
+
 class SvgRepr():
     '''
     Helper class to get IPython to display the SVG figure encoded in data.
