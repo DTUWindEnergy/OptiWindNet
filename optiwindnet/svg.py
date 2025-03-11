@@ -7,7 +7,6 @@ from itertools import chain
 import numpy as np
 import darkdetect
 
-from ground.base import get_context
 import svg
 
 from .geometric import rotate
@@ -85,16 +84,6 @@ def svgplot(G, landscape=True, dark=None, infobox: bool = True,
     if landscape and landscape_angle:
         # landscape_angle is not None and not 0
         VertexC = rotate(VertexC, landscape_angle)
-    if border is None:
-        hull = G.graph.get('hull')
-        if hull is not None:
-            border = VertexC[hull]
-        else:
-            context = get_context()
-            Point = context.point_cls
-            PointMap = {Point(float(x), float(y)): i for i, (x, y) in enumerate(VertexC)}
-            BorderPt = context.points_convex_hull(PointMap.keys())
-            border = np.array([PointMap[point] for point in BorderPt])
 
     # viewport scaling
     idx_B = T + B
