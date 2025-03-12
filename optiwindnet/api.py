@@ -7,26 +7,26 @@ import yaml
 from itertools import pairwise
 
 
-# interarray
-from interarray.svg import svgplot
-from interarray.importer import L_from_yaml, L_from_pbf, L_from_site
-from interarray.plotting import gplot
-from interarray.mesh import make_planar_embedding
-from interarray.pathfinding import PathFinder
-from interarray.interface import assign_cables
-from interarray.importer import load_repository
-from interarray.interarraylib import G_from_S
+# optiwindnet
+from optiwindnet.svg import svgplot
+from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
+from optiwindnet.plotting import gplot
+from optiwindnet.mesh import make_planar_embedding
+from optiwindnet.pathfinding import PathFinder
+from optiwindnet.interface import assign_cables
+from optiwindnet.importer import load_repository
+from optiwindnet.interarraylib import G_from_S
 
 # Heuristic
-from interarray.heuristics import EW_presolver
+from optiwindnet.heuristics import EW_presolver
 # Metha-Heuristic
-from interarray.baselines.hgs import iterative_hgs_cvrp
+from optiwindnet.baselines.hgs import iterative_hgs_cvrp
 
 
 # MILP
-from interarray.MILP import ortools as ort
-from interarray.pathfinding import PathFinder
-import interarray.MILP.pyomo as omo
+from optiwindnet.MILP import ortools as ort
+from optiwindnet.pathfinding import PathFinder
+import optiwindnet.MILP.pyomo as omo
 from pyomo.contrib.appsi.solvers import Highs
 from pyomo import environ as pyo
 
@@ -124,8 +124,7 @@ class WindFarmNetwork():
     """
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, border=None, obstacles=None, L=None, S=None, 
-                 G_tentative=None, G=None, **kwargs):
+                 cables=None, border=None, obstacles=None, L=None, verbose=True, **kwargs):
 
         #
         if turbines is not None:
@@ -133,20 +132,84 @@ class WindFarmNetwork():
         self.L = L
 
         # Compute the planar embedding
-        self.P, self.A = make_planar_embedding(L)
-
-        # Assign additional attributes
-        self.S = S
-        self.G_tentative = G_tentative
-        self.G = G
+        self._P, self._A = make_planar_embedding(L)
         self.border = border
         self.obstacles = obstacles
         self.cables = cables
 
+        # Flags to track update status (initialized as updated)
+        self._S = None
+        self._G_tentative = None
+        self.G = None
+        self._A_updated = True
+        self._P_updated = True
+        self._S_updated = False
+        self._G_tentative_updated = False
+        self._G_updated = False
+
         if self.cables is not None:
             self.cables_capacity = max(cable[1] for cable in cables) # np.max(self.cables[:, 1])
 
-        self.add_aux_methods()
+        self.verbose = verbose
+
+    def _update_planar_embedding(self):
+        """Updates P and A if they are stale."""
+        if not self._P_updated or not self._A_updated:
+            self._P, self._A = make_planar_embedding(self.L)
+            self._P_updated = True
+            self._A_updated = True
+
+    @property
+    def A(self):
+        """Lazy update of A when accessed."""
+        self._update_planar_embedding()
+        return self._A
+    
+    @A.setter
+    def A(self, value):
+        self._A = value
+
+    @property
+    def P(self):
+        """Lazy update of P when accessed."""
+        self._update_planar_embedding()
+        return self._P
+    
+    @P.setter
+    def P(self, value):
+        self._P = value
+
+    @property
+    def S(self):
+        if not self._S_updated and self.verbose:
+            print('S is not updated')
+        return self._S
+    
+    @S.setter
+    def S(self, value):
+        self._S = value
+
+
+    @property
+    def G_tentative(self):
+        if not self._G_tentative_updated and self.verbose:
+            print('G_tentative is not updated')
+        return self._G_tentative
+    
+    @G_tentative.setter
+    def G_tentative(self, value):
+        self._G_tentative = value
+
+
+    @property
+    def G(self):
+        if not self._G_updated and self.verbose:
+            print('G is not updated')
+        return self._G
+
+    @G.setter
+    def G(self, value):
+        self._G = value
     
     def _from_coordinates(self, turbines, substations, border, obstacles):
         """Handles input format from coordinates."""
@@ -201,101 +264,90 @@ class WindFarmNetwork():
                         handle=f"{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}")
 
         return cls(L=L, **kwargs)
-    
-    def add_aux_methods(self):
-        """Attach auxiliary methods to the instance."""
-
-        def plot():
-            """Plots the wind farm network graph."""
-            return gplot(self.G)
-
-        def get_network():
-            """Returns the network edges with cable data."""
-            return self.G.edges(data='cable')
-
-        def cost():
-            """Returns the total cost of the network."""
-            return self.G.size(weight="cost")
-
-        def length():
-            """Returns the total cable length of the network."""
-            return self.G.size(weight="length")
-
-        def set_coordinates(turbines, substations):
-            """Updates the coordinates of turbines and substations."""
-            self.L['VertexC'][:turbines.shape[0], :] = turbines
-            self.L['VertexC'][-substations.shape[0]:, :] = substations
-
-        def set_network(new_edges):
-            """Updates the graph with a new set of edges."""
-            if self.G is None:
-                raise ValueError("Graph (G) is not initialized.")
-
-            if not isinstance(new_edges, list):
-                raise TypeError("new_edges must be a list of tuples (node1, node2, attributes_dict).")
-
-            for edge in new_edges:
-                if not (isinstance(edge, tuple) and len(edge) == 3 and isinstance(edge[2], dict)):
-                    raise ValueError(f"Invalid edge format: {edge}. Must be (node1, node2, attributes_dict).")
-
-            self.G.remove_edges_from(list(self.G.edges()))
-            self.G.add_edges_from(new_edges)
-
-        # Bind these methods to `self`
-        self.plot = plot
-        self.get_network = get_network
-        self.cost = cost
-        self.length = length
-        self.set_coordinates = set_coordinates
-        self.set_network = set_network
 
     
-    # def add_aux_methods(self):
-    #     setattr(self, "plot", lambda: gplot(self.G))  # Now attached to self
-    #     setattr(self, "get_network", lambda: self.G.edges(data='cable'))  # Now attached to self
-    #     setattr(self, "cost", lambda: self.G.size(weight="cost"))
-    #     setattr(self, "length", lambda: self.G.size(weight="length"))
+    def plot(self):
+        """Plots the wind farm network graph."""
+        return gplot(self.G)
 
-    #     def set_coordinates(turbines, substations):
-            
-    #         # update wfn
-    #         self.L['VertexC'][:self.turbines.shape[0], :] = turbines
-    #         self.L['VertexC'][-self.substations.shape[0]:, :] = substations
+    def get_network(self):
+        """Returns the network edges with cable data."""
+        return self.G.edges(data='cable')
 
+    def cost(self):
+        """Returns the total cost of the network."""
+        return self.G.size(weight="cost")
+
+    def length(self):
+        """Returns the total cable length of the network."""
+        return self.G.size(weight="length")
+
+    def set_coordinates(self, turbines, substations):
+        """Updates the coordinates of turbines and substations."""
+        self._G_updated = True
         
-    #     setattr(self, "set_coordinates", set_coordinates)
+        if self.verbose:
+            print('WARNING: wfn.set_coordinates is not checking for cable crossings')
 
-    #     def set_network(new_edges):
-    #         """
-    #         Updates the graph with a new set of edges.
-            
-    #         Args:
-    #             new_edges (list of tuples): Each tuple should be (node1, node2, attributes_dict).
-            
-    #         Raises:
-    #             ValueError: If new_edges is not properly formatted.
-    #         """
+        if not hasattr(self.L, 'graph') or 'VertexC' not in self.L.graph:
+            raise ValueError("Graph L does not contain 'VertexC' attribute.")
 
-    #         #
-    #         if not isinstance(new_edges, list):
-    #             raise TypeError("new_edges must be a list of tuples (node1, node2, attributes_dict).")
+        # Update coordinates
+        self.L.graph['VertexC'][:turbines.shape[0], :] = turbines
+        self.L.graph['VertexC'][-substations.shape[0]:, :] = substations
+        self.G.graph['VertexC'][:turbines.shape[0], :] = turbines
+        self.G.graph['VertexC'][-substations.shape[0]:, :] = substations
 
-    #         #
-    #         for edge in new_edges:
-    #             if (
-    #                 not isinstance(edge, tuple) or
-    #                 len(edge) != 3 or
-    #                 not isinstance(edge[0], (int, str)) or  # Node 1 should be int or str
-    #                 not isinstance(edge[1], (int, str)) or  # Node 2 should be int or str
-    #                 not isinstance(edge[2], dict)  # Edge attributes should be a dictionary
-    #             ):
-    #                 raise ValueError(
-    #                     f"Invalid edge format: {edge}. Each edge must be (node1, node2, attributes_dict).")
+        # Update length
+        VertexC = self.G.graph['VertexC']
+        for u, v, data in self.G.edges(data=True):
+            coord_u = VertexC[u, :]
+            coord_v = VertexC[v, :]
+            data['length'] = np.linalg.norm(np.array(coord_u) - np.array(coord_v))
+        
+        # Update cost
+        assign_cables(self.G, self.cables)
 
-    #         self.G.remove_edges_from(list(self.G.edges()))
-    #         self.G.add_edges_from(new_edges)
+        self._A_updated = False
+        self._P_updated = False
+        self._S_updated = False
+        self._G_tentative_updated = False
 
-    #     setattr(self, "set_network", set_network)
+    def set_network(self, network_tree):
+        """Updates the graph with a new network tree.""" 
+        self._G_updated = True
+        
+        if self.verbose:
+            print('WARNING: wfn.set_network is not checking for cable crossings')
+
+        if self.G is None:
+            raise ValueError("Graph (G) is not initialized.")
+
+        if not isinstance(network_tree, list):
+            raise TypeError("network_tree must be a list of tuples (node1, node2, attributes_dict).")
+
+        for edge in network_tree:
+            if not (isinstance(edge, tuple) and len(edge) == 3 and isinstance(edge[2], dict)):
+                raise ValueError(f"Invalid edge format: {edge}. Must be (node1, node2, attributes_dict).")
+
+        self.G.remove_edges_from(list(self.G.edges()))
+        self.G.add_edges_from(network_tree)
+
+        # Update length
+        for u, v, data in self.G.edges(data=True):
+            coord_u = self.G.graph['VertexC'][u, :]
+            coord_v = self.G.graph['VertexC'][v, :]
+            data['length'] = np.linalg.norm(np.array(coord_u) - np.array(coord_v))
+        
+        # Update cost
+        assign_cables(self.G, self.cables)
+
+        self._A_updated = False
+        self._P_updated = False
+        self._S_updated = False
+        self._G_tentative_updated = False
+
+
 
     def wt_per_cable(cable_cross_section, turbine_power, voltage, efficiency):
         return turbines_per_cable(cable_cross_section, turbine_power, voltage, efficiency)
@@ -306,33 +358,32 @@ class OptiWindNetSolver(ABC):
         self.wfn = wfn
         self.verbose = verbose
 
-
     @abstractmethod
-    def optimize(self, wfn=None, verbose=True, **kwargs):
+    def optimize(self, turbines=None, substations=None, network_tree=None, verbose=True, **kwargs):
         """
         Perform cable layout optimization. Must be implemented by subclasses.
         """
         pass
 
-    def __call__(self, wfn=None, verbose=True, **kwargs):
+    def __call__(self, turbines=None, substations=None, network_tree=None, verbose=True, **kwargs):
         """Make the instance callable, calling optimize() internally."""
-        return self.optimize(wfn=wfn, verbose=True, **kwargs)  
+        return self.optimize( turbines=turbines, substations=substations, network_tree=network_tree, verbose=verbose, **kwargs)  
 
-
-    def gradient(self, wfn=None, verbose=None, gradient_type='cost'):
+    def gradient(self, turbines=None, substations=None, network_tree=None, verbose=True, gradient_type='cost'):
         """
         Calculates the gradient of the length and cost of cable with respect to the positions of the nodes.
         """
-        if wfn is not None:
-            self.wfn = wfn
-        else:
-            wfn = self.wfn
-
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
 
-        G = self.wfn.G # self.evaluate(turbines=turbines, substations=substations, verbose=verbose, node_type='all')
+        if turbines is not None or substations is not None:
+            self.wfn.set_coordinates(turbines=turbines, substations=substations)
+
+        if network_tree is not None:
+            self.wfn.set_network(network_tree=network_tree)
+
+        G = self.wfn.G
         vertexes = G.graph['VertexC']
         R = G.graph['R']
         T = G.graph['T']
@@ -352,13 +403,16 @@ class OptiWindNetSolver(ABC):
                     gradients_cost[i, 0] += ((v[0] - u[0]) / np.linalg.norm(v - u)) * G.graph['cables'][G.edges[(ii, jj)]['cable']][2]
                     gradients_cost[i, 1] += ((v[1] - u[1]) / np.linalg.norm(v - u)) * G.graph['cables'][G.edges[(ii, jj)]['cable']][2]
 
-        # Filter the results based on the requested node type
+
+        # wind turbines
         gradients_length_wt = gradients_length[:T]
         gradients_cost_wt = gradients_cost[:T]
 
+        # substations
         gradients_length_ss = gradients_length[N - R:]
         gradients_cost_ss = gradients_cost[N - R:]
 
+        # Filter the results based on the requested gradient type
         if gradient_type=='cost':
             gradients_wt = gradients_cost_wt
             gradients_ss = gradients_cost_ss
@@ -377,11 +431,22 @@ class Heuristic(OptiWindNetSolver):
         self.solver = solver
         super().__init__(wfn=wfn, **kwargs)
 
-    def optimize(self, wfn=None, **kwargs):
-        if wfn is not None:
-            self.wfn = wfn
-        else:
-            wfn = self.wfn
+    def optimize(self, turbines=None, substations=None, network_tree=None, verbose=None, **kwargs):
+        wfn = self.wfn
+        # set to True at the begining to avoid unwanted verbose info
+        wfn._S_updated = True
+        wfn._G_tentative_updated = True
+        wfn._G_updated = True
+        
+        if turbines is not None or substations is not None:
+            self.wfn.set_coordinates(turbines=turbines, substations=substations)
+
+        if network_tree is not None:
+            self.wfn.set_network(network_tree=network_tree)
+
+        # If verbose argument is None, use the value of self.verbose
+        if verbose is None:
+            verbose = self.verbose
 
         # optimizing
         if self.solver=='EW':
@@ -400,7 +465,6 @@ class Heuristic(OptiWindNetSolver):
         wfn.G = G
 
         self.wfn = wfn
-        
         return wfn
     
 class MetaHeuristic(OptiWindNetSolver):
@@ -410,11 +474,22 @@ class MetaHeuristic(OptiWindNetSolver):
         self.solver = solver
         self.time_limit = time_limit
 
-    def optimize(self, wfn=None, verbose=True, **kwargs):
-        if wfn is not None:
-            self.wfn = wfn
-        else:
-            wfn = self.wfn
+    def optimize(self, turbines=None, substations=None, network_tree=None, **kwargs):
+        wfn = self.wfn
+        # set to True at the begining to avoid unwanted verbose info
+        wfn._S_updated = True
+        wfn._G_tentative_updated = True
+        wfn._G_updated = True
+
+        if turbines is not None or substations is not None:
+            self.wfn.set_coordinates(turbines=turbines, substations=substations)
+
+        if network_tree is not None:
+            self.wfn.set_network(network_tree=network_tree)
+
+        # If verbose argument is None, use the value of self.verbose
+        if verbose is None:
+            verbose = self.verbose
 
         # optimizing
         if self.solver== 'HGS': # Hybrid Genetic Search
@@ -447,11 +522,22 @@ class MILP(OptiWindNetSolver):
         self.model_options = model_options  
 
         
-    def optimize(self, wfn=None, verbose=True, **kwargs):
-        if wfn is not None:
-            self.wfn = wfn
-        else:
-            wfn = self.wfn
+    def optimize(self, turbines=None, substations=None, network_tree=None, **kwargs):
+        wfn = self.wfn
+        # set to True at the begining to avoid unwanted verbose info
+        wfn._S_updated = True
+        wfn._G_tentative_updated = True
+        wfn._G_updated = True
+
+        if turbines is not None or substations is not None:
+            self.wfn.set_coordinates(turbines=turbines, substations=substations)
+
+        if network_tree is not None:
+            self.wfn.set_network(network_tree=network_tree)
+
+        # If verbose argument is None, use the value of self.verbose
+        if verbose is None:
+            verbose = self.verbose
 
         # optimizing
         if self.solver == 'ortools':
