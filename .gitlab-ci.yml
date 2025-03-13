@@ -29,9 +29,11 @@ pages:
   stage:  
     deploy
   script:  
+  - apt-get update
+  - apt-get -y install make pandoc graphviz
   - pip install --upgrade pip ipython ipykernel
   - ipython kernel install --name "python3" --user
-  - pip install .[docs] --upgrade
+  - pip install .[test, docs] --upgrade
   - cd docs; make html
   - cd ../; mv docs/build/html public/
   artifacts:
