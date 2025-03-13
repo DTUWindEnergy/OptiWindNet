@@ -1,4 +1,4 @@
-name: interarray
+name: optiwindnet_env
 channels:
   - conda-forge
 dependencies:
