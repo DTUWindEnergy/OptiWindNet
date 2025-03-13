@@ -36,7 +36,7 @@ test  = [ 'pytest',  # for testing
           'line_profiler',  # to check speed
         ] 
 docs = [
-          'sphinx',  # generating documentation
+          'sphinx<=7.3.7',  # generating documentation
           'sphinx_rtd_theme',  # docs theme
           'ipywidgets',  # notebook widgets
           "numpydoc", 
