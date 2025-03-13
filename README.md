@@ -1,3 +1,10 @@
+[![pipeline status](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/pipeline.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
+# [![coverage report](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/coverage.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
+# [![DOI](https://zenodo.org/badge/164115313.svg)](https://zenodo.org/badge/latestdoi/164115313)
+# [![PyPi](https://img.shields.io/pypi/v/optiwindnet)](https://pypi.org/project/optiwindnet/)
+# [![License](https://img.shields.io/pypi/l/optiwindnet)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/blob/main/LICENSE)
+
+
 OptiWindNet
 ===========
 
@@ -126,6 +133,9 @@ conda install coin-or-cbc
 
 Documentation
 -------------
+
+
+[https://topfarm.pages.windenergy.dtu.dk/OptiWindNet](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet).
 
 Some usage examples can be found in [notebooks](notebooks).
 
