@@ -66,7 +66,7 @@ intersphinx_mapping = {
 templates_path = ['_templates']
 
 # Auto API conf.:
-autoapi_dirs = ['../OptiWindNet']
+autoapi_dirs = ['../optiwindnet']
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
