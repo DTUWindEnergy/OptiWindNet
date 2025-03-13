@@ -26,3 +26,4 @@ dependencies:
       - gon
       - hygese
       - osmium
+      - PythonCDT @ git+https://github.com/artem-ogre/PythonCDT.git
