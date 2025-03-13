@@ -272,7 +272,7 @@ class WindFarmNetwork():
 
     def get_network(self):
         """Returns the network edges with cable data."""
-        return self.G.edges(data='cable')
+        return self.G.edges(data=True)
 
     def cost(self):
         """Returns the total cost of the network."""
@@ -347,8 +347,6 @@ class WindFarmNetwork():
         self._S_updated = False
         self._G_tentative_updated = False
 
-
-
     def wt_per_cable(cable_cross_section, turbine_power, voltage, efficiency):
         return turbines_per_cable(cable_cross_section, turbine_power, voltage, efficiency)
 
@@ -384,6 +382,7 @@ class OptiWindNetSolver(ABC):
             self.wfn.set_network(network_tree=network_tree)
 
         G = self.wfn.G
+        print(G.edges(data=True))
         vertexes = G.graph['VertexC']
         R = G.graph['R']
         T = G.graph['T']
@@ -391,17 +390,20 @@ class OptiWindNetSolver(ABC):
         gradients_length = np.zeros((N, 2))
         gradients_cost = np.zeros((N, 2))
 
-        # Calculate gradient for each node
-        for i, v in enumerate(vertexes):
-            # Calculate gradient for x and y dimensions
-            for j, u in enumerate(vertexes):
-                ii = i if i < N - R else i - N
-                jj = j if j < N - R else j - N
-                if j != i and G.has_edge(ii, jj):
-                    gradients_length[i, 0] += (v[0] - u[0]) / np.linalg.norm(v - u)
-                    gradients_length[i, 1] += (v[1] - u[1]) / np.linalg.norm(v - u)
-                    gradients_cost[i, 0] += ((v[0] - u[0]) / np.linalg.norm(v - u)) * G.graph['cables'][G.edges[(ii, jj)]['cable']][2]
-                    gradients_cost[i, 1] += ((v[1] - u[1]) / np.linalg.norm(v - u)) * G.graph['cables'][G.edges[(ii, jj)]['cable']][2]
+        # Iterate over edges directly to avoid duplicate calculations
+        for ii, jj in G.edges():
+            if ii == jj:  # Skip self-loops
+                continue
+            
+            v = vertexes[ii]
+            u = vertexes[jj]
+            
+            if gradient_type == 'cost':
+                gradients_cost[ii, 0] += ((v[0] - u[0]) / np.linalg.norm(v - u)) * G.graph['cables'][G.edges[(ii, jj)]['cable']][2]
+                gradients_cost[ii, 1] += ((v[1] - u[1]) / np.linalg.norm(v - u)) * G.graph['cables'][G.edges[(ii, jj)]['cable']][2]
+            else:
+                gradients_length[ii, 0] += (v[0] - u[0]) / np.linalg.norm(v - u)
+                gradients_length[ii, 1] += (v[1] - u[1]) / np.linalg.norm(v - u)
 
 
         # wind turbines
