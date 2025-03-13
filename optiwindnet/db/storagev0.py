@@ -11,8 +11,8 @@ import networkx as nx
 import numpy as np
 from pony.orm import db_session
 
-from ..interarraylib import calcload
-from ..utils import NodeTagger
+from optiwindnet.interarraylib import calcload
+from optiwindnet.utils import NodeTagger
 
 # Coordinates use arrays of floats.
 # Somehow, nodesets with the same coordinates were getting different digests,

@@ -15,8 +15,8 @@ import networkx as nx
 import numpy as np
 from pony import orm
 
-from ..interarraylib import calcload
-from ..utils import NodeTagger
+from optiwindnet.interarraylib import calcload
+from optiwindnet.utils import NodeTagger
 
 F = NodeTagger()
 
