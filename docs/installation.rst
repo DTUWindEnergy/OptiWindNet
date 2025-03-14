@@ -10,7 +10,7 @@ A recent Python version (3.10+) is required to run *OptiWindNet*, and we recomme
 * `Python <https://www.python.org/downloads/>`_ and using the built-ins ``venv`` virtual environment creator and ``pip`` package manager;
 * or `Miniforge <https://conda-forge.org/download/>`_ (`Anaconda or Miniconda <https://www.anaconda.com/download/success>`_ also work) and using ``conda`` to create and populate the virtual environment.
 
-In the near future OptiWindNet will be turned into a Python package installable with the usual package managers, but currently it must be installed from the project tree obtained via ``git``. This software can be obtained from `Git <https://git-scm.com/downloads>`_ for a standalone version or from `Git for Windows <https://gitforwindows.org/`_ to get bundle of git and other useful tools for the Windows platform (recommended).
+In the near future OptiWindNet will be turned into a Python package installable with the usual package managers, but currently it must be installed from the project tree obtained via ``git``. This software can be obtained from `Git <https://git-scm.com/downloads>`_ for a standalone version or from `Git for Windows <https://gitforwindows.org/>`_ to get bundle of git and other useful tools for the Windows platform (recommended).
 
 Installation
 ------------

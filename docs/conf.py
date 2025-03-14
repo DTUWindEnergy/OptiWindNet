@@ -24,7 +24,7 @@ sys.path.append(r"c:\Anaconda3\envs\py36\Library\bin")
 # -- Project information -----------------------------------------------------
 
 project = 'OptiWindNet'
-copyright = '2018, DTU Wind Energy'
+copyright = '2025, DTU Wind Energy'
 author = 'DTU Wind Energy'
 
 # The short X.Y version
