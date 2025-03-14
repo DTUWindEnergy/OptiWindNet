@@ -1,54 +1,55 @@
 .. _installation:
 
 Installation Guide
-===========================
+==================
+
+Pre-installation
+----------------
+A recent Python version (3.10+) is required to run *OptiWindNet*, and we recommend to install it in its own virtual environment. This can be achieved by installing **either**:
+
+* `Python <https://www.python.org/downloads/>`_ and using the built-ins ``venv`` virtual environment creator and ``pip`` package manager;
+* or `Miniforge <https://conda-forge.org/download/>`_ (`Anaconda or Miniconda <https://www.anaconda.com/download/success>`_ also work) and using ``conda`` to create and populate the virtual environment.
+
+In the near future OptiWindNet will be turned into a Python package installable with the usual package managers, but currently it must be installed from the project tree obtained via ``git``. This software can be obtained from `Git <https://git-scm.com/downloads>`_ for a standalone version or from `Git for Windows <https://gitforwindows.org/`_ to get bundle of git and other useful tools for the Windows platform (recommended).
+
+Installation
+------------
+The following commands must be run from the system's command line interface (e.g. *git-bash*, *cmd*, *powershell*), first making sure that `git` and `python` or `conda` are available (see section above)::
+
+    git clone https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+
+If using ``venv``/``pip``
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Run::
+
+    python -m venv optiwindnet_env
+
+* cmd: ``optiwindnet_env\Scripts\activate.bat``
+* bash: ``source optiwindnet_env/Scripts/activate``
+* powershell: ``optiwindnet_env\Scripts\Activate.ps1``
+
+Then::
+
+    pip install -r OptiWindNet/requirements.txt
+    pip install --editable OptiWindNet/
 
 
-Pre-Installation
-----------------------------
-Before you can install the software, you must first have a working Python distribution with a package manager. For all platforms we recommend that you download and install Anaconda - a professional grade, full-blown scientific Python distribution.
+If using ``conda``
+^^^^^^^^^^^^^^^^^^
 
-To set up Anaconda, you should:
+Run::
 
-    * Download and install Anaconda (Python 3.x version, 64 bit installer is recommended) from https://www.continuum.io/downloads
-    
-    * Update the root Anaconda environment (type in a terminal): 
-        
-        ``>> conda update --all``
-    
-    * Activate the Anaconda root environment in a terminal as follows: 
-        
-        ``>> activate``
+    conda env create -f OptiWindNet/environment.yml
+    activate optiwindnet_env
+    pip install --editable OptiWindNet/
 
-It is recommended to create a new environment to install OptiWindNet if you have other Python programs. This ensures that the dependencies for the different packages do not conflict with one another. In the command prompt, create and active an environment with::
+Updates
+-------
 
-   git clone https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
-   cd OptiWindNet
-   conda env create -f environment.yml
-   activate optiwindnet_env
+Run::
 
+    cd OptiWindNet
+    git pull
 
-Simple Installation
-----------------------------
-
-OptiWindNet’s base code is open-sourced and freely available on `GitLab 
-<https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>`_ (MIT license).
-
-* Install from PyPi.org (official releases)::
-  
-    pip install optiwindnet
-
-* Install from GitLab  (includes any recent updates)::
-  
-    pip install git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
-        
-
-
-Developer Installation
--------------------------------
-
-We highly recommend developers to install OptiWindNet into the environment created previously. The commands to clone and install OptiWindNet with developer options including dependencies required to run the tests into the current active environment in an Anaconda Prompt are as follows::
-
-   git clone https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
-   cd OptiWindNet
-   pip install -e .[test]
+If ``pip`` was given the ``--editable`` option when installing, the new version will be immediately available within the Python environment ``optiwindnet_env``.
