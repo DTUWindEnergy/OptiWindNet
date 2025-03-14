@@ -1,10 +1,10 @@
 .. _installation:
 
-Installation Guide
-==================
+.. Installation Guide
+.. ==================
 
-Pre-installation
-----------------
+Requirements
+------------
 A recent Python version (3.10+) is required to run *OptiWindNet*, and we recommend to install it in its own virtual environment. This can be achieved by installing **either**:
 
 * `Python <https://www.python.org/downloads/>`_ and using the built-ins ``venv`` virtual environment creator and ``pip`` package manager;
@@ -44,8 +44,8 @@ Run::
     activate optiwindnet_env
     pip install --editable OptiWindNet/
 
-Updates
--------
+Updating
+--------
 
 Run::
 

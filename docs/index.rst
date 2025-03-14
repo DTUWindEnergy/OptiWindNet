@@ -47,17 +47,16 @@ OptiWindNet 1.0.0: An open-source wind farm electrical network optimization tool
 
     .. toctree::
         :maxdepth: 1
-	:caption: Contents
+	:caption: Essentials
 
         installation
-        notebooks/ChangeLog
-        notebooks/Publications
+        notebooks/Quickstart
 
     .. toctree::
-        :maxdepth: 1
-	:caption: Main Components
+        :maxdepth: 2
+	:caption: Features
+	:titlesonly:
 
-        notebooks/Quickstart
 	notebooks/01-data_input
 	notebooks/02-included-locations
 	notebooks/03-example-Taylor-2023
