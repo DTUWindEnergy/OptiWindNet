@@ -7,11 +7,43 @@ from itertools import chain
 import numpy as np
 import darkdetect
 
-from ground.base import get_context
 import svg
 
 from .geometric import rotate
 from .interarraylib import describe_G
+
+
+# monkey-patch svg.py until PR makes its way to PyPI
+# https://github.com/orsinium-labs/svg.py/pull/16
+from dataclasses import dataclass
+from typing import Literal
+@dataclass
+class G(
+    svg.Element,
+    svg._mixins.GraphicsElementEvents,
+    svg._mixins.Color,
+    svg._mixins.Graphics,
+    svg._mixins.FillStroke,
+):
+    """The <g> SVG element is a container used to group other SVG elements.
+
+    Transformations applied to the <g> element are performed on its child elements,
+    and its attributes are inherited by its children. It can also group multiple elements
+    to be referenced later with the <use> element.
+
+    https://developer.mozilla.org/en-US/docs/Web/SVG/Element/g
+    """
+    element_name = "g"
+    transform: list[svg.Transform] | None = None
+    class_: list[str] | None = None
+    mask: str | None = None
+    opacity: svg._types.Number | None = None
+    clip_path: str | None = None
+    fill_rule: Literal["evenodd", "nonzero", "inherit"] | None = None
+    fill_opacity: svg._types.Number | None = None
+    fill: str | None = None
+
+svg.G = G
 
 
 class SvgRepr():
@@ -52,16 +84,6 @@ def svgplot(G, landscape=True, dark=None, infobox: bool = True,
     if landscape and landscape_angle:
         # landscape_angle is not None and not 0
         VertexC = rotate(VertexC, landscape_angle)
-    if border is None:
-        hull = G.graph.get('hull')
-        if hull is not None:
-            border = VertexC[hull]
-        else:
-            context = get_context()
-            Point = context.point_cls
-            PointMap = {Point(float(x), float(y)): i for i, (x, y) in enumerate(VertexC)}
-            BorderPt = context.points_convex_hull(PointMap.keys())
-            border = np.array([PointMap[point] for point in BorderPt])
 
     # viewport scaling
     idx_B = T + B
