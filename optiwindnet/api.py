@@ -273,6 +273,15 @@ class WindFarmNetwork():
     def get_network(self):
         """Returns the network edges with cable data."""
         return self.G.edges(data=True)
+    
+    def get_network_array(self):
+        """Returns the network edges with cable data."""
+        network = self.G.edges(data=True)
+        network_array =  np.array([
+                            [entry[0], entry[1], entry[2]['length'], entry[2]['load'], int(entry[2]['reverse']), entry[2]['cable'], entry[2]['cost']]
+                            for entry in network
+                            ])
+        return network_array
 
     def cost(self):
         """Returns the total cost of the network."""
@@ -347,14 +356,28 @@ class WindFarmNetwork():
         self._S_updated = False
         self._G_tentative_updated = False
 
+    
+    def set_network_array(self, network_array):
+        network = [
+                (int(row[0]), int(row[1]), {
+                    'length': np.float64(row[2]),
+                    'load': int(row[3]),
+                    'reverse': bool(row[4]),
+                    'cable': int(row[5]),
+                    'cost': np.float64(row[6])
+                })
+                for row in network_array
+            ]
+        self.set_network(network_tree=network)
+
+
     def wt_per_cable(cable_cross_section, turbine_power, voltage, efficiency):
         return turbines_per_cable(cable_cross_section, turbine_power, voltage, efficiency)
 
 
 class OptiWindNetSolver(ABC):
-    def __init__(self, wfn, verbose=True, **kwargs):
-        self.wfn = wfn
-        self.verbose = verbose
+    def __init__(self, **kwargs):
+        pass
 
     @abstractmethod
     def optimize(self, turbines=None, substations=None, network_tree=None, verbose=True, **kwargs):
@@ -430,8 +453,10 @@ class OptiWindNetSolver(ABC):
 class Heuristic(OptiWindNetSolver):
     def __init__(self, wfn, solver='EW', verbose=True, **kwargs):
         # Call the base class initialization
+        self.wfn = wfn
+        self.verbose = verbose
         self.solver = solver
-        super().__init__(wfn=wfn, **kwargs)
+        #super().__init__(wfn=wfn, **kwargs)
 
     def optimize(self, turbines=None, substations=None, network_tree=None, verbose=None, **kwargs):
         wfn = self.wfn
@@ -470,9 +495,10 @@ class Heuristic(OptiWindNetSolver):
         return wfn
     
 class MetaHeuristic(OptiWindNetSolver):
-    def __init__(self, solver='HGS', time_limit=3, **kwargs):
+    def __init__(self, wfn, solver='HGS', time_limit=3, verbose=True, **kwargs):
         # Call the base class initialization
-        super().__init__()
+        self.wfn = wfn
+        self.verbose = verbose
         self.solver = solver
         self.time_limit = time_limit
 
@@ -509,9 +535,9 @@ class MetaHeuristic(OptiWindNetSolver):
         return wfn
 
 class MILP(OptiWindNetSolver):
-    def __init__(self, solver='ortools', solver_options=None, model_options=None, **kwargs):
-        # Call the base class initialization
-        super().__init__()
+    def __init__(self, wfn, solver='ortools', solver_options=None, model_options=None, verbose=True, **kwargs):  
+        self.wfn = wfn
+        self.verbose = verbose
         #
         if solver_options is None:
             solver_options = {}
@@ -524,7 +550,7 @@ class MILP(OptiWindNetSolver):
         self.model_options = model_options  
 
         
-    def optimize(self, turbines=None, substations=None, network_tree=None, **kwargs):
+    def optimize(self, turbines=None, substations=None, network_tree=None, verbose=None, **kwargs):
         wfn = self.wfn
         # set to True at the begining to avoid unwanted verbose info
         wfn._S_updated = True
@@ -547,7 +573,8 @@ class MILP(OptiWindNetSolver):
             orter = ort.CpSat()
             # set the model
             model = ort.make_min_length_model(
-                        wfn.A, wfn.cables_capacity,
+                        wfn.A,
+                        wfn.cables_capacity,
                         gateXings_constraint=self.model_options.get("gateXring_constraint", False),
                         branching=self.model_options.get("branching", True),
                         gates_limit=self.model_options.get("gates_limit", False)
