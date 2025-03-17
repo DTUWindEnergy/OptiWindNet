@@ -288,7 +288,9 @@ class WindFarmNetwork():
 
     def get_network(self):
         """Returns the network edges with cable data."""
-        return self.G.edges(data=True)
+        net_graph = self.G.edges(data=True)
+        net = list(net_graph)  # Keep it as a list of tuples
+        return net
     
     def get_network_array(self):
         """Returns the network edges with cable data."""
@@ -312,7 +314,7 @@ class WindFarmNetwork():
         self._G_updated = True
         
         if self.verbose:
-            print('WARNING: wfn.set_coordinates is not checking for cable crossings')
+            print('WARNING: wfn.set_coordinates is not checking for feasiblity')
 
         if not hasattr(self.L, 'graph') or 'VertexC' not in self.L.graph:
             raise ValueError("Graph L does not contain 'VertexC' attribute.")
@@ -343,7 +345,7 @@ class WindFarmNetwork():
         self._G_updated = True
         
         if self.verbose:
-            print('WARNING: wfn.set_network is not checking for cable crossings')
+            print('WARNING: wfn.set_network is not checking for feasibility')
 
         if self.G is None:
             raise ValueError("Graph (G) is not initialized.")
@@ -396,15 +398,15 @@ class OptiWindNetSolver(ABC):
         pass
 
     @abstractmethod
-    def optimize(self, turbines=None, substations=None, network_tree=None, verbose=True, **kwargs):
+    def optimize(self, turbines=None, substations=None, network_array=None, verbose=True, **kwargs):
         """
         Perform cable layout optimization. Must be implemented by subclasses.
         """
         pass
 
-    def __call__(self, turbines=None, substations=None, network_tree=None, verbose=True, **kwargs):
+    def __call__(self, turbines=None, substations=None, network_array=None, verbose=True, **kwargs):
         """Make the instance callable, calling optimize() internally."""
-        return self.optimize( turbines=turbines, substations=substations, network_tree=network_tree, verbose=verbose, **kwargs)  
+        return self.optimize( turbines=turbines, substations=substations, network_array=network_array, verbose=verbose, **kwargs)  
 
     def gradient(self, turbines=None, substations=None, network_tree=None, verbose=True, gradient_type='cost'):
         """
@@ -467,14 +469,15 @@ class OptiWindNetSolver(ABC):
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, wfn, solver='EW', verbose=True, **kwargs):
+    def __init__(self, wfn, solver='EW', detour=True, verbose=True, **kwargs):
         # Call the base class initialization
         self.wfn = wfn
         self.verbose = verbose
         self.solver = solver
+        self.detour = detour
         #super().__init__(wfn=wfn, **kwargs)
 
-    def optimize(self, turbines=None, substations=None, network_tree=None, verbose=None, **kwargs):
+    def optimize(self, turbines=None, substations=None, network_array=None, verbose=None, **kwargs):
         wfn = self.wfn
         # set to True at the begining to avoid unwanted verbose info
         wfn._S_updated = True
@@ -482,32 +485,41 @@ class Heuristic(OptiWindNetSolver):
         wfn._G_updated = True
         
         if turbines is not None or substations is not None:
-            self.wfn.set_coordinates(turbines=turbines, substations=substations)
+            wfn.set_coordinates(turbines=turbines, substations=substations)
 
-        if network_tree is not None:
-            self.wfn.set_network(network_tree=network_tree)
-
-        # If verbose argument is None, use the value of self.verbose
-        if verbose is None:
-            verbose = self.verbose
-
-        # optimizing
-        if self.solver=='EW':
-            S = EW_presolver(wfn.A, capacity=wfn.cables_capacity)
+        if network_array is not None:
+            print('The optimizer is not run since a network_array is given')
+            wfn.set_network_array(network_array=network_array)
         else:
-            raise ValueError(
-                f"{self.solver} is not among the supported Heuristic solvers. Choose among: EW.")
+            # If verbose argument is None, use the value of self.verbose
+            if verbose is None:
+                verbose = self.verbose
 
-        G_tentative = G_from_S(S, wfn.A)
-        G = G_tentative
-        assign_cables(G, wfn.cables)
+            # optimizing
+            if self.solver=='EW':
+                S = EW_presolver(wfn.A, capacity=wfn.cables_capacity)
+            else:
+                raise ValueError(
+                    f"{self.solver} is not among the supported Heuristic solvers. Choose among: EW.")
 
-        # update wfn attributes
-        wfn.S = S
-        wfn.G_tentative = G_tentative
-        wfn.G = G
+            G_tentative = G_from_S(S, wfn.A)
+            
+            if self.detour:
+                G = PathFinder(G_tentative, planar=wfn.P, A=wfn.A).create_detours()
+            else:
+                G = G_tentative
 
-        self.wfn = wfn
+            assign_cables(G, wfn.cables)
+
+            # update wfn attributes
+            wfn.S = S
+            wfn.G_tentative = G_tentative
+            wfn.G = G
+
+            self.wfn = wfn
+
+            if verbose:
+                print('S, G_tentative, and G got updated!')
         return wfn
     
 class MetaHeuristic(OptiWindNetSolver):
