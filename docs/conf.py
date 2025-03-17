@@ -69,7 +69,7 @@ templates_path = ['_templates']
 autoapi_dirs = ['../optiwindnet']
 #  autoapi_options = [ 'members', 'undoc-members', 'private-members', 'show-inheritance', 'show-module-summary', 'special-members', 'imported-members', ]
 autoapi_options = [ 'members', 'undoc-members', 'show-inheritance', 'special-members', 'imported-members', ]
-autoapi_add_toctree_entry = False
+#  autoapi_add_toctree_entry = False
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
