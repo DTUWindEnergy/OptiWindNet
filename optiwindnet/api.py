@@ -273,6 +273,18 @@ class WindFarmNetwork():
     def plot(self):
         """Plots the wind farm network graph."""
         return gplot(self.G)
+    
+    def plot_L(self):
+        """Plots the wind farm network graph."""
+        return gplot(self.L)
+    
+    def plot_A(self):
+        """Plots the wind farm network graph."""
+        return gplot(self.A)
+    
+    def plot_G_tentative(self):
+        """Plots the wind farm network graph."""
+        return gplot(self.G_tentative)
 
     def get_network(self):
         """Returns the network edges with cable data."""
