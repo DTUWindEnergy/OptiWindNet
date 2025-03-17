@@ -62,7 +62,7 @@ Approaches
 Getting Started
 ---------------
 
-Ensure that the :ref:`Requirements`_ are met and follow the :ref:`Installation`_ instructions. Then check the :ref:`Quickstart`_ to begin using OptiWindNet.
+Ensure that the :ref:`Requirements` are met and follow the :ref:`Installation` instructions. Then check the :doc:`Quickstart <notebooks/Quickstart>` to begin using OptiWindNet.
 
 
 How to Cite
