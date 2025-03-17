@@ -55,7 +55,7 @@ Approaches
 ^^^^^^^^^^
 
 * heuristics based on extensions to the Esau-Williams heuristic for the CMSTP;
-* meta-heuristic based on hybrid genetic search (`implemented elsewhere <https://github.com/vidalt/HGS-CVRP>_` by Thibaut Vidal, described in `his paper <https://doi.org/10.1016/j.cor.2021.105643>_`);
+* meta-heuristic based on hybrid genetic search (`implemented elsewhere <https://github.com/vidalt/HGS-CVRP>`_ by Thibaut Vidal, described in `his paper <https://doi.org/10.1016/j.cor.2021.105643>`_);
 * mathematical optimization using mixed-integer linear programming (MILP) models (using a branch-and-cut solver such as Google's OR-Tools, Coin-OR Branch-and-Cut (CBC), IBM's CPLEX, Gurobi, HiGHS, SCIP).
 
 
