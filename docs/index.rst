@@ -62,7 +62,7 @@ Approaches
 Getting Started
 ---------------
 
-Ensure that the :ref:`Requirements_` are met and follow the :ref:`Installation_` instructions. Then check the :ref:`Quickstart_` to begin using OptiWindNet.
+Ensure that the :ref:`Requirements`_ are met and follow the :ref:`Installation`_ instructions. Then check the :ref:`Quickstart`_ to begin using OptiWindNet.
 
 
 How to Cite
@@ -101,5 +101,4 @@ OptiWindNet 1.0.0: An open-source wind farm electrical network optimization tool
     .. toctree::
         :maxdepth: 2
 	:caption: API reference
-
 
