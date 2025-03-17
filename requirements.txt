@@ -3,7 +3,7 @@ darkdetect==0.8.0
 gon==6.0.0
 ground==9.0.0
 hygese==0.0.0.8
-matplotlib==3.10.0
+matplotlib==3.10.1
 networkx==3.4.2
 numba==0.60.0
 numpy==2.0.2
@@ -17,5 +17,5 @@ PythonCDT @ git+https://github.com/artem-ogre/PythonCDT.git@13456f5
 PyYAML==6.0.2
 scipy==1.15.1
 shapely==2.0.6
-svg.py==1.5.0
+svg.py==1.6.0
 utm==0.7.0

@@ -16,13 +16,13 @@ dependencies:
   - pyyaml
   - scipy
   - shapely
-  - svg.py
   - utm
   # required by osmium
   - requests
   # required by gon
   - typing-extensions
   - pip:
+      - svg.py
       - gon
       - hygese
       - ortools
