@@ -124,11 +124,11 @@ class WindFarmNetwork():
     """
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, border=None, obstacles=None, L=None, verbose=True, **kwargs):
+                 cables=None, border=None, obstacles=None, name='', handle='', L=None, verbose=True, **kwargs):
 
         #
         if turbines is not None:
-            L = self._from_coordinates(turbines, substations, border, obstacles)
+            L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
         self.L = L
 
         # Compute the planar embedding
@@ -211,7 +211,7 @@ class WindFarmNetwork():
     def G(self, value):
         self._G = value
     
-    def _from_coordinates(self, turbines, substations, border, obstacles):
+    def _from_coordinates(self, turbines, substations, border, obstacles, name, handle):
         """Handles input format from coordinates."""
         R = substations.shape[0]
         T = turbines.shape[0]
@@ -223,8 +223,8 @@ class WindFarmNetwork():
             R=R, T=T, B=B,
             border=np.arange(T, T + border.shape[0]) if border is not None and border.shape[0] > 0 else np.array([]),
             obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)] if obstacles else [],
-            name='Example Location',
-            handle='example',
+            name=name,
+            handle=handle,
             VertexC=np.vstack((turbines, border, *obstacles, substations)),
         )
     
