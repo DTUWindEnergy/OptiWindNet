@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 from pathlib import Path
 import yaml
-#import yaml_include
+import yaml_include
 from itertools import pairwise
 
 
@@ -244,6 +244,10 @@ class WindFarmNetwork():
             raise TypeError("Filepath must be a string")
         
         fpath = Path(filepath)
+
+        yaml.add_constructor(
+            "!include", yaml_include.Constructor(base_dir='data'))
+        
         with open(fpath, 'r') as f:
             system = yaml.full_load(f)
 
@@ -570,7 +574,7 @@ class MILP(OptiWindNetSolver):
         # optimizing
         if self.solver == 'ortools':
             # initialize
-            orter = ort.CpSat()
+            #orter = ort.CpSat()
             # set the model
             model = ort.make_min_length_model(
                         wfn.A,
@@ -584,6 +588,7 @@ class MILP(OptiWindNetSolver):
             if wfn.S is not None:
                 ort.warmup_model(model, wfn.S)
 
+            orter = ort.cp_model.CpSolver()
             # settings
             orter.parameters.max_time_in_seconds = self.solver_options.get("max_time_in_seconds", 40)
             orter.parameters.relative_gap_limit = self.solver_options.get("relative_gap_limi", 0.005)
@@ -600,7 +605,9 @@ class MILP(OptiWindNetSolver):
                     f"\nbest solution's strategy: {orter.SolutionInfo()}",
                     f'\ngap: {100*gap:.1f}%')
 
-            G = ort.investigate_pool(wfn.P, wfn.A, model, orter, result)
+            S = ort.S_from_solution(model, orter, result)
+            G_tentative = G_from_S(S, wfn.A)
+            G = PathFinder(G_tentative, planar=wfn.P, A=wfn.A).create_detours()
 
         elif self.solver == 'cplex' or 'cbc' or 'gurobi' or 'highs' or 'scip':
             ##############
@@ -699,6 +706,9 @@ class MILP(OptiWindNetSolver):
             raise ValueError(
                 f"{self.solver} is not among the supported MILP solvers. Choose among: ortools, gurobi, cplex, highs, scip, cbc.")
 
+        
+        assign_cables(G, wfn.cables)
+        
         wfn.S = S
         wfn.G_tentative = G_tentative
         wfn.G = G
