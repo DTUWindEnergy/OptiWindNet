@@ -67,6 +67,9 @@ templates_path = ['_templates']
 
 # Auto API conf.:
 autoapi_dirs = ['../optiwindnet']
+#  autoapi_options = [ 'members', 'undoc-members', 'private-members', 'show-inheritance', 'show-module-summary', 'special-members', 'imported-members', ]
+autoapi_options = [ 'members', 'undoc-members', 'show-inheritance', 'special-members', 'imported-members', ]
+autoapi_add_toctree_entry = False
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -96,7 +99,7 @@ exclude_patterns = [
 ]
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = None
+pygments_style = 'monokai'
 
 
 autosummary_generate = True
@@ -122,7 +125,7 @@ nbsphinx_execute = 'never'
 nbsphinx_timeout = 180
 
 # Default Pygments lexer for syntax highlighting in code cells:
-#nbsphinx_codecell_lexer = 'ipython3'
+nbsphinx_codecell_lexer = 'python3'
 
 # Width of input/output prompts used in CSS:
 #nbsphinx_prompt_width = '8ex'

@@ -25,5 +25,6 @@ dependencies:
   - pip:
       - gon
       - hygese
+      - ortools
       - osmium
       - PythonCDT @ git+https://github.com/artem-ogre/PythonCDT.git
