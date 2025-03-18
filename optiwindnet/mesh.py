@@ -10,13 +10,7 @@ from collections import defaultdict
 from itertools import chain, tee, combinations
 
 from bidict import bidict
-from ground.base import get_context
-from gon.base import (
-    Point, Segment, Contour, Polygon, Relation, Location, EMPTY
-)
-from orient.planar import (
-    point_in_polygon, contour_in_region, segment_in_region
-)
+import shapely as shp
 
 import PythonCDT as cdt
 
@@ -343,59 +337,55 @@ def make_planar_embedding(
     scale = 2.*max(VertexCʹ.max(axis=0) - VertexCʹ.min(axis=0))
 
     VertexC = (VertexCʹ - mean)/scale
-    # geometric context init (packages ground, gon)
-    context = get_context()
-    points = np.fromiter((Point(float(x), float(y)) for x, y in VertexC),
-                         dtype=object,
-                         count=T + B + R)
 
     # ##############################################
     # A.1) Transform border concavities in polygons.
     # ##############################################
     debug('PART A')
+    root_xy_ = tuple((x.item(), y.item()) for (x, y) in VertexC[-R:])
+    nodeset_xy_ = set(chain(root_xy_,
+                            ((x.item(), y.item()) for (x, y) in VertexC[:T])))
+    root_pts = shp.MultiPoint(root_xy_)
     if border is None:
-        hull_minus_border = EMPTY
-        border_vertex_from_point = {}
-        roots_outside = []
+        hull_minus_border = shp.MultiPolygon()
+        border_vertex_from_xy = {}
+        out_root_pts = shp.MultiPoint()
     else:
-        border_poly = Polygon(border=Contour(points[border]))
+        border_poly = shp.Polygon(shell=VertexC[border])
+        out_root_pts = root_pts - border_poly
+        hull_poly = (border_poly | root_pts).convex_hull
+        hull_ring = hull_poly.boundary
 
-        # Check if roots are outside the border. If so, extend the border to them.
-        roots_outside = [
-            r_pt for r_pt in points[-R:]
-            if point_in_polygon(r_pt, border_poly) is Location.EXTERIOR]
-        #  print('roots_outside', len(roots_outside), roots_outside, border_poly)
-        hull = context.points_convex_hull(roots_outside
-                                          + border_poly.border.vertices)
-        hull_poly = Polygon(border=Contour(hull))
+        border_vertex_from_xy = {
+            (x.item(), y.item()): i
+            for i, (x, y) in enumerate(VertexC[T:-R], start=T)
+        }
 
-        border_vertex_from_point = {
-                point: i for i, point in enumerate(points[T:-R], start=T)}
-
-        hull_border_vertices = [border_vertex_from_point[hullpt]
-                                for hullpt in hull
-                                if hullpt in border_vertex_from_point]
+        hull_border_xy_ = {xy for xy in hull_ring.coords[:-1]
+                           if xy in border_vertex_from_xy}
+        hull_border_vertices = [border_vertex_from_xy[xy]
+                                for xy in hull_border_xy_]
 
         # Turn the main border's concave zones into concavity polygons.
         hull_minus_border = hull_poly - border_poly
 
     concavities = []
-    if hull_minus_border is EMPTY:
-        assert len(roots_outside) == 0
-    elif hasattr(hull_minus_border, 'polygons'):
+    if hull_minus_border.is_empty:
+        assert out_root_pts.is_empty
+    #  elif hasattr(hull_minus_border, 'geoms'):
+    elif isinstance(hull_minus_border, shp.MultiPolygon):
         # MultiPolygon
-        for p in hull_minus_border.polygons:
-            if all((point_in_polygon(r_pt, p) is Location.EXTERIOR)
-                   for r_pt in roots_outside):
-                concavities.append(p.border)
+        for p in hull_minus_border.geoms:
+            if p.intersects(out_root_pts):
+                border_poly |= p
             else:
-                border_poly += p
-    elif roots_outside:
-        # single Polygon in hull_minus_border includes a root
-        border_poly = hull_poly
-    else:
+                concavities.append(p.exterior)
+    elif out_root_pts.is_empty:
         # single Polygon is a concavity
-        concavities = [hull_minus_border.border]
+        concavities = [hull_minus_border.exterior]
+    else:
+        # single Polygon in hull_minus_border includes a root -> no concavity
+        border_poly = hull_poly
 
     # ###################################################################
     # B) Check if concavities' vertices coincide with wtg. Where they do,
@@ -407,26 +397,27 @@ def make_planar_embedding(
     #  debug(f'offset: {offset}')
     stuntC = []
     stunts_primes = []
-    remove_from_border_pt_map = set()
+    remove_from_border_xy_map = set()
     B_old = B
     # replace coinciding vertices with stunts and save concavities here
-    for i, concavity in enumerate(concavities):
+    for i, ring in enumerate(concavities):
         changed = False
-        debug('concavity: %s', concavity)
+        debug('ring: %s', ring)
         stunt_coords = []
-        conc_points = []
-        vertices = concavity.vertices
-        rev = vertices[-1]
-        X = border_vertex_from_point[rev]
+        new_ring_xy_ = []
+        old_ring_xy_ = tuple(xy for xy in (ring.coords[:-1] if ring.is_ccw
+                                           else ring.coords[-2::-1]))
+        rev = old_ring_xy_[-1]
+        X = border_vertex_from_xy[rev]
         X_is_hull = X in hull_border_vertices
-        cur = vertices[0]
-        Y = border_vertex_from_point[cur]
+        cur = old_ring_xy_[0]
+        Y = border_vertex_from_xy[cur]
         Y_is_hull = Y in hull_border_vertices
         # X->Y->Z is in ccw direction
-        for fwd in chain(vertices[1:], (cur,)):
-            Z = border_vertex_from_point[fwd]
-            Z_is_hull = fwd in hull_poly.border.vertices
-            if cur in points[:T] or cur in points[-R:]:
+        for fwd in chain(old_ring_xy_[1:], (cur,)):
+            Z = border_vertex_from_xy[fwd]
+            Z_is_hull = fwd in hull_border_xy_
+            if cur in nodeset_xy_:
                 # Concavity border vertex coincides with node.
                 # Therefore, create a stunt vertex for the border.
                 XY = VertexC[Y] - VertexC[X]
@@ -467,22 +458,22 @@ def make_planar_embedding(
                 # stuntsC = VertexC[T + B - len(stunts_primes): T + B]
                 stunts_primes.append(Y)
                 stunt_coord = VertexC[Y] + S
-                stunt_point = Point(*(float(sc) for sc in stunt_coord))
                 stunt_coords.append(stunt_coord)
-                conc_points.append(stunt_point)
-                remove_from_border_pt_map.add(cur)
-                border_vertex_from_point[stunt_point] = T + B
+                stunt_xy = (stunt_coord[0].item(), stunt_coord[1].item())
+                new_ring_xy_.append(stunt_xy)
+                remove_from_border_xy_map.add(cur)
+                border_vertex_from_xy[stunt_xy] = T + B
                 B += 1
                 changed = True
             else:
-                conc_points.append(cur)
+                new_ring_xy_.append(cur)
             X, X_is_hull = Y, Y_is_hull
             Y, Y_is_hull = Z, Z_is_hull
-            Y_is_hull = fwd in hull_poly.border.vertices
+            Y_is_hull = fwd in hull_border_xy_
             cur = fwd
         if changed:
             debug('Concavities changed!')
-            concavities[i] = Contour(conc_points)
+            concavities[i] = shp.LinearRing(new_ring_xy_)
             stuntC.append(mean + scale*np.array(stunt_coords))
     # Stunts are added to the B range and they should be saved with routesets.
     # Alternatively, one could convert stunts to clones of their primes, but
@@ -491,75 +482,80 @@ def make_planar_embedding(
         debug('stuntC lengths: %s; former B: %d; new B: %d',
               [len(nc) for nc in stuntC], B_old, B)
 
-    for pt in remove_from_border_pt_map:
-        del border_vertex_from_point[pt]
+    for xy in remove_from_border_xy_map:
+        del border_vertex_from_xy[xy]
 
     # #############################################
     # B.2) Create a miriad of indices and mappings.
     # #############################################
     debug('PART B.2')
 
-    vertex_from_point = (
-        border_vertex_from_point
-        | {point: i for i, point in enumerate(points[:T])}
-        | {point: i for i, point in zip(range(-R, 0), points[-R:])}
-    )
+    node_vertex_from_xy = {
+        (x.item(), y.item()): i for i, (x, y) in chain(
+            enumerate(VertexC[:T]), enumerate(VertexC[-R:], start=-R))
+    }
 
-    if roots_outside:
-        border = np.array([vertex_from_point[pt] for pt in hull], dtype=int)
+    if not out_root_pts.is_empty:
+        border = np.array([(border_vertex_from_xy.get(xy)
+                            or node_vertex_from_xy[xy])
+                           for xy in border_poly.exterior.coords[:-1]], dtype=int)
 
-    holes = [Contour(points[obstacle]) for obstacle in obstacles]
+    holes = [shp.LinearRing(VertexC[obstacle]) for obstacle in obstacles]
 
-    # assemble all points actually used in concavities and obstacles
-    num_pt_concavities = sum(len(conc.vertices) for conc in concavities)
-    num_pt_holes = sum(len(hole.vertices) for hole in holes)
+    # count the points actually used in concavities and obstacles
+    num_pt_concavities = sum(shp.count_coordinates(c) for c in concavities)
+    num_pt_holes = sum(shp.count_coordinates(h) for h in holes)
 
     # account for the supertriangle vertices that cdt.Triangulation() adds
     supertriangle = (T + B, T + B + 1, T + B + 2)
-    iCDT = 0
     vertex_from_iCDT = np.full(
         (3 + T + R + num_pt_concavities + num_pt_holes,), NULL,  dtype=int)
     vertex_from_iCDT[:3] = supertriangle
     V2d_nodes = []
-    for iCDT, pt in enumerate(chain(points[:T], points[-R:]), start=iCDT):
-        V2d_nodes.append(cdt.V2d(pt.x, pt.y))
-        vertex_from_iCDT[iCDT + 3] = vertex_from_point[pt]
+    iCDT = 0
+    for iCDT, (xy, n) in enumerate(node_vertex_from_xy.items(), start=iCDT):
+        V2d_nodes.append(cdt.V2d(*xy))
+        vertex_from_iCDT[iCDT + 3] = n
 
-    # Bundle concavities that share a common point.
-    if len(concavities) > 1:
-        # multiple concavities -> join concavities with a common vertex
-        stack = [(set(conc.vertices), conc.vertices) for conc in concavities]
-        # concavityVertexSeqs uses the unjoined concavity polygons' vertices
-        concavityVertexSeqs = [tuple(vertex_from_point[p] for p in points)
-                               for _, points in stack]
+    # Create a map vertex -> concavity/hole id
+    # holes first
+    vertex2conc_id_map = {border_vertex_from_xy[xy]: i
+                          for i, ring in enumerate(holes)
+                          for xy in ring.coords[:-1]}
+    # then concavities
+    if len(concavities) <= 1:
+        vertex2conc_id_map |= {
+            border_vertex_from_xy[xy]: i
+            for i, ring in enumerate(concavities, start=len(holes))
+            for xy in ring.coords[:-1]
+        }
+    else: # multiple concavities
+        # Concavities that share a common point are assigned the same id.
+        stack = [(set(conc.coords[:-1]), tuple(conc.coords[:-1]))
+                 for conc in concavities]
         ready = []
         while stack:
-            refset, reflst = stack.pop()
+            refset, ref_xy_ = stack.pop()
             stable = True
-            for iconc, (tstset, tstlst) in enumerate(stack):
-                common = refset & tstset
+            for iconc, (testset, test_xy_) in enumerate(stack):
+                common = refset & testset
                 if common:
                     common, = common
-                    iref, itst = reflst.index(common), tstlst.index(common)
-                    joined = (reflst[:iref] + tstlst[itst:]
-                              + tstlst[:itst] + reflst[iref:])
+                    iref, itst = ref_xy_.index(common), test_xy_.index(common)
+                    joined = (ref_xy_[:iref] + test_xy_[itst:]
+                              + test_xy_[:itst] + ref_xy_[iref:])
                     debug('common vertex: %d -> new contour: %s', common, joined)
                     del stack[iconc]
-                    stack.append((refset | tstset, joined))
+                    stack.append((refset | testset, joined))
                     stable = False
                     break
             if stable:
-                ready.append(reflst)
-        concavities = [Contour(vertex_list) for vertex_list in ready]
-    elif len(concavities) == 1:
-        concavityVertexSeqs = [tuple(vertex_from_point[v]
-                                     for v in concavities[0].vertices)]
-    else:
-        concavityVertexSeqs = []
-
-    vertex2conc_id_map = {vertex_from_point[p]: i
-                          for i, hole in enumerate(chain(concavities, holes))
-                          for p in hole.vertices}
+                ready.append(ref_xy_)
+        vertex2conc_id_map |= {
+            border_vertex_from_xy[xy]: i
+            for i, xy_ in enumerate(ready, start=len(holes))
+            for xy in xy_
+        }
 
     # ########################################################
     # C) Get Delaynay triangulation of the wtg+oss nodes only.
@@ -648,18 +644,17 @@ def make_planar_embedding(
     # an exception is made for edges that include a root node
     hull_concave = []
     if border is not None:
-        hull_prunned_cont = Contour(points[hull_prunned])
-        border_cont = border_poly.border
-        hull__border = contour_in_region(hull_prunned_cont, border_cont)
+        hull_prunned_poly = shp.Polygon(shell=VertexC[hull_prunned])
+        shp.prepare(hull_prunned_poly)
+        #  border_poly = shp.Polygon(VertexC[border])
+        shp.prepare(border_poly)
         pushed = 0
-        if hull__border in (Relation.CROSS, Relation.TOUCH, Relation.OVERLAP):
+        if not border_poly.covers(hull_prunned_poly):
             hull_stack = hull_prunned[0:1] + hull_prunned[::-1]
             u, v = hull_prunned[-1], hull_stack.pop()
             while hull_stack:
-                edge_seg = Segment(points[u], points[v])
-                edge_to_border = segment_in_region(edge_seg, border_cont)
-                if (edge_to_border is Relation.CROSS
-                        or edge_to_border is Relation.TOUCH):
+                edge_line = shp.LineString(VertexC[[u, v]])
+                if not border_poly.covers(edge_line):
                     t = P_A[u][v]['ccw']
                     #  print(f'[{pushed}]', F[u], F[v], f'⟨{F[t]}⟩', [F[n] for n in hull_stack[::-1]])
                     if t == u:
@@ -703,20 +698,20 @@ def make_planar_embedding(
     debug('PART Y')
     constraint_edges = set()
     edgesCDT_obstacles = []
-    pts_hard_constraints = set()
+    hard_constraints_xy_ = set()
     V2d_holes = []
     # add obstacles' edges
-    for hole in holes:
-        for seg in hole.segments:
-            s, t = vertex_from_point[seg.start], vertex_from_point[seg.end]
+    for ring in holes:
+        for s_xy, t_xy in zip(ring.coords[:-1], ring.coords[1:]):
+            s, t = border_vertex_from_xy[s_xy], border_vertex_from_xy[t_xy]
             edge = []
-            for n, pt in ((s, seg.start), (t, seg.end)):
-                if pt not in pts_hard_constraints:
+            for n, xy in ((s, s_xy), (t, t_xy)):
+                if xy not in hard_constraints_xy_:
                     iCDT += 1
                     vertex_from_iCDT[iCDT + 3] = n
                     edge.append(iCDT)
-                    pts_hard_constraints.add(pt)
-                    V2d_holes.append(cdt.V2d(pt.x, pt.y))
+                    hard_constraints_xy_.add(xy)
+                    V2d_holes.append(cdt.V2d(*xy))
                 else:
                     edge.append(np.flatnonzero(vertex_from_iCDT == n)[0] - 3)
             st = (s, t) if s < t else (t, s)
@@ -784,17 +779,17 @@ def make_planar_embedding(
     edgesCDT_concavities = []
     V2d_concavities = []
     # add concavities' edges
-    for conc in concavities:
-        for seg in conc.segments:
-            s, t = vertex_from_point[seg.start], vertex_from_point[seg.end]
+    for ring in concavities:
+        for s_xy, t_xy in zip(ring.coords[:-1], ring.coords[1:]):
+            s, t = border_vertex_from_xy[s_xy], border_vertex_from_xy[t_xy]
             edge = []
-            for n, pt in ((s, seg.start), (t, seg.end)):
-                if pt not in pts_hard_constraints:
+            for n, xy in ((s, s_xy), (t, t_xy)):
+                if xy not in hard_constraints_xy_:
                     iCDT += 1
                     vertex_from_iCDT[iCDT + 3] = n
                     edge.append(iCDT)
-                    pts_hard_constraints.add(pt)
-                    V2d_concavities.append(cdt.V2d(pt.x, pt.y))
+                    hard_constraints_xy_.add(xy)
+                    V2d_concavities.append(cdt.V2d(*xy))
                 else:
                     edge.append(np.flatnonzero(vertex_from_iCDT == n)[0] - 3)
             st = (s, t) if s < t else (t, s)
@@ -836,16 +831,16 @@ def make_planar_embedding(
     P = P_from_halfedge_pack(P_halfedge_pack)
 
     # Remove edges inside the concavities
-    for hole in chain(
-            concavityVertexSeqs,
-            (([vertex_from_point[v] for v in hole.vertices[::-1]]
-             for hole in holes) if obstacles else ())):
-        for rev, cur, fwd in zip(chain((hole[-1],), hole[:-1]),
-                                 hole, chain(hole[1:], (hole[0],))):
-            while P[cur][fwd]['ccw'] != rev:
-                u, v = cur, P[cur][fwd]['ccw']
+    for ring in chain(concavities, holes):
+        cw_or_ccw = 'ccw' if ring.is_ccw else 'cw'
+        vertices = tuple(border_vertex_from_xy[xy] for xy in ring.coords)
+        rev = vertices[-2]
+        for cur, fwd in zip(vertices[:-1], vertices[1:]):
+            while P[cur][fwd][cw_or_ccw] != rev:
+                u, v = cur, P[cur][fwd][cw_or_ccw]
                 P.remove_edge(u, v)
                 P_edges.remove((u, v) if u < v else (v, u))
+            rev = cur
 
     # adjust flat triangles around concavities
     #  changes_super = _flip_triangles_obstacles_super(
@@ -1044,7 +1039,7 @@ def make_planar_embedding(
     debug('PART I')
     d2roots = cdist(VertexC[:T + B + 3], VertexC[-R:])
     # d2roots may not be the plain Euclidean distance if there are obstacles.
-    if concavityVertexSeqs or obstacles:
+    if concavities or obstacles:
         # Use P_paths to obtain estimates of d2roots taking into consideration
         # the concavities and obstacle zones.
         for r in range(-R, 0):
