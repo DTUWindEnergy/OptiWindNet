@@ -981,13 +981,13 @@ def index(array: np.ndarray[tuple[int], np.dtype[np.int_]], item: np.int_) -> in
 
 
 @nb.njit('void(int_[:, ::1], int_[:, ::1], int_[:, ::1], boolean[:])', cache=True)
-def halfedges_from_triangulation(
+def _halfedges_from_triangulation(
        triangles: np.ndarray[tuple[int, int], np.dtype[np.int_]],
        neighbors: np.ndarray[tuple[int, int], np.dtype[np.int_]],
        halfedges: np.ndarray[tuple[int, int], np.dtype[np.int_]],
        ref_is_cw_: np.ndarray[tuple[int], np.dtype[np.bool_]]) -> None:
     '''
-    Meant to be called from `mesh.planar_from_cdt_triangles()`. Inputs are
+    Meant to be called from `mesh._planar_from_cdt_triangles()`. Inputs are
     derived from `PythonCDT.Triangulation().triangles`.
 
     Args:

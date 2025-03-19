@@ -10,18 +10,12 @@ from collections import defaultdict
 from itertools import chain, tee, combinations
 
 from bidict import bidict
-from ground.base import get_context
-from gon.base import (
-    Point, Segment, Contour, Polygon, Relation, Location, EMPTY
-)
-from orient.planar import (
-    point_in_polygon, contour_in_region, segment_in_region
-)
+import shapely as shp
 
 import PythonCDT as cdt
 
 from .geometric import (
-    halfedges_from_triangulation,
+    _halfedges_from_triangulation,
     is_crossing_no_bbox,
     triangle_AR,
     is_triangle_pair_a_convex_quadrilateral,
@@ -41,22 +35,24 @@ F = NodeTagger()
 NULL = np.iinfo(int).min
 
 
-def edges_and_hull_from_cdt(triangles: list[cdt.Triangle],
-                            vertmap: np.ndarray) -> list[tuple[int, int]]:
-    '''
+def _edges_and_hull_from_cdt(triangles: list[cdt.Triangle],
+                             vertmap: np.ndarray) -> list[tuple[int, int]]:
+    '''Get edges/hull from triangulation.
+
     THIS FUNCTION MAY BE IRRELEVANT, AS WE TYPICALLY NEED THE
     NetworkX.PlanarEmbedding ANYWAY, SO IT IS BETTER TO USE
-    `planar_from_cdt_triangles()` DIRECTLY, followed by `hull_processor()`.
+    `_planar_from_cdt_triangles()` DIRECTLY, followed by `_hull_processor()`.
 
     Produces all the edges and a the convex hull (nodes) from a constrained
     Delaunay triangulation (via PythonCDT).
 
-    `triangles` is a `PythonCDT.Triangulation().triangles` list
-    `vertmap` is a node number translation table, from CDT numbers to NetworkX
+    Args:
+      triangles: is a `PythonCDT.Triangulation().triangles` list
+      vertmap: is a node number translation table, from CDT numbers to NetworkX
 
     Returns:
-    - list of edges that are sides of the triangles
-    - list of nodes of the convex hull (counter-clockwise)
+      list of edges that are sides of the triangles
+      list of nodes of the convex hull (counter-clockwise)
     '''
     tri_visited = set()
     hull_edges = {}
@@ -108,18 +104,19 @@ def edges_and_hull_from_cdt(triangles: list[cdt.Triangle],
     return ebunch, convex_hull
 
 
-def planar_from_cdt_triangles(mesh: cdt.Triangulation,
+def _planar_from_cdt_triangles(mesh: cdt.Triangulation,
         vertmap: np.ndarray) -> tuple[tuple[np.ndarray, np.ndarray], set]:
     '''Convert from a PythonCDT.Triangulation to NetworkX.PlanarEmbedding.
 
-    Used internally in `make_planar_embedding()`. Wraps the numba-compiled `halfedges_from_triangulation()`, which does the intensive work.
+    For use within `make_planar_embedding()`. Wraps the numba-compiled
+    `_halfedges_from_triangulation()`, which does the intensive work.
     
     Args:
-        triangles: `PythonCDT.Triangulation().triangles` list
-        vertmap: node number translation table, from CDT numbers to NetworkX
+      triangles: `PythonCDT.Triangulation().triangles` list
+      vertmap: node number translation table, from CDT numbers to NetworkX
 
     Returns:
-        planar embedding
+      planar embedding
     '''
     num_tri = mesh.triangles_count()
     triangleI = np.empty((num_tri, 3), dtype=np.int_)
@@ -135,13 +132,17 @@ def planar_from_cdt_triangles(mesh: cdt.Triangulation,
     num_half_edges = 6*mesh.vertices_count() - 12
     halfedges = np.empty((num_half_edges, 3), dtype=np.int_)
     ref_is_cw_ = np.empty((num_half_edges,), dtype=np.bool_)
-    halfedges_from_triangulation(triangleI, neighborI, halfedges, ref_is_cw_)
+    _halfedges_from_triangulation(triangleI, neighborI, halfedges, ref_is_cw_)
     edges = set((u.item(), v.item()) for u, v in halfedges[:, :2] if u < v)
     return (halfedges, ref_is_cw_), edges
 
 
-def P_from_halfedge_pack(halfedge_pack: tuple[np.ndarray, np.ndarray]) \
+def _P_from_halfedge_pack(halfedge_pack: tuple[np.ndarray, np.ndarray]) \
         -> nx.PlanarEmbedding:
+    '''Build a nx.PlanarEmbedding from a pack of half-edges.
+
+    For use within `make_planar_embedding()`.
+    '''
     halfedges, ref_is_cw_ = halfedge_pack
     P = nx.PlanarEmbedding()
     for (u, v, ref), ref_is_cw in zip(halfedges, ref_is_cw_):
@@ -153,22 +154,22 @@ def P_from_halfedge_pack(halfedge_pack: tuple[np.ndarray, np.ndarray]) \
     return P
 
 
-def hull_processor(P: nx.PlanarEmbedding, T: int,
-                   supertriangle: tuple[int, int, int],
-                   vertex2conc_id_map: dict[int, int]) \
+def _hull_processor(P: nx.PlanarEmbedding, T: int,
+                    supertriangle: tuple[int, int, int],
+                    vertex2conc_id_map: dict[int, int]) \
         -> tuple[list[int], list[tuple[int, int]], set[tuple[int, int]]]:
-    '''
-    Iterates over the edges that form a triangle with one of supertriangle's
-    vertices.
+    '''Find the convex hull and supertriangle-incident edges to remove.
 
-    The supertriangle vertices must have indices in `range(T + B - 3, T + B)`
+    Iterate over the edges that form a triangle with one of supertriangle's
+    vertices. This produces the node sequence that form the convex hull and
+    marks for removal the portals that would enable a path to go around the
+    outside of a concavity.
 
-    If the border has concavities, `to_remove` will be non-empty.
-
-    Multiple goals:
-      - Get the node sequence that form the convex hull
-      - Get the edges that enable a path to go around the outside of an
-        obstacle's border.
+    Args:
+      P: planar embedding to process
+      T: number of terminals of P
+      supertriangle: indices to the supertriangles' vertices
+      vertex2cons_id_map: vertex index to concavity id map
 
     Returns:
       The convex hull, P edges to be removed and outer edges of concavities
@@ -250,7 +251,7 @@ def _flip_triangles_obstacles_super(P: nx.PlanarEmbedding, T: int, B: int,
 
     Some flat triangles may be created within border vertices. These might
     block the clearing of portals that go around concavities (performed by
-    `hull_processor()`). This function flips these triangles so that they have
+    `_hull_processor()`). This function flips these triangles so that they have
     a vertex in the supertriangle.
     '''
     changes = {}
@@ -285,42 +286,46 @@ def _flip_triangles_obstacles_super(P: nx.PlanarEmbedding, T: int, B: int,
 
 def make_planar_embedding(
         L: nx.Graph,
-        #  R: int, VertexC: np.ndarray,
-        #  boundaries: list[np.ndarray] | None = None,
         offset_scale: float = 1e-4,
         max_tri_AR: float = MAX_TRIANGLE_ASPECT_RATIO) -> \
         tuple[nx.PlanarEmbedding, nx.Graph]:
-    ''' This does more than the planar embedding. A name change is in order.
+    '''Triangulate a location and produce graphs P and A for it.
 
-    The available edges graph `A` is arguably the main product.
+    P is the planar embedding mesh and A is the available-edges graph.
+    TODO: change the name of this function.
 
     Args:
-        L: locations graph
-        offset_scale: Fraction of the diagonal of the site's bbox to use as
-            spacing between border and nodes in concavities (only where nodes
-            are the border).
+      L: locations graph
+      offset_scale: Fraction of the diagonal of the site's bbox to use as
+        spacing between border and nodes in concavities (only where nodes
+        are the border).
+      max_tri_AR: maximum aspect ratio allowed for triangles on the hull of
+        A as the algorithm removes flat triangles (higher values keep more).
 
     Returns:
-        P - the planar embedding graph - and A - the available edges graph.
+      P - the planar embedding graph - and A - the available-edges graph.
     '''
 
     # ######
     # Steps:
     # ######
     # A) Scale the coordinates to avoid CDT errors.
-    # A.1) Transform border concavities in polygons.
-    # B) Check if concavities' vertices coincide with wtg. Where they do,
+    # B) Transform border concavities in polygons.
+    # C) Check if concavities' vertices coincide with wtg. Where they do,
     #    create stunt concavity vertices to the inside of the concavity.
-    # C) Get Delaynay triangulation of the wtg+oss nodes only.
-    # D) Build the available-edges graph A and its planar embedding.
-    # Y) Handle obstacles
-    # E) Add concavities and get the Constrained Delaunay Triang.
-    # F) Build the planar embedding of the constrained triangulation.
-    # G) Build P_paths.
-    # H) Revisit A to update edges crossing borders with P_path contours.
-    # I) Revisit A to update d2roots according to lengths along P_paths.
-    # J) Calculate the area of the concave hull.
-    # X) Create hull_concave.
+    # D) Create a miriad of indices and mappings.
+    # E) Get Delaunay triangulation of the wtg+oss nodes only.
+    # F) Build the available-edges graph A and its planar embedding.
+    # G) Build the hull-concave.
+    # H) Insert the obstacles' constraint edges.
+    # I) Insert the hull's and concavities' constraint edges.
+    # J) Add coordinates for stunts, supertriangle and scale back.
+    # K) Build the planar embedding of the constrained triangulation.
+    # L) Build P_paths.
+    # M) Revisit A to update edges crossing borders with P_path contours.
+    # N) Revisit A to update d2roots according to lengths along P_paths.
+    # O) Calculate the area of the concave hull.
+    # P) Set A's graph attributes.
 
     R, T, B, VertexCʹ = (L.graph[k] for k in 'R T B VertexC'.split())
     border = L.graph.get('border')
@@ -339,94 +344,91 @@ def make_planar_embedding(
     # vertex sets that fall within a small area. The way to circunvent the
     # error described above is to scale all coordinates down so that CDT will
     # use the fallback and this fallback is enough to cover the scaled borders.
+    debug('PART A')
     mean = VertexCʹ.mean(axis=0)
     scale = 2.*max(VertexCʹ.max(axis=0) - VertexCʹ.min(axis=0))
 
     VertexC = (VertexCʹ - mean)/scale
-    # geometric context init (packages ground, gon)
-    context = get_context()
-    points = np.fromiter((Point(float(x), float(y)) for x, y in VertexC),
-                         dtype=object,
-                         count=T + B + R)
 
-    # ##############################################
-    # A.1) Transform border concavities in polygons.
-    # ##############################################
-    debug('PART A')
+    # ############################################
+    # B) Transform border concavities in polygons.
+    # ############################################
+    debug('PART B')
+    root_xy_ = tuple((x.item(), y.item()) for (x, y) in VertexC[-R:])
+    nodeset_xy_ = set(chain(root_xy_,
+                            ((x.item(), y.item()) for (x, y) in VertexC[:T])))
+    root_pts = shp.MultiPoint(root_xy_)
     if border is None:
-        hull_minus_border = EMPTY
-        border_vertex_from_point = {}
-        roots_outside = []
+        hull_minus_border = shp.MultiPolygon()
+        border_vertex_from_xy = {}
+        out_root_pts = shp.MultiPoint()
     else:
-        border_poly = Polygon(border=Contour(points[border]))
+        border_poly = shp.Polygon(shell=VertexC[border])
+        out_root_pts = root_pts - border_poly
+        hull_poly = (border_poly | root_pts).convex_hull
+        hull_ring = hull_poly.boundary
 
-        # Check if roots are outside the border. If so, extend the border to them.
-        roots_outside = [
-            r_pt for r_pt in points[-R:]
-            if point_in_polygon(r_pt, border_poly) is Location.EXTERIOR]
-        #  print('roots_outside', len(roots_outside), roots_outside, border_poly)
-        hull = context.points_convex_hull(roots_outside
-                                          + border_poly.border.vertices)
-        hull_poly = Polygon(border=Contour(hull))
+        border_vertex_from_xy = {
+            (x.item(), y.item()): i
+            for i, (x, y) in enumerate(VertexC[T:-R], start=T)
+        }
 
-        border_vertex_from_point = {
-                point: i for i, point in enumerate(points[T:-R], start=T)}
-
-        hull_border_vertices = [border_vertex_from_point[hullpt]
-                                for hullpt in hull
-                                if hullpt in border_vertex_from_point]
+        hull_border_xy_ = {xy for xy in hull_ring.coords[:-1]
+                           if xy in border_vertex_from_xy}
+        hull_border_vertices = [border_vertex_from_xy[xy]
+                                for xy in hull_border_xy_]
 
         # Turn the main border's concave zones into concavity polygons.
         hull_minus_border = hull_poly - border_poly
 
     concavities = []
-    if hull_minus_border is EMPTY:
-        assert len(roots_outside) == 0
-    elif hasattr(hull_minus_border, 'polygons'):
+    if hull_minus_border.is_empty:
+        assert out_root_pts.is_empty
+    elif isinstance(hull_minus_border, shp.MultiPolygon):
         # MultiPolygon
-        for p in hull_minus_border.polygons:
-            if all((point_in_polygon(r_pt, p) is Location.EXTERIOR)
-                   for r_pt in roots_outside):
-                concavities.append(p.border)
+        for p in hull_minus_border.geoms:
+            if p.intersects(out_root_pts):
+                border_poly |= p
             else:
-                border_poly += p
-    elif roots_outside:
-        # single Polygon in hull_minus_border includes a root
-        border_poly = hull_poly
-    else:
+                concavities.append(p.exterior)
+    elif out_root_pts.is_empty:
         # single Polygon is a concavity
-        concavities = [hull_minus_border.border]
+        concavities = [hull_minus_border.exterior]
+    else:
+        # single Polygon in hull_minus_border includes a root -> no concavity
+        border_poly = hull_poly
 
     # ###################################################################
-    # B) Check if concavities' vertices coincide with wtg. Where they do,
+    # C) Check if concavities' vertices coincide with wtg. Where they do,
     #    create stunt concavity vertices to the inside of the concavity.
     # ###################################################################
-    debug('PART B')
+    debug('PART C')
     offset = offset_scale*np.hypot(*(VertexC.max(axis=0)
                                      - VertexC.min(axis=0)))
     #  debug(f'offset: {offset}')
     stuntC = []
     stunts_primes = []
-    remove_from_border_pt_map = set()
+    remove_from_border_xy_map = set()
     B_old = B
     # replace coinciding vertices with stunts and save concavities here
-    for i, concavity in enumerate(concavities):
+    for i, ring in enumerate(concavities):
         changed = False
-        debug('concavity: %s', concavity)
+        debug('ring: %s', ring)
         stunt_coords = []
-        conc_points = []
-        vertices = concavity.vertices
-        rev = vertices[-1]
-        X = border_vertex_from_point[rev]
+        new_ring_xy_ = []
+        old_ring_xy_ = tuple(xy for xy in (ring.coords[:-1] if ring.is_ccw
+                                           else ring.coords[-2::-1]))
+        rev = old_ring_xy_[-1]
+        X = border_vertex_from_xy[rev]
         X_is_hull = X in hull_border_vertices
-        cur = vertices[0]
-        Y = border_vertex_from_point[cur]
+        cur = old_ring_xy_[0]
+        Y = border_vertex_from_xy[cur]
         Y_is_hull = Y in hull_border_vertices
         # X->Y->Z is in ccw direction
-        for fwd in chain(vertices[1:], (cur,)):
-            Z = border_vertex_from_point[fwd]
-            Z_is_hull = fwd in hull_poly.border.vertices
-            if cur in points[:T] or cur in points[-R:]:
+        for fwd in chain(old_ring_xy_[1:], (cur,)):
+            Z = border_vertex_from_xy[fwd]
+            Z_is_hull = fwd in hull_border_xy_
+            if cur in nodeset_xy_:
                 # Concavity border vertex coincides with node.
                 # Therefore, create a stunt vertex for the border.
                 XY = VertexC[Y] - VertexC[X]
@@ -467,22 +469,22 @@ def make_planar_embedding(
                 # stuntsC = VertexC[T + B - len(stunts_primes): T + B]
                 stunts_primes.append(Y)
                 stunt_coord = VertexC[Y] + S
-                stunt_point = Point(*(float(sc) for sc in stunt_coord))
                 stunt_coords.append(stunt_coord)
-                conc_points.append(stunt_point)
-                remove_from_border_pt_map.add(cur)
-                border_vertex_from_point[stunt_point] = T + B
+                stunt_xy = (stunt_coord[0].item(), stunt_coord[1].item())
+                new_ring_xy_.append(stunt_xy)
+                remove_from_border_xy_map.add(cur)
+                border_vertex_from_xy[stunt_xy] = T + B
                 B += 1
                 changed = True
             else:
-                conc_points.append(cur)
+                new_ring_xy_.append(cur)
             X, X_is_hull = Y, Y_is_hull
             Y, Y_is_hull = Z, Z_is_hull
-            Y_is_hull = fwd in hull_poly.border.vertices
+            Y_is_hull = fwd in hull_border_xy_
             cur = fwd
         if changed:
             debug('Concavities changed!')
-            concavities[i] = Contour(conc_points)
+            concavities[i] = shp.LinearRing(new_ring_xy_)
             stuntC.append(mean + scale*np.array(stunt_coords))
     # Stunts are added to the B range and they should be saved with routesets.
     # Alternatively, one could convert stunts to clones of their primes, but
@@ -491,94 +493,99 @@ def make_planar_embedding(
         debug('stuntC lengths: %s; former B: %d; new B: %d',
               [len(nc) for nc in stuntC], B_old, B)
 
-    for pt in remove_from_border_pt_map:
-        del border_vertex_from_point[pt]
+    for xy in remove_from_border_xy_map:
+        del border_vertex_from_xy[xy]
 
-    # #############################################
-    # B.2) Create a miriad of indices and mappings.
-    # #############################################
-    debug('PART B.2')
+    # ###########################################
+    # D) Create a miriad of indices and mappings.
+    # ###########################################
+    debug('PART D')
 
-    vertex_from_point = (
-        border_vertex_from_point
-        | {point: i for i, point in enumerate(points[:T])}
-        | {point: i for i, point in zip(range(-R, 0), points[-R:])}
-    )
+    node_vertex_from_xy = {
+        (x.item(), y.item()): i for i, (x, y) in chain(
+            enumerate(VertexC[:T]), enumerate(VertexC[-R:], start=-R))
+    }
 
-    if roots_outside:
-        border = np.array([vertex_from_point[pt] for pt in hull], dtype=int)
+    if not out_root_pts.is_empty:
+        border = np.array([(border_vertex_from_xy.get(xy)
+                            or node_vertex_from_xy[xy])
+                           for xy in border_poly.exterior.coords[:-1]], dtype=int)
 
-    holes = [Contour(points[obstacle]) for obstacle in obstacles]
+    holes = [shp.LinearRing(VertexC[obstacle]) for obstacle in obstacles]
 
-    # assemble all points actually used in concavities and obstacles
-    num_pt_concavities = sum(len(conc.vertices) for conc in concavities)
-    num_pt_holes = sum(len(hole.vertices) for hole in holes)
+    # count the points actually used in concavities and obstacles
+    num_pt_concavities = sum(shp.count_coordinates(c) for c in concavities)
+    num_pt_holes = sum(shp.count_coordinates(h) for h in holes)
 
     # account for the supertriangle vertices that cdt.Triangulation() adds
     supertriangle = (T + B, T + B + 1, T + B + 2)
-    iCDT = 0
     vertex_from_iCDT = np.full(
         (3 + T + R + num_pt_concavities + num_pt_holes,), NULL,  dtype=int)
     vertex_from_iCDT[:3] = supertriangle
     V2d_nodes = []
-    for iCDT, pt in enumerate(chain(points[:T], points[-R:]), start=iCDT):
-        V2d_nodes.append(cdt.V2d(pt.x, pt.y))
-        vertex_from_iCDT[iCDT + 3] = vertex_from_point[pt]
+    iCDT = 0
+    for iCDT, (xy, n) in enumerate(node_vertex_from_xy.items(), start=iCDT):
+        V2d_nodes.append(cdt.V2d(*xy))
+        vertex_from_iCDT[iCDT + 3] = n
 
-    # Bundle concavities that share a common point.
-    if len(concavities) > 1:
-        # multiple concavities -> join concavities with a common vertex
-        stack = [(set(conc.vertices), conc.vertices) for conc in concavities]
-        # concavityVertexSeqs uses the unjoined concavity polygons' vertices
-        concavityVertexSeqs = [tuple(vertex_from_point[p] for p in points)
-                               for _, points in stack]
+    # Create a map vertex -> concavity/hole id
+    # holes first
+    vertex2conc_id_map = {border_vertex_from_xy[xy]: i
+                          for i, ring in enumerate(holes)
+                          for xy in ring.coords[:-1]}
+    # then concavities
+    if len(concavities) <= 1:
+        vertex2conc_id_map |= {
+            border_vertex_from_xy[xy]: i
+            for i, ring in enumerate(concavities, start=len(holes))
+            for xy in ring.coords[:-1]
+        }
+    else: # multiple concavities
+        # Concavities that share a common point are assigned the same id.
+        stack = [(set(conc.coords[:-1]), tuple(conc.coords[:-1]))
+                 for conc in concavities]
         ready = []
         while stack:
-            refset, reflst = stack.pop()
+            refset, ref_xy_ = stack.pop()
             stable = True
-            for iconc, (tstset, tstlst) in enumerate(stack):
-                common = refset & tstset
+            for iconc, (testset, test_xy_) in enumerate(stack):
+                common = refset & testset
                 if common:
                     common, = common
-                    iref, itst = reflst.index(common), tstlst.index(common)
-                    joined = (reflst[:iref] + tstlst[itst:]
-                              + tstlst[:itst] + reflst[iref:])
+                    iref, itst = ref_xy_.index(common), test_xy_.index(common)
+                    joined = (ref_xy_[:iref] + test_xy_[itst:]
+                              + test_xy_[:itst] + ref_xy_[iref:])
                     debug('common vertex: %d -> new contour: %s', common, joined)
                     del stack[iconc]
-                    stack.append((refset | tstset, joined))
+                    stack.append((refset | testset, joined))
                     stable = False
                     break
             if stable:
-                ready.append(reflst)
-        concavities = [Contour(vertex_list) for vertex_list in ready]
-    elif len(concavities) == 1:
-        concavityVertexSeqs = [tuple(vertex_from_point[v]
-                                     for v in concavities[0].vertices)]
-    else:
-        concavityVertexSeqs = []
-
-    vertex2conc_id_map = {vertex_from_point[p]: i
-                          for i, hole in enumerate(chain(concavities, holes))
-                          for p in hole.vertices}
+                ready.append(ref_xy_)
+        vertex2conc_id_map |= {
+            border_vertex_from_xy[xy]: i
+            for i, xy_ in enumerate(ready, start=len(holes))
+            for xy in xy_
+        }
 
     # ########################################################
-    # C) Get Delaynay triangulation of the wtg+oss nodes only.
+    # E) Get Delaunay triangulation of the wtg+oss nodes only.
     # ########################################################
-    debug('PART C')
+    debug('PART E')
     # Create triangulation and add vertices and edges
     mesh = cdt.Triangulation(cdt.VertexInsertionOrder.AUTO,
                              cdt.IntersectingConstraintEdges.NOT_ALLOWED, 0.0)
     mesh.insert_vertices(V2d_nodes)
 
-    P_A_halfedge_pack, P_A_edges = planar_from_cdt_triangles(mesh,
-                                                             vertex_from_iCDT)
-    P_A = P_from_halfedge_pack(P_A_halfedge_pack)
+    P_A_halfedge_pack, P_A_edges = _planar_from_cdt_triangles(mesh,
+                                                              vertex_from_iCDT)
+    P_A = _P_from_halfedge_pack(P_A_halfedge_pack)
     P_A_edges.difference_update((u, v) for v in supertriangle for u in P_A[v])
 
     # ##############################################################
-    # D) Build the available-edges graph A and its planar embedding.
+    # F) Build the available-edges graph A and its planar embedding.
     # ##############################################################
-    debug('PART D')
+    debug('PART F')
     convex_hull_A = []
     a, b, c = supertriangle
     for pivot, begin, end in ((a, c, b),
@@ -642,24 +649,24 @@ def make_planar_embedding(
             diagonals[(s, t)] = (u, v)
             A.add_edge(s, t, kind='extended')
 
-    # D.1) get hull_concave
-
+    # ##########################
+    # G) Build the hull-concave.
+    # ##########################
+    debug('PART G')
     # prevent edges that cross the boudaries from going into PlanarEmbedding
     # an exception is made for edges that include a root node
     hull_concave = []
     if border is not None:
-        hull_prunned_cont = Contour(points[hull_prunned])
-        border_cont = border_poly.border
-        hull__border = contour_in_region(hull_prunned_cont, border_cont)
+        hull_prunned_poly = shp.Polygon(shell=VertexC[hull_prunned])
+        shp.prepare(hull_prunned_poly)
+        shp.prepare(border_poly)
         pushed = 0
-        if hull__border in (Relation.CROSS, Relation.TOUCH, Relation.OVERLAP):
+        if not border_poly.covers(hull_prunned_poly):
             hull_stack = hull_prunned[0:1] + hull_prunned[::-1]
             u, v = hull_prunned[-1], hull_stack.pop()
             while hull_stack:
-                edge_seg = Segment(points[u], points[v])
-                edge_to_border = segment_in_region(edge_seg, border_cont)
-                if (edge_to_border is Relation.CROSS
-                        or edge_to_border is Relation.TOUCH):
+                edge_line = shp.LineString(VertexC[[u, v]])
+                if not border_poly.covers(edge_line):
                     t = P_A[u][v]['ccw']
                     #  print(f'[{pushed}]', F[u], F[v], f'⟨{F[t]}⟩', [F[n] for n in hull_stack[::-1]])
                     if t == u:
@@ -697,26 +704,26 @@ def make_planar_embedding(
         hull_concave = hull_prunned
     debug('hull_concave: %s', '–'.join(F[n] for n in hull_concave))
 
-    # ######################################################################
-    # Y) Handle obstacles
-    # ######################################################################
-    debug('PART Y')
+    # ##########################################
+    # H) Insert the obstacles' constraint edges.
+    # ##########################################
+    debug('PART H')
     constraint_edges = set()
     edgesCDT_obstacles = []
-    pts_hard_constraints = set()
+    hard_constraints_xy_ = set()
     V2d_holes = []
     # add obstacles' edges
-    for hole in holes:
-        for seg in hole.segments:
-            s, t = vertex_from_point[seg.start], vertex_from_point[seg.end]
+    for ring in holes:
+        for s_xy, t_xy in zip(ring.coords[:-1], ring.coords[1:]):
+            s, t = border_vertex_from_xy[s_xy], border_vertex_from_xy[t_xy]
             edge = []
-            for n, pt in ((s, seg.start), (t, seg.end)):
-                if pt not in pts_hard_constraints:
+            for n, xy in ((s, s_xy), (t, t_xy)):
+                if xy not in hard_constraints_xy_:
                     iCDT += 1
                     vertex_from_iCDT[iCDT + 3] = n
                     edge.append(iCDT)
-                    pts_hard_constraints.add(pt)
-                    V2d_holes.append(cdt.V2d(pt.x, pt.y))
+                    hard_constraints_xy_.add(xy)
+                    V2d_holes.append(cdt.V2d(*xy))
                 else:
                     edge.append(np.flatnonzero(vertex_from_iCDT == n)[0] - 3)
             st = (s, t) if s < t else (t, s)
@@ -729,8 +736,7 @@ def make_planar_embedding(
     if edgesCDT_obstacles:
         mesh.insert_vertices(V2d_holes)
         mesh.insert_edges(edgesCDT_obstacles)
-        _, P_edges = planar_from_cdt_triangles(mesh,
-                                               vertex_from_iCDT)
+        _, P_edges = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
         # Here we use the changes in CDT triangulation to identify the P_A
         # edges that cross obstacles or lay in their vicinity.
         edges_to_examine = P_A_edges - P_edges
@@ -763,10 +769,10 @@ def make_planar_embedding(
                              for u, v in soft_constraints]
             mesh.insert_edges(edgesCDT_soft)
 
-    # ######################################################################
-    # E) Add concavities and get the Constrained Delaunay Triang.
-    # ######################################################################
-    debug('PART E')
+    # #######################################################
+    # I) Insert the hull's and concavities' constraint edges.
+    # #######################################################
+    debug('PART I')
     # create the PythonCDT edges
     edgesCDT_P_A = []
 
@@ -784,17 +790,17 @@ def make_planar_embedding(
     edgesCDT_concavities = []
     V2d_concavities = []
     # add concavities' edges
-    for conc in concavities:
-        for seg in conc.segments:
-            s, t = vertex_from_point[seg.start], vertex_from_point[seg.end]
+    for ring in concavities:
+        for s_xy, t_xy in zip(ring.coords[:-1], ring.coords[1:]):
+            s, t = border_vertex_from_xy[s_xy], border_vertex_from_xy[t_xy]
             edge = []
-            for n, pt in ((s, seg.start), (t, seg.end)):
-                if pt not in pts_hard_constraints:
+            for n, xy in ((s, s_xy), (t, t_xy)):
+                if xy not in hard_constraints_xy_:
                     iCDT += 1
                     vertex_from_iCDT[iCDT + 3] = n
                     edge.append(iCDT)
-                    pts_hard_constraints.add(pt)
-                    V2d_concavities.append(cdt.V2d(pt.x, pt.y))
+                    hard_constraints_xy_.add(xy)
+                    V2d_concavities.append(cdt.V2d(*xy))
                 else:
                     edge.append(np.flatnonzero(vertex_from_iCDT == n)[0] - 3)
             st = (s, t) if s < t else (t, s)
@@ -805,11 +811,12 @@ def make_planar_embedding(
         mesh.insert_vertices(V2d_concavities)
         mesh.insert_edges(edgesCDT_concavities)
 
-    # ##########################################
-    # Z) Scale coordinates back.
-    # ##########################################
+    # ############################################################
+    # J) Add coordinates for stunts, supertriangle and scale back.
+    # ############################################################
     # add any newly created plus the supertriangle's vertices to VertexC
     # note: B has already been increased by all stuntC lengths within the loop
+    debug('PART J')
     supertriangleC = (mean +
                       scale*np.array([(v.x, v.y) for v in mesh.vertices[:3]]))
     # NOTE: stuntC was scaled back upon its creation
@@ -828,30 +835,30 @@ def make_planar_embedding(
     nx.set_edge_attributes(A, A_edge_length, name='length')
 
     # ###############################################################
-    # F) Build the planar embedding of the constrained triangulation.
+    # K) Build the planar embedding of the constrained triangulation.
     # ###############################################################
-    debug('PART F')
-    P_halfedge_pack, P_edges = planar_from_cdt_triangles(mesh,
-                                                         vertex_from_iCDT)
-    P = P_from_halfedge_pack(P_halfedge_pack)
+    debug('PART K')
+    P_halfedge_pack, P_edges = _planar_from_cdt_triangles(mesh,
+                                                          vertex_from_iCDT)
+    P = _P_from_halfedge_pack(P_halfedge_pack)
 
     # Remove edges inside the concavities
-    for hole in chain(
-            concavityVertexSeqs,
-            (([vertex_from_point[v] for v in hole.vertices[::-1]]
-             for hole in holes) if obstacles else ())):
-        for rev, cur, fwd in zip(chain((hole[-1],), hole[:-1]),
-                                 hole, chain(hole[1:], (hole[0],))):
-            while P[cur][fwd]['ccw'] != rev:
-                u, v = cur, P[cur][fwd]['ccw']
+    for ring in chain(concavities, holes):
+        cw_or_ccw = 'ccw' if ring.is_ccw else 'cw'
+        vertices = tuple(border_vertex_from_xy[xy] for xy in ring.coords)
+        rev = vertices[-2]
+        for cur, fwd in zip(vertices[:-1], vertices[1:]):
+            while P[cur][fwd][cw_or_ccw] != rev:
+                u, v = cur, P[cur][fwd][cw_or_ccw]
                 P.remove_edge(u, v)
                 P_edges.remove((u, v) if u < v else (v, u))
+            rev = cur
 
     # adjust flat triangles around concavities
     #  changes_super = _flip_triangles_obstacles_super(
     #          P, T, B + 3, VertexC, max_tri_AR=max_tri_AR)
 
-    convex_hull, to_remove, conc_outer_edges = hull_processor(
+    convex_hull, to_remove, conc_outer_edges = _hull_processor(
             P, T, supertriangle, vertex2conc_id_map)
     P.remove_edges_from(to_remove)
     P_edges.difference_update((u, v) if u < v else (v, u)
@@ -892,9 +899,9 @@ def make_planar_embedding(
     #  print('&'*80)
 
     # #################
-    # G) Build P_paths.
+    # L) Build P_paths.
     # #################
-    debug('PART G')
+    debug('PART L')
     P_edges.difference_update((u, v) for v in supertriangle for u in P[v])
     P_paths = nx.Graph(P_edges)
 
@@ -915,20 +922,11 @@ def make_planar_embedding(
         if 'length' not in edgeD:
             edgeD['length'] = np.hypot(*(VertexC[u] - VertexC[v])).item()
 
-    # #######################
-    # X) Create hull_concave.
-    # #######################
-    # TODO: adjust comments, since this is done in section D.1
-    #       (hull_concave is needed earlier)
-
+    # ###################################################################
+    # M) Revisit A to update edges crossing borders with P_path contours.
+    # ###################################################################
+    debug('PART M')
     cw, ccw = rotation_checkers_factory(VertexC)
-
-    A.graph['hull_concave'] = hull_concave
-
-    # ###################################################################
-    # H) Revisit A to update edges crossing borders with P_path contours.
-    # ###################################################################
-    debug('PART H')
     corner_to_A_edges = defaultdict(list)
     A_edges_to_revisit = []
     for u, v in A.edges - P_paths.edges:
@@ -1023,7 +1021,6 @@ def make_planar_embedding(
                 # Some edges will need revisiting to maybe promote their
                 # diagonals to delaunay edges.
                 A_edges_to_revisit.append((u, v))
-    A.graph['corner_to_A_edges'] = corner_to_A_edges
 
     # Diagonals in A which have a missing origin Delaunay edge become edges.
     for uv in A_edges_to_revisit:
@@ -1039,12 +1036,12 @@ def make_planar_embedding(
         P_A.remove_edge(*uv)
 
     # ##################################################################
-    # I) Revisit A to update d2roots according to lengths along P_paths.
+    # N) Revisit A to update d2roots according to lengths along P_paths.
     # ##################################################################
-    debug('PART I')
+    debug('PART N')
     d2roots = cdist(VertexC[:T + B + 3], VertexC[-R:])
     # d2roots may not be the plain Euclidean distance if there are obstacles.
-    if concavityVertexSeqs or obstacles:
+    if concavities or obstacles:
         # Use P_paths to obtain estimates of d2roots taking into consideration
         # the concavities and obstacle zones.
         for r in range(-R, 0):
@@ -1070,8 +1067,9 @@ def make_planar_embedding(
                 d2roots[n, r] = new_length
 
     # ##########################################
-    # J) Calculate the area of the concave hull.
+    # O) Calculate the area of the concave hull.
     # ##########################################
+    debug('PART O')
     if border is None:
         bX, bY = VertexC[convex_hull_A].T
     else:
@@ -1084,7 +1082,10 @@ def make_planar_embedding(
     norm_scale = 1./math.sqrt(
         area_from_polygon_vertices(*VertexC[hull_concave].T))
 
-    # Set A's graph attributes.
+    # ############################
+    # P) Set A's graph attributes.
+    # ############################
+    debug('PART P')
     A.graph.update(
         T=T, R=R, B=B,
         VertexC=VertexC,
@@ -1094,6 +1095,7 @@ def make_planar_embedding(
         planar=P_A,
         diagonals=diagonals,
         d2roots=d2roots,
+        corner_to_A_edges=corner_to_A_edges,
         # TODO: make these 2 attribute names consistent across the code
         hull=convex_hull_A,
         hull_prunned=hull_prunned,
@@ -1112,14 +1114,22 @@ def make_planar_embedding(
     # products:
     # P: PlanarEmbedding
     # A: Graph (carries the updated VertexC)
-    # P_A: PlanarEmbedding
-    # P_paths: Graph
-    # diagonals: dict
+    #   P_A: PlanarEmbedding
+    #   diagonals: bidict
     return P, A
 
 
 def delaunay(L: nx.Graph, bind2root: bool = False) -> nx.Graph:
     # TODO: deprecate the use of delaunay()
+    '''DEPRECATED. Create the extended-Delaunay-based available-edges graph A.
+
+    Args:
+      L: location
+      bind2root: assign edge attribute 'root' (used by legacy heuristics)
+
+    Returns:
+      A - available-edges graph
+    '''
     _, A = make_planar_embedding(L)
     if bind2root:
         assign_root(A)
@@ -1134,13 +1144,15 @@ def delaunay(L: nx.Graph, bind2root: bool = False) -> nx.Graph:
 
 
 def A_graph(G_base, delaunay_based=True, weightfun=None, weight_attr='weight'):
-    '''
+    '''DEPRECATED. Create the available-edges graph A.
+
+    Migrate to `make_planar_embedding()`.
+
     Return the "available edges" graph that is the base for edge search in
     Esau-Williams. If `delaunay_based` is True, the edges are the expanded
     Delaunay triangulation, otherwise a complete graph is returned.
 
-    This function is being kept for backward-compatibility. For the Delaunay
-    triangulation, call `delaunay()` directly.
+    This function is kept for backward-compatibility.
     '''
     if delaunay_based:
         A = delaunay(G_base)
