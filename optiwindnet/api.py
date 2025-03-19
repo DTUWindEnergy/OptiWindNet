@@ -124,7 +124,7 @@ class WindFarmNetwork():
     """
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, border=None, obstacles=None, name='', handle='', L=None, verbose=True, **kwargs):
+                 cables=None, border=None, obstacles=None, name='', handle='', L=None, router=None, verbose=True, **kwargs):
 
         #
         if turbines is not None:
@@ -136,6 +136,7 @@ class WindFarmNetwork():
         self.border = border
         self.obstacles = obstacles
         self.cables = cables
+        self.router = router
 
         # Flags to track update status (initialized as updated)
         self._S = None
@@ -389,25 +390,6 @@ class WindFarmNetwork():
         self.set_network(network_tree=network)
 
 
-    def wt_per_cable(cable_cross_section, turbine_power, voltage, efficiency):
-        return turbines_per_cable(cable_cross_section, turbine_power, voltage, efficiency)
-
-
-class OptiWindNetSolver(ABC):
-    def __init__(self, **kwargs):
-        pass
-
-    @abstractmethod
-    def optimize(self, turbines=None, substations=None, network_array=None, verbose=True, **kwargs):
-        """
-        Perform cable layout optimization. Must be implemented by subclasses.
-        """
-        pass
-
-    def __call__(self, turbines=None, substations=None, network_array=None, verbose=True, **kwargs):
-        """Make the instance callable, calling optimize() internally."""
-        return self.optimize( turbines=turbines, substations=substations, network_array=network_array, verbose=verbose, **kwargs)  
-
     def gradient(self, turbines=None, substations=None, network_tree=None, verbose=True, gradient_type='cost'):
         """
         Calculates the gradient of the length and cost of cable with respect to the positions of the nodes.
@@ -466,6 +448,41 @@ class OptiWindNetSolver(ABC):
             raise ValueError("gradient_type should be either 'cost' or 'length'")
 
         return gradients_wt, gradients_ss
+
+
+    def wt_per_cable(cable_cross_section, turbine_power, voltage, efficiency):
+        return turbines_per_cable(cable_cross_section, turbine_power, voltage, efficiency)
+    
+    def optimize(self, turbines=None, substations=None, verbose=None, router=None):
+        if turbines is not None or substations is not None:
+            self.set_coordinates(turbines=turbines, substations=substations)
+
+        if router is None:
+            router=self.router
+            if router is None:
+                raise ValueError(
+                            "To run the optimization, a router must be initialized. "
+                            "This can be done either during the creation of the WFN object "
+                            "or via the `optimize` method of the WFN object.")
+    
+        network_array = router(turbines=None, substations=None, verbose=True)
+        return network_array
+
+
+class OptiWindNetSolver(ABC):
+    def __init__(self, **kwargs):
+        pass
+
+    @abstractmethod
+    def optimize(self, turbines=None, substations=None, verbose=True, **kwargs):
+        """
+        Perform cable layout optimization. Must be implemented by subclasses.
+        """
+        pass
+
+    def __call__(self, turbines=None, substations=None, verbose=True, **kwargs):
+        """Make the instance callable, calling optimize() internally."""
+        return self.optimize(turbines=None, substations=None, verbose=True, **kwargs)  
 
 
 class Heuristic(OptiWindNetSolver):
