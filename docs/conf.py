@@ -136,7 +136,7 @@ nbsphinx_codecell_lexer = 'python3'
 # This is processed by Jinja2 and inserted before each notebook
 
 nbsphinx_prolog = r"""
-{% set docname = 'docs/' + env.doc2path(env.docname, base=None) %}
+{% set docname = 'docs/' + env.doc2path(env.docname, base=None) | string() %}
 
 
 .. only:: html
