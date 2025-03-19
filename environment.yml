@@ -23,7 +23,6 @@ dependencies:
   # required by gon
   - typing-extensions
   - pip:
-      - gon
       - hygese
       - ortools
       - osmium
