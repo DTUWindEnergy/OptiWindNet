@@ -31,7 +31,7 @@ pages:
   script:  
   - apt-get update
   - apt-get -y install make pandoc graphviz
-  - pip install --upgrade pip ipython ipykernel sphinx nbsphinx
+  - pip install --upgrade pip ipython ipykernel sphinx nbsphinx autoapi
   - ipython kernel install --name "python3" --user
   - pip install .[test,docs] --upgrade --no-deps
   - cd docs; make html
