@@ -2,20 +2,49 @@
 
 Requirements
 ============
-A recent Python version (3.10+) is required to run *OptiWindNet*, and we recommend to install it in its own virtual environment. This can be achieved by installing **either**:
 
-* `Python <https://www.python.org/downloads/>`_ and using the built-ins ``venv`` virtual environment creator and ``pip`` package manager;
-* or `Miniforge <https://conda-forge.org/download/>`_ (`Anaconda or Miniconda <https://www.anaconda.com/download/success>`_ also work) and using ``conda`` to create and populate the virtual environment.
+* Python
+* Git
+* C Build Utilities
 
-In the near future OptiWindNet will be turned into a Python package installable with the usual package managers, but currently it must be installed from the project tree obtained via ``git``. This software can be obtained from `Git <https://git-scm.com/downloads>`_ for a standalone version or from `Git for Windows <https://gitforwindows.org/>`_ to get bundle of git and other useful tools for the Windows platform (recommended).
+*OptiWindNet* has been tested on Windows 10 and on Linux systems, but should run on MacOSX as well.
+
+Python
+------
+A recent Python version (3.10+) is required to run *OptiWindNet*, and the use of a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
+
+* `Python <https://www.python.org/downloads/>`_, which provides: ``venv`` virtual environment creator and ``pip`` package manager;
+* or `Miniforge <https://conda-forge.org/download/>`_ (`Anaconda or Miniconda <https://www.anaconda.com/download/success>`_ also work), which provides: ``conda`` environment and package manager.
+
+Git
+---
+
+*OptiWindNet* and one of its dependencies (*PythonCDT*) are installable only from their source code repositories and require the program ``git``. This software can be obtained from `Git <https://git-scm.com/downloads>`_ for a standalone version or from `Git for Windows <https://gitforwindows.org/>`_ to get bundle of git and other useful tools for the Windows platform (recommended).
+
+C Build Utilities
+-----------------
+Two of *OptiWindNet*'s dependencies (*PythonCDT* and *hygese*) require C source code to be compiled at installation time. If ``gcc``, ``cmake`` and ``make`` commands are already available in the target system, no further action is necessary. If not, the easiest way to fullfill that requirement on Windows (as a regular user) is using `Scoop <https://scoop.sh/>`_.
+
+To install Scoop, open a PowerShell prompt and enter::
+
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+    Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+
+Next, use ``scoop`` to install `WinLibs <https://winlibs.com/>`_::
+
+    scoop install mingw-winlibs
+
+To check the build system is ready, enter these commands::
+
+    gcc --version
+    make --version
+    cmake --version
 
 .. _Installation:
 
 Installation
 ============
-The following commands must be run from the system's command line interface (e.g. *git-bash*, *cmd*, *powershell*), first making sure that `git` and `python` or `conda` are available (see section above)::
-
-    git clone https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+The following commands must be run from the system's command line interface (e.g. *git-bash*, *cmd*, *powershell*).
 
 If using ``venv``/``pip``
 -------------------------
@@ -30,19 +59,22 @@ Run::
 
 Then::
 
-    pip install -r OptiWindNet/requirements.txt
-    pip install --editable OptiWindNet/
-
+    pip install git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
 
 If using ``conda``
 ------------------
 
-Run::
+Download `environment.yml <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/environment.yml?ref_type=heads&inline=false>`_, then run::
 
-    conda env create -f OptiWindNet/environment.yml
-    activate optiwindnet_env
-    pip install --editable OptiWindNet/
+    conda env create -f environment.yml
+    conda activate optiwindnet_env
+    pip install git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
 
+
+Running
+=======
+
+*OptiWindNet* is not an application and has no *main* program to be executed. The recommended way to use it is in an interactive Python notebook such as `JupyterLab <https://jupyterlab.readthedocs.io/en/latest/>`_ or the `Jupyter Extension for Visual Studio Code <https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter>`_.
 
 Optional - Solvers
 ==================
@@ -53,7 +85,7 @@ Other solvers can be used for mathematical optimization, but they are not instal
 See the documentation section **Solvers** for relevant parameters when calling each solver.
 
 The commands suggested here assume that the Python environment for *OptiWindNet* has been already activated.
-For packages that are installable with both ``pip`` and ``conda``, only one of the commands.
+For packages that are installable with both ``pip`` and ``conda``, **enter only one** of the commands.
 
 Solvers perform a search accross the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Mar/2025, only `gurobi`, `cplex` and `cbc` have this multi-threaded search capability. The `ortools` solver also benefits from multi-core systems by launching a portfolio of algorithms in parallel, with some information exchange among them.
 
@@ -100,9 +132,6 @@ Pyomo's interface with CBC is through a system call, so it does not need to be p
 Updating
 ========
 
-Run::
+Activate the Python environment for *OptiWindNet* and enter::
 
-    cd OptiWindNet
-    git pull
-
-If ``pip`` was given the ``--editable`` option when installing, the new version will be immediately available within the Python environment ``optiwindnet_env``.
+    pip install --upgrade --force-reinstall git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
