@@ -454,19 +454,25 @@ class WindFarmNetwork():
         return turbines_per_cable(cable_cross_section, turbine_power, voltage, efficiency)
     
     def optimize(self, turbines=None, substations=None, verbose=None, router=None):
+        router = router or self.router  # Use provided router or the existing one in the class
+        if router is None:
+            raise ValueError(
+                        "To run the optimization, a router must be initialized. "
+                        "This can be done either during the creation of the WFN object "
+                        "or via the `optimize` method of the WFN object.")
+        
+        if verbose is None:
+            verbose = self.verbose
+        # If new coordinates are provided, update them
         if turbines is not None or substations is not None:
             self.set_coordinates(turbines=turbines, substations=substations)
 
-        if router is None:
-            router=self.router
-            if router is None:
-                raise ValueError(
-                            "To run the optimization, a router must be initialized. "
-                            "This can be done either during the creation of the WFN object "
-                            "or via the `optimize` method of the WFN object.")
-    
-        network_array = router(turbines=None, substations=None, verbose=True)
-        return network_array
+        turbines = turbines or self.L.graph['VertexC'][:self.L.graph['T'], :]
+        substations = substations or self.L.graph['VertexC'][-self.L.graph['R']:, :]
+
+        L, A, P, S, G_tentative, G = router(L=self.L, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
+        
+        return G
 
 
 class OptiWindNetSolver(ABC):
@@ -486,58 +492,43 @@ class OptiWindNetSolver(ABC):
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, wfn, solver='EW', detour=True, verbose=True, **kwargs):
+    def __init__(self, solver='EW', detour=True, verbose=True, **kwargs):
+        if solver not in ['EW']:
+            raise ValueError(
+                f"{solver} is not among the supported Heuristic solvers. Choose among: ['EW']."
+            )
+
         # Call the base class initialization
-        self.wfn = wfn
         self.verbose = verbose
         self.solver = solver
         self.detour = detour
-        #super().__init__(wfn=wfn, **kwargs)
 
-    def optimize(self, turbines=None, substations=None, network_array=None, verbose=None, **kwargs):
-        wfn = self.wfn
-        # set to True at the begining to avoid unwanted verbose info
-        wfn._S_updated = True
-        wfn._G_tentative_updated = True
-        wfn._G_updated = True
-        
-        if turbines is not None or substations is not None:
-            wfn.set_coordinates(turbines=turbines, substations=substations)
+    def optimize(self, L, turbines=None, substations=None, cables=None, cables_capacity=None, verbose=None, **kwargs):
 
-        if network_array is not None:
-            print('The optimizer is not run since a network_array is given')
-            wfn.set_network_array(network_array=network_array)
+        if verbose is None:
+            verbose = self.verbose
+
+
+        # Compute the planar embedding
+        P, A = make_planar_embedding(L)
+        # optimizing
+        if self.solver=='EW':
+            S = EW_presolver(A, capacity=cables_capacity)
         else:
-            # If verbose argument is None, use the value of self.verbose
-            if verbose is None:
-                verbose = self.verbose
-
-            # optimizing
-            if self.solver=='EW':
-                S = EW_presolver(wfn.A, capacity=wfn.cables_capacity)
-            else:
-                raise ValueError(
-                    f"{self.solver} is not among the supported Heuristic solvers. Choose among: EW.")
-
-            G_tentative = G_from_S(S, wfn.A)
+            pass
             
-            if self.detour:
-                G = PathFinder(G_tentative, planar=wfn.P, A=wfn.A).create_detours()
-            else:
-                G = G_tentative
+        G_tentative = G_from_S(S, A)
+        
+        if self.detour:
+            G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        else:
+            G = G_tentative
 
-            assign_cables(G, wfn.cables)
+        assign_cables(G, cables)
 
-            # update wfn attributes
-            wfn.S = S
-            wfn.G_tentative = G_tentative
-            wfn.G = G
-
-            self.wfn = wfn
-
-            if verbose:
-                print('S, G_tentative, and G got updated!')
-        return wfn
+        if verbose:
+            print('S, G_tentative, and G got updated!')
+        return L, A, P, S, G_tentative, G
     
 class MetaHeuristic(OptiWindNetSolver):
     def __init__(self, wfn, solver='HGS', time_limit=3, verbose=True, **kwargs):
