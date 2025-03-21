@@ -20,8 +20,6 @@ dependencies:
   - utm
   # required by osmium
   - requests
-  # required by gon
-  - typing-extensions
   - pip:
       - hygese @ git+https://github.com/mdealencar/PyHygese@scikit-build
       - ortools
