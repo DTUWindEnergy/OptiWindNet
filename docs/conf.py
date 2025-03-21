@@ -190,11 +190,11 @@ html_theme = 'furo'
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-html_theme_options = {
+#  html_theme_options = {
     # TOC options
     # 'navigation_depth': 2,  # only show 2 levels on left sidebar
-    'collapse_navigation': False,  # don't allow sidebar to collapse
-}
+    #  'collapse_navigation': False,  # don't allow sidebar to collapse
+#  }
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
