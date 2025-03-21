@@ -5,7 +5,7 @@ Requirements
 
 * Python
 * Git
-* C Build Utilities
+* C/C++ Build Utilities
 
 *OptiWindNet* has been tested on Windows 10 and on Linux systems, but should run on MacOSX as well.
 
@@ -23,7 +23,7 @@ Git
 
 C Build Utilities
 -----------------
-Two of *OptiWindNet*'s dependencies (*PythonCDT* and *hygese*) require C source code to be compiled at installation time. If ``gcc``, ``cmake`` and ``make`` commands are already available in the target system, no further action is necessary. If not, the easiest way to fullfill that requirement on Windows (as a regular user) is using `Scoop <https://scoop.sh/>`_.
+Two of *OptiWindNet*'s dependencies (*PythonCDT* and *hygese*) require C/C++ source code to be compiled at installation time. If ``gcc``, ``g++``, ``cmake`` and ``make`` commands are already available in the target system, no further action is necessary. If not, the easiest way to fullfill that requirement on Windows (as a regular user) is using `Scoop <https://scoop.sh/>`_.
 
 To install Scoop, open a PowerShell prompt and enter::
 
@@ -34,7 +34,7 @@ Next, use ``scoop`` to install `WinLibs <https://winlibs.com/>`_::
 
     scoop install mingw-winlibs
 
-To check the build system is ready, enter these commands::
+Open a new shell to ensure that the updated system PATH is loaded. To check the build system is ready, enter these commands::
 
     gcc --version
     make --version
