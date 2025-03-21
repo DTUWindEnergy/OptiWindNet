@@ -44,7 +44,9 @@ def describe_G(G):
 
 def update_lengths(G):
     '''Adds missing edge lengths.
-    Changes G in place.'''
+
+    Changes G in place.
+    '''
     VertexC = G.graph['VertexC']
     for u, v, dataE in G.edges(data=True):
         if 'length' not in dataE:
@@ -52,9 +54,9 @@ def update_lengths(G):
 
 
 def pathdist(G, path):
-    '''
-    Return the total length (distance) of a `path` of nodes in `G` from nodes'
-    coordinates (does not rely on edge attributes).
+    '''Calculate the total length of a `path` of nodes in `G`.
+
+    Uses the nodes' coordinates (does not rely on edge attributes).
     '''
     VertexC = G.graph['VertexC']
     dist = 0.
@@ -69,15 +71,15 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
     '''Count the number of Delaunay diagonals (extended edges) of `A` in `S`.
 
     Args:
-        S: solution topology
-        A: available edges used in creating `S`
+      S: solution topology
+      A: available edges used in creating `S`
 
     Returns:
-        number of non-gate edges of `S` that are of kind 'extended' or
-            'contour_extended' (kind is read from `A`).
+      number of non-gate edges of `S` that are of kind 'extended' or
+        'contour_extended' (kind is read from `A`).
 
     Raises:
-        ValueError: if an edge of unknown kind is found.
+      ValueError: if an edge of unknown kind is found.
     '''
     delaunay = 0
     extended = 0
@@ -101,11 +103,13 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 
 
 def bfs_subtree_loads(G, parent, children, subtree):
-    '''
-    Recurse down the subtree, updating edge and node attributes. Return value
-    is total descendant nodes. Meant to be called by `calcload()`, but can be
-    used independently (e.g. from PathFinder).
-    Nodes must not have a 'load' attribute.
+    '''Recurse down the subtree, updating edge and node attributes.
+
+    Meant to be called by `calcload()`, but can be used independently (e.g.
+    from PathFinder). Nodes must not have a 'load' attribute.
+
+    Returns:
+      Total number of descendant nodes
     '''
     T = G.graph['T']
     nodeD = G.nodes[parent]
@@ -126,7 +130,8 @@ def bfs_subtree_loads(G, parent, children, subtree):
 
 
 def calcload(G):
-    '''
+    '''Calculate link loads and updates edge and node attributes of G.
+
     Perform a breadth-first-traversal of each root's subtree. As each node is
     visited, its subtree id and the load leaving it are stored as its
     attribute (keys 'subtree' and 'load', respectively). Also the edges'
@@ -176,21 +181,22 @@ def fun_fingerprint(fun=None) -> dict[str, bytes | str]:
 
 
 def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
-    '''
+    '''Create L from a location's attributes.
+
     Args:
-        VertexC: numpy.ndarray (V, 2) with x, y pos. of wtg + oss (total V)
-        T: int number of wtg
-        R: int number of oss
-        **kwargs: Additional relevant arguments, for example:
-            name: str site name
-            handle: str site identifier
-            B: int number of border and obstacle zones' vertices
-            border: array (B,) of VertexC indices that define the border (ccw)
-            obstacles: sequence of numpy.ndarray of VertexC indices
+      VertexC: numpy.ndarray (V, 2) with x, y pos. of wtg + oss (total V)
+      T: int number of wtg
+      R: int number of oss
+      **kwargs: Additional relevant arguments, for example:
+        * name: str site name
+        * handle: str site identifier
+        * B: int number of border and obstacle zones' vertices
+        * border: array (B,) of VertexC indices that define the border (ccw)
+        * obstacles: sequence of numpy.ndarray of VertexC indices
 
     Returns:
-        Graph containing V nodes and no edges. All keyword arguments are made
-        available as graph attributes.
+      Graph containing N = R + T nodes and no edges. All keyword arguments are
+        made available as graph attributes.
     '''
     if 'handle' not in kwargs:
         kwargs['handle'] = 'L_from_site'
@@ -214,7 +220,8 @@ def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
 
 
 def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
-    '''
+    '''Create G from S and A.
+
     Graph `S` contains the topology of a routeset network (nodes only, no
     contours or detours). `S` must have been created from the available edges
     in `A`, whose contour information is used to obtain a routeset `G`
@@ -414,12 +421,13 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     return G
 
 
-def S_from_G(G: nx.Graph):
+def S_from_G(G: nx.Graph) -> nx.Graph:
     '''Get `G`'s topology (contours, detours, lengths, coords are dropped).
     
     If using S to warm-start a MILP model, call after `S_from_G()`:
-        - `as_hooked_to_nearest()`: for branching (tree) models
-        - `as_hooked_to_head()`: for non-branching (path) models
+    * `as_hooked_to_nearest()`: for branching (tree) models
+    * `as_hooked_to_head()`: for non-branching (path) models
+
     This ensures that topology S is feasible (if non-branching) and not
     trivially suboptimal (if branching).
 
@@ -478,10 +486,10 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     attributes. All edges and remaining attributes are not carried from `G`.
 
     Args:
-        G: routeset graph to extract site data from.
+      G: routeset graph to extract site data from.
 
     Returns:
-        Site graph (no edges) with lean attributes.
+      Site graph (no edges) with lean attributes.
     '''
     R, T = (G.graph[k] for k in 'RT')
     L = nx.Graph(**{k: G.graph[k]
@@ -506,10 +514,10 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     The output's root is the centroid of the input's roots.
 
     Args:
-        Lʹ: input location
+      Lʹ: input location
 
     Returns:
-        location with a single root.
+      location with a single root.
     '''
     R, VertexCʹ = (Lʹ.graph[k] for k in ('R', 'VertexC'))
     L = Lʹ.copy()
@@ -554,12 +562,12 @@ def as_rescaled(Gʹ: nx.Graph, L: nx.Graph) -> nx.Graph:
     '''Revert normalization done by `as_normalized()`.
 
     Args:
-        Gʹ: routeset to rescale to pre-normalization size.
-        L: (or G or A) locations or routeset to get 'VertexC' from (also
-            'd2roots', if available).
+      Gʹ: routeset to rescale to pre-normalization size.
+      L: (or G or A) locations or routeset to get 'VertexC' from (also
+        'd2roots', if available).
 
     Returns:
-        Routeset with coordinates and lengths at site scale.
+      Routeset with coordinates and lengths at site scale.
     '''
     if not Gʹ.graph.get('is_normalized', False):
         # Gʹ is not marked as normalized
@@ -582,9 +590,10 @@ def as_rescaled(Gʹ: nx.Graph, L: nx.Graph) -> nx.Graph:
 
 
 def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
-    '''
-    Create a shallow copy of `Gʹ` without detour nodes (and possibly *with*
-    the resulting crossings).
+    '''Create an undetoured version of Gʹ.
+
+    Creates a shallow copy of `Gʹ` without detour nodes (and possibly *with*
+    the resulting crossings). Changed links' 'kind' become 'tentative'.
 
     This is to be applyed to a routeset that already has detours. It serves to
     re-run PathFinder on a detoured routeset, but it is not the best solution
@@ -622,7 +631,8 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
 
 
 def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
-    '''
+    '''Make tentative feeders link to the nearest-to-root node of each subtree.
+
     Output may be branched (use with care with path routesets).
 
     Sifts through all 'tentative' gates' subtrees and choose the hook closest
@@ -632,8 +642,8 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     warmstart for MILP models.
 
     Args:
-        G: routeset or topology S
-        d2roots: distance from nodes to roots (e.g. A.graph['d2roots'])
+      G: routeset or topology S
+      d2roots: distance from nodes to roots (e.g. A.graph['d2roots'])
     '''
     assert Gʹ.graph.get('has_loads')
     G = Gʹ.copy()
@@ -681,7 +691,9 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
 
 def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
-    '''Only works with solutions where subtrees are paths (radial topology).
+    '''Make tentative feeders link to the nearest-to-root end of each string.
+
+    Only works with solutions where subtrees are paths (radial topology).
 
     Sifts through all 'tentative' gates' subtrees and re-hook that path to
     the one of its end-nodes that is neares to the respective root according
@@ -691,8 +703,8 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     warmstart for MILP models.
 
     Args:
-        S: solution topology
-        d2roots: distance from nodes to roots (e.g. A.graph['d2roots'])
+      S: solution topology
+      d2roots: distance from nodes to roots (e.g. A.graph['d2roots'])
     '''
     assert Sʹ.graph.get('has_loads')
     S = Sʹ.copy()
@@ -757,10 +769,10 @@ def make_remap(G, refG, H, refH):
     routeset in H.
 
     Args:
-        G: routeset with obsolete representation.
-        refG: two nodes to used as references.
-        H: routeset with valid representation.
-        refH: two nodes corresponding to `refG`
+      G: routeset with obsolete representation.
+      refG: two nodes to used as references.
+      H: routeset with valid representation.
+      refH: two nodes corresponding to `refG`
     '''
     T = G.graph['T']
     VertexC = G.graph['VertexC'][:T]
