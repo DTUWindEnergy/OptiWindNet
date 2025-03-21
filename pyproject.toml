@@ -71,7 +71,7 @@ docs = [
         ]
 
 [tool.setuptools]
-include-package-data = false
+include-package-data = true
 
 [tool.setuptools.packages.find]
 exclude = [
@@ -81,9 +81,8 @@ exclude = [
   "notebooks/*",
 ]
 
-
 [tool.setuptools.package-data]
-optiwindnet = []
+optiwindnet = ['data/*']
 
 [tool.setuptools_scm]
 version_file = "optiwindnet/version.py"
