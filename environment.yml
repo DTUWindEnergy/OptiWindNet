@@ -23,7 +23,7 @@ dependencies:
   # required by gon
   - typing-extensions
   - pip:
-      - hygese
+      - hygese @ git+https://github.com/mdealencar/PyHygese@scikit-build
       - ortools
       - osmium
       - PythonCDT @ git+https://github.com/artem-ogre/PythonCDT.git
