@@ -1,6 +1,7 @@
+python>=3.10
 bidict~=0.23.1
 darkdetect~=0.8.0
-hygese @ git+https://github.com/mdealencar/PyHygese@scikit-build
+hygese @ git+https://github.com/mdealencar/PyHygese.git@scikit-build
 matplotlib~=3.10.1
 networkx~=3.4.2
 numba~=0.61.0

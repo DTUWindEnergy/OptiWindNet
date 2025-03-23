@@ -2,7 +2,7 @@ name: optiwindnet_env
 channels:
   - conda-forge
 dependencies:
-  - python ~=3.12
+  - python >=3.10
   - bidict ~=0.23.1
   - darkdetect ~=0.8.0
   - matplotlib ~=3.10.1
@@ -18,9 +18,9 @@ dependencies:
   - svg.py ~=1.6.0
   - utm ~=0.7.0
   # required by osmium
-  - requests
+  - requests ~=2.32.3
   - pip:
-      - hygese @ git+https://github.com/mdealencar/PyHygese@scikit-build
+      - hygese @ git+https://github.com/mdealencar/PyHygese.git@scikit-build
       - ortools ~=9.12.4544
       - osmium ~=4.0.2
       - PythonCDT @ git+https://github.com/artem-ogre/PythonCDT.git
