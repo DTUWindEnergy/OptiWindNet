@@ -230,13 +230,13 @@ class WindFarmNetwork():
         )
     
     @classmethod
-    def from_yaml(cls, filepath: str, cables=None, **kwargs):
+    def from_yaml(cls, filepath: str, **kwargs):
         """Creates a WindFarmNetwork instance from a YAML file."""
         if not isinstance(filepath, str):
             raise TypeError("Filepath must be a string")
 
         L = L_from_yaml(filepath)
-        return cls(L=L, cables= cables, **kwargs)
+        return cls(L=L, **kwargs)
         
     @classmethod
     def from_windIO(cls, filepath: str, **kwargs):
@@ -295,12 +295,17 @@ class WindFarmNetwork():
     
     def get_network_array(self):
         """Returns the network edges with cable data."""
-        network = self.G.edges(data=True)
-        network_array =  np.array([
-                            [entry[0], entry[1], entry[2]['length'], entry[2]['load'], int(entry[2]['reverse']), entry[2]['cable'], entry[2]['cost']]
-                            for entry in network
-                            ])
-        return network_array
+        network = list(self.G.edges(data=True))
+
+        from_nodes   = np.array([int(e[0]) for e in network], dtype=int)
+        to_nodes     = np.array([int(e[1]) for e in network], dtype=int)
+        lengths      = np.array([e[2]['length'] for e in network], dtype=float)
+        loads        = np.array([e[2]['load'] for e in network], dtype=int)
+        reverses     = np.array([e[2]['reverse'] for e in network], dtype=bool)
+        cable_types  = np.array([e[2]['cable'] for e in network], dtype=int)
+        costs        = np.array([e[2]['cost'] for e in network], dtype=float)
+
+        return from_nodes, to_nodes, lengths, loads, reverses, cable_types, costs
 
     def cost(self):
         """Returns the total cost of the network."""
@@ -319,12 +324,17 @@ class WindFarmNetwork():
 
         if not hasattr(self.L, 'graph') or 'VertexC' not in self.L.graph:
             raise ValueError("Graph L does not contain 'VertexC' attribute.")
+        
+
 
         # Update coordinates
-        self.L.graph['VertexC'][:turbines.shape[0], :] = turbines
-        self.L.graph['VertexC'][-substations.shape[0]:, :] = substations
-        self.G.graph['VertexC'][:turbines.shape[0], :] = turbines
-        self.G.graph['VertexC'][-substations.shape[0]:, :] = substations
+        if turbines is not None:
+            self.L.graph['VertexC'][:turbines.shape[0], :] = turbines
+            self.G.graph['VertexC'][:turbines.shape[0], :] = turbines
+        
+        if substations is not None:
+            self.L.graph['VertexC'][-substations.shape[0]:, :] = substations
+            self.G.graph['VertexC'][-substations.shape[0]:, :] = substations
 
         # Update length
         VertexC = self.G.graph['VertexC']
@@ -467,12 +477,28 @@ class WindFarmNetwork():
         if turbines is not None or substations is not None:
             self.set_coordinates(turbines=turbines, substations=substations)
 
-        turbines = turbines or self.L.graph['VertexC'][:self.L.graph['T'], :]
-        substations = substations or self.L.graph['VertexC'][-self.L.graph['R']:, :]
+        if turbines is None:
+            turbines = self.L.graph['VertexC'][:self.L.graph['T'], :]
 
+        if substations is None:
+            substations = substations or self.L.graph['VertexC'][-self.L.graph['R']:, :]
+
+        self._A_updated = True
+        self._P_updated = True
+        self._S_updated = True
+        self._G_tentative_updated = True
+        self._G_updated = True
         L, A, P, S, G_tentative, G = router(L=self.L, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
         
-        return G
+        self.L = L
+        self.A = A
+        self.P = P
+        self.S = S
+        self.G_tentative = G_tentative
+        self.G = G
+
+        network_array = self.get_network_array()
+        return network_array
 
 
 class OptiWindNetSolver(ABC):
@@ -526,8 +552,7 @@ class Heuristic(OptiWindNetSolver):
 
         assign_cables(G, cables)
 
-        if verbose:
-            print('S, G_tentative, and G got updated!')
+
         return L, A, P, S, G_tentative, G
     
 class MetaHeuristic(OptiWindNetSolver):
