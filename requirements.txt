@@ -11,7 +11,7 @@ osmium~=4.0.2
 pony~=0.7.18
 py~=1.11.0
 pyomo~=6.9.1
-PythonCDT @ git+https://github.com/artem-ogre/PythonCDT.git@13456f5
+PythonCDT @ git+https://github.com/artem-ogre/PythonCDT.git@13456f53a8324506b8836816ce90491d070856db
 PyYAML~=6.0.2
 scipy~=1.15.2
 shapely~=2.0.7
