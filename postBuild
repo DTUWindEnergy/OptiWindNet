@@ -1,1 +1,2 @@
 pip install git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+conda install conda-forge::highspy conda-forge::coincbc conda-forge::scip conda-forge::pyyaml-include
