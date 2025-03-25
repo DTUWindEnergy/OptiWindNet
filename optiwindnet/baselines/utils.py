@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 import numpy as np
 import networkx as nx
 from scipy.spatial.distance import cdist

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 import math
 from typing import Sequence
 import numpy as np

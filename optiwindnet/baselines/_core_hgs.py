@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 # [[2012.10384] Hybrid Genetic Search for the CVRP: Open-Source Implementation
 #  and SWAP\* Neighborhood]
 # (https://arxiv.org/abs/2012.10384)
