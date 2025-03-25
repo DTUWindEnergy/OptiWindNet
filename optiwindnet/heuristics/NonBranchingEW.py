@@ -21,13 +21,16 @@ F = NodeTagger()
 
 def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
          debug=False, weightfun=None, weight_attr='length'):
-    '''Non-branching Esau-Williams heuristic for C-MST
-    inputs:
-    G_base: networkx.Graph
-    c: capacity
-    rootlust: weight of the reduction of gate length in calculating savings
-      (use some value between 0 and 1, e.g. 0.6)
-    returns G_cmst: networkx.Graph'''
+    '''Non-branching Esau-Williams heuristic for C-MST.
+
+    Args:
+      G_base: networkx.Graph
+      c: capacity
+      rootlust: weight of the reduction of gate length in calculating savings
+        (use some value between 0 and 1, e.g. 0.6)
+    Returns:
+      G_cmst: networkx.Graph
+    '''
 
     start_time = time.perf_counter()
     # grab relevant options to store in the graph later

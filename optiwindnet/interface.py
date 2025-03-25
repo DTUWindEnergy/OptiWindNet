@@ -26,16 +26,16 @@ def translate2global_optimizer(G):
 
 
 def assign_cables(G, cables):
-    '''
-    G: networkx graph with edges having a 'load' attribute (use calcload(G))
-    cables: [(«cross section», «capacity», «cost»), ...] in increasing
-            capacity order (each cable entry must be a tuple)
-            or numpy.ndarray where each row represents one cable type
+    '''Assign a cable type to each edge of `G` and update attribute 'cost'.
 
-    The attribute 'cost' of the edges of G will be updated with their cost,
-    considering the cheapest cable that can handle their load.
-    A new attribute 'cable' will be assigned to each edge with the index of the
-    cable chosen.
+    Each edge is assigned the cheapest cable type that can carry its load. The
+    edge attribute 'cable' is the index in `cables` of the type chosen.
+
+    Args:
+      G: networkx graph with edges having a 'load' attribute (use calcload(G))
+      cables: [(«cross section», «capacity», «cost»), ...] in increasing
+        capacity order (each cable entry must be a tuple) or numpy.ndarray
+        where each row represents one cable type
     '''
 
     Nc = len(cables)
@@ -80,12 +80,18 @@ def assign_subtree(G):
         start = subtree + 1
 
 
-def G_from_XYR(X, Y, R=1, name='unnamed', borderC=None):
-    '''
-    This function assumes that the first R coordinates are OSSs
-    X: x coordinates of nodes
-    Y: y coordinates of nodes
-    R: number of OSSs
+def L_from_XYR(X, Y, R=1, name='unnamed', borderC=None):
+    '''Create location graph L from node coordinates split in X and Y.
+    
+    This function assumes that the first R coordinates in X/Y are OSSs.
+
+    Args:
+      X: x coordinates of nodes
+      Y: y coordinates of nodes
+      R: number of OSSs
+
+    Returns:
+      Location graph L.
     '''
     assert len(X) == len(Y), 'ERROR: X and Y lengths must match'
     T = len(X) - R
@@ -99,24 +105,28 @@ def G_from_XYR(X, Y, R=1, name='unnamed', borderC=None):
             (max(X), min(Y))))
     B = borderC.shape[0]
     border = list(range(T, T + B))
-    G = nx.Graph(R=R, T=T, B=B, border=border, name=name,
+    L = nx.Graph(R=R, T=T, B=B, border=border, name=name,
                  VertexC=np.r_[np.c_[X[R:], Y[R:]],
                                np.c_[X[R-1::-1], Y[R-1::-1]],
                                borderC])
-    G.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'})
+    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'})
                       for n in range(T)))
-    G.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'})
+    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'})
                       for r in range(-R, 0)))
-    return G
+    return L
 
 
 def G_from_table(table: np.ndarray[:, :], G_base: nx.Graph,
                  capacity: int | None = None, cost_scale: float = 1e3) \
                  -> nx.Graph:
-    '''Creates a networkx graph with nodes and data from G_base and edges from
-    a table. (e.g. the S matrix of juru's `global_optimizer`)
+    '''Create a networkx Graph with nodes and data from G_base and edges from
+    a table.
 
-    `table`: [ [u, v, length, cable type, load (WT number), cost] ]'''
+    (e.g. the S matrix of juru's `global_optimizer`)
+
+    Args:
+      table: [ [u, v, length, cable type, load (WT number), cost] ]
+    '''
     G = nx.Graph()
     G.graph.update(G_base.graph)
     G.add_nodes_from(G_base.nodes(data=True))
@@ -143,8 +153,7 @@ def G_from_table(table: np.ndarray[:, :], G_base: nx.Graph,
 
 
 def G_from_TG(S, G_base, capacity=None, load_col=4):
-    '''
-    DEPRECATED in favor of `G_from_table()`
+    '''DEPRECATED in favor of `G_from_table()`
 
     Creates a networkx graph with nodes and data from G_base and edges from
     a S matrix.
@@ -184,14 +193,14 @@ def G_from_TG(S, G_base, capacity=None, load_col=4):
 
 
 def table_from_G(G):
-    '''
-    G: networkx graph
+    '''Create a table representing the edges of G.
 
-    returns:
-    table: [ («u», «v», «length», «load (WT number)», «cable type»,
-              «edge cost»), ...]
+    Args:
+      G: graph to convert to table
 
-    (table is a numpy record array)
+    Returns:
+      table: [ («u», «v», «length», «load (WT number)», «cable type»,
+        «edge cost»), ...] (table is a numpy record array)
     '''
     R = G.graph['R']
     Ne = G.number_of_edges()
@@ -220,15 +229,15 @@ def table_from_G(G):
 
 
 class HeuristicFactory():
-    '''
-    Initializes a heuristic algorithm.
-    Inputs:
-    T: number of nodes
-    R: number of roots
-    rootC: 2D nympy array (R, 2) of the XY coordinates of the roots
-    boundaryC: 2D numpy array (_, 2) of the XY coordinates of the boundary
-    cables: [(«cross section», «capacity», «cost»), ...] ordered by capacity
-    name: site name
+    '''Initializes a heuristic algorithm.
+
+    Args:
+      T: number of nodes
+      R: number of roots
+      rootC: 2D nympy array (R, 2) of the XY coordinates of the roots
+      boundaryC: 2D numpy array (_, 2) of the XY coordinates of the boundary
+      cables: [(«cross section», «capacity», «cost»), ...] ordered by capacity
+      name: site name
 
     (increasing capacity along cables' elements)
     '''
@@ -262,28 +271,36 @@ class HeuristicFactory():
         return self.G.size(weight='cost')
 
     def get_table(self):
-        '''
+        '''Create a table representing the edges of the solution.
+
         Must have called cost() at least once. Only the last call's layout is
         available.
-        returns:
-        table: [ («u», «v», «length», «load (WT number)», «cable type»,
-                  «edge cost»), ...]
+
+        Returns:
+          table: [ («u», «v», «length», «load (WT number)», «cable type»,
+            «edge cost»), ...] (table is a numpy record array)
         '''
         return table_from_G(self.G)
 
 
 def heuristic_wrapper(X, Y, cables, R=1, heuristic='CPEW', return_graph=False):
-    '''
-    This function assumes that the first R vertices are OSSs
-    X: x coordinates of vertices
-    Y: y coordinates of vertices
-    cables: [(«cross section», «capacity», «cost»), ...] ordered by capacity
-    R: number of OSSs
-    heuristic: {'CPEW', 'OBEW'}
+    '''Run a heuristic on a location defined by X/Y coordinates.
+    
+    This function assumes that the first R coordinates in X/Y are OSSs.
+    (increasing capacity along `cables`' elements)
 
-    (increasing capacity along cables' elements)
+    Args:
+      X: x coordinates of nodes
+      Y: y coordinates of nodes
+      R: number of OSSs
+      cables: [(«cross section», «capacity», «cost»), ...] ordered by capacity
+      R: number of OSSs
+      heuristic: {'CPEW', 'OBEW'}
+
+    Returns:
+      Location graph L.
     '''
-    G_base = G_from_XYM(X, Y, R)
+    G_base = L_from_XYR(X, Y, R)
     G = heuristics[heuristic](G_base, capacity=cables[-1][1])
     calcload(G)
     assign_cables(G, cables)

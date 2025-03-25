@@ -43,3 +43,12 @@ error = logger.error
 
 # global module constants
 MAX_TRIANGLE_ASPECT_RATIO = 50.
+
+
+try:  # pragma: no cover
+    # version.py created when installing optiwindnet
+    from optiwindnet import version
+    __version__ = version.__version__
+    __release__ = version.__version__
+except BaseException:  # pragma: no cover
+    pass

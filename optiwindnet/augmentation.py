@@ -18,12 +18,17 @@ F = NodeTagger()
 # iCDF_factory(T_min = 70,  T_max = 200, η = 0.6, d_lb = 0.045):
 def iCDF_factory(T_min: int, T_max: int, η: float, d_lb: float)\
         -> Callable[[float], int]:
-    '''
+    '''Helper for producing inverted cummulative ditribution function (CDF).
+
     Create function to shape the PDF: y(x) = d(T) - d_lb = 2*sqrt(η/π/T) - d_lb
-    where:
-        T is the WT count
-        η is the area covered by T circles of diameter d (η = Nπd²/4)
-        d_lb is the lower bound for the minimum distance between WT
+    
+    Args:
+      T: number of terminals
+      η: area covered by T circles of diameter d (η = Nπd²/4)
+      d_lb: lower bound for the minimum distance between WT
+
+    Returns:
+      Inverted CDF function.
     '''
 
     def integral(x):  # integral of y(x) wrt x
@@ -37,8 +42,10 @@ def iCDF_factory(T_min: int, T_max: int, η: float, d_lb: float)\
     area_under_curve = integral(T_max + 0.5) - offset
 
     def iCDF(u: float) -> int:
-        '''Map from u ~ uniform(0, 1) to random variable T ~ custom \
-        probability density function'''
+        '''Inverted CDF.
+
+        Maps from u ~ uniform(0, 1) to random variable T ~ custom_PDF(). 
+        '''
         return int(round(integral_inv(u*area_under_curve + offset)))
 
     return iCDF
@@ -63,8 +70,8 @@ def get_border_scale_offset(
 def normalize_site_single_oss(L: nx.Graph)\
         -> tuple[np.ndarray[tuple[int, COLS], np.dtype[np.float64]],
                  np.ndarray[tuple[COLS], np.dtype[np.float64]]]:
-    '''
-    Calculate the area and scale the border so that it has area 1.
+    ''' Calculate the area and scale the border so that it has area 1.
+
     The border and OSS are translated to the 1st quadrant, near the origin.
 
     IF SITE HAS MULTIPLE OSSs, ONLY 1 IS RETURNED (mean of the OSSs' coords).
@@ -115,11 +122,17 @@ def build_instance_graph(WTpos, boundary, name='', handle='unnamed', oss=None,
 @nb.njit(cache=True, inline='always')
 def _clears(RepellerC: nb.float64[:, :], repel_radius_sq: float,
            point: nb.float64[:]) -> bool:
-    '''Check there is at least sqrt(repel_radius_sq) separating `point` (2,)
-    and each `RepellerC` (K, 2).
+    '''Check if there is a minimum distance between a point and all repellers.
+
+    The point must be at least sqrt(repel_radius_sq) apart from repellers.
+    
+    Args:
+      RepellerC: coordinates (K, 2) of repellers
+      repel_radius_sq: the square of the minimum radius required
+      point: coordinate (2,) of point to test
 
     Returns:
-        True if `point` clears all `RepellerC`.
+      True if `point` clears all discs centered on `RepellerC`.
     '''
     return (((point[np.newaxis, :] - RepellerC)**2).sum(axis=1)
             >= repel_radius_sq).all()
@@ -130,11 +143,11 @@ def _contains_np(polygon: nb.float64[:, :],
     '''Evaluate if `polygon` (K, 2) covers points in `pts` (T, 2).
 
     Args:
-        polygon: coordinates of vertices (K, 2).
-        pts: coordinates of points to test (T, 2).
+      polygon: coordinates of vertices (K, 2).
+      pts: coordinates of points to test (T, 2).
 
     Returns:
-        boolean array shaped (T,) (True if pts[i] inside `polygon`).
+      boolean array shaped (T,) (True if pts[i] inside `polygon`).
     '''
     polygon_rolled = np.roll(polygon, -1, axis=0)
     vectors = polygon_rolled - polygon
@@ -157,11 +170,11 @@ def _contains(polygon: nb.float64[:, :], point: nb.float64[:]) -> bool:
     '''Evaluate if `polygon` (K, 2) covers `point` (2,).
 
     Args:
-        polygon: coordinates of vertices (K, 2).
-        point: coordinates of point to test (2,).
+      polygon: coordinates of vertices (K, 2).
+      point: coordinates of point to test (2,).
 
     Returns:
-        True if `point` inside `polygon`, False otherwise
+      True if `point` inside `polygon`, False otherwise
     '''
     intersections = 0
     dx2, dy2 = point - polygon[-1]
@@ -187,25 +200,26 @@ def poisson_disc_filler(T: int, min_dist: float, BorderC: nb.float64[:, :],
                         repel_radius: float = 0., obstacles=None, seed=None,
                         iter_max_factor: int = 50, plot: bool = False,
                         partial_fulfilment: bool = True) -> nb.float64[:, :]:
-    '''
+    '''Randomly place points inside an area respecting a minimum separation.
+
     Fills the area delimited by `BorderC` with `T` randomly
     placed points that are at least `min_dist` apart and that
     don't fall inside any of the `RepellerC` discs or `obstacles` areas.
 
     Args:
-        T: number of points to place.
-        min_dist: minimum distance between place points.
-        BorderC: coordinates (B × 2) of border polygon.
-        RepellerC: coordinates (R × 2) of the centers of forbidden discs.
-        repel_radius: the radius of the forbidden discs.
-        obstacles: iterable (O × X × 2).
-        iter_max_factor: factor to multiply by `T` to limit the number of
-            iterations.
-        partial_fulfilment: whether to return less than `T` points (True) or
-            to raise exception (False) if unable to fulfill request.
+      T: number of points to place.
+      min_dist: minimum distance between place points.
+      BorderC: coordinates (B × 2) of border polygon.
+      RepellerC: coordinates (R × 2) of the centers of forbidden discs.
+      repel_radius: the radius of the forbidden discs.
+      obstacles: iterable (O × X × 2).
+      iter_max_factor: factor to multiply by `T` to limit the number of
+        iterations.
+      partial_fulfilment: whether to return less than `T` points (True) or
+        to raise exception (False) if unable to fulfill request.
     
     Returns:
-        coordinates (T, 2) of placed points
+      coordinates (T, 2) of placed points
     '''
     # TODO: implement obstacles zones
     if obstacles is not None:
@@ -339,13 +353,16 @@ def _poisson_disc_filler_core(
     cells = np.full((i_len, j_len), T, dtype=np.int64)
 
     def no_conflict(p: int, q: int, point: nb.float64[:]) -> bool:
-        '''
-        Check for conflict with points from the 20 cells neighboring the
+        '''Check for conflict with points from the 20 cells neighboring the
         current cell.
-        :param p:  x cell index.
-        :param q:  y cell index.
-        :param point: numpy array shaped (2,) with the point's coordinates
-        :return True if point does not conflict, False otherwise.
+
+        Args:
+          p: x cell index.
+          q: y cell index.
+          point: numpy array shaped (2,) with the point's coordinates
+        
+        Returns:
+          True if point does not conflict, False otherwise.
         '''
         p_min, p_max = max(0, p - 2), min(i_len, p + 3)
         q_min, q_max = max(0, q - 2), min(j_len, q + 3)
