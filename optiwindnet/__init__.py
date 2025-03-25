@@ -41,10 +41,6 @@ debug = logger.debug
 warn = logger.warning
 error = logger.error
 
-# global module constants
-MAX_TRIANGLE_ASPECT_RATIO = 50.
-
-
 try:  # pragma: no cover
     # version.py created when installing optiwindnet
     from optiwindnet import version
