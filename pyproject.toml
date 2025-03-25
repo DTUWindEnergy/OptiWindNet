@@ -43,7 +43,7 @@ dependencies = [
 
 [project.urls]
 'Documentation'= 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/'
-'Changelog'= 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/notebooks/ChangeLog.html'
+# 'Changelog'= 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/notebooks/ChangeLog.html'
 'Source code'= 'https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet'
 'Issue tracker'= 'https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/issues'
 
