@@ -4,14 +4,12 @@ requires = [
     "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
-
 [project]
 name = "optiwindnet"
 description = "Tools for optimizing the electrical cable network (collection system) for offshore wind power plants."
 authors = [   { name="DTU Wind Energy"},   { name="Mauricio Souza de Alencar", email="ma___@dtu.dk" }, ]
 dynamic = ["version"]
 keywords = ["optimization", "wind farms", "routing"]
-#license = {file = "LICENSE"}
 classifiers = [
     "Development Status :: 4 - Beta", 
     "Intended Audience :: Developers",
@@ -43,7 +41,7 @@ dependencies = [
 
 [project.urls]
 'Documentation'= 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/'
-# 'Changelog'= 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/notebooks/ChangeLog.html'
+# 'Changelog'= 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/'
 'Source code'= 'https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet'
 'Issue tracker'= 'https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/issues'
 
@@ -66,20 +64,10 @@ docs = [
           "ipykernel",
           "pypandoc",
           'sphinx-autoapi',
-#          "topfarm",
-#          "hydesign",
         ]
 
 [tool.setuptools]
 include-package-data = true
-
-[tool.setuptools.packages.find]
-exclude = [
-  "requirements.txt",
-  "environment.yml",
-  "location_template.yml",
-  "postBuild",
-]
 
 [tool.setuptools.package-data]
 optiwindnet = ['data/*']
