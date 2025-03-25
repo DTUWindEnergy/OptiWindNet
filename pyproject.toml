@@ -15,11 +15,10 @@ keywords = ["optimization", "wind farms", "routing"]
 classifiers = [
     "Development Status :: 4 - Beta", 
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)",
     "Programming Language :: Python :: 3",
 ]
 readme = "README.md"
-license = {text = "MIT License"}
+license = "MIT"
 requires-python = ">= 3.10"
 dependencies = [
     'bidict~=0.23.1',
