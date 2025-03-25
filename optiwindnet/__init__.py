@@ -14,33 +14,6 @@ https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 __license__ = "LGPL-2.1-or-later"
 
-import sys
-import logging
-
-logger = logging.getLogger(__name__)
-
-# WARNING, ERROR, CRITICAL go to stderr
-stderr_handler = logging.StreamHandler()
-stderr_handler.setLevel(logging.WARNING)
-formatter = logging.Formatter('%(levelname)s: %(message)s '
-                              '[%(name)s:%(funcName)s]')
-stderr_handler.setFormatter(formatter)
-logger.addHandler(stderr_handler)
-
-# DEBUG, INFO go to stdout (as well as any level below WARNING)
-def _log_stdout_filter(record):
-    return record.levelno < logging.WARNING
-
-stdout_handler = logging.StreamHandler(sys.stdout)
-stdout_handler.addFilter(_log_stdout_filter)
-stdout_handler.setLevel(logging.NOTSET)
-logger.addHandler(stdout_handler)
-
-info = logger.info
-debug = logger.debug
-warn = logger.warning
-error = logger.error
-
 try:  # pragma: no cover
     # version.py created when installing optiwindnet
     from optiwindnet import version

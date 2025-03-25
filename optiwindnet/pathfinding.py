@@ -3,6 +3,7 @@
 
 import heapq
 import math
+import logging
 from collections import defaultdict, namedtuple
 from collections.abc import Iterable
 from itertools import chain
@@ -17,8 +18,9 @@ from .mesh import planar_flipped_by_routeset
 from .geometric import rotation_checkers_factory
 from .interarraylib import bfs_subtree_loads, scaffolded
 from .utils import NodeStr, NodeTagger
-from . import info, warn, debug, error
 
+logger = logging.getLogger(__name__)
+debug, info, warn = logger.debug, logger.info, logger.warning
 F = NodeTagger()
 
 NULL = np.iinfo(int).min
@@ -43,8 +45,8 @@ class PathNodes(dict):
     def add(self, _source: int, sector: int, parent: int, dist: float,
             d_hop: float) -> int:
         if parent not in self:
-            error('attempted to add an edge in `PathNodes` to nonexistent'
-                  'parent (%d)', parent)
+            logger.error('attempted to add an edge in `PathNodes` to '
+                         'nonexistent parent (%d)', parent)
         _parent = self.prime_from_id[parent]
         for prev_id in self.ids_from_prime_sector[_source, sector]:
             if self[prev_id].parent == parent:
@@ -628,8 +630,8 @@ class PathFinder():
                  for sec, id in I_path[hook].items())
                 for hook in hookchoices))
             if not path_options:
-                error('subtree of node %s has no non-crossing paths to any '
-                      'root: leaving gate as-is', F[n])
+                logger.error('subtree of node %s has no non-crossing paths to '
+                             'any root: leaving gate as-is', F[n])
                 # unable to fix this crossing
                 failed_detours.append((r, n))
                 continue
@@ -646,13 +648,13 @@ class PathFinder():
                 path.append(paths.prime_from_id[id])
                 pseudonode = paths[id]
             if not math.isclose(sum(dists), dist):
-                error('distance sum (%.1f) != best distance (%.1f), hook = %s,'
-                      ' path: %s', sum(dists), dist, F[hook],
-                      self.n2s(*path))
+                logger.error('distance sum (%.1f) != best distance (%.1f), '
+                             'hook = %s, path: %s', sum(dists), dist, F[hook],
+                             self.n2s(*path))
 
             debug('path: %s', self.n2s(*path))
             if len(path) < 2:
-                error('no path found for %s-%s', F[r], F[n])
+                logger.error('no path found for %s-%s', F[r], F[n])
                 continue
             added_clones = len(path) - 2
             Clone = list(range(clone_idx, clone_idx + added_clones))

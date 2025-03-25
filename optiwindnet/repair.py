@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import logging
 import networkx as nx
 
 from .crossings import list_edge_crossings
 from .interarraylib import calcload, NodeTagger
-from . import warn
 
 
+logger = logging.getLogger(__name__)
+warn = logger.warning
 F = NodeTagger()
 
 
