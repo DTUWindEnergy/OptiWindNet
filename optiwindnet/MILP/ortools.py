@@ -2,17 +2,19 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
+import logging
 from collections import defaultdict
 from itertools import chain
 import networkx as nx
 
 from ortools.sat.python import cp_model
 
-from .. import info
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint, G_from_S
 from ..pathfinding import PathFinder
 
+logger = logging.getLogger(__name__)
+info = logger.info
 
 class _SolutionStore(cp_model.CpSolverSolutionCallback):
     '''Ad hoc implementation of a callback that stores solutions to a pool.'''
