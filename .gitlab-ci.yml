@@ -54,7 +54,7 @@ pypi_linux:
     - test_pypi
   script:
     - apt-get update
-    - apt-get -y install gcc cmake
+    - apt-get -y install gcc g++ cmake
     - pip install --upgrade pip
     - pip install -e . --upgrade
     - pip install --upgrade build
