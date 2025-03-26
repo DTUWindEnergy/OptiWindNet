@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
+import logging
 import numpy as np
 import networkx as nx
 from scipy.spatial.distance import cdist
@@ -27,12 +28,14 @@ from .geometric import (
     apply_edge_exemptions,
     complete_graph,
 )
-from . import MAX_TRIANGLE_ASPECT_RATIO, info, debug, warn
 from .interarraylib import NodeTagger
 from .geometric import is_triangle_pair_a_convex_quadrilateral
 
+logger = logging.getLogger(__name__)
+debug, warn = logger.debug, logger.warning
 F = NodeTagger()
 NULL = np.iinfo(int).min
+_MAX_TRIANGLE_ASPECT_RATIO = 50.
 
 
 def _edges_and_hull_from_cdt(triangles: list[cdt.Triangle],
@@ -287,7 +290,7 @@ def _flip_triangles_obstacles_super(P: nx.PlanarEmbedding, T: int, B: int,
 def make_planar_embedding(
         L: nx.Graph,
         offset_scale: float = 1e-4,
-        max_tri_AR: float = MAX_TRIANGLE_ASPECT_RATIO) -> \
+        max_tri_AR: float = _MAX_TRIANGLE_ASPECT_RATIO) -> \
         tuple[nx.PlanarEmbedding, nx.Graph]:
     '''Triangulate a location and produce graphs P and A for it.
 

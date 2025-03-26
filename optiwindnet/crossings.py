@@ -16,8 +16,8 @@ from .geometric import (
 def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
                            fnT: np.ndarray | None = None,
                            EPSILON=1e-15) -> list:
-    '''
-    List all crossings between edges in the `Edge` (E×2) numpy array.
+    '''List all crossings between edges in the `Edge` (E×2) numpy array.
+
     Coordinates must be provided in the `VertexC` (V×2) array.
 
     `Edge` contains indices to VertexC. If `Edge` includes detour nodes
@@ -34,8 +34,7 @@ def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
     for i, ((UVx, UVy), (u, v)) in enumerate(zip(V[:-1], Edge[:-1])):
         u_, v_ = (u, v) if fnT is None else fnT[[u, v]]
         (uCx, uCy), (vCx, vCy) = VertexC[[u_, v_]]
-        for j, ((STx, STy), (s, t)) in enumerate(zip(-V[i+1:], Edge[i+1:]),
-                                                 start=i+1):
+        for (STx, STy), (s, t) in zip(-V[i+1:], Edge[i+1:]):
             s_, t_ = (s, t) if fnT is None else fnT[[s, t]]
             if s_ == u_ or t_ == u_ or s_ == v_ or t_ == v_:
                 # <edges have a common node>
@@ -111,43 +110,6 @@ def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
     return crossings
 
 
-def edgeXing_iter(u, v, G, A):
-    '''This is broken, do not use! Use `edgeset_edgeXing_iter()` instead.'''
-    planar = A.graph['planar']
-    _, s = A.next_face_half_edge(u, v)
-    _, t = A.next_face_half_edge(v, u)
-    if s == t:
-        # <u, v> and the 3rd vertex are hull
-        return
-    if (s, t) in A.edges:
-        # the diagonal conflicts with the Delaunay edge
-        yield ((u, v), (s, t))
-        conflicting = [(s, t)]
-    else:
-        conflicting = []
-    # examine the two triangles (u, v) belongs to
-    for a, b, c in ((u, v, s),
-                    (v, u, t)):
-        # this is for diagonals crossing diagonals
-        triangle = tuple(sorted((a, b, c)))
-        if triangle not in checked:
-            checked.add(triangle)
-            _, e = A.next_face_half_edge(c, b)
-            if (a, e) in A.edges:
-                conflicting.append((a, e))
-            _, d = A.next_face_half_edge(a, c)
-            if (b, d) in A.edges:
-                conflicting.append((b, d))
-            if len(conflicting) > 1:
-                yield conflicting
-
-
-def layout_edgeXing_iter(G, A):
-    '''does this even make sense?'''
-    for edge in G.edges:
-        yield from edgeXing_iter(edge, G, A)
-
-
 def edge_crossings(u: int, v: int, G: nx.Graph, diagonals: bidict) \
         -> list[tuple[int, int]]:
     u, v = (u, v) if u < v else (v, u)
@@ -175,8 +137,8 @@ def edge_crossings(u: int, v: int, G: nx.Graph, diagonals: bidict) \
 
 def edgeset_edgeXing_iter(diagonals: bidict) \
         -> Iterator[list[tuple[int, int]]]:
-    '''
-    Iterator over all edge crossings in an expanded Delaunay edge set `A`.
+    '''Iterator over all edge crossings in an expanded Delaunay edge set `A`.
+
     Each crossing is a 2 or 3-tuple of (u, v) edges. Does not include gates.
     '''
     checked = set()
@@ -204,107 +166,6 @@ def edgeset_edgeXing_iter(diagonals: bidict) \
                 yield conflicting
 
 
-def edgeset_edgeXing_iter_deprecated(A, include_roots=False):
-    '''DEPRECATED!
-
-    Iterator over all edge crossings in an expanded
-    Delaunay edge set `A`. Each crossing is a 2 or 3-tuple
-    of (u, v) edges.'''
-    planar = A.graph['planar']
-    checked = set()
-    # iterate over all Delaunay edges
-    for u, v in planar.edges:
-        if u > v or (not include_roots and (u < 0 or v < 0)):
-            # planar is a DiGraph, so skip one half-edge of the pair
-            continue
-        # get diagonal
-        _, s = planar.next_face_half_edge(u, v)
-        _, t = planar.next_face_half_edge(v, u)
-        if s == t or (not include_roots and (s < 0 or t < 0)):
-            # <u, v> and the 3rd vertex are hull
-            continue
-        triangles = []
-        if (s, u) in planar.edges:
-            triangles.append((u, v, s))
-        if (t, v) in planar.edges:
-            triangles.append((v, u, t))
-        s, t = (s, t) if s < t else (t, s)
-        has_diagonal = (s, t) in A.edges
-        if has_diagonal:
-            # the diagonal conflicts with the Delaunay edge
-            yield ((u, v), (s, t))
-        # examine the two triangles (u, v) belongs to
-        for a, b, c in triangles:
-            # this is for diagonals crossing diagonals
-            triangle = tuple(sorted((a, b, c)))
-            if triangle not in checked:
-                checked.add(triangle)
-                conflicting = [(s, t)] if has_diagonal else []
-                _, e = planar.next_face_half_edge(c, b)
-                if ((e, c) in planar.edges
-                        and (a, e) in A.edges
-                        and (include_roots or (a >= 0 and e >= 0))):
-                    conflicting.append((a, e) if a < e else (e, a))
-                _, d = planar.next_face_half_edge(a, c)
-                if ((d, a) in planar.edges
-                        and (b, d) in A.edges
-                        and (include_roots or (b >= 0 and d >= 0))):
-                    conflicting.append((b, d) if b < d else (d, b))
-                if len(conflicting) > 1:
-                    yield conflicting
-
-
-# adapted edge_crossings() from geometric.py
-# delaunay() does not create `triangles` and `triangles_exp`
-# anymore, so this is broken
-def edgeXing_iter_deprecated(A):
-    '''
-    DEPRECATED!
-    This is broken, do not use!
-
-    Iterates over all pairs of crossing edges in `A`. This assumes `A`
-    has only expanded Delaunay edges (with triangles and triangles_exp).
-
-    Used in constraint generation for MILP model.
-    '''
-    triangles = A.graph['triangles']
-    # triangles_exp maps expanded Delaunay to Delaunay edges
-    triangles_exp = A.graph['triangles_exp']
-    checked = set()
-    for uv, (s, t) in triangles_exp.items():
-        # <(u, v) is an expanded Delaunay edge>
-        u, v = uv
-        checked.add(uv)
-        if (u, v) not in A.edges:
-            continue
-        if (s, t) in A.edges:
-            yield (((u, v) if u < v else (v, u)),
-                   ((s, t) if s < t else (t, s)))
-        else:
-            # this looks wrong...
-            # the only case where this might happen is
-            # when a Delaunay edge is removed because of
-            # the angle > pi/2 blocking of a root node
-            # but even in this case, we should check for
-            # crossings with other expanded edges
-            continue
-        for a_b in ((u, s), (u, t), (s, v), (t, v)):
-            if a_b not in triangles:
-                continue
-            cd = triangles[frozenset(a_b)]
-            if cd in checked:
-                continue
-            if (cd in triangles_exp
-                    and tuple(cd) in A.edges
-                    # this last condition is for edges that should have been
-                    # eliminated in delaunay()'s hull_edge_is_overlapping(),
-                    # but weren't
-                    and set(triangles_exp[cd]) <= {u, v, s, t}):
-                c, d = cd
-                yield (((u, v) if u < v else (v, u)),
-                       ((c, d) if c < d else (d, c)))
-
-
 def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
                   borders: Iterable | None = None,
                   touch_is_cross: bool = True) \
@@ -315,15 +176,15 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
     considered. Used in constraint generation for ILP model.
 
     Args:
-        G: Routeset or edgeset (A) to examine.
-        hooks: Nodes to check, grouped by root in sub-sequences from root `-R`
-            to `-1`. If `None`, all non-root nodes are checked using `'root'`
-            node attribute.
-        borders: Impassable line segments between border vertices.
-        touch_is_cross: If `True`, count as crossing a gate going over a node.
+      G: Routeset or edgeset (A) to examine.
+      hooks: Nodes to check, grouped by root in sub-sequences from root `-R`
+        to `-1`. If `None`, all non-root nodes are checked using `'root'`
+        node attribute.
+      borders: Impassable line segments between border vertices.
+      touch_is_cross: If `True`, count as crossing a gate going over a node.
 
     Yields:
-        Pair of (edge, gate) that cross (each a 2-tuple of nodes).
+      Pair of (edge, gate) that cross (each a 2-tuple of nodes).
     '''
     R, T, VertexC = (G.graph[k] for k in ('R', 'T', 'VertexC'))
     fnT = G.graph.get('fnT')
@@ -383,21 +244,27 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
 
 
 def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
-    '''
-    Check if route set represented by G's edges is topologically sound,
+    '''Validate G's tree topology and absence of crossings.
+
+    Check if the routeset represented by G's edges is topologically sound,
     repects capacity and has no edge crossings nor branch splitting.
 
-    Returns:
-        list of crossings/splits
+    Args:
+      G: graph to evaluate
 
-    Example:
-        F = NodeTagger()
-        Xings = validate_routeset(G)
-            for u, v, s, t in Xings:
-                if u != v:
-                    print(f'{F[u]}–{F[v]} crosses {F[s]}–{F[t]}')
-                else:
-                    print(f'detour @ {F[u]} splits {F[s]}–{F[v]}–{F[t]}')
+    Returns:
+      list of crossings/splits, G is valid if an empty list is returned
+
+    Example::
+
+      F = NodeTagger()
+      Xings = validate_routeset(G)
+        for u, v, s, t in Xings:
+          if u != v:
+            print(f'{F[u]}–{F[v]} crosses {F[s]}–{F[t]}')
+          else:
+            print(f'detour @ {F[u]} splits {F[s]}–{F[v]}–{F[t]}')
+
     '''
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
@@ -471,17 +338,17 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
 
 def list_edge_crossings(S: nx.Graph, A: nx.Graph) \
         -> list[tuple[tuple[int, int], tuple[int, int]]]:
-    '''
-    List edge×edge crossings for the network topology in S.
+    '''List edge×edge crossings for the network topology in S.
+
     `S` must only use extended Delaunay edges. It will not detect crossings
     of non-extDelaunay gates or detours.
 
     Args:
-        S: solution topology
-        A: available edges used in creating `S`
+      S: solution topology
+      A: available edges used in creating `S`
 
     Returns:
-        list of 2-tuple (crossing) of 2-tuple (edge, ordered)
+      list of 2-tuple (crossing) of 2-tuple (edge, ordered)
     '''
     eeXings = []
     checked = set()

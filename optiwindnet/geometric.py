@@ -22,8 +22,14 @@ F = NodeTagger()
 NULL = np.iinfo(int).min
 
 def triangle_AR(uC, vC, tC):
-    '''returns the aspect ratio of the triangle defined by the three 2D points
-    `uC`, `vC` and `tC`, which must be numpy arrays'''
+    '''Calculate the aspect ratio of the triangle defined by the coordinates.
+
+    Args:
+      uC, vC, tC: triangle vertices coordinates as (2,) numpy arrays
+
+    Returns:
+      Aspect ratio of the triangle defined by the three 2D points.
+    '''
     lengths = np.hypot(*np.column_stack((vC - tC, tC - uC, uC - vC)))
     den = (lengths.sum()/2 - lengths).prod()
     if den == 0.:
@@ -33,8 +39,13 @@ def triangle_AR(uC, vC, tC):
 
 
 def any_pairs_opposite_edge(NodesC, uC, vC, margin=0):
-    '''Returns True if any two of `NodesC` are on opposite
-    sides of the edge (`uC`, `vC`).
+    '''Compare relative position of vertices wrt line segment.
+    
+    Args:
+      uC, vC: (2,) numpy array coordinates of edge ends
+
+    Returns:
+      True if any two of `NodesC` are on opposite sides of the edge.
     '''
     maxidx = len(NodesC) - 1
     if maxidx <= 0:
@@ -59,17 +70,14 @@ def any_pairs_opposite_edge(NodesC, uC, vC, margin=0):
 
 
 def rotate(coords, angle):
-    '''rotates `coords` (numpy array T×2) by `angle` (degrees)'''
+    '''Rotates `coords` (numpy array T×2) by `angle` (degrees)'''
     rotation = np.deg2rad(angle)
     c, s = np.cos(rotation), np.sin(rotation)
     return np.dot(coords, np.array([[c, s], [-s, c]]))
 
 
 def point_d2line(p, u, v):
-    '''
-    Calculate the distance from point `p` to the line defined by points `u`
-    and `v`.
-    '''
+    '''Calculate the distance from point `p` to the `u`-`v` line.'''
     x0, y0 = p
     x1, y1 = u
     x2, y2 = v
@@ -78,10 +86,18 @@ def point_d2line(p, u, v):
 
 
 def angle_numpy(a, pivot, b):
-    '''a, pivot, b are coordinate pairs
-    returns angle a-root-b (radians)
-    - angle is within ±π (shortest arc from a to b around pivot)
-    - positive direction is counter-clockwise'''
+    '''Calculate the angle a-pivot-b.
+
+    * can operate on multiple point triplets
+    * angle is within ±π (shortest arc from a to b around pivot)
+    * positive direction is counter-clockwise
+
+    Args:
+      a, pivot, b: (N, 2) numpy arrays of coordinate pairs
+
+    Returns:
+      Angles a-pivot-b (radians)
+    '''
     A = a - pivot
     B = b - pivot
     # dot_prod = np.dot(A, B) if len(A) >= len(B) else np.dot(B, A)
@@ -91,10 +107,17 @@ def angle_numpy(a, pivot, b):
 
 
 def angle(a, pivot, b):
-    '''`a`, `pivot`, `b` are coordinate pairs
-    returns angle a-root-b (radians)
-    - angle is within ±π (shortest arc from a to b around pivot)
-    - positive direction is counter-clockwise'''
+    '''Calculate the angle a-pivot-b.
+
+    * angle is within ±π (shortest arc from a to b around pivot)
+    * positive direction is counter-clockwise
+
+    Args:
+      a, pivot, b: (2,) numpy arrays of coordinate pairs
+
+    Returns:
+      Angle a-pivot-b (radians)
+    '''
     Ax, Ay = a - pivot
     Bx, By = b - pivot
     # debug and print(VertexC[a], VertexC[b])
@@ -105,7 +128,7 @@ def angle(a, pivot, b):
 
 def find_edges_bbox_overlaps(
         VertexC: np.ndarray, u: int, v: int, edges: np.ndarray) -> np.ndarray:
-    '''Find which `edges` has a bounding box overlap with ⟨u, v⟩.
+    '''Find which `edges` have a bounding box overlap with ⟨u, v⟩.
     
     This is a preliminary filter for crossing checks. Enables avoiding the more
     costly geometric crossing calculations for segments that are clearly
@@ -115,6 +138,7 @@ def find_edges_bbox_overlaps(
       VertexC: (N×2) point coordinates
       u, v: indices of probed edge
       edges: list of index pairs representing edges to check against
+
     Returns:
       numpy array with the indices of overlaps in `edges`
     '''
@@ -127,8 +151,12 @@ def find_edges_bbox_overlaps(
 
 
 def is_crossing_numpy(u, v, s, t):
-    '''checks if (u, v) crosses (s, t);
-    returns ¿? in case of superposition'''
+    '''Checks if (u, v) crosses (s, t).
+
+    Returns:
+      True in case of crossing.
+    '''
+    # TODO: document output in corner cases (e.g. superposition, touch)
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
     # Faster Line Segment Intersection
@@ -181,9 +209,17 @@ def is_crossing_no_bbox(uC: np.ndarray[tuple[int], np.dtype[np.float64]],
                         vC: np.ndarray[tuple[int], np.dtype[np.float64]],
                         sC: np.ndarray[tuple[int], np.dtype[np.float64]],
                         tC: np.ndarray[tuple[int], np.dtype[np.float64]]) -> bool:
-    '''checks if (uC, vC) crosses (sC, tC);
-    returns ¿? in case of superposition
+    '''Checks if (uC, vC) crosses (sC, tC).
+
+    Does not check for bounding-box overlap. Use `find_edges_bbox_overlap()`
+    first to filter out edges with disjoint bounding boxes (cheaper than the
+    calculations here).
+
+    Returns:
+      True in case of crossing.
     '''
+    # TODO: document output in corner cases (e.g. superposition, touch)
+
     # adapted from Franklin Antonio's insectc.c lines_intersect()
     # Faster Line Segment Intersection
     # Graphic Gems III
@@ -216,12 +252,18 @@ def is_crossing_no_bbox(uC: np.ndarray[tuple[int], np.dtype[np.float64]],
 
 
 def is_crossing(uC, vC, sC, tC, touch_is_cross=True):
-    '''checks if (uC, vC) crosses (sC, tC);
-    returns ¿? in case of superposition
-    choices for `less`:
-    -> operator.lt counts touching as crossing
-    -> operator.le does not count touching as crossing
+    '''Checks if (uC, vC) crosses (sC, tC).
+
+    Args:
+      uC, vC, sC, tC: (2,) numpy array coordinates of edge ends
+      touch_is_cross: whether to consider any common point as a crossing
+
+    Returns:
+      True in case of crossing.
     '''
+    # choices for `less`:
+    # -> operator.lt counts touching as crossing
+    # -> operator.le does not count touching as crossing
     less = operator.lt if touch_is_cross else operator.le
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
@@ -269,8 +311,15 @@ def is_crossing(uC, vC, sC, tC, touch_is_cross=True):
 
 
 def is_bunch_split_by_corner(bunch, a, o, b, margin=1e-3):
-    '''`bunch` is a numpy array of points (T×2)
-    the points `a`-`o`-`b` define a corner'''
+    '''Check if a cone splits a bunch of points in two sets.
+    
+    Args:
+      bunch: numpy array of points (T×2)
+      a, o, b: points that define the cone's angle
+
+    Returns:
+      True if points in bunch are both inside and outside cone a-o-b
+    '''
     AngleA = angle_numpy(a, o, bunch)
     AngleB = angle_numpy(b, o, bunch)
     # print('AngleA', AngleA, 'AngleB', AngleB)
@@ -294,10 +343,14 @@ def is_triangle_pair_a_convex_quadrilateral(
         vC: np.ndarray[tuple[int], np.dtype[np.float64]],
         sC: np.ndarray[tuple[int], np.dtype[np.float64]],
         tC: np.ndarray[tuple[int], np.dtype[np.float64]]) -> bool:
-    '''⟨u, v⟩ is the common side;
-    ⟨s, t⟩ are the opposing vertices;
-    returns False also if it is a triangle
-    only works if ⟨s, t⟩ crosses the line defined by ⟨u, v⟩'''
+    '''Check convexity of quadrilateral.
+
+    ⟨u, v⟩ is the common side; ⟨s, t⟩ are the opposing vertices;
+    only works if ⟨s, t⟩ crosses the line defined by ⟨u, v⟩
+
+    Returns:
+      True if the quadrilateral is convex and is not a triangle
+    '''
     # this used to be called `is_quadrilateral_convex()`
     # us × ut
     usut = _cross_prod_2d(sC - uC, tC - uC)
@@ -315,7 +368,8 @@ def is_same_side(L1, L2, A, B, touch_is_cross=True):
 
     Note: often used to check crossings with gate edges,
     where the gate edge A-B is already known to be on a line
-    that crosses the edge L1–L2 (using the angle rank).'''
+    that crosses the edge L1–L2 (using the angle rank).
+    '''
 
     # greater = operator.gt if touch_is_cross else operator.ge
     greater = operator.ge if touch_is_cross else operator.gt
@@ -346,12 +400,10 @@ def is_blocking(root, u, v, s, t):
 
 
 def apply_edge_exemptions(G, allow_edge_deletion=True):
-    '''
-    should be DEPRECATED (depends on `delaunay_deprecated()`'s triangles)
+    '''DEPRECATED (depends on 'E_hull' and 'N_hull' graph attributes)
 
-    exemption is used by weighting functions that take
-    into account the angular sector blocked by each edge w.r.t.
-    the closest root node
+    Exemption is used by weighting functions that take into account the angular
+    sector blocked by each edge w.r.t. the closest root node.
     '''
     E_hull = G.graph['E_hull']
     N_hull = G.graph['N_hull']
@@ -407,9 +459,14 @@ def apply_edge_exemptions(G, allow_edge_deletion=True):
 
 
 def perimeter(VertexC, vertices_ordered):
-    '''
-    `vertices_ordered` represent indices of `VertexC` in clockwise or counter-
-    clockwise order.
+    '''Calculate the perimeter of the polygon defined by `vertices_ordered`.
+
+    Args:
+      vertices_ordered: indices of `VertexC` in clockwise or counter-clockwise
+        orientation.
+
+    Return:
+      The perimeter length.
     '''
     vec = VertexC[vertices_ordered[:-1]] - VertexC[vertices_ordered[1:]]
     return (np.hypot(*vec.T).sum()
@@ -419,12 +476,13 @@ def perimeter(VertexC, vertices_ordered):
 
 def angle_helpers(L: nx.Graph) -> tuple[np.ndarray, np.ndarray,
                                         np.ndarray, np.ndarray]:
-    '''
+    '''Create auxiliary arrays of node attributes based on polar coordinates.
+
     Args:
         L: location (also works with A or G)
 
     Returns:
-        tuple of (angles, anglesRank, anglesXhp, anglesYhp)
+        Tuple of (angles, anglesRank, anglesXhp, anglesYhp)
     '''
 
     T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
@@ -449,7 +507,9 @@ def assign_root(A: nx.Graph) -> None:
     '''Add node attribute 'root' with the root closest to each node.
 
     Changes A in-place.
-
+    
+    Args:
+      A: available-edges graph
     '''
     closest_root = -A.graph['R'] + np.argmin(A.graph['d2roots'], axis=1)
     nx.set_node_attributes(
@@ -479,9 +539,12 @@ def get_crossings_map(Edge, VertexC, prune=True):
 def complete_graph(G_base: nx.Graph, *, include_roots: bool = False,
                    prune: bool = True, map_crossings: bool = False) \
         -> nx.Graph:
-    '''Creates a networkx graph connecting all non-root nodes to every
+    '''Create a complete graph based on G_base.
+
+    Produces a networkx Graph connecting all non-root nodes to every
     other non-root node. Edges with an arc > pi/2 around root are discarded
-    The length of each edge is the euclidean distance between its vertices.'''
+    The length of each edge is the euclidean distance between its vertices.
+    '''
     R, T = (G_base.graph[k] for k in 'RT')
     VertexC = G_base.graph['VertexC']
     TerminalC = VertexC[:T]
@@ -538,11 +601,14 @@ def complete_graph(G_base: nx.Graph, *, include_roots: bool = False,
 
 
 def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
-    '''Create the minimum spanning tree from the Delaunay triangulation in `A`.
+    '''Create the minimum spanning forest from the Delaunay edges of `A`.
     
-    If the graph has more than one root, the tree will be split on its longest
-    link between each root pair. The output will be a forest instead of a tree.
+    There is one tree for each root and exactly one root per tree.
+    If the graph has more than one root, the minimum spanning tree of the
+    entire graph is split on its longest links between each root pair.
 
+    Returns:
+      Topology S containing the forest.
     '''
     R, T = (A.graph[k] for k in 'RT')
     N = R + T
@@ -598,11 +664,14 @@ def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
 
 # TODO: MARGIN is ARBITRARY - depends on the scale
 def check_crossings(G, debug=False, MARGIN=0.1):
-    '''Checks for crossings (touch/overlap is not considered crossing).
+    '''DEPRECATED. Use functions from submodule `crossings` instead.
+
+    Checks for crossings (touch/overlap is not considered crossing).
     This is an independent check on the tree resulting from the heuristic.
     It is not supposed to be used within the heuristic.
     MARGIN is how far an edge can advance across another one and still not be
-    considered a crossing.'''
+    considered a crossing.
+    '''
     VertexC = G.graph['VertexC']
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
@@ -794,18 +863,24 @@ def rotation_checkers_factory(VertexC: np.ndarray) -> tuple[
         Callable[[int, int, int], bool]]:
 
     def cw(A: int, B: int, C: int) -> bool:
-        """return
-            True: if A->B->C traverses the triangle ABC clockwise
-            False: otherwise"""
+        '''Check cw orientation.
+
+        Returns:
+          True: if A->B->C traverses the triangle ABC clockwise
+          False: otherwise
+        '''
         Ax, Ay = VertexC[A]
         Bx, By = VertexC[B]
         Cx, Cy = VertexC[C]
         return (Bx - Ax) * (Cy - Ay) < (By - Ay) * (Cx - Ax)
 
     def ccw(A: int, B: int, C: int) -> bool:
-        """return
-            True: if A->B->C traverses the triangle ABC counter-clockwise
-            False: otherwise"""
+        '''Check ccw orientation.
+
+        Returns:
+          True: if A->B->C traverses the triangle ABC counter-clockwise
+          False: otherwise
+        '''
         Ax, Ay = VertexC[B]
         Bx, By = VertexC[A]
         Cx, Cy = VertexC[C]
@@ -820,19 +895,18 @@ def rotating_calipers(convex_hull: np.ndarray) \
     # jhultman/rotating-calipers:
     #   CUDA and Numba implementations of computational geometry algorithms.
     # (https://github.com/jhultman/rotating-calipers)
-    """
-    argument `convex_hull` is a (H, 2) array of coordinates of the convex hull
-        in counter-clockwise order.
+    '''Find the shortest width of a polygon.
+
+    Reference: Toussaint, Godfried T. "Solving geometric problems with the
+    rotating calipers." Proc. IEEE Melecon. Vol. 83. 1983.
+
     Args:
-        convex_hull: (H, 2) array of coordinates of the convex hull
-          in counter-clockwise order
+      convex_hull: (H, 2) array of coordinates of the convex hull
+        in counter-clockwise order
 
     Returns:
-
-    Reference:
-        Toussaint, Godfried T. "Solving geometric problems with the rotating
-          calipers." Proc. IEEE Melecon. Vol. 83. 1983.
-    """
+      best_calipers, best_caliper_angle, area_min, bbox
+    '''
     caliper_angles = np.array([0.5*np.pi, 0, -0.5*np.pi, np.pi], dtype=float)
     area_min = np.inf
     H = convex_hull.shape[0]
@@ -886,20 +960,20 @@ def rotating_calipers(convex_hull: np.ndarray) \
 
 
 def normalize_area(G_base: nx.Graph, *, hull_nonroot: np.ndarray) -> nx.Graph:
-    """
-    DEPRECATED: use interarraylib.as_normalized()
+    '''DEPRECATED: use interarraylib.as_normalized()
 
     Rescale graph's coordinates and distances such as to make the rootless
     concave hull of nodes enclose an area of 1.
     Graph is first rotated by attribute 'landscape_angle' and afterward it's
     coordinates are translated to the first quadrant, touching the axes.
     The last step is the scaling.
+
     Graph attributes added/changed:
-        'angle': original landscape_angle value
-        'offset': values subtracted from coordinates (x, y) before scaling
-        'scale': multiplicative factor applied to coordinates
-        'landscape_angle': set to 0
-    """
+    * 'angle': original landscape_angle value
+    * 'offset': values subtracted from coordinates (x, y) before scaling
+    * 'scale': multiplicative factor applied to coordinates
+    * 'landscape_angle': set to 0
+    '''
     G = nx.create_empty_copy(G_base)
     landscape_angle = G.graph.get('landscape_angle')
     VertexC = (rotate(G_base.graph['VertexC'], landscape_angle)
@@ -922,8 +996,7 @@ def normalize_area(G_base: nx.Graph, *, hull_nonroot: np.ndarray) -> nx.Graph:
 
 
 def denormalize(G_scaled, G_base):
-    '''
-    DEPRECATED: use interarraylib.as_site_scale()
+    '''DEPRECATED: use interarraylib.as_rescaled()
 
     note: d2roots will be created in G_base if absent.
     '''
@@ -959,10 +1032,11 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     counter-clockwise).
 
     Args:
-        X: array of X coordinates
-        Y: array of Y coordinates
+      X: array of X coordinates
+      Y: array of Y coordinates
+
     Returns:
-        area
+      area
     '''
     # Shoelace formula for area (https://stackoverflow.com/a/30408825/287217).
     return 0.5*abs(X[-1]*Y[0] - Y[-1]*X[0]
@@ -972,6 +1046,13 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
 
 @nb.njit(nb.int_(nb.int_[:], nb.int_), cache=True, inline='always')
 def index(array: np.ndarray[tuple[int], np.dtype[np.int_]], item: np.int_) -> int:
+    '''Find the index of first occurrence of `item` in `array`.
+    
+    Equivalent of the method `index()` of Python lists for numpy arrays.
+    
+    Returns:
+      index
+    '''
     for idx, val in enumerate(array):
         if val == item:
             return idx
@@ -986,7 +1067,8 @@ def _halfedges_from_triangulation(
        neighbors: np.ndarray[tuple[int, int], np.dtype[np.int_]],
        halfedges: np.ndarray[tuple[int, int], np.dtype[np.int_]],
        ref_is_cw_: np.ndarray[tuple[int], np.dtype[np.bool_]]) -> None:
-    '''
+    '''Lists the neighbor-aware half-edges that represent a triangulation.
+
     Meant to be called from `mesh._planar_from_cdt_triangles()`. Inputs are
     derived from `PythonCDT.Triangulation().triangles`.
 
