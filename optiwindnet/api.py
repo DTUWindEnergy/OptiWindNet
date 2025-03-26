@@ -10,7 +10,7 @@ from itertools import pairwise
 # optiwindnet
 from optiwindnet.svg import svgplot
 from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
-from optiwindnet.plotting import gplot
+#from optiwindnet.plotting import gplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
@@ -237,6 +237,15 @@ class WindFarmNetwork():
 
         L = L_from_yaml(filepath)
         return cls(L=L, **kwargs)
+    
+    @classmethod
+    def from_pbf(cls, filepath: str, **kwargs):
+        """Creates a WindFarmNetwork instance from a YAML file."""
+        if not isinstance(filepath, str):
+            raise TypeError("Filepath must be a string")
+
+        L = L_from_pbf(filepath)
+        return cls(L=L, **kwargs)
         
     @classmethod
     def from_windIO(cls, filepath: str, **kwargs):
@@ -269,23 +278,33 @@ class WindFarmNetwork():
                         handle=f"{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}")
 
         return cls(L=L, **kwargs)
+    
+    @classmethod
+    def load_L(cls, L, **kwargs):
+        return cls(L=L, **kwargs)
 
     
     def plot(self):
         """Plots the wind farm network graph."""
-        return gplot(self.G)
+        return svgplot(self.G)
     
     def plot_L(self):
         """Plots the wind farm network graph."""
-        return gplot(self.L)
+        return svgplot(self.L)
     
     def plot_A(self):
         """Plots the wind farm network graph."""
-        return gplot(self.A)
+        return svgplot(self.A)
     
     def plot_G_tentative(self):
         """Plots the wind farm network graph."""
-        return gplot(self.G_tentative)
+        return svgplot(self.G_tentative)
+    
+    def create_detours(self):
+        """Plots the wind farm network graph."""
+        self.G = PathFinder(self.G_tentative, planar=self.P, A=self.A).create_detours()
+        assign_cables(self.G, self.cables)
+
 
     def get_network(self):
         """Returns the network edges with cable data."""
@@ -295,17 +314,24 @@ class WindFarmNetwork():
     
     def get_network_array(self):
         """Returns the network edges with cable data."""
-        network = list(self.G.edges(data=True))
+        network_array_type = np.dtype([
+            ('src', int),
+            ('tgt', int),
+            ('length', float),
+            ('load', float),
+            ('reverse', bool),
+            ('cable', int),
+            ('cost', float),
+        ])
 
-        from_nodes   = np.array([int(e[0]) for e in network], dtype=int)
-        to_nodes     = np.array([int(e[1]) for e in network], dtype=int)
-        lengths      = np.array([e[2]['length'] for e in network], dtype=float)
-        loads        = np.array([e[2]['load'] for e in network], dtype=int)
-        reverses     = np.array([e[2]['reverse'] for e in network], dtype=bool)
-        cable_types  = np.array([e[2]['cable'] for e in network], dtype=int)
-        costs        = np.array([e[2]['cost'] for e in network], dtype=float)
+        def iter_edges(G, keys):
+            for s, t, edgeD in G.edges(data=True):
+                yield s, t, *(edgeD[key] for key in keys)
 
-        return from_nodes, to_nodes, lengths, loads, reverses, cable_types, costs
+
+        network_array = np.fromiter(iter_edges(self.G, network_array_type.names[2:]),
+                                dtype=network_array_type, count=self.G.number_of_edges())
+        return network_array
 
     def cost(self):
         """Returns the total cost of the network."""
@@ -325,8 +351,6 @@ class WindFarmNetwork():
         if not hasattr(self.L, 'graph') or 'VertexC' not in self.L.graph:
             raise ValueError("Graph L does not contain 'VertexC' attribute.")
         
-
-
         # Update coordinates
         if turbines is not None:
             self.L.graph['VertexC'][:turbines.shape[0], :] = turbines
@@ -414,7 +438,7 @@ class WindFarmNetwork():
         if network_tree is not None:
             self.wfn.set_network(network_tree=network_tree)
 
-        G = self.wfn.G
+        G = self.G
         print(G.edges(data=True))
         vertexes = G.graph['VertexC']
         R = G.graph['R']
@@ -476,7 +500,8 @@ class WindFarmNetwork():
         # If new coordinates are provided, update them
         if turbines is not None or substations is not None:
             self.set_coordinates(turbines=turbines, substations=substations)
-
+            self._P, self._A = make_planar_embedding(self.L)
+        
         if turbines is None:
             turbines = self.L.graph['VertexC'][:self.L.graph['T'], :]
 
@@ -488,7 +513,7 @@ class WindFarmNetwork():
         self._S_updated = True
         self._G_tentative_updated = True
         self._G_updated = True
-        L, A, P, S, G_tentative, G = router(L=self.L, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
+        L, A, P, S, G_tentative, G = router(L=self.L, A=self.A, P=self.P, S=self.S, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
         
         self.L = L
         self.A = A
@@ -518,7 +543,7 @@ class OptiWindNetSolver(ABC):
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, solver='EW', detour=True, verbose=True, **kwargs):
+    def __init__(self, solver='EW', detour=False, verbose=True, **kwargs):
         if solver not in ['EW']:
             raise ValueError(
                 f"{solver} is not among the supported Heuristic solvers. Choose among: ['EW']."
@@ -526,17 +551,15 @@ class Heuristic(OptiWindNetSolver):
 
         # Call the base class initialization
         self.verbose = verbose
+        self.detour = detour
         self.solver = solver
         self.detour = detour
 
-    def optimize(self, L, turbines=None, substations=None, cables=None, cables_capacity=None, verbose=None, **kwargs):
+    def optimize(self, L, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
 
         if verbose is None:
             verbose = self.verbose
 
-
-        # Compute the planar embedding
-        P, A = make_planar_embedding(L)
         # optimizing
         if self.solver=='EW':
             S = EW_presolver(A, capacity=cables_capacity)
@@ -556,25 +579,15 @@ class Heuristic(OptiWindNetSolver):
         return L, A, P, S, G_tentative, G
     
 class MetaHeuristic(OptiWindNetSolver):
-    def __init__(self, wfn, solver='HGS', time_limit=3, verbose=True, **kwargs):
+    def __init__(self, solver='HGS', time_limit=3, detour=False, verbose=True, **kwargs):
         # Call the base class initialization
-        self.wfn = wfn
+
         self.verbose = verbose
+        self.detour = detour
         self.solver = solver
         self.time_limit = time_limit
 
-    def optimize(self, turbines=None, substations=None, network_tree=None, **kwargs):
-        wfn = self.wfn
-        # set to True at the begining to avoid unwanted verbose info
-        wfn._S_updated = True
-        wfn._G_tentative_updated = True
-        wfn._G_updated = True
-
-        if turbines is not None or substations is not None:
-            self.wfn.set_coordinates(turbines=turbines, substations=substations)
-
-        if network_tree is not None:
-            self.wfn.set_network(network_tree=network_tree)
+    def optimize(self, L, A, P, cables=None, cables_capacity=None, **kwargs):
 
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
@@ -582,23 +595,25 @@ class MetaHeuristic(OptiWindNetSolver):
 
         # optimizing
         if self.solver== 'HGS': # Hybrid Genetic Search
-            S = iterative_hgs_cvrp(wfn.A, capacity=wfn.cables_capacity, time_limit=self.time_limit)
+            S = iterative_hgs_cvrp(A, capacity=cables_capacity, time_limit=self.time_limit)
         else:
             raise ValueError(
                 f"{self.solver} is not among the supported Meta-Heuristic solvers. Choose among: HGS.")
         
-        G_tentative = G_from_S(S, wfn.A)
-        G = G_tentative
-        assign_cables(G, wfn.cables)
+        G_tentative = G_from_S(S, A)
+        if self.detour:
+            G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        else:
+            G = G_tentative
 
-        self.wfn = wfn
+        assign_cables(G, cables)
         
-        return wfn
+        return L, A, P, S, G_tentative, G
 
 class MILP(OptiWindNetSolver):
-    def __init__(self, wfn, solver='ortools', solver_options=None, model_options=None, verbose=True, **kwargs):  
-        self.wfn = wfn
+    def __init__(self, solver='ortools', solver_options=None, model_options=None, detour=False, verbose=True, **kwargs):
         self.verbose = verbose
+        self.detour = detour
         #
         if solver_options is None:
             solver_options = {}
@@ -611,19 +626,8 @@ class MILP(OptiWindNetSolver):
         self.model_options = model_options  
 
         
-    def optimize(self, turbines=None, substations=None, network_tree=None, verbose=None, **kwargs):
-        wfn = self.wfn
-        # set to True at the begining to avoid unwanted verbose info
-        wfn._S_updated = True
-        wfn._G_tentative_updated = True
-        wfn._G_updated = True
-
-        if turbines is not None or substations is not None:
-            self.wfn.set_coordinates(turbines=turbines, substations=substations)
-
-        if network_tree is not None:
-            self.wfn.set_network(network_tree=network_tree)
-
+    def optimize(self, L, A, P, S=None, cables=None, cables_capacity=None, verbose=None, **kwargs):
+        
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -634,16 +638,18 @@ class MILP(OptiWindNetSolver):
             #orter = ort.CpSat()
             # set the model
             model = ort.make_min_length_model(
-                        wfn.A,
-                        wfn.cables_capacity,
-                        gateXings_constraint=self.model_options.get("gateXring_constraint", False),
+                        A,
+                        cables_capacity,
+                        gateXings_constraint=self.model_options.get("gateXing_constraint", False),
                         branching=self.model_options.get("branching", True),
                         gates_limit=self.model_options.get("gates_limit", False)
                     )
             
             # warm start
-            if wfn.S is not None:
-                ort.warmup_model(model, wfn.S)
+            if S is not None:
+                if verbose:
+                    print('s is not None and warmup is run!')
+                ort.warmup_model(model, S)
 
             orter = ort.cp_model.CpSolver()
             # settings
@@ -663,10 +669,9 @@ class MILP(OptiWindNetSolver):
                     f'\ngap: {100*gap:.1f}%')
 
             S = ort.S_from_solution(model, orter, result)
-            G_tentative = G_from_S(S, wfn.A)
-            G = PathFinder(G_tentative, planar=wfn.P, A=wfn.A).create_detours()
+  
 
-        elif self.solver == 'cplex' or 'cbc' or 'gurobi' or 'highs' or 'scip':
+        elif self.solver in ['cplex', 'cbc', 'gurobi', 'highs', 'scip']:
             ##############
             # initialize #
             ##############
@@ -692,51 +697,20 @@ class MILP(OptiWindNetSolver):
                 pyo_solver.available(), type(pyo_solver)
 
             model = omo.make_min_length_model(
-                wfn.A, wfn.cables_capacity,      
-                gateXings_constraint=self.model_options.get("gateXring_constraint", False),
+                A, cables_capacity,      
+                gateXings_constraint=self.model_options.get("gateXing_constraint", False),
                 branching=self.model_options.get("branching", True),
                 gates_limit=self.model_options.get("gates_limit", False)
                 )
             
             # warm start
-            if wfn.S is not None:
-                omo.warmup_model(model, wfn.S)
+            if S is not None:
+                if verbose:
+                    print('s is not None and warmup is run!')
+                omo.warmup_model(model, S)
 
-            # options
-            solver_options_mapping = {
-                'gurobi': {
-                    'mipgap': self.solver_options.get("mingap", 0.005),   # Relative lower-bound to objective-value gap
-                    'timelimit': self.solver_options.get("timelimit", 60),   # Time limit in seconds
-                    'mipfocus': self.solver_options.get("mipfocus", 1),     # defualt=1: Focus on producing solutions
-                },
-                'cplex': {
-                    'mipgap': self.solver_options.get("mingap", 0.005),
-                    'timelimit': self.solver_options.get("timelimit", 60),
-                    'parallel': self.solver_options.get("parallel", -1),    # default=-1 : Opportunistic parallelism (non-deterministic)
-                    'emphasis_mip': self.solver_options.get("emphasis_mip", 4),    # default=4 : , # Focus on producing solutions
-                },
-                'cbc': {
-                    'ratioGap': self.solver_options.get("mingap", 0.005),
-                    'seconds': self.solver_options.get("timelimit", 90),
-                    'timeMode': 'elapsed',
-                    'threads': self.solver_options.get("parallel", 8),
-                    'RandomCbcSeed': self.solver_options.get("seed", 4321),  # Seed for repeatable results
-                    'Dins': 'on',
-                    'VndVariableNeighborhoodSearch': 'on',
-                },
-                'highs': {
-                    'time_limit': self.solver_options.get("timelimit", 60),     # Time limit in seconds
-                    'mip_rel_gap': self.solver_options.get("mingap", 0.005), # MIP gap
-                },
-                'scip': {
-                    'limits/gap': self.solver_options.get("mingap", 0.005),
-                    'limits/time': self.solver_options.get("timelimit", 180),
-                    'display/freq': 0.5,
-                    'parallel/maxnthreads': self.solver_options.get("parallel", 16), # Currently not used in Pyomo
-                }
-            }
-
-            pyo_solver.options.update(solver_options_mapping[self.solver])
+            pyo_solver.options.update(self.solver_options)
+            #pyo_solver.options.update(solver_options_mapping[self.solver])
 
             if verbose:
                 print(f'Solving "{model.handle}": {{R={len(model.R)}, T={len(model.T)}, κ={model.k.value}}}\n')
@@ -755,55 +729,21 @@ class MILP(OptiWindNetSolver):
             result = pyo_solver.solve(model, **solver_args[self.solver])
 
             S = omo.S_from_solution(model, pyo_solver, result)
-            G_tentative = G_from_S(S, self.A)
-            assign_cables(G_tentative, self.cables)
-            G = PathFinder(G_tentative, planar=wfn.P, A=wfn.A).create_detours()
-        
+
+            
         else:
             raise ValueError(
                 f"{self.solver} is not among the supported MILP solvers. Choose among: ortools, gurobi, cplex, highs, scip, cbc.")
 
+        G_tentative = G_from_S(S, A)
+
+        if self.detour:
+            G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        else:
+            G = G_tentative
+        assign_cables(G, cables)
         
-        assign_cables(G, wfn.cables)
-        
-        wfn.S = S
-        wfn.G_tentative = G_tentative
-        wfn.G = G
-
-        # update self.wfn
-        self.wfn = wfn
-
-        return wfn
-
-#######
-# example usage
-# if __name__ == "__main__":
-        
-
-#     wfn = WindFarmNetwork.from_yaml(filepath='example_location.yaml') # input format: coordinates by default
-#     # wfn = WindFarmNetwork(input_format='yaml', filepath='path to the yaml file')
-#     # wfn = WindFarmNetwork.from_yaml(filepath='path to the yaml file')
-#     # wfn = WindFarmNetwork(input_format='windIo', filepath='path to the yaml file')
-#     print('wfn initialized properly')
-#     print(wfn.L)
-    #optimzer = Heuristic(wfn=wfn, solver='EW') # default is EW
-    # wfn = optimzer.optimize(wt_x=0, wt_y=0, ss_x=0, ss_y=0) # am not sure if we should return wfn or just update it internally
-    # gradients_wt, gradients_ss = optimzer.gradient(wt_x=0, wt_y=0, ss_x=0, ss_y=0) # gradient_type = cost by default
-    # gradients_wt, gradients_ss = optimzer.gradient(wt_x=0, wt_y=0, ss_x=0, ss_y=0, gradient_type='length')
-
-    # optimzer = MetaHeuristic(wfn=wfn, solver='GHS') # default is GHS
-    # optimizer = MILP(wfn=wfn, solver='ortools', solver_options={}, model_options={})
-
-###########################################################
-# gitlab repo
-# shall we build wfn in optimizer.optimize() from the coordinates if wfn is None?
-#       in my view, no since it brings complexity for users.
-# S, A, ... are shallow copied of L. when we attach them as atributes of wfn (wfn.L, wfn.A, ...)
-# does wfn.A be still a shallow copy of wfn.L?
-
-
-###### to do:
-# installation of the dependancies, to include git link in the installation
+        return L, A, P, S, G_tentative, G
 
 
 

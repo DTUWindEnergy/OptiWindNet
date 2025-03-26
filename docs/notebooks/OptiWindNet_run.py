@@ -25,60 +25,30 @@ obstacles = [
     # [second obstacle] ...
 ]
 
-wfn = WindFarmNetwork(turbines=turbines, substations=substations, border=border, obstacles=obstacles, cables=cables)
+# initialize the Heuristic router
+router = Heuristic(solver='EW') # default is EW
 
-router = Heuristic(wfn=wfn, solver='EW') # default is EW
-router()
-grad_wt, grad_ss = router.gradient()
-#print('gradients_wt\n', grad_wt)
-#print('gradients_ss\n', grad_ss)
-print(wfn.cost())
+# create wfn from coordinates
+wfn = WindFarmNetwork(turbines=turbines, substations=substations, border=border, obstacles=obstacles, cables=cables,router=router)
+#wfn.plot_L()
+#wfn.plot_A()
 
-
-substations = np.array([[695, 1060],], dtype=float)
-router(turbines=turbines, substations=substations)
-print(wfn.cost())
-#print(wfn.G.graph['VertexC'][-substations.shape[0]:, :])
-grad_wt, grad_ss = router.gradient()
-#print('gradients_wt\n', grad_wt)
-print('gradients_ss\n', grad_ss)
-substations = np.array([[695, 1060],], dtype=float)
-grad_wt, grad_ss = router.gradient(turbines=turbines, substations=substations)
-print('gradients_ss\n', grad_ss)
+edges_array = wfn.optimize()
+# print('from_nodes:', from_nodes)
+# print('to_nodes:', to_nodes)
+# print('lengths:', lengths)
+# print('loads:', loads)
+# print('reverses:', reverses)
+# print('cable_types:', cable_types)
+# print('costs:', costs)
+# router should return array tree
+#wfn.plot_L()
+#wfn.plot_A()
+#wfn.plot_G_tentative()
 wfn.plot()
-# print(wfn.get_network())
-# a, b = optimzer.gradient()
-# print('gradients_wt\n', a)
-# print('gradients_ss\n', b)
+print(edges_array['src'])
+type(edges_array)
+print(edges_array.dtype.names)
 
-# substations_new = np.array([[0, 0],], dtype=float)
-# wfn.set_coordinates(turbines=turbines, substations=substations_new)
 
-#print('L after optimizer:', wfn.L.graph)
-#print('G after optimizer:', wfn.G.graph)
-
-# #wfn = WindFarmNetwork(turbines=turbines, substations=substations, border=border, obstacles=obstacles, cables=cables)
-# substations_new = np.array([[0, 0],], dtype=float)
-# print('=======================')
-# print('here are the VertexC L: ', wfn.L.graph['VertexC'][-1])
-# print('here are the VertexC A: ', wfn.A.graph['VertexC'][-1])
-# #print('here are the VertexC P: ', wfn.P.graph['VertexC'])
-# #print('here are the VertexC S: ', wfn.S.VertexC)
-# print('here are the VertexC G: ', wfn.G.graph['VertexC'][-1])
-
-# print('here are the VertexC S: ', wfn.S.graph['T'])
-# print('here are the VertexC P: ', wfn.P.graph)
-# print('here are the VertexC S: ', wfn.S.graph)
-# print("Nodes with attributes S:", wfn.S.nodes(data=True))
-# print('=======================')
-# wfn.set_coordinates(turbines=turbines, substations=substations_new)
-# print('=======================')
-# print('here are the VertexC L: ', wfn.L.graph['VertexC'][-1])
-# print('here are the VertexC A: ', wfn.A.graph['VertexC'][-1])
-# #print('here are the VertexC P: ', wfn.P.graph['VertexC'])
-# #print('here are the VertexC S: ', wfn.S.VertexC)
-# print('here are the VertexC G: ', wfn.G.graph['VertexC'][-1])
-# print('=======================')
-# a, b = optimzer.gradient()
-# print('gradients_wt\n', a)
-# print('gradients_ss\n', b)
+wfn.gradient()

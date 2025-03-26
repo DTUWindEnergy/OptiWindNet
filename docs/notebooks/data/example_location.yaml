@@ -1,12 +1,11 @@
 
 # coordinate format can be "planar" or "latlon"
-#   - for "latlon" examples, see `interarray/data/*.yaml`
+#   - for "latlon" examples, see `optiwindnet/data/*.yaml`
 #   - this field is optional, default is "latlon"
 #   - coordinates are converted to floats, so floats may be used as well
 COORDINATE_FORMAT: planar
 
 # extents define a polygon:
-#   - vertices in counter-clockwise orientation
 #   - do not repeat the initial vertex at the end
 #   - line breaks are optional
 EXTENTS: [
@@ -23,10 +22,9 @@ EXTENTS: [
 ]
 
 # obstacles is optional and must be a list of polygons (even if 1 obstacle)
-#   - vertices in clockwise orientation (yes, opposite of extents)
 #   - obstacles must be strictly inside the extents polygon
 #   - the parser will not complain about borders of obstacles overlapping
-#     borders of extents, but interarray will behave unpredictably
+#     borders of extents, but optiwindnet will behave unpredictably
 OBSTACLES: [
   [  # first obstacle
     [1540, 920],
