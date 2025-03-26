@@ -61,4 +61,4 @@ pypi_linux:
     - python3 -m build
     - twine upload dist/* -u $TWINE_USERNAME -p $TWINE_PASSWORD
   tags:
-  - ci-ubuntu
+  - linux
