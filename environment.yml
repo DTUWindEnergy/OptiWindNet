@@ -20,7 +20,7 @@ dependencies:
   # required by osmium
   - requests ~=2.32.3
   - pip:
-      - hygese @ git+https://github.com/mdealencar/PyHygese.git@scikit-build
+      - hygese @ git+https://github.com/mdealencar/PyHygese.git@follow_upstream_and_new_build_backend
       - ortools ~=9.12.4544
       - osmium ~=4.0.2
       - PythonCDT @ git+https://github.com/artem-ogre/PythonCDT.git@13456f53a8324506b8836816ce90491d070856db
