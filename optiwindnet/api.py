@@ -281,7 +281,7 @@ class WindFarmNetwork():
         return cls(L=L, **kwargs)
     
     @classmethod
-    def load_L(cls, L, **kwargs):
+    def upload_L(cls, L, **kwargs):
         return cls(L=L, **kwargs)
 
     
@@ -425,7 +425,7 @@ class WindFarmNetwork():
         self.set_network(network_tree=network)
 
 
-    def gradient(self, turbines=None, substations=None, network_tree=None, verbose=True, gradient_type='cost'):
+    def gradient(self, turbines=None, substations=None, network_tree=None, verbose=None, gradient_type='cost'):
         """
         Calculates the gradient of the length and cost of cable with respect to the positions of the nodes.
         """
@@ -532,19 +532,19 @@ class OptiWindNetSolver(ABC):
         pass
 
     @abstractmethod
-    def optimize(self, turbines=None, substations=None, verbose=True, **kwargs):
+    def optimize(self, turbines=None, substations=None, verbose=None, **kwargs):
         """
         Perform cable layout optimization. Must be implemented by subclasses.
         """
         pass
 
-    def __call__(self, turbines=None, substations=None, verbose=True, **kwargs):
+    def __call__(self, turbines=None, substations=None, verbose=None, **kwargs):
         """Make the instance callable, calling optimize() internally."""
-        return self.optimize(turbines=None, substations=None, verbose=True, **kwargs)  
+        return self.optimize(turbines=turbines, substations=substations, verbose=verbose, **kwargs)  
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, solver='EW', detour=False, verbose=True, **kwargs):
+    def __init__(self, solver='EW', detour=False, verbose=None, **kwargs):
         if solver not in ['EW']:
             raise ValueError(
                 f"{solver} is not among the supported Heuristic solvers. Choose among: ['EW']."
@@ -580,7 +580,7 @@ class Heuristic(OptiWindNetSolver):
         return L, A, P, S, G_tentative, G
     
 class MetaHeuristic(OptiWindNetSolver):
-    def __init__(self, solver='HGS', time_limit=3, detour=False, verbose=True, **kwargs):
+    def __init__(self, solver='HGS', time_limit=3, detour=False, verbose=None, **kwargs):
         # Call the base class initialization
 
         self.verbose = verbose
@@ -588,7 +588,7 @@ class MetaHeuristic(OptiWindNetSolver):
         self.solver = solver
         self.time_limit = time_limit
 
-    def optimize(self, L, A, P, cables=None, cables_capacity=None, **kwargs):
+    def optimize(self, L, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
 
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
@@ -612,7 +612,7 @@ class MetaHeuristic(OptiWindNetSolver):
         return L, A, P, S, G_tentative, G
 
 class MILP(OptiWindNetSolver):
-    def __init__(self, solver='ortools', solver_options=None, model_options=None, detour=False, verbose=True, **kwargs):
+    def __init__(self, solver='ortools', solver_options=None, model_options=None, detour=False, verbose=None, **kwargs):
         self.verbose = verbose
         self.detour = detour
         #
@@ -707,7 +707,7 @@ class MILP(OptiWindNetSolver):
             # warm start
             if S is not None:
                 if verbose:
-                    print('s is not None and warmup is run!')
+                    print('S is not None and the model is warmed up with S.')
                 omo.warmup_model(model, S)
 
             pyo_solver.options.update(self.solver_options)
