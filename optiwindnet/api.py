@@ -10,7 +10,7 @@ from itertools import pairwise
 # optiwindnet
 from optiwindnet.svg import svgplot
 from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
-from optiwindnet.plotting import gplot
+from optiwindnet.plotting import gplot, pplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
@@ -30,102 +30,31 @@ import optiwindnet.MILP.pyomo as omo
 from pyomo.contrib.appsi.solvers import Highs
 from pyomo import environ as pyo
 
-def process_coordinates(wt_x, wt_y, substations):
-    try:
-        # Convert wind turbine inputs to NumPy arrays with dtype=float.
-        x = np.asarray(wt_x, dtype=float) if wt_x is not None else np.array([])
-        y = np.asarray(wt_y, dtype=float) if wt_y is not None else np.array([])
-    except Exception as e:
-        raise ValueError("wt_x and wt_y must be iterables of numbers convertible to floats.") from e
+from inspect import signature
 
-    # Ensure the arrays are one-dimensional.
-    if x.ndim != 1 or y.ndim != 1:
-        raise ValueError("wt_x and wt_y must be one-dimensional sequences (lists, tuples, or 1D arrays).")
-
-    # Check that both arrays have the same length.
-    if x.shape[0] != y.shape[0]:
-        raise ValueError("wt_x and wt_y must have the same number of elements.")
-
-    # Combine the two arrays into a single (T,2) array.
-    turbines = np.column_stack((x, y)) if x.size > 0 else np.empty((0, 2))
-
-    # Substation coordinates processing
-    if ss_x is not None and ss_y is not None:
-        try:
-            ss_x = np.asarray(ss_x, dtype=float)
-            ss_y = np.asarray(ss_y, dtype=float)
-        except Exception as e:
-            raise ValueError("ss_x and ss_y must be iterables of numbers convertible to floats.") from e
-
-        # Ensure the arrays are one-dimensional.
-        if ss_x.ndim != 1 or ss_y.ndim != 1:
-            raise ValueError("ss_x and ss_y must be one-dimensional sequences (lists, tuples, or 1D arrays).")
-
-        # Check that both arrays have the same length.
-        if ss_x.shape[0] != ss_y.shape[0]:
-            raise ValueError("ss_x and ss_y must have the same number of elements.")
-
-        # Combine the substation coordinates into a single (m,2) array.
-        substations = np.column_stack((substations))
-    else:
-        substations = np.empty((0, 2))
-
-    return turbines, substations
-
-
-def update_wfn(wfn, turbines=None, substations=None):
-    
-    # update wfn
-    wfn.L['VertexC'][:wfn.turbines.shape[0], :] = turbines or wfn.turbines
-    wfn.L['VertexC'][-wfn.substations.shape[0]:, :] = substations or wfn.substations
-
-
-def turbines_per_cable(cable_cross_section, turbine_power, voltage, efficiency=0.95):
-    """
-    Calculate how many wind turbines a given cable can handle.
-
-    Parameters:
-    - cable_cross_section (float): Cable cross-section in mm².
-    - turbine_power (float): Rated power of a single wind turbine in MW.
-    - voltage (float): Operating voltage in Volts.
-    - efficiency (float): Efficiency/power factor (default: 0.95).
-
-    Returns:
-    - int: Maximum number of turbines the cable can handle.
-    """
-
-    # Lookup table for current capacity (Ampacity) based on cross-section
-    cable_ampacity_lookup = {
-        50: 140,  # 50 mm² -> 140A
-        95: 220,  # 95 mm² -> 220A
-        150: 300, # 150 mm² -> 300A
-        240: 400, # 240 mm² -> 400A
-        400: 550, # 400 mm² -> 550A
-    }
-
-    # Get max cable current capacity (A)
-    if cable_cross_section not in cable_ampacity_lookup:
-        raise ValueError("Cable cross-section not found in lookup table!")
-
-    I_cable_max = cable_ampacity_lookup[cable_cross_section]  # Amps
-
-    # Convert turbine power from MW to Watts
-    P_turbine = turbine_power * 1e6  # MW to W
-
-    # Calculate max number of turbines the cable can handle
-    N_turbines = (I_cable_max * voltage * efficiency) / P_turbine
-
-    return int(N_turbines)  # Return integer number of turbines
 
 class WindFarmNetwork():
     """
     Represents a wind farm electrical network, capable of processing 
     layout data from different formats and computing network properties.
     """
+    _plot_signature = signature(gplot)
+    _plot_signature_no_G = _plot_signature.replace(
+        parameters=[
+            p for name, p in _plot_signature.parameters.items() if name != 'G'
+        ]
+        )
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, border=None, obstacles=[], name='', handle='', L=None, router=None, verbose=True, **kwargs):
+                 cables=None, cables_capacity=None, border=None, obstacles=[], name='', handle='', L=None, router=None, verbose=True, **kwargs):
 
+        if cables is None and cables_capacity is None:
+            raise ValueError("Please provide data for either cables or cables_capacity!")
+        
+        if cables is None:
+            cables = [0, cables_capacity, 0]
+        else:
+            cables_capacity = max(cable[1] for cable in cables)
         #
         if turbines is not None: L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
            
@@ -147,9 +76,7 @@ class WindFarmNetwork():
         self._S_updated = False
         self._G_tentative_updated = False
         self._G_updated = False
-
-        if self.cables is not None:
-            self.cables_capacity = max(cable[1] for cable in cables) # np.max(self.cables[:, 1])
+        self.cables_capacity = cables_capacity
 
         self.verbose = verbose
 
@@ -284,43 +211,47 @@ class WindFarmNetwork():
     def upload_L(cls, L, **kwargs):
         return cls(L=L, **kwargs)
 
+
+    def plot(self, *args, **kwargs):
+        WindFarmNetwork._plot_signature_no_G.bind(*args, **kwargs)
+        return gplot(self.G, *args, **kwargs)
     
-    def plot(self):
+    def plot_L(self, **kwargs):
         """Plots the wind farm network graph."""
-        return gplot(self.G)
+        return gplot(self.L, **kwargs)
     
-    def plot_L(self):
+    def plot_A(self, **kwargs):
         """Plots the wind farm network graph."""
-        return gplot(self.L)
+        return gplot(self.A, **kwargs)
     
-    def plot_A(self):
+    def plot_G_tentative(self, **kwargs):
         """Plots the wind farm network graph."""
-        return gplot(self.A)
+        return gplot(self.G_tentative, **kwargs)
     
-    def plot_G_tentative(self):
+    def svgplot(self, **kwargs):
         """Plots the wind farm network graph."""
-        return gplot(self.G_tentative)
+        return svgplot(self.G, **kwargs)
     
-    def svgplot(self):
+    def svgplot_L(self, **kwargs):
         """Plots the wind farm network graph."""
-        return svgplot(self.G)
+        return svgplot(self.L, **kwargs)
     
-    def svgplot_L(self):
+    def svgplot_A(self, **kwargs):
         """Plots the wind farm network graph."""
-        return svgplot(self.L)
+        return svgplot(self.A, **kwargs)
     
-    def svgplot_A(self):
+    def svgplot_G_tentative(self, **kwargs):
         """Plots the wind farm network graph."""
-        return svgplot(self.A)
-    
-    def svgplot_G_tentative(self):
-        """Plots the wind farm network graph."""
-        return svgplot(self.G_tentative)
+        return svgplot(self.G_tentative, **kwargs)
     
     def create_detours(self):
         """Plots the wind farm network graph."""
         self.G = PathFinder(self.G_tentative, planar=self.P, A=self.A).create_detours()
         assign_cables(self.G, self.cables)
+
+    def pplot(self, **kwargs):
+        """Plots the wind farm network graph."""
+        return pplot(self.P, self.A, **kwargs)
 
 
     def get_network(self):
@@ -465,7 +396,14 @@ class WindFarmNetwork():
         gradients_cost = np.zeros((N, 2))
 
         # Iterate over edges directly to avoid duplicate calculations
-        for ii, jj in G.edges():
+        for u, v in G.edges():
+            vec = vertices[u] - vertices[v]
+            gradinc = vec/np.hypot(*vec.T)
+            if gradient_type == 'cost':
+                gradinc *= G.graph['cables'][G[u][v]['cable']][2]
+            gradients_cost += gradinc
+                
+
             if ii == jj:  # Skip self-loops
                 continue
             
@@ -665,7 +603,7 @@ class MILP(OptiWindNetSolver):
             # warm start
             if S is not None:
                 if verbose:
-                    print('s is not None and warmup is run!')
+                    print('S is not None and the model is warmed up with the available S.')
                 ort.warmup_model(model, S)
 
             orter = ort.cp_model.CpSolver()
@@ -723,7 +661,7 @@ class MILP(OptiWindNetSolver):
             # warm start
             if S is not None:
                 if verbose:
-                    print('S is not None and the model is warmed up with S.')
+                    print('S is not None and the model is warmed up with the available S.')
                 omo.warmup_model(model, S)
 
             pyo_solver.options.update(self.solver_options)
