@@ -10,7 +10,7 @@ from itertools import pairwise
 # optiwindnet
 from optiwindnet.svg import svgplot
 from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
-#from optiwindnet.plotting import gplot
+from optiwindnet.plotting import gplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
@@ -287,17 +287,33 @@ class WindFarmNetwork():
     
     def plot(self):
         """Plots the wind farm network graph."""
-        return svgplot(self.G)
+        return gplot(self.G)
     
     def plot_L(self):
         """Plots the wind farm network graph."""
-        return svgplot(self.L)
+        return gplot(self.L)
     
     def plot_A(self):
         """Plots the wind farm network graph."""
-        return svgplot(self.A)
+        return gplot(self.A)
     
     def plot_G_tentative(self):
+        """Plots the wind farm network graph."""
+        return gplot(self.G_tentative)
+    
+    def svgplot(self):
+        """Plots the wind farm network graph."""
+        return svgplot(self.G)
+    
+    def svgplot_L(self):
+        """Plots the wind farm network graph."""
+        return svgplot(self.L)
+    
+    def svgplot_A(self):
+        """Plots the wind farm network graph."""
+        return svgplot(self.A)
+    
+    def svgplot_G_tentative(self):
         """Plots the wind farm network graph."""
         return svgplot(self.G_tentative)
     
