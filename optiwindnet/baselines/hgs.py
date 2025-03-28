@@ -2,7 +2,7 @@ import math
 from dataclasses import asdict
 import numpy as np
 import networkx as nx
-import hygese as hgs
+import hybgensea as hgs
 from py.io import StdCaptureFD
 
 from ..interarraylib import fun_fingerprint
@@ -20,9 +20,9 @@ from . import length_matrix_single_depot_from_G
 def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
              vehicles: int | None = None, seed: int = 0) \
                      -> nx.Graph:
-    '''Solves the OCVRP using PyHygese with links from `A`
+    '''Solves the OCVRP using HGS-CVRP with links from `A`
 
-    Wraps PyHygese, which provides bindings to the HGS-CVRP library (Hybrid
+    Wraps HybGenSea, which provides bindings to the HGS-CVRP library (Hybrid
     Genetic Search solver for Capacitated Vehicle Routing Problems). This
     function uses it to solve an Open-CVRP i.e., vehicles do not return to the
     depot.
