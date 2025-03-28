@@ -69,12 +69,10 @@ class WindFarmNetwork():
 
         # Flags to track update status (initialized as updated)
         self._S = None
-        self._G_tentative = None
         self.G = None
         self._A_updated = True
         self._P_updated = True
         self._S_updated = False
-        self._G_tentative_updated = False
         self._G_updated = False
         self.cables_capacity = cables_capacity
 
@@ -116,18 +114,6 @@ class WindFarmNetwork():
     @S.setter
     def S(self, value):
         self._S = value
-
-
-    @property
-    def G_tentative(self):
-        if not self._G_tentative_updated and self.verbose:
-            print('G_tentative is not updated')
-        return self._G_tentative
-    
-    @G_tentative.setter
-    def G_tentative(self, value):
-        self._G_tentative = value
-
 
     @property
     def G(self):
@@ -224,10 +210,6 @@ class WindFarmNetwork():
         """Plots the wind farm network graph."""
         return gplot(self.A, **kwargs)
     
-    def plot_G_tentative(self, **kwargs):
-        """Plots the wind farm network graph."""
-        return gplot(self.G_tentative, **kwargs)
-    
     def svgplot(self, **kwargs):
         """Plots the wind farm network graph."""
         return svgplot(self.G, **kwargs)
@@ -240,13 +222,13 @@ class WindFarmNetwork():
         """Plots the wind farm network graph."""
         return svgplot(self.A, **kwargs)
     
-    def svgplot_G_tentative(self, **kwargs):
-        """Plots the wind farm network graph."""
-        return svgplot(self.G_tentative, **kwargs)
-    
     def create_detours(self):
-        """Plots the wind farm network graph."""
-        self.G = PathFinder(self.G_tentative, planar=self.P, A=self.A).create_detours()
+        """
+        Create detours in the current graph using the PathFinder module,
+        and reassign cables accordingly.
+        """
+        pathfinder = PathFinder(self.G, planar=self.P, A=self.A)
+        self.G = pathfinder.create_detours()
         assign_cables(self.G, self.cables)
 
     def pplot(self, **kwargs):
@@ -321,7 +303,6 @@ class WindFarmNetwork():
         self._A_updated = False
         self._P_updated = False
         self._S_updated = False
-        self._G_tentative_updated = False
 
     def set_network(self, network_tree):
         """Updates the graph with a new network tree.""" 
@@ -355,7 +336,6 @@ class WindFarmNetwork():
         self._A_updated = False
         self._P_updated = False
         self._S_updated = False
-        self._G_tentative_updated = False
 
     
     def set_network_array(self, network_array):
@@ -422,9 +402,6 @@ class WindFarmNetwork():
         return gradients_wt, gradients_ss
 
 
-    def wt_per_cable(cable_cross_section, turbine_power, voltage, efficiency):
-        return turbines_per_cable(cable_cross_section, turbine_power, voltage, efficiency)
-    
     def optimize(self, turbines=None, substations=None, verbose=None, router=None):
         router = router or self.router  # Use provided router or the existing one in the class
         if router is None:
@@ -449,15 +426,10 @@ class WindFarmNetwork():
         self._A_updated = True
         self._P_updated = True
         self._S_updated = True
-        self._G_tentative_updated = True
         self._G_updated = True
-        L, A, P, S, G_tentative, G = router(L=self.L, A=self.A, P=self.P, S=self.S, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
+        S, G = router(L=self.L, A=self.A, P=self.P, S=self.S, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
         
-        self.L = L
-        self.A = A
-        self.P = P
         self.S = S
-        self.G_tentative = G_tentative
         self.G = G
 
         network_array = self.get_network_array()
@@ -514,7 +486,7 @@ class Heuristic(OptiWindNetSolver):
         assign_cables(G, cables)
 
 
-        return L, A, P, S, G_tentative, G
+        return S, G
     
 class MetaHeuristic(OptiWindNetSolver):
     def __init__(self, solver='HGS', time_limit=3, detour=False, verbose=None, **kwargs):
@@ -546,7 +518,7 @@ class MetaHeuristic(OptiWindNetSolver):
 
         assign_cables(G, cables)
         
-        return L, A, P, S, G_tentative, G
+        return S, G
 
 class MILP(OptiWindNetSolver):
     def __init__(self, solver='ortools', solver_options=None, model_options=None, detour=False, verbose=None, **kwargs):
@@ -681,7 +653,7 @@ class MILP(OptiWindNetSolver):
             G = G_tentative
         assign_cables(G, cables)
         
-        return L, A, P, S, G_tentative, G
+        return S, G
 
 
 
