@@ -395,7 +395,7 @@ class WindFarmNetwork():
         N = len(vertices)
         gradients = np.zeros((N, 2))
 
-        for u, v, data in G.edges(data=True):
+        for u, v in G.edges():
             vec = vertices[u] - vertices[v]
             norm = np.hypot(*vec)
 
