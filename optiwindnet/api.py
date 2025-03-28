@@ -376,6 +376,8 @@ class WindFarmNetwork():
         """
         Calculates the gradient of the length and cost of cable with respect to the positions of the nodes.
         """
+        if gradient_type.lower() not in ['cost', 'length']:
+            raise ValueError("gradient_type should be either 'cost' or 'length'")
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -387,54 +389,35 @@ class WindFarmNetwork():
             self.wfn.set_network(network_tree=network_tree)
 
         G = self.G
-        print(G.edges(data=True))
-        vertexes = G.graph['VertexC']
+        vertices = G.graph['VertexC']
         R = G.graph['R']
         T = G.graph['T']
-        N = len(vertexes)
-        gradients_length = np.zeros((N, 2))
-        gradients_cost = np.zeros((N, 2))
+        N = len(vertices)
+        gradients = np.zeros((N, 2))
 
-        # Iterate over edges directly to avoid duplicate calculations
-        for u, v in G.edges():
+        for u, v, data in G.edges(data=True):
             vec = vertices[u] - vertices[v]
-            gradinc = vec/np.hypot(*vec.T)
-            if gradient_type == 'cost':
+            norm = np.hypot(*vec)
+
+            if norm < 1e-12:
+                continue  # Skip zero-length edges
+
+            gradinc = vec / norm
+
+            if gradient_type.lower() == 'cost':
                 gradinc *= G.graph['cables'][G[u][v]['cable']][2]
-            gradients_cost += gradinc
-                
 
-            if ii == jj:  # Skip self-loops
-                continue
-            
-            v = vertexes[ii]
-            u = vertexes[jj]
-            
-            if gradient_type == 'cost':
-                gradients_cost[ii, 0] += ((v[0] - u[0]) / np.linalg.norm(v - u)) * G.graph['cables'][G.edges[(ii, jj)]['cable']][2]
-                gradients_cost[ii, 1] += ((v[1] - u[1]) / np.linalg.norm(v - u)) * G.graph['cables'][G.edges[(ii, jj)]['cable']][2]
-            else:
-                gradients_length[ii, 0] += (v[0] - u[0]) / np.linalg.norm(v - u)
-                gradients_length[ii, 1] += (v[1] - u[1]) / np.linalg.norm(v - u)
+            gradients[u] += gradinc
+            gradients[v] -= gradinc
 
+            ####################################
+            # To Do: check fnt for detour nodes
+            ####################################
 
         # wind turbines
-        gradients_length_wt = gradients_length[:T]
-        gradients_cost_wt = gradients_cost[:T]
-
+        gradients_wt = gradients[:T]
         # substations
-        gradients_length_ss = gradients_length[N - R:]
-        gradients_cost_ss = gradients_cost[N - R:]
-
-        # Filter the results based on the requested gradient type
-        if gradient_type=='cost':
-            gradients_wt = gradients_cost_wt
-            gradients_ss = gradients_cost_ss
-        elif gradient_type=='length':
-            gradients_wt = gradients_length_wt
-            gradients_ss = gradients_length_ss
-        else:
-            raise ValueError("gradient_type should be either 'cost' or 'length'")
+        gradients_ss = gradients[N - R:]
 
         return gradients_wt, gradients_ss
 
