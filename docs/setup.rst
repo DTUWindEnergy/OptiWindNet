@@ -23,7 +23,7 @@ Git
 
 C Build Utilities
 -----------------
-Two of *OptiWindNet*'s dependencies (*PythonCDT* and *hygese*) require C/C++ source code to be compiled at installation time. If ``gcc``, ``g++``, ``cmake`` and ``make`` commands are already available in the target system, no further action is necessary. If not, the easiest way to fullfill that requirement on Windows (as a regular user) is using `Scoop <https://scoop.sh/>`_.
+One of *OptiWindNet*'s dependencies (*PythonCDT*) requires C/C++ source code to be compiled at installation time. If ``gcc``, ``g++``, ``cmake`` and ``make`` commands are already available in the target system, no further action is necessary. If not, the easiest way to fullfill that requirement on Windows (as a regular user) is using `Scoop <https://scoop.sh/>`_.
 
 To install Scoop, open a PowerShell prompt and enter::
 
