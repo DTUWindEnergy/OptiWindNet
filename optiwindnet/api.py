@@ -49,7 +49,7 @@ class WindFarmNetwork():
                  cables=None, cables_capacity=None, border=None, obstacles=[], name='', handle='', L=None, router=None, verbose=True, **kwargs):
 
         if cables is None and cables_capacity is None:
-            raise ValueError("Please provide data for either cables or cables_capacity!")
+            raise ValueError("Please provide data for either cables or cables_capacity. If both are provided cables_capacity is overwritten by cables data!")
         
         if cables is None:
             cables = [0, cables_capacity, 0]
