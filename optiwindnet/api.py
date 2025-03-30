@@ -630,11 +630,11 @@ class MILP(OptiWindNetSolver):
             ##########
             # Define solver-specific arguments for solving
             solver_args = {
-                'gurobi': {'warmstart': model.warmed_by, 'tee': True},
-                'cbc': {'warmstart': model.warmed_by, 'tee': True},
-                'cplex': {'warmstart': True, 'tee': True},
-                'highs': {'tee': True},
-                'scip': {'tee': True}
+                'gurobi': {'warmstart': self.solver_options.get("warmstart", model.warmed_by), 'tee': self.solver_options.get("tee", True)},
+                'cbc': {'warmstart': self.solver_options.get("warmstart", model.warmed_by), 'tee': self.solver_options.get("tee", True)},
+                'cplex': {'warmstart': self.solver_options.get("warmstart", True), 'tee': self.solver_options.get("tee", True)},
+                'highs': {'tee': self.solver_options.get("tee", True)},
+                'scip': {'tee': self.solver_options.get("tee", True)}
             }
             result = pyo_solver.solve(model, **solver_args[self.solver])
 
