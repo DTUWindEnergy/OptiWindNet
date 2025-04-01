@@ -537,7 +537,7 @@ class MILP(OptiWindNetSolver):
 
         
     def optimize(self, L, A, P, S=None, cables=None, cables_capacity=None, verbose=None, **kwargs):
-        
+        warmstart  = False
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -560,6 +560,7 @@ class MILP(OptiWindNetSolver):
                 if verbose:
                     print('S is not None and the model is warmed up with the available S.')
                 ort.warmup_model(model, S)
+                warmstart = True
 
             orter = ort.cp_model.CpSolver()
             # settings
@@ -569,6 +570,9 @@ class MILP(OptiWindNetSolver):
             orter.parameters.log_search_progress = verbose
             orter.log_callback = print # required to get the log inside the notebook (goes only to console otherwise)
 
+            ##########
+            # result #
+            ##########
             result = orter.solve(model)
 
             if verbose: # print info about the final solution
@@ -587,8 +591,7 @@ class MILP(OptiWindNetSolver):
             ##############
             # Define solver and solver_io mapping for special cases
             solver_mapping = {
-                'highs': 'appsi_highs', 
-                # Add cases where solver name needs to be adapted to call from pyomo solver factory
+                'highs': 'appsi_highs',
                 }
             solver_io_mapping ={
                 'gurobi': 'python',
@@ -614,10 +617,14 @@ class MILP(OptiWindNetSolver):
                 )
             
             # warm start
-            if S is not None:
+            S_updated = True
+            if S is not None and S_updated:
                 if verbose:
                     print('S is not None and the model is warmed up with the available S.')
                 omo.warmup_model(model, S)
+                warmstart = True
+            elif S is not None and not S_updated and verbose:
+                print('S is not updated, so it is not used for warm up.')
 
             pyo_solver.options.update(self.solver_options)
             #pyo_solver.options.update(solver_options_mapping[self.solver])
@@ -625,18 +632,22 @@ class MILP(OptiWindNetSolver):
             if verbose:
                 print(f'Solving "{model.handle}": {{R={len(model.R)}, T={len(model.T)}, κ={model.k.value}}}\n')
 
+
+            # Define solver-specific arguments for solving
+            #######################################################################
+            solver_args = {'tee': self.solver_options.get("tee", True)}
+
+            if warmstart:
+                if self.solver in ['gurobi', 'cbc']:
+                    solver_args['warmstart'] = model.warmed_by
+                if self.solver in ['cplex']:
+                    solver_args['warmstart'] = True
+
             ##########
             # result #
             ##########
-            # Define solver-specific arguments for solving
-            solver_args = {
-                'gurobi': {'warmstart': self.solver_options.get("warmstart", model.warmed_by), 'tee': self.solver_options.get("tee", True)},
-                'cbc': {'warmstart': self.solver_options.get("warmstart", model.warmed_by), 'tee': self.solver_options.get("tee", True)},
-                'cplex': {'warmstart': self.solver_options.get("warmstart", True), 'tee': self.solver_options.get("tee", True)},
-                'highs': {'tee': self.solver_options.get("tee", True)},
-                'scip': {'tee': self.solver_options.get("tee", True)}
-            }
-            result = pyo_solver.solve(model, **solver_args[self.solver])
+            result = pyo_solver.solve(model, **solver_args)
+
 
             S = omo.S_from_solution(model, pyo_solver, result)
 
