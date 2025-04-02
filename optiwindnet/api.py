@@ -31,7 +31,14 @@ from pyomo.contrib.appsi.solvers import Highs
 from pyomo import environ as pyo
 
 from inspect import signature
+# L: location_topology
+# A: available_edges
+# P: planner_embedding
+# S: solution_topology
+# G->F: network_final
 
+# default solver: ew_pre_solver
+# if face error do a simple optimization
 
 class WindFarmNetwork():
     """
@@ -46,16 +53,33 @@ class WindFarmNetwork():
         )
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, cables_capacity=None, border=None, obstacles=[], name='', handle='', L=None, router=None, verbose=True, **kwargs):
-
+                 cables=None, border=None, obstacles=[], name='', handle='', L=None, router=None, verbose=True, **kwargs):
+        # merge cables and cables_capacity: number, list, list of list
         if cables is None and cables_capacity is None:
             raise ValueError("Please provide data for either cables or cables_capacity. If both are provided cables_capacity is overwritten by cables data!")
         
-        if cables is None:
-            cables = [0, cables_capacity, 0]
+        # cables formatting
+        if isinstance(cables, int):
+            cables = [(cables, 1)]
+
+        elif isinstance(cables, (list, tuple)):
+            if len(cables) == 2 and all(isinstance(x, int) for x in cables):
+                cables = [tuple(cables)]
+            elif all(isinstance(c, int) for c in cables):
+                cables = [(c, 1) for c in cables]
+            elif all(isinstance(c, (list, tuple)) and len(c) == 2 for c in cables):
+                cables = [tuple(c) for c in cables]
+            else:
+                raise ValueError(f"Invalid cable format: {cables}")
+
         else:
-            cables_capacity = max(cable[1] for cable in cables)
+            raise ValueError(f"Invalid cable format: {cables}")
+        
+        cables = [(None, *c) for c in cables]
+
+        cables_capacity = max(cable[1] for cable in cables)
         #
+
         if turbines is not None: L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
            
         self.L = L
@@ -132,7 +156,6 @@ class WindFarmNetwork():
         border_sizes = np.array([border.shape[0]] + [obstacle.shape[0] for obstacle in obstacles]) if obstacles else np.array([])
         B = border_sizes.sum() if border_sizes.size > 0 else 0
         obstacle_idxs = np.cumsum(border_sizes) + T
-        print(obstacles)
 
         return L_from_site(
             R=R, T=T, B=B,
@@ -354,7 +377,7 @@ class WindFarmNetwork():
 
     def gradient(self, turbines=None, substations=None, network_tree=None, verbose=None, gradient_type='cost'):
         """
-        Calculates the gradient of the length and cost of cable with respect to the positions of the nodes.
+        Calculate the gradient of the length and cost of cable with respect to the positions of the nodes.
         """
         if gradient_type.lower() not in ['cost', 'length']:
             raise ValueError("gradient_type should be either 'cost' or 'length'")
@@ -453,10 +476,10 @@ class OptiWindNetSolver(ABC):
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, solver='EW', detour=False, verbose=None, **kwargs):
-        if solver not in ['EW']:
+    def __init__(self, solver='Esau_Williams', detour=True, verbose=None, **kwargs):
+        if solver not in ['Esau_Williams']:
             raise ValueError(
-                f"{solver} is not among the supported Heuristic solvers. Choose among: ['EW']."
+                f"{solver} is not among the supported Heuristic solvers. Choose among: ['Esau_Williams']."
             )
 
         # Call the base class initialization
@@ -467,11 +490,12 @@ class Heuristic(OptiWindNetSolver):
 
     def optimize(self, L, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
 
+        print(cables_capacity)
         if verbose is None:
             verbose = self.verbose
 
         # optimizing
-        if self.solver=='EW':
+        if self.solver=='Esau_Williams':
             S = EW_presolver(A, capacity=cables_capacity)
         else:
             pass
@@ -489,7 +513,7 @@ class Heuristic(OptiWindNetSolver):
         return S, G
     
 class MetaHeuristic(OptiWindNetSolver):
-    def __init__(self, solver='HGS', time_limit=3, detour=False, verbose=None, **kwargs):
+    def __init__(self, time_limit, solver='HGS', detour=False, verbose=None, **kwargs):
         # Call the base class initialization
 
         self.verbose = verbose
@@ -554,13 +578,6 @@ class MILP(OptiWindNetSolver):
                         branching=self.model_options.get("branching", True),
                         gates_limit=self.model_options.get("gates_limit", False)
                     )
-            
-            # warm start
-            if S is not None:
-                if verbose:
-                    print('S is not None and the model is warmed up with the available S.')
-                ort.warmup_model(model, S)
-                warmstart = True
 
             orter = ort.cp_model.CpSolver()
             # settings
@@ -612,8 +629,8 @@ class MILP(OptiWindNetSolver):
             model = omo.make_min_length_model(
                 A, cables_capacity,      
                 gateXings_constraint=self.model_options.get("gateXing_constraint", False),
-                branching=self.model_options.get("branching", True),
-                gates_limit=self.model_options.get("gates_limit", False)
+                branching=self.model_options.get("branching", True), # if branching is false 
+                gates_limit=self.model_options.get("gates_limit", False) # if ew_pre_solver does not fit is True (warm start it with metaheauristic)
                 )
             
             # warm start
@@ -621,10 +638,13 @@ class MILP(OptiWindNetSolver):
             if S is not None and S_updated:
                 if verbose:
                     print('S is not None and the model is warmed up with the available S.')
-                omo.warmup_model(model, S)
-                warmstart = True
-            elif S is not None and not S_updated and verbose:
-                print('S is not updated, so it is not used for warm up.')
+            else:
+                if verbose:
+                    print('S is None or not updated. Esau-Williams Heuristic is used for warmstarting the MILP solver.')
+                S = EW_presolver(A, capacity=cables_capacity)
+
+            omo.warmup_model(model, S)
+
 
             pyo_solver.options.update(self.solver_options)
             #pyo_solver.options.update(solver_options_mapping[self.solver])
@@ -637,11 +657,10 @@ class MILP(OptiWindNetSolver):
             #######################################################################
             solver_args = {'tee': self.solver_options.get("tee", True)}
 
-            if warmstart:
-                if self.solver in ['gurobi', 'cbc']:
-                    solver_args['warmstart'] = model.warmed_by
-                if self.solver in ['cplex']:
-                    solver_args['warmstart'] = True
+            if self.solver in ['gurobi', 'cbc']:
+                solver_args['warmstart'] = model.warmed_by
+            if self.solver in ['cplex']:
+                solver_args['warmstart'] = True
 
             ##########
             # result #
