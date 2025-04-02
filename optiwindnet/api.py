@@ -30,6 +30,8 @@ import optiwindnet.MILP.pyomo as omo
 from pyomo.contrib.appsi.solvers import Highs
 from pyomo import environ as pyo
 
+import warnings
+
 from inspect import signature
 # L: location_topology
 # A: available_edges
@@ -37,7 +39,6 @@ from inspect import signature
 # S: solution_topology
 # G->F: network_final
 
-# default solver: ew_pre_solver
 # if face error do a simple optimization
 
 class WindFarmNetwork():
@@ -54,12 +55,19 @@ class WindFarmNetwork():
 
     def __init__(self, turbines=None, substations=None,
                  cables=None, border=None, obstacles=[], name='', handle='', L=None, router=None, verbose=True, **kwargs):
-        # merge cables and cables_capacity: number, list, list of list
-        if cables is None and cables_capacity is None:
-            raise ValueError("Please provide data for either cables or cables_capacity. If both are provided cables_capacity is overwritten by cables data!")
+        
+        if router is None:
+            router = Heuristic(solver='Esau_Williams')
         
         # cables formatting
-        if isinstance(cables, int):
+        if cables is None:
+            warnings.warn(
+                "No cable data provided. Defaulting to cables = [(10, 1)], "
+                "where 10 is the maximum cable capacity and 1 is the cost in €/m."
+            )
+            cables = [(10, 1)]
+
+        elif isinstance(cables, int):
             cables = [(cables, 1)]
 
         elif isinstance(cables, (list, tuple)):
@@ -215,11 +223,6 @@ class WindFarmNetwork():
                         handle=f"{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}")
 
         return cls(L=L, **kwargs)
-    
-    @classmethod
-    def upload_L(cls, L, **kwargs):
-        return cls(L=L, **kwargs)
-
 
     def plot(self, *args, **kwargs):
         WindFarmNetwork._plot_signature_no_G.bind(*args, **kwargs)
@@ -490,7 +493,6 @@ class Heuristic(OptiWindNetSolver):
 
     def optimize(self, L, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
 
-        print(cables_capacity)
         if verbose is None:
             verbose = self.verbose
 
