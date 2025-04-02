@@ -1,5 +1,9 @@
 image: continuumio/miniconda3
 
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+
 # ===== TEST OptiWindNet linux=====
 test_linux:
   stage:
@@ -27,9 +31,12 @@ test_windows:
     - ANMH_old  # Windows runner
 
 # ===== DEPLOY optiwindnet docs=====
-pages:
+make_pages:
+  pages: true
   rules:
-    - if: $CI_COMMIT_BRANCH == 'main'
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - docs/**/*
   stage:  
     deploy
   script:
