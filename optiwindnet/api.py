@@ -61,10 +61,11 @@ class WindFarmNetwork():
         
         # cables formatting
         if cables is None:
-            warnings.warn(
-                "No cable data provided. Defaulting to cables = [(10, 1)], "
-                "where 10 is the maximum cable capacity and 1 is the cost in €/m."
-            )
+            if verbose:
+                warnings.warn(
+                    "No cable data provided. Defaulting to cables = [(10, 1)], "
+                    "where 10 is the maximum cable capacity and 1 is the cost in €/m."
+                )
             cables = [(10, 1)]
 
         elif isinstance(cables, int):
