@@ -11,6 +11,9 @@ test_linux:
   script:
     - apt-get update
     - apt-get -y install gcc g++ cmake
+    - cmake --version
+    - which cmake
+    - /usr/bin/cmake --version
     - pip install --upgrade pip
     - pip install .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
