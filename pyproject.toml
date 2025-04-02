@@ -71,7 +71,7 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["optiwindnet/**"]
+include = ["optiwindnet", "optiwindnet/**/*"]
 # exclude = []
 
 [tool.setuptools.package-data]
