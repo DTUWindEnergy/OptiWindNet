@@ -1,9 +1,5 @@
 image: continuumio/miniconda3
 
-workflow:
-  rules:
-    - if: $CI_COMMIT_BRANCH
-
 # ===== TEST OptiWindNet linux=====
 test_linux:
   stage:
@@ -41,7 +37,7 @@ test_windows:
 make_pages:
   pages: true
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH 
       changes:
         - docs/**/*
   stage:  
@@ -63,7 +59,7 @@ make_pages:
 # ===== DEPLOY publish optiwindnet on pypi=====
 pypi_linux:
   rules:
-    - if: $CI_COMMIT_TAG =~ 'v[0-9]+.[0-9]+.[0-9]+'
+    - if: $CI_COMMIT_TAG =~ /^v\d+.\d+.\d+/
   stage:
     deploy
   script:
