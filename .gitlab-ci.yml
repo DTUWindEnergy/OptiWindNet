@@ -28,7 +28,7 @@ test_windows:
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - conda init powershell
-    - conda install gcc gxx cmake
+    - conda install m2w64-gcc cmake
     - "if (test-path $PROFILE.CurrentUserAllHosts) { & $PROFILE.CurrentUserAllHosts}"
     - conda activate optiwindnet_env
     - pip install -e .[test] --no-deps
