@@ -11,11 +11,8 @@ test_linux:
   script:
     - apt-get update
     - apt-get -y install gcc g++ cmake
-    - cmake --version
-    - which cmake
-    - /usr/bin/cmake --version
     - pip install --upgrade pip
-    - pip install .[test]
+    - CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
     # - python -m pytest
   tags:  # runner platform
@@ -28,6 +25,7 @@ test_windows:
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - conda init powershell
+    - conda config --add channels defaults
     - conda install m2w64-gcc cmake
     - "if (test-path $PROFILE.CurrentUserAllHosts) { & $PROFILE.CurrentUserAllHosts}"
     - conda activate optiwindnet_env
