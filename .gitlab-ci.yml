@@ -50,9 +50,6 @@ make_pages:
   artifacts:
     paths:
     - public
-  only: 
-    - /^test_docdeploy.*/ 
-    - main
   tags: 
     - linux
 
