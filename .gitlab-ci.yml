@@ -28,8 +28,9 @@ test_windows:
     - conda config --add channels defaults
     - conda install m2w64-gcc cmake
     - "if (test-path $PROFILE.CurrentUserAllHosts) { & $PROFILE.CurrentUserAllHosts}"
+    - conda env create --file environment.yml
     - conda activate optiwindnet_env
-    - pip install -e .[test] --no-deps
+    - pip install -e .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
     # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   tags:
