@@ -33,14 +33,13 @@ def assign_cables(G, cables):
 
     Args:
       G: networkx graph with edges having a 'load' attribute (use calcload(G))
-      cables: [(«cross section», «capacity», «cost»), ...] in increasing
-        capacity order (each cable entry must be a tuple) or numpy.ndarray
-        where each row represents one cable type
+      cables: [(«capacity», «cost»), ...] in increasing capacity order (each
+        cable entry must be a tuple) or numpy.ndarray where each row represents
+        one cable type
     '''
 
     Nc = len(cables)
-    dt = np.dtype([('area', float),
-                   ('capacity', int),
+    dt = np.dtype([('capacity', int),
                    ('cost', float)])
     if isinstance(cables, np.ndarray):
         cable_ = nprec.unstructured_to_structured(cables, dtype=dt)
