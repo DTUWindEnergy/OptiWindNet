@@ -1,52 +1,56 @@
 image: continuumio/miniconda3
 
 # ===== TEST OptiWindNet linux=====
-#test_optiwindnet:
-#  stage: 
-#    test
-#  script:
-#  - pip install .[test]
-#  - python -m pytest
-#  tags:
-#  - linux
+test_linux:
+  stage:
+    test
+  script:
+    - pip install .[test]
+    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
+    # - python -m pytest
+  tags:  # runner platform
+    - linux
 
 # ===== TEST OptiWindNet windows=====
-#test_optiwindnet_windows:
-#  stage:
-#    test
-#  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
-#  script:
-#  - conda init powershell
-#  - "if (test-path $PROFILE.CurrentUserAllHosts) { & $PROFILE.CurrentUserAllHosts}"
-#  - conda activate optiwindnet_env
-#  - pip install -e . --no-deps
-#  - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
-#  tags:
-#  - ANMH_old
-#
+test_windows:
+  stage:
+    test
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  script:
+    - conda init powershell
+    - "if (test-path $PROFILE.CurrentUserAllHosts) { & $PROFILE.CurrentUserAllHosts}"
+    - conda activate optiwindnet_env
+    - pip install -e . --no-deps
+    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
+    # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+  tags:
+    - ANMH_old  # Windows runner
+
 # ===== DEPLOY optiwindnet docs=====
 pages:
+  if: $CI_COMMIT_BRANCH == 'main'
   stage:  
     deploy
-  script:  
-  - apt-get update
-  - apt-get -y install make pandoc graphviz
-  - pip install --upgrade pip ipython ipykernel sphinx nbsphinx autoapi sphinx_rtd_theme sphinx-autoapi furo
-  - ipython kernel install --name "python3" --user
-  - pip install .[test,docs] --upgrade --no-deps
-  - cd docs; make html
-  - cd ../; mv docs/build/html public/
+  script:
+    - apt-get update
+    - apt-get -y install make pandoc graphviz
+    - pip install --upgrade pip ipython ipykernel sphinx nbsphinx autoapi sphinx_rtd_theme sphinx-autoapi furo
+    - ipython kernel install --name "python3" --user
+    - pip install .[test,docs] --upgrade --no-deps
+    - cd docs; make html
+    - cd ../; mv docs/build/html public/
   artifacts:
     paths:
     - public
   only: 
-  - /^test_docdeploy.*/ 
-  - main
+    - /^test_docdeploy.*/ 
+    - main
   tags: 
-  - linux
+    - linux
 
 # ===== DEPLOY publish optiwindnet on pypi=====
 pypi_linux:
+  if: $CI_COMMIT_TAG =~ 'v[0-9]+.[0-9]+.[0-9]+'
   stage:
     deploy
   only:
@@ -62,4 +66,4 @@ pypi_linux:
     - python3 -m build
     - twine upload dist/* -u $TWINE_USERNAME -p $TWINE_PASSWORD
   tags:
-  - linux
+    - linux
