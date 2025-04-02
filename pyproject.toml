@@ -67,8 +67,12 @@ docs = [
         ]
 
 [tool.setuptools]
-packages = ["optiwindnet"]
 include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["optiwindnet/**"]
+# exclude = []
 
 [tool.setuptools.package-data]
 optiwindnet = ['data/*']

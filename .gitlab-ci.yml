@@ -67,12 +67,7 @@ pypi_linux:
   stage:
     deploy
   script:
-    - apt-get update
-    - apt-get -y install gcc g++ cmake
-    - pip install --upgrade pip
-    - pip install -e . --upgrade
-    - pip install --upgrade build
-    - pip install --upgrade twine packaging
+    - pip install --upgrade pip build twine packaging
     - python3 -m build
     - twine upload dist/* -u $TWINE_USERNAME -p $TWINE_PASSWORD
   tags:
