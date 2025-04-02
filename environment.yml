@@ -19,6 +19,7 @@ dependencies:
   - utm ~=0.7.0
   # required by osmium
   - requests ~=2.32.3
+  - pip
   - pip:
       - hybgensea
       - ortools ~=9.12.4544
