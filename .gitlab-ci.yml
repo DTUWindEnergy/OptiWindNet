@@ -8,7 +8,7 @@ test_linux:
     - apt-get update
     - apt-get -y install gcc g++ cmake
     - pip install --upgrade pip
-    - CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install .[test]
+    - pip install .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
     # - python -m pytest
   tags:  # runner platform
@@ -24,7 +24,6 @@ test_windows:
     - conda config --add channels defaults
     - conda install m2w64-gcc cmake
     - "if (test-path $PROFILE.CurrentUserAllHosts) { & $PROFILE.CurrentUserAllHosts}"
-    - $env:CMAKE_POLICY_VERSION_MINIMUM="3.5"
     - conda env create --file environment.yml
     - conda activate optiwindnet_env
     - pip install -e .[test]
