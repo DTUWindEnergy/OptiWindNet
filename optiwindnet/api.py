@@ -30,8 +30,6 @@ import optiwindnet.MILP.pyomo as omo
 from pyomo.contrib.appsi.solvers import Highs
 from pyomo import environ as pyo
 
-import warnings
-
 from inspect import signature
 # L: location_topology
 # A: available_edges
@@ -62,7 +60,7 @@ class WindFarmNetwork():
         # cables formatting
         if cables is None:
             if verbose:
-                warnings.warn(
+               print("WARNING: "
                     "No cable data provided. Defaulting to cables = [(10, 1)], "
                     "where 10 is the maximum cable capacity and 1 is the cost in €/m."
                 )
@@ -102,6 +100,7 @@ class WindFarmNetwork():
 
         # Flags to track update status (initialized as updated)
         self._S = None
+        self._G_tentative = None
         self.G = None
         self._A_updated = True
         self._P_updated = True
@@ -229,25 +228,42 @@ class WindFarmNetwork():
         WindFarmNetwork._plot_signature_no_G.bind(*args, **kwargs)
         return gplot(self.G, *args, **kwargs)
     
-    def plot_L(self, **kwargs):
+    def plot_location(self, **kwargs):
         """Plots the wind farm network graph."""
         return gplot(self.L, **kwargs)
     
-    def plot_A(self, **kwargs):
+    def plot_available_links(self, **kwargs):
         """Plots the wind farm network graph."""
         return gplot(self.A, **kwargs)
+    
+    def plot_navigation_mesh(self, **kwargs):
+        """Plots the wind farm network graph."""
+        return pplot(self.P, self.A, **kwargs)
+    
+    def plot_selected_links(self, **kwargs):
+        """Plots the wind farm network graph."""
+        return gplot(self._G_tentative, **kwargs)
     
     def svgplot(self, **kwargs):
         """Plots the wind farm network graph."""
         return svgplot(self.G, **kwargs)
     
-    def svgplot_L(self, **kwargs):
+    def svgplot_location(self, **kwargs):
         """Plots the wind farm network graph."""
         return svgplot(self.L, **kwargs)
     
-    def svgplot_A(self, **kwargs):
+    def svgplot_available_links(self, **kwargs):
         """Plots the wind farm network graph."""
         return svgplot(self.A, **kwargs)
+    
+    def svgplot_navigation_mesh(self, **kwargs):
+        """Plots the wind farm network graph."""
+        return svgpplot(self.P, self.A, **kwargs)
+
+    
+    def svgplot_selected_links(self, **kwargs):
+        """Plots the wind farm network graph."""
+        return svgplot(self._G_tentative, **kwargs)
     
     def create_detours(self):
         """
@@ -257,10 +273,6 @@ class WindFarmNetwork():
         pathfinder = PathFinder(self.G, planar=self.P, A=self.A)
         self.G = pathfinder.create_detours()
         assign_cables(self.G, self.cables)
-
-    def pplot(self, **kwargs):
-        """Plots the wind farm network graph."""
-        return pplot(self.P, self.A, **kwargs)
 
 
     def get_network(self):
@@ -454,9 +466,9 @@ class WindFarmNetwork():
         self._P_updated = True
         self._S_updated = True
         self._G_updated = True
-        S, G = router(L=self.L, A=self.A, P=self.P, S=self.S, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
-        
+        S, G_tentative, G = router(L=self.L, A=self.A, P=self.P, S=self.S, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
         self.S = S
+        self._G_tentative = G_tentative
         self.G = G
 
         network_array = self.get_network_array()
@@ -513,7 +525,7 @@ class Heuristic(OptiWindNetSolver):
         assign_cables(G, cables)
 
 
-        return S, G
+        return S, G_tentative, G
     
 class MetaHeuristic(OptiWindNetSolver):
     def __init__(self, time_limit, solver='HGS', detour=False, verbose=None, **kwargs):
@@ -545,7 +557,7 @@ class MetaHeuristic(OptiWindNetSolver):
 
         assign_cables(G, cables)
         
-        return S, G
+        return S, G_tentative, G
 
 class MILP(OptiWindNetSolver):
     def __init__(self, solver='ortools', solver_options=None, model_options=None, detour=False, verbose=None, **kwargs):
@@ -686,7 +698,7 @@ class MILP(OptiWindNetSolver):
             G = G_tentative
         assign_cables(G, cables)
         
-        return S, G
+        return S, G_tentative, G
 
 
 
