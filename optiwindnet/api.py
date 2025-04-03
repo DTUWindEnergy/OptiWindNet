@@ -83,7 +83,7 @@ class WindFarmNetwork():
         if turbines is not None: L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
            
         self.L = L
-
+        print(L.graph['obstacles'])
         # Compute the planar embedding
         self._P, self._A = make_planar_embedding(L)
         self.border = border
@@ -151,58 +151,45 @@ class WindFarmNetwork():
         self._G = value
     
     def _from_coordinates(self, turbines, substations, border, obstacles, name, handle):
-        """Handles input format from coordinates."""
+        """Constructs a site graph from coordinate-based inputs."""
+
+        from shapely.geometry import MultiPoint
+
         R = substations.shape[0]
         T = turbines.shape[0]
-        if border is None and obstacles is None:
-            B = 0
 
-            return L_from_site(
-                R=R, T=T, B=B,
-                name=name,
-                handle=handle,
-                VertexC=np.vstack((turbines, substations)),
-            )
 
-        elif border is None:
-            border_sizes = np.array([obstacle.shape[0] for obstacle in obstacles])
-            B = border_sizes.sum() if border_sizes.size > 0 else 0
-            obstacle_idxs = np.cumsum(border_sizes) + T
+        if obstacles is None:
+            obstacles = []
 
-            return L_from_site(
-                R=R, T=T, B=B,
-                obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)],
-                name='Example Location',
-                handle='example',
-                VertexC=np.vstack((turbines,  *obstacles, substations)),
-            )
-        
-        elif obstacles is None:
-            border_sizes = np.array([border.shape[0]])
-            B = border_sizes.sum()
+        if border is None:
+            all_points = [turbines, substations]
+            if obstacles is not None:
+                print(obstacles)
+                all_points.extend(obstacles)
+            hull = MultiPoint(all_points).convex_hull
+            border = np.array(hull.exterior.coords[:-1])  # drop closing point
 
-            return L_from_site(
-                R=R, T=T, B=B,
-                border=np.arange(T, T + border.shape[0]),
-                name='Example Location',
-                handle='example',
-                VertexC=np.vstack((turbines, border, substations)),
-            )
+        border_sizes = np.array([border.shape[0]] + [obs.shape[0] for obs in obstacles])
+        B = border_sizes.sum()
+        obstacle_start_idxs = np.cumsum(border_sizes) + T
 
-        else:
-            border_sizes = np.array([border.shape[0]] +
-                                    [obstacle.shape[0] for obstacle in obstacles])
-            B = border_sizes.sum()
-            obstacle_idxs = np.cumsum(border_sizes) + T
+        border_range = np.arange(T, T + border.shape[0])
+        obstacle_ranges = [np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)]
 
-            return L_from_site(
-                R=R, T=T, B=B,
-                border=np.arange(T, T + border.shape[0]),
-                obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)],
-                name='Example Location',
-                handle='example',
-                VertexC=np.vstack((turbines, border, *obstacles, substations)),
-            )
+        vertex_coords = np.vstack((turbines, border, *obstacles, substations))
+
+        return L_from_site(
+            R=R,
+            T=T,
+            B=B,
+            border=border_range,
+            obstacles=obstacle_ranges,
+            name=name,
+            handle=handle,
+            VertexC=vertex_coords
+        )
+
         
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
