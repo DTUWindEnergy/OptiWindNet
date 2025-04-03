@@ -31,11 +31,6 @@ from pyomo.contrib.appsi.solvers import Highs
 from pyomo import environ as pyo
 
 from inspect import signature
-# L: location_topology
-# A: available_edges
-# P: planner_embedding
-# S: solution_topology
-# G->F: network_final
 
 # if face error do a simple optimization
 
@@ -52,7 +47,7 @@ class WindFarmNetwork():
         )
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, border=None, obstacles=[], name='', handle='', L=None, router=None, verbose=True, **kwargs):
+                 cables=None, border=None, obstacles=None, name='', handle='', L=None, router=None, verbose=True, **kwargs):
         
         if router is None:
             router = Heuristic(solver='Esau_Williams')
@@ -81,10 +76,8 @@ class WindFarmNetwork():
 
         else:
             raise ValueError(f"Invalid cable format: {cables}")
-        
-        cables = [(None, *c) for c in cables]
 
-        cables_capacity = max(cable[1] for cable in cables)
+        cables_capacity = max(cable[0] for cable in cables)
         #
 
         if turbines is not None: L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
@@ -161,19 +154,56 @@ class WindFarmNetwork():
         """Handles input format from coordinates."""
         R = substations.shape[0]
         T = turbines.shape[0]
-        border_sizes = np.array([border.shape[0]] + [obstacle.shape[0] for obstacle in obstacles]) if obstacles else np.array([])
-        B = border_sizes.sum() if border_sizes.size > 0 else 0
-        obstacle_idxs = np.cumsum(border_sizes) + T
+        if border is None and obstacles is None:
+            B = 0
 
-        return L_from_site(
-            R=R, T=T, B=B,
-            border=np.arange(T, T + border.shape[0]) if border is not None and border.shape[0] > 0 else np.array([]),
-            obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)] if obstacles else [],
-            name=name,
-            handle=handle,
-            VertexC=np.vstack((turbines, border, *obstacles, substations)),
-        )
-    
+            return L_from_site(
+                R=R, T=T, B=B,
+                name=name,
+                handle=handle,
+                VertexC=np.vstack((turbines, substations)),
+            )
+
+        elif border is None:
+            border_sizes = np.array([obstacle.shape[0] for obstacle in obstacles])
+            B = border_sizes.sum() if border_sizes.size > 0 else 0
+            obstacle_idxs = np.cumsum(border_sizes) + T
+
+            return L_from_site(
+                R=R, T=T, B=B,
+                obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)],
+                name='Example Location',
+                handle='example',
+                VertexC=np.vstack((turbines,  *obstacles, substations)),
+            )
+        
+        elif obstacles is None:
+            border_sizes = np.array([border.shape[0]])
+            B = border_sizes.sum()
+
+            return L_from_site(
+                R=R, T=T, B=B,
+                border=np.arange(T, T + border.shape[0]),
+                name='Example Location',
+                handle='example',
+                VertexC=np.vstack((turbines, border, substations)),
+            )
+
+        else:
+            border_sizes = np.array([border.shape[0]] +
+                                    [obstacle.shape[0] for obstacle in obstacles])
+            B = border_sizes.sum()
+            obstacle_idxs = np.cumsum(border_sizes) + T
+
+            return L_from_site(
+                R=R, T=T, B=B,
+                border=np.arange(T, T + border.shape[0]),
+                obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)],
+                name='Example Location',
+                handle='example',
+                VertexC=np.vstack((turbines, border, *obstacles, substations)),
+            )
+        
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
         """Creates a WindFarmNetwork instance from a YAML file."""
@@ -244,26 +274,26 @@ class WindFarmNetwork():
         """Plots the wind farm network graph."""
         return gplot(self._G_tentative, **kwargs)
     
-    def svgplot(self, **kwargs):
-        """Plots the wind farm network graph."""
-        return svgplot(self.G, **kwargs)
+    # def svgplot(self, **kwargs):
+    #     """Plots the wind farm network graph."""
+    #     return svgplot(self.G, **kwargs)
     
-    def svgplot_location(self, **kwargs):
-        """Plots the wind farm network graph."""
-        return svgplot(self.L, **kwargs)
+    # def svgplot_location(self, **kwargs):
+    #     """Plots the wind farm network graph."""
+    #     return svgplot(self.L, **kwargs)
     
-    def svgplot_available_links(self, **kwargs):
-        """Plots the wind farm network graph."""
-        return svgplot(self.A, **kwargs)
+    # def svgplot_available_links(self, **kwargs):
+    #     """Plots the wind farm network graph."""
+    #     return svgplot(self.A, **kwargs)
     
-    def svgplot_navigation_mesh(self, **kwargs):
-        """Plots the wind farm network graph."""
-        return svgpplot(self.P, self.A, **kwargs)
+    # def svgplot_navigation_mesh(self, **kwargs):
+    #     """Plots the wind farm network graph."""
+    #     return svgpplot(self.P, self.A, **kwargs)
 
     
-    def svgplot_selected_links(self, **kwargs):
-        """Plots the wind farm network graph."""
-        return svgplot(self._G_tentative, **kwargs)
+    # def svgplot_selected_links(self, **kwargs):
+    #     """Plots the wind farm network graph."""
+    #     return svgplot(self._G_tentative, **kwargs)
     
     def create_detours(self):
         """
@@ -521,6 +551,8 @@ class Heuristic(OptiWindNetSolver):
             G = PathFinder(G_tentative, planar=P, A=A).create_detours()
         else:
             G = G_tentative
+        
+        print('cables:', cables)
 
         assign_cables(G, cables)
 
