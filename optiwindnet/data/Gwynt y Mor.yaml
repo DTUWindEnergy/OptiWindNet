@@ -1,5 +1,7 @@
 # https://kis-orca.org/wp-content/uploads/2020/12/Chart-7-Gwynt-y-Mor.pdf
 
+HANDLE: gwynt
+
 OPERATOR: RWE Renewables
 
 TURBINE:
@@ -196,4 +198,4 @@ TURBINES: |-
   N2M 53°25.398'N 03°37.253'W
   N3L 53°25.402'N 03°36.605'W
   N4L 53°25.406'N 03°35.957'W
-  P1M 53°25.089'N 03°36.924'W"
+  P1M 53°25.089'N 03°36.924'W

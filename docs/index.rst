@@ -8,8 +8,14 @@ The package offers a framework to obtain optimal or near-optimal cable routes fo
 
 The tool is distributed as an open-source Python package that is suitable for use within an interactive Python session (e.g. Jupyter notebook). Alternatively, OptiWindNet's API can be invoked directly from another application.
 
-Source code repository and issue tracker:
+Source code repository:
     https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet
+
+Issue tracker:
+    https://github.com/DTUWindEnergy/OptiWindNet/issues
+
+Jupyter notebooks used in this manual:
+    https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks
 
 License:
     MIT_
@@ -97,6 +103,12 @@ OptiWindNet 1.0.0: An open-source wind farm electrical network optimization tool
 	:caption: Features
 
 	features
+
+    .. toctree::
+	:maxdepth: 2
+	:caption: Paper
+
+	paper
 
     .. toctree::
         :maxdepth: 2
