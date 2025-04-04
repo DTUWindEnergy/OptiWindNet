@@ -49,6 +49,7 @@ class WindFarmNetwork():
     def __init__(self, turbines=None, substations=None,
                  cables=None, border=None, obstacles=None, name='', handle='', L=None, router=None, verbose=True, **kwargs):
         
+        self.verbose = verbose
         if router is None:
             router = Heuristic(solver='Esau_Williams')
         
@@ -83,7 +84,6 @@ class WindFarmNetwork():
         if turbines is not None: L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
            
         self.L = L
-        print(L.graph['obstacles'])
         # Compute the planar embedding
         self._P, self._A = make_planar_embedding(L)
         self.border = border
@@ -100,8 +100,6 @@ class WindFarmNetwork():
         self._S_updated = False
         self._G_updated = False
         self.cables_capacity = cables_capacity
-
-        self.verbose = verbose
 
     def _update_planar_embedding(self):
         """Updates P and A if they are stale."""
@@ -153,23 +151,47 @@ class WindFarmNetwork():
     def _from_coordinates(self, turbines, substations, border, obstacles, name, handle):
         """Constructs a site graph from coordinate-based inputs."""
 
-        from shapely.geometry import MultiPoint
+        from shapely.geometry import Polygon, LinearRing, MultiPoint
 
         R = substations.shape[0]
         T = turbines.shape[0]
 
+        if border is None:
+            if obstacles is None:
+                vertex_coords = np.vstack((turbines, substations))
+                return L_from_site(
+                    R=R,
+                    T=T,
+                    B=0,
+                    name=name,
+                    handle=handle,
+                    VertexC=vertex_coords
+                )
+
+            if self.verbose:
+                print('WARNING: Obstacles are given while no border is defined. The tool is creating borders based on turbine and obstacle coordinates')
+            all_points = [turbines, substations] + obstacles  # include obstacles even if empty
+            all_points_flat = np.vstack(all_points)  # ensure it's shape (N, 2)
+            hull = MultiPoint([tuple(p) for p in all_points_flat]).convex_hull
+            border = np.array(hull.exterior.coords[:-1])  # drop closing point
 
         if obstacles is None:
             obstacles = []
-
-        if border is None:
-            all_points = [turbines, substations]
-            if obstacles is not None:
-                print(obstacles)
-                all_points.extend(obstacles)
-            hull = MultiPoint(all_points).convex_hull
-            border = np.array(hull.exterior.coords[:-1])  # drop closing point
-
+        else:
+            # Convert current border to polygon
+            border_polygon = Polygon(border)
+            
+            # Check if any obstacle is not fully within the border
+            any_outside = any(not border_polygon.contains(Polygon(obs)) for obs in obstacles)
+            
+            if any_outside:
+                if self.verbose:
+                    print('WARNING: Some part of the obstacles is outside the defined border, so borders are extended to include whole part of obstacles.')
+                border_points = [border] + obstacles  # include obstacles even if empty
+                border_points_flat = np.vstack(border_points)  # ensure it's shape (N, 2)
+                hull = MultiPoint([tuple(p) for p in border_points_flat]).convex_hull
+                border = np.array(hull.exterior.coords[:-1])  # drop closing point
+            
         border_sizes = np.array([border.shape[0]] + [obs.shape[0] for obs in obstacles])
         B = border_sizes.sum()
         obstacle_start_idxs = np.cumsum(border_sizes) + T
@@ -189,7 +211,7 @@ class WindFarmNetwork():
             handle=handle,
             VertexC=vertex_coords
         )
-
+    
         
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
@@ -538,8 +560,6 @@ class Heuristic(OptiWindNetSolver):
             G = PathFinder(G_tentative, planar=P, A=A).create_detours()
         else:
             G = G_tentative
-        
-        print('cables:', cables)
 
         assign_cables(G, cables)
 
