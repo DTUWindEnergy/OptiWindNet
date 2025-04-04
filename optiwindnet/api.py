@@ -178,31 +178,41 @@ class WindFarmNetwork():
         if obstacles is None:
             obstacles = []
         else:
-            border_polygon = Polygon(border)
 
-            # Clip each obstacle to the part that lies inside the border
-            clipped_obstacles = []
+            # Start with the original border polygon
+            border_polygon = Polygon(border)
+            remaining_obstacles = []
+            border_subtraction_verbose = True
+
             for obs in obstacles:
                 obs_poly = Polygon(obs)
 
+                # If the obstacle is completely within the border (and not touching exterior), keep it
                 if border_polygon.contains(obs_poly):
-                    clipped_obstacles.append(obs)
-                    continue
+                    remaining_obstacles.append(obs)
+                else:
+                    # Subtract this obstacle from the border
+                    new_border = border_polygon.difference(obs_poly)
 
-                clipped = border_polygon.intersection(obs_poly)
+                    if new_border.is_empty:
+                        raise ValueError("Obstacle subtraction resulted in an empty border — check your geometry.")
 
-                if clipped.is_empty:
-                    continue
+                    if self.verbose and border_subtraction_verbose:
+                        print("WARNING: At least one obstacle intersects/touches the border. The border is redefined to exclude those obstacles.")
+                        border_subtraction_verbose = False
 
-                if self.verbose:
-                    print("Some part of obstacles are beyond the borders. The obstacles are clipped.")
+                    # If the subtraction results in multiple pieces (MultiPolygon), keep the largest one
+                    if isinstance(new_border, MultiPolygon):
+                        border_polygon = max(new_border.geoms, key=lambda g: g.area)
+                    else:
+                        border_polygon = new_border
 
-                # Handle Polygon or MultiPolygon results
-                geoms = clipped.geoms if isinstance(clipped, MultiPolygon) else [clipped]
-                clipped_obstacles.extend(np.array(g.exterior.coords[:-1]) for g in geoms)
+            # Update the border as a NumPy array of exterior coordinates
+            border = np.array(border_polygon.exterior.coords[:-1])
 
-            obstacles = clipped_obstacles
-            
+            # Optionally update obstacles (only those fully contained were kept)
+            obstacles = remaining_obstacles
+                        
         border_sizes = np.array([border.shape[0]] + [obs.shape[0] for obs in obstacles])
         B = border_sizes.sum()
         obstacle_start_idxs = np.cumsum(border_sizes) + T
