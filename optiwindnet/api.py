@@ -152,6 +152,8 @@ class WindFarmNetwork():
         """Constructs a site graph from coordinate-based inputs."""
 
         from shapely.geometry import Polygon, LinearRing, MultiPoint, MultiPolygon
+        
+        border_subtraction_verbose = True
 
         R = substations.shape[0]
         T = turbines.shape[0]
@@ -170,10 +172,12 @@ class WindFarmNetwork():
 
             if self.verbose:
                 print('WARNING: Obstacles are given while no border is defined. The tool is creating borders based on turbine and obstacle coordinates')
-            all_points = [turbines, substations] + obstacles  # include obstacles even if empty
-            all_points_flat = np.vstack(all_points)  # ensure it's shape (N, 2)
+            
+            all_points = [turbines, substations]
+            all_points_flat = np.vstack(all_points)
             hull = MultiPoint([tuple(p) for p in all_points_flat]).convex_hull
             border = np.array(hull.exterior.coords[:-1])  # drop closing point
+            border_subtraction_verbose = False
 
         if obstacles is None:
             obstacles = []
@@ -182,7 +186,6 @@ class WindFarmNetwork():
             # Start with the original border polygon
             border_polygon = Polygon(border)
             remaining_obstacles = []
-            border_subtraction_verbose = True
 
             for obs in obstacles:
                 obs_poly = Polygon(obs)
@@ -210,7 +213,7 @@ class WindFarmNetwork():
             # Update the border as a NumPy array of exterior coordinates
             border = np.array(border_polygon.exterior.coords[:-1])
 
-            # Optionally update obstacles (only those fully contained were kept)
+            # Update obstacles (only those fully contained are kept)
             obstacles = remaining_obstacles
                         
         border_sizes = np.array([border.shape[0]] + [obs.shape[0] for obs in obstacles])
