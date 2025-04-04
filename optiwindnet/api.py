@@ -151,7 +151,7 @@ class WindFarmNetwork():
     def _from_coordinates(self, turbines, substations, border, obstacles, name, handle):
         """Constructs a site graph from coordinate-based inputs."""
 
-        from shapely.geometry import Polygon, LinearRing, MultiPoint
+        from shapely.geometry import Polygon, LinearRing, MultiPoint, MultiPolygon
 
         R = substations.shape[0]
         T = turbines.shape[0]
@@ -178,19 +178,30 @@ class WindFarmNetwork():
         if obstacles is None:
             obstacles = []
         else:
-            # Convert current border to polygon
             border_polygon = Polygon(border)
-            
-            # Check if any obstacle is not fully within the border
-            any_outside = any(not border_polygon.contains(Polygon(obs)) for obs in obstacles)
-            
-            if any_outside:
+
+            # Clip each obstacle to the part that lies inside the border
+            clipped_obstacles = []
+            for obs in obstacles:
+                obs_poly = Polygon(obs)
+
+                if border_polygon.contains(obs_poly):
+                    clipped_obstacles.append(obs)
+                    continue
+
+                clipped = border_polygon.intersection(obs_poly)
+
+                if clipped.is_empty:
+                    continue
+
                 if self.verbose:
-                    print('WARNING: Some part of the obstacles is outside the defined border, so borders are extended to include whole part of obstacles.')
-                border_points = [border] + obstacles  # include obstacles even if empty
-                border_points_flat = np.vstack(border_points)  # ensure it's shape (N, 2)
-                hull = MultiPoint([tuple(p) for p in border_points_flat]).convex_hull
-                border = np.array(hull.exterior.coords[:-1])  # drop closing point
+                    print("Some part of obstacles are beyond the borders. The obstacles are clipped.")
+
+                # Handle Polygon or MultiPolygon results
+                geoms = clipped.geoms if isinstance(clipped, MultiPolygon) else [clipped]
+                clipped_obstacles.extend(np.array(g.exterior.coords[:-1]) for g in geoms)
+
+            obstacles = clipped_obstacles
             
         border_sizes = np.array([border.shape[0]] + [obs.shape[0] for obs in obstacles])
         B = border_sizes.sum()
