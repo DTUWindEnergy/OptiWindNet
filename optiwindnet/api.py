@@ -18,7 +18,7 @@ from optiwindnet.importer import load_repository
 from optiwindnet.interarraylib import G_from_S
 
 # Heuristic
-from optiwindnet.heuristics import EW_presolver
+from optiwindnet.heuristics import EW_presolver, ClassicEW, CPEW, NBEW, OBEW
 # Metha-Heuristic
 from optiwindnet.baselines.hgs import iterative_hgs_cvrp
 
