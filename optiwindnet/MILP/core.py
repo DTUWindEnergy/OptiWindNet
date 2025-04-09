@@ -2,16 +2,31 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import abc
+from typing import Any
 import networkx as nx
 import logging
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 
-
 logger = logging.getLogger(__name__)
-info = logger.info
+error, info = logger.error, logger.info
 
+
+class Solver(abc.ABC):
+
+    @abc.abstractmethod
+    def set_problem(self, P, A, capacity, **kwargs):
+        pass
+
+    @abc.abstractmethod
+    def solve(self, timelimit: int, mipgap: float,
+              options: dict[str, Any] = {}, verbose: bool = False) -> tuple:
+        pass
+
+    @abc.abstractmethod
+    def get_solution(self) -> nx.Graph:
+        pass
 
 class PoolHandler(abc.ABC):
     num_solutions: int
@@ -25,6 +40,17 @@ class PoolHandler(abc.ABC):
     def S_from_pool(self) -> nx.Graph:
         'Build S from the pool solution at the last requested position'
         pass
+
+
+def summarize_result(result):
+    objective = result['Problem'][0]['Upper bound']
+    bound = result['Problem'][0]['Lower bound']
+    relgap = 1. - bound/objective
+    termination = result['Solver'][0]['Termination condition'].name
+    info('objective: %f, bound: %f, gap: %.4f, termination: %s',
+         objective, bound, relgap, termination)
+    return objective, bound, relgap, termination  # runtime, num_solutions
+
 
 def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
         ) -> nx.Graph:
