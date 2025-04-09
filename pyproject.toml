@@ -20,6 +20,7 @@ license = "MIT"
 requires-python = ">= 3.10"
 dependencies = [
     'bidict~=0.23.1',
+    'condeltri~=0.0.2',
     'darkdetect~=0.8.0',
     'hybgensea~=0.0.1',
     'matplotlib~=3.10.1',
@@ -31,7 +32,6 @@ dependencies = [
     'pony~=0.7.18',
     'py~=1.11.0',
     'Pyomo~=6.9.1',
-    'PythonCDT @ git+https://github.com/mdealencar/PythonCDT.git@dist/publish-to-PyPI-test',
     'PyYAML~=6.0.2',
     'scipy~=1.15.2',
     'shapely~=2.0.7',
