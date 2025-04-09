@@ -70,7 +70,7 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
 
     m.k = pyo.Param(domain=pyo.PositiveIntegers,
                     name='capacity', default=capacity)
-    m.weight = pyo.Param(
+    m.weight_ = pyo.Param(
         m.linkset,
         domain=pyo.PositiveReals,
         name='link_weight',
@@ -205,7 +205,7 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
     #############
 
     m.length = pyo.Objective(
-        expr=lambda m: pyo.sum_product(m.weight, m.link_),
+        expr=lambda m: pyo.sum_product(m.weight_, m.link_),
         sense=pyo.minimize,
     )
 

@@ -131,7 +131,7 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
     ##############
 
     k = capacity
-    weight = (2*tuple(A[u][v]['length'] for u, v in E)
+    weight_ = (2*tuple(A[u][v]['length'] for u, v in E)
               + tuple(d2roots[t, r] for t, r in stars))
 
     #############
@@ -212,7 +212,7 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
     # Objective #
     #############
 
-    m.minimize(cp_model.LinearExpr.WeightedSum(tuple(link_.values()), weight))
+    m.minimize(cp_model.LinearExpr.WeightedSum(tuple(link_.values()), weight_))
 
     # save data structure as model attributes
     m.link_, m.linkset, m.flow_, m.R, m.T, m.k = link_, linkset, flow_, R, T, k
