@@ -21,7 +21,7 @@ dependencies:
   - requests ~=2.32.3
   - pip
   - pip:
-      - condeltri ~=0.0.1
+      - condeltri ~=0.0.2
       - hybgensea ~=0.0.1
       - ortools ~=9.12.4544
       - osmium ~=4.0.2

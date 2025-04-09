@@ -20,7 +20,7 @@ license = "MIT"
 requires-python = ">= 3.10"
 dependencies = [
     'bidict~=0.23.1',
-    'condeltri~=0.0.1',
+    'condeltri~=0.0.2',
     'darkdetect~=0.8.0',
     'hybgensea~=0.0.1',
     'matplotlib~=3.10.1',
