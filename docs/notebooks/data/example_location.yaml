@@ -22,9 +22,6 @@ EXTENTS: [
 ]
 
 # obstacles is optional and must be a list of polygons (even if 1 obstacle)
-#   - obstacles must be strictly inside the extents polygon
-#   - the parser will not complain about borders of obstacles overlapping
-#     borders of extents, but optiwindnet will behave unpredictably
 OBSTACLES: [
   [  # first obstacle
     [1540, 920],

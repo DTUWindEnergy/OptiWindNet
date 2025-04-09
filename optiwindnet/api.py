@@ -6,7 +6,6 @@ import yaml
 import yaml_include
 from itertools import pairwise
 
-
 # optiwindnet
 from optiwindnet.svg import svgplot
 from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
@@ -18,10 +17,10 @@ from optiwindnet.importer import load_repository
 from optiwindnet.interarraylib import G_from_S
 
 # Heuristic
-from optiwindnet.heuristics import EW_presolver, ClassicEW, CPEW, NBEW, OBEW
+from optiwindnet.heuristics import EW_presolver
+
 # Metha-Heuristic
 from optiwindnet.baselines.hgs import iterative_hgs_cvrp
-
 
 # MILP
 from optiwindnet.MILP import ortools as ort
@@ -30,21 +29,15 @@ import optiwindnet.MILP.pyomo as omo
 from pyomo.contrib.appsi.solvers import Highs
 from pyomo import environ as pyo
 
-from inspect import signature
-
-# if face error do a simple optimization
+#################################################
+# To Do: if face error do a simple optimization #
+#################################################
 
 class WindFarmNetwork():
     """
     Represents a wind farm electrical network, capable of processing 
     layout data from different formats and computing network properties.
     """
-    _plot_signature = signature(gplot)
-    _plot_signature_no_G = _plot_signature.replace(
-        parameters=[
-            p for name, p in _plot_signature.parameters.items() if name != 'G'
-        ]
-        )
 
     def __init__(self, turbines=None, substations=None,
                  cables=None, border=None, obstacles=None, name='', handle='', L=None, router=None, verbose=True, **kwargs):
@@ -65,12 +58,11 @@ class WindFarmNetwork():
         elif isinstance(cables, int):
             cables = [(cables, 1)]
 
-        elif isinstance(cables, (list, tuple)):
-            if len(cables) == 2 and all(isinstance(x, int) for x in cables):
-                cables = [tuple(cables)]
-            elif all(isinstance(c, int) for c in cables):
+        elif isinstance(cables, (list, tuple, np.ndarray)):
+            if all(isinstance(c, int) for c in cables):
                 cables = [(c, 1) for c in cables]
-            elif all(isinstance(c, (list, tuple)) and len(c) == 2 for c in cables):
+            elif all((isinstance(c, (list, tuple, np.ndarray)) and len(c) == 2) for c in cables):
+
                 cables = [tuple(c) for c in cables]
             else:
                 raise ValueError(f"Invalid cable format: {cables}")
@@ -288,7 +280,6 @@ class WindFarmNetwork():
         return cls(L=L, **kwargs)
 
     def plot(self, *args, **kwargs):
-        WindFarmNetwork._plot_signature_no_G.bind(*args, **kwargs)
         return gplot(self.G, *args, **kwargs)
     
     def plot_location(self, **kwargs):
@@ -306,37 +297,6 @@ class WindFarmNetwork():
     def plot_selected_links(self, **kwargs):
         """Plots the wind farm network graph."""
         return gplot(self._G_tentative, **kwargs)
-    
-    # def svgplot(self, **kwargs):
-    #     """Plots the wind farm network graph."""
-    #     return svgplot(self.G, **kwargs)
-    
-    # def svgplot_location(self, **kwargs):
-    #     """Plots the wind farm network graph."""
-    #     return svgplot(self.L, **kwargs)
-    
-    # def svgplot_available_links(self, **kwargs):
-    #     """Plots the wind farm network graph."""
-    #     return svgplot(self.A, **kwargs)
-    
-    # def svgplot_navigation_mesh(self, **kwargs):
-    #     """Plots the wind farm network graph."""
-    #     return svgpplot(self.P, self.A, **kwargs)
-
-    
-    # def svgplot_selected_links(self, **kwargs):
-    #     """Plots the wind farm network graph."""
-    #     return svgplot(self._G_tentative, **kwargs)
-    
-    def create_detours(self):
-        """
-        Create detours in the current graph using the PathFinder module,
-        and reassign cables accordingly.
-        """
-        pathfinder = PathFinder(self.G, planar=self.P, A=self.A)
-        self.G = pathfinder.create_detours()
-        assign_cables(self.G, self.cables)
-
 
     def get_network(self):
         """Returns the network edges with cable data."""
@@ -373,11 +333,13 @@ class WindFarmNetwork():
         """Returns the total cable length of the network."""
         return self.G.size(weight="length")
 
-    def set_coordinates(self, turbines, substations):
+    def set_coordinates(self, turbines, substations, verbose=None):
         """Updates the coordinates of turbines and substations."""
+        if verbose is None:
+            verbose = self.verbose
         self._G_updated = True
         
-        if self.verbose:
+        if verbose:
             print('WARNING: wfn.set_coordinates is not checking for feasiblity')
 
         if not hasattr(self.L, 'graph') or 'VertexC' not in self.L.graph:
@@ -516,7 +478,7 @@ class WindFarmNetwork():
             verbose = self.verbose
         # If new coordinates are provided, update them
         if turbines is not None or substations is not None:
-            self.set_coordinates(turbines=turbines, substations=substations)
+            self.set_coordinates(turbines=turbines, substations=substations, verbose=False)
             self._P, self._A = make_planar_embedding(self.L)
         
         if turbines is None:
@@ -529,7 +491,7 @@ class WindFarmNetwork():
         self._P_updated = True
         self._S_updated = True
         self._G_updated = True
-        S, G_tentative, G = router(L=self.L, A=self.A, P=self.P, S=self.S, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
+        S, G_tentative, G = router(A=self.A, P=self.P, S=self.S, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
         self.S = S
         self._G_tentative = G_tentative
         self.G = G
@@ -555,7 +517,7 @@ class OptiWindNetSolver(ABC):
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, solver='Esau_Williams', detour=True, verbose=None, **kwargs):
+    def __init__(self, solver='Esau_Williams', maxiter=10000, debug=False, verbose=None, **kwargs):
         if solver not in ['Esau_Williams']:
             raise ValueError(
                 f"{solver} is not among the supported Heuristic solvers. Choose among: ['Esau_Williams']."
@@ -563,83 +525,68 @@ class Heuristic(OptiWindNetSolver):
 
         # Call the base class initialization
         self.verbose = verbose
-        self.detour = detour
         self.solver = solver
-        self.detour = detour
+        self.maxiter = maxiter
+        self.debug = debug
 
-    def optimize(self, L, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
+    def optimize(self, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
 
         if verbose is None:
             verbose = self.verbose
 
         # optimizing
         if self.solver=='Esau_Williams':
-            S = EW_presolver(A, capacity=cables_capacity)
+            S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter, debug=self.debug)
         else:
             pass
             
         G_tentative = G_from_S(S, A)
-        
-        if self.detour:
-            G = PathFinder(G_tentative, planar=P, A=A).create_detours()
-        else:
-            G = G_tentative
+
+        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
         assign_cables(G, cables)
-
 
         return S, G_tentative, G
     
 class MetaHeuristic(OptiWindNetSolver):
-    def __init__(self, time_limit, solver='HGS', detour=False, verbose=None, **kwargs):
+    def __init__(self, time_limit, solver='HGS', gates_limit: int | None = None, max_iter=10, seed: int = 0, verbose=None, **kwargs):
         # Call the base class initialization
-
-        self.verbose = verbose
-        self.detour = detour
-        self.solver = solver
         self.time_limit = time_limit
+        self.gates_limit = gates_limit
+        self.solver = solver
+        self.verbose = verbose
+        self.max_iter = max_iter
+        self.gates_limit = gates_limit
+        self.seed = seed
 
-    def optimize(self, L, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
-
+    def optimize(self, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
 
         # optimizing
         if self.solver== 'HGS': # Hybrid Genetic Search
-            S = iterative_hgs_cvrp(A, capacity=cables_capacity, time_limit=self.time_limit)
+            S = iterative_hgs_cvrp(A, capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
         else:
             raise ValueError(
                 f"{self.solver} is not among the supported Meta-Heuristic solvers. Choose among: HGS.")
         
         G_tentative = G_from_S(S, A)
-        if self.detour:
-            G = PathFinder(G_tentative, planar=P, A=A).create_detours()
-        else:
-            G = G_tentative
+
+        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
         assign_cables(G, cables)
         
         return S, G_tentative, G
 
 class MILP(OptiWindNetSolver):
-    def __init__(self, solver='ortools', solver_options=None, model_options=None, detour=False, verbose=None, **kwargs):
+    def __init__(self, solver='ortools', solver_options=None, model_options=None, verbose=None, **kwargs):
         self.verbose = verbose
-        self.detour = detour
-        #
-        if solver_options is None:
-            solver_options = {}
-
-        if model_options is None:
-            model_options = {}
-
         self.solver = solver
-        self.solver_options = solver_options
-        self.model_options = model_options  
+        self.solver_options = solver_options or {}
+        self.model_options = model_options or {}
 
-        
-    def optimize(self, L, A, P, S=None, cables=None, cables_capacity=None, verbose=None, **kwargs):
-        warmstart  = False
+    def optimize(self, A, P, S=None, cables=None, cables_capacity=None, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -745,24 +692,22 @@ class MILP(OptiWindNetSolver):
             ##########
             result = pyo_solver.solve(model, **solver_args)
 
-
             S = omo.S_from_solution(model, pyo_solver, result)
-
-            
+           
         else:
             raise ValueError(
                 f"{self.solver} is not among the supported MILP solvers. Choose among: ortools, gurobi, cplex, highs, scip, cbc.")
 
         G_tentative = G_from_S(S, A)
 
-        if self.detour:
-            G = PathFinder(G_tentative, planar=P, A=A).create_detours()
-        else:
+        if self.model_options.get("gateXing_constraint", False):
             G = G_tentative
+        else:
+            G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+
         assign_cables(G, cables)
         
         return S, G_tentative, G
-
 
 
 
