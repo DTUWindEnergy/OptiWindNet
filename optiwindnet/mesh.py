@@ -13,7 +13,7 @@ from itertools import chain, tee, combinations
 from bidict import bidict
 import shapely as shp
 
-import PythonCDT as cdt
+import condeltri as cdt
 
 from .geometric import (
     _halfedges_from_triangulation,
