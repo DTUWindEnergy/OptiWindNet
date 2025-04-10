@@ -1,95 +1,98 @@
-# OptiWindNet API
+###################
+# OptiWindNet API #
+###################
+
 from abc import ABC, abstractmethod
-import numpy as np
+from typing import Any, Mapping
+from itertools import pairwise
 from pathlib import Path
+
+import numpy as np
 import yaml
 import yaml_include
-from itertools import pairwise
-from typing import Any, Mapping
 
-from optiwindnet.interarraylib import calcload
+# Local utilities
 from optiwindnet.utils import NodeTagger
-
 F = NodeTagger()
 
 PackType = Mapping[str, Any]
 
-# optiwindnet
+# optiwindnet modules
 from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
 from optiwindnet.plotting import gplot, pplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
-from optiwindnet.interarraylib import G_from_S
+from optiwindnet.interarraylib import G_from_S, calcload
 
-# Heuristic
+# Heuristics
 from optiwindnet.heuristics import EW_presolver
 
-# Metha-Heuristic
+# Metaheuristics
 from optiwindnet.baselines.hgs import iterative_hgs_cvrp
 
 # MILP
 from optiwindnet.MILP import ortools as ort
-from optiwindnet.pathfinding import PathFinder
 import optiwindnet.MILP.pyomo as omo
 from pyomo.contrib.appsi.solvers import Highs
 from pyomo import environ as pyo
+
 
 #################################################
 # To Do: if face error do a simple optimization #
 #################################################
 
-class WindFarmNetwork():
+class WindFarmNetwork:
     """
     Represents a wind farm electrical network, capable of processing 
     layout data from different formats and computing network properties.
     """
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, border=None, obstacles=None, name='', handle='', L=None, router=None, verbose=False, **kwargs):
-        
+                 cables=None, border=None, obstacles=None,
+                 name='', handle='', L=None, router=None,
+                 verbose=False, **kwargs):
+
         self.verbose = verbose
+
+        # Default router if none provided
         if router is None:
             router = Heuristic(solver='Esau_Williams')
-        
-        # cables formatting
+        self.router = router
+
+        # Handle cable formats
         if cables is None:
             if verbose:
-               print("WARNING: "
-                    "No cable data provided. Defaulting to cables = [(10, 1)], "
-                    "where 10 is the maximum cable capacity and 1 is the cost in €/m."
-                )
+                print("WARNING: No cable data provided. Defaulting to cables = [(10, 1)]")
             cables = [(10, 1)]
-
         elif isinstance(cables, int):
             cables = [(cables, 1)]
-
         elif isinstance(cables, (list, tuple, np.ndarray)):
             if all(isinstance(c, int) for c in cables):
                 cables = [(c, 1) for c in cables]
-            elif all((isinstance(c, (list, tuple, np.ndarray)) and len(c) == 2) for c in cables):
-
+            elif all(isinstance(c, (list, tuple, np.ndarray)) and len(c) == 2 for c in cables):
                 cables = [tuple(c) for c in cables]
             else:
                 raise ValueError(f"Invalid cable format: {cables}")
-
         else:
             raise ValueError(f"Invalid cable format: {cables}")
 
-        cables_capacity = max(cable[0] for cable in cables)
-        #
+        self.cables = cables
+        self.cables_capacity = max(c[0] for c in cables)
 
-        if turbines is not None: L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
-           
+        # Load layout from coordinates if turbines provided
+        if turbines is not None:
+            L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
         self.L = L
-        # Compute the planar embedding
+
+        # Planar embedding
         self._P, self._A = make_planar_embedding(L)
+
+        # Geometry inputs
         self.border = border
         self.obstacles = obstacles
-        self.cables = cables
-        self.router = router
 
-        # Flags to track update status (initialized as updated)
+        # Graph/network placeholders and status flags
         self._S = None
         self._G_tentative = None
         self.G = None
@@ -97,27 +100,27 @@ class WindFarmNetwork():
         self._P_updated = True
         self._S_updated = False
         self._G_updated = False
-        self.cables_capacity = cables_capacity
+
 
     def _update_planar_embedding(self):
-        """Updates P and A if they are stale."""
-        if not self._P_updated or not self._A_updated:
+        """Update the planar embedding (P and A) if marked stale."""
+        if not (self._P_updated and self._A_updated):
             self._P, self._A = make_planar_embedding(self.L)
-            self._P_updated = True
-            self._A_updated = True
+            self._P_updated = self._A_updated = True
+
 
     def terse_links(self):
-            '''Returns S links'''
-            _, T = (self.S.graph[k] for k in 'RT')
-            terse = np.empty(T, dtype=int)
+        '''Returns S links'''
+        _, T = (self.S.graph[k] for k in 'RT')
+        terse = np.empty(T, dtype=int)
 
 
-            for u, v, in self.S.edges:
-                u, v = (u, v) if u < v else (v, u)
-                i, target = (v, u)
-                terse[i] = target
+        for u, v, in self.S.edges:
+            u, v = (u, v) if u < v else (v, u)
+            i, target = (v, u)
+            terse[i] = target
 
-            return terse
+        return terse
 
     def G_from_terse_links(self, terse_links: np.ndarray, turbines=None, substations=None) -> None:
         '''Rebuilds G from terse links'''
@@ -277,7 +280,7 @@ class WindFarmNetwork():
     
     @classmethod
     def from_pbf(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from a YAML file."""
+        """Creates a WindFarmNetwork instance from a pbf file."""
         if not isinstance(filepath, str):
             raise TypeError("Filepath must be a string")
 
@@ -286,7 +289,7 @@ class WindFarmNetwork():
         
     @classmethod
     def from_windIO(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from WindIO format."""
+        """Creates a WindFarmNetwork instance from WindIO yaml file."""
         if not isinstance(filepath, str):
             raise TypeError("Filepath must be a string")
         
@@ -468,6 +471,7 @@ class WindFarmNetwork():
         
         if verbose is None:
             verbose = self.verbose
+
         # If new coordinates are provided, update them
         if turbines is not None or substations is not None:
             self._set_coordinates(turbines=turbines, substations=substations, verbose=False)
@@ -527,7 +531,7 @@ class Heuristic(OptiWindNetSolver):
             verbose = self.verbose
 
         # optimizing
-        if self.solver=='Esau_Williams':
+        if self.solver in ['Esau_Williams', 'EW']:
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter, debug=self.debug)
         else:
             pass
@@ -664,7 +668,6 @@ class MILP(OptiWindNetSolver):
 
 
             pyo_solver.options.update(self.solver_options)
-            #pyo_solver.options.update(solver_options_mapping[self.solver])
 
             if verbose:
                 print(f'Solving "{model.handle}": {{R={len(model.R)}, T={len(model.T)}, κ={model.k.value}}}\n')
