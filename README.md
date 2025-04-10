@@ -13,7 +13,7 @@ Tool for designing and optimizing the electrical cable network (collection syste
 
 Documentation: [https://topfarm.pages.windenergy.dtu.dk/OptiWindNet](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet)
 - [Quickstart](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/Quickstart)
-- [Download the Jupyter notebooks](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks?ref_type=heads) used in the documentation.
+- [Download the Jupyter notebooks](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks) used in the documentation.
 - [Report an issue](https://github.com/DTUWindEnergy/OptiWindNet/issues) (mirror of OptiWindNet on GitHub)
 - [API Reference](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/autoapi/optiwindnet/index.html)
 - [How to Cite](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/index.html#how-to-cite)
