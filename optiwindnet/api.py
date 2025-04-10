@@ -5,15 +5,21 @@ from pathlib import Path
 import yaml
 import yaml_include
 from itertools import pairwise
+from typing import Any, Mapping
+
+from optiwindnet.interarraylib import calcload
+from optiwindnet.utils import NodeTagger
+
+F = NodeTagger()
+
+PackType = Mapping[str, Any]
 
 # optiwindnet
-from optiwindnet.svg import svgplot
 from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
 from optiwindnet.plotting import gplot, pplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
-from optiwindnet.importer import load_repository
 from optiwindnet.interarraylib import G_from_S
 
 # Heuristic
@@ -40,7 +46,7 @@ class WindFarmNetwork():
     """
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, border=None, obstacles=None, name='', handle='', L=None, router=None, verbose=True, **kwargs):
+                 cables=None, border=None, obstacles=None, name='', handle='', L=None, router=None, verbose=False, **kwargs):
         
         self.verbose = verbose
         if router is None:
@@ -100,6 +106,37 @@ class WindFarmNetwork():
             self._P_updated = True
             self._A_updated = True
 
+    def terse_links(self):
+            '''Returns S links'''
+            _, T = (self.S.graph[k] for k in 'RT')
+            terse = np.empty(T, dtype=int)
+
+
+            for u, v, in self.S.edges:
+                u, v = (u, v) if u < v else (v, u)
+                i, target = (v, u)
+                terse[i] = target
+
+            return terse
+
+    def G_from_terse_links(self, terse_links: np.ndarray, turbines=None, substations=None) -> None:
+        '''Rebuilds G from terse links'''
+        if turbines is not None or substations is not None:
+            self._set_coordinates(turbines=turbines, substations=substations, verbose=False)
+            self._P, self._A = make_planar_embedding(self.L)
+
+        self.S.remove_edges_from(list(self.S.edges()))
+        for i, j in enumerate(terse_links):
+            self.S.add_edge(i, j, load=0)
+        
+        calcload(self.S)
+
+        self.G_tentative = G_from_S(self.S, self.A)
+
+        self.G = PathFinder(self._G_tentative, planar=self.P, A=self.A).create_detours()
+
+        assign_cables(self.G, self.cables)
+
     @property
     def A(self):
         """Lazy update of A when accessed."""
@@ -143,7 +180,7 @@ class WindFarmNetwork():
     def _from_coordinates(self, turbines, substations, border, obstacles, name, handle):
         """Constructs a site graph from coordinate-based inputs."""
 
-        from shapely.geometry import Polygon, LinearRing, MultiPoint, MultiPolygon
+        from shapely.geometry import Polygon, MultiPoint, MultiPolygon
         
         border_subtraction_verbose = True
 
@@ -324,7 +361,7 @@ class WindFarmNetwork():
         network_array = np.fromiter(iter_edges(self.G, network_array_type.names[2:]),
                                 dtype=network_array_type, count=self.G.number_of_edges())
         return network_array
-
+                            
     def cost(self):
         """Returns the total cost of the network."""
         return self.G.size(weight="cost")
@@ -333,14 +370,14 @@ class WindFarmNetwork():
         """Returns the total cable length of the network."""
         return self.G.size(weight="length")
 
-    def set_coordinates(self, turbines, substations, verbose=None):
+    def _set_coordinates(self, turbines, substations, verbose=None):
         """Updates the coordinates of turbines and substations."""
         if verbose is None:
             verbose = self.verbose
         self._G_updated = True
-        
+
         if verbose:
-            print('WARNING: wfn.set_coordinates is not checking for feasiblity')
+            print('WARNING: wfn._set_coordinates is not checking for feasiblity')
 
         if not hasattr(self.L, 'graph') or 'VertexC' not in self.L.graph:
             raise ValueError("Graph L does not contain 'VertexC' attribute.")
@@ -348,10 +385,12 @@ class WindFarmNetwork():
         # Update coordinates
         if turbines is not None:
             self.L.graph['VertexC'][:turbines.shape[0], :] = turbines
+            self._G_tentative.graph['VertexC'][:turbines.shape[0], :] = turbines
             self.G.graph['VertexC'][:turbines.shape[0], :] = turbines
         
         if substations is not None:
             self.L.graph['VertexC'][-substations.shape[0]:, :] = substations
+            self._G_tentative.graph['VertexC'][-substations.shape[0]:, :] = substations
             self.G.graph['VertexC'][-substations.shape[0]:, :] = substations
 
         # Update length
@@ -368,53 +407,6 @@ class WindFarmNetwork():
         self._P_updated = False
         self._S_updated = False
 
-    def set_network(self, network_tree):
-        """Updates the graph with a new network tree.""" 
-        self._G_updated = True
-        
-        if self.verbose:
-            print('WARNING: wfn.set_network is not checking for feasibility')
-
-        if self.G is None:
-            raise ValueError("Graph (G) is not initialized.")
-
-        if not isinstance(network_tree, list):
-            raise TypeError("network_tree must be a list of tuples (node1, node2, attributes_dict).")
-
-        for edge in network_tree:
-            if not (isinstance(edge, tuple) and len(edge) == 3 and isinstance(edge[2], dict)):
-                raise ValueError(f"Invalid edge format: {edge}. Must be (node1, node2, attributes_dict).")
-
-        self.G.remove_edges_from(list(self.G.edges()))
-        self.G.add_edges_from(network_tree)
-
-        # Update length
-        for u, v, data in self.G.edges(data=True):
-            coord_u = self.G.graph['VertexC'][u, :]
-            coord_v = self.G.graph['VertexC'][v, :]
-            data['length'] = np.linalg.norm(np.array(coord_u) - np.array(coord_v))
-        
-        # Update cost
-        assign_cables(self.G, self.cables)
-
-        self._A_updated = False
-        self._P_updated = False
-        self._S_updated = False
-
-    
-    def set_network_array(self, network_array):
-        network = [
-                (int(row[0]), int(row[1]), {
-                    'length': np.float64(row[2]),
-                    'load': int(row[3]),
-                    'reverse': bool(row[4]),
-                    'cable': int(row[5]),
-                    'cost': np.float64(row[6])
-                })
-                for row in network_array
-            ]
-        self.set_network(network_tree=network)
-
 
     def gradient(self, turbines=None, substations=None, network_tree=None, verbose=None, gradient_type='cost'):
         """
@@ -427,7 +419,7 @@ class WindFarmNetwork():
             verbose = self.verbose
 
         if turbines is not None or substations is not None:
-            self.wfn.set_coordinates(turbines=turbines, substations=substations)
+            self.wfn._set_coordinates(turbines=turbines, substations=substations)
 
         if network_tree is not None:
             self.wfn.set_network(network_tree=network_tree)
@@ -478,7 +470,7 @@ class WindFarmNetwork():
             verbose = self.verbose
         # If new coordinates are provided, update them
         if turbines is not None or substations is not None:
-            self.set_coordinates(turbines=turbines, substations=substations, verbose=False)
+            self._set_coordinates(turbines=turbines, substations=substations, verbose=False)
             self._P, self._A = make_planar_embedding(self.L)
         
         if turbines is None:
