@@ -3,22 +3,12 @@
 Requirements
 ============
 
-* Python
-* Git
+*OptiWindNet* has been tested on Windows 10 and on Linux systems, but should run on Windows 11 and MacOSX as well.
 
-*OptiWindNet* has been tested on Windows 10 and on Linux systems, but should run on MacOSX as well.
-
-Python
-------
 A recent Python version (3.10+) is required to run *OptiWindNet*, and the use of a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
 
 * `Python <https://www.python.org/downloads/>`_, which provides: ``venv`` virtual environment creator and ``pip`` package manager;
 * or `Miniforge <https://conda-forge.org/download/>`_ (`Anaconda or Miniconda <https://www.anaconda.com/download/success>`_ also work), which provides: ``conda`` environment and package manager.
-
-Git
----
-
-*OptiWindNet* is installable only from its source code repository and require the program ``git``. This software can be obtained from `Git <https://git-scm.com/downloads>`_ for a standalone version or from `Git for Windows <https://gitforwindows.org/>`_ to get bundle of git and other useful tools for the Windows platform.
 
 .. _Installation:
 
@@ -39,7 +29,7 @@ Run::
 
 Then::
 
-    pip install git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+    pip install optiwindnet
 
 If using ``conda``
 ------------------
@@ -48,7 +38,7 @@ Download `environment.yml <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
     conda env create -f environment.yml
     conda activate optiwindnet_env
-    pip install git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+    pip install optiwindnet
 
 
 Running
@@ -114,4 +104,4 @@ Updating
 
 Activate the Python environment for *OptiWindNet* and enter::
 
-    pip install --upgrade --force-reinstall git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+    pip install --upgrade optiwindnet
