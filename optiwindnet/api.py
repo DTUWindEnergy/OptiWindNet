@@ -119,12 +119,7 @@ class WindFarmNetwork:
                 raise ValueError('reverse must not be None')
             u, v = (u, v) if u < v else (v, u)
             i, target = (u, v) if reverse else (v, u)
-            #if i < T:
             terse[i] = target
-            #else:
-            #    terse[i - B] = target
-
-        print('terse size: ', terse.size)
 
         return terse
 
