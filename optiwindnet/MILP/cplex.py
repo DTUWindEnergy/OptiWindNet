@@ -5,8 +5,9 @@ import logging
 import networkx as nx
 from typing import Any
 import pyomo.environ as pyo
-from .core import Solver, PoolHandler, summarize_result, investigate_pool
-from .pyomo import make_min_length_model, warmup_model, S_from_solution
+from .core import Solver, PoolHandler, investigate_pool
+from .pyomo import (make_min_length_model, S_from_solution, warmup_model,
+                    summarize_result)
 from ..pathfinding import PathFinder
 from ..interarraylib import G_from_S
 
@@ -41,9 +42,13 @@ class SolverCplex(Solver, PoolHandler):
 
     def solve(self, timelimit: int, mipgap: float,
               options: dict[str, Any] = {}, verbose: bool = False) -> tuple:
-        solver, model = self.solver, self.model
-        base_options = self.options | dict(timelimit=timelimit, mipgap=mipgap)
-        solver.options.update(base_options | options)
+        try:
+            solver, model = self.solver, self.model
+        except AttributeError as exc:
+            exc.args += ('.set_problem() must be called before .solve()',)
+            raise
+        solver.options.update(self.options | options
+                              | dict(timelimit=timelimit, mipgap=mipgap))
         result = solver.solve(model, warmstart=self.warmstart, tee=verbose)
         self.result = result
         cplex = solver._solver_model

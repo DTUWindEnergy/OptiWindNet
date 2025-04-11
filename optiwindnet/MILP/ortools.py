@@ -73,7 +73,11 @@ class SolverORTools(cp_model.CpSolver, Solver, PoolHandler):
         This method uses a custom CpSolverSolutionCallback to fill a solution
         pool stored in the attribute self.solutions.
         '''
-        model = self.model
+        try:
+            model = self.model
+        except AttributeError as exc:
+            exc.args += ('.set_problem() must be called before .solve()',)
+            raise
         storer = _SolutionStore(model)
         self.parameters.max_time_in_seconds = timelimit
         self.parameters.relative_gap_limit = mipgap

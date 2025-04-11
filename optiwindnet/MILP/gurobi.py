@@ -5,8 +5,9 @@ import logging
 import networkx as nx
 from typing import Any
 import pyomo.environ as pyo
-from .core import Solver, PoolHandler, summarize_result, investigate_pool
-from .pyomo import make_min_length_model, S_from_solution, warmup_model
+from .core import Solver, PoolHandler, investigate_pool
+from .pyomo import (make_min_length_model, S_from_solution, warmup_model,
+                    summarize_result)
 from ..pathfinding import PathFinder
 from ..interarraylib import G_from_S
 
@@ -39,6 +40,11 @@ class SolverGurobi(Solver, PoolHandler):
         This will keep the Gurobi license in use until a call to `get_solution()`.
         '''
         model = self.model
+        try:
+            model = self.model
+        except AttributeError as exc:
+            exc.args += ('.set_problem() must be called before .solve()',)
+            raise
         base_options = self.options | dict(timelimit=timelimit, mipgap=mipgap)
         solver = pyo.SolverFactory('gurobi', solver_io='python', manage_env=True,
                                    options=base_options|options)

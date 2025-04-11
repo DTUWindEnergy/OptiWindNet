@@ -42,16 +42,6 @@ class PoolHandler(abc.ABC):
         pass
 
 
-def summarize_result(result):
-    objective = result['Problem'][0]['Upper bound']
-    bound = result['Problem'][0]['Lower bound']
-    relgap = 1. - bound/objective
-    termination = result['Solver'][0]['Termination condition'].name
-    info('objective: %f, bound: %f, gap: %.4f, termination: %s',
-         objective, bound, relgap, termination)
-    return objective, bound, relgap, termination  # runtime, num_solutions
-
-
 def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
         ) -> nx.Graph:
     '''Go through the CpSat's solutions checking which has the shortest length

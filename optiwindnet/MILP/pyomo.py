@@ -13,14 +13,19 @@ import pyomo.environ as pyo
 from pyomo.contrib.solver.base import SolverBase
 from pyomo.opt import SolverResults
 
-from .core import Solver, summarize_result
+from .core import Solver
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint, G_from_S
 from ..pathfinding import PathFinder
 
 logger = logging.getLogger(__name__)
-error, info = logger.error, logger.info
+error, warn, info = logger.error, logger.warning, logger.info
 
+# NOTE: SCIP has solution pool which can be accessed with PySCIPOpt: getSols()
+# TODO: move scip to scip.py and implement:
+#       - class SolverSCIP(Solver, PoolHandler)
+#       - SCIP-specific make_min_length_model, warmup_model, S_from_solution
+#       - warmup_model: model.createSol(), model.setSolVal(), model.addSol()
 
 # solver option name mapping (pyomo should have taken care of this)
 _common_options = namedtuple('common_options', 'mipgap timelimit')
@@ -61,6 +66,28 @@ _default_options = dict(
     scip={},
 )
 
+
+def summarize_result(result):
+    objective = result['Problem'][0]['Upper bound']
+    bound = result['Problem'][0]['Lower bound']
+    relgap = 1. - bound/objective
+    termination = result['Solver'][0]['Termination condition'].name
+    info('objective: %f, bound: %f, gap: %.4f, termination: %s',
+         objective, bound, relgap, termination)
+    return objective, bound, relgap, termination  # runtime, num_solutions
+
+
+def summarize_result_scip(result):
+    # stupid Pyomo inconsistency in result reporting
+    objective = result['Solver'][0]['Primal bound']
+    bound = result['Solver'][0]['Dual bound']
+    relgap = 1. - bound/objective
+    termination = result['Solver'][0]['Termination condition'].name
+    info('objective: %f, bound: %f, gap: %.4f, termination: %s',
+         objective, bound, relgap, termination)
+    return objective, bound, relgap, termination  # runtime, num_solutions
+
+
 class SolverPyomo(Solver):
 
     def __init__(self, name, prefix='', suffix='', **kwargs) -> None:
@@ -74,21 +101,30 @@ class SolverPyomo(Solver):
         self.P, self.A, self.capacity = P, A, capacity
         model = make_min_length_model(self.A, self.capacity, **kwargs)
         self.model = model
-        if warmstart is not None:
-            self.warmstart = True
+        if warmstart is not None and self.solver.warm_start_capable():
+            self.solve_kwargs = {'warmstart': True}
             warmup_model(model, warmstart)
         else:
-            self.warmstart = False
+            self.solve_kwargs = {}
+            if warmstart is not None:
+                warn(f'Solver <{self.name}> is not capable of warm-starting.')
 
     def solve(self, timelimit: int, mipgap: float,
               options: dict[str, Any] = {}, verbose: bool = False) -> tuple:
-        solver, name, model = self.solver, self.name, self.model
-        base_options = self.options | {_optkey[name].timelimit: timelimit,
-                                       _optkey[name].mipgap: mipgap}
-        solver.options.update(base_options | options)
-        result = solver.solve(model, warmstart=self.warmstart, tee=verbose)
+        try:
+            solver, name, model = self.solver, self.name, self.model
+        except AttributeError as exc:
+            exc.args += ('.set_problem() must be called before .solve()',)
+            raise
+        solver.options.update(self.options | options
+                              | {_optkey[name].timelimit: timelimit,
+                                 _optkey[name].mipgap: mipgap})
+        result = solver.solve(model, **self.solve_kwargs, tee=verbose)
         self.result = result
-        return summarize_result(result)
+        if self.name != 'scip':
+            return summarize_result(result)
+        else:
+            return summarize_result_scip(result)
 
 
     def get_solution(self) -> nx.Graph:
