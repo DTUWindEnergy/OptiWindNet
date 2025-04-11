@@ -1,9 +1,9 @@
 [![pipeline status](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/pipeline.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
+[![PyPi](https://img.shields.io/pypi/v/optiwindnet)](https://pypi.org/project/optiwindnet/)
+[![License](https://img.shields.io/pypi/l/optiwindnet)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/blob/main/LICENSE)
 <!---
 [![coverage report](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/coverage.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
 [![DOI](https://zenodo.org/badge/164115313.svg)](https://zenodo.org/badge/latestdoi/164115313)
-[![PyPi](https://img.shields.io/pypi/v/optiwindnet)](https://pypi.org/project/optiwindnet/)
-[![License](https://img.shields.io/pypi/l/optiwindnet)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/blob/main/LICENSE)
 -->
 
 OptiWindNet
@@ -12,16 +12,29 @@ OptiWindNet
 Tool for designing and optimizing the electrical cable network (collection system) for offshore wind power plants.
 
 Documentation: [https://topfarm.pages.windenergy.dtu.dk/OptiWindNet](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet)
-- [Installation](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/setup#Installation) ([requirements](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/setup#Requirements))
 - [Quickstart](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/Quickstart)
+- [Download the Jupyter notebooks](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks) used in the documentation.
+- [Report an issue](https://github.com/DTUWindEnergy/OptiWindNet/issues) (mirror of OptiWindNet on GitHub)
 - [API Reference](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/autoapi/optiwindnet/index.html)
 - [How to Cite](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/index.html#how-to-cite)
+
+Installation
+------------
+
+```
+pip install optiwindnet
+```
+
+Detailed instructions in [Installation](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/setup#Installation).
 
 Requirements
 ------------
 
-- [requirements.txt](requirements.txt) if using `pip`
-- [environment.yml](environment.yml) if using `conda`
+Python 3.10+. The use of a Python virtual environment is recommended. OptiWindNet's dependencies will be installed automatically when using `pip install optiwindnet`.
+
+One may pre-install the dependencies in a python environment by using either:
+- [requirements.txt](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/requirements.txt?ref_type=heads&inline=false): `pip install -r requirements.txt`
+- [environment.yml](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/environment.yml?ref_type=heads&inline=false): `conda env create -f environment.yml` (name: *optiwindnet_env*)
 
 Acknowledgements
 ----------------
