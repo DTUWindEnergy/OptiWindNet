@@ -3,13 +3,15 @@
 
 import math
 import logging
-from collections import defaultdict
+from typing import Any
 from itertools import chain
 import networkx as nx
 
 from ortools.sat.python import cp_model
 
-from .core import PoolHandler
+from .core import Solver, PoolHandler, investigate_pool
+from ..pathfinding import PathFinder
+from ..interarraylib import G_from_S
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint
 
@@ -40,22 +42,45 @@ class _SolutionStore(cp_model.CpSolverSolutionCallback):
         self.solutions.append((self.objective_value, solution))
 
 
-class CpSat(PoolHandler, cp_model.CpSolver):
+class SolverORTools(cp_model.CpSolver, Solver, PoolHandler):
     '''OR-Tools CpSolver wrapper.
 
     This class wraps and changes the behavior of CpSolver in order to save all
     solutions found to a pool. Meant to be used with `investigate_pool()`.
     '''
+    name: str = 'ortools'
     solution_pool: list[tuple[float, dict]]
 
-    def solve(self, model: cp_model.CpModel) -> cp_model.cp_model_pb2.CpSolverStatus:
+    def __init__(self):
+        super().__init__()
+
+    def set_problem(self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
+                     warmstart: nx.Graph | None = None, **kwargs):
+        'kwargs contains problem options'
+        self.P = P
+        self.A = A
+        self.capacity = capacity
+        model = make_min_length_model(self.A, self.capacity, **kwargs)
+        if warmstart is not None:
+            warmup_model(model, warmstart)
+        self.model = model
+
+    def solve(self, timelimit: int, mipgap: float,
+              options: dict[str, Any] = {}, verbose: bool = False) -> tuple:
+    #  def solve(self, model: cp_model.CpModel) -> cp_model.cp_model_pb2.CpSolverStatus:
         '''Wrapper for CpSolver.solve() that saves all solutions.
 
         This method uses a custom CpSolverSolutionCallback to fill a solution
         pool stored in the attribute self.solutions.
         '''
-        self.model = model
+        model = self.model
         storer = _SolutionStore(model)
+        self.parameters.max_time_in_seconds = timelimit
+        self.parameters.relative_gap_limit = mipgap
+        for key, val in options:
+            setattr(self.parameters, key, val)
+        self.log_callback = print
+        self.parameters.log_search_progress = verbose
         result = super().solve(model, storer)
         storer.solutions.reverse()
         self.solution_pool = storer.solutions
@@ -63,15 +88,14 @@ class CpSat(PoolHandler, cp_model.CpSolver):
         self.num_solutions = len(storer.solutions)
         return result
 
-    def load_solution(self, i: int) -> None:
-        '''Select solution at position `i` in the pool.
-
-        Indices start from 0 (last, aka best) and are ordered by increasing
-        objective function value.
-        It *only* affects methods `value()` and `boolean_value()` and
-        attribute `objective_value`.
-        '''
-        self._objective_value, self._value_map = self.solution_pool[i]
+    def get_solution(self) -> nx.Graph:
+        P, A, model = self.P, self.A, self.model
+        if model.method_options['gateXings_constraint']:
+            S = self.S_from_pool()
+            G = PathFinder(G_from_S(S, A), P, A).create_detours()
+        else:
+            G = investigate_pool(P, A, self)
+        return G
 
     def boolean_value(self, literal: cp_model.IntVar) -> bool:
         return self._value_map[literal.index]
@@ -273,7 +297,6 @@ def S_from_solution(model: cp_model.CpModel,
 
     # Metadata
     R, T = model.R, model.T
-    solver_name = 'ortools'
     bound = solver.best_objective_bound
     objective = solver.objective_value
     S = nx.Graph(
@@ -285,10 +308,10 @@ def S_from_solution(model: cp_model.CpModel,
         runtime=solver.wall_time,
         termination=solver.status_name(),
         gap=1. - bound/objective,
-        creator='MILP.' + solver_name,
+        creator='MILP.' + solver.name,
         has_loads=True,
         method_options=dict(
-            solver_name=solver_name,
+            solver_name=solver.name,
             mipgap=solver.parameters.relative_gap_limit,
             timelimit=solver.parameters.max_time_in_seconds,
             fun_fingerprint=model.fun_fingerprint,

@@ -2,25 +2,100 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
+import logging
+from typing import Any
 from collections import namedtuple, defaultdict
 from itertools import chain
 import networkx as nx
+import psutil
 
 import pyomo.environ as pyo
 from pyomo.contrib.solver.base import SolverBase
 from pyomo.opt import SolverResults
 
+from .core import Solver, summarize_result
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint, G_from_S
 from ..pathfinding import PathFinder
 
+logger = logging.getLogger(__name__)
+error, info = logger.error, logger.info
+
 
 # solver option name mapping (pyomo should have taken care of this)
 _common_options = namedtuple('common_options', 'mipgap timelimit')
-_optname = defaultdict(lambda: _common_options(*_common_options._fields))
-_optname['cbc'] = _common_options('ratioGap', 'seconds')
-_optname['highs'] = _common_options('mip_rel_gap', 'time_limit')
-_optname['scip'] = _common_options('limits/gap', 'limits/time')
+_optkey = dict(
+    cbc=_common_options('ratioGap', 'seconds'),
+    highs=_common_options('mip_rel_gap', 'time_limit'),
+    scip=_common_options('limits/gap', 'limits/time')
+)
+# usage: _optname[solver_name].mipgap
+
+_default_options = dict(
+    cbc=dict(
+        threads=len(psutil.Process().cpu_affinity()),
+        timeMode='elapsed',
+        # the parameters below and more can be experimented with
+        # http://www.decom.ufop.br/haroldo/files/cbcCommandLine.pdf
+        nodeStrategy='downFewest',
+        # Heuristics
+        Dins='on',
+        VndVariableNeighborhoodSearch='on',
+        Rens='on',
+        Rins='on',
+        pivotAndComplement='off',
+        proximitySearch='off',
+        # Cuts
+        gomoryCuts='on',
+        mixedIntegerRoundingCuts='on',
+        flowCoverCuts='on',
+        cliqueCuts='off',
+        twoMirCuts='off',
+        knapsackCuts='off',
+        probingCuts='off',
+        zeroHalfCuts='off',
+        liftAndProjectCuts='off',
+        residualCapacityCuts='off',
+    ),
+    highs={},
+    scip={},
+)
+
+class SolverPyomo(Solver):
+
+    def __init__(self, name, prefix='', suffix='', **kwargs) -> None:
+        self.name = name
+        self.options = _default_options[name]
+        self.solver = pyo.SolverFactory(prefix + name + suffix, **kwargs)
+
+    def set_problem(self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
+                    warmstart: nx.Graph | None = None, **kwargs):
+        'kwargs contains problem options'
+        self.P, self.A, self.capacity = P, A, capacity
+        model = make_min_length_model(self.A, self.capacity, **kwargs)
+        self.model = model
+        if warmstart is not None:
+            self.warmstart = True
+            warmup_model(model, warmstart)
+        else:
+            self.warmstart = False
+
+    def solve(self, timelimit: int, mipgap: float,
+              options: dict[str, Any] = {}, verbose: bool = False) -> tuple:
+        solver, name, model = self.solver, self.name, self.model
+        base_options = self.options | {_optkey[name].timelimit: timelimit,
+                                       _optkey[name].mipgap: mipgap}
+        solver.options.update(base_options | options)
+        result = solver.solve(model, warmstart=self.warmstart, tee=verbose)
+        self.result = result
+        return summarize_result(result)
+
+
+    def get_solution(self) -> nx.Graph:
+        P, A = self.P, self.A
+        S = S_from_solution(self.model, self.solver, self.result)
+        G = PathFinder(G_from_S(S, A), P, A).create_detours()
+        return G
 
 
 def make_min_length_model(A: nx.Graph, capacity: int, *,
@@ -245,15 +320,6 @@ def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
 
     # Metadata
     R, T, k = len(model.R), len(model.T), model.k.value
-    #  if 'highs.Highs' in str(solver):
-    if hasattr(solver, 'highs_options'):
-        solver_name = 'highs'
-    elif solver.name.endswith('direct'):
-        solver_name = solver.name[:-6].rstrip('_')
-    elif solver.name.endswith('persistent'):
-        solver_name = solver.name[:-10].rstrip('_')
-    else:
-        solver_name = solver.name
     bound = result['Problem'][0]['Lower bound']
     objective = result['Problem'][0]['Upper bound']
     # create a topology graph S from the solution
@@ -266,17 +332,12 @@ def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
         runtime=result['Solver'][0]['Wallclock time'],
         termination=result['Solver'][0]['Termination condition'].name,
         gap=1. - bound/objective,
-        creator='MILP.pyomo.' + solver_name,
+        creator='MILP.pyomo.',
         has_loads=True,
         method_options=dict(
-            solver_name=solver_name,
-            mipgap=solver.options[_optname[solver_name].mipgap],
-            timelimit=solver.options[_optname[solver_name].timelimit],
             fun_fingerprint=model.fun_fingerprint,
             **model.method_options,
         ),
-        #  solver_details=dict(
-        #  )
     )
 
     if model.warmed_by is not None:
@@ -307,77 +368,3 @@ def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
         S.nodes[r]['load'] = rootload
 
     return S
-
-
-def gurobi_investigate_pool(P, A, model, solver, result):
-    '''Go through the Gurobi's solutions checking which has the shortest length
-    after applying the detours with PathFinder.'''
-    # initialize incumbent total length
-    solver_model = solver._solver_model
-    Λ = float('inf')
-    num_solutions = solver_model.getAttr('SolCount')
-    print(f'Solution pool has {num_solutions} solutions.')
-    # Pool = iter(sorted((cplex.solution.pool.get_objective_value(i), i)
-                       # for i in range(cplex.solution.pool.get_num()))[1:])
-    # model comes loaded with minimal-length undetoured solution
-    for i in range(num_solutions):
-        solver_model.setParam('SolutionNumber', i)
-        λ = solver_model.getAttr('PoolObjVal')
-        if λ > Λ:
-            print(f'Pool investigation over - next best undetoured length: {λ:.3f}')
-            break
-        for omovar, gurvar in solver._pyomo_var_to_solver_var_map.items():
-            omovar.set_value(round(gurvar.Xn), skip_validation=True)
-        S = S_from_solution(model, solver=solver, result=result)
-        G = G_from_S(S, A)
-        Hʹ = PathFinder(G, planar=P, A=A).create_detours()
-        Λʹ = Hʹ.size(weight='length')
-        if Λʹ < Λ:
-            H, Λ = Hʹ, Λʹ
-            pool_index = i
-            pool_objective = λ
-            print(f'Incumbent has (detoured) length: {Λ:.3f}')
-    H.graph['solver_details']['pool_index'] = pool_index
-    if pool_index > 0:
-        H.graph['solver_details']['pool_objective'] = pool_objective
-    return H
-
-
-def cplex_load_solution_from_pool(solver, soln):
-    cplex = solver._solver_model
-    vals = cplex.solution.pool.get_values(soln)
-    vars_to_load = solver._pyomo_var_to_ndx_map.keys()
-    for pyomo_var, val in zip(vars_to_load, vals):
-        if solver._referenced_variables[pyomo_var] > 0:
-            pyomo_var.set_value(val, skip_validation=True)
-
-
-def cplex_investigate_pool(P, A, model, solver, result):
-    '''Go through the CPLEX solutions checking which has the shortest length
-    after applying the detours with PathFinder.'''
-    cplex = solver._solver_model
-    # initialize incumbent total length
-    Λ = float('inf')
-    print(f'Solution pool has {cplex.solution.pool.get_num()} solutions.')
-    Pool = iter(sorted((cplex.solution.pool.get_objective_value(i), i)
-                       for i in range(cplex.solution.pool.get_num()))[1:])
-    # model comes loaded with minimal-length undetoured solution
-    while True:
-        S = S_from_solution(model, solver=solver, result=result)
-        G = G_from_S(S, A)
-        Hʹ = PathFinder(G, planar=P, A=A).create_detours()
-        Λʹ = Hʹ.size(weight='length')
-        if Λʹ < Λ:
-            H, Λ = Hʹ, Λʹ
-            print(f'Incumbent has (detoured) length: {Λ:.3f}')
-        # check if next best solution is worth processing
-        try:
-            λ, soln = next(Pool)
-        except StopIteration:
-            print('Pool exhausted.')
-            break
-        if λ > Λ:
-            print(f'Done with pool - next best undetoured length: {λ:.3f}')
-            break
-        cplex_load_solution_from_pool(solver, soln)
-    return H
