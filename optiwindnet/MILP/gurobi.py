@@ -15,8 +15,8 @@ error, info = logger.error, logger.info
 
 
 class SolverGurobi(Solver, PoolHandler):
-    # default options to pass to Pyomo solver
     name: str = 'gurobi'
+    # default options to pass to Pyomo solver
     options: dict = dict(
         mipfocus=1,
     )
@@ -42,7 +42,7 @@ class SolverGurobi(Solver, PoolHandler):
         base_options = self.options | dict(timelimit=timelimit, mipgap=mipgap)
         solver = pyo.SolverFactory('gurobi', solver_io='python', manage_env=True,
                                    options=base_options|options)
-        self.solver_pyomo = solver
+        self.solver = solver
         result = solver.solve(model, warmstart=self.warmstart, tee=verbose)
         self.num_solutions = solver._solver_model.getAttr('SolCount')
         self.result, self.timelimit, self.mipgap = result, timelimit, mipgap
@@ -61,21 +61,22 @@ class SolverGurobi(Solver, PoolHandler):
         else: 
             return G
         finally:
-            self.solver_pyomo.close()
+            self.solver.close()
 
     def objective_at(self, index: int) -> float:
-        solver_model = self.solver_pyomo._solver_model
+        solver_model = self.solver._solver_model
         solver_model.setParam('SolutionNumber', index)
         return solver_model.getAttr('PoolObjVal')
 
     def S_from_pool(self) -> nx.Graph:
-        solver_pyomo = self.solver_pyomo
-        for omovar, gurvar in solver_pyomo._pyomo_var_to_solver_var_map.items():
+        solver = self.solver
+        for omovar, gurvar in solver._pyomo_var_to_solver_var_map.items():
             omovar.set_value(round(gurvar.Xn), skip_validation=True)
-        S = S_from_solution(self.model, solver=solver_pyomo, result=self.result)
-        S.graph['method_options'] = dict(
+        S = S_from_solution(self.model, solver, self.result)
+        S.graph['method_options'].update(
             solver_name=self.name,
             mipgap=self.mipgap,
             timelimit=self.timelimit,
         )
+        S.graph['creator'] += self.name
         return S

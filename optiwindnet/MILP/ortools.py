@@ -48,6 +48,7 @@ class SolverORTools(cp_model.CpSolver, Solver, PoolHandler):
     This class wraps and changes the behavior of CpSolver in order to save all
     solutions found to a pool. Meant to be used with `investigate_pool()`.
     '''
+    name: str = 'ortools'
     solution_pool: list[tuple[float, dict]]
 
     def __init__(self):
@@ -64,7 +65,7 @@ class SolverORTools(cp_model.CpSolver, Solver, PoolHandler):
             warmup_model(model, warmstart)
         self.model = model
 
-    def solve(self, time_limit: int, mipgap: float,
+    def solve(self, timelimit: int, mipgap: float,
               options: dict[str, Any] = {}, verbose: bool = False) -> tuple:
     #  def solve(self, model: cp_model.CpModel) -> cp_model.cp_model_pb2.CpSolverStatus:
         '''Wrapper for CpSolver.solve() that saves all solutions.
@@ -74,7 +75,7 @@ class SolverORTools(cp_model.CpSolver, Solver, PoolHandler):
         '''
         model = self.model
         storer = _SolutionStore(model)
-        self.parameters.max_time_in_seconds = time_limit
+        self.parameters.max_time_in_seconds = timelimit
         self.parameters.relative_gap_limit = mipgap
         for key, val in options:
             setattr(self.parameters, key, val)
@@ -296,7 +297,6 @@ def S_from_solution(model: cp_model.CpModel,
 
     # Metadata
     R, T = model.R, model.T
-    solver_name = 'ortools'
     bound = solver.best_objective_bound
     objective = solver.objective_value
     S = nx.Graph(
@@ -308,10 +308,10 @@ def S_from_solution(model: cp_model.CpModel,
         runtime=solver.wall_time,
         termination=solver.status_name(),
         gap=1. - bound/objective,
-        creator='MILP.' + solver_name,
+        creator='MILP.' + solver.name,
         has_loads=True,
         method_options=dict(
-            solver_name=solver_name,
+            solver_name=solver.name,
             mipgap=solver.parameters.relative_gap_limit,
             timelimit=solver.parameters.max_time_in_seconds,
             fun_fingerprint=model.fun_fingerprint,

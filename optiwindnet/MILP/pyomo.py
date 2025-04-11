@@ -7,6 +7,7 @@ from typing import Any
 from collections import namedtuple, defaultdict
 from itertools import chain
 import networkx as nx
+import psutil
 
 import pyomo.environ as pyo
 from pyomo.contrib.solver.base import SolverBase
@@ -31,7 +32,31 @@ _optkey = dict(
 # usage: _optname[solver_name].mipgap
 
 _default_options = dict(
-    cbc={},
+    cbc=dict(
+        threads=len(psutil.Process().cpu_affinity()),
+        timeMode='elapsed',
+        # the parameters below and more can be experimented with
+        # http://www.decom.ufop.br/haroldo/files/cbcCommandLine.pdf
+        nodeStrategy='downFewest',
+        # Heuristics
+        Dins='on',
+        VndVariableNeighborhoodSearch='on',
+        Rens='on',
+        Rins='on',
+        pivotAndComplement='off',
+        proximitySearch='off',
+        # Cuts
+        gomoryCuts='on',
+        mixedIntegerRoundingCuts='on',
+        flowCoverCuts='on',
+        cliqueCuts='off',
+        twoMirCuts='off',
+        knapsackCuts='off',
+        probingCuts='off',
+        zeroHalfCuts='off',
+        liftAndProjectCuts='off',
+        residualCapacityCuts='off',
+    ),
     highs={},
     scip={},
 )

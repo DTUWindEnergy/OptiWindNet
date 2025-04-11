@@ -7,6 +7,8 @@ from typing import Any
 import pyomo.environ as pyo
 from .core import Solver, PoolHandler, summarize_result, investigate_pool
 from .pyomo import make_min_length_model, warmup_model, S_from_solution
+from ..pathfinding import PathFinder
+from ..interarraylib import G_from_S
 
 logger = logging.getLogger(__name__)
 error, info = logger.error, logger.info
@@ -14,8 +16,13 @@ error, info = logger.error, logger.info
 
 class SolverCplex(Solver, PoolHandler):
     name: str = 'cplex'
-    sorted_index: int
-    options: dict = {}
+    # default options to pass to Pyomo solver
+    options: dict = dict(
+        # default solution pool size limit is 2100000000
+        # mip_pool_replace=1,  # irrelevant with the default pool size
+        parallel=-1,
+        emphasis_mip=4,
+    )
 
     def __init__(self) -> None:
         self.solver = pyo.SolverFactory('cplex', solver_io='python')
@@ -46,6 +53,7 @@ class SolverCplex(Solver, PoolHandler):
             range(num_solutions), key=cplex.solution.pool.get_objective_value
         )
         self.vars = solver._pyomo_var_to_ndx_map.keys()
+        self.timelimit, self.mipgap = timelimit, mipgap
         return summarize_result(result)
 
     def get_solution(self) -> nx.Graph:
@@ -65,15 +73,15 @@ class SolverCplex(Solver, PoolHandler):
 
     def S_from_pool(self) -> nx.Graph:
         solver, vars = self.solver, self.vars
-        vals = solver._solver_model.cplex.solution.pool.get_values(self.soln)
+        vals = solver._solver_model.solution.pool.get_values(self.soln)
         for pyomo_var, val in zip(vars, vals):
             if solver._referenced_variables[pyomo_var] > 0:
                 pyomo_var.set_value(val, skip_validation=True)
         S = S_from_solution(self.model, solver, self.result)
-        S.graph['method_options'] = dict(
-            solver_name=self.solver_name,
+        S.graph['method_options'].update(
+            solver_name=self.name,
             mipgap=self.mipgap,
             timelimit=self.timelimit,
         )
-        S.graph['creator'] += self.solver_name
+        S.graph['creator'] += self.name
         return S

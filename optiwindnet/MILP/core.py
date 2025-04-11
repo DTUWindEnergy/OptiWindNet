@@ -63,7 +63,7 @@ def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
         λ = pool.objective_at(i)
         #  print(f'λ[{i}] = {λ}')
         if λ > Λ:
-            info(f'Pool investigation over - next best undetoured length: {λ:.3f}')
+            info(f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length")
             break
         S = pool.S_from_pool()
         G = G_from_S(S, A)
@@ -73,7 +73,9 @@ def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
             H, Λ = Hʹ, Λʹ
             pool_index = i
             pool_objective = λ
-            info(f'Incumbent has (detoured) length: {Λ:.3f}')
+            info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
+        else:
+            info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')            
     H.graph['pool_count'] = num_solutions
     if pool_index > 0:
         H.graph['pool_entry'] = pool_index, pool_objective
