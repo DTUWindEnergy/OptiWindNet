@@ -111,14 +111,20 @@ class WindFarmNetwork:
 
     def terse_links(self):
         '''Returns S links'''
-        _, T = (self.S.graph[k] for k in 'RT')
+        R, T = (self.S.graph[k] for k in 'RT')
         terse = np.empty(T, dtype=int)
 
-
-        for u, v, in self.S.edges:
+        for u, v, reverse in self.S.edges(data='reverse'):
+            if reverse is None:
+                raise ValueError('reverse must not be None')
             u, v = (u, v) if u < v else (v, u)
-            i, target = (v, u)
+            i, target = (u, v) if reverse else (v, u)
+            #if i < T:
             terse[i] = target
+            #else:
+            #    terse[i - B] = target
+
+        print('terse size: ', terse.size)
 
         return terse
 
@@ -130,8 +136,8 @@ class WindFarmNetwork:
 
         self.S.remove_edges_from(list(self.S.edges()))
         for i, j in enumerate(terse_links):
-            self.S.add_edge(i, j, load=0)
-        
+            self.S.add_edge(i, j)
+
         calcload(self.S)
 
         self.G_tentative = G_from_S(self.S, self.A)
