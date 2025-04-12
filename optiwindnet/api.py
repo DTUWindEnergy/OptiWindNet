@@ -60,22 +60,45 @@ class WindFarmNetwork:
             router = Heuristic(solver='Esau_Williams')
         self.router = router
 
-        # Handle cable formats
         if cables is None:
             if verbose:
                 print("WARNING: No cable data provided. Defaulting to cables = [(10, 1)]")
             cables = [(10, 1)]
+
         elif isinstance(cables, int):
             cables = [(cables, 1)]
+
         elif isinstance(cables, (list, tuple, np.ndarray)):
-            if all(isinstance(c, int) for c in cables):
-                cables = [(c, 1) for c in cables]
-            elif all(isinstance(c, (list, tuple, np.ndarray)) and len(c) == 2 for c in cables):
-                cables = [tuple(c) for c in cables]
+            cables_list = list(cables)
+
+            # Handle case: single item like [(5, 12)] → keep as is
+            if len(cables_list) == 1 and isinstance(cables_list[0], (tuple, list, np.ndarray)):
+                inner = cables_list[0]
+
+                if all(isinstance(x, int) for x in inner):
+                    if len(inner) == 2:
+                        # Interpret as a single cable with (cap, cost)
+                        cables = [tuple(inner)]
+                    else:
+                        # Interpret as multiple capacities
+                        cables = [(c, 1) for c in inner]
+                else:
+                    raise ValueError(f"Invalid cable values: {cables}")
+
+            # Flat list of ints (like [5, 12, 13])
+            elif all(isinstance(c, int) for c in cables_list):
+                cables = [(c, 1) for c in cables_list]
+
+            # List of tuples: [(5, 12), (10, 20)]
+            elif all(isinstance(c, (tuple, list, np.ndarray)) and len(c) >= 2 and all(isinstance(x, int) for x in c) for c in cables_list):
+                cables = [tuple(c) for c in cables_list]
+
             else:
                 raise ValueError(f"Invalid cable format: {cables}")
+
         else:
             raise ValueError(f"Invalid cable format: {cables}")
+
 
         self.cables = cables
         self.cables_capacity = max(c[0] for c in cables)
@@ -412,7 +435,7 @@ class WindFarmNetwork:
         self._S_updated = False
 
 
-    def gradient(self, turbines=None, substations=None, network_tree=None, verbose=None, gradient_type='cost'):
+    def gradient(self, turbines=None, substations=None, verbose=None, gradient_type='cost'):
         """
         Calculate the gradient of the length and cost of cable with respect to the positions of the nodes.
         """
@@ -423,10 +446,7 @@ class WindFarmNetwork:
             verbose = self.verbose
 
         if turbines is not None or substations is not None:
-            self.wfn._set_coordinates(turbines=turbines, substations=substations)
-
-        if network_tree is not None:
-            self.wfn.set_network(network_tree=network_tree)
+            self._set_coordinates(turbines=turbines, substations=substations)
 
         G = self.G
         vertices = G.graph['VertexC']
@@ -445,7 +465,7 @@ class WindFarmNetwork:
             gradinc = vec / norm
 
             if gradient_type.lower() == 'cost':
-                gradinc *= G.graph['cables'][G[u][v]['cable']][2]
+                gradinc *= G.graph['cables'][G[u][v]['cable']][1]
 
             gradients[u] += gradinc
             gradients[v] -= gradinc
