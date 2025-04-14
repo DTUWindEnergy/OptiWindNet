@@ -85,6 +85,7 @@ class SolverORTools(cp_model.CpSolver, Solver, PoolHandler):
             setattr(self.parameters, key, val)
         self.log_callback = print
         self.parameters.log_search_progress = verbose
+        info('ORTools CpSat parameters:\n%s\n', self.parameters)
         result = super().solve(model, storer)
         storer.solutions.reverse()
         self.solution_pool = storer.solutions
@@ -119,19 +120,17 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
                           gateXings_constraint: bool = False,
                           gates_limit: bool | int = False,
                           branching: bool = True) -> cp_model.CpModel:
-    '''
+    '''Make discrete optimization model over link set A.
+
     Build ILP CP OR-tools model for the collector system length minimization.
-    `A` is the graph with the available edges to choose from.
-
-    `capacity`: cable capacity
-
-    `gateXing_constraint`: if gates and edges are forbidden to cross.
-
-    `gates_limit`: if True, use the minimum feasible number of gates
-    (total for all roots); if False, no limit is imposed; if a number,
-    use it as the limit.
-
-    `branching`: if root branches are paths (False) or can be trees (True).
+    
+    Args:
+      A: graph with the available edges to choose from
+      capacity: maximum link flow capacity
+      gateXing_constraint: if gates and links are forbidden to cross
+      gates_limit: True -> use the minimum feasible number of gates (total for
+        all roots); False -> no limit is imposed; int -> use it as the limit
+      branching: True -> subtrees can be trees; False -> subtrees must be paths
     '''
     R = A.graph['R']
     T = A.graph['T']

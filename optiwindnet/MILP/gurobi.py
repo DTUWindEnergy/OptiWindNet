@@ -48,6 +48,7 @@ class SolverGurobi(Solver, PoolHandler):
         base_options = self.options | dict(timelimit=timelimit, mipgap=mipgap)
         solver = pyo.SolverFactory('gurobi', solver_io='python', manage_env=True,
                                    options=base_options|options)
+        info('Gurobi solver options: %s', solver.options)
         self.solver = solver
         result = solver.solve(model, warmstart=self.warmstart, tee=verbose)
         self.num_solutions = solver._solver_model.getAttr('SolCount')

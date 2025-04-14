@@ -21,8 +21,8 @@ class SolverCplex(Solver, PoolHandler):
     options: dict = dict(
         # default solution pool size limit is 2100000000
         # mip_pool_replace=1,  # irrelevant with the default pool size
-        parallel=-1,
-        emphasis_mip=4,
+        parallel=-1,  # opportunistic parallelism (non-deterministic)
+        emphasis_mip=4,  # focus on producing solutions
     )
 
     def __init__(self) -> None:
@@ -49,6 +49,7 @@ class SolverCplex(Solver, PoolHandler):
             raise
         solver.options.update(self.options | options
                               | dict(timelimit=timelimit, mipgap=mipgap))
+        info('CPLEX solver options: %s', solver.options)
         result = solver.solve(model, warmstart=self.warmstart, tee=verbose)
         self.result = result
         cplex = solver._solver_model

@@ -119,6 +119,7 @@ class SolverPyomo(Solver):
         solver.options.update(self.options | options
                               | {_optkey[name].timelimit: timelimit,
                                  _optkey[name].mipgap: mipgap})
+        info('%s solver options: %s', self.name, solver.options)
         result = solver.solve(model, **self.solve_kwargs, tee=verbose)
         self.result = result
         if self.name != 'scip':
@@ -138,19 +139,17 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
                           gateXings_constraint: bool = False,
                           gates_limit: bool | int = False,
                           branching: bool = True) -> pyo.ConcreteModel:
-    '''
+    '''Make discrete optimization model over link set A.
+
     Build ILP Pyomo model for the collector system length minimization.
-    `A` is the graph with the available edges to choose from.
-
-    `capacity`: cable capacity
-
-    `gateXing_constraint`: if gates and edges are forbidden to cross.
-
-    `gates_limit`: if True, use the minimum feasible number of gates
-    (total for all roots); if False, no limit is imposed; if a number,
-    use it as the limit.
-
-    `branching`: if root branches are paths (False) or can be trees (True).
+    
+    Args:
+      A: graph with the available edges to choose from
+      capacity: maximum link flow capacity
+      gateXing_constraint: if gates and links are forbidden to cross
+      gates_limit: True -> use the minimum feasible number of gates (total for
+        all roots); False -> no limit is imposed; int -> use it as the limit
+      branching: True -> subtrees can be trees; False -> subtrees must be paths
     '''
     R = A.graph['R']
     T = A.graph['T']
