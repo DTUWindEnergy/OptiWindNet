@@ -51,7 +51,7 @@ class WindFarmNetwork:
     """
 
     def __init__(self, turbines=None, substations=None,
-                 cables=None, border=None, obstacles=None,
+                 cables=None, borderC=None, obstaclesC=None,
                  name='', handle='', L=None, router=None,
                  verbose=False, **kwargs):
 
@@ -107,15 +107,15 @@ class WindFarmNetwork:
 
         # Load layout from coordinates if turbines provided
         if turbines is not None:
-            L = self._from_coordinates(turbines, substations, border, obstacles, name, handle)
+            L = self._from_coordinates(turbines, substations, borderC, obstaclesC, name, handle)
         self.L = L
 
         # Planar embedding
         self._P, self._A = make_planar_embedding(L)
 
         # Geometry inputs
-        self.border = border
-        self.obstacles = obstacles
+        self.borderC = borderC
+        self.obstaclesC = obstaclesC
 
         # Graph/network placeholders and status flags
         self._S = None
@@ -206,7 +206,7 @@ class WindFarmNetwork:
     def G(self, value):
         self._G = value
     
-    def _from_coordinates(self, turbines, substations, border, obstacles, name, handle):
+    def _from_coordinates(self, turbines, substations, borderC, obstaclesC, name, handle):
         """Constructs a site graph from coordinate-based inputs."""
         
         border_subtraction_verbose = True
@@ -214,8 +214,8 @@ class WindFarmNetwork:
         R = substations.shape[0]
         T = turbines.shape[0]
 
-        if border is None:
-            if obstacles is None:
+        if borderC is None:
+            if obstaclesC is None:
                 vertexC = np.vstack((turbines, substations))
                 return L_from_site(
                     R=R,
@@ -227,59 +227,59 @@ class WindFarmNetwork:
                 )
 
             if self.verbose:
-                print('WARNING: Obstacles are given while no border is defined. The tool is creating borders based on turbine and obstacle coordinates')
+                print('WARNING: Obstacles are given while no border coordinate is defined. The tool is creating borders based on turbine and obstacle coordinates')
             
             all_points = [turbines, substations]
             all_points_flat = np.vstack(all_points)
             hull = MultiPoint([tuple(p) for p in all_points_flat]).convex_hull
-            border = np.array(hull.exterior.coords[:-1])  # drop closing point
+            borderC = np.array(hull.exterior.coords[:-1])  # drop closing point
             border_subtraction_verbose = False
 
-        if obstacles is None:
-            obstacles = []
+        if obstaclesC is None:
+            obstaclesC = []
         else:
 
             # Start with the original border polygon
-            border_polygon = Polygon(border)
-            remaining_obstacles = []
+            border_polygon = Polygon(borderC)
+            remaining_obstaclesC = []
 
-            for obs in obstacles:
+            for obs in obstaclesC:
                 obs_poly = Polygon(obs)
 
                 # If the obstacle is completely within the border (and not touching exterior), keep it
                 if border_polygon.contains(obs_poly):
-                    remaining_obstacles.append(obs)
+                    remaining_obstaclesC.append(obs)
                 else:
                     # Subtract this obstacle from the border
-                    new_border = border_polygon.difference(obs_poly)
+                    new_borderC = border_polygon.difference(obs_poly)
 
-                    if new_border.is_empty:
+                    if new_borderC.is_empty:
                         raise ValueError("Obstacle subtraction resulted in an empty border — check your geometry.")
 
                     if self.verbose and border_subtraction_verbose:
                         print("WARNING: At least one obstacle intersects/touches the border. The border is redefined to exclude those obstacles.")
                         border_subtraction_verbose = False
 
-                    # If the subtraction results in multiple pieces (MultiPolygon), keep the largest one
-                    if isinstance(new_border, MultiPolygon):
-                        border_polygon = max(new_border.geoms, key=lambda g: g.area)
+                    # If the subtraction results in multiple pieces (MultiPolygon), raise error
+                    if isinstance(new_borderC, MultiPolygon):
+                        raise ValueError("Obstacle subtraction resulted in multiple pieces (MultiPolygon) — check your geometry.")
                     else:
-                        border_polygon = new_border
+                        border_polygon = new_borderC
 
             # Update the border as a NumPy array of exterior coordinates
-            border = np.array(border_polygon.exterior.coords[:-1])
+            borderC = np.array(border_polygon.exterior.coords[:-1])
 
             # Update obstacles (only those fully contained are kept)
-            obstacles = remaining_obstacles
+            obstaclesC = remaining_obstaclesC
                         
-        border_sizes = np.array([border.shape[0]] + [obs.shape[0] for obs in obstacles])
+        border_sizes = np.array([borderC.shape[0]] + [obs.shape[0] for obs in obstaclesC])
         B = border_sizes.sum()
         obstacle_start_idxs = np.cumsum(border_sizes) + T
 
-        border_range = np.arange(T, T + border.shape[0])
+        border_range = np.arange(T, T + borderC.shape[0])
         obstacle_ranges = [np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)]
 
-        vertexC = np.vstack((turbines, border, *obstacles, substations))
+        vertexC = np.vstack((turbines, borderC, *obstaclesC, substations))
 
         return L_from_site(
             R=R,
