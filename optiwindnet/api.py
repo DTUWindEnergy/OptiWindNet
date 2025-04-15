@@ -126,46 +126,6 @@ class WindFarmNetwork:
         self._S_updated = False
         self._G_updated = False
 
-
-    def _update_planar_embedding(self):
-        """Update the planar embedding (P and A) if marked stale."""
-        if not (self._P_updated and self._A_updated):
-            self._P, self._A = make_planar_embedding(self.L)
-            self._P_updated = self._A_updated = True
-
-
-    def terse_links(self):
-        '''Returns S links'''
-        R, T = (self.S.graph[k] for k in 'RT')
-        terse = np.empty(T, dtype=int)
-
-        for u, v, reverse in self.S.edges(data='reverse'):
-            if reverse is None:
-                raise ValueError('reverse must not be None')
-            u, v = (u, v) if u < v else (v, u)
-            i, target = (u, v) if reverse else (v, u)
-            terse[i] = target
-
-        return terse
-
-    def G_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
-        '''Rebuilds G from terse links'''
-        if turbinesC is not None or substationsC is not None:
-            self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC, verbose=False)
-            self._P, self._A = make_planar_embedding(self.L)
-
-        self.S.remove_edges_from(list(self.S.edges()))
-        for i, j in enumerate(terse_links):
-            self.S.add_edge(i, j)
-
-        calcload(self.S)
-
-        self.G_tentative = G_from_S(self.S, self.A)
-
-        self.G = PathFinder(self._G_tentative, planar=self.P, A=self.A).create_detours()
-
-        assign_cables(self.G, self.cables)
-
     @property
     def A(self):
         """Lazy update of A when accessed."""
@@ -205,6 +165,20 @@ class WindFarmNetwork:
     @G.setter
     def G(self, value):
         self._G = value
+
+    def cost(self):
+        """Returns the total cost of the network."""
+        return self.G.size(weight="cost")
+
+    def length(self):
+        """Returns the total cable length of the network."""
+        return self.G.size(weight="length")
+    
+    def _update_planar_embedding(self):
+        """Update the planar embedding (P and A) if marked stale."""
+        if not (self._P_updated and self._A_updated):
+            self._P, self._A = make_planar_embedding(self.L)
+            self._P_updated = self._A_updated = True
     
     def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle):
         """Constructs a site graph from coordinate-based inputs."""
@@ -344,6 +318,7 @@ class WindFarmNetwork:
         return cls(L=L, **kwargs)
 
     def _repr_svg_(self):
+        # Give the WindFarmNetwork object a SVG representation (it is picked up automatically by the notebook)
         return svgplot(self.G)._repr_svg_()
     
     def plot(self, *args, **kwargs):
@@ -371,6 +346,38 @@ class WindFarmNetwork:
         net = list(net_graph)  # Keep it as a list of tuples
         return net
     
+    def terse_links(self):
+        '''Returns S links'''
+        R, T = (self.S.graph[k] for k in 'RT')
+        terse = np.empty(T, dtype=int)
+
+        for u, v, reverse in self.S.edges(data='reverse'):
+            if reverse is None:
+                raise ValueError('reverse must not be None')
+            u, v = (u, v) if u < v else (v, u)
+            i, target = (u, v) if reverse else (v, u)
+            terse[i] = target
+
+        return terse
+
+    def G_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
+        '''Rebuilds G from terse links'''
+        if turbinesC is not None or substationsC is not None:
+            self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC, verbose=False)
+            self._P, self._A = make_planar_embedding(self.L)
+
+        self.S.remove_edges_from(list(self.S.edges()))
+        for i, j in enumerate(terse_links):
+            self.S.add_edge(i, j)
+
+        calcload(self.S)
+
+        self.G_tentative = G_from_S(self.S, self.A)
+
+        self.G = PathFinder(self._G_tentative, planar=self.P, A=self.A).create_detours()
+
+        assign_cables(self.G, self.cables)
+
     def get_network_array(self):
         """Returns the network edges with cable data."""
         network_array_type = np.dtype([
@@ -391,14 +398,6 @@ class WindFarmNetwork:
         network_array = np.fromiter(iter_edges(self.G, network_array_type.names[2:]),
                                 dtype=network_array_type, count=self.G.number_of_edges())
         return network_array
-                            
-    def cost(self):
-        """Returns the total cost of the network."""
-        return self.G.size(weight="cost")
-
-    def length(self):
-        """Returns the total cable length of the network."""
-        return self.G.size(weight="length")
 
     def _set_coordinates(self, turbinesC, substationsC, verbose=None):
         """Updates the coordinates of turbines and substationsC."""
@@ -536,7 +535,7 @@ class OptiWindNetSolver(ABC):
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, solver='Esau_Williams', maxiter=10000, debug=False, verbose=None, **kwargs):
+    def __init__(self, solver='Esau_Williams', maxiter=10000, debug=False, verbose=False, **kwargs):
         if solver not in ['Esau_Williams']:
             raise ValueError(
                 f"{solver} is not among the supported Heuristic solvers. Choose among: ['Esau_Williams']."
@@ -548,7 +547,7 @@ class Heuristic(OptiWindNetSolver):
         self.maxiter = maxiter
         self.debug = debug
 
-    def optimize(self, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
+    def optimize(self, A, P, cables, cables_capacity, verbose=None, **kwargs):
 
         if verbose is None:
             verbose = self.verbose
@@ -568,7 +567,7 @@ class Heuristic(OptiWindNetSolver):
         return S, G_tentative, G
     
 class MetaHeuristic(OptiWindNetSolver):
-    def __init__(self, time_limit, solver='HGS', gates_limit: int | None = None, max_iter=10, seed: int = 0, verbose=None, **kwargs):
+    def __init__(self, time_limit, solver='HGS', gates_limit: int | None = None, max_iter=10, seed: int = 0, verbose=False, **kwargs):
         # Call the base class initialization
         self.time_limit = time_limit
         self.gates_limit = gates_limit
@@ -578,13 +577,13 @@ class MetaHeuristic(OptiWindNetSolver):
         self.gates_limit = gates_limit
         self.seed = seed
 
-    def optimize(self, A, P, cables=None, cables_capacity=None, verbose=None, **kwargs):
+    def optimize(self, A, P, cables, cables_capacity, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
 
         # optimizing
-        if self.solver== 'HGS': # Hybrid Genetic Search
+        if self.solver.lower() in ['hgs', 'hybrid genetic search', 'hybrid_genetic_search']:
             S = iterative_hgs_cvrp(A, capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
         else:
             raise ValueError(
@@ -599,14 +598,14 @@ class MetaHeuristic(OptiWindNetSolver):
         return S, G_tentative, G
 
 class MILP(OptiWindNetSolver):
-    def __init__(self, solver='ortools', solver_options=None, model_options=None, verbose=None, **kwargs):
+    def __init__(self, solver='ortools', solver_options=None, model_options=None, verbose=False, **kwargs):
         self.verbose = verbose
         self.solver = solver
         self.solver_options = solver_options or {}
         self.model_options = model_options or {}
 
-    def optimize(self, A, P, S=None, cables=None, cables_capacity=None, verbose=None, **kwargs):
-        # If verbose argument is None, use the value of self.verbose
+    def optimize(self, A, P, cables, cables_capacity, S=None, verbose=None, **kwargs):
+       
         if verbose is None:
             verbose = self.verbose
 
@@ -622,14 +621,22 @@ class MILP(OptiWindNetSolver):
                         branching=self.model_options.get("branching", True),
                         gates_limit=self.model_options.get("gates_limit", False)
                     )
+            
+            # warm start
+            if S is not None:
+                if verbose:
+                    print('S is not None and the model is warmed up with the available S.')
+
+                ort.warmup_model(model, S)
 
             orter = ort.cp_model.CpSolver()
             # settings
             orter.parameters.max_time_in_seconds = self.solver_options.get("max_time_in_seconds", 40)
             orter.parameters.relative_gap_limit = self.solver_options.get("relative_gap_limi", 0.005)
             orter.parameters.num_workers = self.solver_options.get("num_workers", 8)
-            orter.parameters.log_search_progress = verbose
-            orter.log_callback = print # required to get the log inside the notebook (goes only to console otherwise)
+            orter.parameters.log_search_progress = verbose or self.solver_options.get("log_search_progress", False)
+            if verbose or self.solver_options.get('log_callback', None)==print:
+                orter.log_callback = print # required to get the log inside the notebook (goes only to console otherwise)
 
             ##########
             # result #
@@ -678,16 +685,11 @@ class MILP(OptiWindNetSolver):
                 )
             
             # warm start
-            S_updated = True
-            if S is not None and S_updated:
+            if S is not None:
                 if verbose:
                     print('S is not None and the model is warmed up with the available S.')
-            else:
-                if verbose:
-                    print('S is None or not updated. Esau-Williams Heuristic is used for warmstarting the MILP solver.')
-                S = EW_presolver(A, capacity=cables_capacity)
 
-            omo.warmup_model(model, S)
+                omo.warmup_model(model, S)
 
 
             pyo_solver.options.update(self.solver_options)
@@ -698,12 +700,14 @@ class MILP(OptiWindNetSolver):
 
             # Define solver-specific arguments for solving
             #######################################################################
-            solver_args = {'tee': self.solver_options.get("tee", True)}
+            solver_args = {'tee': verbose or self.solver_options.get("tee", False)}
 
-            if self.solver in ['gurobi', 'cbc']:
-                solver_args['warmstart'] = model.warmed_by
-            if self.solver in ['cplex']:
-                solver_args['warmstart'] = True
+
+            if S is not None:
+                if self.solver in ['gurobi', 'cbc']:
+                    solver_args['warmstart'] = model.warmed_by
+                if self.solver in ['cplex']:
+                    solver_args['warmstart'] = True
 
             ##########
             # result #
