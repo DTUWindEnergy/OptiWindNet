@@ -23,7 +23,6 @@ from .geometric import (
     is_same_side,
     rotation_checkers_factory,
     assign_root,
-    area_from_polygon_vertices,
     find_edges_bbox_overlaps,
     apply_edge_exemptions,
     complete_graph,
@@ -1080,10 +1079,20 @@ def make_planar_embedding(
         bX, bY = np.vstack((VertexC[border], VertexC[-R:], *stuntC)).T
     # assuming that coordinates are UTM -> min() as bbox's offset to origin
     norm_offset = np.array((bX.min(), bY.min()), dtype=np.float64)
-    # Take the sqrt() of the area and invert for the linear factor such that
-    # area=1.
-    norm_scale = 1./math.sqrt(
-        area_from_polygon_vertices(*VertexC[hull_concave].T))
+    hull_concaveC = VertexC[hull_concave + hull_concave[0:1]]
+    semi_perimeter = np.hypot(*(hull_concaveC[1:] - hull_concaveC[:-1]).T).sum()/2
+    # Shoelace formula for area (https://stackoverflow.com/a/30408825/287217).
+    area_hull = 0.5*abs(np.dot(hull_concaveC[:-1, 0], hull_concaveC[1:, 1])
+                        - np.dot(hull_concaveC[:-1, 1], hull_concaveC[1:, 0]))
+    sqrt_area_hull = math.sqrt(area_hull)
+    # Derive a scaling factor from some property of the concave hull
+    if sqrt_area_hull < 1e-4*semi_perimeter:
+        # the concave hull is essentially a line with area close to zero
+        # derive the scaling factor of coordinates from the semi-perimeter
+        norm_scale = 1./semi_perimeter
+    else:
+        # derive the scaling factor of coordinates so that the scaled area is 1
+        norm_scale = 1./sqrt_area_hull
 
     # ############################
     # P) Set A's graph attributes.
