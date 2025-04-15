@@ -50,7 +50,7 @@ class WindFarmNetwork:
     layout data from different formats and computing network properties.
     """
 
-    def __init__(self, turbines=None, substations=None,
+    def __init__(self, turbinesC=None, substationsC=None,
                  cables=None, borderC=None, obstaclesC=None,
                  name='', handle='', L=None, router=None,
                  verbose=False, **kwargs):
@@ -105,9 +105,9 @@ class WindFarmNetwork:
         self.cables = cables
         self.cables_capacity = max(c[0] for c in cables)
 
-        # Load layout from coordinates if turbines provided
-        if turbines is not None:
-            L = self._from_coordinates(turbines, substations, borderC, obstaclesC, name, handle)
+        # Load layout from coordinates if turbinesC provided
+        if turbinesC is not None:
+            L = self._from_coordinates(turbinesC, substationsC, borderC, obstaclesC, name, handle)
         self.L = L
 
         # Planar embedding
@@ -148,10 +148,10 @@ class WindFarmNetwork:
 
         return terse
 
-    def G_from_terse_links(self, terse_links: np.ndarray, turbines=None, substations=None) -> None:
+    def G_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
         '''Rebuilds G from terse links'''
-        if turbines is not None or substations is not None:
-            self._set_coordinates(turbines=turbines, substations=substations, verbose=False)
+        if turbinesC is not None or substationsC is not None:
+            self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC, verbose=False)
             self._P, self._A = make_planar_embedding(self.L)
 
         self.S.remove_edges_from(list(self.S.edges()))
@@ -206,17 +206,17 @@ class WindFarmNetwork:
     def G(self, value):
         self._G = value
     
-    def _from_coordinates(self, turbines, substations, borderC, obstaclesC, name, handle):
+    def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle):
         """Constructs a site graph from coordinate-based inputs."""
         
         border_subtraction_verbose = True
 
-        R = substations.shape[0]
-        T = turbines.shape[0]
+        R = substationsC.shape[0]
+        T = turbinesC.shape[0]
 
         if borderC is None:
             if obstaclesC is None:
-                vertexC = np.vstack((turbines, substations))
+                vertexC = np.vstack((turbinesC, substationsC))
                 return L_from_site(
                     R=R,
                     T=T,
@@ -229,7 +229,7 @@ class WindFarmNetwork:
             if self.verbose:
                 print('WARNING: Obstacles are given while no border coordinate is defined. The tool is creating borders based on turbine and obstacle coordinates')
             
-            all_points = [turbines, substations]
+            all_points = [turbinesC, substationsC]
             all_points_flat = np.vstack(all_points)
             hull = MultiPoint([tuple(p) for p in all_points_flat]).convex_hull
             borderC = np.array(hull.exterior.coords[:-1])  # drop closing point
@@ -279,7 +279,7 @@ class WindFarmNetwork:
         border_range = np.arange(T, T + borderC.shape[0])
         obstacle_ranges = [np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)]
 
-        vertexC = np.vstack((turbines, borderC, *obstaclesC, substations))
+        vertexC = np.vstack((turbinesC, borderC, *obstaclesC, substationsC))
 
         return L_from_site(
             R=R,
@@ -400,8 +400,8 @@ class WindFarmNetwork:
         """Returns the total cable length of the network."""
         return self.G.size(weight="length")
 
-    def _set_coordinates(self, turbines, substations, verbose=None):
-        """Updates the coordinates of turbines and substations."""
+    def _set_coordinates(self, turbinesC, substationsC, verbose=None):
+        """Updates the coordinates of turbines and substationsC."""
         if verbose is None:
             verbose = self.verbose
         self._G_updated = True
@@ -413,15 +413,15 @@ class WindFarmNetwork:
             raise ValueError("Graph L does not contain 'VertexC' attribute.")
         
         # Update coordinates
-        if turbines is not None:
-            self.L.graph['VertexC'][:turbines.shape[0], :] = turbines
-            self._G_tentative.graph['VertexC'][:turbines.shape[0], :] = turbines
-            self.G.graph['VertexC'][:turbines.shape[0], :] = turbines
+        if turbinesC is not None:
+            self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
+            self._G_tentative.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
+            self.G.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
         
-        if substations is not None:
-            self.L.graph['VertexC'][-substations.shape[0]:, :] = substations
-            self._G_tentative.graph['VertexC'][-substations.shape[0]:, :] = substations
-            self.G.graph['VertexC'][-substations.shape[0]:, :] = substations
+        if substationsC is not None:
+            self.L.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
+            self._G_tentative.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
+            self.G.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
 
         # Update length
         VertexC = self.G.graph['VertexC']
@@ -438,7 +438,7 @@ class WindFarmNetwork:
         self._S_updated = False
 
 
-    def gradient(self, turbines=None, substations=None, verbose=None, gradient_type='cost'):
+    def gradient(self, turbinesC=None, substationsC=None, verbose=None, gradient_type='cost'):
         """
         Calculate the gradient of the length and cost of cable with respect to the positions of the nodes.
         """
@@ -449,8 +449,8 @@ class WindFarmNetwork:
         if verbose is None:
             verbose = self.verbose
 
-        if turbines is not None or substations is not None:
-            self._set_coordinates(turbines=turbines, substations=substations)
+        if turbinesC is not None or substationsC is not None:
+            self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC)
 
         G = self.G
         vertexC = G.graph['VertexC']
@@ -485,7 +485,7 @@ class WindFarmNetwork:
 
         return gradients_wt, gradients_ss
 
-    def optimize(self, turbines=None, substations=None, verbose=None, router=None):
+    def optimize(self, turbinesC=None, substationsC=None, verbose=None, router=None):
         router = router or self.router  # Use provided router or the existing one in the class
         if router is None:
             raise ValueError(
@@ -497,21 +497,21 @@ class WindFarmNetwork:
             verbose = self.verbose
 
         # If new coordinates are provided, update them
-        if turbines is not None or substations is not None:
-            self._set_coordinates(turbines=turbines, substations=substations, verbose=False)
+        if turbinesC is not None or substationsC is not None:
+            self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC, verbose=False)
             self._P, self._A = make_planar_embedding(self.L)
         
-        if turbines is None:
-            turbines = self.L.graph['VertexC'][:self.L.graph['T'], :]
+        if turbinesC is None:
+            turbinesC = self.L.graph['VertexC'][:self.L.graph['T'], :]
 
-        if substations is None:
-            substations = substations or self.L.graph['VertexC'][-self.L.graph['R']:, :]
+        if substationsC is None:
+            substationsC = substationsC or self.L.graph['VertexC'][-self.L.graph['R']:, :]
 
         self._A_updated = True
         self._P_updated = True
         self._S_updated = True
         self._G_updated = True
-        S, G_tentative, G = router(A=self.A, P=self.P, S=self.S, turbines=turbines, substations=substations, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
+        S, G_tentative, G = router(A=self.A, P=self.P, S=self.S, turbinesC=turbinesC, substationsC=substationsC, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
         self.S = S
         self._G_tentative = G_tentative
         self.G = G
@@ -524,15 +524,15 @@ class OptiWindNetSolver(ABC):
         pass
 
     @abstractmethod
-    def optimize(self, turbines=None, substations=None, verbose=None, **kwargs):
+    def optimize(self, turbinesC=None, substationsC=None, verbose=None, **kwargs):
         """
         Perform cable layout optimization. Must be implemented by subclasses.
         """
         pass
 
-    def __call__(self, turbines=None, substations=None, verbose=None, **kwargs):
+    def __call__(self, turbinesC=None, substationsC=None, verbose=None, **kwargs):
         """Make the instance callable, calling optimize() internally."""
-        return self.optimize(turbines=turbines, substations=substations, verbose=verbose, **kwargs)  
+        return self.optimize(turbinesC=turbinesC, substationsC=substationsC, verbose=verbose, **kwargs)  
 
 
 class Heuristic(OptiWindNetSolver):
