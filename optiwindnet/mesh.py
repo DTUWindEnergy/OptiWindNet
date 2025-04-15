@@ -13,7 +13,7 @@ from itertools import chain, tee, combinations
 from bidict import bidict
 import shapely as shp
 
-import PythonCDT as cdt
+import condeltri as cdt
 
 from .geometric import (
     _halfedges_from_triangulation,
@@ -23,7 +23,6 @@ from .geometric import (
     is_same_side,
     rotation_checkers_factory,
     assign_root,
-    area_from_polygon_vertices,
     find_edges_bbox_overlaps,
     apply_edge_exemptions,
     complete_graph,
@@ -1026,16 +1025,38 @@ def make_planar_embedding(
                 A_edges_to_revisit.append((u, v))
 
     # Diagonals in A which have a missing origin Delaunay edge become edges.
+    promoted_diagonal_from_parent_node = {}
+    P_A_edges_to_remove = []
     for uv in A_edges_to_revisit:
         st = diagonals.inv.get(uv)
         if st is not None:
-            edgeD = A.edges[st]
-            edgeD['kind'] = ('contour_delaunay'
-                             if 'midpath' in edgeD else
-                             'delaunay')
-            del diagonals[st]
-        # TODO: ¿how important is it to add ⟨s, t⟩ to P_A?
-        # before removing ⟨u, v⟩, we should discern if it is usvt or utsv
+            # prevent promotion of two diagonals of the same triangle
+            promote_st = True
+            for n in uv:
+                promoted = promoted_diagonal_from_parent_node.get(n)
+                if promoted is not None:
+                    (w, y), o = promoted
+                    if (((y, n) in P_A.edges or (y, o) in P_A.edges
+                         or (w, n) in P_A.edges or (w, o) in P_A.edges)
+                        and (w in uv or y in uv)):
+                        # st & promoted are diagonals of the same triangle
+                        diagonals[st] = w, y
+                        promote_st = False
+            if promote_st:
+                edgeD = A.edges[st]
+                edgeD['kind'] = ('contour_delaunay'
+                                 if 'midpath' in edgeD else
+                                 'delaunay')
+                del diagonals[st]
+                u, v = uv
+                promoted_diagonal_from_parent_node[u] = st, v
+                promoted_diagonal_from_parent_node[v] = st, u
+                s, t = st
+                w, y = (u, v) if P_A[u][v]['cw'] == s else (v, u)
+                P_A.add_half_edge(s, t, cw=y)
+                P_A.add_half_edge(t, s, cw=w)
+        P_A_edges_to_remove.append(uv)
+    for uv in P_A_edges_to_remove:
         P_A.remove_edge(*uv)
 
     # ##################################################################
@@ -1080,10 +1101,20 @@ def make_planar_embedding(
         bX, bY = np.vstack((VertexC[border], VertexC[-R:], *stuntC)).T
     # assuming that coordinates are UTM -> min() as bbox's offset to origin
     norm_offset = np.array((bX.min(), bY.min()), dtype=np.float64)
-    # Take the sqrt() of the area and invert for the linear factor such that
-    # area=1.
-    norm_scale = 1./math.sqrt(
-        area_from_polygon_vertices(*VertexC[hull_concave].T))
+    hull_concaveC = VertexC[hull_concave + hull_concave[0:1]]
+    semi_perimeter = np.hypot(*(hull_concaveC[1:] - hull_concaveC[:-1]).T).sum()/2
+    # Shoelace formula for area (https://stackoverflow.com/a/30408825/287217).
+    area_hull = 0.5*abs(np.dot(hull_concaveC[:-1, 0], hull_concaveC[1:, 1])
+                        - np.dot(hull_concaveC[:-1, 1], hull_concaveC[1:, 0]))
+    sqrt_area_hull = math.sqrt(area_hull)
+    # Derive a scaling factor from some property of the concave hull
+    if sqrt_area_hull < 1e-4*semi_perimeter:
+        # the concave hull is essentially a line with area close to zero
+        # derive the scaling factor of coordinates from the semi-perimeter
+        norm_scale = 1./semi_perimeter
+    else:
+        # derive the scaling factor of coordinates so that the scaled area is 1
+        norm_scale = 1./sqrt_area_hull
 
     # ############################
     # P) Set A's graph attributes.

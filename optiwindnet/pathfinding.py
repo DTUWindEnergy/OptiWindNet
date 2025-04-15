@@ -17,7 +17,7 @@ from .crossings import gateXing_iter
 from .mesh import planar_flipped_by_routeset
 from .geometric import rotation_checkers_factory
 from .interarraylib import bfs_subtree_loads, scaffolded
-from .utils import NodeStr, NodeTagger
+from .utils import NodeTagger
 
 logger = logging.getLogger(__name__)
 debug, info, warn = logger.debug, logger.info, logger.warning
@@ -83,7 +83,8 @@ class PathFinder():
     def __init__(self, Gʹ: nx.Graph,
                  planar: nx.PlanarEmbedding,
                  A: nx.Graph | None = None,
-                 branching: bool = True) -> None:
+                 branching: bool = True,
+                 iterations_limit: int = 10000) -> None:
         G = Gʹ.copy()
         R, T, B = (G.graph[k] for k in 'RTB')
         C = G.graph.get('C', 0)
@@ -190,7 +191,7 @@ class PathFinder():
 
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
-        self.hooks2check = hooks2check
+        self.hooks2check, self.iterations_limit = hooks2check, iterations_limit
         self._find_paths()
 
     def get_best_path(self, n: int):
@@ -405,8 +406,8 @@ class PathFinder():
     def _find_paths(self):
         #  print('[exp] starting _explore()')
         G, P, R, T, B = self.G, self.P, self.R, self.T, self.B
-        d2roots = self.d2roots
-        d2rootsRank = self.d2rootsRank
+        d2roots, d2rootsRank = self.d2roots, self.d2rootsRank
+        iterations_limit = self.iterations_limit
         prioqueue = []
         # `uncharted` records whether portals have been traversed
         # (it is orientation-sensitive – two permutations)
@@ -483,13 +484,10 @@ class PathFinder():
                     self._traverse_channel(r, r, [left, right], wedge_end,
                                            self._advance_portal(left, right))
                 ))
-        # TODO: this is arbitrary, should be documented somewhere (or removed)
-        MAX_ITER = 10000
-        #  MAX_ITER = 300
         # process edges in the prioqueue
         counter = 0
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
-        while len(prioqueue) > 0 and counter < MAX_ITER:
+        while len(prioqueue) > 0 and counter < iterations_limit:
             # safeguard against infinite loop
             counter += 1
             #  print(f'[exp] {counter}')
@@ -534,8 +532,9 @@ class PathFinder():
                 #  else:
                 #      print(f'[exp]_traverser {self.n2s(*hop)} was '
                 #            'dropped (no better that previous traverser).')
-        if counter == MAX_ITER:
-            warn('PathFinder: main loop aborted after MAX_ITER!')
+        if counter == iterations_limit:
+            warn('PathFinder loop aborted after iterations_limit reached: %d',
+                 counter)
         debug('PathFinder: loops performed: %d', counter)
 
     def _apply_all_best_paths(self, G: nx.Graph):

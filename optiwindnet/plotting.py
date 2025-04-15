@@ -32,6 +32,12 @@ NODESIZE_LABELED_DETOUR = 155
 F = NodeTagger()
 
 
+def _is_ccw(X, Y):
+    # Signed area Shoelace (https://stackoverflow.com/a/30408825/287217).
+    return (X[-1]*Y[0] - Y[-1]*X[0] + np.dot(X[:-1], Y[1:])
+            - np.dot(Y[:-1], X[1:])) >= 0
+
+
 def gplot(G: nx.Graph, ax: Axes | None = None,
           node_tag: str | None = None,
           landscape: bool = True, infobox: bool = True,
@@ -162,9 +168,11 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
         border_opt = dict(facecolor=border_face, linestyle='dashed',
             edgecolor=kind2color['border'], linewidth=0.7)
         borderC = VertexC[border] 
+        
         if obstacles is None:
             ax.fill(*borderC.T, **border_opt)
         else:
+            border_is_ccw = _is_ccw(*borderC.T)
             obstacleC_ = [VertexC[obstacle] for obstacle in obstacles]
             # path for the external border
             codes = [Path.MOVETO] + (borderC.shape[0] - 1)*[Path.LINETO] + [Path.CLOSEPOLY]
@@ -172,7 +180,10 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
             # paths for the obstacle borders
             for obstacleC in obstacleC_:
                 codes.extend([Path.MOVETO] + (obstacleC.shape[0] - 1)*[Path.LINETO] + [Path.CLOSEPOLY])
-                points.extend([row for row in obstacleC] + [obstacleC[0]])
+                if _is_ccw(*obstacleC.T) != border_is_ccw:
+                    points.extend([row for row in obstacleC] + [obstacleC[0]])
+                else:
+                    points.extend([row for row in obstacleC[::-1]] + [obstacleC[-1]])
             # create and add matplotlib artists
             path = Path(points, codes)
             patch = PathPatch(path, **border_opt)

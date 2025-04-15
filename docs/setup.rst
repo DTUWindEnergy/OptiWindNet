@@ -3,42 +3,12 @@
 Requirements
 ============
 
-* Python
-* Git
-* C/C++ Build Utilities
+*OptiWindNet* has been tested on Windows 10 and on Linux systems, but should run on Windows 11 and MacOSX as well.
 
-*OptiWindNet* has been tested on Windows 10 and on Linux systems, but should run on MacOSX as well.
-
-Python
-------
 A recent Python version (3.10+) is required to run *OptiWindNet*, and the use of a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
 
 * `Python <https://www.python.org/downloads/>`_, which provides: ``venv`` virtual environment creator and ``pip`` package manager;
 * or `Miniforge <https://conda-forge.org/download/>`_ (`Anaconda or Miniconda <https://www.anaconda.com/download/success>`_ also work), which provides: ``conda`` environment and package manager.
-
-Git
----
-
-*OptiWindNet* and one of its dependencies (*PythonCDT*) are installable only from their source code repositories and require the program ``git``. This software can be obtained from `Git <https://git-scm.com/downloads>`_ for a standalone version or from `Git for Windows <https://gitforwindows.org/>`_ to get bundle of git and other useful tools for the Windows platform (recommended).
-
-C Build Utilities
------------------
-One of *OptiWindNet*'s dependencies (*PythonCDT*) requires C/C++ source code to be compiled at installation time. If ``gcc``, ``g++``, ``cmake`` and ``make`` commands are already available in the target system, no further action is necessary. If not, the easiest way to fullfill that requirement on Windows (as a regular user) is using `Scoop <https://scoop.sh/>`_.
-
-To install Scoop, open a PowerShell prompt and enter::
-
-    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-    Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-
-Next, use ``scoop`` to install `WinLibs <https://winlibs.com/>`_::
-
-    scoop install mingw-winlibs
-
-Open a new shell to ensure that the updated system PATH is loaded. To check the build system is ready, enter these commands::
-
-    gcc --version
-    make --version
-    cmake --version
 
 .. _Installation:
 
@@ -59,7 +29,7 @@ Run::
 
 Then::
 
-    pip install git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+    pip install optiwindnet
 
 If using ``conda``
 ------------------
@@ -68,7 +38,7 @@ Download `environment.yml <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
     conda env create -f environment.yml
     conda activate optiwindnet_env
-    pip install git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+    pip install optiwindnet
 
 
 Running
@@ -82,7 +52,7 @@ Optional - Solvers
 The installation procedure above enables *OptiWindNet*'s heuristics, meta-heuristic and mathematical optimization with `Google's OR-Tools <https://developers.google.com/optimization>`_ (open-source software).
 
 Other solvers can be used for mathematical optimization, but they are not installed by default.
-See the documentation section **Solvers** for relevant parameters when calling each solver.
+See the documentation section **Exact Solvers** for relevant parameters when calling each solver.
 
 The commands suggested here assume that the Python environment for *OptiWindNet* has been already activated.
 For packages that are installable with both ``pip`` and ``conda``, **enter only one** of the commands.
@@ -134,4 +104,4 @@ Updating
 
 Activate the Python environment for *OptiWindNet* and enter::
 
-    pip install --upgrade --force-reinstall git+https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet.git
+    pip install --upgrade optiwindnet

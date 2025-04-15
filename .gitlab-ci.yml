@@ -5,8 +5,7 @@ test_linux:
   stage:
     test
   script:
-    - apt-get update
-    - apt-get -y install gcc g++ cmake
+    - python --version
     - pip install --upgrade pip
     - pip install .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
@@ -25,6 +24,7 @@ test_windows:
     - conda env create --file environment.yml
     - if ($LASTEXITCODE) {conda env update -n optiwindnet_env --file environment.yml}
     - conda activate optiwindnet_env
+    - python --version
     - pip install -e .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
     # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
