@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Mapping
 from itertools import pairwise
 from pathlib import Path
+from shapely.geometry import Polygon, MultiPoint, MultiPolygon
 
 import numpy as np
 import yaml
@@ -20,6 +21,7 @@ PackType = Mapping[str, Any]
 # optiwindnet modules
 from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
 from optiwindnet.plotting import gplot, pplot
+from optiwindnet.svg import svgplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
@@ -206,8 +208,6 @@ class WindFarmNetwork:
     
     def _from_coordinates(self, turbines, substations, border, obstacles, name, handle):
         """Constructs a site graph from coordinate-based inputs."""
-
-        from shapely.geometry import Polygon, MultiPoint, MultiPolygon
         
         border_subtraction_verbose = True
 
@@ -216,14 +216,14 @@ class WindFarmNetwork:
 
         if border is None:
             if obstacles is None:
-                vertex_coords = np.vstack((turbines, substations))
+                vertexC = np.vstack((turbines, substations))
                 return L_from_site(
                     R=R,
                     T=T,
                     B=0,
                     name=name,
                     handle=handle,
-                    VertexC=vertex_coords
+                    VertexC=vertexC
                 )
 
             if self.verbose:
@@ -279,7 +279,7 @@ class WindFarmNetwork:
         border_range = np.arange(T, T + border.shape[0])
         obstacle_ranges = [np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)]
 
-        vertex_coords = np.vstack((turbines, border, *obstacles, substations))
+        vertexC = np.vstack((turbines, border, *obstacles, substations))
 
         return L_from_site(
             R=R,
@@ -289,7 +289,7 @@ class WindFarmNetwork:
             obstacles=obstacle_ranges,
             name=name,
             handle=handle,
-            VertexC=vertex_coords
+            VertexC=vertexC
         )
     
         
@@ -343,6 +343,9 @@ class WindFarmNetwork:
 
         return cls(L=L, **kwargs)
 
+    def _repr_svg_(self):
+        return svgplot(self.G)._repr_svg_()
+    
     def plot(self, *args, **kwargs):
         return gplot(self.G, *args, **kwargs)
     
@@ -441,6 +444,7 @@ class WindFarmNetwork:
         """
         if gradient_type.lower() not in ['cost', 'length']:
             raise ValueError("gradient_type should be either 'cost' or 'length'")
+        
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -449,14 +453,14 @@ class WindFarmNetwork:
             self._set_coordinates(turbines=turbines, substations=substations)
 
         G = self.G
-        vertices = G.graph['VertexC']
+        vertexC = G.graph['VertexC']
         R = G.graph['R']
         T = G.graph['T']
-        N = len(vertices)
+        N = len(vertexC)
         gradients = np.zeros((N, 2))
 
         for u, v in G.edges():
-            vec = vertices[u] - vertices[v]
+            vec = vertexC[u] - vertexC[v]
             norm = np.hypot(*vec)
 
             if norm < 1e-12:
@@ -480,7 +484,6 @@ class WindFarmNetwork:
         gradients_ss = gradients[N - R:]
 
         return gradients_wt, gradients_ss
-
 
     def optimize(self, turbines=None, substations=None, verbose=None, router=None):
         router = router or self.router  # Use provided router or the existing one in the class
@@ -515,7 +518,6 @@ class WindFarmNetwork:
 
         network_array = self.get_network_array()
         return network_array
-
 
 class OptiWindNetSolver(ABC):
     def __init__(self, **kwargs):
