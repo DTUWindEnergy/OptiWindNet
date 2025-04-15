@@ -931,18 +931,30 @@ def make_planar_embedding(
     cw, ccw = rotation_checkers_factory(VertexC)
     corner_to_A_edges = defaultdict(list)
     A_edges_to_revisit = []
-    for u, v in A.edges - P_paths.edges:
+    edges_to_process = [(u, v) if u < v else (v, u)
+                        for u, v in A.edges - P_paths.edges]
+    remaining_diagonals = 0
+    while edges_to_process:
+        uv = edges_to_process.pop(0)
+        if len(edges_to_process) > remaining_diagonals and uv in diagonals:
+            # process edges before diagonals
+            edges_to_process.append(uv)
+            remaining_diagonals += 1
+            continue
+        remove_uv = False
+        u, v = uv
         # For the edges in A that are not in P, we find their corresponding
         # shortest path in P_path and update the length attribute in A.
         length, path = nx.bidirectional_dijkstra(P_paths, u, v,
                                                  weight='length')
         debug('A_edge: %s–%s length: %.3f; path: %s', F[u], F[v], length, path)
-        if all(n >= T for n in path[1:-1]):
+        if any(n < T for n in path[1:-1]):
+            # remove edge because the path goes through some wtg node
+            remove_uv = True
+        else:
             # keep only paths that only have border vertices between nodes
             edgeD = A[path[0]][path[-1]]
-            midpath = (path[1:-1].copy()
-                       if u < v else
-                       path[-2:0:-1].copy())
+            midpath = path[1:-1].copy()
             i = 0
             while i <= len(path) - 3:
                 # Check if each vertex at the border is necessary.
@@ -1002,20 +1014,30 @@ def make_planar_embedding(
                 else:
                     shortcuts.append(b)
                 debug('(%d) %s %s %s shortcut', i, F[s], F[b], F[t])
+            if len(path) > 2:
+                # the end-segments of the path must be in the same sectors as
+                # segment ⟨u, v⟩ regarding both u and v as pivots
+                if (u, v) in diagonals:
+                    s, t = diagonals[(u, v)]
+                    if P_A[u][s]['cw'] != t:
+                        s, t = t, s
+                else:
+                    s = P_A[u][v]['ccw']
+                    t = P_A[u][v]['cw']
+                if (cw(u, path[1], s) or cw(u, t, path[1])
+                        or cw(v, path[-2], t) or cw(v, s, path[-2])):
+                    remove_uv = True
+                else:
+                    edgeD['length'] = length
+                    for p in path[1:-1]:
+                        corner_to_A_edges[p].append(uv)
             edgeD.update(# midpath-> which P edges the A edge maps to
                          # (so that PathFinder works)
                          midpath=midpath,
                          # contour_... edges may include direct ones that are
                          # diverted because P_paths does not include them
                          kind='contour_'+edgeD['kind'])
-            if len(path) > 2:
-                edgeD['length'] = length
-                u, v = (u, v) if u < v else (v, u)
-                for p in path[1:-1]:
-                    corner_to_A_edges[p].append((u, v))
-        else:
-            # remove edge because the path goes through some wtg node
-            u, v = (u, v) if u < v else (v, u)
+        if remove_uv:
             A.remove_edge(u, v)
             if (u, v) in diagonals:
                 del diagonals[(u, v)]
