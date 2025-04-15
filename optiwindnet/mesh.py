@@ -1025,16 +1025,38 @@ def make_planar_embedding(
                 A_edges_to_revisit.append((u, v))
 
     # Diagonals in A which have a missing origin Delaunay edge become edges.
+    promoted_diagonal_from_parent_node = {}
+    P_A_edges_to_remove = []
     for uv in A_edges_to_revisit:
         st = diagonals.inv.get(uv)
         if st is not None:
-            edgeD = A.edges[st]
-            edgeD['kind'] = ('contour_delaunay'
-                             if 'midpath' in edgeD else
-                             'delaunay')
-            del diagonals[st]
-        # TODO: ¿how important is it to add ⟨s, t⟩ to P_A?
-        # before removing ⟨u, v⟩, we should discern if it is usvt or utsv
+            # prevent promotion of two diagonals of the same triangle
+            promote_st = True
+            for n in uv:
+                promoted = promoted_diagonal_from_parent_node.get(n)
+                if promoted is not None:
+                    (w, y), o = promoted
+                    if (((y, n) in P_A.edges or (y, o) in P_A.edges
+                         or (w, n) in P_A.edges or (w, o) in P_A.edges)
+                        and (w in uv or y in uv)):
+                        # st & promoted are diagonals of the same triangle
+                        diagonals[st] = w, y
+                        promote_st = False
+            if promote_st:
+                edgeD = A.edges[st]
+                edgeD['kind'] = ('contour_delaunay'
+                                 if 'midpath' in edgeD else
+                                 'delaunay')
+                del diagonals[st]
+                u, v = uv
+                promoted_diagonal_from_parent_node[u] = st, v
+                promoted_diagonal_from_parent_node[v] = st, u
+                s, t = st
+                w, y = (u, v) if P_A[u][v]['cw'] == s else (v, u)
+                P_A.add_half_edge(s, t, cw=y)
+                P_A.add_half_edge(t, s, cw=w)
+        P_A_edges_to_remove.append(uv)
+    for uv in P_A_edges_to_remove:
         P_A.remove_edge(*uv)
 
     # ##################################################################
