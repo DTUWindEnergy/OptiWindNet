@@ -90,60 +90,16 @@ class WindFarmNetwork:
         self.L = L
 
         # Planar embedding
-        self._P, self._A = make_planar_embedding(L)
+        self.P, self.A = make_planar_embedding(L)
 
         # Geometry inputs
         self.borderC = borderC
         self.obstaclesC = obstaclesC
 
         # Graph/network placeholders and status flags
-        self._S = None
+        self.S = None
         self._G_tentative = None
         self.G = None
-        self._A_updated = True
-        self._P_updated = True
-        self._S_updated = False
-        self._G_updated = False
-
-    @property
-    def A(self):
-        """Lazy update of A when accessed."""
-        self._update_planar_embedding()
-        return self._A
-    
-    @A.setter
-    def A(self, value):
-        self._A = value
-
-    @property
-    def P(self):
-        """Lazy update of P when accessed."""
-        self._update_planar_embedding()
-        return self._P
-    
-    @P.setter
-    def P(self, value):
-        self._P = value
-
-    @property
-    def S(self):
-        if not self._S_updated and self.verbose:
-            print('S is not updated')
-        return self._S
-    
-    @S.setter
-    def S(self, value):
-        self._S = value
-
-    @property
-    def G(self):
-        if not self._G_updated and self.verbose:
-            print('G is not updated')
-        return self._G
-
-    @G.setter
-    def G(self, value):
-        self._G = value
 
     def cost(self):
         """Returns the total cost of the network."""
@@ -152,12 +108,7 @@ class WindFarmNetwork:
     def length(self):
         """Returns the total cable length of the network."""
         return self.G.size(weight="length")
-    
-    def _update_planar_embedding(self):
-        """Update the planar embedding (P and A) if marked stale."""
-        if not (self._P_updated and self._A_updated):
-            self._P, self._A = make_planar_embedding(self.L)
-            self._P_updated = self._A_updated = True
+
     
     def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle):
         """Constructs a site graph from coordinate-based inputs."""
@@ -343,7 +294,7 @@ class WindFarmNetwork:
         '''Rebuilds G from terse links'''
         if turbinesC is not None or substationsC is not None:
             self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC, verbose=False)
-            self._P, self._A = make_planar_embedding(self.L)
+            self.P, self.A = make_planar_embedding(self.L)
 
         self.S.remove_edges_from(list(self.S.edges()))
         for i, j in enumerate(terse_links):
@@ -382,7 +333,6 @@ class WindFarmNetwork:
         """Updates the coordinates of turbines and substationsC."""
         if verbose is None:
             verbose = self.verbose
-        self._G_updated = True
 
         if verbose:
             print('WARNING: wfn._set_coordinates is not checking for feasiblity')
@@ -410,10 +360,6 @@ class WindFarmNetwork:
         
         # Update cost
         assign_cables(self.G, self.cables)
-
-        self._A_updated = False
-        self._P_updated = False
-        self._S_updated = False
 
 
     def gradient(self, turbinesC=None, substationsC=None, verbose=None, gradient_type='cost'):
@@ -464,7 +410,10 @@ class WindFarmNetwork:
         return gradients_wt, gradients_ss
 
     def optimize(self, turbinesC=None, substationsC=None, verbose=None, router=None):
-        router = router or self.router  # Use provided router or the existing one in the class
+        if router is not None:
+            self.router = router
+        
+        router = self.router  # Use provided router or the existing one in the class
         if router is None:
             raise ValueError(
                         "To run the optimization, a router must be initialized. "
@@ -475,9 +424,14 @@ class WindFarmNetwork:
             verbose = self.verbose
 
         # If new coordinates are provided, update them
+        if turbinesC is not None:
+            self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
+    
+        if substationsC is not None:
+            self.L.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
+            
         if turbinesC is not None or substationsC is not None:
-            self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC, verbose=False)
-            self._P, self._A = make_planar_embedding(self.L)
+            self.P, self.A = make_planar_embedding(self.L)
         
         if turbinesC is None:
             turbinesC = self.L.graph['VertexC'][:self.L.graph['T'], :]
@@ -485,17 +439,13 @@ class WindFarmNetwork:
         if substationsC is None:
             substationsC = substationsC or self.L.graph['VertexC'][-self.L.graph['R']:, :]
 
-        self._A_updated = True
-        self._P_updated = True
-        self._S_updated = True
-        self._G_updated = True
         S, G_tentative, G = router(A=self.A, P=self.P, S=self.S, turbinesC=turbinesC, substationsC=substationsC, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
         self.S = S
         self._G_tentative = G_tentative
         self.G = G
 
-        network_array = self.get_network_array()
-        return network_array
+        terse_links = self.terse_links()
+        return terse_links
 
 class OptiWindNetSolver(ABC):
     def __init__(self, **kwargs):
@@ -561,17 +511,16 @@ class MetaHeuristic(OptiWindNetSolver):
         if verbose is None:
             verbose = self.verbose
 
-        A_norm = as_normalized(A)
         # optimizing
         if self.solver.lower() in ['hgs', 'hybrid genetic search', 'hybrid_genetic_search']:
-            S = iterative_hgs_cvrp(A_norm, capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
+            S = iterative_hgs_cvrp(A, capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
         else:
             raise ValueError(
                 f"{self.solver} is not among the supported Meta-Heuristic solvers. Choose among: HGS.")
         
-        G_tentative = G_from_S(S, A_norm)
+        G_tentative = G_from_S(S, A)
 
-        G = PathFinder(G_tentative, planar=P, A=A_norm).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
         assign_cables(G, cables)
         
