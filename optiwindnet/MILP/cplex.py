@@ -68,8 +68,8 @@ class SolverCplex(Solver, PoolHandler):
             S = self.S_from_pool()
             G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
-            G = investigate_pool(P, A, self)
-        return G
+            S, G = investigate_pool(P, A, self)
+        return S, G
 
     def objective_at(self, index: int) -> float:
         soln = self.sorted_index_[index]

@@ -4,7 +4,7 @@
 import math
 import logging
 from typing import Any
-from collections import namedtuple, defaultdict
+from collections import namedtuple
 from itertools import chain
 import networkx as nx
 import psutil
@@ -13,7 +13,7 @@ import pyomo.environ as pyo
 from pyomo.contrib.solver.base import SolverBase
 from pyomo.opt import SolverResults
 
-from .core import Solver
+from .core import Topology, FeederRoute, FeederLimit, Solver
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint, G_from_S
 from ..pathfinding import PathFinder
@@ -132,13 +132,16 @@ class SolverPyomo(Solver):
         P, A = self.P, self.A
         S = S_from_solution(self.model, self.solver, self.result)
         G = PathFinder(G_from_S(S, A), P, A).create_detours()
-        return G
+        return S, G
 
 
-def make_min_length_model(A: nx.Graph, capacity: int, *,
-                          gateXings_constraint: bool = False,
-                          gates_limit: bool | int = False,
-                          branching: bool = True) -> pyo.ConcreteModel:
+def make_min_length_model(
+        A: nx.Graph, capacity: int, *,
+        topology: Topology = Topology.BRANCHED,
+        feeder_route: FeederRoute = FeederRoute.SEGMENTED,
+        feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+        max_feeders: int = 0
+) -> pyo.ConcreteModel:
     '''Make discrete optimization model over link set A.
 
     Build ILP Pyomo model for the collector system length minimization.
@@ -146,10 +149,13 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
     Args:
       A: graph with the available edges to choose from
       capacity: maximum link flow capacity
-      gateXing_constraint: if gates and links are forbidden to cross
-      gates_limit: True -> use the minimum feasible number of gates (total for
-        all roots); False -> no limit is imposed; int -> use it as the limit
-      branching: True -> subtrees can be trees; False -> subtrees must be paths
+      topology: one of Topology.{BRANCHED, RADIAL}
+      feeder_route: 
+        FeederRoute.SEGMENTED -> feeder routes may be detoured around subtrees;
+        FeederRoute.STRAIGHT -> feeder routes must be straight, direct lines 
+      feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
+        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}
+      max_feeders: only used if feeder_limit is FeederLimit.SPECIFIED
     '''
     R = A.graph['R']
     T = A.graph['T']
@@ -213,9 +219,9 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
         rule=lambda m, u, v: m.link_[u, v] + m.link_[v, u] <= 1
     )
 
-    # gate-edge crossings
-    if gateXings_constraint:
-        m.cons_gateXedge = pyo.Constraint(
+    # feeder-edge crossings
+    if feeder_route is FeederRoute.STRAIGHT:
+        m.cons_feederXedge = pyo.Constraint(
             gateXing_iter(A),
             rule=lambda m, u, v, r, n: (m.link_[u, v]
                                         + m.link_[v, u]
@@ -264,25 +270,41 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
         )
     )
 
-    # gates limit
-    if gates_limit:
-        def gates_limit_eq_rule(m):
+    # feeder limits
+    if feeder_limit is not FeederLimit.UNLIMITED:
+        min_feeders = math.ceil(T/m.k)
+
+        def feeder_limit_eq_rule(m):
             return (sum(m.link_[t, r] for r in _R for t in _T)
-                    == math.ceil(T/m.k))
+                    == min_feeders)
 
-        def gates_limit_ub_rule(m):
+        def feeder_limit_ub_rule(m):
             return (sum(m.link_[t, r] for r in _R for t in _T)
-                    <= gates_limit)
+                    <= max_feeders)
 
-        m.gates_limit = pyo.Constraint(rule=(gates_limit_eq_rule
-                                             if isinstance(gates_limit, bool)
-                                             else gates_limit_ub_rule))
+        feeder_rule = feeder_limit_ub_rule
+        if feeder_limit is FeederLimit.SPECIFIED:
+            if max_feeders == min_feeders:
+                feeder_rule = feeder_limit_eq_rule
+            elif max_feeders < min_feeders:
+                raise ValueError('max_feeders is below the minimum necessary')
+        elif feeder_limit is FeederLimit.MINIMUM:
+            feeder_rule = feeder_limit_eq_rule
+        elif feeder_limit is FeederLimit.MIN_PLUS1:
+            max_feeders = min_feeders + 1
+        elif feeder_limit is FeederLimit.MIN_PLUS2:
+            max_feeders = min_feeders + 2
+        elif feeder_limit is FeederLimit.MIN_PLUS3:
+            max_feeders = min_feeders + 3
+        else:
+            raise NotImplementedError('Unknown value:', feeder_limit)
+        m.cons_feeder_limit = pyo.Constraint(rule=feeder_rule)
 
-    # non-branching
-    if not branching:
+    # radial or branched topology
+    if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
         # limited by the m.cons_one_out_edge
-        m.non_branching = pyo.Constraint(
+        m.cons_radial = pyo.Constraint(
             m.T,
             rule=lambda m, u: (sum(m.link_[v, u] for v in A_nodes.neighbors(u))
                                <= 1)
@@ -347,38 +369,12 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) \
     return model
 
 
-def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
-                    result: SolverResults) -> nx.Graph:
+def topo_from_solution(model: pyo.ConcreteModel) -> nx.Graph:
     '''
-    Create a topology `S` with the solution in `model` by `solver`.
+    Create a topology nx.Graph with the solution in model.
     '''
-
-    # Metadata
-    R, T, k = len(model.R), len(model.T), model.k.value
-    bound = result['Problem'][0]['Lower bound']
-    objective = result['Problem'][0]['Upper bound']
-    # create a topology graph S from the solution
-    S = nx.Graph(
-        R=R, T=T,
-        handle=model.handle,
-        capacity=k,
-        objective=objective,
-        bound=bound,
-        runtime=result['Solver'][0]['Wallclock time'],
-        termination=result['Solver'][0]['Termination condition'].name,
-        gap=1. - bound/objective,
-        creator='MILP.pyomo.',
-        has_loads=True,
-        method_options=dict(
-            fun_fingerprint=model.fun_fingerprint,
-            **model.method_options,
-        ),
-    )
-
-    if model.warmed_by is not None:
-        S.graph['warmstart'] = model.warmed_by
-    
     # Graph data
+    S = nx.Graph()
     # Get active links and if flow is reversed (i.e. from small to big)
     rev_from_link = {
         (u, v): u < v for (u, v), use in model.link_.items() if use.value > 0.5
@@ -402,4 +398,39 @@ def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
             rootload += S.nodes[nbr]['load']
         S.nodes[r]['load'] = rootload
 
+    return S
+
+
+def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
+                    result: SolverResults) -> nx.Graph:
+    '''
+    Create a topology `S` with the solution in `model` by `solver`.
+    '''
+
+    S = topo_from_solution(model)
+
+    # Metadata
+    R, T, k = len(model.R), len(model.T), model.k.value
+    bound = result['Problem'][0]['Lower bound']
+    objective = result['Problem'][0]['Upper bound']
+    # create a topology graph S from the solution
+    S.graph.update(
+        R=R, T=T,
+        handle=model.handle,
+        capacity=k,
+        objective=objective,
+        bound=bound,
+        runtime=result['Solver'][0]['Wallclock time'],
+        termination=result['Solver'][0]['Termination condition'].name,
+        gap=1. - bound/objective,
+        creator='MILP.pyomo.',
+        has_loads=True,
+        method_options=dict(
+            fun_fingerprint=model.fun_fingerprint,
+            **model.method_options,
+        ),
+    )
+    if model.warmed_by is not None:
+        S.graph['warmstart'] = model.warmed_by
+    
     return S

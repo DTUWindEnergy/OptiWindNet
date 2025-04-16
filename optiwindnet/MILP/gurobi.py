@@ -55,18 +55,18 @@ class SolverGurobi(Solver, PoolHandler):
         self.result, self.timelimit, self.mipgap = result, timelimit, mipgap
         return summarize_result(result)
 
-    def get_solution(self) -> nx.Graph:
+    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
         P, A, model = self.P, self.A, self.model
         try:
             if model.method_options['gateXings_constraint']:
                 S = self.S_from_pool()
                 G = PathFinder(G_from_S(S, A), P, A).create_detours()
             else:
-                G = investigate_pool(P, A, self)
+                S, G = investigate_pool(P, A, self)
         except Exception as exc:
             raise exc
         else: 
-            return G
+            return S, G
         finally:
             self.solver.close()
 
