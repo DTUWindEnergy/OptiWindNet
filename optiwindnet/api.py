@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from itertools import pairwise
 from pathlib import Path
 from shapely.geometry import Polygon, MultiPoint, MultiPolygon
+import copy
 
 import numpy as np
 import yaml
@@ -292,8 +293,14 @@ class WindFarmNetwork:
 
     def G_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
         '''Rebuilds G from terse links'''
+        # If new coordinates are provided, update them
+        if turbinesC is not None:
+            self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
+    
+        if substationsC is not None:
+            self.L.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
+            
         if turbinesC is not None or substationsC is not None:
-            self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC, verbose=False)
             self.P, self.A = make_planar_embedding(self.L)
 
         self.S.remove_edges_from(list(self.S.edges()))
@@ -307,6 +314,8 @@ class WindFarmNetwork:
         self.G = PathFinder(self._G_tentative, planar=self.P, A=self.A).create_detours()
 
         assign_cables(self.G, self.cables)
+
+        return self.G
 
     def get_network_array(self):
         """Returns the network edges with cable data."""
@@ -371,12 +380,20 @@ class WindFarmNetwork:
         
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
-            verbose = self.verbose
+            verbose = self.verbose           
 
-        if turbinesC is not None or substationsC is not None:
-            self._set_coordinates(turbinesC=turbinesC, substationsC=substationsC)
+        if turbinesC is None and substationsC is None:
+            G = self.G
+        else:
+            if verbose:
+                print('WARNIMG: gradient is not checking for the feasibility of the layout with new coordinates!')
+            G = copy.deepcopy(self.G)
+            if turbinesC is not None:
+                G.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
 
-        G = self.G
+            if substationsC is not None:
+                G.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
+
         vertexC = G.graph['VertexC']
         R = G.graph['R']
         T = G.graph['T']
