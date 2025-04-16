@@ -25,7 +25,7 @@ from optiwindnet.svg import svgplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
-from optiwindnet.interarraylib import G_from_S, calcload
+from optiwindnet.interarraylib import G_from_S, calcload, as_normalized
 
 # Heuristics
 from optiwindnet.heuristics import EW_presolver
@@ -61,7 +61,7 @@ class WindFarmNetwork:
         if router is None:
             router = Heuristic(solver='Esau_Williams')
         self.router = router
-
+        cables_array = np.array(cables)
         if cables is None:
             if verbose:
                 print("WARNING: No cable data provided. Defaulting to cables = [(10, 1)]")
@@ -70,36 +70,15 @@ class WindFarmNetwork:
         elif isinstance(cables, int):
             cables = [(cables, 1)]
 
-        elif isinstance(cables, (list, tuple, np.ndarray)):
-            cables_list = list(cables)
-
-            # Handle case: single item like [(5, 12)] → keep as is
-            if len(cables_list) == 1 and isinstance(cables_list[0], (tuple, list, np.ndarray)):
-                inner = cables_list[0]
-
-                if all(isinstance(x, int) for x in inner):
-                    if len(inner) == 2:
-                        # Interpret as a single cable with (cap, cost)
-                        cables = [tuple(inner)]
-                    else:
-                        # Interpret as multiple capacities
-                        cables = [(c, 1) for c in inner]
-                else:
-                    raise ValueError(f"Invalid cable values: {cables}")
-
-            # Flat list of ints (like [5, 12, 13])
-            elif all(isinstance(c, int) for c in cables_list):
-                cables = [(c, 1) for c in cables_list]
-
-            # List of tuples: [(5, 12), (10, 20)]
-            elif all(isinstance(c, (tuple, list, np.ndarray)) and len(c) >= 2 and all(isinstance(x, int) for x in c) for c in cables_list):
-                cables = [tuple(c) for c in cables_list]
-
-            else:
-                raise ValueError(f"Invalid cable format: {cables}")
-
+        elif cables_array.ndim == 1 and cables_array.shape[0] == 1 and isinstance(cables_array.item(), int):
+            cables = [(int(cables_array[0]), 1)]
+        elif (cables_array.ndim == 1 and cables_array.shape[0] == 2):
+            cables = [(int(cables_array[0]), float(cables_array[1]))]
+        elif cables_array.ndim == 2:
+            if cables_array.shape[1] == 2:
+                cables = [(int(cap), float(cost)) for cap, cost in cables_array]
         else:
-            raise ValueError(f"Invalid cable format: {cables}")
+            raise ValueError(f"Invalid cable values: {cables}")
 
 
         self.cables = cables
@@ -582,16 +561,17 @@ class MetaHeuristic(OptiWindNetSolver):
         if verbose is None:
             verbose = self.verbose
 
+        A_norm = as_normalized(A)
         # optimizing
         if self.solver.lower() in ['hgs', 'hybrid genetic search', 'hybrid_genetic_search']:
-            S = iterative_hgs_cvrp(A, capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
+            S = iterative_hgs_cvrp(A_norm, capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
         else:
             raise ValueError(
                 f"{self.solver} is not among the supported Meta-Heuristic solvers. Choose among: HGS.")
         
-        G_tentative = G_from_S(S, A)
+        G_tentative = G_from_S(S, A_norm)
 
-        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A_norm).create_detours()
 
         assign_cables(G, cables)
         
