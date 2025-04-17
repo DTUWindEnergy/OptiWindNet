@@ -26,7 +26,7 @@ from optiwindnet.svg import svgplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
-from optiwindnet.interarraylib import G_from_S, calcload, as_normalized
+from optiwindnet.interarraylib import G_from_S, calcload
 
 # Heuristics
 from optiwindnet.heuristics import EW_presolver
@@ -291,7 +291,7 @@ class WindFarmNetwork:
 
         return terse
 
-    def G_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
+    def update_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
         '''Rebuilds G from terse links'''
         # If new coordinates are provided, update them
         if turbinesC is not None:
