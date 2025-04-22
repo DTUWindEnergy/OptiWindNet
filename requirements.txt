@@ -3,6 +3,7 @@ bidict~=0.23.1
 condeltri~=0.0.2
 darkdetect~=0.8.0
 hybgensea~=0.0.1
+makefun~=1.15.6
 matplotlib~=3.10.1
 networkx~=3.4.2
 numba >=0.60,<0.62
