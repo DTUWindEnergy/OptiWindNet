@@ -179,13 +179,16 @@ class WindFarmNetwork:
             obstaclesC = remaining_obstaclesC
 
         # check_turbine_locations(border, obstacles, turbines):
-        # Border path, with tolerance for edge inclusion
         border_path = Path(borderC)
-        in_border = border_path.contains_points(turbinesC, radius=1e-10)
+        # Border path, with tolerance for edge inclusion
+        in_border_neg = border_path.contains_points(turbinesC, radius=-1e-10)
+        in_border_pos = border_path.contains_points(turbinesC, radius=1e-10)
+        in_border = in_border_neg | in_border_pos
 
         # Check if any turbine is outside the border
         if not np.all(in_border):
             outside_idx = np.where(~in_border)[0]
+            print(borderC)
             raise ValueError(f"Turbines at indices {outside_idx} are outside the border!")
 
         for i, obs in enumerate(obstaclesC):
