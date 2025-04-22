@@ -8,7 +8,7 @@ from itertools import pairwise
 from pathlib import Path
 from shapely.geometry import Polygon, MultiPoint, MultiPolygon
 import copy
-
+from matplotlib.path import Path
 import numpy as np
 import yaml
 import yaml_include
@@ -44,6 +44,7 @@ from pyomo import environ as pyo
 #################################################
 # To Do: if face error do a simple optimization #
 #################################################
+
 
 class WindFarmNetwork:
     """
@@ -176,6 +177,25 @@ class WindFarmNetwork:
 
             # Update obstacles (only those fully contained are kept)
             obstaclesC = remaining_obstaclesC
+
+        # check_turbine_locations(border, obstacles, turbines):
+        # Border path, with tolerance for edge inclusion
+        border_path = Path(borderC)
+        in_border = border_path.contains_points(turbinesC, radius=1e-10)
+
+        # Check if any turbine is outside the border
+        if not np.all(in_border):
+            outside_idx = np.where(~in_border)[0]
+            raise ValueError(f"Turbines at indices {outside_idx} are outside the border!")
+
+        for i, obs in enumerate(obstaclesC):
+            obs_path = Path(obs)
+            in_obstacle = obs_path.contains_points(turbinesC, radius=-1e-10)
+            print(in_obstacle)
+            if np.any(in_obstacle):
+                inside_idx = np.where(in_obstacle)[0]
+                raise ValueError(f"Turbines at indices {inside_idx} are inside obstacle {i}!")
+
                         
         border_sizes = np.array([borderC.shape[0]] + [obs.shape[0] for obs in obstaclesC])
         B = border_sizes.sum()
