@@ -2,12 +2,14 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import networkx as nx
+from types import SimpleNamespace
 from typing import Any
+import networkx as nx
 import pyomo.environ as pyo
-from .core import Solver, PoolHandler, investigate_pool
-from .pyomo import (make_min_length_model, S_from_solution, warmup_model,
-                    summarize_result)
+from .core import (
+    SolutionInfo, PoolHandler, investigate_pool, FeederRoute, Topology
+)
+from .pyomo import SolverPyomo, topology_from_mip_sol
 from ..pathfinding import PathFinder
 from ..interarraylib import G_from_S
 
@@ -15,27 +17,20 @@ logger = logging.getLogger(__name__)
 error, info = logger.error, logger.info
 
 
-class SolverGurobi(Solver, PoolHandler):
+class SolverGurobi(SolverPyomo, PoolHandler):
     name: str = 'gurobi'
     # default options to pass to Pyomo solver
     options: dict = dict(
         mipfocus=1,
     )
 
-    def set_problem(self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
-                    warmstart: nx.Graph | None = None, **kwargs):
-        'kwargs contains problem options'
-        self.P, self.A, self.capacity = P, A, capacity
-        model = make_min_length_model(self.A, self.capacity, **kwargs)
-        self.model = model
-        if warmstart is not None:
-            self.warmstart = True
-            warmup_model(model, warmstart)
-        else:
-            self.warmstart = False
+    def __init__(self):
+        # dummy attribute `solver` to be used by SolverPyomo.set_problem()
+        self.solver = SimpleNamespace(warm_start_capable=lambda: True)
 
-    def solve(self, timelimit: int, mipgap: float,
-              options: dict[str, Any] = {}, verbose: bool = False) -> tuple:
+    def solve(self, time_limit: int, mip_gap: float,
+              options: dict[str, Any] = {}, verbose: bool = False
+        ) -> SolutionInfo:
         '''
         This will keep the Gurobi license in use until a call to `get_solution()`.
         '''
@@ -45,27 +40,43 @@ class SolverGurobi(Solver, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        base_options = self.options | dict(timelimit=timelimit, mipgap=mipgap)
+        base_options = self.options | dict(timelimit=time_limit, mipgap=mip_gap)
         solver = pyo.SolverFactory('gurobi', solver_io='python', manage_env=True,
                                    options=base_options|options)
-        info('Gurobi solver options: %s', solver.options)
         self.solver = solver
-        result = solver.solve(model, warmstart=self.warmstart, tee=verbose)
+        info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
+        result = solver.solve(model, **self.solve_kwargs, tee=verbose)
+        self.result = result
+        objective = result['Problem'][0]['Upper bound']
+        bound = result['Problem'][0]['Lower bound']
+        solution_info = SolutionInfo(
+            runtime=result['Solver'][0]['Wallclock time'],
+            bound = bound,
+            objective = objective,
+            relgap = 1. - bound/objective,
+            termination = result['Solver'][0]['Termination condition'].name,
+        )
+        self.solution_info, self.solver_options = solution_info, options
+        info('>>> Solution <<<\n%s\n', solution_info)
         self.num_solutions = solver._solver_model.getAttr('SolCount')
-        self.result, self.timelimit, self.mipgap = result, timelimit, mipgap
-        return summarize_result(result)
+        return solution_info
 
     def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
-        P, A, model = self.P, self.A, self.model
+        P, A, model_options = self.P, self.A, self.model_options
         try:
-            if model.method_options['gateXings_constraint']:
-                S = self.S_from_pool()
-                G = PathFinder(G_from_S(S, A), P, A).create_detours()
+            if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
+                S = self.topology_from_mip_pool()
+                S.graph['creator'] += self.name
+                G = PathFinder(
+                    G_from_S(S, A), P, A,
+                    branched=model_options['topology'] is Topology.BRANCHED
+                ).create_detours()
             else:
                 S, G = investigate_pool(P, A, self)
         except Exception as exc:
             raise exc
         else: 
+            G.graph.update(self._make_graph_attributes())
             return S, G
         finally:
             self.solver.close()
@@ -75,15 +86,8 @@ class SolverGurobi(Solver, PoolHandler):
         solver_model.setParam('SolutionNumber', index)
         return solver_model.getAttr('PoolObjVal')
 
-    def S_from_pool(self) -> nx.Graph:
+    def topology_from_mip_pool(self) -> nx.Graph:
         solver = self.solver
         for omovar, gurvar in solver._pyomo_var_to_solver_var_map.items():
             omovar.set_value(round(gurvar.Xn), skip_validation=True)
-        S = S_from_solution(self.model, solver, self.result)
-        S.graph['method_options'].update(
-            solver_name=self.name,
-            mipgap=self.mipgap,
-            timelimit=self.timelimit,
-        )
-        S.graph['creator'] += self.name
-        return S
+        return topology_from_mip_sol(model=self.model)

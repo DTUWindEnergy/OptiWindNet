@@ -230,13 +230,10 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     R, T, B = (A.graph[k] for k in 'RTB')
     VertexC, d2roots, diagonals = (A.graph[k] for k in
                                    ('VertexC', 'd2roots', 'diagonals'))
-    # TODO: rethink whether to copy from S or from A
-    G = nx.create_empty_copy(S)
-    G.graph.update(
-        {k: A.graph[k] for k in _essential_graph_attrs + ('num_stunts',)
-         if k in A.graph})
-    if 'is_normalized' in A.graph:
-        G.graph['is_normalized'] = True
+    G = nx.create_empty_copy(A)
+    for k in 'capacity has_loads max_load creator solver_details'.split():
+        G.graph[k] = S.graph[k]
+    nx.set_node_attributes(G, S.nodes)
     # remove supertriangle coordinates from VertexC
     G.graph['VertexC'] = np.vstack((VertexC[:-R - 3], VertexC[-R:]))
     # non_A_edges are the far-reaching gates and ocasionally the result of

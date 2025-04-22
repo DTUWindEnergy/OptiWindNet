@@ -2,12 +2,13 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import networkx as nx
 from typing import Any
+import networkx as nx
 import pyomo.environ as pyo
-from .core import Solver, PoolHandler, investigate_pool
-from .pyomo import (make_min_length_model, S_from_solution, warmup_model,
-                    summarize_result)
+from .core import (
+    SolutionInfo, PoolHandler, investigate_pool, FeederRoute, Topology
+)
+from .pyomo import SolverPyomo, topology_from_mip_sol
 from ..pathfinding import PathFinder
 from ..interarraylib import G_from_S
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 error, info = logger.error, logger.info
 
 
-class SolverCplex(Solver, PoolHandler):
+class SolverCplex(SolverPyomo, PoolHandler):
     name: str = 'cplex'
     # default options to pass to Pyomo solver
     options: dict = dict(
@@ -28,47 +29,31 @@ class SolverCplex(Solver, PoolHandler):
     def __init__(self) -> None:
         self.solver = pyo.SolverFactory('cplex', solver_io='python')
 
-    def set_problem(self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
-                    warmstart: nx.Graph | None = None, **kwargs):
-        'kwargs contains problem options'
-        self.P, self.A, self.capacity = P, A, capacity
-        model = make_min_length_model(self.A, self.capacity, **kwargs)
-        self.model = model
-        if warmstart is not None:
-            self.warmstart = True
-            warmup_model(model, warmstart)
-        else:
-            self.warmstart = False
-
-    def solve(self, timelimit: int, mipgap: float,
-              options: dict[str, Any] = {}, verbose: bool = False) -> tuple:
-        try:
-            solver, model = self.solver, self.model
-        except AttributeError as exc:
-            exc.args += ('.set_problem() must be called before .solve()',)
-            raise
-        solver.options.update(self.options | options
-                              | dict(timelimit=timelimit, mipgap=mipgap))
-        info('CPLEX solver options: %s', solver.options)
-        result = solver.solve(model, warmstart=self.warmstart, tee=verbose)
-        self.result = result
-        cplex = solver._solver_model
+    def solve(self, time_limit: int, mip_gap: float,
+              options: dict[str, Any] = {}, verbose: bool = False
+        ) -> SolutionInfo:
+        solution_info = super().solve(time_limit, mip_gap, options, verbose)
+        cplex = self.solver._solver_model
         num_solutions = cplex.solution.pool.get_num()
         self.num_solutions, self.cplex = num_solutions, cplex
         self.sorted_index_ = sorted(
             range(num_solutions), key=cplex.solution.pool.get_objective_value
         )
-        self.vars = solver._pyomo_var_to_ndx_map.keys()
-        self.timelimit, self.mipgap = timelimit, mipgap
-        return summarize_result(result)
+        self.vars = self.solver._pyomo_var_to_ndx_map.keys()
+        return solution_info
 
-    def get_solution(self) -> nx.Graph:
-        P, A, model = self.P, self.A, self.model
-        if model.method_options['gateXings_constraint']:
-            S = self.S_from_pool()
-            G = PathFinder(G_from_S(S, A), P, A).create_detours()
+    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
+        P, A, model_options = self.P, self.A, self.model_options
+        if model_options['feeder_route'] is FeederRoute.STRAIGHT:
+            S = self.topology_from_mip_pool()
+            S.graph['creator'] += self.name
+            G = PathFinder(
+                G_from_S(S, A), P, A,
+                branched=model_options['topology'] is Topology.BRANCHED
+            ).create_detours()
         else:
             S, G = investigate_pool(P, A, self)
+        G.graph.update(self._make_graph_attributes())
         return S, G
 
     def objective_at(self, index: int) -> float:
@@ -77,17 +62,10 @@ class SolverCplex(Solver, PoolHandler):
         self.soln = soln
         return objective
 
-    def S_from_pool(self) -> nx.Graph:
+    def topology_from_mip_pool(self) -> nx.Graph:
         solver, vars = self.solver, self.vars
         vals = solver._solver_model.solution.pool.get_values(self.soln)
         for pyomo_var, val in zip(vars, vals):
             if solver._referenced_variables[pyomo_var] > 0:
                 pyomo_var.set_value(val, skip_validation=True)
-        S = S_from_solution(self.model, solver, self.result)
-        S.graph['method_options'].update(
-            solver_name=self.name,
-            mipgap=self.mipgap,
-            timelimit=self.timelimit,
-        )
-        S.graph['creator'] += self.name
-        return S
+        return topology_from_mip_sol(model=self.model)

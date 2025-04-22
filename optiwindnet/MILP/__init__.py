@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+from .core import ModelOptions
 
 def solver_factory(solver_name: str):
     match solver_name:

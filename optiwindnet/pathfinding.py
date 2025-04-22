@@ -83,7 +83,7 @@ class PathFinder():
     def __init__(self, Gʹ: nx.Graph,
                  planar: nx.PlanarEmbedding,
                  A: nx.Graph | None = None,
-                 branching: bool = True,
+                 branched: bool = True,
                  iterations_limit: int = 10000) -> None:
         G = Gʹ.copy()
         R, T, B = (G.graph[k] for k in 'RTB')
@@ -183,12 +183,7 @@ class PathFinder():
         self.d2rootsRank = (Rank if Rank is not None else
                             rankdata(d2roots, method='dense', axis=0))
         self.predetour_length = Gʹ.size(weight='length')
-        creator = G.graph.get('creator')
-        if creator is not None and creator[:5] == 'MILP.':
-            self.branching = G.graph['method_options']['branching']
-        else:
-            self.branching = branching
-
+        self.branched = branched
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.hooks2check, self.iterations_limit = hooks2check, iterations_limit
@@ -574,7 +569,7 @@ class PathFinder():
         '''Wrapper for `interarraylib.scaffolded`.'''
         return scaffolded(self.G, P=self.P)
 
-    def create_detours(self):
+    def create_detours(self) -> nx.Graph:
         '''Reroute all gate edges in G with crossings using detour paths.
 
         Returns:
@@ -617,9 +612,9 @@ class PathFinder():
             subtree_id = subtree_id_from_n[n]
             subtree = subtree_from_subtree_id[subtree_id]
             subtree_load = G.nodes[n]['load']
-            # set of nodes to examine is different depending on `branching`
+            # set of nodes to examine is different depending on `branched`
             hookchoices = ([n for n in subtree if n < T]
-                           if self.branching else
+                           if self.branched else
                            [n, next(h for h in subtree if G.degree[h] == 1)])
             debug('hookchoices: %s', hookchoices)
 
