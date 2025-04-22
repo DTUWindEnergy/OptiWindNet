@@ -32,14 +32,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
     R, T = (Aʹ.graph[k] for k in 'RT')
     diagonals = Aʹ.graph['diagonals']
     d2roots = Aʹ.graph['d2roots']
-    S = nx.Graph(
-        R=R, T=T,
-        capacity=capacity,
-        handle=Aʹ.graph['handle'],
-        creator='EW_presolver',
-        edges_fun=EW_presolver,
-        creation_options={},
-    )
+    S = nx.Graph(R=R, T=T)
     A = Aʹ.copy()
 
     roots = range(-R, 0)
@@ -90,6 +83,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
     i = 0
     # <prevented_crossing>: counter for edges discarded due to crossings
     prevented_crossings = 0
+    log = []
     # END: helper data structures
 
     def component_merging_edge(gate, forbidden=None, margin=1.02):
@@ -197,8 +191,6 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
     for n in range(T):
         find_option4gate(n)
 
-    log = []
-    S.graph['log'] = log
     loop = True
     # BEGIN: main loop
     while loop:
@@ -327,8 +319,13 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
     calcload(S)
     # algorithm finished, store some info in the graph object
     S.graph.update(
-        iterations=i,
-        prevented_crossings=prevented_crossings,
         runtime=time.perf_counter() - start_time,
+        capacity=capacity,
+        creator='EW_presolver',
+        solver_details=dict(
+            log=log,
+            iterations=i,
+            prevented_crossings=prevented_crossings,
+        ),
     )
     return S

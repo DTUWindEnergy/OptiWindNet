@@ -169,7 +169,7 @@ def edgeset_edgeXing_iter(diagonals: bidict) \
 def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
                   borders: Iterable | None = None,
                   touch_is_cross: bool = True) \
-        -> Iterator[tuple[tuple[int, int]]]:
+        -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
     '''Iterate over all crossings between gates and edges/borders in G.
 
     If `hooks` is `None`, all nodes that are not a root neighbor are
