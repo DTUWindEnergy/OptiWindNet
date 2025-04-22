@@ -2,19 +2,136 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import abc
+from enum import StrEnum, auto
+from typing import Any, Mapping
+from dataclasses import dataclass, asdict
 import networkx as nx
 import logging
+from makefun import with_signature
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 
-
 logger = logging.getLogger(__name__)
-info = logger.info
+error, info = logger.error, logger.info
+
+
+def _identifier_from_class_name(c: type) -> str:
+    'Convert a camel-case class name to a snake-case identifier'
+    s = c.__name__
+    return s[0].lower() + ''.join('_' + c.lower() if c.isupper()
+                                  else c for c in s[1:])
+
+
+class Topology(StrEnum):
+    'Set the topology of subtrees in the solution.'
+    RADIAL = auto()
+    BRANCHED = auto()
+
+
+class FeederRoute(StrEnum):
+    'If feeder routes must be "straight" or can be detoured ("segmented").'
+    STRAIGHT = auto()
+    SEGMENTED = auto()
+
+
+class FeederLimit(StrEnum):
+    'Whether to limit the maximum number of feeders, if set to "specified", '\
+    'additional kwarg "max_feeders" must be given.'
+    UNLIMITED = auto()
+    SPECIFIED = auto()
+    MINIMUM = auto()
+    MIN_PLUS1 = auto()
+    MIN_PLUS2 = auto()
+    MIN_PLUS3 = auto()
+
+
+class ModelOptions(dict):
+    hints = {_identifier_from_class_name(kind): kind
+             for kind in (Topology, FeederRoute, FeederLimit)}
+
+    @with_signature(
+        '__init__(self, *, '
+        + ', '.join(f'{k}: {v.__name__}' for k, v in hints.items()) + ')'
+    )
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            if isinstance(v, str):
+                kwargs[k] = self.hints[k](v)
+        super().__init__(kwargs)
+
+    @classmethod
+    def help(cls):
+        for k, v in cls.hints.items():
+            print(f'{k} in {{'
+                  f'{", ".join(f"\"{m}\"" for m in v.__members__.values())}'
+                  f'}}\n    {v.__doc__}\n')
+
+
+@dataclass(slots=True)
+class ModelMetadata():
+    R: int
+    T: int
+    capacity: int
+    linkset: tuple
+    link_: Mapping
+    flow_: Mapping
+    model_options: dict
+    fun_fingerprint: dict[str, str|bytes]
+    warmed_by: str = ''
+
+
+@dataclass(slots=True)
+class SolutionInfo():
+    runtime: float
+    bound: float
+    objective: float
+    relgap: float
+    termination: str
+
+
+class Solver(abc.ABC):
+    name: str
+    metadata: ModelMetadata
+    solver: Any
+    solver_options: dict[str, Any]
+    solution_info: SolutionInfo
+
+    @abc.abstractmethod
+    def set_problem(self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
+                    model_options: ModelOptions):
+        'Define the problem geometry, available edges and tree properties'
+        pass
+
+    @abc.abstractmethod
+    def solve(self, time_limit: int, mip_gap: float,
+              options: dict[str, Any] = {}, verbose: bool = False) -> SolutionInfo:
+        pass
+
+    @abc.abstractmethod
+    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
+        pass
+
+    def _make_graph_attributes(self) -> dict[str, Any]:
+        metadata, solution_info = self.metadata, self.solution_info
+        attr = dict(
+            **asdict(solution_info),
+            method_options=dict(
+                solver_name=self.name,
+                fun_fingerprint=metadata.fun_fingerprint,
+                **self.solver_options,
+                **metadata.model_options,
+            ),
+        )
+        if metadata.warmed_by:
+            attr['warmstart'] = metadata.warmed_by
+        return attr
 
 
 class PoolHandler(abc.ABC):
+    name: str
     num_solutions: int
+    model_options: ModelOptions
 
     @abc.abstractmethod
     def objective_at(self, index: int) -> float:
@@ -22,34 +139,36 @@ class PoolHandler(abc.ABC):
         pass
     
     @abc.abstractmethod
-    def S_from_pool(self) -> nx.Graph:
-        'Build S from the pool solution at the last requested position'
+    def topology_from_mip_pool(self) -> nx.Graph:
+        'Build topology from the pool solution at the last requested position'
         pass
 
+
 def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
-        ) -> nx.Graph:
+        ) -> tuple[nx.Graph, nx.Graph]:
     '''Go through the CpSat's solutions checking which has the shortest length
     after applying the detours with PathFinder.'''
     Λ = float('inf')
+    branched=pool.model_options['topology'] is Topology.BRANCHED   
     num_solutions = pool.num_solutions
     info(f'Solution pool has {num_solutions} solutions.')
     for i in range(num_solutions):
         λ = pool.objective_at(i)
-        #  print(f'λ[{i}] = {λ}')
         if λ > Λ:
-            info(f'Pool investigation over - next best undetoured length: {λ:.3f}')
+            info(f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length")
             break
-        S = pool.S_from_pool()
-        G = G_from_S(S, A)
-        Hʹ = PathFinder(G, planar=P, A=A).create_detours()
-        Λʹ = Hʹ.size(weight='length')
+        Sʹ = pool.topology_from_mip_pool()
+        Sʹ.graph['creator'] += pool.name
+        Gʹ = PathFinder(
+            G_from_S(Sʹ, A), planar=P, A=A, branched=branched
+        ).create_detours()
+        Λʹ = Gʹ.size(weight='length')
         if Λʹ < Λ:
-            H, Λ = Hʹ, Λʹ
-            pool_index = i
-            pool_objective = λ
-            info(f'Incumbent has (detoured) length: {Λ:.3f}')
-    H.graph['pool_count'] = num_solutions
-    if pool_index > 0:
-        H.graph['pool_entry'] = pool_index, pool_objective
-    return H
+            S, G, Λ = Sʹ, Gʹ, Λʹ
+            G.graph['pool_entry'] = i, λ
+            info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
+        else:
+            info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')            
+    G.graph['pool_count'] = num_solutions
+    return S, G
 

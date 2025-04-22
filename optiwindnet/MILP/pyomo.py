@@ -2,44 +2,166 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
-from collections import namedtuple, defaultdict
+import os
+import logging
+from typing import Any
+from collections import namedtuple
 from itertools import chain
 import networkx as nx
+import psutil
 
 import pyomo.environ as pyo
-from pyomo.contrib.solver.base import SolverBase
-from pyomo.opt import SolverResults
 
+from .core import (
+    Topology, FeederRoute, FeederLimit, Solver, ModelOptions, SolutionInfo,
+    ModelMetadata
+)
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint, G_from_S
 from ..pathfinding import PathFinder
 
+logger = logging.getLogger(__name__)
+error, warn, info = logger.error, logger.warning, logger.info
+
+# NOTE: SCIP has solution pool which can be accessed with PySCIPOpt: getSols()
+# TODO: move scip to scip.py and implement:
+#       - class SolverSCIP(SolverPyomo, PoolHandler)
+#       - SCIP-specific make_min_length_model, warmup_model, topology_from_mip_sol
+#       - warmup_model: model.createSol(), model.setSolVal(), model.addSol()
 
 # solver option name mapping (pyomo should have taken care of this)
-_common_options = namedtuple('common_options', 'mipgap timelimit')
-_optname = defaultdict(lambda: _common_options(*_common_options._fields))
-_optname['cbc'] = _common_options('ratioGap', 'seconds')
-_optname['highs'] = _common_options('mip_rel_gap', 'time_limit')
-_optname['scip'] = _common_options('limits/gap', 'limits/time')
+_common_options = namedtuple('common_options', 'mip_gap time_limit')
+_optkey = dict(
+    cplex=_common_options('mipgap', 'timelimit'),
+    gurobi=_common_options('mipgap', 'timelimit'),
+    cbc=_common_options('ratioGap', 'seconds'),
+    highs=_common_options('mip_rel_gap', 'time_limit'),
+    scip=_common_options('limits/gap', 'limits/time')
+)
+# usage: _optname[solver_name].mipgap
+
+_default_options = dict(
+    cbc=dict(
+        threads=len(psutil.Process().cpu_affinity()),
+        timeMode='elapsed',
+        # the parameters below and more can be experimented with
+        # http://www.decom.ufop.br/haroldo/files/cbcCommandLine.pdf
+        nodeStrategy='downFewest',
+        # Heuristics
+        Dins='on',
+        VndVariableNeighborhoodSearch='on',
+        Rens='on',
+        Rins='on',
+        pivotAndComplement='off',
+        proximitySearch='off',
+        # Cuts
+        gomoryCuts='on',
+        mixedIntegerRoundingCuts='on',
+        flowCoverCuts='on',
+        cliqueCuts='off',
+        twoMirCuts='off',
+        knapsackCuts='off',
+        probingCuts='off',
+        zeroHalfCuts='off',
+        liftAndProjectCuts='off',
+        residualCapacityCuts='off',
+    ),
+    highs={},
+    scip={},
+)
 
 
-def make_min_length_model(A: nx.Graph, capacity: int, *,
-                          gateXings_constraint: bool = False,
-                          gates_limit: bool | int = False,
-                          branching: bool = True) -> pyo.ConcreteModel:
-    '''
+class SolverPyomo(Solver):
+
+    def __init__(self, name, prefix='', suffix='', **kwargs) -> None:
+        self.name = name
+        self.options = _default_options[name]
+        self.solver = pyo.SolverFactory(prefix + name + suffix, **kwargs)
+
+    def set_problem(
+            self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
+            model_options: ModelOptions, warmstart: nx.Graph | None = None
+        ):
+        self.P, self.A, self.capacity = P, A, capacity
+        model, metadata = make_min_length_model(A, capacity, **model_options)
+        self.model, self.model_options = model, model_options
+        if warmstart is not None and self.solver.warm_start_capable():
+            self.solve_kwargs = {'warmstart': True}
+            warmup_model(model, warmstart)
+        else:
+            self.solve_kwargs = {}
+            if warmstart is not None:
+                warn(f'Solver <{self.name}> is not capable of warm-starting.')
+        self.model, self.metadata = model, metadata
+
+    def solve(self, time_limit: int, mip_gap: float,
+              options: dict[str, Any] = {}, verbose: bool = False
+        ) -> SolutionInfo:
+        try:
+            solver, name, model = self.solver, self.name, self.model
+        except AttributeError as exc:
+            exc.args += ('.set_problem() must be called before .solve()',)
+            raise
+        solver.options.update(self.options | options
+                              | {_optkey[name].time_limit: time_limit,
+                                 _optkey[name].mip_gap: mip_gap})
+        info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
+        result = solver.solve(model, **self.solve_kwargs, tee=verbose)
+        self.result = result
+        if self.name != 'scip':
+            objective = result['Problem'][0]['Upper bound']
+            bound = result['Problem'][0]['Lower bound']
+        else:
+            objective = result['Solver'][0]['Primal bound']
+            bound = result['Solver'][0]['Dual bound']
+        solution_info = SolutionInfo(
+            runtime=result['Solver'][0]['Wallclock time'],
+            bound = bound,
+            objective = objective,
+            relgap = 1. - bound/objective,
+            termination = result['Solver'][0]['Termination condition'].name,
+        )
+        self.solution_info, self.solver_options = solution_info, options
+        info('>>> Solution <<<\n%s\n', solution_info)
+        return solution_info
+
+
+    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
+        P, A, model_options = self.P, self.A, self.model_options
+        S = topology_from_mip_sol(model=self.model)
+        S.graph['creator'] += self.name
+        G = PathFinder(
+            G_from_S(S, A), P, A,
+            branched=model_options['topology'] is Topology.BRANCHED
+        ).create_detours()
+        G.graph.update(self._make_graph_attributes())
+        return S, G
+
+    def topology_from_mip_sol(self):
+        return topology_from_mip_sol(model=self.model)
+
+
+def make_min_length_model(
+        A: nx.Graph, capacity: int, *,
+        topology: Topology = Topology.BRANCHED,
+        feeder_route: FeederRoute = FeederRoute.SEGMENTED,
+        feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+        max_feeders: int = 0
+) -> tuple[pyo.ConcreteModel, ModelMetadata]:
+    '''Make discrete optimization model over link set A.
+
     Build ILP Pyomo model for the collector system length minimization.
-    `A` is the graph with the available edges to choose from.
-
-    `capacity`: cable capacity
-
-    `gateXing_constraint`: if gates and edges are forbidden to cross.
-
-    `gates_limit`: if True, use the minimum feasible number of gates
-    (total for all roots); if False, no limit is imposed; if a number,
-    use it as the limit.
-
-    `branching`: if root branches are paths (False) or can be trees (True).
+    
+    Args:
+      A: graph with the available edges to choose from
+      capacity: maximum link flow capacity
+      topology: one of Topology.{BRANCHED, RADIAL}
+      feeder_route: 
+        FeederRoute.SEGMENTED -> feeder routes may be detoured around subtrees;
+        FeederRoute.STRAIGHT -> feeder routes must be straight, direct lines 
+      feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
+        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}
+      max_feeders: only used if feeder_limit is FeederLimit.SPECIFIED
     '''
     R = A.graph['R']
     T = A.graph['T']
@@ -103,9 +225,9 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
         rule=lambda m, u, v: m.link_[u, v] + m.link_[v, u] <= 1
     )
 
-    # gate-edge crossings
-    if gateXings_constraint:
-        m.cons_gateXedge = pyo.Constraint(
+    # feeder-edge crossings
+    if feeder_route is FeederRoute.STRAIGHT:
+        m.cons_feederXedge = pyo.Constraint(
             gateXing_iter(A),
             rule=lambda m, u, v, r, n: (m.link_[u, v]
                                         + m.link_[v, u]
@@ -154,25 +276,41 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
         )
     )
 
-    # gates limit
-    if gates_limit:
-        def gates_limit_eq_rule(m):
+    # feeder limits
+    if feeder_limit is not FeederLimit.UNLIMITED:
+        min_feeders = math.ceil(T/m.k)
+
+        def feeder_limit_eq_rule(m):
             return (sum(m.link_[t, r] for r in _R for t in _T)
-                    == math.ceil(T/m.k))
+                    == min_feeders)
 
-        def gates_limit_ub_rule(m):
+        def feeder_limit_ub_rule(m):
             return (sum(m.link_[t, r] for r in _R for t in _T)
-                    <= gates_limit)
+                    <= max_feeders)
 
-        m.gates_limit = pyo.Constraint(rule=(gates_limit_eq_rule
-                                             if isinstance(gates_limit, bool)
-                                             else gates_limit_ub_rule))
+        feeder_rule = feeder_limit_ub_rule
+        if feeder_limit is FeederLimit.SPECIFIED:
+            if max_feeders == min_feeders:
+                feeder_rule = feeder_limit_eq_rule
+            elif max_feeders < min_feeders:
+                raise ValueError('max_feeders is below the minimum necessary')
+        elif feeder_limit is FeederLimit.MINIMUM:
+            feeder_rule = feeder_limit_eq_rule
+        elif feeder_limit is FeederLimit.MIN_PLUS1:
+            max_feeders = min_feeders + 1
+        elif feeder_limit is FeederLimit.MIN_PLUS2:
+            max_feeders = min_feeders + 2
+        elif feeder_limit is FeederLimit.MIN_PLUS3:
+            max_feeders = min_feeders + 3
+        else:
+            raise NotImplementedError('Unknown value:', feeder_limit)
+        m.cons_feeder_limit = pyo.Constraint(rule=feeder_rule)
 
-    # non-branching
-    if not branching:
+    # radial or branched topology
+    if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
         # limited by the m.cons_one_out_edge
-        m.non_branching = pyo.Constraint(
+        m.cons_radial = pyo.Constraint(
             m.T,
             rule=lambda m, u: (sum(m.link_[v, u] for v in A_nodes.neighbors(u))
                                <= 1)
@@ -213,15 +351,14 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
     # Store metadata #
     ##################
 
-    m.handle = A.graph['handle']
-    m.name = A.graph.get('name', 'unnamed')
-    m.method_options = dict(gateXings_constraint=gateXings_constraint,
-                            gates_limit=gates_limit,
-                            branching=branching)
+    model_options= dict(topology=topology,
+                        feeder_route=feeder_route,
+                        feeder_limit=feeder_limit,
+                        max_feeders=max_feeders)
+    metadata = ModelMetadata(R, T, capacity, m.linkset, m.link_, m.flow_,
+                             model_options, fun_fingerprint())
 
-    m.fun_fingerprint = fun_fingerprint()
-    m.warmed_by = None
-    return m
+    return m, metadata
 
 
 def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) \
@@ -237,52 +374,18 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) \
     return model
 
 
-def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
-                    result: SolverResults) -> nx.Graph:
-    '''
-    Create a topology `S` with the solution in `model` by `solver`.
-    '''
+def topology_from_mip_sol(*, model: pyo.ConcreteModel,
+                          **kwargs) -> nx.Graph:
+    '''Create a topology nx.Graph from the solution to the Pyomo MILP model.
 
-    # Metadata
-    R, T, k = len(model.R), len(model.T), model.k.value
-    #  if 'highs.Highs' in str(solver):
-    if hasattr(solver, 'highs_options'):
-        solver_name = 'highs'
-    elif solver.name.endswith('direct'):
-        solver_name = solver.name[:-6].rstrip('_')
-    elif solver.name.endswith('persistent'):
-        solver_name = solver.name[:-10].rstrip('_')
-    else:
-        solver_name = solver.name
-    bound = result['Problem'][0]['Lower bound']
-    objective = result['Problem'][0]['Upper bound']
-    # create a topology graph S from the solution
-    S = nx.Graph(
-        R=R, T=T,
-        handle=model.handle,
-        capacity=k,
-        objective=objective,
-        bound=bound,
-        runtime=result['Solver'][0]['Wallclock time'],
-        termination=result['Solver'][0]['Termination condition'].name,
-        gap=1. - bound/objective,
-        creator='MILP.pyomo.' + solver_name,
-        has_loads=True,
-        method_options=dict(
-            solver_name=solver_name,
-            mipgap=solver.options[_optname[solver_name].mipgap],
-            timelimit=solver.options[_optname[solver_name].timelimit],
-            fun_fingerprint=model.fun_fingerprint,
-            **model.method_options,
-        ),
-        #  solver_details=dict(
-        #  )
-    )
-
-    if model.warmed_by is not None:
-        S.graph['warmstart'] = model.warmed_by
-    
-    # Graph data
+    Args:
+      model: pyomo model instance
+      kwargs: not used (signature compatibility)
+    Returns:
+      Graph topology from the solution.
+    '''
+    # in pyomo, the solution is in the model instance not in the solver
+    S = nx.Graph()
     # Get active links and if flow is reversed (i.e. from small to big)
     rev_from_link = {
         (u, v): u < v for (u, v), use in model.link_.items() if use.value > 0.5
@@ -295,7 +398,8 @@ def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
     nx.set_edge_attributes(S, rev_from_link, name='reverse')
     # propagate loads from edges to nodes
     subtree = -1
-    for r in range(-R, 0):
+    max_load = 0
+    for r in range(model.R.first(), 0):
         for u, v in nx.edge_dfs(S, r):
             S.nodes[v]['load'] = S[u][v]['load']
             if u == r:
@@ -303,81 +407,15 @@ def S_from_solution(model: pyo.ConcreteModel, solver: SolverBase,
             S.nodes[v]['subtree'] = subtree
         rootload = 0
         for nbr in S.neighbors(r):
-            rootload += S.nodes[nbr]['load']
+            subtree_load = S.nodes[nbr]['load']
+            max_load = max(max_load, subtree_load)
+            rootload += subtree_load
         S.nodes[r]['load'] = rootload
-
+    S.graph.update(
+        capacity=model.k.value,
+        max_load=max_load,
+        has_loads=True,
+        creator='MILP.' + os.path.basename(__file__),
+        solver_details={},
+    )
     return S
-
-
-def gurobi_investigate_pool(P, A, model, solver, result):
-    '''Go through the Gurobi's solutions checking which has the shortest length
-    after applying the detours with PathFinder.'''
-    # initialize incumbent total length
-    solver_model = solver._solver_model
-    Λ = float('inf')
-    num_solutions = solver_model.getAttr('SolCount')
-    print(f'Solution pool has {num_solutions} solutions.')
-    # Pool = iter(sorted((cplex.solution.pool.get_objective_value(i), i)
-                       # for i in range(cplex.solution.pool.get_num()))[1:])
-    # model comes loaded with minimal-length undetoured solution
-    for i in range(num_solutions):
-        solver_model.setParam('SolutionNumber', i)
-        λ = solver_model.getAttr('PoolObjVal')
-        if λ > Λ:
-            print(f'Pool investigation over - next best undetoured length: {λ:.3f}')
-            break
-        for omovar, gurvar in solver._pyomo_var_to_solver_var_map.items():
-            omovar.set_value(round(gurvar.Xn), skip_validation=True)
-        S = S_from_solution(model, solver=solver, result=result)
-        G = G_from_S(S, A)
-        Hʹ = PathFinder(G, planar=P, A=A).create_detours()
-        Λʹ = Hʹ.size(weight='length')
-        if Λʹ < Λ:
-            H, Λ = Hʹ, Λʹ
-            pool_index = i
-            pool_objective = λ
-            print(f'Incumbent has (detoured) length: {Λ:.3f}')
-    H.graph['solver_details']['pool_index'] = pool_index
-    if pool_index > 0:
-        H.graph['solver_details']['pool_objective'] = pool_objective
-    return H
-
-
-def cplex_load_solution_from_pool(solver, soln):
-    cplex = solver._solver_model
-    vals = cplex.solution.pool.get_values(soln)
-    vars_to_load = solver._pyomo_var_to_ndx_map.keys()
-    for pyomo_var, val in zip(vars_to_load, vals):
-        if solver._referenced_variables[pyomo_var] > 0:
-            pyomo_var.set_value(val, skip_validation=True)
-
-
-def cplex_investigate_pool(P, A, model, solver, result):
-    '''Go through the CPLEX solutions checking which has the shortest length
-    after applying the detours with PathFinder.'''
-    cplex = solver._solver_model
-    # initialize incumbent total length
-    Λ = float('inf')
-    print(f'Solution pool has {cplex.solution.pool.get_num()} solutions.')
-    Pool = iter(sorted((cplex.solution.pool.get_objective_value(i), i)
-                       for i in range(cplex.solution.pool.get_num()))[1:])
-    # model comes loaded with minimal-length undetoured solution
-    while True:
-        S = S_from_solution(model, solver=solver, result=result)
-        G = G_from_S(S, A)
-        Hʹ = PathFinder(G, planar=P, A=A).create_detours()
-        Λʹ = Hʹ.size(weight='length')
-        if Λʹ < Λ:
-            H, Λ = Hʹ, Λʹ
-            print(f'Incumbent has (detoured) length: {Λ:.3f}')
-        # check if next best solution is worth processing
-        try:
-            λ, soln = next(Pool)
-        except StopIteration:
-            print('Pool exhausted.')
-            break
-        if λ > Λ:
-            print(f'Done with pool - next best undetoured length: {λ:.3f}')
-            break
-        cplex_load_solution_from_pool(solver, soln)
-    return H

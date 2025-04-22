@@ -2,14 +2,20 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
+import os
 import logging
-from collections import defaultdict
+from typing import Any
 from itertools import chain
 import networkx as nx
 
 from ortools.sat.python import cp_model
 
-from .core import PoolHandler
+from .core import (
+    Topology, FeederRoute, FeederLimit, Solver, PoolHandler, ModelOptions,
+    ModelMetadata, SolutionInfo, investigate_pool,
+)
+from ..pathfinding import PathFinder
+from ..interarraylib import G_from_S
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint
 
@@ -40,38 +46,82 @@ class _SolutionStore(cp_model.CpSolverSolutionCallback):
         self.solutions.append((self.objective_value, solution))
 
 
-class CpSat(PoolHandler, cp_model.CpSolver):
+class SolverORTools(Solver, PoolHandler):
     '''OR-Tools CpSolver wrapper.
 
     This class wraps and changes the behavior of CpSolver in order to save all
     solutions found to a pool. Meant to be used with `investigate_pool()`.
     '''
+    name: str = 'ortools'
     solution_pool: list[tuple[float, dict]]
+    solver: cp_model.CpSolver
 
-    def solve(self, model: cp_model.CpModel) -> cp_model.cp_model_pb2.CpSolverStatus:
+    def __init__(self):
+        self.solver = cp_model.CpSolver() 
+
+    def set_problem(
+            self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
+            model_options: ModelOptions, warmstart: nx.Graph | None = None
+        ):
+        self.P, self.A, self.capacity = P, A, capacity
+        self.model_options = model_options
+        model, metadata = make_min_length_model(self.A, self.capacity,
+                                                **model_options)
+        if warmstart is not None:
+            warmup_model(model, metadata, warmstart)
+        self.model, self.metadata = model, metadata
+
+    def solve(self, time_limit: int, mip_gap: float,
+              options: dict[str, Any] = {}, verbose: bool = False) -> SolutionInfo:
         '''Wrapper for CpSolver.solve() that saves all solutions.
 
         This method uses a custom CpSolverSolutionCallback to fill a solution
         pool stored in the attribute self.solutions.
         '''
-        self.model = model
+        try:
+            model, solver = self.model, self.solver
+        except AttributeError as exc:
+            exc.args += ('.set_problem() must be called before .solve()',)
+            raise
         storer = _SolutionStore(model)
-        result = super().solve(model, storer)
+        solver.parameters.max_time_in_seconds = time_limit
+        solver.parameters.relative_gap_limit = mip_gap
+        for key, val in options:
+            setattr(solver.parameters, key, val)
+        solver.log_callback = print
+        solver.parameters.log_search_progress = verbose
+        info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
+        result = solver.solve(model, storer)
         storer.solutions.reverse()
         self.solution_pool = storer.solutions
         _, self._value_map = storer.solutions[0]
         self.num_solutions = len(storer.solutions)
-        return result
+        bound=solver.best_objective_bound
+        objective=solver.objective_value
+        solution_info = SolutionInfo(
+            runtime=solver.wall_time,
+            bound=bound,
+            objective=objective,
+            relgap=1. - bound/objective,
+            termination=solver.status_name(),
+        )
+        self.solution_info, self.solver_options = solution_info, options
+        info('>>> Solution <<<\n%s\n', solution_info)
+        return solution_info
 
-    def load_solution(self, i: int) -> None:
-        '''Select solution at position `i` in the pool.
-
-        Indices start from 0 (last, aka best) and are ordered by increasing
-        objective function value.
-        It *only* affects methods `value()` and `boolean_value()` and
-        attribute `objective_value`.
-        '''
-        self._objective_value, self._value_map = self.solution_pool[i]
+    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
+        P, A, model_options = self.P, self.A, self.model_options
+        if model_options['feeder_route'] is FeederRoute.STRAIGHT:
+            S = self.topology_from_mip_pool()
+            G = PathFinder(
+                G_from_S(S, A), P, A,
+                branched=model_options['topology'] is Topology.BRANCHED
+            ).create_detours()
+        else:
+            S, G = investigate_pool(P, A, self)
+        G.graph.update(self._make_graph_attributes())
+        G.graph['solver_details'].update(strategy=self.solver.solution_info())
+        return S, G
 
     def boolean_value(self, literal: cp_model.IntVar) -> bool:
         return self._value_map[literal.index]
@@ -83,27 +133,34 @@ class CpSat(PoolHandler, cp_model.CpSolver):
         objective_value, self._value_map = self.solution_pool[index]
         return objective_value
 
-    def S_from_pool(self) -> nx.Graph:
-        return S_from_solution(self.model, solver=self)
+    def topology_from_mip_pool(self) -> nx.Graph:
+        return topology_from_mip_sol(metadata=self.metadata, solver=self)
+
+    def topology_from_mip_sol(self):
+        return topology_from_mip_sol(metadata=self.metadata, solver=self)
 
 
-def make_min_length_model(A: nx.Graph, capacity: int, *,
-                          gateXings_constraint: bool = False,
-                          gates_limit: bool | int = False,
-                          branching: bool = True) -> cp_model.CpModel:
-    '''
+def make_min_length_model(
+        A: nx.Graph, capacity: int, *,
+        topology: Topology = Topology.BRANCHED,
+        feeder_route: FeederRoute = FeederRoute.SEGMENTED,
+        feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+        max_feeders: int = 0
+) -> tuple[cp_model.CpModel, ModelMetadata]:
+    '''Make discrete optimization model over link set A.
+
     Build ILP CP OR-tools model for the collector system length minimization.
-    `A` is the graph with the available edges to choose from.
-
-    `capacity`: cable capacity
-
-    `gateXing_constraint`: if gates and edges are forbidden to cross.
-
-    `gates_limit`: if True, use the minimum feasible number of gates
-    (total for all roots); if False, no limit is imposed; if a number,
-    use it as the limit.
-
-    `branching`: if root branches are paths (False) or can be trees (True).
+    
+    Args:
+      A: graph with the available edges to choose from
+      capacity: maximum link flow capacity
+      topology: one of Topology.{BRANCHED, RADIAL}
+      feeder_route: 
+        FeederRoute.SEGMENTED -> feeder routes may be detoured around subtrees;
+        FeederRoute.STRAIGHT -> feeder routes must be straight, direct lines 
+      feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
+        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}
+      max_feeders: only used if feeder_limit is FeederLimit.SPECIFIED
     '''
     R = A.graph['R']
     T = A.graph['T']
@@ -153,8 +210,8 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
     for u, v in E:
         m.add_at_most_one(link_[(u, v)], link_[(v, u)])
 
-    # gate-edge crossings
-    if gateXings_constraint:
+    # feeder-edge crossings
+    if feeder_route is FeederRoute.STRAIGHT:
         for (u, v), tr in gateXing_iter(A):
             m.add_at_most_one(link_[(u, v)], link_[(v, u)], link_[tr])
 
@@ -175,25 +232,37 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
               + sum(flow_[t, r] for r in _R)
               == A.nodes[t].get('power', 1))
 
-    # gates limit
-    min_gates = math.ceil(T/k)
-    all_gate_vars_sum = sum(link_[t, r] for r in _R for t in _T)
-    if gates_limit:
-        if isinstance(gates_limit, bool) or gates_limit == min_gates:
-            # fixed number of gates
-            m.add(all_gate_vars_sum == min_gates)
-        else:
-            assert min_gates < gates_limit, (
-                    f'Infeasible: T/k > gates_limit (T = {T}, k = {k},'
-                    f' gates_limit = {gates_limit}).')
-            # number of gates within range
-            m.add_linear_constraint(all_gate_vars_sum, min_gates, gates_limit)
-    else:
+    # feeder limits
+    min_feeders = math.ceil(T/k)
+    all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
+    equal_not_bounded= False
+    if feeder_limit is FeederLimit.UNLIMITED:
         # valid inequality: number of gates is at least the minimum
-        m.add(all_gate_vars_sum >= min_gates)
+        m.add(all_feeder_vars_sum >= min_feeders)
+    else:
+        if feeder_limit is FeederLimit.SPECIFIED:
+            if max_feeders == min_feeders:
+                equal_not_bounded= True
+            elif max_feeders < min_feeders:
+                raise ValueError('max_feeders is below the minimum necessary')
+        elif feeder_limit is FeederLimit.MINIMUM:
+            equal_not_bounded = True
+        elif feeder_limit is FeederLimit.MIN_PLUS1:
+            max_feeders = min_feeders + 1
+        elif feeder_limit is FeederLimit.MIN_PLUS2:
+            max_feeders = min_feeders + 2
+        elif feeder_limit is FeederLimit.MIN_PLUS3:
+            max_feeders = min_feeders + 3
+        else:
+            raise NotImplementedError('Unknown value:', feeder_limit)
+        if equal_not_bounded:
+            m.add(all_feeder_vars_sum == min_feeders)
+        else:
+            m.add_linear_constraint(all_feeder_vars_sum, min_feeders,
+                                    max_feeders)
 
-    # non-branching
-    if not branching:
+    # radial or branched topology
+    if topology is Topology.RADIAL:
         for t in _T:
             m.add(sum(link_[n, t] for n in A_nodes.neighbors(t)) <= 1)
 
@@ -214,108 +283,76 @@ def make_min_length_model(A: nx.Graph, capacity: int, *,
 
     m.minimize(cp_model.LinearExpr.WeightedSum(tuple(link_.values()), weight_))
 
-    # save data structure as model attributes
-    m.link_, m.linkset, m.flow_, m.R, m.T, m.k = link_, linkset, flow_, R, T, k
-
     ##################
     # Store metadata #
     ##################
 
-    m.handle = A.graph['handle']
-    m.name = A.graph.get('name', 'unnamed')
-    m.method_options = dict(gateXings_constraint=gateXings_constraint,
-                            gates_limit=gates_limit,
-                            branching=branching)
-    m.fun_fingerprint = fun_fingerprint()
-    m.warmed_by = None
-    return m
+    model_options= dict(topology=topology,
+                        feeder_route=feeder_route,
+                        feeder_limit=feeder_limit,
+                        max_feeders=max_feeders)
+    metadata = ModelMetadata(R, T, k, linkset, link_, flow_,
+                             model_options, fun_fingerprint())
+
+    return m, metadata
 
 
-def warmup_model(model: cp_model.CpModel, S: nx.Graph) -> cp_model.CpModel:
+def warmup_model(model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
+                 ) -> cp_model.CpModel:
     '''
     Changes `model` in-place.
     '''
-    R, T = model.R, model.T
+    R, T = metadata.R, metadata.T
     model.ClearHints()
-    for u, v in model.linkset[:(len(model.linkset) - R*T)//2]:
+    for u, v in metadata.linkset[:(len(metadata.linkset) - R*T)//2]:
         edgeD = S.edges.get((u, v))
         if edgeD is None:
-            model.add_hint(model.link_[u, v], False)
-            model.add_hint(model.flow_[u, v], 0)
-            model.add_hint(model.link_[v, u], False)
-            model.add_hint(model.flow_[v, u], 0)
+            model.add_hint(metadata.link_[u, v], False)
+            model.add_hint(metadata.flow_[u, v], 0)
+            model.add_hint(metadata.link_[v, u], False)
+            model.add_hint(metadata.flow_[v, u], 0)
         else:
             u, v = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
-            model.add_hint(model.link_[u, v], True)
-            model.add_hint(model.flow_[u, v], edgeD['load'])
-            model.add_hint(model.link_[v, u], False)
-            model.add_hint(model.flow_[v, u], 0)
-    for t, r in model.linkset[-R*T:]:
+            model.add_hint(metadata.link_[u, v], True)
+            model.add_hint(metadata.flow_[u, v], edgeD['load'])
+            model.add_hint(metadata.link_[v, u], False)
+            model.add_hint(metadata.flow_[v, u], 0)
+    for t, r in metadata.linkset[-R*T:]:
         edgeD = S.edges.get((t, r))
-        model.add_hint(model.link_[t, r], edgeD is not None)
-        model.add_hint(model.flow_[t, r], 0 if edgeD is None else edgeD['load'])
-    model.warmed_by = S.graph['creator']
+        model.add_hint(metadata.link_[t, r], edgeD is not None)
+        model.add_hint(metadata.flow_[t, r], 0 if edgeD is None else edgeD['load'])
+    metadata.warmed_by = S.graph['creator']
     return model
 
 
-def S_from_solution(model: cp_model.CpModel,
-                    solver: cp_model.CpSolver, result: int = 0) -> nx.Graph:
-    '''Create a topology `S` from the OR-tools solution to the MILP model.
+def topology_from_mip_sol(*, metadata: ModelMetadata,
+                          solver: SolverORTools|cp_model.CpSolver,
+                          **kwargs) -> nx.Graph:
+    '''Create a topology nx.Graph from the OR-tools solution to the MILP model.
 
     Args:
-        model: passed to the solver.
-        solver: used to solve the model.
-        result: irrelevant, exists only to mirror the Pyomo alternative.
+      metadata: attributes of the solved model
+      solver: solver instance that solved the model
+      kwargs: not used (signature compatibility)
     Returns:
-        Graph topology from the solution.
+      Graph topology from the solution.
     '''
-    # the solution is in the solver object not in the model
-
-    # Metadata
-    R, T = model.R, model.T
-    solver_name = 'ortools'
-    bound = solver.best_objective_bound
-    objective = solver.objective_value
-    S = nx.Graph(
-        R=R, T=T,
-        handle=model.handle,
-        capacity=model.k,
-        objective=objective,
-        bound=bound,
-        runtime=solver.wall_time,
-        termination=solver.status_name(),
-        gap=1. - bound/objective,
-        creator='MILP.' + solver_name,
-        has_loads=True,
-        method_options=dict(
-            solver_name=solver_name,
-            mipgap=solver.parameters.relative_gap_limit,
-            timelimit=solver.parameters.max_time_in_seconds,
-            fun_fingerprint=model.fun_fingerprint,
-            **model.method_options,
-        ),
-        solver_details=dict(
-            strategy=solver.solution_info(),
-        )
-    )
-
-    if model.warmed_by is not None:
-        S.graph['warmstart'] = model.warmed_by
-
-    # Graph data
+    # in ortools, the solution is in the solver instance not in the model
+    S = nx.Graph()
     # Get active links and if flow is reversed (i.e. from small to big)
     rev_from_link = {(u, v): u < v
-                     for (u, v), use in model.link_.items()
+                     for (u, v), use in metadata.link_.items()
                      if solver.boolean_value(use)}
     S.add_weighted_edges_from(
-        ((u, v, solver.value(model.flow_[u, v]))
+        ((u, v, solver.value(metadata.flow_[u, v]))
          for (u, v) in rev_from_link.keys()), weight='load'
     )
     # set the 'reverse' edge attribute
     nx.set_edge_attributes(S, rev_from_link, name='reverse')
     # propagate loads from edges to nodes
     subtree = -1
-    for r in range(-R, 0):
+    max_load = 0
+    for r in range(-metadata.R, 0):
         for u, v in nx.edge_dfs(S, r):
             S.nodes[v]['load'] = S[u][v]['load']
             if u == r:
@@ -323,6 +360,15 @@ def S_from_solution(model: cp_model.CpModel,
             S.nodes[v]['subtree'] = subtree
         rootload = 0
         for nbr in S.neighbors(r):
-            rootload += S.nodes[nbr]['load']
+            subtree_load = S.nodes[nbr]['load']
+            max_load = max(max_load, subtree_load)
+            rootload += subtree_load
         S.nodes[r]['load'] = rootload
+    S.graph.update(
+        capacity=metadata.capacity,
+        max_load=max_load,
+        has_loads=True,
+        creator='MILP.' + os.path.basename(__file__),
+        solver_details={},
+    )
     return S
