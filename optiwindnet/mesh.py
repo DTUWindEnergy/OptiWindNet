@@ -369,7 +369,56 @@ def make_planar_embedding(
             for i in chain(border, *obstacles)
         }
 
+        all_nodes_pts = shp.MultiPoint(node_xy_)
         border_poly = shp.Polygon(shell=VertexC[border])
+        border_ring = border_poly.exterior
+
+        # check for nodes on the border, but that do not define the border
+        nodes_on_the_border = (border_ring & all_nodes_pts
+                               - shp.MultiPoint(border_ring.coords))
+        if not nodes_on_the_border.is_empty:
+            u = border[-1]
+            intersects = []
+            for i, v in enumerate(border):
+                edge_line = shp.LineString(VertexC[(u, v),])
+                intersection = edge_line & nodes_on_the_border
+                if not intersection.is_empty:
+                    if isinstance(intersection, shp.Point):
+                        intersects.append((i, intersection.coords[0]))
+                    else:
+                        # multiple points covered by segment ⟨u, v⟩
+                        info('multiple')
+                        pts = []
+                        ref = VertexC[v]
+                        for pt in intersection.geoms:
+                            ptC = pt.coords[0]
+                            pts.append((np.hypot(*(ptC - ref)), ptC))
+                        # sort by closeness to VertexC[v]
+                        pts.sort()
+                        for _, ptC in pts:
+                            # points furthest from u are inserted first,
+                            # but are pushed towards the end of border as
+                            # points closer to u are inserted afterwards
+                            intersects.append((i, ptC))
+                u = v
+            info('INTERSECTS: %s', intersects)
+            if isinstance(border, np.ndarray):
+                border = border.tolist()
+            info('old border: %s', border)
+            # TODO: handle multiple intersections with a single segment
+            offset = 0
+            for i, xy in intersects:
+                n = node_xy_.index(xy)
+                n = n if n < T else n - T - R
+                border.insert(i + offset, n)
+                border_vertex_from_xy[xy] = n
+                offset += 1
+
+            border_poly = shp.Polygon(shell=VertexC[border])
+            info('new border: %s', border)
+
+        # expand border_poly to include roots outside of it
+        # TODO: move this to a location sanitization pre-make_planar_embedding
         out_root_pts = root_pts - border_poly
         hull_poly = (border_poly | root_pts).convex_hull
         hull_ring = hull_poly.boundary
