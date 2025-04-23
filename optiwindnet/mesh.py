@@ -31,7 +31,7 @@ from .interarraylib import NodeTagger
 from .geometric import is_triangle_pair_a_convex_quadrilateral
 
 logger = logging.getLogger(__name__)
-debug, warn = logger.debug, logger.warning
+debug, info, warn = logger.debug, logger.info, logger.warning
 F = NodeTagger()
 NULL = np.iinfo(int).min
 _MAX_TRIANGLE_ASPECT_RATIO = 50.
@@ -356,24 +356,24 @@ def make_planar_embedding(
     # B) Transform border concavities in polygons.
     # ############################################
     debug('PART B')
-    root_xy_ = tuple((x.item(), y.item()) for (x, y) in VertexC[-R:])
-    nodeset_xy_ = set(chain(root_xy_,
-                            ((x.item(), y.item()) for (x, y) in VertexC[:T])))
-    root_pts = shp.MultiPoint(root_xy_)
+    node_xy_ = tuple((x.item(), y.item()) for (x, y) in chain(VertexC[:T], VertexC[-R:]))
+    nodeset_xy_ = set(node_xy_)
+    root_pts = shp.MultiPoint(node_xy_[-R:])
     if border is None:
         hull_minus_border = shp.MultiPolygon()
         border_vertex_from_xy = {}
         out_root_pts = shp.MultiPoint()
     else:
+        border_vertex_from_xy = {
+            tuple(VertexC[i].tolist()): i.item()
+            for i in chain(border, *obstacles)
+        }
+
         border_poly = shp.Polygon(shell=VertexC[border])
         out_root_pts = root_pts - border_poly
         hull_poly = (border_poly | root_pts).convex_hull
         hull_ring = hull_poly.boundary
 
-        border_vertex_from_xy = {
-            (x.item(), y.item()): i
-            for i, (x, y) in enumerate(VertexC[T:-R], start=T)
-        }
 
         hull_border_xy_ = {xy for xy in hull_ring.coords[:-1]
                            if xy in border_vertex_from_xy}
@@ -395,7 +395,7 @@ def make_planar_embedding(
                 concavities.append(p.exterior)
     elif out_root_pts.is_empty:
         # single Polygon is a concavity
-        concavities = [hull_minus_border.exterior]
+        concavities.append(hull_minus_border.exterior)
     else:
         # single Polygon in hull_minus_border includes a root -> no concavity
         border_poly = hull_poly
@@ -485,7 +485,7 @@ def make_planar_embedding(
             Y_is_hull = fwd in hull_border_xy_
             cur = fwd
         if changed:
-            debug('Concavities changed!')
+            info('Concavities changed: %d stunts', len(stunt_coords))
             concavities[i] = shp.LinearRing(new_ring_xy_)
             stuntC.append(mean + scale*np.array(stunt_coords))
     # Stunts are added to the B range and they should be saved with routesets.
