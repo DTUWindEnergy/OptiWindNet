@@ -371,9 +371,20 @@ def make_planar_embedding(
 
         all_nodes_pts = shp.MultiPoint(node_xy_)
         border_poly = shp.Polygon(shell=VertexC[border])
-        border_ring = border_poly.exterior
+
+        # create a hull_poly that includes roots outside of border_poly
+        # TODO: move this to a location sanitization pre-make_planar_embedding
+        out_root_pts = root_pts - border_poly
+        hull_poly = (border_poly | out_root_pts).convex_hull
+        hull_ring = hull_poly.boundary
+
+        hull_border_xy_ = {xy for xy in hull_ring.coords[:-1]
+                           if xy in border_vertex_from_xy}
+        hull_border_vertices = [border_vertex_from_xy[xy]
+                                for xy in hull_border_xy_]
 
         # check for nodes on the border, but that do not define the border
+        border_ring = border_poly.exterior
         nodes_on_the_border = (border_ring & all_nodes_pts
                                - shp.MultiPoint(border_ring.coords))
         if not nodes_on_the_border.is_empty:
@@ -387,47 +398,28 @@ def make_planar_embedding(
                         intersects.append((i, intersection.coords[0]))
                     else:
                         # multiple points covered by segment ⟨u, v⟩
-                        info('multiple')
                         pts = []
-                        ref = VertexC[v]
+                        ref = VertexC[u]
                         for pt in intersection.geoms:
                             ptC = pt.coords[0]
                             pts.append((np.hypot(*(ptC - ref)), ptC))
-                        # sort by closeness to VertexC[v]
+                        # sort by closeness to VertexC[u]
                         pts.sort()
                         for _, ptC in pts:
-                            # points furthest from u are inserted first,
-                            # but are pushed towards the end of border as
-                            # points closer to u are inserted afterwards
                             intersects.append((i, ptC))
                 u = v
             info('INTERSECTS: %s', intersects)
-            if isinstance(border, np.ndarray):
-                border = border.tolist()
-            info('old border: %s', border)
-            # TODO: handle multiple intersections with a single segment
+            info('border: %s', border)
+            aux_border = border.tolist()
             offset = 0
             for i, xy in intersects:
                 n = node_xy_.index(xy)
                 n = n if n < T else n - T - R
-                border.insert(i + offset, n)
+                aux_border.insert(i + offset, n)
                 border_vertex_from_xy[xy] = n
                 offset += 1
-
-            border_poly = shp.Polygon(shell=VertexC[border])
-            info('new border: %s', border)
-
-        # expand border_poly to include roots outside of it
-        # TODO: move this to a location sanitization pre-make_planar_embedding
-        out_root_pts = root_pts - border_poly
-        hull_poly = (border_poly | root_pts).convex_hull
-        hull_ring = hull_poly.boundary
-
-
-        hull_border_xy_ = {xy for xy in hull_ring.coords[:-1]
-                           if xy in border_vertex_from_xy}
-        hull_border_vertices = [border_vertex_from_xy[xy]
-                                for xy in hull_border_xy_]
+            info('aux_border: %s', aux_border)
+            border_poly = shp.Polygon(shell=VertexC[aux_border])
 
         # Turn the main border's concave zones into concavity polygons.
         hull_minus_border = hull_poly - border_poly
