@@ -356,9 +356,11 @@ def make_planar_embedding(
     # B) Transform border concavities in polygons.
     # ############################################
     debug('PART B')
-    node_xy_ = tuple((x.item(), y.item()) for (x, y) in chain(VertexC[:T], VertexC[-R:]))
-    nodeset_xy_ = set(node_xy_)
-    root_pts = shp.MultiPoint(node_xy_[-R:])
+    node_xy_ = tuple((x.item(), y.item())
+                     for (x, y) in chain(VertexC[:T], VertexC[-R:]))
+    node_vertex_from_xy = dict(zip(node_xy_, chain(range(T), range(-R, 0))))
+
+    root_pts = shp.MultiPoint(VertexC[-R:])
     if border is None:
         hull_minus_border = shp.MultiPolygon()
         border_vertex_from_xy = {}
@@ -369,7 +371,6 @@ def make_planar_embedding(
             for i in chain(border, *obstacles)
         }
 
-        all_nodes_pts = shp.MultiPoint(node_xy_)
         border_poly = shp.Polygon(shell=VertexC[border])
 
         # create a hull_poly that includes roots outside of border_poly
@@ -385,7 +386,7 @@ def make_planar_embedding(
 
         # check for nodes on the border, but that do not define the border
         border_ring = border_poly.exterior
-        nodes_on_the_border = (border_ring & all_nodes_pts
+        nodes_on_the_border = (border_ring & shp.MultiPoint(node_xy_)
                                - shp.MultiPoint(border_ring.coords))
         if not nodes_on_the_border.is_empty:
             u = border[-1]
@@ -413,8 +414,7 @@ def make_planar_embedding(
             aux_border = border.tolist()
             offset = 0
             for i, xy in intersects:
-                n = node_xy_.index(xy)
-                n = n if n < T else n - T - R
+                n = node_vertex_from_xy[xy]
                 aux_border.insert(i + offset, n)
                 border_vertex_from_xy[xy] = n
                 offset += 1
@@ -471,7 +471,7 @@ def make_planar_embedding(
         for fwd in chain(old_ring_xy_[1:], (cur,)):
             Z = border_vertex_from_xy[fwd]
             Z_is_hull = fwd in hull_border_xy_
-            if cur in nodeset_xy_:
+            if cur in node_vertex_from_xy:
                 # Concavity border vertex coincides with node.
                 # Therefore, create a stunt vertex for the border.
                 XY = VertexC[Y] - VertexC[X]
@@ -543,11 +543,6 @@ def make_planar_embedding(
     # D) Create a miriad of indices and mappings.
     # ###########################################
     debug('PART D')
-
-    node_vertex_from_xy = {
-        (x.item(), y.item()): i for i, (x, y) in chain(
-            enumerate(VertexC[:T]), enumerate(VertexC[-R:], start=-R))
-    }
 
     if not out_root_pts.is_empty:
         border = np.array([(border_vertex_from_xy.get(xy)
