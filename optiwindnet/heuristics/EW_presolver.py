@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import time
+import logging
 
 import numpy as np
 import networkx as nx
@@ -15,8 +16,10 @@ from ..interarraylib import calcload
 
 F = NodeTagger()
 
+lggr = logging.getLogger(__name__)
+debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
-def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx.Graph:
+def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     '''Modified Esau-Williams heuristic for C-MST with limited crossings
     
     Args:
@@ -60,7 +63,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
 
     # mappings from components (identified by their gates)
     # <ComponIn>: maps component to set of components queued to merge in
-    ComponIn = np.array([set() for _ in range(T)])
+    ComponIn = [set() for _ in range(T)]
     ComponLoLim = np.arange(T)  # most CW node
     ComponHiLim = np.arange(T)  # most CCW node
 
@@ -124,10 +127,9 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
         return best_edge, tradeoff, edges2discard
 
     def find_option4gate(gate):
-        debug and print(f'<find_option4gate> starting... gate = '
-                        f'<{F[gate]}>')
+        debug('<find_option4gate> starting... gate = <%s>', F[gate])
         if edges2ban:
-            debug and print(f'<<<<<<<edges2ban>>>>>>>>>>> _{len(edges2ban)}_')
+            debug('<<<<<<<edges2ban>>>>>>>>>>> _%d_', len(edges2ban))
         while edges2ban:
             # edge2ban = edges2ban.popleft()
             edge2ban = edges2ban.pop()
@@ -141,11 +143,11 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
             # tradeoff calculation
             pq.add(tradeoff, gate, edge)
             ComponIn[Gate[edge[1]]].add(gate)
-            debug and print(f'<pushed> g2drop <{F[gate]}>, '
-                            f'«{F[edge[0]]}–{F[edge[1]]}», tradeoff = {tradeoff:.1e}')
+            debug('<pushed> g2drop <%s>, «%s–%s», tradeoff = %.3f',
+                  F[gate], F[edge[0]], F[edge[1]], tradeoff)
         else:
             # no viable edge is better than gate for this node
-            debug and print('<cancelling>', F[gate])
+            debug('<cancelling> %s', F[gate])
             if gate in pq.tags:
                 pq.cancel(gate)
 
@@ -153,8 +155,8 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug and print('<<<< UNLIKELY <ban_queued_edge()> '
-                            f'({F[u]}, {F[v]}) not in A.edges >>>>')
+            debug('<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A.edges >>',
+                  F[u], F[v])
         g2keep = Gate[v]
         # TODO: think about why a discard was needed
         ComponIn[g2keep].discard(g2drop)
@@ -196,13 +198,12 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
     while loop:
         i += 1
         if i > maxiter:
-            print(f'ERROR: maxiter reached ({i})')
+            error('ERROR: maxiter reached (%d)', i)
             break
-        debug and print(f'[{i}]')
-        # debug and print(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
+        debug('[%d]', i)
+        # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
         if gates2upd8:
-            debug and print('gates2upd8:', ', '.join(F[gate] for gate in
-                                                     gates2upd8))
+            debug('gates2upd8: %s', tuple(F[gate] for gate in gates2upd8))
         while gates2upd8:
             # find_option4gate(gates2upd8.popleft())
             find_option4gate(gates2upd8.pop())
@@ -210,8 +211,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
             # finished
             break
         g2drop, (u, v) = pq.top()
-        debug and print(f'<popped> «{F[u]}–{F[v]}»,'
-                        f' g2drop: <{F[g2drop]}>')
+        debug('<popped> «%s–%s», g2drop: <%s>', F[u], F[v], F[g2drop])
 
         # TODO: main loop should do only
         # - pop from pq
@@ -225,8 +225,8 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
         eX = edge_crossings(u, v, S, diagonals)
 
         if eX:
-            debug and print(f'<edge_crossing> discarding {(F[u], F[v])}: would cross'
-                            f' {[(F[s], F[t]) for s, t in eX]}')
+            debug('<edge_crossing> discarding «%s–%s»: would cross %s',
+                  F[u], F[v], tuple((F[s], F[t]) for s, t in eX))
             # abort_edge_addition(g2drop, u, v)
             prevented_crossings += 1
             ban_queued_edge(g2drop, u, v)
@@ -244,8 +244,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
         dropLo = ComponLoLim[g2drop]
         newHi = dropHi if angle(*VertexC[[keepHi, root, dropHi]]) > 0 else keepHi
         newLo = dropLo if angle(*VertexC[[dropLo, root, keepLo]]) > 0 else keepLo
-        debug and print(f'<angle_span> //{F[newLo]} : '
-                        f'{F[newHi]}//')
+        debug(f'<angle_span> //%s:%s//', F[newLo], F[newHi])
 
         # edge addition starts here
         subtree = subtrees[v]
@@ -270,11 +269,12 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000, debug=False) -> nx
             A.nodes[n]['root'] = root
             Gate[n] = g2keep
             subtrees[n] = subtree
-        debug and print(f'<add edge> «{F[u]}-{F[v]}» gate '
-                        f'<{F[g2keep]}>, '
-                        f'heap top: <{F[pq[0][-2]]}>, '
-                        f'«{chr(8211).join([F[x] for x in pq[0][-1]])}»'
-                        f' {pq[0][0]:.1e}' if pq else 'heap EMPTY')
+        debug('<add edge> «%s–%s» gate <%s>', F[u], F[v], F[g2keep])
+        if pq:
+            debug('heap top: <%s>, «%s» %.3f', F[pq[0][-2]],
+                  tuple(F[x] for x in pq[0][-1]), pq[0][0])
+        else:
+            debug('heap EMPTY')
         #  G.add_edge(u, v, **A.edges[u, v])
         S.add_edge(u, v)
         log.append((i, 'addE', (u, v)))
