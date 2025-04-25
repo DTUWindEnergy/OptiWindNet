@@ -80,8 +80,10 @@ class WindFarmNetwork:
         self.cables_capacity = max(c[0] for c in cables)
 
         # Load layout from coordinates if turbinesC provided
-        if turbinesC is not None:
+        if turbinesC is not None and substationsC is not None:
             L = self._from_coordinates(turbinesC, substationsC, borderC, obstaclesC, name, handle)
+        elif L is None:
+            raise ValueError('Both turbinesC and substationsC must be provided')
         self.L = L
 
         # Planar embedding
@@ -181,13 +183,11 @@ class WindFarmNetwork:
         # Check if any turbine is outside the border
         if not np.all(in_border):
             outside_idx = np.where(~in_border)[0]
-            print(borderC)
             raise ValueError(f"Turbines at indices {outside_idx} are outside the border!")
 
         for i, obs in enumerate(obstaclesC):
             obs_path = Path(obs)
             in_obstacle = obs_path.contains_points(turbinesC, radius=-1e-10)
-            print(in_obstacle)
             if np.any(in_obstacle):
                 inside_idx = np.where(in_obstacle)[0]
                 raise ValueError(f"Turbines at indices {inside_idx} are inside obstacle {i}!")
