@@ -35,11 +35,8 @@ from optiwindnet.heuristics import EW_presolver
 from optiwindnet.baselines.hgs import iterative_hgs_cvrp
 
 # MILP
-from optiwindnet.MILP import ortools as ort
-import optiwindnet.MILP.pyomo as omo
-from pyomo.contrib.appsi.solvers import Highs
-from pyomo import environ as pyo
-
+from optiwindnet.MILP import solver_factory, ModelOptions
+ModelOptions.help()
 
 #################################################
 # To Do: if face error do a simple optimization #
@@ -100,7 +97,6 @@ class WindFarmNetwork:
 
         # Graph/network placeholders and status flags
         self.S = None
-        self._G_tentative = None
         self.G = None
 
     def cost(self):
@@ -293,7 +289,9 @@ class WindFarmNetwork:
     
     def plot_selected_links(self, **kwargs):
         """Plots the wind farm network graph."""
-        return gplot(self._G_tentative, **kwargs)
+        G_tentative = G_from_S(self.S, self.A)
+        assign_cables(G_tentative, self.cables)
+        return gplot(G_tentative, **kwargs)
 
     def get_network(self):
         """Returns the network edges with cable data."""
@@ -333,9 +331,9 @@ class WindFarmNetwork:
 
         calcload(self.S)
 
-        self.G_tentative = G_from_S(self.S, self.A)
+        G_tentative = G_from_S(self.S, self.A)
 
-        self.G = PathFinder(self._G_tentative, planar=self.P, A=self.A).create_detours()
+        self.G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
 
         assign_cables(self.G, self.cables)
 
@@ -376,12 +374,10 @@ class WindFarmNetwork:
         # Update coordinates
         if turbinesC is not None:
             self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
-            self._G_tentative.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
             self.G.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
         
         if substationsC is not None:
             self.L.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
-            self._G_tentative.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
             self.G.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
 
         # Update length
@@ -480,9 +476,8 @@ class WindFarmNetwork:
         if substationsC is None:
             substationsC = substationsC or self.L.graph['VertexC'][-self.L.graph['R']:, :]
 
-        S, G_tentative, G = router(A=self.A, P=self.P, S=self.S, turbinesC=turbinesC, substationsC=substationsC, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
+        S, G = router(A=self.A, P=self.P, S=self.S, turbinesC=turbinesC, substationsC=substationsC, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
         self.S = S
-        self._G_tentative = G_tentative
         self.G = G
 
         terse_links = self.terse_links()
@@ -505,7 +500,7 @@ class OptiWindNetSolver(ABC):
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, solver='Esau_Williams', maxiter=10000, debug=False, verbose=False, **kwargs):
+    def __init__(self, solver='Esau_Williams', maxiter=10000, verbose=False, **kwargs):
         if solver not in ['Esau_Williams']:
             raise ValueError(
                 f"{solver} is not among the supported Heuristic solvers. Choose among: ['Esau_Williams']."
@@ -515,7 +510,6 @@ class Heuristic(OptiWindNetSolver):
         self.verbose = verbose
         self.solver = solver
         self.maxiter = maxiter
-        self.debug = debug
 
     def optimize(self, A, P, cables, cables_capacity, verbose=None, **kwargs):
 
@@ -524,7 +518,7 @@ class Heuristic(OptiWindNetSolver):
 
         # optimizing
         if self.solver in ['Esau_Williams', 'EW']:
-            S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter, debug=self.debug)
+            S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
         else:
             pass
             
@@ -534,7 +528,7 @@ class Heuristic(OptiWindNetSolver):
 
         assign_cables(G, cables)
 
-        return S, G_tentative, G
+        return S, G
     
 class MetaHeuristic(OptiWindNetSolver):
     def __init__(self, time_limit, solver='HGS', gates_limit: int | None = None, max_iter=10, seed: int = 0, verbose=False, **kwargs):
@@ -565,141 +559,34 @@ class MetaHeuristic(OptiWindNetSolver):
 
         assign_cables(G, cables)
         
-        return S, G_tentative, G
+        return S, G
 
 class MILP(OptiWindNetSolver):
-    def __init__(self, solver='ortools', solver_options=None, model_options=None, verbose=False, **kwargs):
+    def __init__(self, solver_name='ortools', solver_options=None, model_options=None, verbose=False, **kwargs):
         self.verbose = verbose
-        self.solver = solver
+        self.solver_name = solver_name
         self.solver_options = solver_options or {}
         self.model_options = model_options or {}
 
-    def optimize(self, A, P, cables, cables_capacity, S=None, verbose=None, **kwargs):
-       
+    def optimize(self, A, P, cables, cables_capacity, S_warm=None, verbose=None, **kwargs):
+
         if verbose is None:
             verbose = self.verbose
-
-        # optimizing
-        if self.solver == 'ortools':
-            # initialize
-            #orter = ort.CpSat()
-            # set the model
-            model = ort.make_min_length_model(
-                        A,
-                        cables_capacity,
-                        gateXings_constraint=self.model_options.get("gateXing_constraint", False),
-                        branching=self.model_options.get("branching", True),
-                        gates_limit=self.model_options.get("gates_limit", False)
-                    )
-            
-            # warm start
-            if S is not None:
-                if verbose:
-                    print('S is not None and the model is warmed up with the available S.')
-
-                ort.warmup_model(model, S)
-
-            orter = ort.cp_model.CpSolver()
-            # settings
-            orter.parameters.max_time_in_seconds = self.solver_options.get("max_time_in_seconds", 40)
-            orter.parameters.relative_gap_limit = self.solver_options.get("relative_gap_limi", 0.005)
-            orter.parameters.num_workers = self.solver_options.get("num_workers", 8)
-            orter.parameters.log_search_progress = verbose or self.solver_options.get("log_search_progress", False)
-            if verbose or self.solver_options.get('log_callback', None)==print:
-                orter.log_callback = print # required to get the log inside the notebook (goes only to console otherwise)
-
-            ##########
-            # result #
-            ##########
-            result = orter.solve(model)
-
-            if verbose: # print info about the final solution
-                gap = 1 - orter.BestObjectiveBound()/orter.ObjectiveValue()
-                print('=================================================================',
-                    #orter.ResponseStats(),  # uncomment if orter.parameters.log_search_progress == False
-                    f"\nbest solution's strategy: {orter.SolutionInfo()}",
-                    f'\ngap: {100*gap:.1f}%')
-
-            S = ort.S_from_solution(model, orter, result)
-  
-
-        elif self.solver in ['cplex', 'cbc', 'gurobi', 'highs', 'scip']:
-            ##############
-            # initialize #
-            ##############
-            # Define solver and solver_io mapping for special cases
-            solver_mapping = {
-                'highs': 'appsi_highs',
-                }
-            solver_io_mapping ={
-                'gurobi': 'python',
-                'cplex': 'python',
-                # add more if solver_io is not None
-            }
-
-            # Get the solver name, falling back to self.solver if not in mapping
-            solver_name = solver_mapping.get(self.solver, self.solver)
-            solver_io = solver_io_mapping.get(self.solver, None)
-
-            # Initialize solver with or without solver_io
-            pyo_solver = pyo.SolverFactory(solver_name, solver_io=solver_io) if solver_io else pyo.SolverFactory(solver_name)
-            
+      
+        # warm start
+        if S_warm is not None:
             if verbose:
-                pyo_solver.available(), type(pyo_solver)
+                print('S is not None and the model is warmed up with the available S.')
 
-            model = omo.make_min_length_model(
-                A, cables_capacity,      
-                gateXings_constraint=self.model_options.get("gateXing_constraint", False),
-                branching=self.model_options.get("branching", True), # if branching is false 
-                gates_limit=self.model_options.get("gates_limit", False) # if ew_pre_solver does not fit is True (warm start it with metaheauristic)
-                )
-            
-            # warm start
-            if S is not None:
-                if verbose:
-                    print('S is not None and the model is warmed up with the available S.')
+        solver = solver_factory(self.solver_name)
 
-                omo.warmup_model(model, S)
-
-
-            pyo_solver.options.update(self.solver_options)
-
-            if verbose:
-                print(f'Solving "{model.handle}": {{R={len(model.R)}, T={len(model.T)}, κ={model.k.value}}}\n')
-
-
-            # Define solver-specific arguments for solving
-            #######################################################################
-            solver_args = {'tee': verbose or self.solver_options.get("tee", False)}
-
-
-            if S is not None:
-                if self.solver in ['gurobi', 'cbc']:
-                    solver_args['warmstart'] = model.warmed_by
-                if self.solver in ['cplex']:
-                    solver_args['warmstart'] = True
-
-            ##########
-            # result #
-            ##########
-            result = pyo_solver.solve(model, **solver_args)
-
-            S = omo.S_from_solution(model, pyo_solver, result)
-           
-        else:
-            raise ValueError(
-                f"{self.solver} is not among the supported MILP solvers. Choose among: ortools, gurobi, cplex, highs, scip, cbc.")
-
-        G_tentative = G_from_S(S, A)
-
-        if self.model_options.get("gateXing_constraint", False):
-            G = G_tentative
-        else:
-            G = PathFinder(G_tentative, planar=P, A=A).create_detours()
-
-        assign_cables(G, cables)
+        solver.set_problem(P, A, cables_capacity, warmstart=S_warm, model_options=self.model_options)
         
-        return S, G_tentative, G
+        solver.solve(time_limit=15, mip_gap=0.01) #, **self.solver_options)
+
+        S, G = solver.get_solution()
+        
+        return S, G
 
 
 
