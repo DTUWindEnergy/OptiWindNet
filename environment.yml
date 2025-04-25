@@ -5,6 +5,7 @@ dependencies:
   - python >=3.10
   - bidict ~=0.23.1
   - darkdetect ~=0.8.0
+  - makefun ~=1.15.6
   - matplotlib ~=3.10.1
   - networkx ~=3.4.2
   - numba >=0.60,<0.62
