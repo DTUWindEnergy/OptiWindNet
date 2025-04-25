@@ -49,8 +49,8 @@ class WindFarmNetwork:
     layout data from different formats and computing network properties.
     """
 
-    def __init__(self, turbinesC=None, substationsC=None,
-                 cables=None, borderC=None, obstaclesC=None,
+    def __init__(self, cables, turbinesC=None, substationsC=None,
+                 borderC=None, obstaclesC=None,
                  name='', handle='', L=None, router=None,
                  verbose=False, **kwargs):
 
@@ -61,12 +61,8 @@ class WindFarmNetwork:
             router = Heuristic(solver='Esau_Williams')
         self.router = router
         cables_array = np.array(cables)
-        if cables is None:
-            if verbose:
-                print("WARNING: No cable data provided. Defaulting to cables = [(10, 1)]")
-            cables = [(10, 1)]
 
-        elif isinstance(cables, int):
+        if isinstance(cables, int):
             cables = [(cables, 1)]
 
         elif cables_array.ndim == 1 and cables_array.shape[0] == 1 and isinstance(cables_array.item(), int):
@@ -451,11 +447,11 @@ class WindFarmNetwork:
             self.router = router
         
         router = self.router  # Use provided router or the existing one in the class
-        if router is None:
-            raise ValueError(
-                        "To run the optimization, a router must be initialized. "
-                        "This can be done either during the creation of the WFN object "
-                        "or via the `optimize` method of the WFN object.")
+        # if router is None:
+        #     raise ValueError(
+        #                 "To run the optimization, a router must be initialized. "
+        #                 "This can be done either during the creation of the WFN object "
+        #                 "or via the `optimize` method of the WFN object.")
         
         if verbose is None:
             verbose = self.verbose
@@ -480,7 +476,7 @@ class WindFarmNetwork:
         self.S = S
         self.G = G
 
-        terse_links = self.terse_links()
+        terse_links = 0 # self.terse_links()
         return terse_links
 
 class OptiWindNetSolver(ABC):
@@ -582,7 +578,7 @@ class MILP(OptiWindNetSolver):
 
         solver.set_problem(P, A, cables_capacity, warmstart=S_warm, model_options=self.model_options)
         
-        solver.solve(time_limit=15, mip_gap=0.01) #, **self.solver_options)
+        solver.solve(time_limit=15, mip_gap=0.01, options=self.solver_options)
 
         S, G = solver.get_solution()
         
