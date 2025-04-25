@@ -151,9 +151,10 @@ class WindFarmNetwork:
 
             for obs in obstaclesC:
                 obs_poly = Polygon(obs)
+                intersection = border_polygon.boundary.intersection(obs_poly)
 
-                # If the obstacle is completely within the border (and not touching exterior), keep it
-                if border_polygon.contains(obs_poly):
+                # If the obstacle is completely within the border, keep it
+                if border_polygon.contains(obs_poly) and intersection.length == 0:
                     remaining_obstaclesC.append(obs)
                 else:
                     # Subtract this obstacle from the border
@@ -181,8 +182,8 @@ class WindFarmNetwork:
         # check_turbine_locations(border, obstacles, turbines):
         border_path = Path(borderC)
         # Border path, with tolerance for edge inclusion
-        in_border_neg = border_path.contains_points(turbinesC, radius=-1e-10)
-        in_border_pos = border_path.contains_points(turbinesC, radius=1e-10)
+        in_border_neg = border_path.contains_points(turbinesC, radius=-1e1)
+        in_border_pos = border_path.contains_points(turbinesC, radius=1e1)
         in_border = in_border_neg | in_border_pos
 
         # Check if any turbine is outside the border
