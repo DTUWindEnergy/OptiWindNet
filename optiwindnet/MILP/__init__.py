@@ -5,7 +5,6 @@ import logging
 from .core import ModelOptions
 
 lggr = logging.getLogger(__name__)
-print(__name__)
 error = lggr.error
 
 def solver_factory(solver_name: str):
