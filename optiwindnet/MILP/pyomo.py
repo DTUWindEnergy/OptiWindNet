@@ -385,7 +385,7 @@ def topology_from_mip_sol(*, model: pyo.ConcreteModel,
       Graph topology from the solution.
     '''
     # in pyomo, the solution is in the model instance not in the solver
-    S = nx.Graph()
+    S = nx.Graph(R=len(model.R), T=len(model.T))
     # Get active links and if flow is reversed (i.e. from small to big)
     rev_from_link = {
         (u, v): u < v for (u, v), use in model.link_.items() if use.value > 0.5
