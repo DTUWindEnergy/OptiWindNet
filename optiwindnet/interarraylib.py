@@ -529,7 +529,8 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     return L
 
 
-def as_normalized(Aʹ: nx.Graph) -> nx.Graph:
+def as_normalized(Aʹ: nx.Graph, *, offset: float | None = None,
+                  scale: float | None = None) -> nx.Graph:
     '''Make a shallow copy of an instance and shift and scale its geometry.
 
     Coordinates are subtracted by graph attribute 'norm_offset'.
@@ -538,20 +539,24 @@ def as_normalized(Aʹ: nx.Graph) -> nx.Graph:
     Affected linear attributes: 'VertexC', 'd2roots' (graph); 'length' (edge).
 
     Args:
-        Aʹ: (or Gʹ) any instance that has inherited 'norm_scale' from an
+        Aʹ: (or Gʹ) any instance that has inherited 'scale' from an
             edgeset `Aʹ`.
+        offset: override graph's 'norm_offset'
+        scale: override graph's 'norm_scale'
 
     Returns:
         A copy of the instance with changed coordinates and linear metrics.
     '''
     A = Aʹ.copy()
-    norm_factor = A.graph['norm_scale']
+    if offset is None:
+        offset = Aʹ.graph['norm_offset']
+    if scale is None:
+        scale = Aʹ.graph['norm_scale']
     A.graph['is_normalized'] = True
     for _, _, eData in A.edges(data=True):
-        eData['length'] *= norm_factor
-    A.graph['VertexC'] = norm_factor*(Aʹ.graph['VertexC']
-                                      - Aʹ.graph['norm_offset'])
-    A.graph['d2roots'] = norm_factor*Aʹ.graph['d2roots']
+        eData['length'] *= scale
+    A.graph['VertexC'] = scale*(Aʹ.graph['VertexC'] - offset)
+    A.graph['d2roots'] = scale*Aʹ.graph['d2roots']
     return A
 
 
