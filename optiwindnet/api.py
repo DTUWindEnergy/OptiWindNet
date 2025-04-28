@@ -12,6 +12,7 @@ from matplotlib.path import Path
 import numpy as np
 import yaml
 import yaml_include
+import logging
 
 # Local utilities
 from optiwindnet.utils import NodeTagger
@@ -39,9 +40,11 @@ from optiwindnet.MILP import solver_factory, ModelOptions
 ModelOptions.help()
 
 #################################################
-# To Do: if face error do a simple optimization #
+#                                               #
 #################################################
 
+logger = logging.getLogger(__name__)
+error, info = logger.error, logger.info
 
 class WindFarmNetwork:
     """
@@ -51,10 +54,7 @@ class WindFarmNetwork:
 
     def __init__(self, cables, turbinesC=None, substationsC=None,
                  borderC=None, obstaclesC=None,
-                 name='', handle='', L=None, router=None,
-                 verbose=False, **kwargs):
-
-        self.verbose = verbose
+                 name='', handle='', L=None, router=None, **kwargs):
 
         # Default router if none provided
         if router is None:
@@ -73,7 +73,7 @@ class WindFarmNetwork:
             if cables_array.shape[1] == 2:
                 cables = [(int(cap), float(cost)) for cap, cost in cables_array]
         else:
-            raise ValueError(f"Invalid cable values: {cables}")
+            error(f"Invalid cable values: {cables}")
 
 
         self.cables = cables
@@ -126,8 +126,7 @@ class WindFarmNetwork:
                     VertexC=vertexC
                 )
 
-            if self.verbose:
-                print('WARNING: Obstacles are given while no border coordinate is defined. The tool is creating borders based on turbine and obstacle coordinates')
+            info('Obstacles are given while no border coordinate is defined. The tool is creating borders based on turbine and obstacle coordinates')
             
             all_points = [turbinesC, substationsC]
             all_points_flat = np.vstack(all_points)
@@ -157,8 +156,8 @@ class WindFarmNetwork:
                     if new_borderC.is_empty:
                         raise ValueError("Obstacle subtraction resulted in an empty border — check your geometry.")
 
-                    if self.verbose and border_subtraction_verbose:
-                        print("WARNING: At least one obstacle intersects/touches the border. The border is redefined to exclude those obstacles.")
+                    if border_subtraction_verbose:
+                        info("At least one obstacle intersects/touches the border. The border is redefined to exclude those obstacles.")
                         border_subtraction_verbose = False
 
                     # If the subtraction results in multiple pieces (MultiPolygon), raise error
@@ -227,7 +226,7 @@ class WindFarmNetwork:
     def from_pbf(cls, filepath: str, **kwargs):
         """Creates a WindFarmNetwork instance from a pbf file."""
         if not isinstance(filepath, str):
-            raise TypeError("Filepath must be a string")
+            error("Filepath must be a string")
 
         L = L_from_pbf(filepath)
         return cls(L=L, **kwargs)
@@ -302,7 +301,7 @@ class WindFarmNetwork:
 
         for u, v, reverse in self.S.edges(data='reverse'):
             if reverse is None:
-                raise ValueError('reverse must not be None')
+                error('reverse must not be None')
             u, v = (u, v) if u < v else (v, u)
             i, target = (u, v) if reverse else (v, u)
             terse[i] = target
@@ -356,16 +355,13 @@ class WindFarmNetwork:
                                 dtype=network_array_type, count=self.G.number_of_edges())
         return network_array
 
-    def _set_coordinates(self, turbinesC, substationsC, verbose=None):
+    def _set_coordinates(self, turbinesC, substationsC):
         """Updates the coordinates of turbines and substationsC."""
-        if verbose is None:
-            verbose = self.verbose
 
-        if verbose:
-            print('WARNING: wfn._set_coordinates is not checking for feasiblity')
+        info('wfn._set_coordinates is not checking for feasiblity')
 
         if not hasattr(self.L, 'graph') or 'VertexC' not in self.L.graph:
-            raise ValueError("Graph L does not contain 'VertexC' attribute.")
+            error("Graph L does not contain 'VertexC' attribute.")
         
         # Update coordinates
         if turbinesC is not None:
@@ -387,22 +383,17 @@ class WindFarmNetwork:
         assign_cables(self.G, self.cables)
 
 
-    def gradient(self, turbinesC=None, substationsC=None, verbose=None, gradient_type='cost'):
+    def gradient(self, turbinesC=None, substationsC=None, gradient_type='cost'):
         """
         Calculate the gradient of the length and cost of cable with respect to the positions of the nodes.
         """
         if gradient_type.lower() not in ['cost', 'length']:
-            raise ValueError("gradient_type should be either 'cost' or 'length'")
-        
-        # If verbose argument is None, use the value of self.verbose
-        if verbose is None:
-            verbose = self.verbose           
+            raise ValueError("gradient_type should be either 'cost' or 'length'")         
 
         if turbinesC is None and substationsC is None:
             G = self.G
         else:
-            if verbose:
-                print('WARNIMG: gradient is not checking for the feasibility of the layout with new coordinates!')
+            info('wfn.gradient is not checking for the feasibility of the layout with new coordinates!')
             G = copy.deepcopy(self.G)
             if turbinesC is not None:
                 G.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
@@ -442,20 +433,13 @@ class WindFarmNetwork:
 
         return gradients_wt, gradients_ss
 
-    def optimize(self, turbinesC=None, substationsC=None, verbose=None, router=None):
-        if router is not None:
-            self.router = router
-        
-        router = self.router  # Use provided router or the existing one in the class
-        # if router is None:
-        #     raise ValueError(
-        #                 "To run the optimization, a router must be initialized. "
-        #                 "This can be done either during the creation of the WFN object "
-        #                 "or via the `optimize` method of the WFN object.")
-        
-        if verbose is None:
-            verbose = self.verbose
+    def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=False):
 
+        if router is None:
+            router = self.router
+        else:
+            self.router = router     
+            
         # If new coordinates are provided, update them
         if turbinesC is not None:
             self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
@@ -490,7 +474,7 @@ class OptiWindNetSolver(ABC):
         """
         pass
 
-    def __call__(self, turbinesC=None, substationsC=None, verbose=None, **kwargs):
+    def __call__(self, turbinesC=None, substationsC=None, verbose=False, **kwargs):
         """Make the instance callable, calling optimize() internally."""
         return self.optimize(turbinesC=turbinesC, substationsC=substationsC, verbose=verbose, **kwargs)  
 
@@ -571,8 +555,7 @@ class MILP(OptiWindNetSolver):
       
         # warm start
         if S_warm is not None:
-            if verbose:
-                print('S is not None and the model is warmed up with the available S.')
+            info('S is not None and the model is warmed up with the available S.')
 
         solver = solver_factory(self.solver_name)
 
