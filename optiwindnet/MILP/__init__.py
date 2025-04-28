@@ -1,7 +1,11 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import logging
 from .core import ModelOptions
+
+lggr = logging.getLogger(__name__)
+error = lggr.error
 
 def solver_factory(solver_name: str):
     match solver_name:
@@ -23,3 +27,4 @@ def solver_factory(solver_name: str):
             return SolverPyomo(solver_name, prefix='appsi_')
         case _:
             error('Unsupported solver: %s', solver_name)
+            return None
