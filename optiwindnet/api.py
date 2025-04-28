@@ -37,7 +37,6 @@ from optiwindnet.baselines.hgs import iterative_hgs_cvrp
 
 # MILP
 from optiwindnet.MILP import solver_factory, ModelOptions
-ModelOptions.help()
 
 #################################################
 #                                               #
@@ -433,7 +432,7 @@ class WindFarmNetwork:
 
         return gradients_wt, gradients_ss
 
-    def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=False):
+    def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=None):
 
         if router is None:
             router = self.router
@@ -542,17 +541,19 @@ class MetaHeuristic(OptiWindNetSolver):
         return S, G
 
 class MILP(OptiWindNetSolver):
-    def __init__(self, solver_name='ortools', solver_options=None, model_options=None, verbose=False, **kwargs):
-        self.verbose = verbose
+    def __init__(self, solver_name, time_limit, mip_gap, solver_options=None, model_options=None, verbose=False, **kwargs):
+        self.time_limit = time_limit
+        self.mip_gap = mip_gap
         self.solver_name = solver_name
         self.solver_options = solver_options or {}
         self.model_options = model_options or {}
+        self.verbose = verbose
 
-    def optimize(self, A, P, cables, cables_capacity, S_warm=None, verbose=None, **kwargs):
+    def optimize(self, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs):
 
         if verbose is None:
             verbose = self.verbose
-      
+    
         # warm start
         if S_warm is not None:
             info('S is not None and the model is warmed up with the available S.')
@@ -561,9 +562,11 @@ class MILP(OptiWindNetSolver):
 
         solver.set_problem(P, A, cables_capacity, warmstart=S_warm, model_options=self.model_options)
         
-        solver.solve(time_limit=15, mip_gap=0.01, options=self.solver_options)
+        solver.solve(time_limit=self.time_limit, mip_gap=self.mip_gap, options=self.solver_options, verbose=verbose)
 
         S, G = solver.get_solution()
+
+        assign_cables(G, cables)
         
         return S, G
 
