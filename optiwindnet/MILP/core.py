@@ -27,12 +27,14 @@ class Topology(StrEnum):
     'Set the topology of subtrees in the solution.'
     RADIAL = auto()
     BRANCHED = auto()
+    DEFAULT = BRANCHED
 
 
 class FeederRoute(StrEnum):
     'If feeder routes must be "straight" or can be detoured ("segmented").'
     STRAIGHT = auto()
     SEGMENTED = auto()
+    DEFAULT = SEGMENTED
 
 
 class FeederLimit(StrEnum):
@@ -44,6 +46,7 @@ class FeederLimit(StrEnum):
     MIN_PLUS1 = auto()
     MIN_PLUS2 = auto()
     MIN_PLUS3 = auto()
+    DEFAULT = UNLIMITED
 
 
 class ModelOptions(dict):
@@ -52,7 +55,8 @@ class ModelOptions(dict):
 
     @with_signature(
         '__init__(self, *, '
-        + ', '.join(f'{k}: {v.__name__}' for k, v in hints.items()) + ')'
+        + ', '.join(f'{k}: {v.__name__} = "{v.DEFAULT.value}"'
+                    for k, v in hints.items()) + ')'
     )
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -64,8 +68,10 @@ class ModelOptions(dict):
     def help(cls):
         for k, v in cls.hints.items():
             print(f'{k} in {{'
-                  f'{", ".join(f"\"{m}\"" for m in v.__members__.values())}'
-                  f'}}\n    {v.__doc__}\n')
+                  f'{", ".join(f"\"{m}\"" for m in v.__members__.values()
+                               if m != 'default')}'
+                  f'}} default: {cls.hints[k].DEFAULT.value}\n'
+                  f'    {v.__doc__}\n')
 
 
 @dataclass(slots=True)

@@ -84,10 +84,10 @@ class SolverORTools(Solver, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         storer = _SolutionStore(model)
-        solver.parameters.max_time_in_seconds = time_limit
-        solver.parameters.relative_gap_limit = mip_gap
         for key, val in options.items():
             setattr(solver.parameters, key, val)
+        solver.parameters.max_time_in_seconds = time_limit
+        solver.parameters.relative_gap_limit = mip_gap
         solver.log_callback = print
         solver.parameters.log_search_progress = verbose
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
