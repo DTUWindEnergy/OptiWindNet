@@ -308,7 +308,21 @@ class WindFarmNetwork:
         return terse
 
     def update_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
-        '''Rebuilds G from terse links'''
+        '''Undate class from terse links'''
+
+        # --- Added block: check input format ---
+        terse_links = np.asarray(terse_links)
+
+        if not np.issubdtype(terse_links.dtype, np.integer):
+            raise ValueError(
+                f"terse_links must be an array of integers. Got {terse_links.dtype} instead.\n"
+                f"Hint: You can fix it by doing terse_links = [int(x) for x in terse_links]."
+            )
+
+        if terse_links.ndim != 1:
+            raise ValueError(
+                f"terse_links must be a 1D array. Got shape {terse_links.shape} instead."
+            )
         # If new coordinates are provided, update them
         if turbinesC is not None:
             self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
@@ -546,7 +560,7 @@ class MILP(OptiWindNetSolver):
         self.mip_gap = mip_gap
         self.solver_name = solver_name
         self.solver_options = solver_options or {}
-        self.model_options = model_options or {}
+        self.model_options = model_options or ModelOptions()
         self.verbose = verbose
 
     def optimize(self, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs):
