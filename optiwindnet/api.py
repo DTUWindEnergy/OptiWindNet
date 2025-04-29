@@ -43,7 +43,7 @@ from optiwindnet.MILP import solver_factory, ModelOptions
 #################################################
 
 logger = logging.getLogger(__name__)
-error, info = logger.error, logger.info
+error, warning, info = logger.error, logger.warning, logger.info
 
 class WindFarmNetwork:
     """
@@ -53,7 +53,7 @@ class WindFarmNetwork:
 
     def __init__(self, cables, turbinesC=None, substationsC=None,
                  borderC=None, obstaclesC=None,
-                 name='', handle='', L=None, router=None, **kwargs):
+                 name='', handle='', L=None, router=None, buffer_dist = 0, **kwargs):
 
         # Default router if none provided
         if router is None:
@@ -80,7 +80,7 @@ class WindFarmNetwork:
 
         # Load layout from coordinates if turbinesC provided
         if turbinesC is not None and substationsC is not None:
-            L = self._from_coordinates(turbinesC, substationsC, borderC, obstaclesC, name, handle)
+            L = self._from_coordinates(turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist)
         elif L is None:
             raise ValueError('Both turbinesC and substationsC must be provided')
         self.L = L
@@ -104,8 +104,29 @@ class WindFarmNetwork:
         """Returns the total cable length of the network."""
         return self.G.size(weight="length")
 
-    
-    def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle):
+    def expand_polygon_safely(self, polygon, buffer_dist):
+        """Expand a polygon and warn if buffer might fill narrow gaps."""
+        min_gap = polygon.exterior.minimum_clearance
+
+        if buffer_dist >= min_gap / 2:
+            warning("Buffering by %.2f may fill narrow gaps of the exterior border (min gap ≈ %.2f)." % (buffer_dist, min_gap))
+        
+        expanded_polygon = polygon.buffer(buffer_dist)
+
+        return expanded_polygon
+
+    def shrink_polygon_safely(self, polygon, shrink_dist):
+        """Shrink a polygon and warn if it splits or disappears."""
+        shrunk_polygon = polygon.buffer(-shrink_dist)
+
+        if shrunk_polygon.is_empty:
+            warning("Buffering by %.2f completely removed an obstacle!." % shrink_dist)
+        elif shrunk_polygon.geom_type == 'MultiPolygon':
+            warning("Shrinking by %.2f splited an obstacle into %d pieces." % (shrink_dist, len(shrunk_polygon.geoms)))
+
+
+        return shrunk_polygon
+    def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist):
         """Constructs a site graph from coordinate-based inputs."""
         
         border_subtraction_verbose = True
@@ -150,9 +171,9 @@ class WindFarmNetwork:
                     remaining_obstaclesC.append(obs)
                 else:
                     # Subtract this obstacle from the border
-                    new_borderC = border_polygon.difference(obs_poly)
+                    new_border_polygon = border_polygon.difference(obs_poly)
 
-                    if new_borderC.is_empty:
+                    if new_border_polygon.is_empty:
                         raise ValueError("Obstacle subtraction resulted in an empty border — check your geometry.")
 
                     if border_subtraction_verbose:
@@ -160,16 +181,34 @@ class WindFarmNetwork:
                         border_subtraction_verbose = False
 
                     # If the subtraction results in multiple pieces (MultiPolygon), raise error
-                    if isinstance(new_borderC, MultiPolygon):
+                    if isinstance(new_border_polygon, MultiPolygon):
                         raise ValueError("Obstacle subtraction resulted in multiple pieces (MultiPolygon) — check your geometry.")
                     else:
-                        border_polygon = new_borderC
+                        border_polygon = new_border_polygon
 
             # Update the border as a NumPy array of exterior coordinates
             borderC = np.array(border_polygon.exterior.coords[:-1])
 
             # Update obstacles (only those fully contained are kept)
             obstaclesC = remaining_obstaclesC
+        
+        if buffer_dist > 0:
+            # border
+            border_polygon = Polygon(borderC)
+            border_polygon = self.expand_polygon_safely(border_polygon, buffer_dist)
+            borderC = np.array(border_polygon.exterior.coords[:-1])
+
+            # obstacles
+            shrunk_obstaclesC = []
+            for obs in obstaclesC:
+                obs_poly = Polygon(obs)
+                shrunk_obs = self.shrink_polygon_safely(obs_poly, buffer_dist)
+                shrunk_obstaclesC.append(obs)
+
+            # Update obstacles
+            obstaclesC = shrunk_obstaclesC
+        elif buffer_dist < 0:
+            raise ValueError("Buffer value must be equal or greater than 0!")
 
         # check_turbine_locations(border, obstacles, turbines):
         border_path = Path(borderC)
@@ -181,7 +220,7 @@ class WindFarmNetwork:
         # Check if any turbine is outside the border
         if not np.all(in_border):
             outside_idx = np.where(~in_border)[0]
-            raise ValueError(f"Turbines at indices {outside_idx} are outside the border!")
+            raise ValueError("Turbines at indices %s are outside the border!" % outside_idx)
 
         for i, obs in enumerate(obstaclesC):
             obs_path = Path(obs)
