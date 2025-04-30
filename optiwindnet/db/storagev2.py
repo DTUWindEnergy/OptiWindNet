@@ -35,7 +35,8 @@ _misc_not = {'VertexC', 'anglesYhp', 'anglesXhp', 'anglesRank', 'angles',
              'num_diagonals', 'crossings_map', 'tentative', 'method_options',
              'is_normalized', 'norm_scale', 'norm_offset', 'detextra', 'rogue',
              'clone2prime', 'valid', 'path_in_P', 'shortened_contours',
-             'nonAedges', 'method', 'num_stunts', 'crossings', 'creator'}
+             'nonAedges', 'method', 'num_stunts', 'crossings', 'creator',
+             'inter_terminal_clearance_min', 'inter_terminal_clearance_safe'}
 
 
 def L_from_nodeset(nodeset: object) -> nx.Graph:
