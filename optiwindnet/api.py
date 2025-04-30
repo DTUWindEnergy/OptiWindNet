@@ -13,6 +13,9 @@ import numpy as np
 import yaml
 import yaml_include
 import logging
+import numpy as np
+import matplotlib.pyplot as plt
+from shapely.ops import unary_union
 
 # Local utilities
 from optiwindnet.utils import NodeTagger
@@ -109,7 +112,7 @@ class WindFarmNetwork:
         min_gap = polygon.exterior.minimum_clearance
 
         if buffer_dist >= min_gap / 2:
-            warning("Buffering by %.2f may fill narrow gaps of the exterior border (min gap ≈ %.2f)." % (buffer_dist, min_gap))
+            warning("Buffering by %.2f may introduce unexpexted changes in the exterior border (min gap ≈ %.2f). \n For visual comparison use plot_original_vs_buffered method." % (buffer_dist, min_gap))
         
         expanded_polygon = polygon.buffer(buffer_dist)
 
@@ -126,6 +129,151 @@ class WindFarmNetwork:
 
 
         return shrunk_polygon
+
+
+    def plot_original_vs_buffered(self):
+        """
+        Plot original vs buffered borders and obstacles in a single subplot.
+
+        Parameters:
+        - borderC: np.ndarray of original border coordinates (N x 2)
+        - border_bufferedC: np.ndarray of buffered border coordinates
+        - obstaclesC: list of np.ndarray (original obstacles)
+        - obstacles_bufferedC: list of np.ndarray (buffered obstacles)
+        """
+        borderC = self._borderC
+        border_bufferedC = self._border_bufferedC
+        obstaclesC = self._obstaclesC
+        obstacles_bufferedC = self._obstacles_bufferedC
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Original vs Buffered")
+
+        # Original border
+        ax.plot(borderC[:, 0], borderC[:, 1], color='blue', label='Original Border')
+
+        # Buffered border
+        ax.plot(border_bufferedC[:, 0], border_bufferedC[:, 1], '--', color='red', label='Buffered Border')
+
+        # Original obstacles
+        for i, obs in enumerate(obstaclesC):
+            ax.plot(obs[:, 0], obs[:, 1], color='black',
+                    label='Original Obstacle' if i == 0 else None)
+
+        # Buffered obstacles
+        for i, obs in enumerate(obstacles_bufferedC):
+            ax.plot(obs[:, 0], obs[:, 1], '--', color='orange',
+                    label='Buffered Obstacle' if i == 0 else None)
+
+        ax.legend()
+        ax.set_aspect('equal')
+        fig.suptitle('Original borders and obstacles vs the buffered ones')
+        plt.tight_layout()
+        plt.show()
+
+
+    def plot_buffer_difference(self):
+        """
+        Plot only the geometric difference (Buffered ⊖ Original) between the original and buffered polygons.
+
+        Parameters:
+        - borderC: np.ndarray of original border coordinates (N x 2)
+        - border_bufferedC: np.ndarray of buffered border coordinates
+        - obstaclesC: list of np.ndarray (original obstacles)
+        - obstacles_bufferedC: list of np.ndarray (buffered obstacles)
+        """
+        borderC = self._borderC
+        border_bufferedC = self._border_bufferedC
+        obstaclesC = self._obstaclesC
+        obstacles_bufferedC = self._obstacles_bufferedC
+        # Create full polygons with holes
+        poly_original = Polygon(borderC, holes=[obs.tolist() for obs in obstaclesC])
+        poly_buffered = Polygon(border_bufferedC, holes=[obs.tolist() for obs in obstacles_bufferedC])
+
+        # Compute symmetric difference
+        diff = poly_buffered.symmetric_difference(poly_original)
+
+        # Plot difference
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title("Difference (Buffered ⊖ Original)")
+
+        if diff.is_empty:
+            ax.text(0.5, 0.5, "No Difference", ha='center', va='center')
+        elif diff.geom_type == 'Polygon':
+            x, y = diff.exterior.xy
+            ax.fill(x, y, color='green', label='Difference')
+        elif diff.geom_type == 'MultiPolygon':
+            for geom in diff.geoms:
+                x, y = geom.exterior.xy
+                ax.fill(x, y, color='green', label='Difference')
+        else:
+            ax.text(0.5, 0.5, "Unsupported Geometry", ha='center', va='center')
+
+        ax.legend()
+        ax.set_aspect('equal')
+        fig.suptitle('title')
+        plt.tight_layout()
+        plt.show()
+
+    def plot_borders_original_vs_buffered(self):
+        """
+        Plot original and buffered polygons (border + obstacles) and their differences.
+        """
+        borderC = self._borderC
+        border_bufferedC = self._border_bufferedC
+        obstaclesC = self._obstaclesC
+        obstacles_bufferedC = self._obstacles_bufferedC
+                                
+        # Construct shapely polygons
+        original_poly = Polygon(borderC, holes=[obs.tolist() for obs in obstaclesC])
+        buffered_poly = Polygon(border_bufferedC, holes=[obs.tolist() for obs in obstacles_bufferedC])
+
+        difference = buffered_poly.symmetric_difference(original_poly)
+
+        fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+
+        # --- Left: Original and Buffered ---
+        axs[0].set_title("Original vs Buffered")
+
+        # Original border
+        axs[0].plot(borderC[:, 0], borderC[:, 1], label='Original Border', color='blue')
+
+        # Buffered border
+        axs[0].plot(border_bufferedC[:, 0], border_bufferedC[:, 1], '--', label='Buffered Border', color='red')
+
+        # Original obstacles
+        for obs in obstaclesC:
+            axs[0].plot(obs[:, 0], obs[:, 1], color='black', label='Original Obstacle')
+
+        # Buffered obstacles
+        for obs in obstacles_bufferedC:
+            axs[0].plot(obs[:, 0], obs[:, 1], '--', color='orange', label='Buffered Obstacle')
+
+        axs[0].legend()
+        axs[0].set_aspect('equal')
+
+        # --- Right: Difference ---
+        axs[1].set_title("Difference (Buffered ⊖ Original)")
+
+        if difference.is_empty:
+            axs[1].text(0.5, 0.5, "No difference", ha='center', va='center')
+        elif difference.geom_type == 'Polygon':
+            x, y = difference.exterior.xy
+            axs[1].fill(x, y, color='green', label='Difference')
+        elif difference.geom_type == 'MultiPolygon':
+            for poly in difference.geoms:
+                x, y = poly.exterior.xy
+                axs[1].fill(x, y, color='green', label='Difference')
+        else:
+            axs[1].text(0.5, 0.5, "Unsupported geometry", ha='center', va='center')
+
+        axs[1].legend()
+        axs[1].set_aspect('equal')
+
+        fig.suptitle('Original borders and obstacles vs the buffered ones')
+        plt.tight_layout()
+        plt.show()
+
+    
     def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist):
         """Constructs a site graph from coordinate-based inputs."""
         
@@ -193,6 +341,8 @@ class WindFarmNetwork:
             obstaclesC = remaining_obstaclesC
         
         if buffer_dist > 0:
+            self._borderC = borderC
+            self._obstaclesC = obstaclesC
             # border
             border_polygon = Polygon(borderC)
             border_polygon = self.expand_polygon_safely(border_polygon, buffer_dist)
@@ -207,6 +357,9 @@ class WindFarmNetwork:
 
             # Update obstacles
             obstaclesC = shrunk_obstaclesC
+            
+            self._border_bufferedC = borderC
+            self._obstacles_bufferedC = obstaclesC
         elif buffer_dist < 0:
             raise ValueError("Buffer value must be equal or greater than 0!")
 
