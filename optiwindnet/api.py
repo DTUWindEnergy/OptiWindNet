@@ -588,7 +588,7 @@ class WindFarmNetwork:
         assign_cables(self.G, self.cables)
 
 
-    def gradient(self, turbinesC=None, substationsC=None, gradient_type='cost'):
+    def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """
         Calculate the gradient of the length and cost of cable with respect to the positions of the nodes.
         """
