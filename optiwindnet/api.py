@@ -1,3 +1,9 @@
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
+from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.collections import PatchCollection
+import matplotlib.pyplot as plt
+import numpy as np
 ###################
 # OptiWindNet API #
 ###################
@@ -7,6 +13,7 @@ from typing import Any, Mapping
 from itertools import pairwise
 from pathlib import Path
 from shapely.geometry import Polygon, MultiPoint, MultiPolygon
+from matplotlib.patches import Polygon as MplPolygon
 import copy
 from matplotlib.path import Path
 import numpy as np
@@ -109,10 +116,15 @@ class WindFarmNetwork:
 
     def expand_polygon_safely(self, polygon, buffer_dist):
         """Expand a polygon and warn if buffer might fill narrow gaps."""
-        min_gap = polygon.exterior.minimum_clearance
+        
+        if not polygon.equals(polygon.convex_hull):
+            max_buffer_dist = polygon.exterior.minimum_clearance / 2
 
-        if buffer_dist >= min_gap / 2:
-            warning("Buffering by %.2f may introduce unexpexted changes in the exterior border (min gap ≈ %.2f). \n For visual comparison use plot_original_vs_buffered method." % (buffer_dist, min_gap))
+            if buffer_dist >= max_buffer_dist / 2:
+                warning("The defined border is non-convex and buffering may introduce unexpexted changes in the exterior border.")
+                if max_buffer_dist > 0:
+                    warning("Maximum buffer values which is safe is  ≈ %.2f." % max_buffer_dist)
+                warning("For visual comparison use plot_original_vs_buffered.")
         
         expanded_polygon = polygon.buffer(buffer_dist)
 
@@ -121,19 +133,30 @@ class WindFarmNetwork:
     def shrink_polygon_safely(self, polygon, shrink_dist):
         """Shrink a polygon and warn if it splits or disappears."""
         shrunk_polygon = polygon.buffer(-shrink_dist)
+        
+        shrunkC =np.array(shrunk_polygon.exterior.coords)
 
         if shrunk_polygon.is_empty:
             warning("Buffering by %.2f completely removed an obstacle!." % shrink_dist)
+
         elif shrunk_polygon.geom_type == 'MultiPolygon':
             warning("Shrinking by %.2f splited an obstacle into %d pieces." % (shrink_dist, len(shrunk_polygon.geoms)))
 
-
-        return shrunk_polygon
+        return shrunkC
 
 
     def plot_original_vs_buffered(self):
+        fig, axes = plt.subplots(3, 1, figsize=(14, 18))
+        ax1 = axes[0]
+        ax2 = axes[1]
+        self.plot_original_buffered(ax1, ax2)
+        ax3 = axes[2]
+        self.plot_buffer_difference_only(ax3)
+        plt.show()
+
+    def plot_original_buffered(self, ax1, ax2):
         """
-        Plot original vs buffered borders and obstacles in a single subplot.
+        Plot original vs buffered borders and obstacles in side-by-side subplots.
 
         Parameters:
         - borderC: np.ndarray of original border coordinates (N x 2)
@@ -141,137 +164,97 @@ class WindFarmNetwork:
         - obstaclesC: list of np.ndarray (original obstacles)
         - obstacles_bufferedC: list of np.ndarray (buffered obstacles)
         """
-        borderC = self._borderC
+        borderC = self._borderC_original
         border_bufferedC = self._border_bufferedC
-        obstaclesC = self._obstaclesC
+        obstaclesC = self._obstaclesC_original
         obstacles_bufferedC = self._obstacles_bufferedC
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.set_title("Original vs Buffered")
 
-        # Original border
-        ax.plot(borderC[:, 0], borderC[:, 1], color='blue', label='Original Border')
-
-        # Buffered border
-        ax.plot(border_bufferedC[:, 0], border_bufferedC[:, 1], '--', color='red', label='Buffered Border')
-
-        # Original obstacles
+        # --- Left: Original ---
+        ax1.set_title("Original")
+        ax1.add_patch(MplPolygon(borderC, closed=True, edgecolor='blue', facecolor='none', label='Border'))
         for i, obs in enumerate(obstaclesC):
-            ax.plot(obs[:, 0], obs[:, 1], color='black',
-                    label='Original Obstacle' if i == 0 else None)
+            ax1.add_patch(MplPolygon(obs, closed=True, edgecolor='black', facecolor='none',
+                                    label='Obstacle' if i == 0 else None))
+        ax1.set_aspect('equal')
+        ax1.legend()
 
-        # Buffered obstacles
+        # --- Right: Buffered ---
+        ax2.set_title("Buffered")
+        ax2.add_patch(MplPolygon(border_bufferedC, closed=True, edgecolor='red', linestyle='--',
+                                facecolor='none', label='Buffered Border'))
         for i, obs in enumerate(obstacles_bufferedC):
-            ax.plot(obs[:, 0], obs[:, 1], '--', color='orange',
-                    label='Buffered Obstacle' if i == 0 else None)
+            ax2.add_patch(MplPolygon(obs, closed=True, edgecolor='orange', linestyle='--',
+                                    facecolor='none', label='Buffered Obstacle' if i == 0 else None))
+        ax2.set_aspect('equal')
+        ax2.legend()
 
-        ax.legend()
+        # Set same axis limits for both plots
+        all_x = np.concatenate([
+            borderC[:, 0], border_bufferedC[:, 0],
+            *[obs[:, 0] for obs in obstaclesC],
+            *[obs[:, 0] for obs in obstacles_bufferedC]
+        ])
+        all_y = np.concatenate([
+            borderC[:, 1], border_bufferedC[:, 1],
+            *[obs[:, 1] for obs in obstaclesC],
+            *[obs[:, 1] for obs in obstacles_bufferedC]
+        ])
+        x_min, x_max = all_x.min(), all_x.max()
+        y_min, y_max = all_y.min(), all_y.max()
+        x_pad = 0.05 * (x_max - x_min)
+        y_pad = 0.05 * (y_max - y_min)
+        xlim = (x_min - x_pad, x_max + x_pad)
+        ylim = (y_min - y_pad, y_max + y_pad)
+        for ax in [ax1, ax2]:
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+
+        plt.tight_layout()
+
+
+    def plot_buffer_difference_only(self, ax):
+        """
+        """
+
+        # Create border polygons
+        border_orig = Polygon(self._borderC_original)
+        border_buffered = Polygon(self._border_bufferedC)
+
+        # Create the list and add the border pair first
+        polygon_pairs = [(border_buffered, border_orig)]
+
+        # Loop through all obstacles
+        for orig_coords, buff_coords in zip(self._obstaclesC_original, self._obstacles_bufferedC):
+            obs_orig = Polygon(orig_coords)
+            obs_buffered = Polygon(buff_coords)
+            polygon_pairs.append((obs_orig, obs_buffered))
+        
+        for outer, inner in polygon_pairs:
+            ring = outer.difference(inner)
+            if ring.is_empty:
+                continue
+
+            # Plot exterior
+            if ring.geom_type == 'Polygon':
+                x, y = ring.exterior.xy
+                ax.fill(x, y, color='lightblue', edgecolor='black')
+                # Plot holes
+                for interior in ring.interiors:
+                    x, y = zip(*interior.coords)
+                    ax.fill(x, y, color='white', edgecolor='black')
+            elif ring.geom_type == 'MultiPolygon':
+                for poly in ring.geoms:
+                    x, y = poly.exterior.xy
+                    ax.fill(x, y, color='lightblue', edgecolor='black')
+                    for interior in poly.interiors:
+                        x, y = zip(*interior.coords)
+                        ax.fill(x, y, color='white', edgecolor='black')
+
         ax.set_aspect('equal')
-        fig.suptitle('Original borders and obstacles vs the buffered ones')
-        plt.tight_layout()
-        plt.show()
+        plt.title("Areas between original and buffered")
 
-
-    def plot_buffer_difference(self):
-        """
-        Plot only the geometric difference (Buffered ⊖ Original) between the original and buffered polygons.
-
-        Parameters:
-        - borderC: np.ndarray of original border coordinates (N x 2)
-        - border_bufferedC: np.ndarray of buffered border coordinates
-        - obstaclesC: list of np.ndarray (original obstacles)
-        - obstacles_bufferedC: list of np.ndarray (buffered obstacles)
-        """
-        borderC = self._borderC
-        border_bufferedC = self._border_bufferedC
-        obstaclesC = self._obstaclesC
-        obstacles_bufferedC = self._obstacles_bufferedC
-        # Create full polygons with holes
-        poly_original = Polygon(borderC, holes=[obs.tolist() for obs in obstaclesC])
-        poly_buffered = Polygon(border_bufferedC, holes=[obs.tolist() for obs in obstacles_bufferedC])
-
-        # Compute symmetric difference
-        diff = poly_buffered.symmetric_difference(poly_original)
-
-        # Plot difference
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.set_title("Difference (Buffered ⊖ Original)")
-
-        if diff.is_empty:
-            ax.text(0.5, 0.5, "No Difference", ha='center', va='center')
-        elif diff.geom_type == 'Polygon':
-            x, y = diff.exterior.xy
-            ax.fill(x, y, color='green', label='Difference')
-        elif diff.geom_type == 'MultiPolygon':
-            for geom in diff.geoms:
-                x, y = geom.exterior.xy
-                ax.fill(x, y, color='green', label='Difference')
-        else:
-            ax.text(0.5, 0.5, "Unsupported Geometry", ha='center', va='center')
-
+        # Add legend outside top-left
         ax.legend()
-        ax.set_aspect('equal')
-        fig.suptitle('title')
-        plt.tight_layout()
-        plt.show()
-
-    def plot_borders_original_vs_buffered(self):
-        """
-        Plot original and buffered polygons (border + obstacles) and their differences.
-        """
-        borderC = self._borderC
-        border_bufferedC = self._border_bufferedC
-        obstaclesC = self._obstaclesC
-        obstacles_bufferedC = self._obstacles_bufferedC
-                                
-        # Construct shapely polygons
-        original_poly = Polygon(borderC, holes=[obs.tolist() for obs in obstaclesC])
-        buffered_poly = Polygon(border_bufferedC, holes=[obs.tolist() for obs in obstacles_bufferedC])
-
-        difference = buffered_poly.symmetric_difference(original_poly)
-
-        fig, axs = plt.subplots(1, 2, figsize=(14, 6))
-
-        # --- Left: Original and Buffered ---
-        axs[0].set_title("Original vs Buffered")
-
-        # Original border
-        axs[0].plot(borderC[:, 0], borderC[:, 1], label='Original Border', color='blue')
-
-        # Buffered border
-        axs[0].plot(border_bufferedC[:, 0], border_bufferedC[:, 1], '--', label='Buffered Border', color='red')
-
-        # Original obstacles
-        for obs in obstaclesC:
-            axs[0].plot(obs[:, 0], obs[:, 1], color='black', label='Original Obstacle')
-
-        # Buffered obstacles
-        for obs in obstacles_bufferedC:
-            axs[0].plot(obs[:, 0], obs[:, 1], '--', color='orange', label='Buffered Obstacle')
-
-        axs[0].legend()
-        axs[0].set_aspect('equal')
-
-        # --- Right: Difference ---
-        axs[1].set_title("Difference (Buffered ⊖ Original)")
-
-        if difference.is_empty:
-            axs[1].text(0.5, 0.5, "No difference", ha='center', va='center')
-        elif difference.geom_type == 'Polygon':
-            x, y = difference.exterior.xy
-            axs[1].fill(x, y, color='green', label='Difference')
-        elif difference.geom_type == 'MultiPolygon':
-            for poly in difference.geoms:
-                x, y = poly.exterior.xy
-                axs[1].fill(x, y, color='green', label='Difference')
-        else:
-            axs[1].text(0.5, 0.5, "Unsupported geometry", ha='center', va='center')
-
-        axs[1].legend()
-        axs[1].set_aspect('equal')
-
-        fig.suptitle('Original borders and obstacles vs the buffered ones')
-        plt.tight_layout()
-        plt.show()
 
     
     def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist):
@@ -341,8 +324,8 @@ class WindFarmNetwork:
             obstaclesC = remaining_obstaclesC
         
         if buffer_dist > 0:
-            self._borderC = borderC
-            self._obstaclesC = obstaclesC
+            self._borderC_original = borderC
+            self._obstaclesC_original = obstaclesC
             # border
             border_polygon = Polygon(borderC)
             border_polygon = self.expand_polygon_safely(border_polygon, buffer_dist)
@@ -352,8 +335,9 @@ class WindFarmNetwork:
             shrunk_obstaclesC = []
             for obs in obstaclesC:
                 obs_poly = Polygon(obs)
-                shrunk_obs = self.shrink_polygon_safely(obs_poly, buffer_dist)
-                shrunk_obstaclesC.append(obs)
+                obs_bufferedC = self.shrink_polygon_safely(obs_poly, buffer_dist)
+                if obs_bufferedC is not None:
+                    shrunk_obstaclesC.append(obs_bufferedC)
 
             # Update obstacles
             obstaclesC = shrunk_obstaclesC
@@ -362,6 +346,11 @@ class WindFarmNetwork:
             self._obstacles_bufferedC = obstaclesC
         elif buffer_dist < 0:
             raise ValueError("Buffer value must be equal or greater than 0!")
+        else:
+            self._borderC_original = borderC
+            self._obstaclesC_original = obstaclesC
+            self._border_bufferedC = borderC
+            self._obstacles_bufferedC = obstaclesC
 
         # check_turbine_locations(border, obstacles, turbines):
         border_path = Path(borderC)
@@ -391,6 +380,11 @@ class WindFarmNetwork:
         obstacle_ranges = [np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)]
 
         vertexC = np.vstack((turbinesC, borderC, *obstaclesC, substationsC))
+
+        # border_polygon = Polygon(borderC)
+        # print(border_polygon.exterior.minimum_clearance / 2)
+        # print(obstaclesC)
+        # obstaclesC = []
 
         return L_from_site(
             R=R,
