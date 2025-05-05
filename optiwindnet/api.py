@@ -138,6 +138,7 @@ class WindFarmNetwork:
 
         if shrunk_polygon.is_empty:
             warning("Buffering by %.2f completely removed an obstacle!." % shrink_dist)
+            shrunkC = None
 
         elif shrunk_polygon.geom_type == 'MultiPolygon':
             warning("Shrinking by %.2f splited an obstacle into %d pieces." % (shrink_dist, len(shrunk_polygon.geoms)))
@@ -224,10 +225,12 @@ class WindFarmNetwork:
         polygon_pairs = [(border_buffered, border_orig)]
 
         # Loop through all obstacles
-        for orig_coords, buff_coords in zip(self._obstaclesC_original, self._obstacles_bufferedC):
+        for orig_coords, buff_coords in zip(self._obstaclesC_original, self._obstacles_bufferedC_incl_removed):
             obs_orig = Polygon(orig_coords)
             obs_buffered = Polygon(buff_coords)
             polygon_pairs.append((obs_orig, obs_buffered))
+            print('obs original: ', orig_coords)
+            print('obs_buffered: ', buff_coords)
         
         for outer, inner in polygon_pairs:
             ring = outer.difference(inner)
@@ -252,9 +255,6 @@ class WindFarmNetwork:
 
         ax.set_aspect('equal')
         plt.title("Areas between original and buffered")
-
-        # Add legend outside top-left
-        ax.legend()
 
     
     def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist):
@@ -300,6 +300,10 @@ class WindFarmNetwork:
                 # If the obstacle is completely within the border, keep it
                 if border_polygon.contains(obs_poly) and intersection.length == 0:
                     remaining_obstaclesC.append(obs)
+
+                elif not border_polygon.contains(obs_poly) and not border_polygon.intersects(obs_poly):
+                    # Completely outside — skip it
+                    pass
                 else:
                     # Subtract this obstacle from the border
                     new_border_polygon = border_polygon.difference(obs_poly)
@@ -322,7 +326,7 @@ class WindFarmNetwork:
 
             # Update obstacles (only those fully contained are kept)
             obstaclesC = remaining_obstaclesC
-        
+
         if buffer_dist > 0:
             self._borderC_original = borderC
             self._obstaclesC_original = obstaclesC
@@ -333,17 +337,25 @@ class WindFarmNetwork:
 
             # obstacles
             shrunk_obstaclesC = []
+            shrunk_obstaclesC_including_removed = []
             for obs in obstaclesC:
                 obs_poly = Polygon(obs)
                 obs_bufferedC = self.shrink_polygon_safely(obs_poly, buffer_dist)
                 if obs_bufferedC is not None:
                     shrunk_obstaclesC.append(obs_bufferedC)
+                    shrunk_obstaclesC_including_removed.append(obs_bufferedC)
+                
+                if obs_bufferedC is None:
+                    shrunk_obstaclesC_including_removed.append([])
+
+
 
             # Update obstacles
             obstaclesC = shrunk_obstaclesC
             
             self._border_bufferedC = borderC
-            self._obstacles_bufferedC = obstaclesC
+            self._obstacles_bufferedC =  obstaclesC
+            self._obstacles_bufferedC_incl_removed = shrunk_obstaclesC_including_removed
         elif buffer_dist < 0:
             raise ValueError("Buffer value must be equal or greater than 0!")
         else:
@@ -355,8 +367,8 @@ class WindFarmNetwork:
         # check_turbine_locations(border, obstacles, turbines):
         border_path = Path(borderC)
         # Border path, with tolerance for edge inclusion
-        in_border_neg = border_path.contains_points(turbinesC, radius=-1e1)
-        in_border_pos = border_path.contains_points(turbinesC, radius=1e1)
+        in_border_neg = border_path.contains_points(turbinesC, radius=-1e-10)
+        in_border_pos = border_path.contains_points(turbinesC, radius=1e-10)
         in_border = in_border_neg | in_border_pos
 
         # Check if any turbine is outside the border
@@ -370,8 +382,7 @@ class WindFarmNetwork:
             if np.any(in_obstacle):
                 inside_idx = np.where(in_obstacle)[0]
                 raise ValueError(f"Turbines at indices {inside_idx} are inside obstacle {i}!")
-
-                        
+            
         border_sizes = np.array([borderC.shape[0]] + [obs.shape[0] for obs in obstaclesC])
         B = border_sizes.sum()
         obstacle_start_idxs = np.cumsum(border_sizes) + T
@@ -380,11 +391,6 @@ class WindFarmNetwork:
         obstacle_ranges = [np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)]
 
         vertexC = np.vstack((turbinesC, borderC, *obstaclesC, substationsC))
-
-        # border_polygon = Polygon(borderC)
-        # print(border_polygon.exterior.minimum_clearance / 2)
-        # print(obstaclesC)
-        # obstaclesC = []
 
         return L_from_site(
             R=R,
