@@ -124,7 +124,7 @@ class WindFarmNetwork:
                 warning("The defined border is non-convex and buffering may introduce unexpexted changes in the exterior border.")
                 if max_buffer_dist > 0:
                     warning("Maximum buffer values which is safe is  ≈ %.2f." % max_buffer_dist)
-                warning("For visual comparison use plot_original_vs_buffered.")
+                warning("For visual comparison use plot_original_vs_buffered().")
         
         expanded_polygon = polygon.buffer(buffer_dist)
 
@@ -147,49 +147,34 @@ class WindFarmNetwork:
 
 
     def plot_original_vs_buffered(self):
-        fig, axes = plt.subplots(3, 1, figsize=(14, 12))
-        ax1 = axes[0]
-        ax2 = axes[1]
-        self.plot_original_buffered(ax1, ax2)
-        ax3 = axes[2]
-        self.plot_buffer_difference_only(ax3)
-        plt.show()
-
-    def plot_original_buffered(self, ax1, ax2):
         """
-        Plot original vs buffered borders and obstacles in side-by-side subplots.
-
-        Parameters:
-        - borderC: np.ndarray of original border coordinates (N x 2)
-        - border_bufferedC: np.ndarray of buffered border coordinates
-        - obstaclesC: list of np.ndarray (original obstacles)
-        - obstacles_bufferedC: list of np.ndarray (buffered obstacles)
+        Plot original and buffered borders and obstacles on a single plot.
         """
         borderC = self._borderC_original
         border_bufferedC = self._border_bufferedC
         obstaclesC = self._obstaclesC_original
         obstacles_bufferedC = self._obstacles_bufferedC
 
-        # --- Left: Original ---
-        ax1.set_title("Original")
-        ax1.add_patch(MplPolygon(borderC, closed=True, edgecolor='blue', facecolor='none', label='Border'))
-        for i, obs in enumerate(obstaclesC):
-            ax1.add_patch(MplPolygon(obs, closed=True, edgecolor='black', facecolor='none',
-                                    label='Obstacle' if i == 0 else None))
-        ax1.set_aspect('equal')
-        ax1.legend()
+        plt.figure(figsize=(10, 10))
+        plt.title("Original and Buffered Shapes")
+        ax = plt.gca()
 
-        # --- Right: Buffered ---
-        ax2.set_title("Buffered")
-        ax2.add_patch(MplPolygon(border_bufferedC, closed=True, edgecolor='red', linestyle='--',
+        # Original border and obstacles
+        ax.add_patch(MplPolygon(borderC, closed=True, edgecolor='none', facecolor='lightblue', label='Original Border'))
+        for i, obs in enumerate(obstaclesC):
+            ax.add_patch(MplPolygon(obs, closed=True, edgecolor='none', facecolor='white',
+                                    label='Original Obstacle' if i == 0 else None))
+
+        # Buffered border and obstacles
+        ax.add_patch(MplPolygon(border_bufferedC, closed=True, edgecolor='red', linestyle='--',
                                 facecolor='none', label='Buffered Border'))
         for i, obs in enumerate(obstacles_bufferedC):
-            ax2.add_patch(MplPolygon(obs, closed=True, edgecolor='orange', linestyle='--',
+            ax.add_patch(MplPolygon(obs, closed=True, edgecolor='black', linestyle='--',
                                     facecolor='none', label='Buffered Obstacle' if i == 0 else None))
-        ax2.set_aspect('equal')
-        ax2.legend()
 
-        # Set same axis limits for both plots
+        ax.set_aspect('equal')
+
+        # Axis limits
         all_x = np.concatenate([
             borderC[:, 0], border_bufferedC[:, 0],
             *[obs[:, 0] for obs in obstaclesC],
@@ -200,60 +185,14 @@ class WindFarmNetwork:
             *[obs[:, 1] for obs in obstaclesC],
             *[obs[:, 1] for obs in obstacles_bufferedC]
         ])
-        x_min, x_max = all_x.min(), all_x.max()
-        y_min, y_max = all_y.min(), all_y.max()
-        x_pad = 0.05 * (x_max - x_min)
-        y_pad = 0.05 * (y_max - y_min)
-        xlim = (x_min - x_pad, x_max + x_pad)
-        ylim = (y_min - y_pad, y_max + y_pad)
-        for ax in [ax1, ax2]:
-            ax.set_xlim(xlim)
-            ax.set_ylim(ylim)
+        x_pad = 0.05 * (all_x.max() - all_x.min())
+        y_pad = 0.05 * (all_y.max() - all_y.min())
+        ax.set_xlim(all_x.min() - x_pad, all_x.max() + x_pad)
+        ax.set_ylim(all_y.min() - y_pad, all_y.max() + y_pad)
 
+        plt.legend()
         plt.tight_layout()
-
-
-    def plot_buffer_difference_only(self, ax):
-        """
-        """
-
-        # Create border polygons
-        border_orig = Polygon(self._borderC_original)
-        border_buffered = Polygon(self._border_bufferedC)
-
-        # Create the list and add the border pair first
-        polygon_pairs = [(border_buffered, border_orig)]
-
-        # Loop through all obstacles
-        for orig_coords, buff_coords in zip(self._obstaclesC_original, self._obstacles_bufferedC_incl_removed):
-            obs_orig = Polygon(orig_coords)
-            obs_buffered = Polygon(buff_coords)
-            polygon_pairs.append((obs_orig, obs_buffered))
-        
-        for outer, inner in polygon_pairs:
-            ring = outer.difference(inner)
-            if ring.is_empty:
-                continue
-
-            # Plot exterior
-            if ring.geom_type == 'Polygon':
-                x, y = ring.exterior.xy
-                ax.fill(x, y, color='lightblue', edgecolor='black')
-                # Plot holes
-                for interior in ring.interiors:
-                    x, y = zip(*interior.coords)
-                    ax.fill(x, y, color='white', edgecolor='black')
-            elif ring.geom_type == 'MultiPolygon':
-                for poly in ring.geoms:
-                    x, y = poly.exterior.xy
-                    ax.fill(x, y, color='lightblue', edgecolor='black')
-                    for interior in poly.interiors:
-                        x, y = zip(*interior.coords)
-                        ax.fill(x, y, color='white', edgecolor='black')
-
-        ax.set_aspect('equal')
-        plt.title("Areas between original and buffered")
-
+        plt.show()
     
     def _from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist):
         """Constructs a site graph from coordinate-based inputs."""
@@ -609,7 +548,6 @@ class WindFarmNetwork:
         T = G.graph['T']
         N = len(vertexC)
         gradients = np.zeros((N, 2))
-        print(vertexC.shape)
 
         for u, v in G.edges():
             if 'fnT' in G.graph:
@@ -632,10 +570,6 @@ class WindFarmNetwork:
 
             gradients[u_fnt] += gradinc
             gradients[v_fnt] -= gradinc
-
-            ####################################
-            # To Do: check fnT for detour nodes
-            ####################################
 
         # wind turbines
         gradients_wt = gradients[:T]
