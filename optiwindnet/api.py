@@ -671,7 +671,7 @@ class WindFarmNetwork:
         self.S = S
         self.G = G
 
-        terse_links = 0 # self.terse_links()
+        terse_links = self.terse_links()
         return terse_links
 
 class OptiWindNetSolver(ABC):
