@@ -147,7 +147,7 @@ class WindFarmNetwork:
 
 
     def plot_original_vs_buffered(self):
-        fig, axes = plt.subplots(3, 1, figsize=(14, 18))
+        fig, axes = plt.subplots(3, 1, figsize=(14, 12))
         ax1 = axes[0]
         ax2 = axes[1]
         self.plot_original_buffered(ax1, ax2)
@@ -229,8 +229,6 @@ class WindFarmNetwork:
             obs_orig = Polygon(orig_coords)
             obs_buffered = Polygon(buff_coords)
             polygon_pairs.append((obs_orig, obs_buffered))
-            print('obs original: ', orig_coords)
-            print('obs_buffered: ', buff_coords)
         
         for outer, inner in polygon_pairs:
             ring = outer.difference(inner)
@@ -611,9 +609,17 @@ class WindFarmNetwork:
         T = G.graph['T']
         N = len(vertexC)
         gradients = np.zeros((N, 2))
+        print(vertexC.shape)
 
         for u, v in G.edges():
-            vec = vertexC[u] - vertexC[v]
+            if 'fnT' in G.graph:
+                u_fnt = G.graph['fnT'][u]
+                v_fnt = G.graph['fnT'][v]
+            else:
+                u_fnt = u
+                v_fnt = v
+
+            vec = vertexC[u_fnt] - vertexC[v_fnt]
             norm = np.hypot(*vec)
 
             if norm < 1e-12:
@@ -624,11 +630,11 @@ class WindFarmNetwork:
             if gradient_type.lower() == 'cost':
                 gradinc *= G.graph['cables'][G[u][v]['cable']][1]
 
-            gradients[u] += gradinc
-            gradients[v] -= gradinc
+            gradients[u_fnt] += gradinc
+            gradients[v_fnt] -= gradinc
 
             ####################################
-            # To Do: check fnt for detour nodes
+            # To Do: check fnT for detour nodes
             ####################################
 
         # wind turbines
