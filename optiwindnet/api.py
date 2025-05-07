@@ -1,5 +1,6 @@
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
+from shapely.validation import explain_validity
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.collections import PatchCollection
 import matplotlib.pyplot as plt
@@ -92,7 +93,7 @@ class WindFarmNetwork:
         if turbinesC is not None and substationsC is not None:
             L = self._from_coordinates(turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist)
         elif L is None:
-            raise ValueError('Both turbinesC and substationsC must be provided')
+            raise ValueError('Both turbinesC and substationsC must be provided!')
         self.L = L
 
         # Planar embedding
@@ -120,30 +121,34 @@ class WindFarmNetwork:
         if not polygon.equals(polygon.convex_hull):
             max_buffer_dist = polygon.exterior.minimum_clearance / 2
 
-            if buffer_dist >= max_buffer_dist / 2:
-                warning("The defined border is non-convex and buffering may introduce unexpexted changes in the exterior border.")
-                if max_buffer_dist > 0:
-                    warning("Maximum buffer values which is safe is  ≈ %.2f." % max_buffer_dist)
-                warning("For visual comparison use plot_original_vs_buffered().")
+            if buffer_dist >= max_buffer_dist:
+                warning("⚠️ The defined border is non-convex and buffering may introduce unexpexted changes in the exterior border. For visual comparison use plot_original_vs_buffered().")
         
-        expanded_polygon = polygon.buffer(buffer_dist)
+        expanded_polygon = polygon.buffer(buffer_dist, resolution=2)
 
         return expanded_polygon
 
-    def shrink_polygon_safely(self, polygon, shrink_dist):
+    def shrink_polygon_safely(self, polygon, shrink_dist, indx):
         """Shrink a polygon and warn if it splits or disappears."""
         shrunk_polygon = polygon.buffer(-shrink_dist)
-        
-        shrunkC =np.array(shrunk_polygon.exterior.coords)
 
         if shrunk_polygon.is_empty:
-            warning("Buffering by %.2f completely removed an obstacle!." % shrink_dist)
-            shrunkC = None
+            warning("⚠️ Buffering by %.2f completely removed the obstacle at index %d." % (shrink_dist, indx))
+            return None
 
         elif shrunk_polygon.geom_type == 'MultiPolygon':
-            warning("Shrinking by %.2f splited an obstacle into %d pieces." % (shrink_dist, len(shrunk_polygon.geoms)))
+            warning("⚠️ Shrinking by %.2f split the obstacle at indices %d into %d pieces." % (shrink_dist, indx, len(shrunk_polygon.geoms)))
+            return [np.array(part.exterior.coords) for part in shrunk_polygon.geoms]
 
-        return shrunkC
+        elif shrunk_polygon.geom_type == 'Polygon':
+            return np.array(shrunk_polygon.exterior.coords)
+
+        else:
+            print(shrunk_polygon.geom_type)
+            warning("⚠️ Unexpected geometry type %s after shrinking obstacle at index %d. The obstacle is totally removed." %
+                    (shrunk_polygon.geom_type, indx))
+            return None
+
 
 
     def plot_original_vs_buffered(self):
@@ -225,13 +230,17 @@ class WindFarmNetwork:
         if obstaclesC is None:
             obstaclesC = []
         else:
-
             # Start with the original border polygon
             border_polygon = Polygon(borderC)
             remaining_obstaclesC = []
 
-            for obs in obstaclesC:
+            for i, obs in enumerate(obstaclesC):
                 obs_poly = Polygon(obs)
+
+                if not obs_poly.is_valid:
+                    warning("⚠️ Obstacle %d invalid: %s" %(i, explain_validity(obs_poly)))
+                    obs_poly = obs_poly.buffer(0)  # Try fixing it
+
                 intersection = border_polygon.boundary.intersection(obs_poly)
 
                 # If the obstacle is completely within the border, keep it
@@ -239,10 +248,10 @@ class WindFarmNetwork:
                     remaining_obstaclesC.append(obs)
 
                 elif not border_polygon.contains(obs_poly) and not border_polygon.intersects(obs_poly):
-                    # Completely outside — skip it
-                    pass
+                    warning("⚠️ Obstacle at indices %d is completely outside the border and is neglegcted" %i)
                 else:
                     # Subtract this obstacle from the border
+                    warning("⚠️ Obstacle at indices %d intersects with the exteriour border and is merged into the exterior border." %i)
                     new_border_polygon = border_polygon.difference(obs_poly)
 
                     if new_border_polygon.is_empty:
@@ -275,17 +284,21 @@ class WindFarmNetwork:
             # obstacles
             shrunk_obstaclesC = []
             shrunk_obstaclesC_including_removed = []
-            for obs in obstaclesC:
+            for i, obs in enumerate(obstaclesC):
+
                 obs_poly = Polygon(obs)
-                obs_bufferedC = self.shrink_polygon_safely(obs_poly, buffer_dist)
-                if obs_bufferedC is not None:
+                obs_bufferedC = self.shrink_polygon_safely(obs_poly, buffer_dist, i)
+
+                if isinstance(obs_bufferedC, list):  # MultiPolygon
+                    shrunk_obstaclesC.extend(obs_bufferedC)
+                    shrunk_obstaclesC_including_removed.extend(obs_bufferedC)  
+
+                elif obs_bufferedC is not None:      # Polygon
                     shrunk_obstaclesC.append(obs_bufferedC)
-                    shrunk_obstaclesC_including_removed.append(obs_bufferedC)
-                
-                if obs_bufferedC is None:
+                    shrunk_obstaclesC_including_removed.append(obs_bufferedC)  
+
+                else: # None
                     shrunk_obstaclesC_including_removed.append([])
-
-
 
             # Update obstacles
             obstaclesC = shrunk_obstaclesC
@@ -293,6 +306,7 @@ class WindFarmNetwork:
             self._border_bufferedC = borderC
             self._obstacles_bufferedC =  obstaclesC
             self._obstacles_bufferedC_incl_removed = shrunk_obstaclesC_including_removed
+
         elif buffer_dist < 0:
             raise ValueError("Buffer value must be equal or greater than 0!")
         else:
