@@ -133,11 +133,11 @@ class WindFarmNetwork:
         shrunk_polygon = polygon.buffer(-shrink_dist)
 
         if shrunk_polygon.is_empty:
-            warning("⚠️ Buffering by %.2f completely removed the obstacle at index %d." % (shrink_dist, indx))
+            warning("⚠️ Buffering by %.2f completely removed the obstacle at index %d. For visual comparison use plot_original_vs_buffered()." % (shrink_dist, indx))
             return None
 
         elif shrunk_polygon.geom_type == 'MultiPolygon':
-            warning("⚠️ Shrinking by %.2f split the obstacle at index %d into %d pieces." % (shrink_dist, indx, len(shrunk_polygon.geoms)))
+            warning("⚠️ Shrinking by %.2f split the obstacle at index %d into %d pieces. For visual comparison use plot_original_vs_buffered()." % (shrink_dist, indx, len(shrunk_polygon.geoms)))
             return [np.array(part.exterior.coords) for part in shrunk_polygon.geoms]
 
         elif shrunk_polygon.geom_type == 'Polygon':
@@ -145,10 +145,9 @@ class WindFarmNetwork:
 
         else:
             print(shrunk_polygon.geom_type)
-            warning("⚠️ Unexpected geometry type %s after shrinking obstacle at index %d. The obstacle is totally removed." %
+            warning("⚠️ Unexpected geometry type %s after shrinking obstacle at index %d. The obstacle is totally removed. For visual comparison use plot_original_vs_buffered()." %
                     (shrunk_polygon.geom_type, indx))
             return None
-
 
 
     def plot_original_vs_buffered(self):
