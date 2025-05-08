@@ -194,6 +194,8 @@ class WindFarmNetwork:
         ax.set_xlim(all_x.min() - x_pad, all_x.max() + x_pad)
         ax.set_ylim(all_y.min() - y_pad, all_y.max() + y_pad)
 
+        ax.set_axis_off()
+
         plt.legend()
         plt.tight_layout()
         plt.show()
@@ -324,14 +326,14 @@ class WindFarmNetwork:
         # Check if any turbine is outside the border
         if not np.all(in_border):
             outside_idx = np.where(~in_border)[0]
-            raise ValueError("Turbines at index %s are outside the border!" % outside_idx)
+            raise ValueError("Turbines at indices %s are outside the border!" % outside_idx)
 
         for i, obs in enumerate(obstaclesC):
             obs_path = Path(obs)
             in_obstacle = obs_path.contains_points(turbinesC, radius=-1e-10)
             if np.any(in_obstacle):
                 inside_idx = np.where(in_obstacle)[0]
-                raise ValueError(f"Turbines at index {inside_idx} are inside obstacle {i}!")
+                raise ValueError(f"Turbines at indices {inside_idx} are inside the obstacle at index {i}!")
             
         border_sizes = np.array([borderC.shape[0]] + [obs.shape[0] for obs in obstaclesC])
         B = border_sizes.sum()
