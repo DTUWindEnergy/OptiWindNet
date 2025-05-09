@@ -64,7 +64,7 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
     assign_root(A)
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
-    _, anglesRank, anglesXhp, anglesYhp = angle_helpers(G_base)
+    angles, anglesRank = angle_helpers(G_base)
 
     if weightfun is not None:
         options['weightfun'] = weightfun.__name__
@@ -86,8 +86,8 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
     # BEGIN: helper data structures
 
     # mappings from nodes
-    # <subtree_>: maps nodes to the set of nodes in their subtree
-    subtree_ = [{t} for t in _T]
+    # <subtree_>: maps nodes to the list of nodes in their subtree
+    subtree_ = [[t] for t in _T]
     # <subroot_>: maps nodes to their gates
     subroot_ = list(_T)
     # <Tail>: maps nodes to their component's tail
@@ -126,25 +126,19 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
     prevented_crossings = 0
     # END: helper data structures
 
-    def is_rank_within(rank, lowRank, highRank, anglesWrap,
-                       touch_is_cross=False):
-        less = operator.le if touch_is_cross else operator.lt
-        if anglesWrap:
-            return less(rank, lowRank) or less(highRank, rank)
-        else:
-            return less(lowRank, rank) and less(rank, highRank)
-
     def is_crossing_gate(root, subroot, u, v, touch_is_cross=False):
         '''choices for `less`:
         -> operator.lt: touching is not crossing
         -> operator.le: touching is crossing'''
-        gaterank = anglesRank[subroot, root]
-        uR, vR = anglesRank[u, root], anglesRank[v, root]
-        highRank, lowRank = (uR, vR) if uR >= vR else (vR, uR)
-        Xhp = anglesXhp[[u, v], root]
-        uYhp, vYhp = anglesYhp[[u, v], root]
-        if is_rank_within(gaterank, lowRank, highRank,
-                          not any(Xhp) and uYhp != vYhp, touch_is_cross):
+        less = operator.le if touch_is_cross else operator.lt
+        uvA = angles[v, root] - angles[u, root]
+        swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
+        l, h = (v, u) if swaped else (u, v)
+        lR, hR, srR = anglesRank[(l, h, subroot), root]
+        W = lR > hR  # wraps +-pi
+        L = less(lR, srR)  # angle(low) <= angle(probe)
+        H = less(srR, hR)  # angle(probe) <= angle(high)
+        if ~W & L & H | W & ~L & H | W & L & ~H:
             if not is_same_side(*VertexC[[u, v, root, subroot]]):
                 # crossing subroot
                 debug('<crossing> discarding «%s–%s»: would cross subroot <%s>',
@@ -245,8 +239,8 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
                     if subroot_[v] in ComponIn[subroot]:
                         # this means the target component was in line to
                         # connect to the current component
-                        debug('<<< UNLIKELY.B first_non_crossing(): subroot_[%s] '
-                              'in ComponIn[%s] >>>', F[v], F[subroot])
+                        debug('<<< UNLIKELY.B first_non_crossing(): subroot_'
+                              '[%s] in ComponIn[%s] >>>', F[v], F[subroot])
                         _, _, _, (s, t) = pq.tags.get(subroot_[v])
                         if t == u:
                             ComponIn[subroot].remove(subroot_[v])
@@ -255,8 +249,8 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
                     found = False
                     break
             # for pending in PendingG:
-                # print(f'<pending> processing '
-                      # f'pending [{F[pending]}]')
+                #  print(f'<pending> processing '
+                #        f'pending [{F[pending]}]')
                 # find_option4gate(pending)
             if found:
                 break
@@ -327,7 +321,7 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
         if ((u, v) in A.edges) and remove_from_A:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_edge()> (%s, %s) not in A >>>',
+            debug('<<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A >>>',
                   F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
@@ -351,13 +345,10 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
                 find_option4gate(sr_v)
                 is_reverse = True
 
-        # if this if is not visited, replace the above with ComponIn check
-        # this means that if sr_v is to also merge with sr_u, then the
-        # edge of the merging must be (v, u)
         if componin != is_reverse:
-            print(f'«{F[u]}–{F[v]}», '
-                  f'sr_u <{F[sr_u]}>, sr_v <{F[sr_v]}> '
-                  f'componin: {componin}, is_reverse: {is_reverse}')
+            # TODO: Why did I expect always False here? It is sometimes True.
+            debug('«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
+                  F[u], F[v], F[sr_u], F[sr_v], componin, is_reverse)
 
         # END: block to be simplified
 
@@ -385,7 +376,7 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
             error('maxiter reached (%d)', i)
             break
         debug('[%d]', i)
-        # debug and print(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
+        # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
         if gates2upd8:
             debug('gates2upd8: %s', tuple(F[subroot] for subroot in gates2upd8))
         retrylist = gates2retry.copy()
@@ -449,8 +440,8 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
                     eX.append((s, t))
 
         if eX:
-            print(f'<edge_crossing> discarding {(F[u], F[v])}: would cross'
-                  f' {[(F[s], F[t]) for s, t in eX]}')
+            debug('<edge_crossing> discarding «%s–%s»: would cross %s',
+                  F[u], F[v], tuple((F[s], F[t]) for s, t in eX))
             # abort_edge_addition(sr_u, u, v)
             prevented_crossings += 1
             ban_queued_edge(sr_u, u, v)
@@ -531,7 +522,7 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
             Tail[n] = newTail
 
         subtree = subtree_[v]
-        subtree |= subtree_[u]
+        subtree.extend(subtree_[u])
         G.remove_edge(A.nodes[u]['root'], sr_u)
         log.append((i, 'remE', (A.nodes[u]['root'], sr_u)))
 

@@ -474,15 +474,14 @@ def perimeter(VertexC, vertices_ordered):
                          - VertexC[vertices_ordered[0]])))
 
 
-def angle_helpers(L: nx.Graph) -> tuple[np.ndarray, np.ndarray,
-                                        np.ndarray, np.ndarray]:
+def angle_helpers(L: nx.Graph) -> tuple[np.ndarray, np.ndarray]:
     '''Create auxiliary arrays of node attributes based on polar coordinates.
 
     Args:
         L: location (also works with A or G)
 
     Returns:
-        Tuple of (angles, anglesRank, anglesXhp, anglesYhp)
+        Tuple of (angles, anglesRank)
     '''
 
     T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
@@ -496,11 +495,7 @@ def angle_helpers(L: nx.Graph) -> tuple[np.ndarray, np.ndarray,
         angles[n] = np.arctan2(y, x)
 
     anglesRank = rankdata(angles, method='dense', axis=0)
-    # vertex is in the positive-X half-plane
-    anglesXhp = abs(angles) < np.pi/2
-    # vertex is in the positive-Y half-plane
-    anglesYhp = angles >= 0.
-    return angles, anglesRank, anglesXhp, anglesYhp
+    return angles, anglesRank
 
 
 def assign_root(A: nx.Graph) -> None:
@@ -591,6 +586,7 @@ def complete_graph(G_base: nx.Graph, *, include_roots: bool = False,
     # remove edges between nodes belonging to distinct roots whose length is
     # greater than both d2root
     G.graph.update(G_base.graph)
+    G.graph['d2roots'] = cdist(TerminalC, RootC)
     nx.set_node_attributes(G, G_base.nodes)
     for u, v, edgeD in G.edges(data=True):
         edgeD['length'] = C[u, v]

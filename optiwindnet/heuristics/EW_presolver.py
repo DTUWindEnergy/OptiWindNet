@@ -57,8 +57,8 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     # BEGIN: helper data structures
 
     # mappings from nodes
-    # <subtrees>: maps nodes to the set of nodes in their subtree
-    subtrees = [{n} for n in _T]
+    # <subtree_>: maps nodes to the list of nodes in their subtree
+    subtree_ = [[t] for t in _T]
     # <subroot_>: maps nodes to their gates
     subroot_ = list(_T)
 
@@ -96,15 +96,15 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         if forbidden is None:
             forbidden = set()
         forbidden.add(subroot)
-        capacity_left = capacity - len(subtrees[subroot])
+        capacity_left = capacity - len(subtree_[subroot])
         choices = []
         gate_d2root = d2roots[subroot, A.nodes[subroot]['root']]
         #  weighted_edges = []
         edges2discard = []
-        for u in subtrees[subroot]:
+        for u in subtree_[subroot]:
             for v in A[u]:
                 if (subroot_[v] in forbidden or
-                        len(subtrees[v]) > capacity_left):
+                        len(subtree_[v]) > capacity_left):
                     # useless edges
                     edges2discard.append((u, v))
                 else:
@@ -157,7 +157,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A.edges >>',
+            debug('<<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A >>>',
                   F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
@@ -181,13 +181,10 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                 find_option4gate(sr_v)
                 is_reverse = True
 
-        # if this if is not visited, replace the above with ComponIn check
-        # this means that if sr_v is to also merge with sr_u, then the
-        # edge of the merging must be (v, u)
         if componin != is_reverse:
-            print(f'«{F[u]}–{F[v]}», '
-                  f'sr_u <{F[sr_u]}>, sr_v <{F[sr_v]}> '
-                  f'componin: {componin}, is_reverse: {is_reverse}')
+            # TODO: Why did I expect always False here? It is sometimes True.
+            debug('«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
+                  F[u], F[v], F[sr_u], F[sr_v], componin, is_reverse)
 
         # END: block to be simplified
 
@@ -200,7 +197,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     while loop:
         i += 1
         if i > maxiter:
-            error('ERROR: maxiter reached (%d)', i)
+            error('maxiter reached (%d)', i)
             break
         debug('[%d]', i)
         # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
@@ -240,7 +237,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         sr_v = subroot_[v]
         root = A.nodes[sr_v]['root']
 
-        capacity_left = capacity - len(subtrees[u]) - len(subtrees[v])
+        capacity_left = capacity - len(subtree_[u]) - len(subtree_[v])
 
         # edge addition starts here
 
@@ -249,12 +246,12 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         dropLo, dropHi = subtree_span_[sr_u]
         newHi = dropHi if angle(*VertexC[[keepHi, root, dropHi]]) > 0 else keepHi
         newLo = dropLo if angle(*VertexC[[dropLo, root, keepLo]]) > 0 else keepLo
+        debug(f'<angle_span> //%s:%s//', F[newLo], F[newHi])
         # update the component's angle span
         subtree_span_[sr_v] = newLo, newHi
-        debug(f'<angle_span> //%s:%s//', F[newLo], F[newHi])
 
-        subtree = subtrees[v]
-        subtree |= subtrees[u]
+        subtree = subtree_[v]
+        subtree.extend(subtree_[u])
         S.remove_edge(A.nodes[u]['root'], sr_u)
         log.append((i, 'remE', (A.nodes[u]['root'], sr_u)))
 
@@ -267,12 +264,12 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         ComponIn[sr_v].discard(sr_u)
 
         # assign root, subroot and subtree to the newly added nodes
-        for n in subtrees[u]:
+        for n in subtree_[u]:
             A.nodes[n]['root'] = root
             subroot_[n] = sr_v
-            subtrees[n] = subtree
+            subtree_[n] = subtree
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        if pq:
+        if lggr.isEnabledFor(logging.DEBUG) and pq:
             debug('heap top: <%s>, «%s» %.3f', F[pq[0][-2]],
                   tuple(F[x] for x in pq[0][-1]), pq[0][0])
         else:
@@ -287,7 +284,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         # finished adding the edge, now check the consequences
         if capacity_left > 0:
             for subroot in list(ComponIn[sr_v]):
-                if len(subtrees[subroot]) > capacity_left:
+                if len(subtree_[subroot]) > capacity_left:
                     # TODO: think about why a discard was needed
                     # ComponIn[sr_v].remove(subroot)
                     ComponIn[sr_v].discard(subroot)
@@ -295,7 +292,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                     # gates2upd8.append(subroot)
                     gates2upd8.add(subroot)
             for subroot in ComponIn[sr_u] - ComponIn[sr_v]:
-                if len(subtrees[subroot]) > capacity_left:
+                if len(subtree_[subroot]) > capacity_left:
                     # find_option4gate(subroot)
                     # gates2upd8.append(subroot)
                     gates2upd8.add(subroot)
