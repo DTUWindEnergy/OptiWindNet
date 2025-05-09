@@ -564,13 +564,12 @@ class WindFarmNetwork:
         N = len(vertexC)
         gradients = np.zeros((N, 2))
 
+        fnT = G.graph.get('fnT', None)
+        fnT_state = fnT is None
+
         for u, v in G.edges():
-            if 'fnT' in G.graph:
-                u_fnt = G.graph['fnT'][u]
-                v_fnt = G.graph['fnT'][v]
-            else:
-                u_fnt = u
-                v_fnt = v
+            u_fnt = u if fnT_state else fnT[u]
+            v_fnt = v if fnT_state else fnT[v]
 
             vec = vertexC[u_fnt] - vertexC[v_fnt]
             norm = np.hypot(*vec)
