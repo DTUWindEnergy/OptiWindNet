@@ -9,8 +9,10 @@ import networkx as nx
 from scipy.stats import rankdata
 
 from ..mesh import delaunay
-from ..geometric import (angle, apply_edge_exemptions, assign_root, complete_graph,
-                         is_crossing, is_same_side, angle_helpers)
+from ..geometric import (
+    apply_edge_exemptions, assign_root, complete_graph,
+    is_crossing, is_same_side, angle_helpers, angle_oracles_factory
+)
 from ..crossings import edge_crossings
 from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
@@ -25,10 +27,13 @@ F = NodeTagger()
 def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
          weightfun=None, weight_attr='length'):
     '''Crossing Preventing Esau-Williams heuristic for C-MST
-    inputs:
-    G_base: networkx.Graph
-    c: capacity
-    returns G_cmst: networkx.Graph'''
+
+    Args:
+      G_base: networkx.Graph
+      c: capacity
+    Returns:
+      G_cmst: networkx.Graph
+    '''
 
     start_time = time.perf_counter()
     # grab relevant options to store in the graph later
@@ -59,6 +64,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
     angles, anglesRank = angle_helpers(G_base)
+    union_limits, angle_ccw = angle_oracles_factory(angles, anglesRank)
 
     if weightfun is not None:
         options['weightfun'] = weightfun.__name__
@@ -424,13 +430,12 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
         # assess the union's angle span
         keepLo, keepHi = subtree_span_[sr_v]
         dropLo, dropHi = subtree_span_[sr_u]
-        newHi = dropHi if angle(*VertexC[[keepHi, root, dropHi]]) > 0 else keepHi
-        newLo = dropLo if angle(*VertexC[[dropLo, root, keepLo]]) > 0 else keepLo
-        debug(f'<angle_span> //%s:%s//', F[newLo], F[newHi])
+        unionLo, unionHi = union_limits(root, u, dropLo, dropHi,
+                                        v, keepLo, keepHi)
+        debug(f'<angle_span> //%s:%s//', F[unionLo], F[unionHi])
 
         # check which gates are within the union's angle span
-        lR = anglesRank[newLo, root]
-        hR = anglesRank[newHi, root]
+        lR, hR = anglesRank[(unionLo, unionHi), root]
         anglesWrap = lR > hR
         abort = False
         # the more conservative check would be using sr_v instead of
@@ -478,7 +483,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
         # edge addition starts here
 
         # update the component's angle span
-        subtree_span_[sr_v] = newLo, newHi
+        subtree_span_[sr_v] = unionLo, unionHi
 
         subtree = subtree_[v]
         subtree.extend(subtree_[u])

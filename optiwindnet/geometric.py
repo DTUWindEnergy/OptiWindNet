@@ -126,6 +126,71 @@ def angle(a, pivot, b):
     return ang
 
 
+def angle_oracles_factory(angles: np.ndarray, anglesRank: np.ndarray
+                          ) -> tuple[Callable, Callable]:
+    '''Make functions to answer queries about relative angles.
+
+    Inputs are the outputs of `angle_helpers()`.
+
+    Args:
+      angles: (T, R)-array of angles wrt root (+-pi)
+      anglesRank: (T, R)-array of the relative placement of angles
+
+    Returns:
+      union_limits() and angle_ccw()
+    '''
+
+    def is_within(pR: int, lR: int, hR: int) -> bool:
+        W = lR > hR  # wraps, i.e. angle(low) > angle(high)
+        L = lR <= pR  # angle(low) <= angle(probe)
+        H = pR <= hR  # angle(probe) <= angle(high)
+        return ((not W and L and H)
+                or (W and not L and H)
+                or (W and L and not H))
+
+    def union_limits(root: int, u: int, LO: int, HI: int, v: int, lo: int,
+                     hi: int) -> tuple[float, float]:
+        LOR, HIR, loR, hiR = anglesRank[(LO, HI, lo, hi), root]
+        lo_within = is_within(loR, LOR, HIR)
+        hi_within = is_within(hiR, LOR, HIR)
+        if lo_within and hi_within:
+            # print('LOHI contains lohi')
+            return LO, HI
+        elif lo_within:
+            # print('partial overlap, hi outside LOHI')
+            return LO, hi
+        elif hi_within:
+            # print('partial overlap, lo outside LOHI')
+            return lo, HI
+        elif is_within(LOR, loR, hiR):
+            # print('lohi contains LOHI')
+            return lo, hi
+        else:
+            # print('LOHI and lohi are disjoint')
+            uvA = angle_ccw(u, root, v)
+            return (LO, hi) if uvA <= math.pi else (lo, HI)
+
+    def angle_ccw(a: int, pivot: int, b: int) -> float:
+        '''Calculate the angle a-pivot-b.
+
+        * angle is ccw from 0 to 2π
+
+        Args:
+          a, pivot, b: vertex indices
+
+        Returns:
+          Angle a-pivot-b (radians)
+        '''
+        if a == b:
+            return 0.
+        aR, bR = anglesRank[(a , b), pivot]
+        aA, bA = angles[(a , b), pivot]
+        a_to_bA = (bA - aA).item()
+        return a_to_bA if aR <= bR else (2*math.pi + a_to_bA)
+
+    return union_limits, angle_ccw
+
+
 def find_edges_bbox_overlaps(
         VertexC: np.ndarray, u: int, v: int, edges: np.ndarray) -> np.ndarray:
     '''Find which `edges` have a bounding box overlap with ⟨u, v⟩.

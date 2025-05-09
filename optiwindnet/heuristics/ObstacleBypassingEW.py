@@ -10,9 +10,10 @@ import numpy as np
 from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 
-from ..geometric import (angle, angle_helpers, apply_edge_exemptions, assign_root,
-                         is_bunch_split_by_corner, is_crossing,
-                         is_same_side)
+from ..geometric import (
+    angle, angle_helpers, apply_edge_exemptions, assign_root, is_same_side,
+    is_bunch_split_by_corner, is_crossing, angle_oracles_factory
+)
 from ..crossings import edge_crossings
 from ..mesh import make_planar_embedding
 from ..utils import Alerter, NodeStr, NodeTagger
@@ -94,8 +95,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
     angles, anglesRank = angle_helpers(A)
-    #  triangles = A.graph['triangles']
-    #  triangles_exp = A.graph['triangles_exp']
+    union_limits, angle_ccw = angle_oracles_factory(angles, anglesRank)
+
     # apply weightfun on all delaunay edges
     if weightfun is not None:
         # TODO: fix `apply_edge_exemptions()` for the
@@ -151,10 +152,9 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     # mappings from components (identified by their gates)
     # <ComponIn>: maps component to set of components queued to merge in
     ComponIn = [set() for _ in _T]
-    ComponLoLim = np.hstack((np.arange(T)[:, np.newaxis],)*R)  # most CW node
-    ComponHiLim = ComponLoLim.copy()  # most CW node
-    # ComponLoLim = np.arange(T)  # most CCW node
-    # ComponHiLim = np.arange(T)  # most CCW node
+    # <subtree_span_>: pairs (most_CW, most_CCW) of extreme nodes of each
+    #                  subtree, indexed by subroot (former subroot)
+    subtree_span__ = [[(t, t) for t in _T] for _ in roots]
 
     # mappings from roots
     # <final_sr_>: set of gates of finished components (one set per root)
@@ -397,7 +397,6 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         '''generic crossings checker
         common node is not crossing'''
         s_, t_ = fnT[[s, t]]
-        #  st = frozenset((s_, t_))
         st = (s_, t_) if s_ < t_ else (t_, s_)
         #  if st in triangles or st in triangles_exp:
         if st in P.edges or st in diagonals:
@@ -475,17 +474,16 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         # TODO: this would be a good place to handle this special case
         #       but it requires major refactoring of the code
         # if blocked_ in (u, v) and goal_ < 0 and detourHop[-2] >= T:
-        if False and blocked_ in (u, v) and goal_ < 0 and detourHop[-2] >= T:
-            # <(u, v) edge is actually pushing blocked to one of the limits of
-            #  Barrier, this means the actual blocked hop is further away>
-            blockedHopI -= 1
-            actual_blocked = detourHop[blockedHopI]
-            remove = remove | {blocked}
-            refL += np.hypot(*(VertexC[fnT[actual_blocked]]
-                               - VertexC[blocked_]))
-            blocked = actual_blocked
-            blocked_ = fnT[blocked]
-            is_blocked_a_clone = blocked >= T
+        #    # <(u, v) edge is actually pushing blocked to one of the limits of
+        #    #  Barrier, this means the actual blocked hop is further away>
+        #    blockedHopI -= 1
+        #    actual_blocked = detourHop[blockedHopI]
+        #    remove = remove | {blocked}
+        #    refL += np.hypot(*(VertexC[fnT[actual_blocked]]
+        #                       - VertexC[blocked_]))
+        #    blocked = actual_blocked
+        #    blocked_ = fnT[blocked]
+        #    is_blocked_a_clone = blocked >= T
 
         not2hook = remove.copy()
 
@@ -704,8 +702,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     store.append((np.inf, (hook, corner_)))
                     continue
                 else:
-                    new_barrierLo = ComponLoLim[subbarrier, root]
-                    new_barrierHi = ComponHiLim[subbarrier, root]
+                    new_barrierLo, new_barrierHi = subtree_span__[root][subbarrier]
                     remaining_savings = savings - addedL
                     subdetour = plan_detour(
                         root, hook, corner_, *farX, new_barrierLo,
@@ -725,29 +722,29 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     nexthopC = fnT[barrhop[0]] if barrhop else goalC
                     discrim = angle(subcornerC, cornerC, nexthopC) > 0
                     dropcorner = discrim != loNotHi
-                    # TODO: come back to this False
-                    if False and dropcorner:
-                        subcornerC = VertexC[subcorner_]
-                        dropL = np.hypot(*(nexthopC - subcornerC))
-                        dc_addedL = dropL - prevL + barrAddedL
-                        direct = len(subpath) == 1
-                        if not direct:
-                            subfarL = np.hypot(*(cornerC - subcornerC))
-                            subnearL = subaddedL - subfarL + nearL
-                            dc_addedL += subnearL
-                        # debug and print(f'[{i}] CONCAVE: '
-                        # print(f'[{i}] CONCAVE: '
-                        #       f'{n2s(hook, corner_, goal_)}')
-                        dcX = get_crossings(subcorner_, corner_,
-                                            detour_waiver=True)
-                        if not dcX:
-                            print(f'[{i}, {depth}] dropped corner '
-                                  f'{n2s(corner_)}')
-                            path = (*subpath, *barrhop)
-                            LoNotHi = (*subLoNotHi, *barrLoNotHi)
-                            store.append((dc_addedL, path, LoNotHi,
-                                          direct, shift))
-                            continue
+                    # TODO: revisit and fix this 'if' block
+                    #  if dropcorner:
+                    #      subcornerC = VertexC[subcorner_]
+                    #      dropL = np.hypot(*(nexthopC - subcornerC))
+                    #      dc_addedL = dropL - prevL + barrAddedL
+                    #      direct = len(subpath) == 1
+                    #      if not direct:
+                    #          subfarL = np.hypot(*(cornerC - subcornerC))
+                    #          subnearL = subaddedL - subfarL + nearL
+                    #          dc_addedL += subnearL
+                    #      # debug and print(f'[{i}] CONCAVE: '
+                    #      # print(f'[{i}] CONCAVE: '
+                    #      #       f'{n2s(hook, corner_, goal_)}')
+                    #      dcX = get_crossings(subcorner_, corner_,
+                    #                          detour_waiver=True)
+                    #      if not dcX:
+                    #          print(f'[{i}, {depth}] dropped corner '
+                    #                f'{n2s(corner_)}')
+                    #          path = (*subpath, *barrhop)
+                    #          LoNotHi = (*subLoNotHi, *barrLoNotHi)
+                    #          store.append((dc_addedL, path, LoNotHi,
+                    #                        direct, shift))
+                    #          continue
 
                     # combine the nested detours
                     path = (*subpath, corner_, *barrhop)
@@ -954,17 +951,11 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         # assess the union's angle span
         unionHi = np.empty((len(roots),), dtype=int)
         unionLo = np.empty((len(roots),), dtype=int)
-        for root in roots:
-            keepHi = ComponHiLim[sr_v, root]
-            keepLo = ComponLoLim[sr_v, root]
-            dropHi = ComponHiLim[sr_u, root]
-            dropLo = ComponLoLim[sr_u, root]
-            unionHi[root] = (
-                dropHi if angle(*VertexC[fnT[[keepHi, root, dropHi]]]) > 0
-                else keepHi)
-            unionLo[root] = (
-                dropLo if angle(*VertexC[fnT[[dropLo, root, keepLo]]]) > 0
-                else keepLo)
+        for root, subtree_span_ in zip(roots, subtree_span__):
+            keepLo, keepHi = subtree_span_[sr_v]
+            dropLo, dropHi = subtree_span_[sr_u]
+            unionLo[root], unionHi[root] = union_limits(
+                root, u, dropLo, dropHi, v, keepLo, keepHi)
             debug('<angle_span> root %s: //%s:%s// ',
                   F[root], F[unionLo[root]], F[unionHi[root]])
 
@@ -1162,8 +1153,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             ComponIn[sr_v].discard(sr_u)
 
             # update the component's angle span
-            ComponHiLim[sr_v] = unionHi
-            ComponLoLim[sr_v] = unionLo
+            for lo, hi, subtree_span_ in zip(unionLo, unionHi, subtree_span__):
+                subtree_span_[sr_v] = lo, hi
 
             # assign root, subroot and subtree to the newly added nodes
             for n in subtree_[u]:

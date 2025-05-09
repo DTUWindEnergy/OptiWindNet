@@ -4,20 +4,20 @@
 import time
 import logging
 
-import numpy as np
 import networkx as nx
 from scipy.stats import rankdata
 
-from ..geometric import angle, assign_root
+from ..geometric import assign_root
 from ..crossings import edge_crossings
 from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
 from ..interarraylib import calcload
 
-F = NodeTagger()
-
 lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+
+F = NodeTagger()
+
 
 def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     '''Modified Esau-Williams heuristic for C-MST with limited crossings
@@ -40,7 +40,6 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     A = Aʹ.copy()
 
     roots = range(-R, 0)
-    VertexC = A.graph['VertexC']
 
     assign_root(A)
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
@@ -65,9 +64,6 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     # mappings from components (identified by their gates)
     # <ComponIn>: maps component to set of components queued to merge in
     ComponIn = [set() for _ in _T]
-    # <subtree_span_>: pairs (most_CW, most_CCW) of extreme nodes of each
-    #                  subtree, indexed by subroot (former subroot)
-    subtree_span_ = [(t, t) for t in _T]
 
     # other structures
     # <pq>: queue prioritized by lowest tradeoff length
@@ -99,7 +95,6 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         capacity_left = capacity - len(subtree_[subroot])
         choices = []
         gate_d2root = d2roots[subroot, A.nodes[subroot]['root']]
-        #  weighted_edges = []
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
@@ -109,7 +104,6 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                     edges2discard.append((u, v))
                 else:
                     W = A[u][v]['length']
-                    # DEVIATION FROM Esau-Williams: slack
                     if W <= gate_d2root:
                         # useful edges
                         # v's proximity to root is used as tie-breaker
@@ -240,15 +234,6 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         capacity_left = capacity - len(subtree_[u]) - len(subtree_[v])
 
         # edge addition starts here
-
-        # assess the union's angle span
-        keepLo, keepHi = subtree_span_[sr_v]
-        dropLo, dropHi = subtree_span_[sr_u]
-        newHi = dropHi if angle(*VertexC[[keepHi, root, dropHi]]) > 0 else keepHi
-        newLo = dropLo if angle(*VertexC[[dropLo, root, keepLo]]) > 0 else keepLo
-        debug(f'<angle_span> //%s:%s//', F[newLo], F[newHi])
-        # update the component's angle span
-        subtree_span_[sr_v] = newLo, newHi
 
         subtree = subtree_[v]
         subtree.extend(subtree_[u])

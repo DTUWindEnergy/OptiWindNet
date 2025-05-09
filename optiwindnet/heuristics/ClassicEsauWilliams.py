@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import operator
 import time
 import logging
 
@@ -10,8 +9,7 @@ import networkx as nx
 from scipy.stats import rankdata
 
 from ..mesh import delaunay
-from ..geometric import (angle, apply_edge_exemptions, assign_root,
-                         complete_graph, angle_helpers)
+from ..geometric import apply_edge_exemptions, assign_root, complete_graph
 from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
 
@@ -38,8 +36,6 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
     T = G_base.graph['T']
     _T = range(T)
     roots = range(-R, 0)
-    VertexC = G_base.graph['VertexC']
-    d2roots = G_base.graph.get('d2roots')
 
     # BEGIN: prepare auxiliary graph with all allowed edges and metrics
     if delaunay_based:
@@ -56,7 +52,6 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
     assign_root(A)
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
-    angles, anglesRank = angle_helpers(G_base)
 
     if weightfun is not None:
         options['weightfun'] = weightfun.__name__
@@ -86,9 +81,6 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
     # mappings from components (identified by their gates)
     # <ComponIn>: maps component to set of components queued to merge in
     ComponIn = [set() for _ in _T]
-    # <subtree_span_>: pairs (most_CW, most_CCW) of extreme nodes of each
-    #                  subtree, indexed by subroot (former subroot)
-    subtree_span_ = [(t, t) for t in _T]
 
     # mappings from roots
     # <final_sr_>: set of gates of finished components (one set per root)
@@ -231,16 +223,6 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
 
         # END: block to be simplified
 
-    # TODO: check if this function is necessary (not used)
-    def abort_edge_addition(sr_u, u, v):
-        if (u, v) in A.edges:
-            A.remove_edge(u, v)
-        else:
-            print('<<<< UNLIKELY <abort_edge_addition()> '
-                  f'({F[u]}, {F[v]}) not in A.edges >>>>')
-        ComponIn[subroot_[v]].remove(sr_u)
-        find_option4gate(sr_u)
-
     # initialize pq
     for n in _T:
         find_option4gate(n)
@@ -272,18 +254,7 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
 
         capacity_left = capacity - len(subtree_[u]) - len(subtree_[v])
 
-        # assess the union's angle span
-        keepLo, keepHi = subtree_span_[sr_v]
-        dropLo, dropHi = subtree_span_[sr_u]
-        newHi = dropHi if angle(*VertexC[[keepHi, root, dropHi]]) > 0 else keepHi
-        newLo = dropLo if angle(*VertexC[[dropLo, root, keepLo]]) > 0 else keepLo
-        debug(f'<angle_span> //%s:%s//', F[newLo], F[newHi])
-
-
         # edge addition starts here
-
-        # update the component's angle span
-        subtree_span_[sr_v] = newLo, newHi
 
         subtree = subtree_[v]
         subtree.extend(subtree_[u])

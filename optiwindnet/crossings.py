@@ -149,7 +149,7 @@ def edgeset_edgeXing_iter(diagonals: bidict) \
         uv = (u, v)
         if s >= 0:
             # crossing with Delaunay edge
-            yield ((s, t), uv)
+            yield [(s, t), uv]
         # two triangles may contain ⟨s, t⟩, each defined by their non-st vertex
         for hat in uv:
             triangle = tuple(sorted((s, t, hat)))
