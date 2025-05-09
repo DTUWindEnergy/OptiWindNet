@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import operator
 import time
 import logging
 
@@ -119,10 +118,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
     # END: helper data structures
 
     def is_crossing_gate(root, subroot, u, v, touch_is_cross=False):
-        '''choices for `less`:
-        -> operator.lt: touching is not crossing
-        -> operator.le: touching is crossing'''
-        less = operator.le if touch_is_cross else operator.lt
+        less = np.less_equal if touch_is_cross else np.less
         uvA = angles[v, root] - angles[u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
         l, h = (v, u) if swaped else (u, v)

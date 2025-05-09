@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import operator
 import time
 import logging
 from collections import defaultdict
@@ -127,7 +126,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     Dmax = T
 
     # mappings from nodes
-    # <subtree_>: maps nodes to the set of nodes in their subtree
+    # <subtree_>: maps nodes to the list of nodes in their subtree
     subtree_ = [[t] for t in _T] + (B + Dmax)*[None]
     # TODO: fnT might be better named Pof (Prime of)
     # <fnT>: farm node translation table
@@ -189,12 +188,9 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     # END: helper data structures
 
     def is_crossing_gate(root, subroot, u, v, touch_is_cross=False):
-        '''choices for `less`:
-        -> operator.lt: touching is not crossing
-        -> operator.le: touching is crossing'''
+        less = np.less_equal if touch_is_cross else np.less
         # get the primes of all nodes
         _subroot, _u, _v = fnT[[subroot, u, v]]
-        less = operator.le if touch_is_cross else operator.lt
         uvA = angles[_v, root] - angles[_u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
         l, h = (_v, _u) if swaped else (_u, _v)

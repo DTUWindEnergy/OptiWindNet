@@ -11,7 +11,7 @@ from scipy.stats import rankdata
 
 from ..mesh import delaunay
 from ..geometric import (angle, apply_edge_exemptions, assign_root,
-                         complete_graph, is_same_side, angle_helpers)
+                         complete_graph, angle_helpers)
 from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
 
@@ -103,26 +103,6 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
     # <i>: iteration counter
     i = 0
     # END: helper data structures
-
-    def is_crossing_gate(root, subroot, u, v, touch_is_cross=False):
-        '''choices for `less`:
-        -> operator.lt: touching is not crossing
-        -> operator.le: touching is crossing'''
-        less = operator.le if touch_is_cross else operator.lt
-        uvA = angles[v, root] - angles[u, root]
-        swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
-        l, h = (v, u) if swaped else (u, v)
-        lR, hR, srR = anglesRank[(l, h, subroot), root]
-        W = lR > hR  # wraps +-pi
-        L = less(lR, srR)  # angle(low) <= angle(probe)
-        H = less(srR, hR)  # angle(probe) <= angle(high)
-        if ~W & L & H | W & ~L & H | W & L & ~H:
-            if not is_same_side(*VertexC[[u, v, root, subroot]]):
-                # crossing subroot
-                debug('<crossing> discarding «%s–%s»: would cross subroot <%s>',
-                      F[u], F[v], F[subroot])
-                return True
-        return False
 
     def make_gate_final(root, sr_v):
         final_sr_[root].add(sr_v)

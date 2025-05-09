@@ -1,4 +1,3 @@
-import operator
 import math
 from collections.abc import Iterator, Iterable
 from bidict import bidict
@@ -209,7 +208,7 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
     # because if a gate goes precisely through a node
     # there will be nothing to prevent it from spliting
     # that node's subtree
-    less = operator.le if touch_is_cross else operator.lt
+    less = np.less_equal if touch_is_cross else np.less
     for u, v in Edge:
         if fnT is not None:
             u, v = fnT[u], fnT[v]
