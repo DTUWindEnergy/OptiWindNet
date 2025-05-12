@@ -71,8 +71,8 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
         options['weight_attr'] = weight_attr
         for u, v, data in A.edges(data=True):
             data[weight_attr] = weightfun(data)
-    # removing root nodes from A to speedup find_option4gate
-    # this may be done because G already starts with gates
+    # removing root nodes from A to speedup enqueue_best_union
+    # this may be done because G already starts with feeders
     A.remove_nodes_from(roots)
     # END: prepare auxiliary graph with all allowed edges and metrics
 
@@ -88,10 +88,10 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
     subtree_ = [[t] for t in _T]
-    # <subroot_>: maps nodes to their gates
+    # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
 
-    # mappings from components (identified by their gates)
+    # mappings from components (identified by their subroots)
     # <ComponIn>: maps component to set of components queued to merge in
     ComponIn = [set() for _ in _T]
     # <subtree_span_>: pairs (most_CW, most_CCW) of extreme nodes of each
@@ -99,16 +99,16 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
     subtree_span_ = [(t, t) for t in _T]
 
     # mappings from roots
-    # <final_sr_>: set of gates of finished components (one set per root)
-    final_sr_ = [set() for _ in roots]
+    # <commited_>: set of subroots of finished components (one set per root)
+    commited_ = [set() for _ in roots]
 
     # other structures
     # <pq>: queue prioritized by lowest tradeoff length
     pq = PriorityQueue()
-    # find_option4gate()
-    # <gates2upd8>: deque for components that need to go through
-    # gates2upd8 = deque()
-    gates2upd8 = set()
+    # enqueue_best_union()
+    # <stale_subtrees>: deque for components that need to go through
+    # stale_subtrees = deque()
+    stale_subtrees = set()
     # <edges2ban>: deque for edges that should not be considered anymore
     # edges2ban = deque()
     # TODO: this is not being used, decide what to do about it
@@ -123,7 +123,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
     prevented_crossings = 0
     # END: helper data structures
 
-    def is_crossing_gate(root, subroot, u, v, touch_is_cross=False):
+    def is_crossing_feeder(root, subroot, u, v, touch_is_cross=False):
         less = np.less_equal if touch_is_cross else np.less
         uvA = angles[v, root] - angles[u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
@@ -140,12 +140,12 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
                 return True
         return False
 
-    def make_gate_final(root, sr_v):
-        final_sr_[root].add(sr_v)
+    def commit_subroot(root, sr_v):
+        commited_[root].add(sr_v)
         log.append((i, 'finalG', (sr_v, root)))
         debug('<final> subroot [%s] added', F[sr_v])
 
-    def component_merging_choices(subroot, forbidden=None):
+    def get_union_choices(subroot, forbidden=None):
         # gather all the edges leaving the subtree of subroot
         if forbidden is None:
             forbidden = set()
@@ -204,18 +204,18 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
             root = A[u][v]['root']
 
             # check if a subroot is crossing the edge (u, v)
-            # TODO: this only looks at the gates connecting to the edges'
+            # TODO: this only looks at the feeders connecting to the edges'
             # closest root , is it relevant to look at all roots?
             # PendingG = set()
 
-            for final_sr in final_sr_[root]:
+            for commited in commited_[root]:
                 # TODO: test a subroot exactly overlapping with a node
                 # Elaborating: angleRank will take care of this corner case.
                 # the subroot will fall within one of the edges around the node
-                if is_crossing_gate(root, final_sr, u, v):
+                if is_crossing_feeder(root, commited, u, v):
                     # crossing subroot, discard edge
                     prevented_crossings += 1
-                    # TODO: call ban_queued_edge (problem: these edges are not
+                    # TODO: call ban_queued_union (problem: these edges are not
                     # queued)
                     if (u, v) in A.edges:
                         A.remove_edge(u, v)
@@ -230,29 +230,29 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
                         _, _, _, (s, t) = pq.tags.get(subroot_[v])
                         if t == u:
                             ComponIn[subroot].remove(subroot_[v])
-                            gates2upd8.add(subroot_[v])
+                            stale_subtrees.add(subroot_[v])
 
                     found = False
                     break
             # for pending in PendingG:
                 #  print(f'<pending> processing '
                 #        f'pending [{F[pending]}]')
-                # find_option4gate(pending)
+                # enqueue_best_union(pending)
             if found:
                 break
         # END: for loop that picks an edge
         return (weight, u, v) if found else ()
 
-    def find_option4gate(subroot):
-        debug('<find_option4gate> starting... subroot = <%s>', F[subroot])
+    def enqueue_best_union(subroot):
+        debug('<enqueue_best_union> starting... subroot = <%s>', F[subroot])
         if edges2ban:
             debug('<<<<<<<edges2ban>>>>>>>>>>> _%d_', len(edges2ban))
         while edges2ban:
             # edge2ban = edges2ban.popleft()
             edge2ban = edges2ban.pop()
-            ban_queued_edge(*edge2ban)
+            ban_queued_union(*edge2ban)
         # () get component expansion edges with weight
-        weighted_edges, edges2discard = component_merging_choices(subroot)
+        weighted_edges, edges2discard = get_union_choices(subroot)
         # discard useless edges
         A.remove_edges_from(edges2discard)
         # () sort choices
@@ -272,44 +272,44 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
             # no viable edge is better than subroot for this node
             # this becomes a final subroot
             if i:  # run only if not at i = 0
-                # definitive gates at iteration 0 do not cross any other edges
-                # they are not included in final_sr_ because the algorithm
-                # considers the gates extending to infinity (not really)
+                # commited feeders at iteration 0 do not cross any other edges
+                # they are not included in commited_ because the algorithm
+                # considers the feeders extending to infinity (not really)
                 root = A.nodes[subroot]['root']
-                make_gate_final(root, subroot)
+                commit_subroot(root, subroot)
                 check_heap4crossings(root, subroot)
             debug('<cancelling> %s', F[subroot])
             if subroot in pq.tags:
-                # i=0 gates and check_heap4crossings reverse_entry
-                # may leave accepting gates out of pq
+                # i=0 feeders and check_heap4crossings reverse_entry
+                # may leave accepting subtrees out of pq
                 pq.cancel(subroot)
 
-    def check_heap4crossings(root, final_sr):
-        '''search the heap for edges that cross the subroot 'final_sr'.
-        calls find_option4gate for each of the subtrees involved'''
+    def check_heap4crossings(root, commited):
+        '''search the heap for edges that cross the subroot 'commited'.
+        calls enqueue_best_union for each of the subtrees involved'''
         for tradeoff, _, sr_u, uv in pq:
             # if uv is None or uv not in A.edges:
             if uv is None:
                 continue
             u, v = uv
-            if is_crossing_gate(root, final_sr, u, v):
+            if is_crossing_feeder(root, commited, u, v):
                 nonlocal prevented_crossings
                 # crossing subroot, discard edge
                 prevented_crossings += 1
-                ban_queued_edge(sr_u, u, v)
+                ban_queued_union(sr_u, u, v)
 
-    def ban_queued_edge(sr_u, u, v):
+    def ban_queued_union(sr_u, u, v):
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A >>>',
+            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>',
                   F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
-        # gates2upd8.appendleft(sr_u)
-        gates2upd8.add(sr_u)
-        # find_option4gate(sr_u)
+        # stale_subtrees.appendleft(sr_u)
+        stale_subtrees.add(sr_u)
+        # enqueue_best_union(sr_u)
 
         # BEGIN: block to be simplified
         is_reverse = False
@@ -321,9 +321,9 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
                 # TODO: think about why a discard was needed
                 ComponIn[sr_u].discard(sr_v)
                 # this is assymetric on purpose (i.e. not calling
-                # pq.cancel(sr_u), because find_option4gate will do)
+                # pq.cancel(sr_u), because enqueue_best_union will do)
                 pq.cancel(sr_v)
-                find_option4gate(sr_v)
+                enqueue_best_union(sr_v)
                 is_reverse = True
 
         if componin != is_reverse:
@@ -341,11 +341,11 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
             print('<<<< UNLIKELY <abort_edge_addition()> '
                   f'({F[u]}, {F[v]}) not in A.edges >>>>')
         ComponIn[subroot_[v]].remove(sr_u)
-        find_option4gate(sr_u)
+        enqueue_best_union(sr_u)
 
     # initialize pq
     for n in _T:
-        find_option4gate(n)
+        enqueue_best_union(n)
 
     log = []
     G.graph['log'] = log
@@ -358,11 +358,11 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
             break
         debug('[%d]', i)
         # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
-        if gates2upd8:
-            debug('gates2upd8: %s', tuple(F[subroot] for subroot in gates2upd8))
-        while gates2upd8:
-            # find_option4gate(gates2upd8.popleft())
-            find_option4gate(gates2upd8.pop())
+        if stale_subtrees:
+            debug('stale_subtrees: %s', tuple(F[subroot] for subroot in stale_subtrees))
+        while stale_subtrees:
+            # enqueue_best_union(stale_subtrees.popleft())
+            enqueue_best_union(stale_subtrees.pop())
         if not pq:
             # finished
             break
@@ -373,7 +373,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
         # - pop from pq
         # - check if adding edge would block some component
         # - add edge
-        # - call find_option4gate for everyone affected
+        # - call enqueue_best_union for everyone affected
 
         # check if (u, v) crosses an existing edge
         if delaunay_based:
@@ -419,7 +419,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
                   F[u], F[v], tuple((F[s], F[t]) for s, t in eX))
             # abort_edge_addition(sr_u, u, v)
             prevented_crossings += 1
-            ban_queued_edge(sr_u, u, v)
+            ban_queued_union(sr_u, u, v)
             continue
 
         sr_v = subroot_[v]
@@ -434,7 +434,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
                                         v, keepLo, keepHi)
         debug(f'<angle_span> //%s:%s//', F[unionLo], F[unionHi])
 
-        # check which gates are within the union's angle span
+        # check which feeders are within the union's angle span
         lR, hR = anglesRank[(unionLo, unionHi), root]
         anglesWrap = lR > hR
         abort = False
@@ -443,20 +443,20 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
         distanceThreshold = d2rootsRank[sr_u, root]
         for subroot in [g for g in G[root] if
                      d2rootsRank[g, root] > distanceThreshold]:
-            gaterank = anglesRank[subroot, root]
-            if (not anglesWrap and (lR < gaterank < hR) or
-                    (anglesWrap and (gaterank > lR or gaterank < hR))):
+            sr_rank = anglesRank[subroot, root]
+            if (not anglesWrap and (lR < sr_rank < hR) or
+                    (anglesWrap and (sr_rank > lR or sr_rank < hR))):
                 # possible occlusion of subtree[subroot] by union subtree
                 debug('<check_occlusion> «%s-%s» might cross subroot <%s>',
                       F[u], F[v], F[subroot])
-                if subroot in final_sr_[root]:
-                    if is_crossing_gate(root, subroot, u, v, touch_is_cross=True):
+                if subroot in commited_[root]:
+                    if is_crossing_feeder(root, subroot, u, v, touch_is_cross=True):
                         abort = True
                         break
                 elif subroot in ComponIn[sr_u] or subroot in ComponIn[sr_v]:
                     if (len(subtree_[subroot]) > capacity_left):
                         # check crossing with subroot
-                        if is_crossing_gate(root, subroot, u, v,
+                        if is_crossing_feeder(root, subroot, u, v,
                                             touch_is_cross=True):
                             # find_option for subroot, but forbidding sr_u, sr_v
                             abort = True
@@ -477,7 +477,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
         if abort:
             debug('### «%s-%s» would block subroot %s ###', F[u], F[v], F[subroot])
             prevented_crossings += 1
-            ban_queued_edge(sr_u, u, v)
+            ban_queued_union(sr_u, u, v)
             continue
 
         # edge addition starts here
@@ -522,31 +522,31 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
                     # TODO: think about why a discard was needed
                     # ComponIn[sr_v].remove(subroot)
                     ComponIn[sr_v].discard(subroot)
-                    # find_option4gate(subroot)
-                    # gates2upd8.append(subroot)
-                    gates2upd8.add(subroot)
+                    # enqueue_best_union(subroot)
+                    # stale_subtrees.append(subroot)
+                    stale_subtrees.add(subroot)
             for subroot in ComponIn[sr_u] - ComponIn[sr_v]:
                 if len(subtree_[subroot]) > capacity_left:
-                    # find_option4gate(subroot)
-                    # gates2upd8.append(subroot)
-                    gates2upd8.add(subroot)
+                    # enqueue_best_union(subroot)
+                    # stale_subtrees.append(subroot)
+                    stale_subtrees.add(subroot)
                 else:
                     ComponIn[sr_v].add(subroot)
             # ComponIn[sr_u] = None
-            # find_option4gate(sr_v)
-            # gates2upd8.append(sr_v)
-            gates2upd8.add(sr_v)
+            # enqueue_best_union(sr_v)
+            # stale_subtrees.append(sr_v)
+            stale_subtrees.add(sr_v)
         else:
             # max capacity reached: subtree full
-            if sr_v in pq.tags:  # if required because of i=0 gates
+            if sr_v in pq.tags:  # if required because of i=0 feeders
                 pq.cancel(sr_v)
-            make_gate_final(root, sr_v)
+            commit_subroot(root, sr_v)
             # don't consider connecting to this full subtree nodes anymore
             A.remove_nodes_from(subtree)
             for subroot in ComponIn[sr_u] | ComponIn[sr_v]:
-                # find_option4gate(subroot)
-                # gates2upd8.append(subroot)
-                gates2upd8.add(subroot)
+                # enqueue_best_union(subroot)
+                # stale_subtrees.append(subroot)
+                stale_subtrees.add(subroot)
             # ComponIn[sr_u] = None
             # ComponIn[sr_v] = None
             check_heap4crossings(root, sr_v)
@@ -556,10 +556,10 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
         not_marked = []
         for root in roots:
             for subroot in G[root]:
-                if subroot not in final_sr_[root]:
+                if subroot not in commited_[root]:
                     not_marked.append(subroot)
         if not_marked:
-            debug('@@@@ WARNING: gates %s were not marked as final @@@@',
+            debug('@@@@ WARNING: subroots %s were not commited @@@@',
                   tuple(F[subroot] for subroot in not_marked))
 
     # algorithm finished, store some info in the graph object

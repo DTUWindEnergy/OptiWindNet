@@ -79,7 +79,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     # dicts keyed by subtree id
     #     DetourHop, detourLoNotHi
     # sets of subtree ids:
-    #     final_sr_
+    #     commited_
     #
     # need to have a table of vertex -> subroot node
 
@@ -106,8 +106,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         options['weight_attr'] = 'length'
         for _, _, data in A.edges(data=True):
             data['length'] = weightfun(data)
-    # removing root nodes from A to speedup find_option4gate
-    # this may be done because G already starts with gates
+    # removing root nodes from A to speedup enqueue_best_union
+    # this may be done because G already starts with feeders
     A.remove_nodes_from(roots)
     # END: prepare auxiliary graph with all allowed edges and metrics
 
@@ -144,12 +144,10 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     G.graph['fnT'] = fnT
 
     n2s = NodeStr(fnT, T)
-    # <gnT>: subroot node translation table
-    #        to be used when indexing subtree_[]
-    #        gnT[0..(T + B + Dmax)] -> 0..T
-    gnT = np.arange(T + B + Dmax)
+    # <subroot_>: maps vertices (terminals and clones) to subroot terminals
+    subroot_ = list(_T) + (B + Dmax)*[None]
 
-    # mappings from components (identified by their gates)
+    # mappings from components (identified by their subroots)
     # <ComponIn>: maps component to set of components queued to merge in
     ComponIn = [set() for _ in _T]
     # <subtree_span_>: pairs (most_CW, most_CCW) of extreme nodes of each
@@ -157,16 +155,18 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     subtree_span__ = [[(t, t) for t in _T] for _ in roots]
 
     # mappings from roots
-    # <final_sr_>: set of gates of finished components (one set per root)
-    final_sr_ = [set() for _ in roots]
+    # <commited_>: set of proximals of finished components (one set per root).
+    #              proximals are the nodes (either terminals or detours) that
+    #              are neighbors to root
+    commited_ = [set() for _ in roots]
 
     # other structures
     # <pq>: queue prioritized by lowest tradeoff length
     pq = PriorityQueue()
-    # find_option4gate()
-    # <gates2upd8>: deque for components that need to go through
-    # gates2upd8 = deque()
-    gates2upd8 = set()
+    # enqueue_best_union()
+    # <stale_subtrees>: deque for components that need to go through
+    # stale_subtrees = deque()
+    stale_subtrees = set()
     # <edges2ban>: deque for edges that should not be considered anymore
     # edges2ban = deque()
     # TODO: this is not being used, decide what to do about it
@@ -187,7 +187,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     prevented_crossings = 0
     # END: helper data structures
 
-    def is_crossing_gate(root, subroot, u, v, touch_is_cross=False):
+    def is_crossing_feeder(root, subroot, u, v, touch_is_cross=False):
         less = np.less_equal if touch_is_cross else np.less
         # get the primes of all nodes
         _subroot, _u, _v = fnT[[subroot, u, v]]
@@ -206,13 +206,13 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 return True
         return False
 
-    def make_gate_final(root, sr_v):
-        if sr_v not in final_sr_[root]:
-            final_sr_[root].add(sr_v)
-            log.append((i, 'finalG', (sr_v, root)))
-            debug('<make_gate_final> feeder [%s–%s] added', F[sr_v], F[root])
+    def commit_subroot(root, sr_v):
+        if sr_v not in commited_[root]:
+            commited_[root].add(sr_v)
+            log.append((i, 'commit', (sr_v, root)))
+            debug('<commit_subroot> feeder [%s–%s] added', F[sr_v], F[root])
 
-    def component_merging_choices_plain(subroot, forbidden=None):
+    def get_union_choices_plain(subroot, forbidden=None):
         # gather all the edges leaving the subtree of subroot
         if forbidden is None:
             forbidden = set()
@@ -223,12 +223,12 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
-                if (gnT[v] in forbidden or
+                if (subroot_[v] in forbidden or
                         len(subtree_[v]) > capacity_left):
                     # useless edges
                     edges2discard.append((u, v))
                 else:
-                    # newd2root = d2roots[fnT[gnT[v]], G.nodes[fnT[v]]['root']]
+                    # newd2root = d2roots[fnT[subroot_[v]], G.nodes[fnT[v]]['root']]
                     W = A[u][v]['length']
                     # if W <= d2root:  # TODO: what if I use <= instead of <?
                     if W < d2root:
@@ -240,7 +240,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                         #                           tiebreaker, u, v))
         return weighted_edges, edges2discard
 
-    def component_merging_choices(subroot, forbidden=None):
+    def get_union_choices(subroot, forbidden=None):
         # gather all the edges leaving the subtree of subroot
         if forbidden is None:
             forbidden = set()
@@ -253,12 +253,12 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
-                if (gnT[v] in forbidden or
+                if (subroot_[v] in forbidden or
                         len(subtree_[v]) > capacity_left):
                     # useless edges
                     edges2discard.append((u, v))
                 else:
-                    d2rGain = d2root - d2roots[gnT[v], G.nodes[fnT[v]]['root']]
+                    d2rGain = d2root - d2roots[subroot_[v], G.nodes[fnT[v]]['root']]
                     W = A[u][v]['length']
                     # if W <= d2root:  # TODO: what if I use <= instead of <?
                     if W < d2root:
@@ -293,16 +293,16 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         choices = unordchoices[result]
         return choices
 
-    def find_option4gate(subroot):
-        debug('<find_option4gate> starting... subroot = <%s>', F[subroot])
+    def enqueue_best_union(subroot):
+        debug('<enqueue_best_union> starting... subroot = <%s>', F[subroot])
         if edges2ban:
             debug('<<<<<<<edges2ban>>>>>>>>>>> _%d_', len(edges2ban))
         while edges2ban:
             # edge2ban = edges2ban.popleft()
             edge2ban = edges2ban.pop()
-            ban_queued_edge(*edge2ban)
+            ban_queued_union(*edge2ban)
         # () get component expansion edges with weight
-        weighted_edges, edges2discard = component_merging_choices(subroot)
+        weighted_edges, edges2discard = get_union_choices(subroot)
         # discard useless edges
         A.remove_edges_from(edges2discard)
         # () sort choices
@@ -315,7 +315,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             # tradeoff calculation
             tradeoff = weight - d2roots[fnT[subroot], A.nodes[subroot]['root']]
             pq.add(tradeoff, subroot, (u, v))
-            ComponIn[gnT[v]].add(subroot)
+            ComponIn[subroot_[v]].add(subroot)
             debug('<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
                   F[subroot], F[u], F[v], -tradeoff)
 
@@ -323,30 +323,30 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             # no viable edge is better than subroot for this node
             # this becomes a final subroot
             if i:  # run only if not at i = 0
-                # definitive gates at iteration 0 do not cross any other edges
-                # they are not included in final_sr_ because the algorithm
-                # considers the gates extending to infinity (not really)
+                # commited feeders at iteration 0 do not cross any other edges
+                # they are not included in commited_ because the algorithm
+                # considers the feeders extending to infinity (not really)
                 root = A.nodes[subroot]['root']
-                make_gate_final(root, subroot)
+                commit_subroot(root, subroot)
                 # check_heap4crossings(root, subroot)
             debug('<cancelling> %s', F[subroot])
             if subroot in pq.tags:
-                # i=0 gates and check_heap4crossings reverse_entry
-                # may leave accepting gates out of pq
+                # i=0 feeders and check_heap4crossings reverse_entry
+                # may leave accepting subtrees out of pq
                 pq.cancel(subroot)
 
-    def ban_queued_edge(sr_u, u, v):
+    def ban_queued_union(sr_u, u, v):
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A >>>',
+            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>',
                   F[u], F[v])
-        sr_v = gnT[v]
+        sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
-        # gates2upd8.appendleft(sr_u)
-        gates2upd8.add(sr_u)
-        # find_option4gate(sr_u)
+        # stale_subtrees.appendleft(sr_u)
+        stale_subtrees.add(sr_u)
+        # enqueue_best_union(sr_u)
 
         # BEGIN: block to be simplified
         is_reverse = False
@@ -358,9 +358,9 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 # TODO: think about why a discard was needed
                 ComponIn[sr_u].discard(sr_v)
                 # this is assymetric on purpose (i.e. not calling
-                # pq.cancel(sr_u), because find_option4gate will do)
+                # pq.cancel(sr_u), because enqueue_best_union will do)
                 pq.cancel(sr_v)
-                find_option4gate(sr_v)
+                enqueue_best_union(sr_v)
                 is_reverse = True
 
         if componin != is_reverse:
@@ -377,8 +377,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         else:
             print('<<<< UNLIKELY <abort_edge_addition()> '
                   f'{n2s(u, v)} not in A.edges >>>>')
-        ComponIn[gnT[v]].remove(sr_u)
-        find_option4gate(sr_u)
+        ComponIn[subroot_[v]].remove(sr_u)
+        enqueue_best_union(sr_u)
 
     # TODO: check if this function is necessary (not used)
     def get_subtrees_closest_node(subroot, origin):
@@ -398,10 +398,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         common node is not crossing'''
         s_, t_ = fnT[[s, t]]
         st = (s_, t_) if s_ < t_ else (t_, s_)
-        #  if st in triangles or st in triangles_exp:
         if st in P.edges or st in diagonals:
             # <(s_, t_) is in the expanded Delaunay edge set>
-            #  Xlist = edge_crossings(s_, t_, G, triangles, triangles_exp)
             Xlist = edge_crossings(s_, t_, G, diagonals)
             # crossings with expanded Delaunay already checked
             # just detour edges missing
@@ -424,7 +422,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 Xlist.append(w_x)
         return Xlist
 
-    def get_crossings_deprecated(s, t):
+    def deprecated_get_crossings(s, t):
         # TODO: THIS RELIES ON precalculated crossings
         sC, tC = VertexC[fnT[[s, t]]]
         rootC = VertexC[-R:]
@@ -445,19 +443,19 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         (blocked, goal_) is the detour segment
         (u, v) is an edge crossing it
         barrierLo/Hi are the extremes of the subtree of (u, v) wrt root
-        tradeoff = <benefit of the edge addition> - <previous detours>
+        savings = <benefit of the edge addition> - <previous detours>
         '''
         # print(f'[{i}] <plan_detour_recursive[{depth}]> {n2s(u, v)} '
         #       f'blocking {n2s(blocked, goal_)}')
         goalC = VertexC[goal_]
-        cleatnode = gnT[blocked]
-        detourHop = DetourHop[cleatnode]
+        subroot = subroot_[blocked]
+        detourHop = DetourHop[subroot]
         blocked_ = fnT[blocked]
         Awarn(f'({depth}) ' +
               ('@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n' if depth == 0
                else '') +
               f'{n2s(u, v)} blocks {n2s(blocked)}, '
-              f'subroot: {n2s(cleatnode)}')
+              f'subroot: {n2s(subroot)}')
 
         # <refL>: length of the edge crossed by (u, v) – reference of cost
         if goal_ < 0:  # goal_ is a root
@@ -503,7 +501,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
             # block for finding the best hook
             cornerC = VertexC[corner_]
-            Blocked = subtree_[cleatnode].copy()
+            Blocked = subtree_[subroot].copy()
             for rem in remove:
                 Blocked.remove(rem)
             if is_blocked_a_clone:
@@ -512,7 +510,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                             detourHop[blockedHopI - 1::-1])):
                     if j == 2:
                         debug('[%d] (2nd iter) depth: %d, blocked: %s, '
-                              'subroot: %s', i, depth, blocked, cleatnode)
+                              'subroot: %s', i, depth, blocked, subroot)
                         # break
                     hop2check_ = fnT[hop2check]
                     is_hop_a_barriers_clone = hop2check_ in Barrier
@@ -620,7 +618,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                                                    detour_waiver=True)
                     if farX[0] >= 0 and farX[1] >= 0]
             # this will condense multiple edges from the same subtree into one
-            FarXsubtree = {gnT[s]: (s, t) for s, t in FarX}
+            FarXsubtree = {subroot_[s]: (s, t) for s, t in FarX}
 
             # BEGIN barrHack block
             Nin, Nout = len(insideI), len(outsideI)
@@ -629,8 +627,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 barrHackI = outsideI[0] if Nout <= Nin else insideI[0]
                 barrierX_ = BarrierPrime[barrHackI]
                 # TODO: these criteria are too ad hoc, improve it
-                if gnT[barrierX_] in FarXsubtree:
-                    del FarXsubtree[gnT[barrierX_]]
+                if subroot_[barrierX_] in FarXsubtree:
+                    del FarXsubtree[subroot_[barrierX_]]
                 elif (barrierX_ not in G[corner_]
                       and d2roots[barrierX_, root] >
                         1.1*d2roots[fnT[hook], root]):
@@ -644,7 +642,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
             # possible check to include: (something like this)
             # if (anglesRank[corner_, root] >
-            #     anglesRank[ComponHiLim[gnT[blocked], root]]
+            #     anglesRank[ComponHiLim[subroot_[blocked], root]]
             Awarn(f'barrsplit: {is_barrier_split}, inside: {len(insideI)}, '
                   f'outside: {len(outsideI)}, total: {len(BarrierC)}')
             # if is_barrier_split or get_crossings(corner_, goal_):
@@ -777,26 +775,25 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             return (path, cost, LoNotHi + (loNotHi,), shift)
         return None
 
-    def add_corner(hook, corner_, cleatnode, loNotHi):
+    def add_corner(hook, corner_, subroot, loNotHi):
         nonlocal D
         D += 1
 
         if D > Dmax:
-            # TODO: extend VertexC, fnT and gnT
+            # TODO: extend VertexC, fnT and subroot_
             warn('@@@@@@@@@@@@@@ Dmax REACHED @@@@@@@@@@@@@@')
         corner = T + B + D - 1
 
         # update coordinates mapping fnT
         fnT[corner] = corner_
 
-        # update gates mapping gnT
         # subtree being rerouted
-        gnT[corner] = cleatnode
-        subtree_[cleatnode].append(corner)
-        subtree_[corner] = subtree_[cleatnode]
+        subroot_[corner] = subroot
+        subtree_[subroot].append(corner)
+        subtree_[corner] = subtree_[subroot]
 
         # update DetourHop
-        DetourHop[cleatnode].append(corner)
+        DetourHop[subroot].append(corner)
         # update detourLoNotHi
         detourLoNotHi[corner] = loNotHi
         # add Detour node
@@ -810,12 +807,12 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         log.append((i, 'addDE', (hook, corner, fnT[hook], corner_)))
         return corner
 
-    def move_corner(corner, hook, corner_, cleatnode, loNotHi):
+    def move_corner(corner, hook, corner_, subroot, loNotHi):
         # update translation tables
         fnT[corner] = corner_
 
         # update DetourHop
-        DetourHop[cleatnode].append(corner)
+        DetourHop[subroot].append(corner)
         # update detourLoNotHi
         detourLoNotHi[corner] = loNotHi
         # update edges lengths
@@ -829,32 +826,32 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     def make_detour(blocked, path, LoNotHi, shift):
         hook, *Corner_ = path
 
-        cleatnode = gnT[blocked]
-        root = G.nodes[cleatnode]['root']
+        subroot = subroot_[blocked]
+        root = G.nodes[subroot]['root']
         # if Corner_[0] is None:
         if not Corner_:
-            # <a direct subroot replacing previous subroot>
+            # <a direct feeder replacing previous feeder>
             # TODO: this case is very outdated, probably wrong
             debug('[%d] <make_detour> direct subroot «%s–%s»',
                   i, hook, root)
-            # remove previous subroot
-            final_sr_[root].remove(blocked)
-            subtree_[cleatnode].remove(blocked)
+            # remove previous proximal
+            commited_[root].remove(blocked)
+            subtree_[subroot].remove(blocked)
             G.remove_edge(blocked, root)
             log.append((i, 'remE', (blocked, root)))
-            # make a new direct subroot
+            # make a new direct feeder
             length = d2roots[fnT[hook], root]
             G.add_edge(hook, root, length=length,
                        kind='detour', color='yellow', style='dashed')
             log.append((i, 'addDE', (hook, root, fnT[hook], root)))
-            final_sr_[root].add(hook)
+            commited_[root].add(hook)
         else:
-            detourHop = DetourHop[cleatnode]
+            detourHop = DetourHop[subroot]
             if blocked < T or hook == blocked:
-                # <detour only affects the blocked subroot edge>
+                # <detour only affects one feeder segment: blocked-root>
 
-                # remove the blocked subroot edge
-                final_sr_[root].remove(blocked)
+                # remove the blocked proximal edge
+                commited_[root].remove(blocked)
                 G.remove_edge(blocked, root)
                 log.append((i, 'remE', (blocked, root)))
 
@@ -863,14 +860,14 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     # add the first entry in DetourHop (always prime)
                     detourHop.append(hook)
                 for corner_, loNotHi in zip(Corner_, LoNotHi):
-                    corner = add_corner(hook, corner_, cleatnode, loNotHi)
+                    corner = add_corner(hook, corner_, subroot, loNotHi)
                     hook = corner
-                # add the subroot edge from the last corner node created
+                # add the last feeder segment: last corner node to root
                 length = d2roots[corner_, root]
                 G.add_edge(corner, root, length=length,
                            kind='detour', color='yellow', style='dashed')
                 log.append((i, 'addDE', (corner, root, corner_, root)))
-                final_sr_[root].add(corner)
+                commited_[root].add(corner)
             else:
                 # <detour affects edges further from blocked node>
 
@@ -908,7 +905,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                         stale = next(stales)
                         G.remove_node(stale)
                         log.append((i, 'remN', stale))
-                        subtree_[cleatnode].remove(stale)
+                        subtree_[subroot].remove(stale)
                         Stale.append(stale)
                         newN += 1
                 else:
@@ -917,7 +914,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 for j, (corner_, loNotHi) in enumerate(zip(Corner_, LoNotHi)):
                     if j < newN:
                         # create new corner nodes
-                        corner = add_corner(hook, corner_, cleatnode, loNotHi)
+                        corner = add_corner(hook, corner_, subroot, loNotHi)
                     else:
                         stale = next(stales)
                         if j == newN:
@@ -929,14 +926,14 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                                                      fnT[hook], corner_)))
                         # move the stale corners to their new places
                         corner = move_corner(stale, hook, corner_,
-                                             cleatnode, loNotHi)
+                                             subroot, loNotHi)
                     hook = corner
                 # update the subroot edge length
                 nearL = d2roots[corner_, root]
                 G[corner][root].update(length=nearL)
                 log.append((i, 'movDN', (corner, root, corner_, root)))
 
-    def check_gate_crossings(u, v, sr_v, sr_u):
+    def check_feeder_crossings(u, v, sr_v, sr_u):
         nonlocal tradeoff
 
         union = subtree_[u] + subtree_[v]
@@ -963,42 +960,42 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         Detour = {}
 
         for root in roots2check:
-            for g2check in final_sr_[root] - {v}:
-                if (is_crossing_gate(root, g2check, u, v,
-                                     touch_is_cross=True) or
-                        (g2check >= T and fnT[g2check] in (u, v) and
+            for proximal in commited_[root] - {v}:
+                if (is_crossing_feeder(root, proximal, u, v,
+                                       touch_is_cross=True) or
+                        (proximal >= T and fnT[proximal] in (u, v) and
                          (is_bunch_split_by_corner(
                              VertexC[fnT[union]],
-                             *VertexC[fnT[[DetourHop[gnT[g2check]][-2],
-                                          g2check, root]]])[0]))):
+                             *VertexC[fnT[[DetourHop[subroot_[proximal]][-2],
+                                          proximal, root]]])[0]))):
                     # print('getting detour')
-                    # detour = plan_detour(root, g2check,
+                    # detour = plan_detour(root, proximal,
                     #                     u, v, unionLo[root],
                     #                     unionHi[root], -tradeoff)
                     # TODO: it would be worth checking if changing roots is the
                     #       shortest path to avoid the (u, v) block
                     detour = plan_detour(
-                        root, g2check, root, u, v,
+                        root, proximal, root, u, v,
                         unionLo[root], unionHi[root], -tradeoff)
                     if detour is not None:
-                        Detour[g2check] = detour
+                        Detour[proximal] = detour
                     else:
-                        debug('<check_gate_crossings> discarding «%s–%s»: '
-                              'would block subroot %s', F[u], F[v], g2check)
+                        debug('<check_feeder_crossings> discarding «%s–%s»: '
+                              'would block subroot %s', F[u], F[v], proximal)
                         abort = True
                         break
             if abort:
                 break
 
         if not abort and Detour:
-            debug('<check_gate_crossings> detour options: %s',
+            debug('<check_feeder_crossings> detour options: %s',
                   tuple(path for path, _, _, _ in Detour.values()))
             # <crossing detected but detours are possible>
             detoursCost = sum((cost for _, cost, _, _ in Detour.values()))
             if detoursCost < -tradeoff:
                 # add detours to G
                 detdesc = [f'blocked {n2s(blocked)}, '
-                           f'subroot {n2s(gnT[blocked])}, '
+                           f'subroot {n2s(subroot_[blocked])}, '
                            f'{n2s(*path)} '
                            f'@{cost:.0f}'
                            for blocked, (path, cost, loNotHi, shift)
@@ -1014,7 +1011,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
     # initialize pq
     for n in _T:
-        find_option4gate(n)
+        enqueue_best_union(n)
     # create a global tradeoff variable
     tradeoff = 0
 
@@ -1028,10 +1025,10 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             if i > maxiter:
                 error('maxiter reached (%d)', i)
                 return
-            if gates2upd8:
-                debug('<loop> gates2upd8: ', tuple(F[sr] for sr in gates2upd8))
-            while gates2upd8:
-                find_option4gate(gates2upd8.pop())
+            if stale_subtrees:
+                debug('<loop> stale_subtrees: ', tuple(F[sr] for sr in stale_subtrees))
+            while stale_subtrees:
+                enqueue_best_union(stale_subtrees.pop())
             if not pq:
                 # finished
                 return
@@ -1043,7 +1040,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
             if capacity_left < 0:
                 warn('@@@@@ Does this ever happen?? @@@@@')
-                ban_queued_edge(sr_u, u, v)
+                ban_queued_union(sr_u, u, v)
                 yield (u, v), False
                 continue
 
@@ -1063,17 +1060,17 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 for s, t in G.edges(range(T, T + D)):
                     skip = False
                     if s < 0 or t < 0:
-                        # skip gates (will be checked later)
+                        # skip feeders (will be checked later)
                         continue
                     s_, t_ = fnT[[s, t]]
                     Corner = []
                     # below are the 2 cases in which a new edge
                     # will join two subtrees across a detour edge
                     if (s >= T and (s_ == u or s_ == v) and
-                            s != DetourHop[gnT[s]][-1]):
+                            s != DetourHop[subroot_[s]][-1]):
                         Corner.append(s)
                     if (t >= T and (t_ == u or t_ == v) and
-                            t != DetourHop[gnT[t]][-1]):
+                            t != DetourHop[subroot_[t]][-1]):
                         Corner.append(t)
                     for corner in Corner:
                         a, b = G[corner]
@@ -1114,14 +1111,14 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                       F[u], F[v], tuple((F[s], F[t]) for s, t in eX))
                 # abort_edge_addition(sr_u, u, v)
                 prevented_crossings += 1
-                ban_queued_edge(sr_u, u, v)
+                ban_queued_union(sr_u, u, v)
                 yield (u, v), None
                 continue
             # END edge crossing check
 
             # BEGIN subroot crossing check
             # check if (u, v) crosses an existing subroot
-            sr_v = gnT[v]
+            sr_v = subroot_[v]
             root = G.nodes[sr_v]['root']
             r2drop = G.nodes[sr_u]['root']
             if root != r2drop:
@@ -1129,11 +1126,11 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                       f'[{F[r2drop]}], while'
                       f'[{F[v]}] is to {F[root]}.')
 
-            abort, unionLo, unionHi = check_gate_crossings(u, v, sr_v,
+            abort, unionLo, unionHi = check_feeder_crossings(u, v, sr_v,
                                                            sr_u)
             if abort:
                 prevented_crossings += 1
-                ban_queued_edge(sr_u, u, v)
+                ban_queued_union(sr_u, u, v)
                 yield (u, v), None
                 continue
             # END subroot crossing check
@@ -1147,8 +1144,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             sr_v_entry = pq.tags.get(sr_v)
             if sr_v_entry is not None:
                 _, _, _, (_, t) = sr_v_entry
-                # print('node', F[t], 'subroot', F[gnT[t]])
-                ComponIn[gnT[t]].remove(sr_v)
+                # print('node', F[t], 'subroot', F[subroot_[t]])
+                ComponIn[subroot_[t]].remove(sr_v)
             # TODO: think about why a discard was needed
             ComponIn[sr_v].discard(sr_u)
 
@@ -1160,7 +1157,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             for n in subtree_[u]:
                 A.nodes[n]['root'] = root
                 G.nodes[n]['root'] = root
-                gnT[n] = sr_v
+                subroot_[n] = sr_v
                 subtree_[n] = subtree
             debug('<loop> NEW EDGE «%s–%s», sr_v <%s>', F[u], F[v], F[sr_v])
             if not pq:
@@ -1177,25 +1174,25 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     if len(subtree_[subroot]) > capacity_left:
                         # <this subtree got too big for subtree_[subroot] to join>
                         ComponIn[sr_v].discard(subroot)
-                        gates2upd8.add(subroot)
+                        stale_subtrees.add(subroot)
                 # for subroot in ComponIn[sr_u]:
                 for subroot in ComponIn[sr_u] - ComponIn[sr_v]:
                     if len(subtree_[subroot]) > capacity_left:
-                        gates2upd8.add(subroot)
+                        stale_subtrees.add(subroot)
                     else:
                         ComponIn[sr_v].add(subroot)
-                gates2upd8.add(sr_v)
+                stale_subtrees.add(sr_v)
             else:
                 # max capacity reached: subtree full
-                if sr_v in pq.tags:  # required because of i=0 gates
+                if sr_v in pq.tags:  # required because of i=0 feeders
                     pq.cancel(sr_v)
-                make_gate_final(root, sr_v)
+                commit_subroot(root, sr_v)
                 # don't consider connecting to this full subtree anymore
                 A.remove_nodes_from(subtree)
                 # for subroot in ((ComponIn[sr_u] | ComponIn[sr_v]) - {sr_u,
                 # sr_v}):
                 for subroot in ComponIn[sr_u] | ComponIn[sr_v]:
-                    gates2upd8.add(subroot)
+                    stale_subtrees.add(subroot)
     # END: main loop
 
     log = []
@@ -1222,11 +1219,11 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     if lggr.isEnabledFor(logging.DEBUG):
         not_marked = []
         for root in roots:
-            for subroot in G[root]:
-                if subroot not in final_sr_[root]:
-                    not_marked.append(subroot)
+            for proximal in G[root]:
+                if proximal not in commited_[root]:
+                    not_marked.append(proximal)
         if not_marked:
-            debug('@@@@ WARNING: gates %s were not marked as final @@@@',
+            debug('@@@@ WARNING: proximals %s were not commited @@@@',
                   tuple(F[subroot] for subroot in not_marked))
 
     # algorithm finished, store some info in the graph object

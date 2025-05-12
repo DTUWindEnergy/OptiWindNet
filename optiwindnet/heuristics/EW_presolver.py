@@ -44,8 +44,8 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     assign_root(A)
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
 
-    # removing root nodes from A to speedup find_option4gate
-    # this may be done because G already starts with gates
+    # removing root nodes from A to speedup enqueue_best_union
+    # this may be done because G already starts with feeders
     A.remove_nodes_from(roots)
     # END: prepare auxiliary graph with all allowed edges and metrics
 
@@ -58,20 +58,20 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
     subtree_ = [[t] for t in _T]
-    # <subroot_>: maps nodes to their gates
+    # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
 
-    # mappings from components (identified by their gates)
+    # mappings from components (identified by their subroots)
     # <ComponIn>: maps component to set of components queued to merge in
     ComponIn = [set() for _ in _T]
 
     # other structures
     # <pq>: queue prioritized by lowest tradeoff length
     pq = PriorityQueue()
-    # find_option4gate()
-    # <gates2upd8>: deque for components that need to go through
-    # gates2upd8 = deque()
-    gates2upd8 = set()
+    # enqueue_best_union()
+    # <stale_subtrees>: deque for components that need to go through
+    # stale_subtrees = deque()
+    stale_subtrees = set()
     # <edges2ban>: deque for edges that should not be considered anymore
     # edges2ban = deque()
     # TODO: this is not being used, decide what to do about it
@@ -94,7 +94,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         forbidden.add(subroot)
         capacity_left = capacity - len(subtree_[subroot])
         choices = []
-        gate_d2root = d2roots[subroot, A.nodes[subroot]['root']]
+        sr_d2root = d2roots[subroot, A.nodes[subroot]['root']]
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
@@ -104,7 +104,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                     edges2discard.append((u, v))
                 else:
                     W = A[u][v]['length']
-                    if W <= gate_d2root:
+                    if W <= sr_d2root:
                         # useful edges
                         # v's proximity to root is used as tie-breaker
                         choices.append(
@@ -119,17 +119,17 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                 break
             if  rank < best_rank:
                 best_W, best_rank, best_edge = W, rank, edge
-        tradeoff = best_W - gate_d2root
+        tradeoff = best_W - sr_d2root
         return best_edge, tradeoff, edges2discard
 
-    def find_option4gate(subroot):
-        debug('<find_option4gate> starting... subroot = <%s>', F[subroot])
+    def enqueue_best_union(subroot):
+        debug('<enqueue_best_union> starting... subroot = <%s>', F[subroot])
         if edges2ban:
             debug('<<<<<<<edges2ban>>>>>>>>>>> _%d_', len(edges2ban))
         while edges2ban:
             # edge2ban = edges2ban.popleft()
             edge2ban = edges2ban.pop()
-            ban_queued_edge(*edge2ban)
+            ban_queued_union(*edge2ban)
         # () get component expansion edge with weight
         edge, tradeoff, edges2discard = component_merging_edge(subroot)
         # discard useless edges
@@ -147,18 +147,18 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             if subroot in pq.tags:
                 pq.cancel(subroot)
 
-    def ban_queued_edge(sr_u, u, v):
+    def ban_queued_union(sr_u, u, v):
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A >>>',
+            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>',
                   F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
-        # gates2upd8.appendleft(sr_u)
-        gates2upd8.add(sr_u)
-        # find_option4gate(sr_u)
+        # stale_subtrees.appendleft(sr_u)
+        stale_subtrees.add(sr_u)
+        # enqueue_best_union(sr_u)
 
         # BEGIN: block to be simplified
         is_reverse = False
@@ -170,9 +170,9 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                 # TODO: think about why a discard was needed
                 ComponIn[sr_u].discard(sr_v)
                 # this is assymetric on purpose (i.e. not calling
-                # pq.cancel(sr_u), because find_option4gate will do)
+                # pq.cancel(sr_u), because enqueue_best_union will do)
                 pq.cancel(sr_v)
-                find_option4gate(sr_v)
+                enqueue_best_union(sr_v)
                 is_reverse = True
 
         if componin != is_reverse:
@@ -184,7 +184,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
 
     # initialize pq
     for n in _T:
-        find_option4gate(n)
+        enqueue_best_union(n)
 
     loop = True
     # BEGIN: main loop
@@ -195,11 +195,11 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             break
         debug('[%d]', i)
         # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
-        if gates2upd8:
-            debug('gates2upd8: %s', tuple(F[subroot] for subroot in gates2upd8))
-        while gates2upd8:
-            # find_option4gate(gates2upd8.popleft())
-            find_option4gate(gates2upd8.pop())
+        if stale_subtrees:
+            debug('stale_subtrees: %s', tuple(F[subroot] for subroot in stale_subtrees))
+        while stale_subtrees:
+            # enqueue_best_union(stale_subtrees.popleft())
+            enqueue_best_union(stale_subtrees.pop())
         if not pq:
             # finished
             break
@@ -210,7 +210,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         # - pop from pq
         # - check if adding edge would block some component
         # - add edge
-        # - call find_option4gate for everyone affected
+        # - call enqueue_best_union for everyone affected
 
         # check if (u, v) crosses an existing edge
         # look for crossing edges within the neighborhood of (u, v)
@@ -225,7 +225,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                   F[u], F[v], tuple((F[s], F[t]) for s, t in eX))
             # abort_edge_addition(sr_u, u, v)
             prevented_crossings += 1
-            ban_queued_edge(sr_u, u, v)
+            ban_queued_union(sr_u, u, v)
             continue
 
         sr_v = subroot_[v]
@@ -273,30 +273,30 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                     # TODO: think about why a discard was needed
                     # ComponIn[sr_v].remove(subroot)
                     ComponIn[sr_v].discard(subroot)
-                    # find_option4gate(subroot)
-                    # gates2upd8.append(subroot)
-                    gates2upd8.add(subroot)
+                    # enqueue_best_union(subroot)
+                    # stale_subtrees.append(subroot)
+                    stale_subtrees.add(subroot)
             for subroot in ComponIn[sr_u] - ComponIn[sr_v]:
                 if len(subtree_[subroot]) > capacity_left:
-                    # find_option4gate(subroot)
-                    # gates2upd8.append(subroot)
-                    gates2upd8.add(subroot)
+                    # enqueue_best_union(subroot)
+                    # stale_subtrees.append(subroot)
+                    stale_subtrees.add(subroot)
                 else:
                     ComponIn[sr_v].add(subroot)
             # ComponIn[sr_u] = None
-            # find_option4gate(sr_v)
-            # gates2upd8.append(sr_v)
-            gates2upd8.add(sr_v)
+            # enqueue_best_union(sr_v)
+            # stale_subtrees.append(sr_v)
+            stale_subtrees.add(sr_v)
         else:
             # max capacity reached: subtree full
-            if sr_v in pq.tags:  # if required because of i=0 gates
+            if sr_v in pq.tags:  # if required because of i=0 feeders
                 pq.cancel(sr_v)
             # don't consider connecting to this full subtree nodes anymore
             A.remove_nodes_from(subtree)
             for subroot in ComponIn[sr_u] | ComponIn[sr_v]:
-                # find_option4gate(subroot)
-                # gates2upd8.append(subroot)
-                gates2upd8.add(subroot)
+                # enqueue_best_union(subroot)
+                # stale_subtrees.append(subroot)
+                stale_subtrees.add(subroot)
             # ComponIn[sr_u] = None
             # ComponIn[sr_v] = None
     # END: main loop

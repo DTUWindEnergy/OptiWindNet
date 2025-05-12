@@ -58,8 +58,8 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
         options['weight_attr'] = weight_attr
         for u, v, data in A.edges(data=True):
             data[weight_attr] = weightfun(data)
-    # removing root nodes from A to speedup find_option4gate
-    # this may be done because G already starts with gates
+    # removing root nodes from A to speedup enqueue_best_union
+    # this may be done because G already starts with feeders
     A.remove_nodes_from(roots)
     # END: prepare auxiliary graph with all allowed edges and metrics
 
@@ -75,33 +75,33 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
     subtree_ = [[t] for t in _T]
-    # <subroot_>: maps nodes to their gates
+    # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
 
-    # mappings from components (identified by their gates)
+    # mappings from components (identified by their subroots)
     # <ComponIn>: maps component to set of components queued to merge in
     ComponIn = [set() for _ in _T]
 
     # mappings from roots
-    # <final_sr_>: set of gates of finished components (one set per root)
-    final_sr_ = [set() for _ in roots]
+    # <commited_>: set of subroots of finished components (one set per root)
+    commited_ = [set() for _ in roots]
 
     # other structures
     # <pq>: queue prioritized by lowest tradeoff length
     pq = PriorityQueue()
-    # find_option4gate()
-    # <gates2upd8>: deque for components that need to go through
-    gates2upd8 = set()
+    # enqueue_best_union()
+    # <stale_subtrees>: deque for components that need to go through
+    stale_subtrees = set()
     # <i>: iteration counter
     i = 0
     # END: helper data structures
 
-    def make_gate_final(root, sr_v):
-        final_sr_[root].add(sr_v)
+    def commit_subroot(root, sr_v):
+        commited_[root].add(sr_v)
         log.append((i, 'finalG', (sr_v, root)))
         debug('<final> subroot [%s] added', F[sr_v])
 
-    def component_merging_choices(subroot, forbidden=None):
+    def get_union_choices(subroot, forbidden=None):
         # gather all the edges leaving the subtree of subroot
         if forbidden is None:
             forbidden = set()
@@ -148,10 +148,10 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
         choices = unordchoices[result]
         return choices
 
-    def find_option4gate(subroot):
-        debug('<find_option4gate> starting... subroot = <%s>', F[subroot])
+    def enqueue_best_union(subroot):
+        debug('<enqueue_best_union> starting... subroot = <%s>', F[subroot])
         # () get component expansion edges with weight
-        weighted_edges, edges2discard = component_merging_choices(subroot)
+        weighted_edges, edges2discard = get_union_choices(subroot)
         # discard useless edges
         A.remove_edges_from(edges2discard)
         # () sort choices
@@ -176,30 +176,30 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
             # no viable edge is better than subroot for this node
             # this becomes a final subroot
             if i:  # run only if not at i = 0
-                # definitive gates at iteration 0 do not cross any other edges
-                # they are not included in final_sr_ because the algorithm
-                # considers the gates extending to infinity (not really)
+                # commited feeders at iteration 0 do not cross any other edges
+                # they are not included in commited_ because the algorithm
+                # considers the feeders extending to infinity (not really)
                 root = A.nodes[subroot]['root']
-                make_gate_final(root, subroot)
+                commit_subroot(root, subroot)
                 # check_heap4crossings(root, subroot)
             debug('<cancelling> %s', F[subroot])
             if subroot in pq.tags:
-                # i=0 gates and check_heap4crossings reverse_entry
-                # may leave accepting gates out of pq
+                # i=0 feeders and check_heap4crossings reverse_entry
+                # may leave accepting subtrees out of pq
                 pq.cancel(subroot)
 
-    def ban_queued_edge(sr_u, u, v):
+    def ban_queued_union(sr_u, u, v):
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A >>>',
+            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>',
                   F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
-        # gates2upd8.appendleft(sr_u)
-        gates2upd8.add(sr_u)
-        # find_option4gate(sr_u)
+        # stale_subtrees.appendleft(sr_u)
+        stale_subtrees.add(sr_u)
+        # enqueue_best_union(sr_u)
 
         # BEGIN: block to be simplified
         is_reverse = False
@@ -211,9 +211,9 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
                 # TODO: think about why a discard was needed
                 ComponIn[sr_u].discard(sr_v)
                 # this is assymetric on purpose (i.e. not calling
-                # pq.cancel(sr_u), because find_option4gate will do)
+                # pq.cancel(sr_u), because enqueue_best_union will do)
                 pq.cancel(sr_v)
-                find_option4gate(sr_v)
+                enqueue_best_union(sr_v)
                 is_reverse = True
 
         if componin != is_reverse:
@@ -225,7 +225,7 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
 
     # initialize pq
     for n in _T:
-        find_option4gate(n)
+        enqueue_best_union(n)
 
     log = []
     G.graph['log'] = log
@@ -238,11 +238,11 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
             break
         debug('[%d]', i)
         # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
-        if gates2upd8:
-            debug('gates2upd8: %s', tuple(F[subroot] for subroot in gates2upd8))
-        while gates2upd8:
-            # find_option4gate(gates2upd8.popleft())
-            find_option4gate(gates2upd8.pop())
+        if stale_subtrees:
+            debug('stale_subtrees: %s', tuple(F[subroot] for subroot in stale_subtrees))
+        while stale_subtrees:
+            # enqueue_best_union(stale_subtrees.popleft())
+            enqueue_best_union(stale_subtrees.pop())
         if not pq:
             # finished
             break
@@ -290,32 +290,32 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
             for subroot in list(ComponIn[sr_v]):
                 if len(subtree_[subroot]) > capacity_left:
                     ComponIn[sr_v].discard(subroot)
-                    gates2upd8.add(subroot)
+                    stale_subtrees.add(subroot)
             for subroot in ComponIn[sr_u] - ComponIn[sr_v]:
                 if len(subtree_[subroot]) > capacity_left:
-                    gates2upd8.add(subroot)
+                    stale_subtrees.add(subroot)
                 else:
                     ComponIn[sr_v].add(subroot)
-            gates2upd8.add(sr_v)
+            stale_subtrees.add(sr_v)
         else:
             # max capacity reached: subtree full
-            if sr_v in pq.tags:  # if required because of i=0 gates
+            if sr_v in pq.tags:  # if required because of i=0 feeders
                 pq.cancel(sr_v)
-            make_gate_final(root, sr_v)
+            commit_subroot(root, sr_v)
             # don't consider connecting to this full subtree nodes anymore
             A.remove_nodes_from(subtree)
             for subroot in ComponIn[sr_u] | ComponIn[sr_v]:
-                gates2upd8.add(subroot)
+                stale_subtrees.add(subroot)
     # END: main loop
 
     if lggr.isEnabledFor(logging.DEBUG):
         not_marked = []
         for root in roots:
             for subroot in G[root]:
-                if subroot not in final_sr_[root]:
+                if subroot not in commited_[root]:
                     not_marked.append(subroot)
         if not_marked:
-            debug('@@@@ WARNING: gates %s were not marked as final @@@@',
+            debug('@@@@ WARNING: subroots %s were not commited @@@@',
                   tuple(F[subroot] for subroot in not_marked))
 
     # algorithm finished, store some info in the graph object
