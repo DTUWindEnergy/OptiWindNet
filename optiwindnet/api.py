@@ -564,14 +564,14 @@ class WindFarmNetwork:
         N = len(vertexC)
         gradients = np.zeros((N, 2))
 
-        fnT = G.graph.get('fnT', None)
-        fnT_state = fnT is None
+        fnT = G.graph.get('fnT')
 
         for u, v in G.edges():
-            u_fnt = u if fnT_state else fnT[u]
-            v_fnt = v if fnT_state else fnT[v]
+            if fnT is not None:
+                u = fnT[u]
+                v = fnT[v]
 
-            vec = vertexC[u_fnt] - vertexC[v_fnt]
+            vec = vertexC[u] - vertexC[v]
             norm = np.hypot(*vec)
 
             if norm < 1e-12:
@@ -582,8 +582,8 @@ class WindFarmNetwork:
             if gradient_type.lower() == 'cost':
                 gradinc *= G.graph['cables'][G[u][v]['cable']][1]
 
-            gradients[u_fnt] += gradinc
-            gradients[v_fnt] -= gradinc
+            gradients[u] += gradinc
+            gradients[v] -= gradinc
 
         # wind turbines
         gradients_wt = gradients[:T]
