@@ -1146,7 +1146,7 @@ def make_planar_embedding(
     if obstacles:
         A.graph['obstacles'] = obstacles
     if stunts_primes:
-        A.graph['num_stunts'] = len(stunts_primes)
+        A.graph['stunts_primes'] = stunts_primes
     landscape_angle = L.graph.get('landscape_angle')
     if landscape_angle is not None:
         A.graph['landscape_angle'] = landscape_angle

@@ -491,12 +491,12 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     R, T = (G.graph[k] for k in 'RT')
     L = nx.Graph(**{k: G.graph[k]
                     for k in _essential_graph_attrs if k in G.graph})
-    num_stunts = G.graph.get('num_stunts')
-    if num_stunts:
+    stunts_primes = G.graph.get('stunts_primes')
+    if stunts_primes:
         VertexC = G.graph['VertexC']
-        L.graph['VertexC'] = np.vstack((VertexC[:-R - num_stunts],
+        L.graph['VertexC'] = np.vstack((VertexC[:-R - len(stunts_primes)],
                                         VertexC[-R:]))
-        L.graph['B'] -= num_stunts
+        L.graph['B'] -= len(stunts_primes)
     L.add_nodes_from(((n, {'label': label})
                       for n, label in G.nodes(data='label')
                       if 0 <= n < T), kind='wtg')
