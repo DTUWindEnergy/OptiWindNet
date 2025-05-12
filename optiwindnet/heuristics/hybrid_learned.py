@@ -37,12 +37,12 @@ class Appraiser():
         num_edge_alt,
         num_subtrees,
         # edge features
-        u_is_gate,
-        v_is_gate,
+        u_is_subroot,
+        v_is_subroot,
         load,
         target_load,
         extent,
-        gate_d2root,
+        sr_d2root,
         target_d2root,
         cos,
     ):
@@ -63,6 +63,7 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
 
     start_time = time.perf_counter()
     R, T = Aʹ.graph['R'], Aʹ.graph['T']
+    _T = range(T)
     diagonals = Aʹ.graph['diagonals']
     d2roots = Aʹ.graph['d2roots']
     S = nx.Graph(R=R, T=T)
@@ -74,7 +75,7 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
 
     assign_root(A)
 
-    # removing root nodes from A to speedup find_option4gate
+    # removing root nodes from A to speedup enqueue_best_union
     # this may be done because G already starts with gates
     A.remove_nodes_from(roots)
     # END: prepare auxiliary graph with all allowed edges and metrics
@@ -89,24 +90,25 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     # BEGIN: helper data structures
 
     # mappings from nodes
-    # <subtrees>: maps nodes to the list of nodes in their subtree
-    subtree_ = [[t] for t in range(T)]
-    # <feeder_of>: maps terminals to their feeders
-    feeder_of = [t for t in range(T)]
+    # <subtree_>: maps nodes to the list of nodes in their subtree
+    subtree_ = [[t] for t in _T]
+    # <subroot_>: maps terminals to their subroots
+    subroot_ = list(_T)
 
-    # mappings from components (identified by their gates)
+    # mappings from components (identified by their subroots)
     # <ComponIn>: maps component to set of components queued to merge in
-    ComponIn = [set() for _ in range(T)]
-    ComponLoLim = np.arange(T)  # most CW node
-    ComponHiLim = np.arange(T)  # most CCW node
+    ComponIn = [set() for _ in _T]
+    # <subtree_span_>: pairs (most_CW, most_CCW) of extreme nodes of each
+    #                  subtree, indexed by subroot
+    subtree_span_ = [(t, t) for t in _T]
 
     # other structures
     # <pq>: queue prioritized by lowest tradeoff length
     pq = PriorityQueue()
-    # find_option4gate()
-    # <gates2upd8>: deque for components that need to go through
-    # gates2upd8 = deque()
-    gates2upd8 = set()
+    # enqueue_best_union()
+    # <stale_subtrees>: deque for components that need to go through
+    # stale_subtrees = deque()
+    stale_subtrees = set()
     # <edges2ban>: deque for edges that should not be considered anymore
     # edges2ban = deque()
     # TODO: this is not being used, decide what to do about it
@@ -122,36 +124,36 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     log = []
     # END: helper data structures
 
-    def component_merging_edge(gate, forbidden=None):
-        # gather all the edges leaving the subtree of gate
+    def get_best_union(subroot, forbidden=None):
+        # gather all the edges leaving the subtree of subroot
         if forbidden is None:
             forbidden = set()
-        forbidden.add(gate)
+        forbidden.add(subroot)
         choices = []
-        gate_d2root = d2roots[gate, A.nodes[gate]['root']]
-        load = len(subtree_[gate])
+        sr_d2root = d2roots[subroot, A.nodes[subroot]['root']]
+        load = len(subtree_[subroot])
         load_left = capacity - load
         edges2discard = []
         edges2examine = []
         subtree_choices = set()
-        for u in subtree_[gate]:
-            u_is_gate=(u == gate),
+        for u in subtree_[subroot]:
+            u_is_subroot=(u == subroot),
             for v in A[u]:
                 target_load = len(subtree_[v])
-                target_gate = feeder_of[v]
-                if (target_gate in forbidden or target_load > load_left):
+                sr_v = subroot_[v]
+                if (sr_v in forbidden or target_load > load_left):
                     edges2discard.append((u, v))
                 else:
-                    subtree_choices.add(target_gate)
-                    edges2examine.append((u, v, u_is_gate, target_load,
-                                          target_gate))
+                    subtree_choices.add(sr_v)
+                    edges2examine.append((u, v, u_is_subroot, target_load,
+                                          sr_v))
         # discard useless edges
         A.remove_edges_from(edges2discard)
         #  rel_component_excess = num_components/min_components - 1
         num_edge_alt = len(edges2examine)
         num_subtrees = len(subtree_choices)
-        for u, v, u_is_gate, target_load, target_gate in edges2examine:
-            target_root = A.nodes[target_gate]['root']
+        for u, v, u_is_subroot, target_load, sr_v in edges2examine:
+            target_root = A.nodes[sr_v]['root']
             extent = A[u][v]['length']
             vec_uv = VertexC[v] - VertexC[u]
             vec_ur = VertexC[root] - VertexC[u]
@@ -162,84 +164,84 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                 num_edge_alt=num_edge_alt,
                 num_subtrees=num_subtrees,
                 # edge features
-                u_is_gate=u_is_gate,
-                v_is_gate=(v == target_gate),
+                u_is_subroot=u_is_subroot,
+                v_is_subroot=(v == sr_v),
                 load=load,
                 target_load=target_load,
                 extent=extent,
-                gate_d2root=gate_d2root,
-                target_d2root=d2roots[target_gate, target_root],
+                sr_d2root=sr_d2root,
+                target_d2root=d2roots[sr_v, target_root],
                 cos=cos_uv_ur,
                 ), u, v)
             )
         if not choices:
-            return None, 0., edges2discard
+            return None, 0.
         choices.sort()
         tradeoff, *edge = choices[0]
         return edge, tradeoff
 
-    def find_option4gate(gate):
-        debug('<find_option4gate> starting... gate = <%s>', F[gate])
+    def enqueue_best_union(subroot):
+        debug('<enqueue_best_union> starting... subroot = <%s>', F[subroot])
         if edges2ban:
             debug('<<<<<<<edges2ban>>>>>>>>>>> _%d_', len(edges2ban))
         while edges2ban:
             # edge2ban = edges2ban.popleft()
             edge2ban = edges2ban.pop()
-            ban_queued_edge(*edge2ban)
+            ban_queued_union(*edge2ban)
         # () get component expansion edge with weight
-        edge, tradeoff = component_merging_edge(gate)
+        edge, tradeoff = get_best_union(subroot)
         if edge is not None:
-            pq.add(tradeoff, gate, edge)
-            ComponIn[feeder_of[edge[1]]].add(gate)
-            debug('<pushed> g2drop <%s>, «%s–%s», tradeoff = %.3f',
-                  F[gate], F[edge[0]], F[edge[1]], tradeoff)
+            pq.add(tradeoff, subroot, edge)
+            ComponIn[subroot_[edge[1]]].add(subroot)
+            debug('<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
+                  F[subroot], F[edge[0]], F[edge[1]], tradeoff)
         else:
-            # no viable edge is better than gate for this node
-            debug('<cancelling> %s', F[gate])
-            if gate in pq.tags:
-                pq.cancel(gate)
+            # no viable edge is better than subroot for this node
+            debug('<cancelling> %s', F[subroot])
+            if subroot in pq.tags:
+                pq.cancel(subroot)
 
-    def ban_queued_edge(g2drop, u, v):
+    def ban_queued_union(sr_u, u, v):
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            warn('<< UNLIKELY <ban_queued_edge()> «%s–%s» not in A.edges >>',
+            warn('<< UNLIKELY <ban_queued_union()> «%s–%s» not in A.edges >>',
                   F[u], F[v])
-        g2keep = feeder_of[v]
+        sr_v = subroot_[v]
         # TODO: think about why a discard was needed
-        ComponIn[g2keep].discard(g2drop)
-        # gates2upd8.appendleft(g2drop)
-        gates2upd8.add(g2drop)
-        # find_option4gate(g2drop)
+        ComponIn[sr_v].discard(sr_u)
+        # stale_subtrees.appendleft(sr_u)
+        stale_subtrees.add(sr_u)
+        # enqueue_best_union(sr_u)
 
         # BEGIN: block to be simplified
         is_reverse = False
-        componin = g2keep in ComponIn[g2drop]
-        reverse_entry = pq.tags.get(g2keep)
+        componin = sr_v in ComponIn[sr_u]
+        reverse_entry = pq.tags.get(sr_v)
         if reverse_entry is not None:
             _, _, _, (s, t) = reverse_entry
             if (t, s) == (u, v):
                 # TODO: think about why a discard was needed
-                ComponIn[g2drop].discard(g2keep)
+                ComponIn[sr_u].discard(sr_v)
                 # this is assymetric on purpose (i.e. not calling
-                # pq.cancel(g2drop), because find_option4gate will do)
-                pq.cancel(g2keep)
-                find_option4gate(g2keep)
+                # pq.cancel(sr_u), because enqueue_best_union will do)
+                pq.cancel(sr_v)
+                enqueue_best_union(sr_v)
                 is_reverse = True
 
         # if this if is not visited, replace the above with ComponIn check
-        # this means that if g2keep is to also merge with g2drop, then the
+        # this means that if sr_v is to also merge with sr_u, then the
         # edge of the merging must be (v, u)
         if componin != is_reverse:
             print(f'«{F[u]}–{F[v]}», '
-                  f'g2drop <{F[g2drop]}>, g2keep <{F[g2keep]}> '
+                  f'sr_u <{F[sr_u]}>, sr_v <{F[sr_v]}> '
                   f'componin: {componin}, is_reverse: {is_reverse}')
 
         # END: block to be simplified
 
     # initialize pq
-    for t in range(T):
-        find_option4gate(t)
+    for t in _T:
+        enqueue_best_union(t)
 
     loop = True
     # BEGIN: main loop
@@ -250,23 +252,23 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             break
         debug('[%d]', i)
         # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
-        if gates2upd8:
-            debug('gates2upd8: %s', tuple(F[gate] for gate in gates2upd8))
-        for gate2upd8 in gates2upd8:
-            # find_option4gate(gates2upd8.popleft())
-            find_option4gate(gate2upd8)
-        gates2upd8.clear()
+        if stale_subtrees:
+            debug('stale_subtrees: %s', tuple(F[sr] for sr in stale_subtrees))
+        for stale_subtree in stale_subtrees:
+            # enqueue_best_union(stale_subtrees.popleft())
+            enqueue_best_union(stale_subtree)
+        stale_subtrees.clear()
         if not pq:
             # finished
             break
-        g2drop, (u, v) = pq.top()
-        debug('<popped> «%s–%s», g2drop: <%s>', F[u], F[v], F[g2drop])
+        sr_u, (u, v) = pq.top()
+        debug('<popped> «%s–%s», sr_u: <%s>', F[u], F[v], F[sr_u])
 
         # TODO: main loop should do only
         # - pop from pq
         # - check if adding edge would block some component
         # - add edge
-        # - call find_option4gate for everyone affected
+        # - call enqueue_best_union for everyone affected
 
         # check if (u, v) crosses an existing edge
         # look for crossing edges within the neighborhood of (u, v)
@@ -276,42 +278,43 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         if eX:
             debug('<edge_crossing> discarding «%s–%s»: would cross %s',
                   F[u], F[v], tuple((F[s], F[t]) for s, t in eX))
-            # abort_edge_addition(g2drop, u, v)
+            # abort_edge_addition(sr_u, u, v)
             prevented_crossings += 1
-            ban_queued_edge(g2drop, u, v)
+            ban_queued_union(sr_u, u, v)
             continue
 
-        g2keep = feeder_of[v]
-        root = A.nodes[g2keep]['root']
+        sr_v = subroot_[v]
+        root = A.nodes[sr_v]['root']
         subtree = subtree_[v]
 
         # assess the union's angle span
-        keepLo, keepHi = ComponLoLim[g2keep], ComponHiLim[g2keep]
-        dropLo, dropHi = ComponLoLim[g2drop], ComponHiLim[g2drop]
+        keepLo, keepHi = subtree_span_[sr_v]
+        dropLo, dropHi = subtree_span_[sr_u]
         newHi = dropHi if angle(*VertexC[[keepHi, root, dropHi]]) > 0 else keepHi
         newLo = dropLo if angle(*VertexC[[dropLo, root, keepLo]]) > 0 else keepLo
+        # update the component's angle span
+        subtree_span_[sr_v] = newLo, newHi
         debug(f'<angle_span> //%s:%s//', F[newLo], F[newHi])
 
         # edge addition starts here
-        ComponLoLim[g2keep], ComponHiLim[g2keep] = newLo, newHi
         subtree.extend(subtree_[u])
-        S.remove_edge(A.nodes[u]['root'], g2drop)
-        log.append((i, 'remE', (A.nodes[u]['root'], g2drop)))
+        S.remove_edge(A.nodes[u]['root'], sr_u)
+        log.append((i, 'remE', (A.nodes[u]['root'], sr_u)))
 
-        g2keep_entry = pq.tags.get(g2keep)
-        if g2keep_entry is not None:
-            _, _, _, (_, t) = g2keep_entry
-            # print('node', F[t], 'gate', F[feeder_of[t]])
-            ComponIn[feeder_of[t]].remove(g2keep)
+        sr_v_entry = pq.tags.get(sr_v)
+        if sr_v_entry is not None:
+            _, _, _, (_, t) = sr_v_entry
+            # print('node', F[t], 'subroot', F[subroot_[t]])
+            ComponIn[subroot_[t]].remove(sr_v)
         # TODO: think about why a discard was needed
-        ComponIn[g2keep].discard(g2drop)
+        ComponIn[sr_v].discard(sr_u)
 
-        # assign root, gate and subtree to the newly added terminals
+        # assign root, subroot and subtree to the newly added terminals
         for t in subtree_[u]:
             A.nodes[t]['root'] = root
-            feeder_of[t] = g2keep
+            subroot_[t] = sr_v
             subtree_[t] = subtree
-        debug('<add edge> «%s–%s» gate <%s>', F[u], F[v], F[g2keep])
+        debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
         if pq:
             debug('heap top: <%s>, «%s» %.3f', F[pq[0][-2]],
                   tuple(F[x] for x in pq[0][-1]), pq[0][0])
@@ -319,7 +322,7 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             debug('heap EMPTY')
         #  G.add_edge(u, v, **A.edges[u, v])
         S.add_edge(u, v)
-        is_subroot_[g2drop] = False
+        is_subroot_[sr_u] = False
         num_components -= 1
         log.append((i, 'addE', (u, v)))
         # remove from consideration edges internal to subtrees
@@ -328,39 +331,39 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         # finished adding the edge, now check the consequences
         capacity_left = capacity - len(subtree_[u]) - len(subtree_[v])
         if capacity_left > 0:
-            for gate in list(ComponIn[g2keep]):
-                if len(subtree_[gate]) > capacity_left:
+            for subroot in list(ComponIn[sr_v]):
+                if len(subtree_[subroot]) > capacity_left:
                     # TODO: think about why a discard was needed
-                    # ComponIn[g2keep].remove(gate)
-                    ComponIn[g2keep].discard(gate)
-                    # find_option4gate(gate)
-                    # gates2upd8.append(gate)
-                    gates2upd8.add(gate)
-            for gate in ComponIn[g2drop] - ComponIn[g2keep]:
-                if len(subtree_[gate]) > capacity_left:
-                    # find_option4gate(gate)
-                    # gates2upd8.append(gate)
-                    gates2upd8.add(gate)
+                    # ComponIn[sr_v].remove(subroot)
+                    ComponIn[sr_v].discard(subroot)
+                    # enqueue_best_union(subroot)
+                    # stale_subtrees.append(subroot)
+                    stale_subtrees.add(subroot)
+            for subroot in ComponIn[sr_u] - ComponIn[sr_v]:
+                if len(subtree_[subroot]) > capacity_left:
+                    # enqueue_best_union(subroot)
+                    # stale_subtrees.append(subroot)
+                    stale_subtrees.add(subroot)
                 else:
-                    ComponIn[g2keep].add(gate)
-            # ComponIn[g2drop] = None
-            # find_option4gate(g2keep)
-            # gates2upd8.append(g2keep)
-            gates2upd8.add(g2keep)
+                    ComponIn[sr_v].add(subroot)
+            # ComponIn[sr_u] = None
+            # enqueue_best_union(sr_v)
+            # stale_subtrees.append(sr_v)
+            stale_subtrees.add(sr_v)
         else:
             # max capacity reached: subtree full
-            S.add_edge(g2keep, root)
-            is_subroot_[g2keep] = False
-            if g2keep in pq.tags:  # "if" required because of i=0 gates
-                pq.cancel(g2keep)
+            S.add_edge(sr_v, root)
+            is_subroot_[sr_v] = False
+            if sr_v in pq.tags:  # "if" required because of i=0 gates
+                pq.cancel(sr_v)
             # don't consider connecting to this full subtree nodes anymore
             A.remove_nodes_from(subtree)
-            for gate in ComponIn[g2drop] | ComponIn[g2keep]:
-                # find_option4gate(gate)
-                # gates2upd8.append(gate)
-                gates2upd8.add(gate)
-            # ComponIn[g2drop] = None
-            # ComponIn[g2keep] = None
+            for subroot in ComponIn[sr_u] | ComponIn[sr_v]:
+                # enqueue_best_union(subroot)
+                # stale_subtrees.append(subroot)
+                stale_subtrees.add(subroot)
+            # ComponIn[sr_u] = None
+            # ComponIn[sr_v] = None
     # END: main loop
 
     # add the feeders for sub-capacity components
