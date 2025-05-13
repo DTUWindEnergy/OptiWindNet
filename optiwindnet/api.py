@@ -198,12 +198,6 @@ class WindFarmNetwork:
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
         return gplot(G_tentative, **kwargs)
-
-    def get_network(self):
-        """Returns the network edges with cable data."""
-        net_graph = self.G.edges(data=True)
-        net = list(net_graph)  # Keep it as a list of tuples
-        return net
     
     def terse_links(self):
         '''Returns S links'''
@@ -259,7 +253,7 @@ class WindFarmNetwork:
 
         return self.G
 
-    def get_network_array(self):
+    def get_network(self):
         """Returns the network edges with cable data."""
         network_array_type = np.dtype([
             ('src', int),
@@ -276,36 +270,9 @@ class WindFarmNetwork:
                 yield s, t, *(edgeD[key] for key in keys)
 
 
-        network_array = np.fromiter(iter_edges(self.G, network_array_type.names[2:]),
+        network = np.fromiter(iter_edges(self.G, network_array_type.names[2:]),
                                 dtype=network_array_type, count=self.G.number_of_edges())
-        return network_array
-
-    def _set_coordinates(self, turbinesC, substationsC):
-        """Updates the coordinates of turbines and substationsC."""
-
-        info('wfn._set_coordinates is not checking for feasiblity')
-
-        if not hasattr(self.L, 'graph') or 'VertexC' not in self.L.graph:
-            error("Graph L does not contain 'VertexC' attribute.")
-        
-        # Update coordinates
-        if turbinesC is not None:
-            self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
-            self.G.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
-        
-        if substationsC is not None:
-            self.L.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
-            self.G.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
-
-        # Update length
-        VertexC = self.G.graph['VertexC']
-        for u, v, data in self.G.edges(data=True):
-            coord_u = VertexC[u, :]
-            coord_v = VertexC[v, :]
-            data['length'] = np.linalg.norm(np.array(coord_u) - np.array(coord_v))
-        
-        # Update cost
-        assign_cables(self.G, self.cables)
+        return network
 
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
@@ -404,7 +371,6 @@ class OptiWindNetSolver(ABC):
     def __call__(self, turbinesC=None, substationsC=None, verbose=False, **kwargs):
         """Make the instance callable, calling optimize() internally."""
         return self.optimize(turbinesC=turbinesC, substationsC=substationsC, verbose=verbose, **kwargs)  
-
 
 class Heuristic(OptiWindNetSolver):
     def __init__(self, solver='Esau_Williams', maxiter=10000, verbose=False, **kwargs):
