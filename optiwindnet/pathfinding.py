@@ -710,13 +710,34 @@ class PathFinder():
         else:
             del G.graph['tentative']
 
+        D = clone_idx - T - B - C
+        detextra = G.size(weight='length')/self.predetour_length - 1
+        stunts_primes = G.graph.pop('stunts_primes', False)
+        if stunts_primes:
+            num_stunts = len(stunts_primes)
+            G = nx.relabel_nodes(G, {clone: clone - num_stunts for clone in
+                                     range(T + B, clone_idx)},
+                                 copy=False)
+            clone_idx -= num_stunts
+            B -= num_stunts
+            VertexC = G.graph['VertexC']
+            G.graph['VertexC'] = np.vstack((VertexC[:T + B], VertexC[-R:]))
+            if clone2prime:
+                for stunt, prime in enumerate(stunts_primes, start=T + B):
+                    try:
+                        while True:
+                            i = clone2prime.index(stunt)
+                            clone2prime[i] = prime
+                    except ValueError:
+                        continue
+            
         fnT = np.arange(R + clone_idx)
         fnT[T + B: clone_idx] = clone2prime
         fnT[-R:] = range(-R, 0)
-        D = clone_idx - T - B - C
-        G.graph.update(D=D, fnT=fnT)
-        detextra = G.size(weight='length')/self.predetour_length - 1
-        G.graph['detextra'] = detextra
+        G.graph.update(
+            B=B, D=D, fnT=fnT,
+            detextra=detextra,
+        )
         debug('<PathFinder: created %d detour vertices, total length changed '
               'by %.2f%%', D, 100*detextra)
         # TODO: there might be some lost contour clones that could be prunned
