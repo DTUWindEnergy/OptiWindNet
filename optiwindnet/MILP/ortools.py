@@ -84,10 +84,10 @@ class SolverORTools(Solver, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         storer = _SolutionStore(model)
+        for key, val in options.items():
+            setattr(solver.parameters, key, val)
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.relative_gap_limit = mip_gap
-        for key, val in options:
-            setattr(solver.parameters, key, val)
         solver.log_callback = print
         solver.parameters.log_search_progress = verbose
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
@@ -338,7 +338,7 @@ def topology_from_mip_sol(*, metadata: ModelMetadata,
       Graph topology from the solution.
     '''
     # in ortools, the solution is in the solver instance not in the model
-    S = nx.Graph()
+    S = nx.Graph(R=metadata.R, T=metadata.T)
     # Get active links and if flow is reversed (i.e. from small to big)
     rev_from_link = {(u, v): u < v
                      for (u, v), use in metadata.link_.items()

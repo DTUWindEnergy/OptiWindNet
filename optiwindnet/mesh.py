@@ -864,12 +864,16 @@ def make_planar_embedding(
                          VertexCʹ[-R:]))
 
     # Add length attribute to A's edges.
-    A_edges = (*P_A_edges, *diagonals)
-    source, target = zip(*A_edges)
-    # TODO: ¿use d2roots for root-incident edges? probably not worth it
-    A_edge_length = dict(
-        zip(A_edges, (length.item() for length in
-                      np.hypot(*(VertexC[source,] - VertexC[target,]).T))))
+    A_edges = np.array((*P_A_edges, *diagonals))
+    length_ = np.hypot(*(VertexC[A_edges[:, 0]] - VertexC[A_edges[:, 1]]).T)
+    is_terminal_ = A_edges >= 0
+    inter_terminal_mask = np.logical_and(is_terminal_[:, 0], is_terminal_[:, 1])
+    inter_terminal_clearance_ = length_[inter_terminal_mask]
+    inter_terminal_clearance_min = np.min(inter_terminal_clearance_).item()
+    inter_terminal_clearance_safe = np.quantile(inter_terminal_clearance_, 0.1).item()
+
+    A_edge_length = dict(zip(map(tuple, A_edges),
+                             (length.item() for length in length_)))
     nx.set_edge_attributes(A, A_edge_length, name='length')
 
     # ###############################################################
@@ -955,7 +959,6 @@ def make_planar_embedding(
             P_paths.add_edge(s, t)
 
     nx.set_edge_attributes(P_paths, A_edge_length, name='length')
-    #  for u, v in P_paths.edges - A_edge_length:
     for u, v, edgeD in P_paths.edges(data=True):
         if 'length' not in edgeD:
             edgeD['length'] = np.hypot(*(VertexC[u] - VertexC[v])).item()
@@ -1173,11 +1176,13 @@ def make_planar_embedding(
         # experimental attr
         norm_offset=norm_offset,
         norm_scale=norm_scale,
+        inter_terminal_clearance_min=inter_terminal_clearance_min,
+        inter_terminal_clearance_safe=inter_terminal_clearance_safe,
     )
     if obstacles:
         A.graph['obstacles'] = obstacles
     if stunts_primes:
-        A.graph['num_stunts'] = len(stunts_primes)
+        A.graph['stunts_primes'] = stunts_primes
     landscape_angle = L.graph.get('landscape_angle')
     if landscape_angle is not None:
         A.graph['landscape_angle'] = landscape_angle
