@@ -296,17 +296,21 @@ class WindFarmNetwork:
         vertexC = G.graph['VertexC']
         R = G.graph['R']
         T = G.graph['T']
+        D = G.graph.get('D', 0)
         N = len(vertexC)
-        gradients = np.zeros((N, 2))
+        gradients = np.zeros((N+D, 2))
 
         fnT = G.graph.get('fnT')
 
         for u, v in G.edges():
-            if fnT is not None:
-                u = fnT[u]
-                v = fnT[v]
+            if fnT is None:
+                u_fnt = u
+                v_fnt = v
+            else:
+                u_fnt = fnT[u]
+                v_fnt = fnT[v]
 
-            vec = vertexC[u] - vertexC[v]
+            vec = vertexC[u_fnt] - vertexC[v_fnt]
             norm = np.hypot(*vec)
 
             if norm < 1e-12:
