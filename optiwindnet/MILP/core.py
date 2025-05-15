@@ -2,7 +2,12 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import abc
-from enum import StrEnum, auto
+from enum import auto
+try:
+    from enum import StrEnum
+except ImportError:
+    # workaround for python < 3.11
+    from backports.strenum import StrEnum
 from typing import Any, Mapping
 from dataclasses import dataclass, asdict
 import networkx as nx
@@ -68,9 +73,9 @@ class ModelOptions(dict):
     def help(cls):
         for k, v in cls.hints.items():
             print(f'{k} in {{'
-                  f'{", ".join(f"\"{m}\"" for m in v.__members__.values()
-                               if m != 'default')}'
-                  f'}} default: {cls.hints[k].DEFAULT.value}\n'
+                  + ", ".join(f"\"{m}\"" for m in v.__members__.values()
+                              if m != 'default')
+                  + f'}} default: {cls.hints[k].DEFAULT.value}\n'
                   f'    {v.__doc__}\n')
 
 
