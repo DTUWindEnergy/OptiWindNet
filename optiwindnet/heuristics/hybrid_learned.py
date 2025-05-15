@@ -4,9 +4,14 @@
 import time
 import logging
 import math
+import pickle
+from enum import IntEnum
+from typing import Self
 
 import numpy as np
 import networkx as nx
+import torch
+import torch_geometric as pyg
 
 from ..geometric import angle, assign_root
 from ..crossings import edge_crossings
@@ -20,33 +25,120 @@ lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
+class LinkCount(IntEnum):
+    ONE_OR_TWO = 0
+    THREE_OR_FOUR = 1
+    FIVE_OR_SIX = 2
+    SEVEN_OR_EIGHT = 3
+    NINE_OR_MORE = 4
+
+    @classmethod
+    def encode(cls, count: int) -> Self:
+        return cls(min(4, (count - 1)//2))
+
+
+class UnionCount(IntEnum):
+    ONE = 0
+    TWO = 1
+    THREE = 2
+    FOUR = 3
+    FIVE = 4
+    SIX_OR_MORE = 5
+
+    @classmethod
+    def encode(cls, count: int) -> Self:
+        return cls(min(5, count - 1))
+
+
 class Appraiser():
+    features_changed_: list[bool]
+    num_feas_joins_: list[int | None]
+    num_feas_links_: list[int | None]
+    extent_min_: list[float | None]
+    dependencies_: list[list[int]]
 
     def __init__(self, A: nx.Graph, capacity: int):
         # problem features
-        self.capacity = capacity
-        self.T = A.graph['T']
+        self.capacity_12 = capacity/12
+        T = A.graph['T']
+        _T = range(T)
         # scale is the median of distances of terminals to their nearest root
         d2roots = A.graph['d2roots']
+        self.log_rel_root_dist_ = np.log(
+            d2roots/A.graph['inter_terminal_clearance_safe']
+        )
+        self.num_feas_joins_ = [None for _ in _T]
+        self.num_feas_links_ = [None for _ in _T]
+        self.extent_min_ = [None for _ in _T]
+        self.features_changed_ = [True for _ in _T]
+        self.dependencies_ = [[] for _ in _T]
         closest_root = np.argmin(d2roots, axis=1)
         self.scale = np.median(d2roots[:, closest_root])
         print(self.scale, d2roots.min(), d2roots.max())
+        # load pytorch model
+        model_path = '../../../../affairs/edge/hybrid/'
+        model_def = pickle.load(open(model_path + 'MLP_auc_957_θ3329.pkl', 'rb'))
+        model = pyg.nn.MLP(**model_def['config'])
+        model.load_state_dict(model_def['state'])
+        self.model = model
 
-    def appraise(
-        self, 
-        num_edge_alt,
-        num_subtrees,
-        # edge features
-        u_is_subroot,
-        v_is_subroot,
-        load,
-        target_load,
-        extent,
-        sr_d2root,
-        target_d2root,
-        cos,
-    ):
+    def set_component_features(self,):
         pass
+
+    def appraise(self, features_):
+        # rules for making an appraisal stale:
+        # - direct_neighbors: every subtree that has feas_links to one of the joined subtrees
+        # - indirect_neighbors: only if there is change in the target's (min_extent, feas_links_cat, feas_unions_cat)
+
+        #  't_is_subroot', stable
+        #  't_load_12', stable
+        #  't_span', stable
+        #  't_log_rel_extent', ? depends... 
+        #  't_log_rel_root_dist', stable
+        #  't_feas_links_cat_0..4', needs checking
+        #  't_feas_unions_cat_0..5', needs checking
+        #  features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
+        #  ['s_is_subroot',
+        #  't_is_subroot',
+        #  'capacity_12',
+        #  's_load_12',
+        #  't_load_12',
+        #  's_span',
+        #  't_span',
+        #  's_log_rel_extent',
+        #  't_log_rel_extent',
+        #  's_log_rel_root_dist',
+        #  't_log_rel_root_dist',
+        #  'union_span',
+        #  'union_rel_load',
+        #  'cos',
+        #  's_feas_links_cat_0..4',
+        #  't_feas_links_cat_0..4',
+        #  's_feas_unions_cat_0..5',
+        #  't_feas_unions_cat_0..5']
+        #  features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
+        features = torch.tensor(((
+            s_is_subroot,
+            t_is_subroot,
+            self.capacity_12,
+            s_load/12,  # s_load_12
+            t_load/12,  # t_load_12
+            self.span[u],
+            self.span[v],
+            np.log(extent/self.s_extent_min),  # s_rel_extent
+            np.log(extent/self.t_extent_min),  # t_rel_extent
+            np.log(s_subroot_d2root/self.inter_terminal_clearance_safe),  # s_rel_root_dist
+            np.log(t_subroot_d2root/self.inter_terminal_clearance_safe),  # t_rel_root_dist
+            union_span,
+            union_load/self.capacity,  # union_rel_load
+            cos,
+            LinkCount.encode(self.s_num_feas_links),  # s_num_feas_links_cat
+            LinkCount.encode(self.t_num_feas_links),  # t_num_feas_links_cat
+            LinkCount.encode(self.s_num_feas_unions),  # s_num_feas_unions_cat
+            LinkCount.encode(self.t_num_feas_unions),  # t_num_feas_unions_cat
+        ),))
+        appraisal = model(features)
+
         
 
 def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
@@ -76,7 +168,6 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     assign_root(A)
 
     # removing root nodes from A to speedup enqueue_best_union
-    # this may be done because G already starts with gates
     A.remove_nodes_from(roots)
     # END: prepare auxiliary graph with all allowed edges and metrics
 
@@ -122,63 +213,85 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
     # <prevented_crossing>: counter for edges discarded due to crossings
     prevented_crossings = 0
     log = []
+
+    appraiser = Appraiser(A, capacity)
     # END: helper data structures
 
-    def get_best_union(subroot, forbidden=None):
+    def get_feas_links(subroot, forbidden=None):
         # gather all the edges leaving the subtree of subroot
         if forbidden is None:
             forbidden = set()
         forbidden.add(subroot)
         choices = []
-        sr_d2root = d2roots[subroot, A.nodes[subroot]['root']]
+        root = A.nodes[subroot]['root']
+        sr_d2root = d2roots[subroot, root]
+        rC = VertexC[root]
         load = len(subtree_[subroot])
         load_left = capacity - load
-        edges2discard = []
-        edges2examine = []
-        subtree_choices = set()
-        for u in subtree_[subroot]:
-            u_is_subroot=(u == subroot),
-            for v in A[u]:
+        unfeas_links = []
+        feas_links = []
+        feas_features_ = []
+        feas_unions = set()
+        extent_min = float('inf')
+        for u in (t for t in subtree_[subroot] if A[t]):
+            u_is_subroot=(u == subroot)
+            uC = VertexC[u]
+            vec_ur = rC - uC
+            d_ur = np.hypot(*vec_ur)
+            for v, uvD in A[u].items():
                 target_load = len(subtree_[v])
                 sr_v = subroot_[v]
                 if (sr_v in forbidden or target_load > load_left):
-                    edges2discard.append((u, v))
+                    unfeas_links.append((u, v))
                 else:
-                    subtree_choices.add(sr_v)
-                    edges2examine.append((u, v, u_is_subroot, target_load,
-                                          sr_v))
+                    feas_unions.add(sr_v)
+                    extent = uvD['length']
+                    vec_uv = VertexC[v] - uC
+                    cos_uv_ur = (np.dot(vec_uv, vec_ur)/d_ur/np.hypot(*vec_uv))
+                    feas_links.append((u, v))
+                    feas_features_.append((
+                        sr_u, sr_v,
+                        u_is_subroot, (v == sr_v),
+                        load, target_load,
+                        extent, cos_uv_ur
+                    ))
+                    extent_min = min(extent_min, extent)
         # discard useless edges
-        A.remove_edges_from(edges2discard)
+        A.remove_edges_from(unfeas_links)
         #  rel_component_excess = num_components/min_components - 1
-        num_edge_alt = len(edges2examine)
-        num_subtrees = len(subtree_choices)
-        for u, v, u_is_subroot, target_load, sr_v in edges2examine:
-            target_root = A.nodes[sr_v]['root']
-            extent = A[u][v]['length']
-            vec_uv = VertexC[v] - VertexC[u]
-            vec_ur = VertexC[root] - VertexC[u]
-            cos_uv_ur = (np.dot(vec_uv, vec_ur)
-                         /np.hypot(*vec_uv)/np.hypot(*vec_ur))
-            choices.append((appraiser.appraise(
-                # subtree-wide features
-                num_edge_alt=num_edge_alt,
-                num_subtrees=num_subtrees,
-                # edge features
-                u_is_subroot=u_is_subroot,
-                v_is_subroot=(v == sr_v),
-                load=load,
-                target_load=target_load,
-                extent=extent,
-                sr_d2root=sr_d2root,
-                target_d2root=d2roots[sr_v, target_root],
-                cos=cos_uv_ur,
-                ), u, v)
-            )
-        if not choices:
-            return None, 0.
-        choices.sort()
-        tradeoff, *edge = choices[0]
-        return edge, tradeoff
+        stale_subtrees |= appraiser.dependencies_[subroot]
+        dropped_dependencies = appraiser.dependencies_[subroot] - feas_unions
+        for sr in dropped_dependencies:
+            appraiser.dependencies_[sr].remove(subroot)
+            stale_subtrees.add(sr)
+        cat_feas_unions = UnionCount.encode(len(feas_unions))
+        appraiser.dependencies_[subroot] = feas_unions
+        for sr in feas_unions:
+            appraiser.dependencies_[sr].add(subroot)
+        cat_feas_links = LinkCount.encode(len(feas_links))
+        changed = (
+            (cat_feas_links != appraiser.cat_feas_links_[subroot])
+            or (cat_feas_unions != appraiser.cat_feas_unions_[subroot])
+            or (extent_min != appraiser.extent_min_[subroot])
+        )
+        if changed:
+            stale_subtrees |= appraiser.dependencies_[subroot]
+            appraiser.changed_[subroot] = changed
+            appraiser.cat_feas_unions_[subroot] = cat_feas_unions
+            appraiser.cat_feas_links_[subroot] = cat_feas_links
+            appraiser.extent_min_[subroot] = extent_min
+        return feas_links, feas_features_
+
+    def propagate_join_(sr_u, sr_v):
+        direct_stale = appraiser.dependencies_[sr_u]|appraiser.dependencies_[sr_v]
+
+
+    def appraise_feasible(feas_links, feas_features_):
+        appraisals = appraiser.appraise(feas_features_)
+        # TODO: the appraiser calls often operate on a subset of feasible links,
+        # so we need to join the still-good appraisals with the newly updated ones
+        best_idx = np.argmin(appraisals)
+        return feas_links[best_idx], appraisals[best_idx]
 
     def enqueue_best_union(subroot):
         debug('<enqueue_best_union> starting... subroot = <%s>', F[subroot])
@@ -189,7 +302,7 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             edge2ban = edges2ban.pop()
             ban_queued_union(*edge2ban)
         # () get component expansion edge with weight
-        edge, tradeoff = get_best_union(subroot)
+        feas_links, feas_features = get_feas_links(subroot)
         if edge is not None:
             pq.add(tradeoff, subroot, edge)
             ComponIn[subroot_[edge[1]]].add(subroot)
@@ -298,7 +411,10 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
 
         # edge addition starts here
         subtree.extend(subtree_[u])
+
+        # this is wrong, the feeder removed should be the longest one
         S.remove_edge(A.nodes[u]['root'], sr_u)
+
         log.append((i, 'remE', (A.nodes[u]['root'], sr_u)))
 
         sr_v_entry = pq.tags.get(sr_v)
@@ -354,7 +470,7 @@ def hybrid_learned(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             # max capacity reached: subtree full
             S.add_edge(sr_v, root)
             is_subroot_[sr_v] = False
-            if sr_v in pq.tags:  # "if" required because of i=0 gates
+            if sr_v in pq.tags:  # "if" required because of i=0 commits
                 pq.cancel(sr_v)
             # don't consider connecting to this full subtree nodes anymore
             A.remove_nodes_from(subtree)
