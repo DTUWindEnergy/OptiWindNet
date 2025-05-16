@@ -4,9 +4,9 @@ import numpy as np
 from optiwindnet.api import WindFarmNetwork
 
 # Define input data
-cables = [(100, 1.0)]
-turbinesC = np.array([[0, 0], [1, 1]])
-substationsC = np.array([[5, 5]])
+cables =[(2, 10), (5, 20)]
+turbinesC = np.array([[0, 0], [-1, 2]])
+substationsC = np.array([[1, 1]])
 
 # Provide a valid border to avoid empty geometry issues
 borderC = np.array([

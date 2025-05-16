@@ -15,11 +15,17 @@ def wf_network_fixture():
 # ---------- Initialization & Validation ----------
 
 def test_valid_initialization():
-    cables = [(100, 1.0)]
-    turbinesC = np.array([[0, 0]])
+    cables =[(2, 10), (5, 20)]
+    turbinesC = np.array([[0, 0], [-1, 2]])
     substationsC = np.array([[1, 1]])
-    wf_network = WindFarmNetwork(cables, turbinesC=turbinesC, substationsC=substationsC)
-    assert wf_network.cables == cables
+    wfn = WindFarmNetwork(turbinesC=turbinesC, substationsC=substationsC, cables=cables)
+    assert wfn.cables == cables
+    assert wfn.cables_capacity == 5
+    assert wfn.L == loaded_L
+    assert wfn.A == loaded_A
+    assert wfn.P == loaded_P
+    assert wfn.S == None
+    assert wfn.G == None
 
 def test_invalid_cables_type():
     with pytest.raises(Exception):
@@ -121,3 +127,7 @@ def test_get_network_returns_array(wf_network_fixture):
 def test_repr_svg_returns_string(wf_network_fixture):
     svg = wf_network_fixture._repr_svg_()
     assert isinstance(svg, str) or svg is not None
+
+
+test_valid_initialization()
+test_invalid_cables_type()

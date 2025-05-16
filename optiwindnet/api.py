@@ -61,7 +61,7 @@ class WindFarmNetwork:
 
     def __init__(self, cables, turbinesC=None, substationsC=None,
                  borderC=None, obstaclesC=None,
-                 name='', handle='', L=None, router=None, buffer_dist = 0, **kwargs):
+                 name='', handle='', L=None, router=None, buffer_dist = 0):
 
         # Default router if none provided
         if router is None:
@@ -95,10 +95,6 @@ class WindFarmNetwork:
 
         # Planar embedding
         self.P, self.A = make_planar_embedding(L)
-
-        # Geometry inputs
-        self.borderC = borderC
-        self.obstaclesC = obstaclesC
 
         # Graph/network placeholders and status flags
         self.S = None
