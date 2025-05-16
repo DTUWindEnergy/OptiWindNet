@@ -311,11 +311,7 @@ class WindFarmNetwork:
             vec *= cable_costs
 
         np.add.at(gradients[:, 0], _u, vec[:, 0])
-        np.add.at(gradients[:, 1], _v, vec[:, 1])
-        # probably this would work instead of all this indexing
-        #  _uv = fnT[np.array(G.edges)]
-        #  np.add.at(_gradients, _uv, vec)
-        #  assert (_gradients == gradients).all()
+        np.add.at(gradients[:, 1], _v, -vec[:, 1])
 
         # wind turbines
         gradients_wt = gradients[:T]
