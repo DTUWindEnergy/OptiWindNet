@@ -231,8 +231,10 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     VertexC, d2roots, diagonals = (A.graph[k] for k in
                                    ('VertexC', 'd2roots', 'diagonals'))
     G = nx.create_empty_copy(A)
-    for k in 'capacity has_loads max_load creator solver_details'.split():
-        G.graph[k] = S.graph[k]
+    for k in ('capacity', 'has_loads', 'max_load', 'creator', 'solver_details'):
+        value = S.graph.get(k)
+        if value is not None:
+            G.graph[k] = value
     nx.set_node_attributes(G, S.nodes)
     # remove supertriangle coordinates from VertexC
     G.graph['VertexC'] = np.vstack((VertexC[:-R - 3], VertexC[-R:]))
