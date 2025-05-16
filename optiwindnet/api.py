@@ -278,52 +278,49 @@ class WindFarmNetwork:
         if gradient_type.lower() not in ['cost', 'length']:
             raise ValueError("gradient_type should be either 'cost' or 'length'")         
 
-        if turbinesC is None and substationsC is None:
-            G = self.G
-        else:
+        G = self.G
+        VertexC = G.graph['VertexC']
+        if turbinesC is not None or substationsC is not None:
             info('wfn.gradient is not checking for the feasibility of the layout with new coordinates!')
-            G = copy.deepcopy(self.G)
+            VertexC = VertexC.copy()
             if turbinesC is not None:
-                G.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
-
+                VertexC[:turbinesC.shape[0], :] = turbinesC
             if substationsC is not None:
-                G.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
+                VertexC[-substationsC.shape[0]:, :] = substationsC
 
-        vertexC = G.graph['VertexC']
         R = G.graph['R']
         T = G.graph['T']
-        D = G.graph.get('D', 0)
-        N = len(vertexC)
-        gradients = np.zeros((N+D, 2))
+        gradients = np.zeros_like(VertexC)
 
         fnT = G.graph.get('fnT')
+        if fnT is not None:
+            _u, _v = fnT[np.array(G.edges)].T
+        else:
+            _u, _v = np.array(G.edges).T
+        vec = VertexC[_u] - VertexV[_v]
+        norm = np.hypot(*vec.T)
+        # suppress the contributions of zero-length edges
+        norm[norm < 1e-12] = 1.
+        vec /= norm[:, None]
+        
+        if gradient_type.lower() == 'cost':
+            cable_costs = np.fromiter(
+                (G.graph['cables'][cable] for *_, cable in G.edges(data='cable')),
+                dtype=np.float64, count=G.number_of_edges()
+            )
+            vec *= cable_costs
 
-        for u, v in G.edges():
-            if fnT is None:
-                u_fnt = u
-                v_fnt = v
-            else:
-                u_fnt = fnT[u]
-                v_fnt = fnT[v]
-
-            vec = vertexC[u_fnt] - vertexC[v_fnt]
-            norm = np.hypot(*vec)
-
-            if norm < 1e-12:
-                continue  # Skip zero-length edges
-
-            gradinc = vec / norm
-
-            if gradient_type.lower() == 'cost':
-                gradinc *= G.graph['cables'][G[u][v]['cable']][1]
-
-            gradients[u] += gradinc
-            gradients[v] -= gradinc
+        np.add.at(gradients[:, 0], _u, vec[:, 0])
+        np.add.at(gradients[:, 1], _v, vec[:, 1])
+        # probably this would work instead of all this indexing
+        #  _uv = fnT[np.array(G.edges)]
+        #  np.add.at(_gradients, _uv, vec)
+        #  assert (_gradients == gradients).all()
 
         # wind turbines
         gradients_wt = gradients[:T]
         # substations
-        gradients_ss = gradients[N - R:]
+        gradients_ss = gradients[-R:]
 
         return gradients_wt, gradients_ss
 
