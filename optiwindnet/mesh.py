@@ -158,7 +158,8 @@ def _P_from_halfedge_pack(halfedge_pack: tuple[np.ndarray, np.ndarray]) \
 
 def _hull_processor(P: nx.PlanarEmbedding, T: int,
                     supertriangle: tuple[int, int, int],
-                    vertex2conc_id_map: dict[int, int]) \
+                    vertex2conc_id_map: dict[int, int],
+                    num_holes: int) \
         -> tuple[list[int], list[tuple[int, int]], set[tuple[int, int]]]:
     '''Find the convex hull and supertriangle-incident edges to remove.
 
@@ -195,8 +196,9 @@ def _hull_processor(P: nx.PlanarEmbedding, T: int,
                 elif v == end:
                     to_remove.append((pivot, v))
                     debug('del_sup %d %d', pivot, v)
-                if (vertex2conc_id_map.get(u, -1)
-                        == vertex2conc_id_map.get(v, -2)):
+                conc_id_u = vertex2conc_id_map.get(u)
+                if ((conc_id_u == vertex2conc_id_map.get(v, -1))
+                        and (conc_id_u >= num_holes)):
                     to_remove.append((u, v))
                     conc_outer_edges.add((u, v) if u < v else (v, u))
                     debug('del_int %d %d', u, v)
@@ -535,11 +537,12 @@ def make_planar_embedding(
     vertex2conc_id_map = {border_vertex_from_xy[xy]: i
                           for i, ring in enumerate(holes)
                           for xy in ring.coords[:-1]}
+    num_holes = len(holes)
     # then concavities
     if len(concavities) <= 1:
         vertex2conc_id_map |= {
             border_vertex_from_xy[xy]: i
-            for i, ring in enumerate(concavities, start=len(holes))
+            for i, ring in enumerate(concavities, start=num_holes)
             for xy in ring.coords[:-1]
         }
     else: # multiple concavities
@@ -865,7 +868,7 @@ def make_planar_embedding(
     #          P, T, B + 3, VertexC, max_tri_AR=max_tri_AR)
 
     convex_hull, to_remove, conc_outer_edges = _hull_processor(
-            P, T, supertriangle, vertex2conc_id_map)
+            P, T, supertriangle, vertex2conc_id_map, num_holes)
     P.remove_edges_from(to_remove)
     P_edges.difference_update((u, v) if u < v else (v, u)
                               for u, v in to_remove)
@@ -952,9 +955,10 @@ def make_planar_embedding(
                 # The vertex is kept if the border angle and the path angle
                 # point to the same side. Otherwise, remove the vertex.
                 s, b, t = path[i:i + 3]
-                # skip to shortcut if b is a neighbor of the supertriangle
-                if all(n not in P[b] for n in supertriangle):
-                    b_conc_id = vertex2conc_id_map[b]
+                b_conc_id = vertex2conc_id_map[b]
+                # skip to shortcut if b is in a concavity and is a neighbor of
+                # the supertriangle
+                if b_conc_id < num_holes or all(n not in P[b] for n in supertriangle):
                     debug('s: %s; b: %s; t: %s; b_conc_id: %s', F[s], F[b], F[t], b_conc_id)
                     debug([(F[n], vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
                     nbs = P.neighbors_cw_order(b)
