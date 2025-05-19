@@ -310,8 +310,8 @@ class WindFarmNetwork:
                             )
             vec *= cable_costs[:, None]
 
-        np.add.at(gradients[:, 0], _u, vec[:, 0])
-        np.subtract.at(gradients[:, 1], _v, vec[:, 1])
+        np.add.at(gradients, _u, vec)
+        np.subtract.at(gradients, _v, vec)
 
         # wind turbines
         gradients_wt = gradients[:T]
