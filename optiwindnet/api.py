@@ -308,8 +308,6 @@ class WindFarmNetwork:
                                 (G.graph['cables'][cable]['cost'] for *_, cable in G.edges(data='cable')),
                                 dtype=np.float64, count=G.number_of_edges()
                             )
-            print(cable_costs)
-            print(cable_costs[:, None])
             vec *= cable_costs[:, None]
 
         np.add.at(gradients[:, 0], _u, vec[:, 0])
