@@ -13,7 +13,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Mapping
 from pathlib import Path
 import copy
-from matplotlib.path import Path
 import numpy as np
 import yaml
 import yaml_include
