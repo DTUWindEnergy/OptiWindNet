@@ -33,23 +33,20 @@ class Drawable():
     '''
     SVG generator for NetworkX's Graph.
     '''
-    borderE: list[svg.Element]
+    toplevelE: list[svg.Element]
+    featuresE: list[svg.Element]
     reusableE: list[svg.Element]
     edgesE: list[svg.Element]
     detoursE: list[svg.Element]
-    nodesE: list[svg.Element]
-    infoboxE: list[svg.Element]
-    toplevelE: list[svg.Element]
 
     def __init__(self, G: nx.Graph, *, landscape: bool = True,
-                 dark: bool | None = None, transparent: bool = True):
-        self.borderE = []
+                 dark: bool | None = None, transparent: bool = True,
+                 node_size: int = 12):
+        self.toplevelE = []
+        self.featuresE = []
         self.reusableE = []
         self.edgesE = []
         self.detoursE = []
-        self.nodesE = []
-        self.infoboxE = []
-        self.toplevelE = []
         self.G, self.landscape = G, landscape
         R, T, B = (G.graph[k] for k in 'RTB')
         self.R, self.T, self.B = R, T, B
@@ -60,9 +57,7 @@ class Drawable():
             fnT[-R:] = range(-R, 0)
         self.fnT = fnT
 
-        ##############################
-        # Coordinates transformation #
-        ##############################
+        # coordinates transformation
         G = self.G
         w, h = 1920, 1080
         margin = 30
@@ -96,14 +91,25 @@ class Drawable():
         VertexS = VertexS.round().astype(int)
         self.VertexS = VertexS
         self.bottom_right_anchor = dict(x=round(W*scale + margin), y=h - margin)
-        self.viewBox = svg.ViewBoxSpec(0, 0, w, h)
 
-        #######################
-        # Background elements #
-        #######################
+        # create SVG entity
+        self.svg = svg.SVG(
+            viewBox=svg.ViewBoxSpec(0, 0, w, h),
+            elements=self.toplevelE,
+        )
+        self.toplevelE.append(svg.Defs(elements=self.reusableE))
+
+        # background canvas
         if not transparent:
             # draw an opaque canvas the same size as the viewport
             self.toplevelE.append(svg.Rect(fill=c.bg_color, width=w, height=h))
+
+        # add the group for plot features at the top level, populate later
+        self.toplevelE.append(svg.G(
+            id=self.G.graph.get('handle', self.G.graph.get('name', 'handleless')),
+            elements=self.featuresE))
+
+        # border and obstacles
         border, obstacles, landscape_angle = (
             G.graph.get(k) for k in 'border obstacles landscape_angle'.split())
         # prepare obstacles
@@ -114,7 +120,7 @@ class Drawable():
                     'M' + ' '.join(str(c) for c in VertexS[obstacle].flat) + 'z')
         # border with obstacles as holes
         if border is not None:
-            self.borderE.append(svg.Path(
+            self.featuresE.append(svg.Path(
                 id='border', stroke=c.kind2color['border'], stroke_dasharray=[15, 7],
                 stroke_width=2, fill=c.border_face, fill_rule='evenodd',
                 # fill_rule "evenodd" is agnostic to polygon vertices orientation
@@ -124,6 +130,22 @@ class Drawable():
                     draw_obstacles
                 )),
             ))
+
+        # root nodes
+        root_side = round(1.77*node_size)
+        self.reusableE.append(
+            svg.Rect(id='oss', fill=c.root_face, stroke=c.root_edge,
+                     stroke_width=2, width=root_side, height=root_side)
+        )
+        self.roots_group = svg.G(id='OSSgrp', elements=[
+            svg.Use(href='#oss', x=VertexS[r, 0] - root_side/2,
+                    y=VertexS[r, 1] - root_side/2)
+            for r in range(-R, 0)])
+
+        # terminal nodes
+        self.reusableE.append(
+            svg.Circle(id='wtg', stroke=c.term_edge, stroke_width=2, r=node_size)
+        )
 
     def add_edges(self):
         fnT, c, VertexS = self.fnT, self.c, self.VertexS
@@ -148,6 +170,20 @@ class Drawable():
                 id='edges_' + edge_kind, stroke=c.kind2color[edge_kind],
                 stroke_width=4, **group_attrs, elements=lines,
             ))
+
+    def add_edge(self, u, v):
+        # for creating a stepreel
+        fnT, c, VertexS = self.fnT, self.c, self.VertexS
+        if not self.edgesE:
+            self.linksE = []
+            self.edgesE.append(svg.G(
+                id='links', stroke=c.kind2color['unspecified'],
+                stroke_width=4, elements=self.linksE,
+            ))
+        self.linksE.append(
+            svg.Line(x1=VertexS[fnT[u], 0], y1=VertexS[fnT[u], 1],
+                     x2=VertexS[fnT[v], 0], y2=VertexS[fnT[v], 1])
+        )
 
     def add_detours(self):
         G, R, T, B = self.G, self.R, self.T, self.B
@@ -189,37 +225,30 @@ class Drawable():
             )
         ))
 
-    def add_nodes(self, node_size: int = 12):
+    def add_terminals(self, unconnected_color_idx: int = 19):
         c, VertexS = self.c, self.VertexS
-        G, R, T = self.G, self.R, self.T
+        G, T = self.G, self.T
 
-        # reusable elements
-        root_side = round(1.77*node_size)
-        self.reusableE.extend((
-            svg.Circle(id='wtg', stroke=c.term_edge, stroke_width=2, r=node_size),
-            svg.Rect(id='oss', fill=c.root_face, stroke=c.root_edge, stroke_width=2,
-                     width=root_side, height=root_side),
-        ))
-
-        # nodes
         subtrees = defaultdict(list)
-        for n, sub in G.nodes(data='subtree', default=19):
+        for n, sub in G.nodes(data='subtree', default=unconnected_color_idx):
             if 0 <= n < T:
                 subtrees[sub].append(n)
-        terminals = []
+        terminalsE = []
         for sub, nodes in subtrees.items():
-            terminals.append(svg.G(
+            terminalsE.append(svg.G(
                 fill=c.colors[sub % len(c.colors)],
                 elements=[svg.Use(href='#wtg', x=VertexS[n, 0], y=VertexS[n, 1])
                           for n in nodes]))
-        self.nodesE.extend((
-            svg.G(id='WTGgrp', elements=terminals),
-            svg.G(id='OSSgrp', elements=[
-                svg.Use(href='#oss', x=VertexS[r, 0] - root_side/2,
-                        y=VertexS[r, 1] - root_side/2) for r in range(-R, 0)
-                ]
-            ),
-        ))
+        self.terminals_group = svg.G(id='WTGgrp', elements=terminalsE)
+
+    def add_terminals_ungrouped(self, unconnected_color_idx: int = 19):
+        # for creating a stepreel
+        T, c, VertexS = self.T, self.c, self.VertexS
+
+        terminalsE = [svg.Use(href='#wtg', x=VertexS[n, 0], y=VertexS[n, 1],
+                              fill=c.colors[unconnected_color_idx])
+                      for n in range(T)]
+        self.terminals_group = svg.G(id='WTGgrp', elements=terminalsE)
 
     def add_box(self, github_bugfix: bool = True):
         self.reusableE.append(svg.Filter(
@@ -241,36 +270,25 @@ class Drawable():
             desc_lines = [l.encode('ascii', 'xmlcharrefreplace').decode()
                           for l in desc_lines]
 
-        linesE: list[svg.Element] = [
+        text_linesE: list[svg.Element] = [
             svg.TSpan(x=self.bottom_right_anchor['x'],# dx=svg.Length(-0.2, 'em'),
                       dy=svg.Length((-1.3 if i else -0.), 'em'), text=line)
             for i, line in enumerate(desc_lines)
         ]
-        self.infoboxE.append(svg.Text(
-            **self.bottom_right_anchor, elements=linesE, fill=self.c.fg_color,
-            font_size=40, text_anchor='end', font_family='sans-serif',
+        self.toplevelE.append(svg.Text(
+            **self.bottom_right_anchor, elements=text_linesE, font_size=40,
+            fill=self.c.fg_color, text_anchor='end', font_family='sans-serif',
             filter='url(#bg_textbox)',
         ))
 
     def to_svg(self) -> str:
-        # elements should be added according to the desired z-order
-        graphElements = [*self.borderE, *self.edgesE, *self.detoursE,
-                         *self.nodesE]
-
-        self.toplevelE.extend((
-            svg.Defs(elements=self.reusableE),
-            svg.G(id=self.G.graph.get('handle', self.G.graph.get('name',
-                                                                 'handleless')),
-                  elements=graphElements),
-            *self.infoboxE,
+        self.featuresE.extend((
+            *self.edgesE,
+            *self.detoursE,
+            self.roots_group,
+            self.terminals_group,
         ))
-
-        # Aggregate all elements in the SVG figure.
-        out = svg.SVG(
-            viewBox=self.viewBox,
-            elements=self.toplevelE,
-        )
-        return out.as_str()
+        return self.svg.as_str()
 
 
 def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
@@ -297,12 +315,12 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     '''
 
     drawable = Drawable(G, landscape=landscape, dark=dark,
-                        transparent=transparent)
+                        transparent=transparent, node_size=node_size)
 
     drawable.add_edges()
     if G.graph.get('D', False):
         drawable.add_detours()
-    drawable.add_nodes(node_size=node_size)
+    drawable.add_terminals()
     if infobox and G.graph.get('has_loads', False):
         drawable.add_box(github_bugfix=github_bugfix)
 
