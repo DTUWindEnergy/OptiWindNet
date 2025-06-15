@@ -196,8 +196,8 @@ class Drawable():
         # reusable elements
         root_side = round(1.77*node_size)
         self.reusableE.extend((
-            svg.Circle(id='wtg', stroke=c.node_edge, stroke_width=2, r=node_size),
-            svg.Rect(id='oss', fill=c.root_color, stroke=c.border_face, stroke_width=2,
+            svg.Circle(id='wtg', stroke=c.term_edge, stroke_width=2, r=node_size),
+            svg.Rect(id='oss', fill=c.root_face, stroke=c.root_edge, stroke_width=2,
                      width=root_side, height=root_side),
         ))
 

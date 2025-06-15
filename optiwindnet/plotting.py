@@ -156,20 +156,20 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
             art.set_capstyle(edges_capstyle)
 
     # draw nodes
+    arts = nx.draw_networkx_nodes(
+        G, pos, ax=ax, nodelist=roots, linewidths=0.3, node_color=c.root_face,
+        edgecolors=c.root_edge, node_size=root_size, node_shape='s', label='OSS')
+    arts.set_clip_on(False)
+    arts = nx.draw_networkx_nodes(
+        G, pos, nodelist=range(T), edgecolors=c.term_edge, ax=ax, label='WTG',
+        node_color=node_colors, node_size=node_size, linewidths=0.3)
+    arts.set_clip_on(False)
     if D:
-        # draw circunferences around nodes that have Detour clones
+        # draw rings around nodes that have Detour clones
         arts = nx.draw_networkx_nodes(
             G, pos, ax=ax, nodelist=detour, alpha=0.4, edgecolors=c.detour_ring,
             node_color='none', node_size=detour_size, label='corner')
         arts.set_clip_on(False)
-    arts = nx.draw_networkx_nodes(
-        G, pos, ax=ax, nodelist=roots, linewidths=0.3, node_color=c.root_color,
-        edgecolors=c.node_edge, node_size=root_size, node_shape='s', label='OSS')
-    arts.set_clip_on(False)
-    arts = nx.draw_networkx_nodes(
-        G, pos, nodelist=range(T), edgecolors=c.node_edge, ax=ax, label='WTG',
-        node_color=node_colors, node_size=node_size, linewidths=0.3)
-    arts.set_clip_on(False)
 
     # draw labels
     font_size = dict(load=FONTSIZE_LOAD,

@@ -12,7 +12,8 @@ class Colors():
     fg_color: str
     bg_color: str
     root_color: str
-    node_edge: str
+    root_edge: str
+    term_edge: str
     detour_ring: str
     border_face: str
 
@@ -67,10 +68,11 @@ class Colors():
             }
             self.fg_color = 'white'
             self.bg_color = 'black'
-            self.root_color = 'lawngreen'
-            self.node_edge = 'none'
+            self.term_edge = 'none'
             self.detour_ring = 'orange'
             self.border_face = '#111'
+            self.root_face = 'lawngreen'
+            self.root_edge = self.border_face
         else:
             self.kind2color = {
                 'scaffold': 'gray',
@@ -91,10 +93,11 @@ class Colors():
             }
             self.fg_color = 'black'
             self.bg_color = 'white'
-            self.root_color = 'black'
-            self.node_edge = 'black'
+            self.term_edge = 'black'
             self.detour_ring = 'deepskyblue'
             self.border_face = '#eee'
+            self.root_face = 'black'
+            self.root_edge = self.border_face
         # matplotlib tab20
         self.colors = ('#1f77b4', '#aec7e8', '#ff7f0e', '#ffbb78', '#2ca02c',
                        '#98df8a', '#d62728', '#ff9896', '#9467bd', '#c5b0d5',
