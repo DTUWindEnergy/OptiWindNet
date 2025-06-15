@@ -6,13 +6,11 @@ from itertools import chain
 
 import numpy as np
 import networkx as nx
-import darkdetect
-
 import svg
 
 from .geometric import rotate
 from .interarraylib import describe_G
-
+from .themes import Colors
 
 class SvgRepr():
     '''
@@ -53,8 +51,7 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     Returns:
       SvgRepr object containing the SVG markup in its 'data' attribute
     '''
-    if dark is None:
-        dark = darkdetect.isDark()
+    c = Colors(dark)
     w, h = 1920, 1080
     margin = 30
     root_side = round(1.77*node_size)
@@ -89,69 +86,6 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     VertexS[:, 1] = h - VertexS[:, 1]
     VertexS = VertexS.round().astype(int)
 
-    # theme settings
-    kind2alpha = defaultdict(lambda: 1.)
-    kind2alpha['virtual'] = 0.4
-    kind2color = {}
-    kind2dasharray = dict(
-            tentative='18 15',
-            rogue='25 5',
-            extended='18 15',
-            contour_extended='18 15',
-            scaffold='10 10',
-    )
-    if dark:
-        kind2color.update(
-            scaffold='gray',
-            delaunay='darkcyan',
-            extended='darkcyan',
-            tentative='red',
-            rogue='yellow',
-            contour_delaunay='green',
-            contour_extended='green',
-            contour='red',
-            planar='darkorchid',
-            constraint='purple',
-            border = 'silver',
-            unspecified='crimson',
-            detour='darkorange',
-            virtual='gold',
-        )
-        fg_color = 'white'
-        bg_color = 'black'
-        root_color = 'lawngreen'
-        node_edge = 'none'
-        detour_ring = 'orange'
-        border_face = '#111'
-    else:
-        kind2color.update(
-            scaffold='gray',
-            delaunay='darkgreen',
-            extended='darkgreen',
-            tentative='darkorange',
-            rogue='magenta',
-            contour_delaunay='firebrick',
-            contour_extended='firebrick',
-            contour='black',
-            planar='darkorchid',
-            constraint='darkcyan',
-            border = 'dimgray',
-            unspecified='firebrick',
-            detour='royalblue',
-            virtual='gold',
-        )
-        fg_color = 'black'
-        bg_color = 'white'
-        root_color = 'black'
-        node_edge = 'black'
-        detour_ring = 'deepskyblue'
-        border_face = '#eee'
-    # matplotlib tab20
-    colors = ('#1f77b4', '#aec7e8', '#ff7f0e', '#ffbb78', '#2ca02c',
-              '#98df8a', '#d62728', '#ff9896', '#9467bd', '#c5b0d5',
-              '#8c564b', '#c49c94', '#e377c2', '#f7b6d2', '#7f7f7f',
-              '#c7c7c7', '#bcbd22', '#dbdb8d', '#17becf', '#9edae5')
-
     fnT = G.graph.get('fnT')
     if fnT is None:
         fnT = np.arange(R + T + B + 3)
@@ -162,8 +96,8 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     #############################
     # Defs (i.e. reusable elements)
     reusableE = [
-        svg.Circle(id='wtg', stroke=node_edge, stroke_width=2, r=node_size),
-        svg.Rect(id='oss', fill=root_color, stroke=node_edge, stroke_width=2,
+        svg.Circle(id='wtg', stroke=c.node_edge, stroke_width=2, r=node_size),
+        svg.Rect(id='oss', fill=c.root_color, stroke=c.border_face, stroke_width=2,
                  width=root_side, height=root_side),
     ]
 
@@ -177,8 +111,8 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     borderE: list[svg.Element]  = []
     if border is not None:
         borderE.append(svg.Path(
-            id='border', stroke=kind2color['border'], stroke_dasharray=[15, 7],
-            stroke_width=2, fill=border_face, fill_rule='evenodd',
+            id='border', stroke=c.kind2color['border'], stroke_dasharray=[15, 7],
+            stroke_width=2, fill=c.border_face, fill_rule='evenodd',
             # fill_rule "evenodd" is agnostic to polygon vertices orientation
             # "nonzero" would depend on orientation (if opposite, no fill)
             d=' '.join(chain(
@@ -203,10 +137,10 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     edgesE: list[svg.Element]  = []
     for edge_kind, lines in edge_lines.items():
         group_attrs = {}
-        if edge_kind in kind2dasharray:
-            group_attrs['stroke_dasharray'] = kind2dasharray[edge_kind]
+        if edge_kind in c.kind2dasharray:
+            group_attrs['stroke_dasharray'] = c.kind2dasharray[edge_kind]
         edgesE.append(svg.G(
-            id='edges_' + edge_kind, stroke=kind2color[edge_kind],
+            id='edges_' + edge_kind, stroke=c.kind2color[edge_kind],
             stroke_width=4, **group_attrs, elements=lines,
         ))
 
@@ -215,7 +149,7 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     if D > 0:
         # reusable ring for indicating clone-vertices
         reusableE.append(svg.Circle(id='dt', fill='none', stroke_opacity=0.3,
-                         stroke=detour_ring, stroke_width=4, r=23))
+                         stroke=c.detour_ring, stroke_width=4, r=23))
 
         # Detour edges as polylines (to align the dashes among overlapping lines)
         Points = []
@@ -235,7 +169,7 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
                 Points.append(' '.join(str(c) for c in VertexS[hops].flat))
         detoursE.extend((
             svg.G(
-                id='detours', stroke=kind2color['detour'], stroke_width=4,
+                id='detours', stroke=c.kind2color['detour'], stroke_width=4,
                 stroke_dasharray=[18, 15], fill='none',
                 elements=[svg.Polyline(points=points) for points in Points]
             ),
@@ -255,7 +189,7 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     terminals = []
     for sub, nodes in subtrees.items():
         terminals.append(svg.G(
-            fill=colors[sub % len(colors)],
+            fill=c.colors[sub % len(c.colors)],
             elements=[svg.Use(href='#wtg', x=VertexS[n, 0], y=VertexS[n, 1])
                       for n in nodes]))
     nodesE: list[svg.Element]  = [
@@ -275,7 +209,7 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
             x=svg.Length(-5, '%'), y=svg.Length(-5, '%'),
             width=svg.Length(110, '%'), height=svg.Length(110, '%'),
             elements=[
-                svg.FeFlood(flood_color=bg_color,
+                svg.FeFlood(flood_color=c.bg_color,
                             flood_opacity=0.6, result='bg'),
                 svg.FeMerge(elements=[svg.FeMergeNode(in_='bg'),
                                       svg.FeMergeNode(in_='SourceGraphic')])
@@ -296,7 +230,7 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
             for i, line in enumerate(desc_lines)
         ]
         infoboxE.append(svg.Text(
-            x=right_anchor, y=h - margin, elements=linesE, fill=fg_color,
+            x=right_anchor, y=h - margin, elements=linesE, fill=c.fg_color,
             font_size=40, text_anchor='end', font_family='sans-serif',
             filter='url(#bg_textbox)',
         ))
@@ -307,7 +241,7 @@ def svgplot(G: nx.Graph, *, landscape: bool = True, infobox: bool = True,
     # Aggregate the SVG root elements
     rootElements: list[svg.Element] = []
     if not transparent:
-        rootElements.append(svg.Rect(fill=bg_color, width=w, height=h))
+        rootElements.append(svg.Rect(fill=c.bg_color, width=w, height=h))
     rootElements.extend((
         svg.Defs(elements=reusableE),
         svg.G(id=G.graph.get('handle', G.graph.get('name', 'handleless')),
