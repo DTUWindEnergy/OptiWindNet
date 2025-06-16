@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-from collections import defaultdict
 from collections.abc import Sequence
 from itertools import chain, product
 
-import darkdetect
 from matplotlib.axes import Axes
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
@@ -16,6 +14,7 @@ import numpy as np
 
 from .geometric import rotate
 from .interarraylib import NodeTagger, describe_G
+from .themes import Colors
 
 
 FONTSIZE_LABEL = 5
@@ -69,8 +68,7 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
     Returns:
         Axes instance containing the plot.
     '''
-    if dark is None:
-        dark = darkdetect.isDark()
+    c = Colors(dark)
 
     if node_tag is None:
         kw_axes = dict(aspect='equal', xmargin=0.005, ymargin=0.005)
@@ -81,70 +79,6 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
         root_size = NODESIZE_LABELED_ROOT
         detour_size = NODESIZE_LABELED_DETOUR
         node_size = NODESIZE_LABELED
-
-    # theme settings
-    kind2alpha = defaultdict(lambda: 1.)
-    kind2alpha['virtual'] = 0.4
-    kind2style = {
-        'scaffold': 'dotted',
-        'delaunay': 'solid',
-        'extended': 'dashed',
-        'tentative': 'dashdot',
-        'rogue': 'dashed',
-        'contour_delaunay': 'solid',
-        'contour_extended': 'dashed',
-        'contour': 'solid',
-        'planar': 'dashdot',
-        'constraint': 'solid',
-        'border': 'dashed',
-        None: 'solid',
-        'detour': (0, (3, 3)),
-        'virtual': 'solid',
-        }
-    if dark:
-        kind2color = {
-            'scaffold': 'gray',
-            'delaunay': 'darkcyan',
-            'extended': 'darkcyan',
-            'tentative': 'red',
-            'rogue': 'yellow',
-            'contour_delaunay': 'green',
-            'contour_extended': 'green',
-            'contour': 'red',
-            'planar': 'darkorchid',
-            'constraint': 'purple',
-            'border': 'silver',
-            None: 'crimson',
-            'detour': 'darkorange',
-            'virtual': 'gold',
-        }
-        root_color = 'lawngreen'
-        node_edge = 'none'
-        detour_ring = 'orange'
-        border_face = '#111'
-        text_color = 'white'
-    else:
-        kind2color = {
-            'scaffold': 'gray',
-            'delaunay': 'darkgreen',
-            'extended': 'darkgreen',
-            'tentative': 'darkorange',
-            'rogue': 'magenta',
-            'contour_delaunay': 'firebrick',
-            'contour_extended': 'firebrick',
-            'contour': 'black',
-            'planar': 'darkorchid',
-            'constraint': 'darkcyan',
-            'border':  'dimgray',
-            None: 'black',
-            'detour': 'royalblue',
-            'virtual': 'gold',
-        }
-        root_color = 'black'
-        node_edge = 'black'
-        detour_ring = 'deepskyblue'
-        border_face = '#eee'
-        text_color = 'black'
 
     R, T, B = (G.graph[k] for k in 'RTB')
     VertexC = G.graph['VertexC']
@@ -165,8 +99,8 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
     ax.set_axis_off()
     # draw farm border
     if border is not None:
-        border_opt = dict(facecolor=border_face, linestyle='dashed',
-            edgecolor=kind2color['border'], linewidth=0.7)
+        border_opt = dict(facecolor=c.border_face, linestyle='dashed',
+            edgecolor=c.kind2color['border'], linewidth=0.7)
         borderC = VertexC[border] 
         
         if obstacles is None:
@@ -201,16 +135,15 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
         pos |= dict(zip(contour, VertexC[fnT[contour]]))
     RootL = {r: G.nodes[r].get('label', F[r]) for r in roots[::-1]}
 
-    colors = plt.get_cmap('tab20', 20).colors
     # default value for subtree (i.e. color for unconnected nodes)
     # is the last color of the tab20 colormap (i.e. 19)
     subtrees = G.nodes(data='subtree', default=19)
-    node_colors = [colors[subtrees[n] % len(colors)] for n in range(T)]
+    node_colors = [c.colors[subtrees[n] % len(c.colors)] for n in range(T)]
 
     edges_width = 1.
     edges_capstyle = 'round'
     # draw edges
-    for graph, edge_kind in product((G, G.graph.get('overlay')), kind2style):
+    for graph, edge_kind in product((G, G.graph.get('overlay')), c.kind2style):
         if graph is None:
             continue
         edges = [(u, v) for u, v, kind in graph.edges.data('kind')
@@ -218,25 +151,25 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
         if edges:
             art = nx.draw_networkx_edges(graph, pos, edgelist=edges,
                 label=(edge_kind or 'route'), width=edges_width,
-                style=kind2style[edge_kind], alpha=kind2alpha[edge_kind],
-                edge_color=kind2color[edge_kind], ax=ax)
+                style=c.kind2style[edge_kind], alpha=c.kind2alpha[edge_kind],
+                edge_color=c.kind2color[edge_kind], ax=ax)
             art.set_capstyle(edges_capstyle)
 
     # draw nodes
-    if D:
-        # draw circunferences around nodes that have Detour clones
-        arts = nx.draw_networkx_nodes(
-            G, pos, ax=ax, nodelist=detour, alpha=0.4, edgecolors=detour_ring,
-            node_color='none', node_size=detour_size, label='corner')
-        arts.set_clip_on(False)
     arts = nx.draw_networkx_nodes(
-        G, pos, ax=ax, nodelist=roots, linewidths=0.3, node_color=root_color,
-        edgecolors=node_edge, node_size=root_size, node_shape='s', label='OSS')
+        G, pos, ax=ax, nodelist=roots, linewidths=0.3, node_color=c.root_face,
+        edgecolors=c.root_edge, node_size=root_size, node_shape='s', label='OSS')
     arts.set_clip_on(False)
     arts = nx.draw_networkx_nodes(
-        G, pos, nodelist=range(T), edgecolors=node_edge, ax=ax, label='WTG',
+        G, pos, nodelist=range(T), edgecolors=c.term_edge, ax=ax, label='WTG',
         node_color=node_colors, node_size=node_size, linewidths=0.3)
     arts.set_clip_on(False)
+    if D:
+        # draw rings around nodes that have Detour clones
+        arts = nx.draw_networkx_nodes(
+            G, pos, ax=ax, nodelist=detour, alpha=0.4, edgecolors=c.detour_ring,
+            node_color='none', node_size=detour_size, label='corner')
+        arts.set_clip_on(False)
 
     # draw labels
     font_size = dict(load=FONTSIZE_LOAD,
@@ -277,17 +210,17 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
     if infobox and capacity is not None:
         # using the `legend()` method is a hack to get the `loc='best'` search
         # algorithm of matplotlib to place the info box not covering nodes
-        info_art = ax.legend([], labelspacing=0, facecolor=border_face,
-            edgecolor=text_color, title='\n'.join(describe_G(G)),
+        info_art = ax.legend([], labelspacing=0, facecolor=c.border_face,
+            edgecolor=c.fg_color, title='\n'.join(describe_G(G)),
             framealpha=0.6, title_fontproperties={'size': FONTSIZE_INFO_BOX})
         plt.setp(info_art.get_title(), multialignment='center',
-                 color=text_color)
+                 color=c.fg_color)
     else:
         info_art = None
     if legend:
         # even if calling `legend()` twice, the info box remains
         ax.legend(ncol=8, fontsize=FONTSIZE_LEGEND_STRIP,
-            loc='lower center', columnspacing=1, labelcolor=text_color,
+            loc='lower center', columnspacing=1, labelcolor=c.fg_color,
             handletextpad=0.3, bbox_to_anchor=(0.5, -0.07), frameon=False)
         if info_art is not None:
             ax.add_artist(info_art)

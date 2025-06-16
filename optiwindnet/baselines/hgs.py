@@ -1,9 +1,10 @@
 import math
+from io import StringIO
 from dataclasses import asdict
 import numpy as np
 import networkx as nx
 import hybgensea as hgs
-from py.io import StdCaptureFD
+from wurlitzer import pipes
 
 from ..interarraylib import fun_fingerprint
 from ..repair import repair_routeset_path
@@ -95,8 +96,10 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
         depot=0,
     )
 
-    result, out, err = StdCaptureFD.call(hgs_solver.solve_cvrp, data,
-                                         rounding=False)
+    redirection = StringIO()
+    with pipes(stdout=redirection):
+        result = hgs_solver.solve_cvrp(data, rounding=False)
+    out = redirection.getvalue()
 
     # create a topology graph S from the results
     S = nx.Graph(

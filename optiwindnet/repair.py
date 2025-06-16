@@ -319,10 +319,16 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
                 # found an unrepairable crossing
                 outstanding_crossings.append((uv, st))
                 continue
-            # crossing is potentialy repairable
-            done = False
             u, v = uv
             s, t = st
+            subtree_uv = S.nodes[u]['subtree']
+            if subtree_uv == S.nodes[s]['subtree']:
+                # this crossing is within a single subtree -> non-repairable
+                # TODO: implement repair for this case (challenging)
+                outstanding_crossings.append((uv, st))
+                continue
+            # crossing is potentialy repairable
+            done = False
             break
         if done:
             break
