@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import subprocess
+from shutil import which
+
 import pylunasvg
 from PIL import Image
 
@@ -8,7 +11,7 @@ from ..svg import Drawable
 
 
 def make_reel(S, G, filename):
-    log = S.graph['log']
+    steps_log = S.graph['solver_details']['steps_log']
     drawable = Drawable(G, transparent=False)
 
     drawable.add_terminals_ungrouped()
@@ -16,14 +19,16 @@ def make_reel(S, G, filename):
     reel = []
     c = drawable.c
     num_colors = len(drawable.c.colors)
-    for u, v in log:
+    for u, v in steps_log:
         drawable.add_edge(u, v)
 
         # update node colors
-        drawable.terminals_group.elements[u].fill = \
-            c.colors[S.nodes[u]['subtree'] % num_colors]
-        drawable.terminals_group.elements[v].fill = \
-            c.colors[S.nodes[v]['subtree'] % num_colors]
+        if u >= 0:
+            drawable.terminals_group.elements[u].fill = \
+                c.colors[S.nodes[u]['subtree'] % num_colors]
+        if v >= 0:
+            drawable.terminals_group.elements[v].fill = \
+                c.colors[S.nodes[v]['subtree'] % num_colors]
 
         # plot and rasterize
         luna = pylunasvg.Document.load_from_data(drawable.to_svg())
@@ -42,5 +47,9 @@ def make_reel(S, G, filename):
         reel.append(im)
 
     reel[0].save(filename, save_all=True, append_images=reel[1:], duration=333, loop=0)
+
+    gifsicle = which('gifsicle')
+    if gifsicle is not None:
+         subprocess.run([gifsicle, '--batch', '--optimize=3', '--colors=256', filename])
     return 
 

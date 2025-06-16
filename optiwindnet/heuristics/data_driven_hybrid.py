@@ -5,13 +5,14 @@ import time
 import logging
 import math
 import pickle
+import gzip
 from enum import IntEnum
 from typing import Self, Callable
 
 import numpy as np
 import networkx as nx
 import torch
-import torch_geometric as pyg
+from mlhelpers.modelbuilders import FFMultilayerUniformModel
 
 from ..geometric import assign_root, angle_helpers, angle_oracles_factory
 from ..crossings import edge_crossings
@@ -91,13 +92,15 @@ class Appraiser():
         # load pytorch model
         #  model_path = '../../../../affairs/edge/hybrid/'
         #  model_def = pickle.load(open(model_path + 'MLP_auc_957_θ3329.pkl', 'rb'))
-        model_def = pickle.load(open(model_path, 'rb'))
-        model = pyg.nn.MLP(**model_def['config'])
+        with gzip.open(model_path, 'rb') as model_file:
+            model_def = pickle.loads(model_file.read())
+        #  model = pyg.nn.MLP(**model_def['config'])
+        model = FFMultilayerUniformModel.from_suggestions(**model_def['config'])
         model.load_state_dict(model_def['state'])
         model.eval()
         self.model = model
 
-    def appraise(self, partial_features_, links_):
+    def appraise(self, partial_features_):
         # rules for making an appraisal stale:
         # - direct_neighbors: every subtree that has feas_links to one of the joined subtrees
         # - indirect_neighbors: only if there is change in the target's (min_extent, feas_links_cat, feas_unions_cat)
@@ -129,36 +132,42 @@ class Appraiser():
         #  's_feas_unions_cat_0..5',
         #  't_feas_unions_cat_0..5']
         #  partial_features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
-        features_list = [
-            (
+        features_list = []
+        for (sr_s, sr_t, s_is_subroot, t_is_subroot, s_load, t_load, extent,
+                cos_uv_ur, union_span) in partial_features_:
+            s_root = self.A.nodes[sr_s]['root']
+            t_root = self.A.nodes[sr_t]['root']
+            # as of 2025-06: Angle span calculation is not implemented when
+            #   uniting components connected to different roots.
+            # TODO: subtree_span should be indexed by subroot and root;
+            #       the relevant span is wrt the target's root
+            s_span_lo, s_span_hi = self.subtree_span_[sr_s]
+            t_span_lo, t_span_hi = self.subtree_span_[sr_t]
+            union_lo, union_hi = union_span
+            features_list.append((
                 s_is_subroot,
                 t_is_subroot,
                 self.capacity_12,
                 s_load/12,  # s_load_12
                 t_load/12,  # t_load_12
-                self.angle_ccw(self.subtree_span_[sr_s]),
-                self.angle_ccw(self.subtree_span_[sr_t]),
+                self.angle_ccw(s_span_lo, s_root, s_span_hi),
+                self.angle_ccw(t_span_lo, t_root, t_span_hi),
                 np.log(extent/self.extent_min_[sr_s]),  # s_rel_extent
                 np.log(extent/self.extent_min_[sr_t]),  # t_rel_extent
-                np.log(self.d2roots[sr_s, self.A.nodes[sr_s]['root']]
+                np.log(self.d2roots[sr_s, t_root]
                        /self.inter_terminal_clearance_safe),  # s_rel_root_dist
-                np.log(self.d2roots[sr_t, self.A.nodes[sr_t]['root']]
+                np.log(self.d2roots[sr_t, t_root]
                        /self.inter_terminal_clearance_safe),  # t_rel_root_dist
-                self.angle_ccw(union_span),
+                self.angle_ccw(union_lo, t_root, union_hi),
                 (s_load + t_load)/self.capacity,  # union_rel_load
                 cos_uv_ur,
                 *LinkCount.onehot(self.cat_feas_links_[sr_s]),  # s_num_feas_links_cat
                 *LinkCount.onehot(self.cat_feas_links_[sr_t]),  # t_num_feas_links_cat
                 *UnionCount.onehot(self.cat_feas_unions_[sr_s]),  # s_num_feas_unions_cat
                 *UnionCount.onehot(self.cat_feas_unions_[sr_t]),  # t_num_feas_unions_cat
-            ) for (sr_s, sr_t,
-                   s_is_subroot, t_is_subroot,
-                   s_load, t_load,
-                   extent, cos_uv_ur,
-                   union_span) in partial_features_
-        ]
+            ))
 
-        features = torch.tensor(features_list)
+        features = torch.tensor(features_list, dtype=torch.float32)
         with torch.no_grad():
             appraisals = self.model(features)
         return torch.squeeze(appraisals)
@@ -225,8 +234,6 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
     # enqueue_best_union()
     # <stale_subtrees>: deque for components that need to go through
     # stale_subtrees = deque()
-    #  stale_subtrees = set(_T)
-    blah = set(_T)
     stale_subtrees = set(_T)
     fresh_subtrees = set()
     whoneeds_ = [set() for _ in _T]
@@ -235,7 +242,7 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
     extent_min_ = [-1.]*T
     # <i>: iteration counter
     i = 0
-    log = []
+    steps_log = []
 
     appraiser = Appraiser(A, capacity, model_path, subtree_span_,
                           cat_feas_links_, cat_feas_unions_, extent_min_,
@@ -243,10 +250,11 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
     # END: helper data structures
 
     def refresh_subtree(subroot, forbidden=None):
-        '''examine all the links incident on the subtree of subroot;
-        group them according to feasibility: feas/unfeas
-        update features of subtree[subroot]
-        mark those that depend on subtree[subroot] as stale
+        '''
+        - examine all the links incident on the subtree of subroot;
+        - group them according to feasibility: feas/unfeas;
+        - update features of subtree[subroot];
+        - mark those that depend on subtree[subroot] as stale;
         '''
         if forbidden is None:
             forbidden = set()
@@ -294,34 +302,37 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
                         union_span
                     ))
                     extent_min = min(extent_min, extent)
-        # discard useless edges
         link_caused_staleness = set()
         for s, t in unfeas_links:
-            pq.cancel((s, t))
-            pq.cancel((t, s))
+            if (s, t) in pq.tags:
+                pq.cancel((s, t))
+            if (t, s) in pq.tags:
+                pq.cancel((t, s))
             link_caused_staleness.add(subroot_[t])
-        A.remove_edges_from(unfeas_links)
-        assert link_caused_staleness == whoneeds_[subroot] - feas_unions
-        assert len(link_caused_staleness & fresh_subtrees) == 0
+        #  print(f'[{i}] {link_caused_staleness}\n{whoneeds_[subroot]}\n{feas_unions}')
+        #  assert link_caused_staleness == whoneeds_[subroot] - feas_unions, 'set mismatch'
+        #  assert len(link_caused_staleness & fresh_subtrees) == 0, 'size mismatch'
         #  rel_component_excess = num_components/min_components - 1
         #  dropped_dependencies = whoneeds_[subroot] - feas_unions
         # all that can no longer link to subtree_[subroot] are stale
-        #  stale_subtrees |= dropped_dependencies - fresh_subtrees
-        blah.union(link_caused_staleness - fresh_subtrees)
 
-        stale_subtrees.union(link_caused_staleness - fresh_subtrees)
-        fresh_subtrees.add(subroot)
+        stale_subtrees.update(link_caused_staleness - fresh_subtrees)
         if not feas_unions:
             # this handles subtrees that reached capacity or became isolated
             S.add_edge(subroot, root)
-            log.append((i, 'addE', (subroot, root)))
+            A.remove_nodes_from(subtree_[subroot])
+            steps_log.append((subroot, root))
             is_subroot_[subroot] = False
             return [], []
+        # discard useless edges
+        A.remove_edges_from(unfeas_links)
+        fresh_subtrees.add(subroot)
         whoneeds_[subroot] = feas_unions
         for sr in feas_unions:
             # TODO: this loop is probably unnecessary, confirming it with assert:
             # there might be a change in the subroot of a feas_union...
-            assert subroot in whoneeds_[sr], 'subroot not in whoneeds_[feas_union]'
+            #  assert subroot in whoneeds_[sr], 'subroot not in whoneeds_[feas_union]'
+            # THIS LOOP IS ACTUALLY NECESSARY
             whoneeds_[sr].add(subroot)
         cat_feas_unions = UnionCount.encode(len(feas_unions))
         cat_feas_links = LinkCount.encode(len(feas_links))
@@ -330,7 +341,7 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
                 or (extent_min != extent_min_[subroot])):
             # since the current subtree had features changes, all that depend
             # on it must be marked as stale
-            stale_subtrees |= whoneeds_[subroot] - fresh_subtrees
+            stale_subtrees.update(whoneeds_[subroot] - fresh_subtrees)
             cat_feas_unions_[subroot] = cat_feas_unions
             cat_feas_links_[subroot] = cat_feas_links
             extent_min_[subroot] = extent_min
@@ -355,9 +366,10 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
             links_features.extend(feas_features)
         
         # appraise and enqueue links
-        appraisals = appraiser.appraise(links_to_upd, links_features)
-        for link, (sr_u, *_), appraisal in zip(links_to_upd, links_features, appraisals):
-            pq.add(-appraisal, link, sr_u)
+        if links_features:
+            appraisals = appraiser.appraise(links_features)
+            for link, (sr_u, *_), appraisal in zip(links_to_upd, links_features, appraisals):
+                pq.add(-appraisal, link, sr_u)
 
         if not pq:
             # finished
@@ -366,6 +378,10 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         # get best link
         (u, v), sr_u = pq.top()
         debug('<popped> «%s–%s», sr_u: <%s>', F[u], F[v], F[sr_u])
+        # TODO: reassess this hack
+        if (u, v) not in A.edges:
+            debug('>>> top-edge is not in A anymore <<<')
+            continue
 
         sr_v = subroot_[v]
         if (d2roots[u, A.nodes[sr_u]['root']]
@@ -383,19 +399,33 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         debug(f'<angle_span> //%s//', union_span)
 
         # edge addition starts here
+        debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
+        S.add_edge(u, v)
+        steps_log.append((u, v))
 
         # update the component's angle span
         subtree_span_[sr_kept] = union_span
 
         subtree.extend(subtree_[sr_dropped])
-        stale_subtrees = whoneeds_[sr_kept]|whoneeds_[sr_dropped]
-        stale_subtrees.remove(sr_dropped)
+        stale_subtrees.clear()
+        stale_subtrees.update(whoneeds_[sr_kept], whoneeds_[sr_dropped])
+        # TODO: rethink why not: stale_subtrees.remove(sr_dropped)
+        stale_subtrees.discard(sr_dropped)
+        if len(subtree) == capacity:
+            stale_subtrees.discard(sr_kept)
+            S.add_edge(sr_kept, root)
+            steps_log.append((sr_kept, root))
+            A.remove_nodes_from(subtree)
+        else:
+            A.remove_edge(u, v)
 
         # this block might be unnecessary if whoneeds is not for dropped dependencies
-        whoneeds_[sr_dropped].remove(sr_kept)
+        # TODO: rethink why not: whoneeds_[sr_dropped].remove(sr_kept)
+        whoneeds_[sr_dropped].discard(sr_kept)
         for sr in whoneeds_[sr_dropped]:
-            whoneeds_[sr].remove[sr_dropped]
-            whoneeds_[sr].add[sr_kept]
+            # TODO: rethink why not: whoneeds_[sr].remove(sr_dropped)
+            whoneeds_[sr].discard(sr_dropped)
+            whoneeds_[sr].add(sr_kept)
 
         # update terminal->subroot mapping for sr_dropped's terminals
         for t in subtree_[sr_dropped]:
@@ -405,9 +435,6 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
                   tuple(F[x] for x in pq[0][-2]), pq[0][0])
         else:
             debug('heap EMPTY')
-        debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        S.add_edge(u, v)
-        log.append((i, 'addE', (u, v)))
         is_subroot_[sr_dropped] = False
         num_components -= 1
         # remove from A and pq the edges that cross ⟨u, v⟩
@@ -417,13 +444,12 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
             pq.cancel((t, s))
             stale_subtrees.add(subroot_[s])
             stale_subtrees.add(subroot_[t])
-        A.remove_edge(u, v)
     # END: main loop
 
     # add the feeders for sub-capacity components
-    for sr in np.flatnonzero(is_subroot_):
-        debug('Adding sub-capacity subtree: subroot %d', sr)
-        S.add_edge(sr, A.nodes[sr]['root'])
+    #  for sr in np.flatnonzero(is_subroot_):
+    #      debug('Adding sub-capacity subtree: subroot %d', sr)
+    #      S.add_edge(sr, A.nodes[sr]['root'])
 
     debug('Final number of components: %d', num_components)
     calcload(S)
@@ -432,8 +458,9 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         runtime=time.perf_counter() - start_time,
         capacity=capacity,
         creator='data_driven_hybrid',
+        iterations=i,
         solver_details=dict(
-            log=log,
+            steps_log=steps_log,
             iterations=i,
         ),
     )
