@@ -19,16 +19,16 @@ def make_reel(S, G, filename):
     reel = []
     c = drawable.c
     num_colors = len(drawable.c.colors)
-    for u, v in steps_log:
-        drawable.add_edge(u, v)
-
-        # update node colors
-        if u >= 0:
-            drawable.terminals_group.elements[u].fill = \
-                c.colors[S.nodes[u]['subtree'] % num_colors]
-        if v >= 0:
-            drawable.terminals_group.elements[v].fill = \
-                c.colors[S.nodes[v]['subtree'] % num_colors]
+    for i, links in steps_log.items():
+        for u, v in links:
+            drawable.add_edge(u, v)
+            # update node colors
+            if u >= 0:
+                drawable.terminals_group.elements[u].fill = \
+                    c.colors[S.nodes[u]['subtree'] % num_colors]
+            if v >= 0:
+                drawable.terminals_group.elements[v].fill = \
+                    c.colors[S.nodes[v]['subtree'] % num_colors]
 
         # plot and rasterize
         luna = pylunasvg.Document.load_from_data(drawable.to_svg())

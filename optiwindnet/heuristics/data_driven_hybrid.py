@@ -8,6 +8,7 @@ import pickle
 import gzip
 from enum import IntEnum
 from typing import Self, Callable
+from collections import defaultdict
 
 import numpy as np
 import networkx as nx
@@ -242,23 +243,23 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
     extent_min_ = [-1.]*T
     # <i>: iteration counter
     i = 0
-    steps_log = []
+    steps_log = defaultdict(list)
+    appraisal_log = {}
+    purge_log = defaultdict(list)
+    stale_log = {}
 
     appraiser = Appraiser(A, capacity, model_path, subtree_span_,
                           cat_feas_links_, cat_feas_unions_, extent_min_,
                           angle_ccw)
     # END: helper data structures
 
-    def refresh_subtree(subroot, forbidden=None):
+    def refresh_subtree(subroot):
         '''
         - examine all the links incident on the subtree of subroot;
         - group them according to feasibility: feas/unfeas;
         - update features of subtree[subroot];
         - mark those that depend on subtree[subroot] as stale;
         '''
-        if forbidden is None:
-            forbidden = set()
-        forbidden.add(subroot)
         root = A.nodes[subroot]['root']
         rC = VertexC[root]
         load = len(subtree_[subroot])
@@ -270,6 +271,7 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         extent_min = float('inf')
         union_span_ = {}
         u_span = subtree_span_[subroot]
+        link_caused_staleness = set()
         for u in (t for t in subtree_[subroot] if A[t]):
             u_is_subroot=(u == subroot)
             uC = VertexC[u]
@@ -278,8 +280,13 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
             for v, uvD in A[u].items():
                 sr_v = subroot_[v]
                 target_load = len(subtree_[sr_v])
-                if (sr_v in forbidden or target_load > load_left):
+                if sr_v == subroot:
+                    # link internal to subtree only add once
+                    if u < v:
+                        unfeas_links.append((u, v))
+                elif target_load > load_left:
                     unfeas_links.append((u, v))
+                    link_caused_staleness.add(sr_v)
                 else:
                     feas_unions.add(sr_v)
                     extent = uvD['length']
@@ -302,13 +309,9 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
                         union_span
                     ))
                     extent_min = min(extent_min, extent)
-        link_caused_staleness = set()
         for s, t in unfeas_links:
-            if (s, t) in pq.tags:
-                pq.cancel((s, t))
-            if (t, s) in pq.tags:
-                pq.cancel((t, s))
-            link_caused_staleness.add(subroot_[t])
+            pq.cancel((s, t))
+            pq.cancel((t, s))
         #  print(f'[{i}] {link_caused_staleness}\n{whoneeds_[subroot]}\n{feas_unions}')
         #  assert link_caused_staleness == whoneeds_[subroot] - feas_unions, 'set mismatch'
         #  assert len(link_caused_staleness & fresh_subtrees) == 0, 'size mismatch'
@@ -321,11 +324,14 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
             # this handles subtrees that reached capacity or became isolated
             S.add_edge(subroot, root)
             A.remove_nodes_from(subtree_[subroot])
-            steps_log.append((subroot, root))
+            purge_log[i].append(tuple(subtree_[subroot]))
+            steps_log[i].append((subroot, root))
             is_subroot_[subroot] = False
             return [], []
         # discard useless edges
-        A.remove_edges_from(unfeas_links)
+        if unfeas_links:
+            A.remove_edges_from(unfeas_links)
+            purge_log[i].append(tuple(unfeas_links))
         fresh_subtrees.add(subroot)
         whoneeds_[subroot] = feas_unions
         for sr in feas_unions:
@@ -368,6 +374,7 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         # appraise and enqueue links
         if links_features:
             appraisals = appraiser.appraise(links_features)
+            appraisal_log[i] = tuple(links_to_upd), appraisals
             for link, (sr_u, *_), appraisal in zip(links_to_upd, links_features, appraisals):
                 pq.add(-appraisal, link, sr_u)
 
@@ -380,6 +387,7 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         debug('<popped> «%s–%s», sr_u: <%s>', F[u], F[v], F[sr_u])
         # TODO: reassess this hack
         if (u, v) not in A.edges:
+            stale_log[i] = u, v
             debug('>>> top-edge is not in A anymore <<<')
             continue
 
@@ -401,7 +409,8 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         # edge addition starts here
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
         S.add_edge(u, v)
-        steps_log.append((u, v))
+        steps_log[i].append((u, v))
+        pq.cancel((v, u))
 
         # update the component's angle span
         subtree_span_[sr_kept] = union_span
@@ -411,13 +420,18 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         stale_subtrees.update(whoneeds_[sr_kept], whoneeds_[sr_dropped])
         # TODO: rethink why not: stale_subtrees.remove(sr_dropped)
         stale_subtrees.discard(sr_dropped)
+        A.remove_edge(u, v)
         if len(subtree) == capacity:
             stale_subtrees.discard(sr_kept)
             S.add_edge(sr_kept, root)
-            steps_log.append((sr_kept, root))
+            steps_log[i].append((sr_kept, root))
+            for s, t in A.edges(subtree):
+                pq.cancel((s, t))
+                pq.cancel((t, s))
             A.remove_nodes_from(subtree)
+            purge_log[i].append(tuple(subtree))
         else:
-            A.remove_edge(u, v)
+            purge_log[i].append(((u, v),))
 
         # this block might be unnecessary if whoneeds is not for dropped dependencies
         # TODO: rethink why not: whoneeds_[sr_dropped].remove(sr_kept)
@@ -440,6 +454,7 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         # remove from A and pq the edges that cross ⟨u, v⟩
         for s, t in edge_crossings(u, v, A, diagonals):
             A.remove_edge(s, t)
+            purge_log[i].append(((s, t),))
             pq.cancel((s, t))
             pq.cancel((t, s))
             stale_subtrees.add(subroot_[s])
@@ -461,6 +476,9 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         iterations=i,
         solver_details=dict(
             steps_log=steps_log,
+            purge_log=purge_log,
+            appraisal_log=appraisal_log,
+            stale_log=stale_log,
             iterations=i,
         ),
     )
