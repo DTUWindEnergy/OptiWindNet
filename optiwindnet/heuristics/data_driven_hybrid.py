@@ -3,17 +3,17 @@
 
 import time
 import logging
-import pickle
 import gzip
 from enum import IntEnum
 from typing import Self, Callable
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
 import networkx as nx
 import torch
 from scipy.stats import rankdata
-from mlhelpers.modelbuilders import FFMultilayerUniformModel
+from mlhelpers.modelbuilders import model_from_file
 
 from ..geometric import assign_root, angle_helpers, angle_oracles_factory
 from ..crossings import edge_crossings
@@ -63,118 +63,104 @@ class UnionCount(IntEnum):
         return out
 
 
-class Appraiser():
+class AppraiserFactory():
     features_changed_: list[bool]
 
-    def __init__(self, A: nx.Graph, capacity: int,
-                 model_path: str,
-                 subtree_span_: list[tuple[int, int]],
-                 cat_feas_links_: list[int],
-                 cat_feas_unions_: list[int],
-                 extent_min_: list[float],
-                 angle_ccw: Callable,
-                 ):
-        self.capacity = capacity
-        self.subtree_span_  = subtree_span_
-        self.cat_feas_links_ = cat_feas_links_
-        self.cat_feas_unions_ = cat_feas_unions_
-        self.extent_min_ = extent_min_
-        self.angle_ccw = angle_ccw
-        self.A = A
+    def __init__(self, model_path: str | Path):
+        # load pytorch model
+        self.model = model_from_file(model_path)
+
+    def get_appraiser(self, A: nx.Graph, capacity: int,
+                      subtree_span_: list[tuple[int, int]],
+                      cat_feas_links_: list[int],
+                      cat_feas_unions_: list[int],
+                      extent_min_: list[float],
+                      angle_ccw: Callable,
+                      ) -> Callable:
+        model = self.model
         # problem features
-        self.capacity_12 = capacity/12
-        self.inter_terminal_clearance_safe = A.graph['inter_terminal_clearance_safe']
-        # scale is the median of distances of terminals to their nearest root
+        capacity_12 = capacity/12.
         d2roots = A.graph['d2roots']
-        self.d2roots = d2roots
-        self.log_rel_root_dist_ = np.log(
+        log_rel_root_dist_ = np.log(
             d2roots/A.graph['inter_terminal_clearance_safe']
         )
-        # load pytorch model
-        #  model_path = '../../../../affairs/edge/hybrid/'
-        #  model_def = pickle.load(open(model_path + 'MLP_auc_957_θ3329.pkl', 'rb'))
-        with gzip.open(model_path, 'rb') as model_file:
-            model_def = pickle.loads(model_file.read())
-        #  model = pyg.nn.MLP(**model_def['config'])
-        model = FFMultilayerUniformModel.from_suggestions(**model_def['config'])
-        model.load_state_dict(model_def['state'])
-        model.eval()
-        self.model = model
 
-    def appraise(self, partial_features_):
-        # rules for making an appraisal stale:
-        # - direct_neighbors: every subtree that has feas_links to one of the joined subtrees
-        # - indirect_neighbors: only if there is change in the target's (min_extent, feas_links_cat, feas_unions_cat)
+        def appraise(partial_features_):
+            # rules for making an appraisal stale:
+            # - direct_neighbors: every subtree that has feas_links to one of the joined subtrees
+            # - indirect_neighbors: only if there is change in the target's (min_extent, feas_links_cat, feas_unions_cat)
 
-        #  't_is_subroot', stable
-        #  't_load_12', stable
-        #  't_span', stable
-        #  't_log_rel_extent', ? depends... 
-        #  't_log_rel_root_dist', stable
-        #  't_feas_links_cat_0..4', needs checking
-        #  't_feas_unions_cat_0..5', needs checking
-        #  features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
-        #  ['s_is_subroot',
-        #  't_is_subroot',
-        #  'capacity_12',
-        #  's_load_12',
-        #  't_load_12',
-        #  's_span',
-        #  't_span',
-        #  's_log_rel_extent',
-        #  't_log_rel_extent',
-        #  's_log_rel_root_dist',
-        #  't_log_rel_root_dist',
-        #  'union_span',
-        #  'union_rel_load',
-        #  'cos',
-        #  's_feas_links_cat_0..4',
-        #  't_feas_links_cat_0..4',
-        #  's_feas_unions_cat_0..5',
-        #  't_feas_unions_cat_0..5']
-        #  partial_features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
-        features_list = []
-        for (sr_s, sr_t, s_is_subroot, t_is_subroot, s_load, t_load, extent,
-                cos_uv_ur, union_span) in partial_features_:
-            s_root = self.A.nodes[sr_s]['root']
-            t_root = self.A.nodes[sr_t]['root']
-            # as of 2025-06: Angle span calculation is not implemented when
-            #   uniting components connected to different roots.
-            # TODO: subtree_span should be indexed by subroot and root;
-            #       the relevant span is wrt the target's root
-            s_span_lo, s_span_hi = self.subtree_span_[sr_s]
-            t_span_lo, t_span_hi = self.subtree_span_[sr_t]
-            union_lo, union_hi = union_span
-            features_list.append((
-                s_is_subroot,
-                t_is_subroot,
-                self.capacity_12,
-                s_load/12,  # s_load_12
-                t_load/12,  # t_load_12
-                self.angle_ccw(s_span_lo, s_root, s_span_hi),
-                self.angle_ccw(t_span_lo, t_root, t_span_hi),
-                np.log(extent/self.extent_min_[sr_s]),  # s_rel_extent
-                np.log(extent/self.extent_min_[sr_t]),  # t_rel_extent
-                np.log(self.d2roots[sr_s, t_root]
-                       /self.inter_terminal_clearance_safe),  # s_rel_root_dist
-                np.log(self.d2roots[sr_t, t_root]
-                       /self.inter_terminal_clearance_safe),  # t_rel_root_dist
-                self.angle_ccw(union_lo, t_root, union_hi),
-                (s_load + t_load)/self.capacity,  # union_rel_load
-                cos_uv_ur,
-                *LinkCount.onehot(self.cat_feas_links_[sr_s]),  # s_num_feas_links_cat
-                *LinkCount.onehot(self.cat_feas_links_[sr_t]),  # t_num_feas_links_cat
-                *UnionCount.onehot(self.cat_feas_unions_[sr_s]),  # s_num_feas_unions_cat
-                *UnionCount.onehot(self.cat_feas_unions_[sr_t]),  # t_num_feas_unions_cat
-            ))
+            #  't_is_subroot', stable
+            #  't_load_12', stable
+            #  't_span', stable
+            #  't_log_rel_extent', ? depends... 
+            #  't_log_rel_root_dist', stable
+            #  't_feas_links_cat_0..4', needs checking
+            #  't_feas_unions_cat_0..5', needs checking
+            #  features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
+            #  ['s_is_subroot',
+            #  't_is_subroot',
+            #  'capacity_12',
+            #  's_load_12',
+            #  't_load_12',
+            #  's_span',
+            #  't_span',
+            #  's_log_rel_extent',
+            #  't_log_rel_extent',
+            #  's_log_rel_root_dist',
+            #  't_log_rel_root_dist',
+            #  'union_span',
+            #  'union_rel_load',
+            #  'cos',
+            #  's_feas_links_cat_0..4',
+            #  't_feas_links_cat_0..4',
+            #  's_feas_unions_cat_0..5',
+            #  't_feas_unions_cat_0..5']
+            #  partial_features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
+            features_list = []
+            for (sr_s, sr_t, s_is_subroot, t_is_subroot, s_load, t_load, extent,
+                    cos_uv_ur, union_span) in partial_features_:
+                s_root = A.nodes[sr_s]['root']
+                t_root = A.nodes[sr_t]['root']
+                # as of 2025-06: Angle span calculation is not implemented when
+                #   uniting components connected to different roots.
+                # TODO: subtree_span should be indexed by subroot and root;
+                #       the relevant span is wrt the target's root
+                s_span_lo, s_span_hi = subtree_span_[sr_s]
+                t_span_lo, t_span_hi = subtree_span_[sr_t]
+                union_lo, union_hi = union_span
+                features_list.append((
+                    s_is_subroot,
+                    t_is_subroot,
+                    capacity_12,
+                    s_load/12,  # s_load_12
+                    t_load/12,  # t_load_12
+                    angle_ccw(s_span_lo, s_root, s_span_hi),
+                    angle_ccw(t_span_lo, t_root, t_span_hi),
+                    np.log(extent/extent_min_[sr_s]),  # s_rel_extent
+                    np.log(extent/extent_min_[sr_t]),  # t_rel_extent
+                    log_rel_root_dist_[sr_s, t_root],
+                    log_rel_root_dist_[sr_t, t_root],
+                    angle_ccw(union_lo, t_root, union_hi),
+                    (s_load + t_load)/capacity,  # union_rel_load
+                    cos_uv_ur,
+                    *LinkCount.onehot(cat_feas_links_[sr_s]),  # s_num_feas_links_cat
+                    *LinkCount.onehot(cat_feas_links_[sr_t]),  # t_num_feas_links_cat
+                    *UnionCount.onehot(cat_feas_unions_[sr_s]),  # s_num_feas_unions_cat
+                    *UnionCount.onehot(cat_feas_unions_[sr_t]),  # t_num_feas_unions_cat
+                ))
 
-        features = torch.tensor(features_list, dtype=torch.float32)
-        with torch.no_grad():
-            appraisals = self.model(features)
-        return appraisals.squeeze(1)
+            features = torch.tensor(features_list, dtype=torch.float32)
+            with torch.no_grad():
+                appraisals = model(features)
+            return appraisals.squeeze(1)
+
+        return appraise
         
 
-def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10000) -> nx.Graph:
+def data_driven_hybrid(Aʹ: nx.Graph, capacity: int,
+                       appraiser_factory: AppraiserFactory,
+                       maxiter=10000) -> nx.Graph:
     '''Hybrid machine-learning and Esau-Williams heuristic for C-MST
     
     Args:
@@ -255,9 +241,6 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
     # <i>: iteration counter
     i = 0
 
-    appraiser = Appraiser(A, capacity, model_path, subtree_span_,
-                          cat_feas_links_, cat_feas_unions_, extent_min_,
-                          angle_ccw)
     # END: helper data structures
 
     # BEGIN: output data containers
@@ -267,6 +250,10 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
     purge_log = defaultdict(list)
     stale_log = {}
     # END: output data containers
+    appraise = appraiser_factory.get_appraiser(
+        A, capacity, subtree_span_, cat_feas_links_, cat_feas_unions_,
+        extent_min_, angle_ccw
+    )
 
     def refresh_subtree(subroot):
         '''
@@ -393,7 +380,7 @@ def data_driven_hybrid(Aʹ: nx.Graph, capacity: int, model_path: str, maxiter=10
         
         # appraise and enqueue links
         if links_features:
-            appraisals = appraiser.appraise(links_features)
+            appraisals = appraise(links_features)
             appraisal_log[i] = tuple(links_to_upd), appraisals
             for link, (sr_u, *_), appraisal in zip(links_to_upd, links_features, appraisals):
                 pq.add(-appraisal, link, sr_u)
