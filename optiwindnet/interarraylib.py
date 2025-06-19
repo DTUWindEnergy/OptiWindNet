@@ -230,13 +230,12 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     R, T, B = (A.graph[k] for k in 'RTB')
     VertexC, d2roots, diagonals = (A.graph[k] for k in
                                    ('VertexC', 'd2roots', 'diagonals'))
-    # TODO: rethink whether to copy from S or from A
-    G = nx.create_empty_copy(S)
-    G.graph.update(
-        {k: A.graph[k] for k in _essential_graph_attrs + ('num_stunts',)
-         if k in A.graph})
-    if 'is_normalized' in A.graph:
-        G.graph['is_normalized'] = True
+    G = nx.create_empty_copy(A)
+    for k in ('capacity', 'has_loads', 'max_load', 'creator', 'solver_details'):
+        value = S.graph.get(k)
+        if value is not None:
+            G.graph[k] = value
+    nx.set_node_attributes(G, S.nodes)
     # remove supertriangle coordinates from VertexC
     G.graph['VertexC'] = np.vstack((VertexC[:-R - 3], VertexC[-R:]))
     # non_A_edges are the far-reaching gates and ocasionally the result of
@@ -494,12 +493,12 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     R, T = (G.graph[k] for k in 'RT')
     L = nx.Graph(**{k: G.graph[k]
                     for k in _essential_graph_attrs if k in G.graph})
-    num_stunts = G.graph.get('num_stunts')
-    if num_stunts:
+    stunts_primes = G.graph.get('stunts_primes')
+    if stunts_primes:
         VertexC = G.graph['VertexC']
-        L.graph['VertexC'] = np.vstack((VertexC[:-R - num_stunts],
+        L.graph['VertexC'] = np.vstack((VertexC[:-R - len(stunts_primes)],
                                         VertexC[-R:]))
-        L.graph['B'] -= num_stunts
+        L.graph['B'] -= len(stunts_primes)
     L.add_nodes_from(((n, {'label': label})
                       for n, label in G.nodes(data='label')
                       if 0 <= n < T), kind='wtg')
@@ -532,7 +531,8 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     return L
 
 
-def as_normalized(Aʹ: nx.Graph) -> nx.Graph:
+def as_normalized(Aʹ: nx.Graph, *, offset: float | None = None,
+                  scale: float | None = None) -> nx.Graph:
     '''Make a shallow copy of an instance and shift and scale its geometry.
 
     Coordinates are subtracted by graph attribute 'norm_offset'.
@@ -541,20 +541,24 @@ def as_normalized(Aʹ: nx.Graph) -> nx.Graph:
     Affected linear attributes: 'VertexC', 'd2roots' (graph); 'length' (edge).
 
     Args:
-        Aʹ: (or Gʹ) any instance that has inherited 'norm_scale' from an
+        Aʹ: (or Gʹ) any instance that has inherited 'scale' from an
             edgeset `Aʹ`.
+        offset: override graph's 'norm_offset'
+        scale: override graph's 'norm_scale'
 
     Returns:
         A copy of the instance with changed coordinates and linear metrics.
     '''
     A = Aʹ.copy()
-    norm_factor = A.graph['norm_scale']
+    if offset is None:
+        offset = Aʹ.graph['norm_offset']
+    if scale is None:
+        scale = Aʹ.graph['norm_scale']
     A.graph['is_normalized'] = True
     for _, _, eData in A.edges(data=True):
-        eData['length'] *= norm_factor
-    A.graph['VertexC'] = norm_factor*(Aʹ.graph['VertexC']
-                                      - Aʹ.graph['norm_offset'])
-    A.graph['d2roots'] = norm_factor*Aʹ.graph['d2roots']
+        eData['length'] *= scale
+    A.graph['VertexC'] = scale*(Aʹ.graph['VertexC'] - offset)
+    A.graph['d2roots'] = scale*Aʹ.graph['d2roots']
     return A
 
 

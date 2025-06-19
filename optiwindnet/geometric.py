@@ -21,8 +21,13 @@ from .utils import NodeStr, NodeTagger
 F = NodeTagger()
 NULL = np.iinfo(int).min
 
-def triangle_AR(uC, vC, tC):
-    '''Calculate the aspect ratio of the triangle defined by the coordinates.
+
+def triangle_AR(base1C, base2C, topC):
+    '''Calculate the ratio: dist(base1, base2)/dist(base, top).
+
+    Numerator is the length of the base of the triagle (base1C, base2C).
+
+    Denominator is the distance from point topC to the base line.
 
     Args:
       uC, vC, tC: triangle vertices coordinates as (2,) numpy arrays
@@ -30,12 +35,17 @@ def triangle_AR(uC, vC, tC):
     Returns:
       Aspect ratio of the triangle defined by the three 2D points.
     '''
-    lengths = np.hypot(*np.column_stack((vC - tC, tC - uC, uC - vC)))
-    den = (lengths.sum()/2 - lengths).prod()
-    if den == 0.:
+    x1, y1 = base1C
+    x2, y2 = base2C
+    xt, yt = topC
+
+    dx = x2 - x1
+    dy = y2 - y1
+    den = abs(dy * xt - dx * yt + x2 * y1 - y2 * x1)
+    if den < 1e-12:
         return float('inf')
-    else:
-        return lengths.prod()/8/den
+    base_sqr = dx**2 + dy**2
+    return base_sqr/den
 
 
 def any_pairs_opposite_edge(NodesC, uC, vC, margin=0):
@@ -124,6 +134,71 @@ def angle(a, pivot, b):
     ang = np.arctan2(Ax*By - Ay*Bx, Ax*Bx + Ay*By)
     # debug and print(f'{ang*180/np.pi:.1f}')
     return ang
+
+
+def angle_oracles_factory(angles: np.ndarray, anglesRank: np.ndarray
+                          ) -> tuple[Callable, Callable]:
+    '''Make functions to answer queries about relative angles.
+
+    Inputs are the outputs of `angle_helpers()`.
+
+    Args:
+      angles: (T, R)-array of angles wrt root (+-pi)
+      anglesRank: (T, R)-array of the relative placement of angles
+
+    Returns:
+      union_limits() and angle_ccw()
+    '''
+
+    def is_within(pR: int, lR: int, hR: int) -> bool:
+        W = lR > hR  # wraps, i.e. angle(low) > angle(high)
+        L = lR <= pR  # angle(low) <= angle(probe)
+        H = pR <= hR  # angle(probe) <= angle(high)
+        return ((not W and L and H)
+                or (W and not L and H)
+                or (W and L and not H))
+
+    def union_limits(root: int, u: int, LO: int, HI: int, v: int, lo: int,
+                     hi: int) -> tuple[float, float]:
+        LOR, HIR, loR, hiR = anglesRank[(LO, HI, lo, hi), root]
+        lo_within = is_within(loR, LOR, HIR)
+        hi_within = is_within(hiR, LOR, HIR)
+        if lo_within and hi_within:
+            # print('LOHI contains lohi')
+            return LO, HI
+        elif lo_within:
+            # print('partial overlap, hi outside LOHI')
+            return LO, hi
+        elif hi_within:
+            # print('partial overlap, lo outside LOHI')
+            return lo, HI
+        elif is_within(LOR, loR, hiR):
+            # print('lohi contains LOHI')
+            return lo, hi
+        else:
+            # print('LOHI and lohi are disjoint')
+            uvA = angle_ccw(u, root, v)
+            return (LO, hi) if uvA <= math.pi else (lo, HI)
+
+    def angle_ccw(a: int, pivot: int, b: int) -> float:
+        '''Calculate the angle a-pivot-b.
+
+        * angle is ccw from 0 to 2π
+
+        Args:
+          a, pivot, b: vertex indices
+
+        Returns:
+          Angle a-pivot-b (radians)
+        '''
+        if a == b:
+            return 0.
+        aR, bR = anglesRank[(a , b), pivot]
+        aA, bA = angles[(a , b), pivot]
+        a_to_bA = (bA - aA).item()
+        return a_to_bA if aR <= bR else (2*math.pi + a_to_bA)
+
+    return union_limits, angle_ccw
 
 
 def find_edges_bbox_overlaps(
@@ -474,15 +549,14 @@ def perimeter(VertexC, vertices_ordered):
                          - VertexC[vertices_ordered[0]])))
 
 
-def angle_helpers(L: nx.Graph) -> tuple[np.ndarray, np.ndarray,
-                                        np.ndarray, np.ndarray]:
+def angle_helpers(L: nx.Graph) -> tuple[np.ndarray, np.ndarray]:
     '''Create auxiliary arrays of node attributes based on polar coordinates.
 
     Args:
         L: location (also works with A or G)
 
     Returns:
-        Tuple of (angles, anglesRank, anglesXhp, anglesYhp)
+        Tuple of (angles, anglesRank)
     '''
 
     T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
@@ -496,11 +570,7 @@ def angle_helpers(L: nx.Graph) -> tuple[np.ndarray, np.ndarray,
         angles[n] = np.arctan2(y, x)
 
     anglesRank = rankdata(angles, method='dense', axis=0)
-    # vertex is in the positive-X half-plane
-    anglesXhp = abs(angles) < np.pi/2
-    # vertex is in the positive-Y half-plane
-    anglesYhp = angles >= 0.
-    return angles, anglesRank, anglesXhp, anglesYhp
+    return angles, anglesRank
 
 
 def assign_root(A: nx.Graph) -> None:
@@ -591,6 +661,7 @@ def complete_graph(G_base: nx.Graph, *, include_roots: bool = False,
     # remove edges between nodes belonging to distinct roots whose length is
     # greater than both d2root
     G.graph.update(G_base.graph)
+    G.graph['d2roots'] = cdist(TerminalC, RootC)
     nx.set_node_attributes(G, G_base.nodes)
     for u, v, edgeD in G.edges(data=True):
         edgeD['length'] = C[u, v]

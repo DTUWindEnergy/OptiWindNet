@@ -1,4 +1,3 @@
-import operator
 import math
 from collections.abc import Iterator, Iterable
 from bidict import bidict
@@ -150,7 +149,7 @@ def edgeset_edgeXing_iter(diagonals: bidict) \
         uv = (u, v)
         if s >= 0:
             # crossing with Delaunay edge
-            yield ((s, t), uv)
+            yield [(s, t), uv]
         # two triangles may contain ⟨s, t⟩, each defined by their non-st vertex
         for hat in uv:
             triangle = tuple(sorted((s, t, hat)))
@@ -169,7 +168,7 @@ def edgeset_edgeXing_iter(diagonals: bidict) \
 def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
                   borders: Iterable | None = None,
                   touch_is_cross: bool = True) \
-        -> Iterator[tuple[tuple[int, int]]]:
+        -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
     '''Iterate over all crossings between gates and edges/borders in G.
 
     If `hooks` is `None`, all nodes that are not a root neighbor are
@@ -191,10 +190,9 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
     roots = range(-R, 0)
     anglesRank = G.graph.get('anglesRank', None)
     if anglesRank is None:
-        _, anglesRank, anglesXhp, anglesYhp = angle_helpers(G)
+        angles, anglesRank = angle_helpers(G)
     else:
-        anglesXhp = G.graph['anglesXhp']
-        anglesYhp = G.graph['anglesYhp']
+        angles = G.graph['angles']
     # TODO: There is a corner case here: for multiple roots, the gates are not
     #       being checked between different roots. Unlikely but possible case.
     # iterable of non-gate edges:
@@ -210,29 +208,25 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
     # because if a gate goes precisely through a node
     # there will be nothing to prevent it from spliting
     # that node's subtree
-    less = operator.le if touch_is_cross else operator.lt
+    less = np.less_equal if touch_is_cross else np.less
     for u, v in Edge:
         if fnT is not None:
             u, v = fnT[u], fnT[v]
         uC = VertexC[u]
         vC = VertexC[v]
         for root, iGate in zip(roots, IGate):
+            ang = angles[:, root]
+            rank = anglesRank[:, root]
             rootC = VertexC[root]
-            uR, vR = anglesRank[u, root], anglesRank[v, root]
-            highRank, lowRank = (uR, vR) if uR >= vR else (vR, uR)
-            Xhp = anglesXhp[[u, v], root]
-            uYhp, vYhp = anglesYhp[[u, v], root]
-            # get a vector of gate edges' ranks for current root
-            gaterank = anglesRank[iGate, root]
-            # check if angle of <u, v> wraps across +-pi
-            if (not any(Xhp)) and uYhp != vYhp:
-                # <u, v> wraps across zero
-                is_rank_within = np.logical_or(less(gaterank, lowRank),
-                                               less(highRank, gaterank))
-            else:
-                # <u, v> does not wrap across zero
-                is_rank_within = np.logical_and(less(lowRank, gaterank),
-                                                less(gaterank, highRank))
+            uvA = ang[v] - ang[u]
+            swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
+            l, h = (v, u) if swaped else (u, v)
+            lR, hR = rank[l], rank[h]
+            pR_ = rank[iGate]
+            W = lR > hR  # wraps +-pi
+            L = less(lR, pR_)  # angle(low) <= angle(probe)
+            H = less(pR_, hR)  # angle(probe) <= angle(high)
+            is_rank_within = ~W & L & H | W & ~L & H | W & L & ~H
             for n in iGate[np.flatnonzero(is_rank_within)].tolist():
                 # this test confirms the crossing because `is_rank_within`
                 # established that root–n is on a line crossing u–v

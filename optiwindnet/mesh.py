@@ -31,7 +31,7 @@ from .interarraylib import NodeTagger
 from .geometric import is_triangle_pair_a_convex_quadrilateral
 
 logger = logging.getLogger(__name__)
-debug, warn = logger.debug, logger.warning
+debug, info, warn = logger.debug, logger.info, logger.warning
 F = NodeTagger()
 NULL = np.iinfo(int).min
 _MAX_TRIANGLE_ASPECT_RATIO = 50.
@@ -158,7 +158,8 @@ def _P_from_halfedge_pack(halfedge_pack: tuple[np.ndarray, np.ndarray]) \
 
 def _hull_processor(P: nx.PlanarEmbedding, T: int,
                     supertriangle: tuple[int, int, int],
-                    vertex2conc_id_map: dict[int, int]) \
+                    vertex2conc_id_map: dict[int, int],
+                    num_holes: int) \
         -> tuple[list[int], list[tuple[int, int]], set[tuple[int, int]]]:
     '''Find the convex hull and supertriangle-incident edges to remove.
 
@@ -195,8 +196,9 @@ def _hull_processor(P: nx.PlanarEmbedding, T: int,
                 elif v == end:
                     to_remove.append((pivot, v))
                     debug('del_sup %d %d', pivot, v)
-                if (vertex2conc_id_map.get(u, -1)
-                        == vertex2conc_id_map.get(v, -2)):
+                conc_id_u = vertex2conc_id_map.get(u)
+                if ((conc_id_u == vertex2conc_id_map.get(v, -1))
+                        and (conc_id_u >= num_holes)):
                     to_remove.append((u, v))
                     conc_outer_edges.add((u, v) if u < v else (v, u))
                     debug('del_int %d %d', u, v)
@@ -356,24 +358,24 @@ def make_planar_embedding(
     # B) Transform border concavities in polygons.
     # ############################################
     debug('PART B')
-    root_xy_ = tuple((x.item(), y.item()) for (x, y) in VertexC[-R:])
-    nodeset_xy_ = set(chain(root_xy_,
-                            ((x.item(), y.item()) for (x, y) in VertexC[:T])))
-    root_pts = shp.MultiPoint(root_xy_)
+    node_xy_ = tuple((x.item(), y.item()) for (x, y) in chain(VertexC[:T], VertexC[-R:]))
+    nodeset_xy_ = set(node_xy_)
+    root_pts = shp.MultiPoint(node_xy_[-R:])
     if border is None:
         hull_minus_border = shp.MultiPolygon()
         border_vertex_from_xy = {}
         out_root_pts = shp.MultiPoint()
     else:
+        border_vertex_from_xy = {
+            tuple(VertexC[i].tolist()): i.item()
+            for i in chain(border, *obstacles)
+        }
+
         border_poly = shp.Polygon(shell=VertexC[border])
         out_root_pts = root_pts - border_poly
         hull_poly = (border_poly | root_pts).convex_hull
         hull_ring = hull_poly.boundary
 
-        border_vertex_from_xy = {
-            (x.item(), y.item()): i
-            for i, (x, y) in enumerate(VertexC[T:-R], start=T)
-        }
 
         hull_border_xy_ = {xy for xy in hull_ring.coords[:-1]
                            if xy in border_vertex_from_xy}
@@ -395,7 +397,7 @@ def make_planar_embedding(
                 concavities.append(p.exterior)
     elif out_root_pts.is_empty:
         # single Polygon is a concavity
-        concavities = [hull_minus_border.exterior]
+        concavities.append(hull_minus_border.exterior)
     else:
         # single Polygon in hull_minus_border includes a root -> no concavity
         border_poly = hull_poly
@@ -485,7 +487,7 @@ def make_planar_embedding(
             Y_is_hull = fwd in hull_border_xy_
             cur = fwd
         if changed:
-            debug('Concavities changed!')
+            info('Concavities changed: %d stunts', len(stunt_coords))
             concavities[i] = shp.LinearRing(new_ring_xy_)
             stuntC.append(mean + scale*np.array(stunt_coords))
     # Stunts are added to the B range and they should be saved with routesets.
@@ -535,11 +537,12 @@ def make_planar_embedding(
     vertex2conc_id_map = {border_vertex_from_xy[xy]: i
                           for i, ring in enumerate(holes)
                           for xy in ring.coords[:-1]}
+    num_holes = len(holes)
     # then concavities
     if len(concavities) <= 1:
         vertex2conc_id_map |= {
             border_vertex_from_xy[xy]: i
-            for i, ring in enumerate(concavities, start=len(holes))
+            for i, ring in enumerate(concavities, start=num_holes)
             for xy in ring.coords[:-1]
         }
     else: # multiple concavities
@@ -828,12 +831,16 @@ def make_planar_embedding(
                          VertexCʹ[-R:]))
 
     # Add length attribute to A's edges.
-    A_edges = (*P_A_edges, *diagonals)
-    source, target = zip(*A_edges)
-    # TODO: ¿use d2roots for root-incident edges? probably not worth it
-    A_edge_length = dict(
-        zip(A_edges, (length.item() for length in
-                      np.hypot(*(VertexC[source,] - VertexC[target,]).T))))
+    A_edges = np.array((*P_A_edges, *diagonals))
+    length_ = np.hypot(*(VertexC[A_edges[:, 0]] - VertexC[A_edges[:, 1]]).T)
+    is_terminal_ = A_edges >= 0
+    inter_terminal_mask = np.logical_and(is_terminal_[:, 0], is_terminal_[:, 1])
+    inter_terminal_clearance_ = length_[inter_terminal_mask]
+    inter_terminal_clearance_min = np.min(inter_terminal_clearance_).item()
+    inter_terminal_clearance_safe = np.quantile(inter_terminal_clearance_, 0.1).item()
+
+    A_edge_length = dict(zip(map(tuple, A_edges),
+                             (length.item() for length in length_)))
     nx.set_edge_attributes(A, A_edge_length, name='length')
 
     # ###############################################################
@@ -861,7 +868,7 @@ def make_planar_embedding(
     #          P, T, B + 3, VertexC, max_tri_AR=max_tri_AR)
 
     convex_hull, to_remove, conc_outer_edges = _hull_processor(
-            P, T, supertriangle, vertex2conc_id_map)
+            P, T, supertriangle, vertex2conc_id_map, num_holes)
     P.remove_edges_from(to_remove)
     P_edges.difference_update((u, v) if u < v else (v, u)
                               for u, v in to_remove)
@@ -919,7 +926,6 @@ def make_planar_embedding(
             P_paths.add_edge(s, t)
 
     nx.set_edge_attributes(P_paths, A_edge_length, name='length')
-    #  for u, v in P_paths.edges - A_edge_length:
     for u, v, edgeD in P_paths.edges(data=True):
         if 'length' not in edgeD:
             edgeD['length'] = np.hypot(*(VertexC[u] - VertexC[v])).item()
@@ -949,9 +955,10 @@ def make_planar_embedding(
                 # The vertex is kept if the border angle and the path angle
                 # point to the same side. Otherwise, remove the vertex.
                 s, b, t = path[i:i + 3]
-                # skip to shortcut if b is a neighbor of the supertriangle
-                if all(n not in P[b] for n in supertriangle):
-                    b_conc_id = vertex2conc_id_map[b]
+                b_conc_id = vertex2conc_id_map[b]
+                # skip to shortcut if b is in a concavity and is a neighbor of
+                # the supertriangle
+                if b_conc_id < num_holes or all(n not in P[b] for n in supertriangle):
                     debug('s: %s; b: %s; t: %s; b_conc_id: %s', F[s], F[b], F[t], b_conc_id)
                     debug([(F[n], vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
                     nbs = P.neighbors_cw_order(b)
@@ -1040,7 +1047,8 @@ def make_planar_embedding(
                          or (w, n) in P_A.edges or (w, o) in P_A.edges)
                         and (w in uv or y in uv)):
                         # st & promoted are diagonals of the same triangle
-                        diagonals[st] = w, y
+                        if st not in diagonals:
+                            diagonals[st] = w, y
                         promote_st = False
             if promote_st:
                 edgeD = A.edges[st]
@@ -1137,11 +1145,13 @@ def make_planar_embedding(
         # experimental attr
         norm_offset=norm_offset,
         norm_scale=norm_scale,
+        inter_terminal_clearance_min=inter_terminal_clearance_min,
+        inter_terminal_clearance_safe=inter_terminal_clearance_safe,
     )
     if obstacles:
         A.graph['obstacles'] = obstacles
     if stunts_primes:
-        A.graph['num_stunts'] = len(stunts_primes)
+        A.graph['stunts_primes'] = stunts_primes
     landscape_angle = L.graph.get('landscape_angle')
     if landscape_angle is not None:
         A.graph['landscape_angle'] = landscape_angle
