@@ -1047,7 +1047,8 @@ def make_planar_embedding(
                          or (w, n) in P_A.edges or (w, o) in P_A.edges)
                         and (w in uv or y in uv)):
                         # st & promoted are diagonals of the same triangle
-                        diagonals[st] = w, y
+                        if st not in diagonals:
+                            diagonals[st] = w, y
                         promote_st = False
             if promote_st:
                 edgeD = A.edges[st]
