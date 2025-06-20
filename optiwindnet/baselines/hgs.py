@@ -1,9 +1,10 @@
 import math
+from io import StringIO
 from dataclasses import asdict
 import numpy as np
 import networkx as nx
 import hybgensea as hgs
-from py.io import StdCaptureFD
+from wurlitzer import pipes
 
 from ..interarraylib import fun_fingerprint
 from ..repair import repair_routeset_path
@@ -95,8 +96,10 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
         depot=0,
     )
 
-    result, out, err = StdCaptureFD.call(hgs_solver.solve_cvrp, data,
-                                         rounding=False)
+    redirection = StringIO()
+    with pipes(stdout=redirection):
+        result = hgs_solver.solve_cvrp(data, rounding=False)
+    out = redirection.getvalue()
 
     # create a topology graph S from the results
     S = nx.Graph(
@@ -116,8 +119,11 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
         #  )
     )
     branches = ([n - 1 for n in branch] for branch in result.routes)
+    max_load = 0
     for subtree_id, branch in enumerate(branches):
-        loads = range(len(branch), 0, -1)
+        branch_load = len(branch)
+        max_load = max(max_load, branch_load)
+        loads = range(branch_load, 0, -1)
         S.add_nodes_from(((n, {'load': load})
                           for n, load in zip(branch, loads)),
                          subtree=subtree_id)
@@ -129,6 +135,7 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
     root_load = sum(S.nodes[n]['load'] for n in S.neighbors(-1))
     S.nodes[-1]['load'] = root_load
     assert root_load == T, 'ERROR: root node load does not match T.'
+    S.graph['max_load'] = max_load
     return S
 
 

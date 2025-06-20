@@ -21,8 +21,13 @@ from .utils import NodeStr, NodeTagger
 F = NodeTagger()
 NULL = np.iinfo(int).min
 
-def triangle_AR(uC, vC, tC):
-    '''Calculate the aspect ratio of the triangle defined by the coordinates.
+
+def triangle_AR(base1C, base2C, topC):
+    '''Calculate the ratio: dist(base1, base2)/dist(base, top).
+
+    Numerator is the length of the base of the triagle (base1C, base2C).
+
+    Denominator is the distance from point topC to the base line.
 
     Args:
       uC, vC, tC: triangle vertices coordinates as (2,) numpy arrays
@@ -30,12 +35,17 @@ def triangle_AR(uC, vC, tC):
     Returns:
       Aspect ratio of the triangle defined by the three 2D points.
     '''
-    lengths = np.hypot(*np.column_stack((vC - tC, tC - uC, uC - vC)))
-    den = (lengths.sum()/2 - lengths).prod()
-    if den == 0.:
+    x1, y1 = base1C
+    x2, y2 = base2C
+    xt, yt = topC
+
+    dx = x2 - x1
+    dy = y2 - y1
+    den = abs(dy * xt - dx * yt + x2 * y1 - y2 * x1)
+    if den < 1e-12:
         return float('inf')
-    else:
-        return lengths.prod()/8/den
+    base_sqr = dx**2 + dy**2
+    return base_sqr/den
 
 
 def any_pairs_opposite_edge(NodesC, uC, vC, margin=0):
