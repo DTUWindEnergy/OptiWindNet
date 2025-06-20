@@ -362,7 +362,7 @@ def make_planar_embedding(
                      for (x, y) in chain(VertexC[:T], VertexC[-R:]))
     node_vertex_from_xy = dict(zip(node_xy_, chain(range(T), range(-R, 0))))
 
-    root_pts = shp.MultiPoint(VertexC[-R:])
+    root_pts = shp.MultiPoint(node_xy_[-R:])
     if border is None:
         hull_minus_border = shp.MultiPolygon()
         border_vertex_from_xy = {}
