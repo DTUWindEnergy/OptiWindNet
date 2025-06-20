@@ -2,12 +2,9 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import abc
+from itertools import chain
 from enum import auto
-try:
-    from enum import StrEnum
-except ImportError:
-    # workaround for python < 3.11
-    from backports.strenum import StrEnum
+from enum import StrEnum
 from typing import Any, Mapping
 from dataclasses import dataclass, asdict
 import networkx as nx
@@ -57,16 +54,31 @@ class FeederLimit(StrEnum):
 class ModelOptions(dict):
     hints = {_identifier_from_class_name(kind): kind
              for kind in (Topology, FeederRoute, FeederLimit)}
+    # this has to be kept in sync with make_min_length_model()
+    simple = dict(
+        balanced=(bool, False,
+            'Whether to enforce balanced subtrees (subtree loads differ at most '
+            'by one unit).'),
+        max_feeders=(int, 0,
+            'Maximum number of feeders (used only if <feeder_limit = "specified">)'),
+    )
 
     @with_signature(
         '__init__(self, *, '
-        + ', '.join(f'{k}: {v.__name__} = "{v.DEFAULT.value}"'
-                    for k, v in hints.items()) + ')'
+        + ', '.join(chain(
+            (f'{k}: {v.__name__} = "{v.DEFAULT.value}"' for k, v in hints.items()),
+            (f'{name}: {kind.__name__} = {default}' for name, (kind, default, _) in simple.items())
+        ))
+        + ')'
     )
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             if isinstance(v, str):
                 kwargs[k] = self.hints[k](v)
+            else:
+                if k not in self.simple:
+                    raise ValueError(f'Unknown argument: {k}')
+
         super().__init__(kwargs)
 
     @classmethod
@@ -77,6 +89,9 @@ class ModelOptions(dict):
                               if m != 'default')
                   + f'}} default: {cls.hints[k].DEFAULT.value}\n'
                   f'    {v.__doc__}\n')
+        for name, (kind, default, desc) in cls.simple.items():
+            print(f'{name} [{kind.__name__}] default: {default}\n'
+                  f'    {desc}\n')
 
 
 @dataclass(slots=True)

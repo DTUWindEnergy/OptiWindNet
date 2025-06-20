@@ -146,6 +146,7 @@ def make_min_length_model(
         topology: Topology = Topology.BRANCHED,
         feeder_route: FeederRoute = FeederRoute.SEGMENTED,
         feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+        balanced: bool = False,
         max_feeders: int = 0
 ) -> tuple[pyo.ConcreteModel, ModelMetadata]:
     '''Make discrete optimization model over link set A.
@@ -277,8 +278,8 @@ def make_min_length_model(
     )
 
     # feeder limits
+    min_feeders = math.ceil(T/m.k)
     if feeder_limit is not FeederLimit.UNLIMITED:
-        min_feeders = math.ceil(T/m.k)
 
         def feeder_limit_eq_rule(m):
             return (sum(m.link_[t, r] for r in _R for t in _T)
@@ -306,6 +307,31 @@ def make_min_length_model(
             raise NotImplementedError('Unknown value:', feeder_limit)
         m.cons_feeder_limit = pyo.Constraint(rule=feeder_rule)
 
+        # enforce balanced subtrees (subtree loads differ at most by one unit)
+        if balanced:
+            if feeder_rule is not feeder_limit_eq_rule:
+                warn('Model option <balanced = True> is incompatible with '
+                     'having a range of possible feeder counts: model will '
+                     'not enforce balanced subtrees.')
+            else:
+                low_load, num_high_load = divmod(T, min_feeders)
+                if num_high_load != 0:
+                    m.feeder_at_low_load = pyo.Var(
+                        m.T, m.R, domain=pyo.Binary, initialize=0
+                    )
+                    m.cons_link_low_load_to_flow = pyo.Constraint(
+                        m.T, m.R,
+                        rule=lambda m, t, r: m.flow_[(t, r)] == low_load
+                    )
+                    m.cons_balanced = pyo.Constraint(
+                        rule=lambda m: sum(m.feeder_at_low_load[(t, r)]
+                                           for t in m.T for r in m.R)
+                        == min_feeders - num_high_load)
+    elif balanced:
+        warn('Model option <balanced = True> is incompatible with <feeder_limit'
+             ' = UNLIMITED>: model will not enforce balanced subtrees.')
+
+            # auxiliary variables
     # radial or branched topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
