@@ -135,7 +135,15 @@ class Solver(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None) -> tuple[nx.Graph, nx.Graph]:
+        '''Output solution topology A and routeset G.
+
+        Args:
+          A: optionally replace the A given via set_problem() (if normalized A)
+
+        Returns:
+          Topology graph S and routeset G.
+        '''
         pass
 
     def _make_graph_attributes(self) -> dict[str, Any]:
@@ -172,7 +180,7 @@ class PoolHandler(abc.ABC):
 
 def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
         ) -> tuple[nx.Graph, nx.Graph]:
-    '''Go through the CpSat's solutions checking which has the shortest length
+    '''Go through the solver's solutions checking which has the shortest length
     after applying the detours with PathFinder.'''
     Λ = float('inf')
     branched=pool.model_options['topology'] is Topology.BRANCHED   

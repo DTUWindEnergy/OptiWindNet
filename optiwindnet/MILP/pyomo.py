@@ -126,8 +126,10 @@ class SolverPyomo(Solver):
         return solution_info
 
 
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
-        P, A, model_options = self.P, self.A, self.model_options
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        if A is None:
+            A = self.A
+        P, model_options = self.P, self.model_options
         S = topology_from_mip_sol(model=self.model)
         S.graph['creator'] += self.name
         G = PathFinder(
@@ -314,19 +316,13 @@ def make_min_length_model(
                      'having a range of possible feeder counts: model will '
                      'not enforce balanced subtrees.')
             else:
-                low_load, num_high_load = divmod(T, min_feeders)
-                if num_high_load != 0:
-                    m.feeder_at_low_load = pyo.Var(
-                        m.T, m.R, domain=pyo.Binary, initialize=0
-                    )
-                    m.cons_link_low_load_to_flow = pyo.Constraint(
-                        m.T, m.R,
-                        rule=lambda m, t, r: m.flow_[(t, r)] == low_load
-                    )
+                feeder_min_load = T//min_feeders
+                if feeder_min_load < capacity:
                     m.cons_balanced = pyo.Constraint(
-                        rule=lambda m: sum(m.feeder_at_low_load[(t, r)]
-                                           for t in m.T for r in m.R)
-                        == min_feeders - num_high_load)
+                        m.T, m.R,
+                        rule=(lambda m, t, r:
+                              m.flow_[t, r] >= m.link_[t, r]*feeder_min_load)
+                    )
     elif balanced:
         warn('Model option <balanced = True> is incompatible with <feeder_limit'
              ' = UNLIMITED>: model will not enforce balanced subtrees.')
