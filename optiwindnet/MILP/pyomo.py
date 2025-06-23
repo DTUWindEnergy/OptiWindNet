@@ -126,8 +126,10 @@ class SolverPyomo(Solver):
         return solution_info
 
 
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
-        P, A, model_options = self.P, self.A, self.model_options
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        if A is None:
+            A = self.A
+        P, model_options = self.P, self.model_options
         S = topology_from_mip_sol(model=self.model)
         S.graph['creator'] += self.name
         G = PathFinder(
@@ -146,6 +148,7 @@ def make_min_length_model(
         topology: Topology = Topology.BRANCHED,
         feeder_route: FeederRoute = FeederRoute.SEGMENTED,
         feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+        balanced: bool = False,
         max_feeders: int = 0
 ) -> tuple[pyo.ConcreteModel, ModelMetadata]:
     '''Make discrete optimization model over link set A.
@@ -277,8 +280,8 @@ def make_min_length_model(
     )
 
     # feeder limits
+    min_feeders = math.ceil(T/m.k)
     if feeder_limit is not FeederLimit.UNLIMITED:
-        min_feeders = math.ceil(T/m.k)
 
         def feeder_limit_eq_rule(m):
             return (sum(m.link_[t, r] for r in _R for t in _T)
@@ -306,6 +309,25 @@ def make_min_length_model(
             raise NotImplementedError('Unknown value:', feeder_limit)
         m.cons_feeder_limit = pyo.Constraint(rule=feeder_rule)
 
+        # enforce balanced subtrees (subtree loads differ at most by one unit)
+        if balanced:
+            if feeder_rule is not feeder_limit_eq_rule:
+                warn('Model option <balanced = True> is incompatible with '
+                     'having a range of possible feeder counts: model will '
+                     'not enforce balanced subtrees.')
+            else:
+                feeder_min_load = T//min_feeders
+                if feeder_min_load < capacity:
+                    m.cons_balanced = pyo.Constraint(
+                        m.T, m.R,
+                        rule=(lambda m, t, r:
+                              m.flow_[t, r] >= m.link_[t, r]*feeder_min_load)
+                    )
+    elif balanced:
+        warn('Model option <balanced = True> is incompatible with <feeder_limit'
+             ' = UNLIMITED>: model will not enforce balanced subtrees.')
+
+            # auxiliary variables
     # radial or branched topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are

@@ -1047,8 +1047,12 @@ def make_planar_embedding(
                          or (w, n) in P_A.edges or (w, o) in P_A.edges)
                         and (w in uv or y in uv)):
                         # st & promoted are diagonals of the same triangle
-                        if st not in diagonals:
+                        if (w, y) not in diagonals.inv:
                             diagonals[st] = w, y
+                        else:
+                            warn('Delaunay edge %s already has a diagonal. '
+                                 'Unable to add «%d–%d» as its diagonal',
+                                 st, w, y)
                         promote_st = False
             if promote_st:
                 edgeD = A.edges[st]
