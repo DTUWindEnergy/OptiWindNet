@@ -37,7 +37,8 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
     '''
     R, T, VertexC = (
         A.graph[k] for k in ('R', 'T', 'VertexC'))
-    assert R == 1, 'ERROR: only single depot supported'
+    if R > 1:
+        raise ValueError('Use hgs_multiroot() for multiple-depot problems')
 
     # Solver initialization
     # https://github.com/vidalt/HGS-CVRP/tree/main#running-the-algorithm
@@ -99,7 +100,7 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
         #  solver_details=dict(
         #  )
     )
-    branches = ([n - 1 for n in branch] for branch in result.routes)
+    branches = ([n - 1 for n in branch] for branch in routes)
     max_load = 0
     for subtree_id, branch in enumerate(branches):
         branch_load = len(branch)
