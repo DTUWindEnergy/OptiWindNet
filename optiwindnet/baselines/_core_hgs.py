@@ -38,9 +38,11 @@ def do_hgs(W, coordinates, vehicles, capacity, solver_options):
         distance_matrix=W,
         demands=demands,
         vehicle_capacity=float(capacity),
-        num_vehicles=vehicles,
         depot=0,
     )
+
+    if vehicles is not None:
+        data['num_vehicles'] = vehicles
 
     ap = hgs.AlgorithmParameters(**solver_options)
     hgs_solver = hgs.Solver(parameters=ap, verbose=True)

@@ -69,13 +69,18 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
     # coordinates. Distance_matrix is used for cost calculation if provided.
     # The additional coordinates will be helpful in speeding up the algorithm.
     weights, w_max = length_matrix_single_depot_from_G(A, scale=1.)
+
     vehicles_min = math.ceil(T/capacity)
-    if vehicles is None or vehicles <= vehicles_min:
-        if vehicles is not None and vehicles < vehicles_min:
+    if vehicles is not None:
+        if vehicles < vehicles_min:
             print(f'Vehicle number ({vehicles}) too low for feasibilty '
                   f'with capacity ({capacity}). Setting to {vehicles_min}.')
-        # set to minimum feasible vehicle number
-        vehicles = vehicles_min
+            # set to minimum feasible vehicle number
+            vehicles = vehicles_min
+        feeders_above_min = vehicles - vehicles_min
+    else:
+        feeders_above_min = None  # unlimited
+
     # HGS-CVRP crashes if distance_matrix has inf values, but there must
     # be a strong incentive to choose A edges only. (5× is arbitrary)
     distance_matrix = weights.clip(max=5*w_max)
@@ -95,11 +100,13 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
         solver_log=log,
         solution_time=solution_time,
         method_options=dict(solver_name='HGS-CVRP',
+                            feeders_above_min=feeders_above_min,
                             complete=A.number_of_edges() == 0,
                             fun_fingerprint=fun_fingerprint()) | algo_params,
-        #  solver_details=dict(
-        #  )
     )
+    if vehicles is not None:
+        S.graph['solver_details'] = dict(vehicles=vehicles)
+
     branches = ([n - 1 for n in branch] for branch in routes)
     max_load = 0
     for subtree_id, branch in enumerate(branches):
