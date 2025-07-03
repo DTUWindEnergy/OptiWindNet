@@ -8,7 +8,6 @@ from typing import Any
 from collections import namedtuple
 from itertools import chain
 import networkx as nx
-import psutil
 
 import pyomo.environ as pyo
 
@@ -42,7 +41,7 @@ _optkey = dict(
 
 _default_options = dict(
     cbc=dict(
-        threads=len(psutil.Process().cpu_affinity()),
+        threads=os.cpu_count(),
         timeMode='elapsed',
         # the parameters below and more can be experimented with
         # http://www.decom.ufop.br/haroldo/files/cbcCommandLine.pdf
