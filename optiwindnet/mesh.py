@@ -369,14 +369,14 @@ def make_planar_embedding(
     mean = VertexCʹ.mean(axis=0)
     scale = 2.*max(VertexCʹ.max(axis=0) - VertexCʹ.min(axis=0))
 
-    VertexC = (VertexCʹ - mean)/scale
+    VertexS = (VertexCʹ - mean)/scale
 
     # ############################################
     # B) Transform border concavities in polygons.
     # ############################################
     debug('PART B')
-    node_xy_ = tuple((x.item(), y.item()) for (x, y) in chain(VertexC[:T], VertexC[-R:]))
-    nodeset_xy_ = set(node_xy_)
+    node_xy_ = tuple((x.item(), y.item()) for (x, y) in chain(VertexS[:T], VertexS[-R:]))
+    nodeset_xy_ = set(node_xy_[:-R])
     root_pts = shp.MultiPoint(node_xy_[-R:])
     if border is None:
         hull_minus_border = shp.MultiPolygon()
@@ -384,11 +384,11 @@ def make_planar_embedding(
         out_root_pts = shp.MultiPoint()
     else:
         border_vertex_from_xy = {
-            tuple(VertexC[i].tolist()): i.item()
+            tuple(VertexS[i].tolist()): i.item()
             for i in chain(border, *obstacles)
         }
 
-        border_poly = shp.Polygon(shell=VertexC[border])
+        border_poly = shp.Polygon(shell=VertexS[border])
         out_root_pts = root_pts - border_poly
         hull_poly = (border_poly | root_pts).convex_hull
         hull_ring = hull_poly.boundary
@@ -419,102 +419,114 @@ def make_planar_embedding(
         # single Polygon in hull_minus_border includes a root -> no concavity
         border_poly = hull_poly
 
+    holes = [shp.LinearRing(VertexS[obstacle]) for obstacle in obstacles]
+
     # ###################################################################
     # C) Check if concavities' vertices coincide with wtg. Where they do,
     #    create stunt concavity vertices to the inside of the concavity.
     # ###################################################################
     debug('PART C')
-    offset = offset_scale*np.hypot(*(VertexC.max(axis=0)
-                                     - VertexC.min(axis=0)))
+    offset = offset_scale*np.hypot(*(VertexS.max(axis=0)
+                                     - VertexS.min(axis=0)))
     #  debug(f'offset: {offset}')
-    stuntC = []
+    stuntS = []
     stunts_primes = []
     remove_from_border_xy_map = set()
     B_old = B
     # replace coinciding vertices with stunts and save concavities here
-    for i, ring in enumerate(concavities):
-        changed = False
-        debug('ring: %s', ring)
-        stunt_coords = []
-        new_ring_xy_ = []
-        old_ring_xy_ = tuple(xy for xy in (ring.coords[:-1] if ring.is_ccw
-                                           else ring.coords[-2::-1]))
-        rev = old_ring_xy_[-1]
-        X = border_vertex_from_xy[rev]
-        X_is_hull = X in hull_border_vertices
-        cur = old_ring_xy_[0]
-        Y = border_vertex_from_xy[cur]
-        Y_is_hull = Y in hull_border_vertices
-        # X->Y->Z is in ccw direction
-        for fwd in chain(old_ring_xy_[1:], (cur,)):
-            Z = border_vertex_from_xy[fwd]
-            Z_is_hull = fwd in hull_border_xy_
-            if cur in nodeset_xy_:
-                # Concavity border vertex coincides with node.
-                # Therefore, create a stunt vertex for the border.
-                XY = VertexC[Y] - VertexC[X]
-                YZ = VertexC[Z] - VertexC[Y]
-                _XY_ = np.hypot(*XY)
-                _YZ_ = np.hypot(*YZ)
-                nXY = XY[::-1]/_XY_
-                nYZ = YZ[::-1]/_YZ_
-                # normal to XY, pointing inward
-                nXY[0] = -nXY[0]
-                # normal to YZ, pointing inward
-                nYZ[0] = -nYZ[0]
-                angle = np.arccos(np.dot(-XY, YZ)/_XY_/_YZ_)
-                if abs(angle) < np.pi/2:
-                    # XYZ acute
-                    debug('acute')
-                    # project nXY on YZ
-                    proj = YZ/_YZ_/max(0.5, np.sin(abs(angle)))
-                else:
-                    # XYZ obtuse
-                    debug('obtuse')
-                    # project nXY on YZ
-                    proj = YZ*np.dot(nXY, YZ)/_YZ_**2
-                if Y_is_hull:
-                    if X_is_hull:
-                        debug('XY hull')
-                        # project nYZ on XY
-                        S = offset*(-XY/_XY_/max(0.5, np.sin(angle)) - nXY)
-                    else:
-                        assert Z_is_hull
+    for rings, is_hole in ((concavities, False), (holes, True)):
+        for i, ring in enumerate(rings):
+            changed = False
+            debug('is_hole: %s, ring: %d, num_vertices: %d', is_hole, i, len(ring.coords) - 1)
+            stunt_coords = []
+            new_ring_xy_ = []
+            old_ring_xy_ = tuple(
+                xy for xy in (ring.coords[:-1]
+                              if (not ring.is_ccw if is_hole else ring.is_ccw)
+                              else ring.coords[-2::-1]))
+            debug('%s', old_ring_xy_)
+            rev = old_ring_xy_[-1]
+            X = border_vertex_from_xy[rev]
+            X_is_hull = X in hull_border_vertices
+            cur = old_ring_xy_[0]
+            Y = border_vertex_from_xy[cur]
+            Y_is_hull = Y in hull_border_vertices
+            # X->Y->Z is in ccw direction
+            for fwd in chain(old_ring_xy_[1:], (cur,)):
+                Z = border_vertex_from_xy[fwd]
+                Z_is_hull = fwd in hull_border_xy_
+                if cur in nodeset_xy_:
+                    # Concavity border vertex coincides with node.
+                    # Therefore, create a stunt vertex for the border.
+                    XY = VertexS[Y] - VertexS[X]
+                    YZ = VertexS[Z] - VertexS[Y]
+                    _XY_ = np.hypot(*XY)
+                    _YZ_ = np.hypot(*YZ)
+                    nXY = XY[::-1]/_XY_
+                    nYZ = YZ[::-1]/_YZ_
+                    # normal to XY, pointing inward
+                    nXY[0] = -nXY[0]
+                    # normal to YZ, pointing inward
+                    nYZ[0] = -nYZ[0]
+                    angle = np.arccos(np.dot(-XY, YZ)/_XY_/_YZ_)
+                    if abs(angle) < np.pi/2:
+                        # XYZ acute
+                        debug('acute')
                         # project nXY on YZ
-                        S = offset*(YZ/_YZ_/max(0.5, np.sin(angle)) - nYZ)
-                        debug('YZ hull')
+                        proj = YZ/_YZ_/max(0.5, np.sin(abs(angle)))
+                    else:
+                        # XYZ obtuse
+                        debug('obtuse')
+                        # project nXY on YZ
+                        proj = YZ*np.dot(nXY, YZ)/_YZ_**2
+                    if Y_is_hull:
+                        if X_is_hull:
+                            debug('XY hull')
+                            # project nYZ on XY
+                            S = offset*(-XY/_XY_/max(0.5, np.sin(angle)) - nXY)
+                        else:
+                            assert Z_is_hull
+                            # project nXY on YZ
+                            S = offset*(YZ/_YZ_/max(0.5, np.sin(angle)) - nYZ)
+                            debug('YZ hull')
+                    else:
+                        S = offset*(nYZ+proj)
+                    debug('translation: %s', S)
+                    # to extract stunts' coordinates:
+                    # stuntsC = VertexS[T + B - len(stunts_primes): T + B]
+                    stunts_primes.append(Y)
+                    stunt_coord = VertexS[Y] + S
+                    stunt_coords.append(stunt_coord)
+                    stunt_xy = (stunt_coord[0].item(), stunt_coord[1].item())
+                    new_ring_xy_.append(stunt_xy)
+                    remove_from_border_xy_map.add(cur)
+                    border_vertex_from_xy[stunt_xy] = T + B
+                    B += 1
+                    changed = True
                 else:
-                    S = offset*(nYZ+proj)
-                debug('translation: %s', S)
-                # to extract stunts' coordinates:
-                # stuntsC = VertexC[T + B - len(stunts_primes): T + B]
-                stunts_primes.append(Y)
-                stunt_coord = VertexC[Y] + S
-                stunt_coords.append(stunt_coord)
-                stunt_xy = (stunt_coord[0].item(), stunt_coord[1].item())
-                new_ring_xy_.append(stunt_xy)
-                remove_from_border_xy_map.add(cur)
-                border_vertex_from_xy[stunt_xy] = T + B
-                B += 1
-                changed = True
-            else:
-                new_ring_xy_.append(cur)
-            X, X_is_hull = Y, Y_is_hull
-            Y, Y_is_hull = Z, Z_is_hull
-            Y_is_hull = fwd in hull_border_xy_
-            cur = fwd
-        if changed:
-            info('Concavities changed: %d stunts', len(stunt_coords))
-            concavities[i] = shp.LinearRing(new_ring_xy_)
-            stuntC.append(mean + scale*np.array(stunt_coords))
+                    new_ring_xy_.append(cur)
+                X, X_is_hull = Y, Y_is_hull
+                Y, Y_is_hull = Z, Z_is_hull
+                Y_is_hull = fwd in hull_border_xy_
+                cur = fwd
+            if changed:
+                info('Concavities changed: %d stunts', len(stunt_coords))
+                new_conc = shp.LinearRing(new_ring_xy_)
+                if is_hole:
+                    holes[i] = new_conc
+                else:
+                    concavities[i] = new_conc
+                #  stuntC.append(mean + scale*np.array(stunt_coords))
+                stuntS.append(np.array(stunt_coords))
     # Stunts are added to the B range and they should be saved with routesets.
     # Alternatively, one could convert stunts to clones of their primes, but
     # this could create some small interferences between edges.
-    if stuntC:
-        debug('stuntC lengths: %s; former B: %d; new B: %d',
-              [len(nc) for nc in stuntC], B_old, B)
+    if stuntS:
+        info('stuntS lengths: %s; former B: %d; new B: %d',
+             [len(nc) for nc in stuntS], B_old, B)
 
     for xy in remove_from_border_xy_map:
+        info('removing %d', border_vertex_from_xy[xy])
         del border_vertex_from_xy[xy]
 
     # ###########################################
@@ -524,15 +536,13 @@ def make_planar_embedding(
 
     node_vertex_from_xy = {
         (x.item(), y.item()): i for i, (x, y) in chain(
-            enumerate(VertexC[:T]), enumerate(VertexC[-R:], start=-R))
+            enumerate(VertexS[:T]), enumerate(VertexS[-R:], start=-R))
     }
 
     if not out_root_pts.is_empty:
         border = np.array([(border_vertex_from_xy.get(xy)
                             or node_vertex_from_xy[xy])
                            for xy in border_poly.exterior.coords[:-1]], dtype=int)
-
-    holes = [shp.LinearRing(VertexC[obstacle]) for obstacle in obstacles]
 
     # count the points actually used in concavities and obstacles
     num_pt_concavities = sum(shp.count_coordinates(c) for c in concavities)
@@ -544,10 +554,10 @@ def make_planar_embedding(
         (3 + T + R + num_pt_concavities + num_pt_holes,), NULL,  dtype=int)
     vertex_from_iCDT[:3] = supertriangle
     V2d_nodes = []
-    iCDT = 0
-    for iCDT, (xy, n) in enumerate(node_vertex_from_xy.items(), start=iCDT):
+    iCDT = NULL
+    for iCDT, (xy, n) in enumerate(node_vertex_from_xy.items(), start=3):
         V2d_nodes.append(cdt.V2d(*xy))
-        vertex_from_iCDT[iCDT + 3] = n
+        vertex_from_iCDT[iCDT] = n
 
     # Create a map vertex -> concavity/hole id
     # holes first
@@ -577,7 +587,7 @@ def make_planar_embedding(
                     iref, itst = ref_xy_.index(common), test_xy_.index(common)
                     joined = (ref_xy_[:iref] + test_xy_[itst:]
                               + test_xy_[:itst] + ref_xy_[iref:])
-                    debug('common vertex: %d -> new contour: %s', common, joined)
+                    debug('common vertex: %s -> new contour: %s', common, joined)
                     del stack[iconc]
                     stack.append((refset | testset, joined))
                     stable = False
@@ -633,7 +643,7 @@ def make_planar_embedding(
         n = P_A[u][v]['ccw']
         # P_A is a DiGraph, so there are 2 degrees per undirected edge 
         if (P_A.degree[u] > 4 and P_A.degree[v] > 4
-                and triangle_AR(*VertexC[[u, v, n]]) > max_tri_AR):
+                and triangle_AR(*VertexS[[u, v, n]]) > max_tri_AR):
             P_A.remove_edge(u, v)
             queue.extend(((n, v), (u, n)))
             uv = (u, v) if u < v else (v, u)
@@ -666,7 +676,7 @@ def make_planar_embedding(
         vuD = P_A[v][u]
         assert s == vuD['ccw'] and t == vuD['cw']
 
-        if is_triangle_pair_a_convex_quadrilateral(*VertexC[[u, v, s, t]]):
+        if is_triangle_pair_a_convex_quadrilateral(*VertexS[[u, v, s, t]]):
             s, t = (s, t) if s < t else (t, s)
             diagonals[(s, t)] = (u, v)
             A.add_edge(s, t, kind='extended')
@@ -679,7 +689,7 @@ def make_planar_embedding(
     # an exception is made for edges that include a root node
     hull_concave = []
     if border is not None:
-        hull_prunned_poly = shp.Polygon(shell=VertexC[hull_prunned])
+        hull_prunned_poly = shp.Polygon(shell=VertexS[hull_prunned])
         shp.prepare(hull_prunned_poly)
         shp.prepare(border_poly)
         pushed = 0
@@ -687,7 +697,7 @@ def make_planar_embedding(
             hull_stack = hull_prunned[0:1] + hull_prunned[::-1]
             u, v = hull_prunned[-1], hull_stack.pop()
             while hull_stack:
-                edge_line = shp.LineString(VertexC[[u, v]])
+                edge_line = shp.LineString(VertexS[[u, v]])
                 if not border_poly.covers(edge_line):
                     t = P_A[u][v]['ccw']
                     #  print(f'[{pushed}]', F[u], F[v], f'⟨{F[t]}⟩', [F[n] for n in hull_stack[::-1]])
@@ -732,30 +742,41 @@ def make_planar_embedding(
     debug('PART H')
     constraint_edges = set()
     edgesCDT_obstacles = []
-    hard_constraints_xy_ = set()
+    #  hard_constraints_xy_ = set()
     V2d_holes = []
     # add obstacles' edges
+    debug('holes')
     for ring in holes:
         for s_xy, t_xy in zip(ring.coords[:-1], ring.coords[1:]):
             s, t = border_vertex_from_xy[s_xy], border_vertex_from_xy[t_xy]
             edge = []
             for n, xy in ((s, s_xy), (t, t_xy)):
-                if xy not in hard_constraints_xy_:
+                if xy not in node_vertex_from_xy:
                     iCDT += 1
-                    vertex_from_iCDT[iCDT + 3] = n
-                    edge.append(iCDT)
-                    hard_constraints_xy_.add(xy)
+                    vertex_from_iCDT[iCDT] = n
+                    edge.append(iCDT - 3)
+                    node_vertex_from_xy[xy] = n
                     V2d_holes.append(cdt.V2d(*xy))
                 else:
-                    edge.append(np.flatnonzero(vertex_from_iCDT == n)[0] - 3)
+                    n = node_vertex_from_xy[xy]
+                    edge.append(
+                        np.flatnonzero(vertex_from_iCDT[3:] == n)[0].item()
+                    )
+            debug('s: %d, t: %d, sC: %s, tC: %s', s, t, s_xy, t_xy)
             st = (s, t) if s < t else (t, s)
             constraint_edges.add(st)
             edgesCDT_obstacles.append(cdt.Edge(*edge))
 
+    debug('%s', constraint_edges)
     # if adding obstacles, crossing-free edges might be removed from the mesh
     justly_removed = set()
     soft_constraints = set()
     if edgesCDT_obstacles:
+        VertexS = np.vstack(
+            (VertexS[:-R],
+             *stuntS,
+             np.array([(v.x, v.y) for v in mesh.vertices[:3]]),
+             VertexS[-R:]))
         mesh.insert_vertices(V2d_holes)
         mesh.insert_edges(edgesCDT_obstacles)
         _, P_edges = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
@@ -765,10 +786,10 @@ def make_planar_embedding(
         edges_check = np.array(list(constraint_edges))
         while edges_to_examine:
             u, v = edges_to_examine.pop()
-            uC, vC = VertexC[[u, v]]
+            uC, vC = VertexS[[u, v]]
             # if ⟨u, v⟩ does not cross any constraint_edges, add it to edgesCDT
-            ovlap = find_edges_bbox_overlaps(VertexC, u, v, edges_check)
-            if not any(is_crossing_no_bbox(uC, vC, *VertexC[edge])
+            ovlap = find_edges_bbox_overlaps(VertexS, u, v, edges_check)
+            if not any(is_crossing_no_bbox(uC, vC, *VertexS[edge])
                        for edge in edges_check[ovlap]):
                 # ⟨u, v⟩ was removed from the triangulation but does not cross
                 soft_constraints.add((u, v))
@@ -799,6 +820,7 @@ def make_planar_embedding(
     edgesCDT_P_A = []
 
     # Add A's hull_concave as soft constraints to ensure A's edges remain in P.
+    debug('hull_concave')
     for s, t in zip(hull_concave, hull_concave[1:] + [hull_concave[0]]):
         s, t = (s, t) if s < t else (t, s)
         if ((s, t) in justly_removed
@@ -812,19 +834,21 @@ def make_planar_embedding(
     edgesCDT_concavities = []
     V2d_concavities = []
     # add concavities' edges
+    debug('concavities')
     for ring in concavities:
         for s_xy, t_xy in zip(ring.coords[:-1], ring.coords[1:]):
             s, t = border_vertex_from_xy[s_xy], border_vertex_from_xy[t_xy]
             edge = []
             for n, xy in ((s, s_xy), (t, t_xy)):
-                if xy not in hard_constraints_xy_:
+                if xy not in node_vertex_from_xy:
                     iCDT += 1
-                    vertex_from_iCDT[iCDT + 3] = n
-                    edge.append(iCDT)
-                    hard_constraints_xy_.add(xy)
+                    vertex_from_iCDT[iCDT] = n
+                    edge.append(iCDT - 3)
+                    node_vertex_from_xy[xy] = n
                     V2d_concavities.append(cdt.V2d(*xy))
                 else:
-                    edge.append(np.flatnonzero(vertex_from_iCDT == n)[0] - 3)
+                    n = node_vertex_from_xy[xy]
+                    edge.append(np.flatnonzero(vertex_from_iCDT[3:] == n)[0])
             st = (s, t) if s < t else (t, s)
             constraint_edges.add(st)
             edgesCDT_concavities.append(cdt.Edge(*edge))
@@ -839,13 +863,14 @@ def make_planar_embedding(
     # add any newly created plus the supertriangle's vertices to VertexC
     # note: B has already been increased by all stuntC lengths within the loop
     debug('PART J')
-    supertriangleC = (mean +
-                      scale*np.array([(v.x, v.y) for v in mesh.vertices[:3]]))
-    # NOTE: stuntC was scaled back upon its creation
-    VertexC = np.vstack((VertexCʹ[:-R],
-                         *stuntC,
-                         supertriangleC,
-                         VertexCʹ[-R:]))
+    supertriangleC = (mean
+                      + scale*np.array([(v.x, v.y) for v in mesh.vertices[:3]]))
+    VertexC = np.vstack((
+        VertexCʹ[:-R],
+        *(mean + scale*coord for coord in stuntS),
+        supertriangleC,
+        VertexCʹ[-R:],
+    ))
 
     # Add length attribute to A's edges.
     A_edges = np.array((*P_A_edges, *diagonals))
@@ -933,9 +958,7 @@ def make_planar_embedding(
 
     # this adds diagonals to P_paths, but not diagonals that cross constraints
     for u, v in P_edges - hull_prunned_edges:
-        # TODO: how is this check different from `if uv in constraint_edges`
-        if (u in vertex2conc_id_map and v in vertex2conc_id_map
-            and vertex2conc_id_map[u] == vertex2conc_id_map[v]):
+        if (u, v) in constraint_edges:
             continue
         uvD = P[u][v]
         s, t = uvD['cw'], uvD['ccw']
@@ -1126,8 +1149,8 @@ def make_planar_embedding(
     if border is None:
         bX, bY = VertexC[convex_hull_A].T
     else:
-        # for the bounding box, use border, roots and stunts
-        bX, bY = np.vstack((VertexC[border], VertexC[-R:], *stuntC)).T
+        # for the bounding box, use border and roots
+        bX, bY = np.vstack((VertexC[border], VertexC[-R:])).T
     # assuming that coordinates are UTM -> min() as bbox's offset to origin
     norm_offset = np.array((bX.min(), bY.min()), dtype=np.float64)
     hull_concaveC = VertexC[hull_concave + hull_concave[0:1]]
