@@ -4,8 +4,10 @@
 import math
 import logging
 import numpy as np
+import numba as nb
 import networkx as nx
 from scipy.spatial.distance import cdist
+from typing import NewType, Literal
 
 from collections import defaultdict
 from itertools import chain, tee, combinations
@@ -16,11 +18,11 @@ import shapely as shp
 import condeltri as cdt
 
 from .geometric import (
-    _halfedges_from_triangulation,
+    Indices,
+    CoordPairs,
     is_crossing_no_bbox,
     triangle_AR,
     is_triangle_pair_a_convex_quadrilateral,
-    is_same_side,
     rotation_checkers_factory,
     assign_root,
     find_edges_bbox_overlaps,
@@ -30,15 +32,107 @@ from .geometric import (
 from .interarraylib import NodeTagger
 from .geometric import is_triangle_pair_a_convex_quadrilateral
 
+__all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
+
 logger = logging.getLogger(__name__)
 debug, info, warn = logger.debug, logger.info, logger.warning
 F = NodeTagger()
 NULL = np.iinfo(int).min
 _MAX_TRIANGLE_ASPECT_RATIO = 50.
 
+IndexTrios = NewType('IndexTrios', np.ndarray[tuple[int, Literal[3]], np.dtype[np.int_]])
+
+@nb.njit(cache=True)
+def _index(array: Indices, item: np.int_) -> int:
+    '''Find the index of first occurrence of `item` in `array`.
+    
+    Equivalent of the method `index()` of Python lists for numpy arrays.
+    
+    Returns:
+      index
+    '''
+    for idx, val in enumerate(array):
+        if val == item:
+            return idx
+    # value not found (must not happen, maybe should throw exception)
+    # raise ValueError('value not found in array')
+    return 0
+
+
+@nb.njit(cache=True)
+def _halfedges_from_triangulation(
+       triangles: IndexTrios, neighbors: IndexTrios, halfedges: IndexTrios,
+       ref_is_cw_: np.ndarray[tuple[int], np.dtype[np.bool_]]) -> None:
+    '''Lists the neighbor-aware half-edges that represent a triangulation.
+
+    Meant to be called from `mesh._planar_from_cdt_triangles()`. Inputs are
+    derived from `PythonCDT.Triangulation().triangles`.
+
+    Args:
+        triangles: array of triangle.vertices for triangle in triangles
+        neighbors: array of triangle.neighbors for triangle in triangles
+
+    Returns:
+        3 lists of half-edges to be passed to `networkx.PlanarEmbedding`
+    '''
+    NULL_ = nb.int_(NULL)
+    nodes_done = set()
+    # add the first three nodes to process
+    nodes_todo = {n: nb.int_(0) for n in triangles[0]}
+    i = nb.int_(0)
+    while nodes_todo:
+        pivot, tri_idx_start = nodes_todo.popitem()
+        tri = triangles[tri_idx_start]
+        tri_nb = neighbors[tri_idx_start]
+        pivot_idx = _index(tri, pivot)
+        succ_start = tri[(pivot_idx + 1) % 3]
+        nb_idx_start_reverse = (pivot_idx - 1) % 3
+        succ_end = tri[(pivot_idx - 1) % 3]
+        # first half-edge from `pivot`
+        #  print('INIT', [pivot, succ_start])
+        halfedges[i] = pivot, succ_start, NULL_
+        i += 1
+        nb_idx = pivot_idx
+        ref = succ_start
+        ref_is_cw = False
+        while True:
+            tri_idx = tri_nb[nb_idx]
+            if tri_idx == NULL_:
+                if not ref_is_cw:
+                    # revert direction
+                    ref_is_cw = True
+                    #  print('REVE', [pivot, succ_end, ref], cw)
+                    ref_is_cw_[i] = ref_is_cw
+                    halfedges[i] = pivot, succ_end, succ_start
+                    i += 1
+                    ref = succ_end
+                    tri_nb = neighbors[tri_idx_start]
+                    nb_idx = nb_idx_start_reverse
+                    continue
+                else:
+                    break
+            tri = triangles[tri_idx]
+            tri_nb = neighbors[tri_idx]
+            pivot_idx = _index(tri, pivot)
+            succ = (tri[(pivot_idx - 1) % 3]
+                    if ref_is_cw else
+                    tri[(pivot_idx + 1) % 3])
+            nb_idx = ((pivot_idx - 1) % 3) if ref_is_cw else pivot_idx
+            #  print('NORM', [pivot, succ, ref], cw)
+            ref_is_cw_[i] = ref_is_cw
+            halfedges[i] = pivot, succ, ref
+            i += 1
+            if succ not in nodes_todo and succ not in nodes_done:
+                nodes_todo[succ] = tri_idx
+            if succ == succ_end:
+                break
+            ref = succ
+        nodes_done.add(pivot)
+    return
+
 
 def _edges_and_hull_from_cdt(triangles: list[cdt.Triangle],
-                             vertmap: np.ndarray) -> list[tuple[int, int]]:
+                             vertmap: Indices) -> list[tuple[int, int]]:
     '''Get edges/hull from triangulation.
 
     THIS FUNCTION MAY BE IRRELEVANT, AS WE TYPICALLY NEED THE
@@ -106,8 +200,10 @@ def _edges_and_hull_from_cdt(triangles: list[cdt.Triangle],
     return ebunch, convex_hull
 
 
-def _planar_from_cdt_triangles(mesh: cdt.Triangulation,
-        vertmap: np.ndarray) -> tuple[tuple[np.ndarray, np.ndarray], set]:
+def _planar_from_cdt_triangles(mesh: cdt.Triangulation, vertmap: Indices
+        ) -> tuple[tuple[IndexTrios,
+                         np.ndarray[tuple[int], np.dtype[np.bool_]]],
+                   set[tuple[int, int]]]:
     '''Convert from a PythonCDT.Triangulation to NetworkX.PlanarEmbedding.
 
     For use within `make_planar_embedding()`. Wraps the numba-compiled
@@ -207,85 +303,6 @@ def _hull_processor(P: nx.PlanarEmbedding, T: int,
                 # if u is not in supertriangle, it is convex_hull
                 convex_hull.append(u)
     return convex_hull, to_remove, conc_outer_edges
-
-
-def _flip_triangles_near_obstacles(P: nx.PlanarEmbedding, T: int, B: int,
-                                    VertexC: np.ndarray) \
-        -> list[tuple[tuple[int, int]]]:
-    '''
-    DEPRECATED after the forcing of non-contoured A edges to be kept in P
-
-    Changes P in-place.
-    '''
-    changes = {}
-    border_nodes = set(range(T, T + B - 3)) & P.nodes
-    while border_nodes:
-        u = border_nodes.pop()
-        nbcw = P.neighbors_cw_order(u)
-        rev = next(nbcw)
-        cur = next(nbcw)
-        for fwd in chain(nbcw, (rev, cur)):
-            debug('looking at: %s %s', F[u], F[cur])
-            if ((rev < T)
-                    and (fwd < T)
-                    and (u, cur) in P.edges
-                    and not (cur, u) in changes
-                    and not is_same_side(*VertexC[[rev, fwd, u, cur]])
-                    and P[rev][u]['ccw'] == cur
-                    and P[fwd][u]['cw'] == cur):
-                debug('changing to: %s %s', F[rev], F[fwd])
-                changes[(u, cur)] = rev, fwd
-                P.remove_edge(u, cur)
-                P.add_half_edge(rev, fwd, cw=u)
-                P.add_half_edge(fwd, rev, cw=cur)
-                border_nodes.add(u)
-                break
-            rev = cur
-            cur = fwd
-    return changes
-
-
-def _flip_triangles_obstacles_super(P: nx.PlanarEmbedding, T: int, B: int,
-                                     VertexC: np.ndarray, max_tri_AR: float) \
-        -> list[tuple[tuple[int, int]]]:
-    '''
-    DEPRECATED after the forcing of non-contoured A edges to be kept in P
-
-    Changes P in-place.
-
-    Some flat triangles may be created within border vertices. These might
-    block the clearing of portals that go around concavities (performed by
-    `_hull_processor()`). This function flips these triangles so that they have
-    a vertex in the supertriangle.
-    '''
-    changes = {}
-    idx_ST = T + B - 3
-    print('idx_ST', idx_ST)
-    # examine only border triangles
-    for u in range(T, idx_ST):
-        if u not in P.nodes:
-            continue
-        nbcw = P.neighbors_cw_order(u)
-        rev = next(nbcw)
-        cur = next(nbcw)
-        for fwd in chain(nbcw, (rev, cur)):
-            print('looking at:', F[u], F[cur], end=' | ')
-            if (cur < idx_ST and (
-                    ((T <= rev < idx_ST) and fwd >= idx_ST
-                     and triangle_AR(*VertexC[[u, cur, rev]]) > max_tri_AR)
-                    or ((T <= fwd < idx_ST) and rev >= idx_ST
-                        and triangle_AR(*VertexC[[u, cur, fwd]]) > max_tri_AR))
-                    and P[rev][u]['ccw'] == cur
-                    and P[fwd][u]['cw'] == cur):
-                print('changing to:', F[rev], F[fwd])
-                changes[(u, cur)] = rev, fwd
-                P.remove_edge(u, cur)
-                P.add_half_edge(rev, fwd, cw=u)
-                P.add_half_edge(fwd, rev, cw=cur)
-            rev = cur
-            cur = fwd
-    print('')
-    return changes
 
 
 def make_planar_embedding(
@@ -1325,9 +1342,9 @@ def _deprecated_planar_flipped_by_routeset(
 
 
 def planar_flipped_by_routeset(
-        G: nx.Graph, *, planar: nx.PlanarEmbedding, VertexC: np.ndarray,
+        G: nx.Graph, *, planar: nx.PlanarEmbedding, VertexC: CoordPairs,
         diagonals: bidict | None = None) -> nx.PlanarEmbedding:
-    '''Ajust `planar` to include the edges actually used by reouteset `G`.
+    '''Ajust `planar` to include the edges actually used by routeset `G`.
 
     Copies `planar` and flips the edges to their diagonal if the latter is an
     edge of `G`. Ideally, the returned PlanarEmbedding includes all `G` edges
@@ -1339,8 +1356,7 @@ def planar_flipped_by_routeset(
     Important: `G` must be free of edge×edge crossings.
     '''
     R, T, B, C, D = (G.graph.get(k, 0) for k in ('R', 'T', 'B', 'C', 'D'))
-    border, obstacles, fnT = (
-        G.graph.get(k) for k in ('border', 'obstacles', 'fnT'))
+    fnT = G.graph.get('fnT')
     if fnT is None:
         fnT = np.arange(R + T + B + 3 + C + D)
         fnT[-R:] = range(-R, 0)
