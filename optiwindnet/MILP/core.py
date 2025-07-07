@@ -14,6 +14,8 @@ from makefun import with_signature
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 
+__all__ = ('Topology', 'FeederRoute', 'FeederLimit', 'ModelOptions')
+
 logger = logging.getLogger(__name__)
 error, info = logger.error, logger.info
 
@@ -52,6 +54,11 @@ class FeederLimit(StrEnum):
 
 
 class ModelOptions(dict):
+    '''Hold options for the modelling of the cable routing problem.
+
+    Use ModelOptions.help() to get the options and their permitted and default
+    values. Use ModelOptions() without any parameters to use the defaults.
+    '''
     hints = {_identifier_from_class_name(kind): kind
              for kind in (Topology, FeederRoute, FeederLimit)}
     # this has to be kept in sync with make_min_length_model()
