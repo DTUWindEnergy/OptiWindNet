@@ -197,7 +197,7 @@ def gplot(G: nx.Graph, ax: Axes | None = None,
     if node_tag is not None:
         arts = nx.draw_networkx_labels(
             G, pos, ax=ax, labels=RootL, font_size=FONTSIZE_ROOT_LABEL,
-            font_color='black' if dark else 'yellow')
+            font_color=c.bg_color)
         for artist in arts.values():
             artist.set_clip_on(False)
 
