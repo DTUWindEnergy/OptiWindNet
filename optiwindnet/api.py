@@ -62,15 +62,15 @@ class WindFarmNetwork:
                  borderC=None, obstaclesC=None,
                  name='', handle='', L=None, router=None, buffer_dist = 0):
 
-        # Default router if none provided
+         # Use a default router (heuristic Esau_Williams) if none is provided
         if router is None:
             router = Heuristic(solver='Esau_Williams')
         self.router = router
-        cables_array = np.array(cables)
 
+        # Ensure cables are in the expected format: list of (capacity, cost) tuples
+        cables_array = np.array(cables)
         if isinstance(cables, int):
             cables = [(cables, 1)]
-
         elif cables_array.ndim == 1 and cables_array.shape[0] == 1 and isinstance(cables_array.item(), int):
             cables = [(int(cables_array[0]), 1)]
         elif (cables_array.ndim == 1 and cables_array.shape[0] == 2):
@@ -79,23 +79,24 @@ class WindFarmNetwork:
             if cables_array.shape[1] == 2:
                 cables = [(int(cap), float(cost)) for cap, cost in cables_array]
         else:
-            error(f"Invalid cable values: {cables}")
+            raise ValueError(f"Invalid cable values: {cables}")
 
 
         self.cables = cables
         self.cables_capacity = max(c[0] for c in cables)
 
-        # Load layout from coordinates if turbinesC provided
+        # Construct layout from coordinates if not directly provided
         if turbinesC is not None and substationsC is not None:
             L = from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist)
         elif L is None:
             raise ValueError('Both turbinesC and substationsC must be provided!')
-        self.L = L
+        
+        self.L = L # Location graph
 
-        # Planar embedding
+        # Create planar embedding from L
         self.P, self.A = make_planar_embedding(L)
 
-        # Graph/network placeholders and status flags
+        # Initialize graph objects for S and G (to be filled later)
         self.S = None
         self.G = None
 
@@ -115,7 +116,6 @@ class WindFarmNetwork:
         obstaclesC = self._obstaclesC_original
         obstacles_bufferedC = self._obstacles_bufferedC
 
-        # plot
         plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC)
     
         
@@ -130,7 +130,7 @@ class WindFarmNetwork:
     
     @classmethod
     def from_pbf(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from a pbf file."""
+        """Creates a WindFarmNetwork instance from a PBF file."""
         if not isinstance(filepath, str):
             error("Filepath must be a string")
 
@@ -151,6 +151,7 @@ class WindFarmNetwork:
         with open(fpath, 'r') as f:
             system = yaml.full_load(f)
 
+        # Parse coordinate data
         coords = system['wind_farm']['layouts']['initial_layout']['coordinates']
         terminalC = np.c_[coords['x'], coords['y']]
         coords = system['wind_farm']['electrical_substations']['coordinates']
@@ -162,6 +163,7 @@ class WindFarmNetwork:
         R = rootC.shape[0]
         name_tokens = fpath.stem.split('_')
 
+        # Construct L
         L = L_from_site(R=R, T=T, VertexC=np.vstack((terminalC, borderC, rootC)),
                         border=np.arange(T, T + borderC.shape[0]),
                         name=' '.join(name_tokens),
@@ -170,32 +172,33 @@ class WindFarmNetwork:
         return cls(L=L, **kwargs)
 
     def _repr_svg_(self):
-        # Give the WindFarmNetwork object a SVG representation (it is picked up automatically by the notebook)
+        """IPython hook for rendering the graph as SVG in notebooks."""
         return svgplot(self.G)._repr_svg_()
     
     def plot(self, *args, **kwargs):
+        """Plots the final optimized network."""
         return gplot(self.G, *args, **kwargs)
     
     def plot_location(self, **kwargs):
-        """Plots the wind farm network graph."""
+        """Plots the location (vertices and borders)."""
         return gplot(self.L, **kwargs)
     
     def plot_available_links(self, **kwargs):
-        """Plots the wind farm network graph."""
+        """Plots the available links from planar embedding."""
         return gplot(self.A, **kwargs)
     
     def plot_navigation_mesh(self, **kwargs):
-        """Plots the wind farm network graph."""
+        """Plots the navigation mesh (planar graph and adjacency)."""
         return pplot(self.P, self.A, **kwargs)
     
     def plot_selected_links(self, **kwargs):
-        """Plots the wind farm network graph."""
+        """Plots the currently selected links in cable layout (chosen from available links)."""
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
         return gplot(G_tentative, **kwargs)
     
     def terse_links(self):
-        '''Returns S links'''
+        """Returns a compact representation of the selected links as an array of link targets."""
         R, T = (self.S.graph[k] for k in 'RT')
         terse = np.empty(T, dtype=int)
 
@@ -209,11 +212,15 @@ class WindFarmNetwork:
         return terse
 
     def update_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
-        '''Undate class from terse links'''
+        """
+        Updates the network from terse link representation.
+        Optionally updates node coordinates.
+        """
 
         # --- Added block: check input format ---
         terse_links = np.asarray(terse_links)
 
+        # Validate input shape and type
         if not np.issubdtype(terse_links.dtype, np.integer):
             raise ValueError(
                 f"terse_links must be an array of integers. Got {terse_links.dtype} instead.\n"
@@ -224,7 +231,8 @@ class WindFarmNetwork:
             raise ValueError(
                 f"terse_links must be a 1D array. Got shape {terse_links.shape} instead."
             )
-        # If new coordinates are provided, update them
+        
+        # Update coordinates if provided
         if turbinesC is not None:
             self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
     
@@ -234,6 +242,7 @@ class WindFarmNetwork:
         if turbinesC is not None or substationsC is not None:
             self.P, self.A = make_planar_embedding(self.L)
 
+        # Rebuild the selected edge set
         self.S.remove_edges_from(list(self.S.edges()))
         for i, j in enumerate(terse_links):
             self.S.add_edge(i, j)
@@ -249,7 +258,7 @@ class WindFarmNetwork:
         return self.G
 
     def get_network(self):
-        """Returns the network edges with cable data."""
+        """Returns the network as a structured array of edge data."""
         network_array_type = np.dtype([
             ('src', int),
             ('tgt', int),
@@ -272,7 +281,7 @@ class WindFarmNetwork:
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """
-        Calculate the gradient of the length and cost of cable with respect to the positions of the nodes.
+        Computes gradients of total cable length or cost with respect to the node positions.
         """
         if gradient_type.lower() not in ['cost', 'length']:
             raise ValueError("gradient_type should be either 'cost' or 'length'")         
