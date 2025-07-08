@@ -5,3 +5,4 @@ sphinx-autoapi
 sphinx_copybutton
 sphinx_sitemap
 pypandoc
+setuptools-scm
