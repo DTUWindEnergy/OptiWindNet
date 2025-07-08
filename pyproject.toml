@@ -55,17 +55,15 @@ test  = [ 'pytest',  # for testing
           'line_profiler',  # to check speed
         ] 
 docs = [
-          'sphinx',  # generating documentation
-          'sphinx_rtd_theme',  # docs theme
-          'ipywidgets',  # notebook widgets
-          "numpydoc", 
-          "nbsphinx", 
-          "sphinx_copybutton", 
-          "sphinx_sitemap", 
-          "ipympl", 
-          "ipykernel",
-          "pypandoc",
+          'sphinx',
+          'nbsphinx', 
+          'furo',
+          'sphinx-versioned-docs',
           'sphinx-autoapi',
+          'sphinx_copybutton', 
+          'sphinx_sitemap', 
+          'pypandoc',
+          'setuptools-scm',
         ]
 
 [tool.setuptools]
