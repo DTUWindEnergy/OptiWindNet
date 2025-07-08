@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import re
+import logging
 from itertools import chain, zip_longest
 from collections import namedtuple, defaultdict
 from pathlib import Path
@@ -13,12 +14,14 @@ import networkx as nx
 import numpy as np
 import utm
 import yaml
-import osmium
+import esy.osm.pbf
 import shapely as shp
-import shapely.wkb as wkblib
 
 from .utils import NodeTagger
 from .interarraylib import L_from_site
+
+_lggr = logging.getLogger(__name__)
+info = _lggr.info
 
 F = NodeTagger()
 
@@ -180,76 +183,6 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     return G
 
 
-wkbfab = osmium.geom.WKBFactory()
-
-
-class GetRelations(osmium.SimpleHandler):
-    def __init__(self):
-        super().__init__()
-        self.borderIDs = []
-        self.obstacleIDs = []
-        self.plant_tags = None
-        self.plant_name = None
-
-    def relation(self, r):
-        power = r.tags.get('power') or r.tags.get('construction:power')
-        if power == 'plant':
-            if self.plant_tags is None:
-                self.plant_tags = dict(r.tags)
-                self.plant_name = r.tags.get('name:en') or r.tags.get('name')
-            else:
-                raise RuntimeError('Only single-power-plant .osm.pbf files are supported.')
-            for member in r.members:
-                if member.type == 'w':
-                    if member.role == 'outer':
-                        self.borderIDs.append(member.ref)
-                    elif member.role == 'inner':
-                        self.obstacleIDs.append(member.ref)
-
-
-class GetAllData(osmium.SimpleHandler):
-    def __init__(self, borderIDs, obstacleIDs):
-        super().__init__()
-        self.borderIDs = borderIDs
-        self.obstacleIDs = obstacleIDs
-        self.turbines = []
-        self.substations = []
-        self.border = None
-        self.obstacles = []
-        self.plant_name = None
-
-    def node(self, n):
-        power = n.tags.get('power') or n.tags.get('construction:power')
-        if power == 'generator':
-            self.turbines.append(
-                wkblib.loads(wkbfab.create_point(n), hex=True)
-            )
-        if power in ['substation', 'transformer']:
-            self.substations.append(
-                wkblib.loads(wkbfab.create_point(n), hex=True)
-            )
-
-    def way(self, w):
-        power = w.tags.get('power') or w.tags.get('construction:power')
-        if power in ['substation', 'transformer']:
-            self.substations.append(
-                # reduce polygon-shaped substation/transformer to its centroid
-                wkblib.loads(wkbfab.create_linestring(w), hex=True).centroid
-            )
-        elif power == 'plant':
-            assert not self.borderIDs and not self.obstacleIDs
-            assert self.border is None, 'The outer location border must be a single polygon.'
-            self.border = wkblib.loads(wkbfab.create_linestring(w), hex=True)
-            self.plant_name = w.tags.get('name:en') or w.tags.get('name')
-        elif w.id in self.obstacleIDs:
-            self.obstacles.append(
-                wkblib.loads(wkbfab.create_linestring(w), hex=True)
-            )
-        elif w.id in self.borderIDs:
-            assert self.border is None, 'The outer location border must be a single polygon.'
-            self.border = wkblib.loads(wkbfab.create_linestring(w), hex=True)
-
-
 def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     '''Import wind farm data from .osm.pbf file.
 
@@ -265,26 +198,92 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     assert ['.osm', '.pbf'] == filepath.suffixes[-2:], \
         'Argument `filepath` does not have `.osm.pbf` extension.'
     name = filepath.stem[:-4]
+    osm = esy.osm.pbf.File(filepath)
+    plant_name = None
+    nodes = {}
+    substations = []
+    turbines = []
+    border_raw = None
+    obstacles_raw = []
+    ways = {}
+    for e in osm:
+        match e:
+            case esy.osm.pbf.Node():
+                nodes[e.id] = e
+                power_kind = e.tags.get('power')
+                match power_kind:
+                    case 'substation' | 'transformer':
+                        substations.append(e.lonlat[::-1])
+                    case 'generator':
+                        turbines.append(e.lonlat[::-1])
+                    case _:
+                        info('Unhandled power category for Node: %s', power_kind)
+            case esy.osm.pbf.Way():
+                power_kind = e.tags.get('power')
+                if power_kind is None:
+                    power_kind = e.tags.get('construction:power')
+                match power_kind:
+                    case 'plant':
+                        plant_name = e.tags.get('name:en') or e.tags.get('name')
+                        if border_raw is not None:
+                            raise ValueError('Only a single border is supported.')
+                        border_raw = [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
+                    case 'substation' | 'transformer':
+                        substations.append([nodes[nid].lonlat[::-1] for nid in e.refs[:-1]])
+                    case 'generator':
+                        info('Generator must be Node, not Way.')
+                    case None:
+                        # likely to be used in a Relation
+                        ways[e.id] = e
+                    case _:
+                        info('Unhandled power category for Way: %s', power_kind)
+            case esy.osm.pbf.Relation():
+                if e.tags.get('type') == 'multipolygon':
+                    power_kind = e.tags.get('power')
+                    if power_kind is None:
+                        power_kind = e.tags.get('construction:power')
+                    match power_kind:
+                        case 'plant':
+                            plant_name = e.tags.get('name:en') or e.tags.get('name')
+                            for m in e.members:
+                                eid, cls, kind = m
+                                match cls:
+                                    case 'WAY':
+                                        match kind:
+                                            case 'outer':
+                                                if border_raw is not None:
+                                                    raise ValueError('Only a single border is supported.')
+                                                border_raw = [nodes[nid].lonlat[::-1] for nid in ways[eid].refs[:-1]]
+                                            case 'inner':
+                                                obstacles_raw.append(
+                                                    [nodes[nid].lonlat[::-1] for nid in ways[eid].refs[:-1]]
+                                                )
+                        case _:
+                            info('Unhandled power category for Relation: %s', power_kind)
 
-    first_pass = GetRelations()
-    file = osmium.io.File(filepath)
-    first_pass.apply_file(file, idx='flex_mem')
-    getter = GetAllData(first_pass.borderIDs, first_pass.obstacleIDs)
-    getter.apply_file(file, locations=True, idx='flex_mem')
-
-    T = len(getter.turbines)
-    R = len(getter.substations)
+    T = len(turbines)
+    R = len(substations)
     if T == 0 or R == 0:
         raise ValueError(f'Location: "{name}" -> Unable to identify at least one substation and one generator.')
-    node_latlon = {(node.y, node.x): i for i, node in
-                   enumerate(getter.turbines)}
-    node_latlon.update({(node.y, node.x): i for i, node in
-                        enumerate(getter.substations, start=-R)})
+
+    #  for i, substation in enumerate(tuple(substations)):
+    for i, substation in enumerate(tuple(substations)):
+        if isinstance(substation, list):
+            # Substation defined as a polygon, reduce it to a point
+            easting, northing, zone_num, zone_let = utm.from_latlon(*np.array(tuple(zip(*substation))))
+            centroid = shp.Polygon(shell=list(zip(easting, northing))).centroid
+            latlon = utm.to_latlon(centroid.x, centroid.y, zone_num, zone_let)
+            substations[i] = latlon
+
+    node_latlon = {node: i for i, node in
+                   enumerate(turbines)}
+    node_latlon.update({node: i for i, node in
+                        enumerate(substations, start=-R)})
 
     i = T
-    border_latlon = []
     border = []
-    for latlon in map(tuple, getter.border.coords.__array__()[:-1, ::-1].tolist()):
+    border_latlon = []
+    for latlon in border_raw:
         if latlon not in node_latlon:
             border_latlon.append(latlon)
             border.append(i)
@@ -296,10 +295,10 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     obstacles = []
     obstacles_latlon = []
-    for obstacle_entry in getter.obstacles:
+    for obstacle_entry in obstacles_raw:
         obstacle_latlon = []
         obstacle = []
-        for latlon in map(tuple, obstacle_entry.coords.__array__()[:-1, ::-1].tolist()):
+        for latlon in obstacle_entry:
             if latlon not in node_latlon:
                 obstacle_latlon.append(latlon)
                 obstacle.append(i)
@@ -314,10 +313,10 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     # Build site data structure
     latlon = np.array(tuple(chain(
-        ((n.y, n.x) for n in getter.turbines),
+        turbines,
         border_latlon,
         obstacles_latlon,
-        ((n.y, n.x) for n in getter.substations),
+        substations,
         )), dtype=float
     )
 
@@ -333,7 +332,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             name=name,
             handle=handle,
             )
-    if getter.border is not None:
+    if border is not None:
         L.graph['border'] = np.array(border, dtype=np.int_)
         if obstacles:
             L.graph['obstacles'] = [np.array(obstacle, dtype=np.int_)
@@ -353,10 +352,8 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     L.graph['B'] = B
 
-    if getter.plant_name is not None:
-        L.graph['OSM_name'] = getter.plant_name
-    elif first_pass.plant_name is not None:
-        L.graph['OSM_name'] = first_pass.plant_name
+    if plant_name is not None:
+        L.graph['OSM_name'] = plant_name
 
     return L
 
