@@ -2,12 +2,9 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import abc
+from itertools import chain
 from enum import auto
-try:
-    from enum import StrEnum
-except ImportError:
-    # workaround for python < 3.11
-    from backports.strenum import StrEnum
+from enum import StrEnum
 from typing import Any, Mapping
 from dataclasses import dataclass, asdict
 import networkx as nx
@@ -16,6 +13,8 @@ from makefun import with_signature
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
+
+__all__ = ('Topology', 'FeederRoute', 'FeederLimit', 'ModelOptions')
 
 logger = logging.getLogger(__name__)
 error, info = logger.error, logger.info
@@ -55,18 +54,38 @@ class FeederLimit(StrEnum):
 
 
 class ModelOptions(dict):
+    '''Hold options for the modelling of the cable routing problem.
+
+    Use ModelOptions.help() to get the options and their permitted and default
+    values. Use ModelOptions() without any parameters to use the defaults.
+    '''
     hints = {_identifier_from_class_name(kind): kind
              for kind in (Topology, FeederRoute, FeederLimit)}
+    # this has to be kept in sync with make_min_length_model()
+    simple = dict(
+        balanced=(bool, False,
+            'Whether to enforce balanced subtrees (subtree loads differ at most '
+            'by one unit).'),
+        max_feeders=(int, 0,
+            'Maximum number of feeders (used only if <feeder_limit = "specified">)'),
+    )
 
     @with_signature(
         '__init__(self, *, '
-        + ', '.join(f'{k}: {v.__name__} = "{v.DEFAULT.value}"'
-                    for k, v in hints.items()) + ')'
+        + ', '.join(chain(
+            (f'{k}: {v.__name__} = "{v.DEFAULT.value}"' for k, v in hints.items()),
+            (f'{name}: {kind.__name__} = {default}' for name, (kind, default, _) in simple.items())
+        ))
+        + ')'
     )
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             if isinstance(v, str):
                 kwargs[k] = self.hints[k](v)
+            else:
+                if k not in self.simple:
+                    raise ValueError(f'Unknown argument: {k}')
+
         super().__init__(kwargs)
 
     @classmethod
@@ -77,6 +96,9 @@ class ModelOptions(dict):
                               if m != 'default')
                   + f'}} default: {cls.hints[k].DEFAULT.value}\n'
                   f'    {v.__doc__}\n')
+        for name, (kind, default, desc) in cls.simple.items():
+            print(f'{name} [{kind.__name__}] default: {default}\n'
+                  f'    {desc}\n')
 
 
 @dataclass(slots=True)
@@ -120,7 +142,15 @@ class Solver(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None) -> tuple[nx.Graph, nx.Graph]:
+        '''Output solution topology A and routeset G.
+
+        Args:
+          A: optionally replace the A given via set_problem() (if normalized A)
+
+        Returns:
+          Topology graph S and routeset G.
+        '''
         pass
 
     def _make_graph_attributes(self) -> dict[str, Any]:
@@ -157,7 +187,7 @@ class PoolHandler(abc.ABC):
 
 def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
         ) -> tuple[nx.Graph, nx.Graph]:
-    '''Go through the CpSat's solutions checking which has the shortest length
+    '''Go through the solver's solutions checking which has the shortest length
     after applying the detours with PathFinder.'''
     Λ = float('inf')
     branched=pool.model_options['topology'] is Topology.BRANCHED   

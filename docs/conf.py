@@ -12,25 +12,19 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-from optiwindnet import __release__
-from optiwindnet import __version__
 import os
 import sys
 from pathlib import Path
+from setuptools_scm import get_version
 sys.path.insert(0, os.path.abspath('..'))
 
+version = get_version(root='..', relative_to=__file__)
 
 # -- Project information -----------------------------------------------------
 
 project = 'OptiWindNet'
 copyright = '2025, DTU Wind Energy'
 author = 'DTU Wind Energy'
-
-# The short X.Y version
-version = __version__
-# The full version, including alpha/beta/rc tags
-release = __release__
-
 
 # -- General configuration ---------------------------------------------------
 

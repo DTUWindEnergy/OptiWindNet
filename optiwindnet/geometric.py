@@ -6,10 +6,11 @@ import operator
 from collections import defaultdict
 from itertools import pairwise, product, combinations
 from math import isclose
-from typing import Callable
+from typing import Callable, NewType, Literal
 
 import networkx as nx
 import numpy as np
+from numpy.typing import NDArray
 import numba as nb
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
@@ -18,11 +19,18 @@ from scipy.stats import rankdata
 
 from .utils import NodeStr, NodeTagger
 
+#  __all__ = ()
 F = NodeTagger()
 NULL = np.iinfo(int).min
 
+CoordPair = NewType('CoordPair', np.ndarray[tuple[Literal[2]], np.dtype[np.float64]])
+CoordPairs = NewType('CoordPairs', np.ndarray[tuple[int, Literal[2]], np.dtype[np.float64]])
+IndexPairs = NewType('IndexPairs', np.ndarray[tuple[int, Literal[2]], np.dtype[np.int_]])
+Indices = NewType('Indices', np.ndarray[tuple[int], np.dtype[np.int_]])
 
-def triangle_AR(base1C, base2C, topC):
+
+@nb.njit(cache=True)
+def triangle_AR(base1C: CoordPair, base2C: CoordPair, topC: CoordPair) -> float:
     '''Calculate the ratio: dist(base1, base2)/dist(base, top).
 
     Numerator is the length of the base of the triagle (base1C, base2C).
@@ -43,33 +51,76 @@ def triangle_AR(base1C, base2C, topC):
     dy = y2 - y1
     den = abs(dy * xt - dx * yt + x2 * y1 - y2 * x1)
     if den < 1e-12:
-        return float('inf')
+        return np.inf
     base_sqr = dx**2 + dy**2
     return base_sqr/den
 
 
-def any_pairs_opposite_edge(NodesC, uC, vC, margin=0):
+@nb.njit(cache=True)
+def point_d2line(pC: CoordPair, uC: CoordPair, vC: CoordPair) -> np.float64:
+    '''Calculate the distance from point `p` to the `u`-`v` line.'''
+    x0, y0 = pC
+    x1, y1 = uC
+    x2, y2 = vC
+    return (abs((x2 - x1)*(y1 - y0) - (x1 - x0)*(y2 - y1)) /
+            np.sqrt((x2 - x1)**2 + (y2 - y1)**2))
+
+
+@nb.njit(cache=True)
+def is_same_side(uC: CoordPair, vC: CoordPair, sC: CoordPair, tC: CoordPair,
+                 touch_is_cross: bool = True) -> bool:
+    '''Check if points A an B are on the same side
+    of the line defined by points L1 and L2.
+
+    Note: often used to check crossings with gate edges,
+    where the gate edge A-B is already known to be on a line
+    that crosses the edge L1–L2 (using the angle rank).
+    '''
+
+    denom = (uC[0] - vC[0])
+    # test to avoid division by zero
+    if denom != 0:
+        a = -(uC[1] - vC[1])/denom
+        c = -a*uC[0] - uC[1]
+        num = a*sC[0] + sC[1] + c
+        den = a*tC[0] + tC[1] + c
+        #  discriminator = float(num*den)
+        discriminator = num*den
+    else:
+        # this means the line is vertical (uC[0] = vC[0])
+        # which makes the test simpler
+        #  discriminator = float((sC[0] - uC[0])*(tC[0] - uC[0]))
+        discriminator = (sC[0] - uC[0])*(tC[0] - uC[0])
+    return discriminator > 0. or (
+        touch_is_cross and discriminator == 0.
+    )
+
+
+@nb.njit(cache=True)
+def any_pairs_opposite_edge(nodesC: CoordPairs, uC: CoordPair, vC: CoordPair,
+                            margin: float = 0.) -> bool:
     '''Compare relative position of vertices wrt line segment.
     
     Args:
-      uC, vC: (2,) numpy array coordinates of edge ends
+      nodesC: (N, 2) array of test coordinates
+      uC, vC: (2,) array of coordinates of edge ends
 
     Returns:
-      True if any two of `NodesC` are on opposite sides of the edge.
+      True if any two of `nodesC` are on opposite sides of the edge.
     '''
-    maxidx = len(NodesC) - 1
+    maxidx = len(nodesC) - 1
     if maxidx <= 0:
         return False
-    refC = NodesC[0]
+    refC = nodesC[0]
     i = 1
     while point_d2line(refC, uC, vC) <= margin:
         # ref node is approx. overlapping the edge: get the next one
-        refC = NodesC[i]
+        refC = nodesC[i]
         i += 1
         if i > maxidx:
             return False
 
-    for cmpC in NodesC[i:]:
+    for cmpC in nodesC[i:]:
         if point_d2line(cmpC, uC, vC) <= margin:
             # cmp node is approx. overlapping the edge: skip
             continue
@@ -79,23 +130,17 @@ def any_pairs_opposite_edge(NodesC, uC, vC, margin=0):
     return False
 
 
-def rotate(coords, angle):
+@nb.njit(cache=True)
+def rotate(coords: CoordPairs, angle: float) -> CoordPairs:
     '''Rotates `coords` (numpy array T×2) by `angle` (degrees)'''
     rotation = np.deg2rad(angle)
     c, s = np.cos(rotation), np.sin(rotation)
     return np.dot(coords, np.array([[c, s], [-s, c]]))
 
 
-def point_d2line(p, u, v):
-    '''Calculate the distance from point `p` to the `u`-`v` line.'''
-    x0, y0 = p
-    x1, y1 = u
-    x2, y2 = v
-    return (abs((x2 - x1)*(y1 - y0) - (x1 - x0)*(y2 - y1)) /
-            math.sqrt((x2 - x1)**2 + (y2 - y1)**2))
-
-
-def angle_numpy(a, pivot, b):
+@nb.njit(cache=True)
+def angle_numpy(aC: CoordPairs, pivotC: CoordPairs, bC: CoordPairs
+        ) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
     '''Calculate the angle a-pivot-b.
 
     * can operate on multiple point triplets
@@ -103,41 +148,43 @@ def angle_numpy(a, pivot, b):
     * positive direction is counter-clockwise
 
     Args:
-      a, pivot, b: (N, 2) numpy arrays of coordinate pairs
+      aC, pivotC, bC: (N, 2) numpy arrays of coordinate pairs
 
     Returns:
       Angles a-pivot-b (radians)
     '''
-    A = a - pivot
-    B = b - pivot
+    A = aC - pivotC
+    B = bC - pivotC
     # dot_prod = np.dot(A, B) if len(A) >= len(B) else np.dot(B, A)
     dot_prod = A @ B.T  # if len(A) >= len(B) else np.dot(B, A)
     # return np.arctan2(np.cross(A, B), np.dot(A, B))
     return np.arctan2(np.cross(A, B), dot_prod)
 
 
-def angle(a, pivot, b):
-    '''Calculate the angle a-pivot-b.
+def angle(aC, pivotC, bC):
+    '''Calculate the angle aC-pivotC-bC.
 
     * angle is within ±π (shortest arc from a to b around pivot)
     * positive direction is counter-clockwise
 
     Args:
-      a, pivot, b: (2,) numpy arrays of coordinate pairs
+      aC, pivotC, bC: (2,) numpy arrays of coordinate pairs
 
     Returns:
-      Angle a-pivot-b (radians)
+      Angle aC-pivotC-bC (radians)
     '''
-    Ax, Ay = a - pivot
-    Bx, By = b - pivot
+    Ax, Ay = aC - pivotC
+    Bx, By = bC - pivotC
     # debug and print(VertexC[a], VertexC[b])
     ang = np.arctan2(Ax*By - Ay*Bx, Ax*Bx + Ay*By)
     # debug and print(f'{ang*180/np.pi:.1f}')
     return ang
 
 
-def angle_oracles_factory(angles: np.ndarray, anglesRank: np.ndarray
-                          ) -> tuple[Callable, Callable]:
+def angle_oracles_factory(angles: NDArray[np.float64], anglesRank: NDArray[np.int_]
+                          ) -> tuple[Callable[[int, int, int, int, int, int, int],
+                                              tuple[float, float]],
+                                     Callable[[int, int, int], float]]:
     '''Make functions to answer queries about relative angles.
 
     Inputs are the outputs of `angle_helpers()`.
@@ -202,7 +249,8 @@ def angle_oracles_factory(angles: np.ndarray, anglesRank: np.ndarray
 
 
 def find_edges_bbox_overlaps(
-        VertexC: np.ndarray, u: int, v: int, edges: np.ndarray) -> np.ndarray:
+        VertexC: CoordPairs, u: int, v: int, edges: IndexPairs
+        ) -> NDArray[np.int_]:
     '''Find which `edges` have a bounding box overlap with ⟨u, v⟩.
     
     This is a preliminary filter for crossing checks. Enables avoiding the more
@@ -273,17 +321,14 @@ def is_crossing_numpy(u, v, s, t):
     return True
 
 
-@nb.njit('f8(f8[:], f8[:])', cache=True, inline='always')
-def _cross_prod_2d(P: np.ndarray[tuple[int], np.dtype[np.float64]],
-                   Q: np.ndarray[tuple[int], np.dtype[np.float64]]) -> float:
+@nb.njit(cache=True)
+def _cross_prod_2d(P: CoordPair, Q: CoordPair) -> np.float64:
     return P[0]*Q[1] - P[1]*Q[0]
 
 
-@nb.njit('b1(f8[:], f8[:], f8[:], f8[:])', cache=True, inline='always')
-def is_crossing_no_bbox(uC: np.ndarray[tuple[int], np.dtype[np.float64]],
-                        vC: np.ndarray[tuple[int], np.dtype[np.float64]],
-                        sC: np.ndarray[tuple[int], np.dtype[np.float64]],
-                        tC: np.ndarray[tuple[int], np.dtype[np.float64]]) -> bool:
+@nb.njit(cache=True)
+def is_crossing_no_bbox(uC: CoordPair, vC: CoordPair, sC: CoordPair,
+                        tC: CoordPair) -> bool:
     '''Checks if (uC, vC) crosses (sC, tC).
 
     Does not check for bounding-box overlap. Use `find_edges_bbox_overlap()`
@@ -303,7 +348,6 @@ def is_crossing_no_bbox(uC: np.ndarray[tuple[int], np.dtype[np.float64]],
     C = uC - sC
 
     # denominator
-    #  f = B[0]*A[1] - B[1]*A[0]
     f = _cross_prod_2d(B, A)
     # TODO: arbitrary threshold
     if abs(f) < 1e-10:
@@ -326,7 +370,8 @@ def is_crossing_no_bbox(uC: np.ndarray[tuple[int], np.dtype[np.float64]],
     return True
 
 
-def is_crossing(uC, vC, sC, tC, touch_is_cross=True):
+def is_crossing(uC: CoordPair, vC: CoordPair, sC: CoordPair,
+                tC: CoordPair, touch_is_cross: bool = True) -> bool:
     '''Checks if (uC, vC) crosses (sC, tC).
 
     Args:
@@ -412,12 +457,10 @@ def is_bunch_split_by_corner(bunch, a, o, b, margin=1e-3):
     return split, np.flatnonzero(inside), np.flatnonzero(outside)
 
 
-@nb.njit('b1(f8[:], f8[:], f8[:], f8[:])', cache=True, inline='always')
+@nb.njit(cache=True)
 def is_triangle_pair_a_convex_quadrilateral(
-        uC: np.ndarray[tuple[int], np.dtype[np.float64]],
-        vC: np.ndarray[tuple[int], np.dtype[np.float64]],
-        sC: np.ndarray[tuple[int], np.dtype[np.float64]],
-        tC: np.ndarray[tuple[int], np.dtype[np.float64]]) -> bool:
+        uC: CoordPair, vC: CoordPair, sC: CoordPair, tC: CoordPair
+        ) -> bool:
     '''Check convexity of quadrilateral.
 
     ⟨u, v⟩ is the common side; ⟨s, t⟩ are the opposing vertices;
@@ -437,41 +480,18 @@ def is_triangle_pair_a_convex_quadrilateral(
     return (usut > 0.) == (vtvs > 0.)
 
 
-def is_same_side(L1, L2, A, B, touch_is_cross=True):
-    '''Check if points A an B are on the same side
-    of the line defined by points L1 and L2.
+def is_blocking(rootC: CoordPair, uC: CoordPair, vC: CoordPair, sC: CoordPair,
+                tC: CoordPair) -> bool:
+    '''DEPRECATED
 
-    Note: often used to check crossings with gate edges,
-    where the gate edge A-B is already known to be on a line
-    that crosses the edge L1–L2 (using the angle rank).
+    This is used only by apply_edge_exemptions()
     '''
-
-    # greater = operator.gt if touch_is_cross else operator.ge
-    greater = operator.ge if touch_is_cross else operator.gt
-    # print(L1, L2, A, B)
-    (Ax, Ay), (Bx, By), (L1x, L1y), (L2x, L2y) = (A, B, L1, L2)
-    denom = (L1x - L2x)
-    # test to avoid division by zero
-    if denom:
-        a = -(L1y - L2y)/denom
-        c = -a*L1x - L1y
-        num = a*Ax + Ay + c
-        den = a*Bx + By + c
-        discriminator = num*den
-    else:
-        # this means the line is vertical (L1x = L2x)
-        # which makes the test simpler
-        discriminator = (Ax - L1x)*(Bx - L1x)
-    return greater(discriminator, 0)
-
-
-def is_blocking(root, u, v, s, t):
     # s and t are necessarily on opposite sides of uv
     # (because of Delaunay – see the triangles construction)
     # hence, if (root, t) are on the same side, (s, root) are not
-    return (is_triangle_pair_a_convex_quadrilateral(u, v, s, root)
-            if is_same_side(u, v, root, t)
-            else is_triangle_pair_a_convex_quadrilateral(u, v, root, t))
+    return (is_triangle_pair_a_convex_quadrilateral(uC, vC, sC, rootC)
+            if is_same_side(uC, vC, rootC, tC)
+            else is_triangle_pair_a_convex_quadrilateral(uC, vC, rootC, tC))
 
 
 def apply_edge_exemptions(G, allow_edge_deletion=True):
@@ -549,7 +569,7 @@ def perimeter(VertexC, vertices_ordered):
                          - VertexC[vertices_ordered[0]])))
 
 
-def angle_helpers(L: nx.Graph) -> tuple[np.ndarray, np.ndarray]:
+def angle_helpers(L: nx.Graph) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
     '''Create auxiliary arrays of node attributes based on polar coordinates.
 
     Args:
@@ -735,7 +755,7 @@ def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
 
 # TODO: MARGIN is ARBITRARY - depends on the scale
 def check_crossings(G, debug=False, MARGIN=0.1):
-    '''DEPRECATED. Use functions from submodule `crossings` instead.
+    '''DEPRECATED. Use functions from module `crossings` instead.
 
     Checks for crossings (touch/overlap is not considered crossing).
     This is an independent check on the tree resulting from the heuristic.
@@ -929,7 +949,7 @@ def check_crossings(G, debug=False, MARGIN=0.1):
     return crossings
 
 
-def rotation_checkers_factory(VertexC: np.ndarray) -> tuple[
+def rotation_checkers_factory(VertexC: CoordPairs) -> tuple[
         Callable[[int, int, int], bool],
         Callable[[int, int, int], bool]]:
 
@@ -960,8 +980,8 @@ def rotation_checkers_factory(VertexC: np.ndarray) -> tuple[
     return cw, ccw
 
 
-def rotating_calipers(convex_hull: np.ndarray) \
-        -> tuple[np.ndarray, float, float, np.ndarray]:
+def rotating_calipers(convex_hull: NDArray[np.int_]) \
+        -> tuple[NDArray[np.int_], float, float, CoordPairs]:
     # inspired by:
     # jhultman/rotating-calipers:
     #   CUDA and Numba implementations of computational geometry algorithms.
@@ -1030,72 +1050,6 @@ def rotating_calipers(convex_hull: np.ndarray) \
     return best_calipers, best_caliper_angle, area_min, bbox
 
 
-def normalize_area(G_base: nx.Graph, *, hull_nonroot: np.ndarray) -> nx.Graph:
-    '''DEPRECATED: use interarraylib.as_normalized()
-
-    Rescale graph's coordinates and distances such as to make the rootless
-    concave hull of nodes enclose an area of 1.
-    Graph is first rotated by attribute 'landscape_angle' and afterward it's
-    coordinates are translated to the first quadrant, touching the axes.
-    The last step is the scaling.
-
-    Graph attributes added/changed:
-    * 'angle': original landscape_angle value
-    * 'offset': values subtracted from coordinates (x, y) before scaling
-    * 'scale': multiplicative factor applied to coordinates
-    * 'landscape_angle': set to 0
-    '''
-    G = nx.create_empty_copy(G_base)
-    landscape_angle = G.graph.get('landscape_angle')
-    VertexC = (rotate(G_base.graph['VertexC'], landscape_angle)
-               if landscape_angle else
-               G_base.graph['VertexC'].copy())
-    G.graph['VertexC'] = VertexC
-    offsetC = VertexC.min(axis=0)
-    scale = 1./np.sqrt(
-        area_from_polygon_vertices(*(VertexC[hull_nonroot] - offsetC).T))
-    d2roots = G.graph.get('d2roots')
-    if d2roots is not None:
-        G.graph['d2roots'] = d2roots*scale
-    G.graph['scale'] = scale
-    G.graph['angle'] = landscape_angle
-    G.graph['landscape_angle'] = 0
-    G.graph['offset'] = offsetC
-    VertexC -= offsetC
-    VertexC *= scale
-    return G
-
-
-def denormalize(G_scaled, G_base):
-    '''DEPRECATED: use interarraylib.as_rescaled()
-
-    note: d2roots will be created in G_base if absent.
-    '''
-    G = G_scaled.copy()
-    R, T, B = (G.graph[k] for k in 'RTB')
-    C, D = (G.graph.get(k, 0) for k in 'CD')
-    VertexC = G.graph['VertexC'] = G_base.graph['VertexC']
-    fnT = G.graph.get('fnT')
-    if fnT is None:
-        fnT = np.arange(T + R)
-        fnT[-R:] = range(-R, 0)
-    d2roots = G_base.graph.get('d2roots')
-    if d2roots is None:
-        d2roots = cdist(VertexC[:T], VertexC[-R:])
-        G_base.graph['d2roots'] = d2roots
-    G.graph['d2roots'] = d2roots
-    G.graph['landscape_angle'] = G_base.graph['landscape_angle']
-    ulength = G.graph.get('undetoured_length')
-    if ulength is not None:
-        G.graph['undetoured_length'] = ulength/G.graph['scale']
-    for key in ('angle', 'scale', 'offset'):
-        del G.graph[key]
-    # TODO: change this to the vectorized version
-    for u, v, edgeD in G.edges(data=True):
-        edgeD['length'] = np.hypot(*(VertexC[fnT[u]] - VertexC[fnT[v]]).T)
-    return G
-
-
 def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     '''Calculate the area enclosed by the polygon with the vertices (x, y).
 
@@ -1113,94 +1067,3 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     return 0.5*abs(X[-1]*Y[0] - Y[-1]*X[0]
                    + np.dot(X[:-1], Y[1:])
                    - np.dot(Y[:-1], X[1:]))
-
-
-@nb.njit(nb.int_(nb.int_[:], nb.int_), cache=True, inline='always')
-def index(array: np.ndarray[tuple[int], np.dtype[np.int_]], item: np.int_) -> int:
-    '''Find the index of first occurrence of `item` in `array`.
-    
-    Equivalent of the method `index()` of Python lists for numpy arrays.
-    
-    Returns:
-      index
-    '''
-    for idx, val in enumerate(array):
-        if val == item:
-            return idx
-    # value not found (must not happen, maybe should throw exception)
-    # raise ValueError('value not found in array')
-    return 0
-
-
-@nb.njit('void(int_[:, ::1], int_[:, ::1], int_[:, ::1], boolean[:])', cache=True)
-def _halfedges_from_triangulation(
-       triangles: np.ndarray[tuple[int, int], np.dtype[np.int_]],
-       neighbors: np.ndarray[tuple[int, int], np.dtype[np.int_]],
-       halfedges: np.ndarray[tuple[int, int], np.dtype[np.int_]],
-       ref_is_cw_: np.ndarray[tuple[int], np.dtype[np.bool_]]) -> None:
-    '''Lists the neighbor-aware half-edges that represent a triangulation.
-
-    Meant to be called from `mesh._planar_from_cdt_triangles()`. Inputs are
-    derived from `PythonCDT.Triangulation().triangles`.
-
-    Args:
-        triangles: array of triangle.vertices for triangle in triangles
-        neighbors: array of triangle.neighbors for triangle in triangles
-
-    Returns:
-        3 lists of half-edges to be passed to `networkx.PlanarEmbedding`
-    '''
-    NULL_ = nb.int_(NULL)
-    nodes_done = set()
-    # add the first three nodes to process
-    nodes_todo = {n: nb.int_(0) for n in triangles[0]}
-    i = nb.int_(0)
-    while nodes_todo:
-        pivot, tri_idx_start = nodes_todo.popitem()
-        tri = triangles[tri_idx_start]
-        tri_nb = neighbors[tri_idx_start]
-        pivot_idx = index(tri, pivot)
-        succ_start = tri[(pivot_idx + 1) % 3]
-        nb_idx_start_reverse = (pivot_idx - 1) % 3
-        succ_end = tri[(pivot_idx - 1) % 3]
-        # first half-edge from `pivot`
-        #  print('INIT', [pivot, succ_start])
-        halfedges[i] = pivot, succ_start, NULL_
-        i += 1
-        nb_idx = pivot_idx
-        ref = succ_start
-        ref_is_cw = False
-        while True:
-            tri_idx = tri_nb[nb_idx]
-            if tri_idx == NULL_:
-                if not ref_is_cw:
-                    # revert direction
-                    ref_is_cw = True
-                    #  print('REVE', [pivot, succ_end, ref], cw)
-                    ref_is_cw_[i] = ref_is_cw
-                    halfedges[i] = pivot, succ_end, succ_start
-                    i += 1
-                    ref = succ_end
-                    tri_nb = neighbors[tri_idx_start]
-                    nb_idx = nb_idx_start_reverse
-                    continue
-                else:
-                    break
-            tri = triangles[tri_idx]
-            tri_nb = neighbors[tri_idx]
-            pivot_idx = index(tri, pivot)
-            succ = (tri[(pivot_idx - 1) % 3]
-                    if ref_is_cw else
-                    tri[(pivot_idx + 1) % 3])
-            nb_idx = ((pivot_idx - 1) % 3) if ref_is_cw else pivot_idx
-            #  print('NORM', [pivot, succ, ref], cw)
-            ref_is_cw_[i] = ref_is_cw
-            halfedges[i] = pivot, succ, ref
-            i += 1
-            if succ not in nodes_todo and succ not in nodes_done:
-                nodes_todo[succ] = tri_idx
-            if succ == succ_end:
-                break
-            ref = succ
-        nodes_done.add(pivot)
-    return

@@ -20,7 +20,7 @@ from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint
 
 logger = logging.getLogger(__name__)
-info = logger.info
+error, warn, info = logger.error, logger.warning, logger.info
 
 
 class _SolutionStore(cp_model.CpSolverSolutionCallback):
@@ -88,7 +88,6 @@ class SolverORTools(Solver, PoolHandler):
             setattr(solver.parameters, key, val)
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.relative_gap_limit = mip_gap
-        solver.log_callback = print
         solver.parameters.log_search_progress = verbose
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
         result = solver.solve(model, storer)
@@ -109,8 +108,10 @@ class SolverORTools(Solver, PoolHandler):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
-        P, A, model_options = self.P, self.A, self.model_options
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        if A is None:
+            A = self.A
+        P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
             S = self.topology_from_mip_pool()
             G = PathFinder(
@@ -145,6 +146,7 @@ def make_min_length_model(
         topology: Topology = Topology.BRANCHED,
         feeder_route: FeederRoute = FeederRoute.SEGMENTED,
         feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+        balanced: bool = False,
         max_feeders: int = 0
 ) -> tuple[cp_model.CpModel, ModelMetadata]:
     '''Make discrete optimization model over link set A.
@@ -239,6 +241,9 @@ def make_min_length_model(
     if feeder_limit is FeederLimit.UNLIMITED:
         # valid inequality: number of gates is at least the minimum
         m.add(all_feeder_vars_sum >= min_feeders)
+        if balanced:
+            warn('Model option <balanced = True> is incompatible with <feeder_limit'
+                 ' = UNLIMITED>: model will not enforce balanced subtrees.')
     else:
         if feeder_limit is FeederLimit.SPECIFIED:
             if max_feeders == min_feeders:
@@ -260,6 +265,17 @@ def make_min_length_model(
         else:
             m.add_linear_constraint(all_feeder_vars_sum, min_feeders,
                                     max_feeders)
+        # enforce balanced subtrees (subtree loads differ at most by one unit)
+        if balanced:
+            if not equal_not_bounded:
+                warn('Model option <balanced = True> is incompatible with '
+                     'having a range of possible feeder counts: model will '
+                     'not enforce balanced subtrees.')
+            else:
+                feeder_min_load = T//min_feeders
+                if feeder_min_load < capacity:
+                    for t, r in stars:
+                        m.add(flow_[t, r] >= link_[t, r]*feeder_min_load)
 
     # radial or branched topology
     if topology is Topology.RADIAL:
