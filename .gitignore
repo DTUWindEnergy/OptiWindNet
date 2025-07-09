@@ -26,7 +26,6 @@ share/python-wheels/
 *.egg
 MANIFEST
 optiwindnet/version.py
-IEA-Wind-2200-22-ROWP/
 
 # auto-generated backup files
 *.backup
