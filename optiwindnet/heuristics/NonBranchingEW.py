@@ -17,7 +17,7 @@ from ..crossings import edge_crossings
 from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
 
-__all__ = ('NBEW',)
+__all__ = ()
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error

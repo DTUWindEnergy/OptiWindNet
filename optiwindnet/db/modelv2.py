@@ -15,9 +15,9 @@ import os
 from pony.orm import (Database, IntArray, Json, Optional, PrimaryKey, Required,
                       Set)
 
-from . import naive_utc_now
+from . import _naive_utc_now
 
-__all__ = ('open_database',)
+__all__ = ()
 
 
 def open_database(filepath: str, create_db: bool = False) -> Database:
@@ -83,7 +83,7 @@ def define_entities(db: Database):
         tentative = Optional(IntArray)
         rogue = Optional(IntArray)
         timestamp = Optional(datetime.datetime,
-                             default=naive_utc_now)
+                             default=_naive_utc_now)
         misc = Optional(Json)
         stuntC = Optional(bytes)  # coords of border stunts
         # len(clone2prime) == C + D
@@ -99,7 +99,7 @@ def define_entities(db: Database):
         # options is a dict of function parameters
         options = Required(Json)
         timestamp = Required(datetime.datetime,
-                             default=naive_utc_now)
+                             default=_naive_utc_now)
         funfile = Required(str)
         # hashlib.sha256(fun.__code__.co_code)
         funhash = Required(bytes)

@@ -19,7 +19,17 @@ from scipy.stats import rankdata
 
 from .utils import NodeStr, NodeTagger
 
-#  __all__ = ()
+__all__ = (
+    'triangle_AR', 'point_d2line', 'is_same_side', 'any_pairs_opposite_edge',
+    'rotate', 'angle_numpy', 'angle', 'angle_oracles_factory',
+    'find_edges_bbox_overlaps', 'is_crossing_numpy', 'is_crossing_no_bbox',
+    'is_crossing', 'is_bunch_split_by_corner',
+    'is_triangle_pair_a_convex_quadrilateral', 'perimeter', 'angle_helpers',
+    'assign_root', 'get_crossings_map', 'complete_graph',
+    'minimum_spanning_forest', 'rotation_checkers_factory', 'rotating_calipers',
+    'area_from_polygon_vertices'
+)
+
 F = NodeTagger()
 NULL = np.iinfo(int).min
 
@@ -58,7 +68,7 @@ def triangle_AR(base1C: CoordPair, base2C: CoordPair, topC: CoordPair) -> float:
 
 @nb.njit(cache=True)
 def point_d2line(pC: CoordPair, uC: CoordPair, vC: CoordPair) -> np.float64:
-    '''Calculate the distance from point `p` to the `u`-`v` line.'''
+    '''Calculate the distance from point `pC` to the `uC`-`vC` line.'''
     x0, y0 = pC
     x1, y1 = uC
     x2, y2 = vC
@@ -69,12 +79,12 @@ def point_d2line(pC: CoordPair, uC: CoordPair, vC: CoordPair) -> np.float64:
 @nb.njit(cache=True)
 def is_same_side(uC: CoordPair, vC: CoordPair, sC: CoordPair, tC: CoordPair,
                  touch_is_cross: bool = True) -> bool:
-    '''Check if points A an B are on the same side
-    of the line defined by points L1 and L2.
+    '''Check if points `sC` an `tC` are on the same side of the line defined
+    by points `uC` and `vC`.
 
-    Note: often used to check crossings with gate edges,
-    where the gate edge A-B is already known to be on a line
-    that crosses the edge L1–L2 (using the angle rank).
+    Note: often used to check crossings with feeder links, where the feeder link
+    `sC`-`tC` is already known to be on a line that crosses the edge `uC`–`vC`
+    (using the angle rank).
     '''
 
     denom = (uC[0] - vC[0])

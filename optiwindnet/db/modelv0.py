@@ -14,7 +14,7 @@ import os
 
 from pony.orm import Database, IntArray, Optional, PrimaryKey, Required, Set
 
-from . import naive_utc_now
+from . import _naive_utc_now
 
 __all__ = ('open_database',)
 
@@ -72,7 +72,7 @@ def define_entities(db: Database):
         runtime = Optional(float)
         runtime_unit = Optional(str)
         machine = Optional(lambda: Machine)
-        timestamp = Optional(datetime.datetime, default=naive_utc_now)
+        timestamp = Optional(datetime.datetime, default=_naive_utc_now)
         # DetourC = Optional(bytes)  # superceeded by D and clone2prime
         # misc is a pickled python dictionary
         misc = Optional(bytes)
@@ -86,7 +86,7 @@ def define_entities(db: Database):
         # capacity = Required(int)
         # options is a dict of function parameters
         options = Required(str)
-        timestamp = Required(datetime.datetime, default=naive_utc_now)
+        timestamp = Required(datetime.datetime, default=_naive_utc_now)
         EdgeSets = Set(EdgeSet)
 
     class Machine(db.Entity):

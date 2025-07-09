@@ -12,6 +12,14 @@ import numpy as np
 from .utils import NodeTagger
 from .geometric import rotate
 
+__all__ = (
+    'describe_G', 'pathdist', 'count_diagonals', 'bfs_subtree_loads',
+    'calcload', 'site_fingerprint', 'fun_fingerprint', 'L_from_site',
+    'G_from_S', 'S_from_G', 'L_from_G', 'as_single_root', 'as_normalized',
+    'as_rescaled', 'as_undetoured', 'as_hooked_to_nearest', 'as_hooked_to_head',
+    'make_remap', 'scaffolded'
+)
+
 F = NodeTagger()
 
 _essential_graph_attrs = (

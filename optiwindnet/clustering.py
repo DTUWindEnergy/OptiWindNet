@@ -5,6 +5,8 @@ from heapq import heappop, heappush
 import math
 import networkx as nx
 
+__all__ = ('clusterize',)
+
 
 def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
     '''Partition the terminals of A into one cluster per root.

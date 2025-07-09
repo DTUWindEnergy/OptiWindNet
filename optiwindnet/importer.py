@@ -131,7 +131,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
       handle: Short moniker for the site.
 
     Returns:
-      Unconnected locations graph L.
+      Unconnected location graph L.
     '''
     if isinstance(filepath, str):
         filepath = Path(filepath)
@@ -213,7 +213,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         handle: Short moniker for the site.
 
     Returns:
-        Unconnected locations graph L.
+        Unconnected location graph L.
     '''
     if isinstance(filepath, str):
         filepath = Path(filepath)

@@ -16,6 +16,7 @@ from .geometric import rotate
 from .interarraylib import NodeTagger, describe_G
 from .themes import Colors
 
+__all__ = ('gplot', 'pplot')
 
 FONTSIZE_LABEL = 5
 FONTSIZE_LOAD = 7

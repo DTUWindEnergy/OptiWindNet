@@ -12,6 +12,8 @@ from .geometric import rotate
 from .interarraylib import describe_G
 from .themes import Colors
 
+__all__ = ('SvgRepr', 'svgplot')
+
 class SvgRepr():
     '''
     Helper class to get IPython to display the SVG figure encoded in data.

@@ -14,6 +14,8 @@ from pony.orm import db_session
 from optiwindnet.interarraylib import calcload
 from optiwindnet.utils import NodeTagger
 
+__all__ = ()
+
 # Coordinates use arrays of floats.
 # Somehow, nodesets with the same coordinates were getting different digests,
 # when the code ran on different computers.

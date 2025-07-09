@@ -20,7 +20,7 @@ from ..utils import Alerter, NodeStr, NodeTagger
 from .priorityqueue import PriorityQueue
 from ..interarraylib import L_from_G, fun_fingerprint
 
-__all__ = ('OBEW',)
+__all__ = ()
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error

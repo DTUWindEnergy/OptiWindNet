@@ -15,7 +15,7 @@ import os
 from pony.orm import (Database, IntArray, Json, Optional, PrimaryKey, Required,
                       Set)
 
-from . import naive_utc_now
+from . import _naive_utc_now
 
 __all__ = ('open_database',)
 
@@ -69,7 +69,7 @@ def define_entities(db: Database):
         # number of Detour nodes
         D = Optional(int, default=0)
         timestamp = Optional(datetime.datetime,
-                             default=naive_utc_now)
+                             default=_naive_utc_now)
         misc = Optional(Json)
         clone2prime = Optional(IntArray)
         edges = Required(IntArray)
@@ -81,7 +81,7 @@ def define_entities(db: Database):
         # options is a dict of function parameters
         options = Required(Json)
         timestamp = Required(datetime.datetime,
-                             default=naive_utc_now)
+                             default=_naive_utc_now)
         funfile = Required(str)
         # hashlib.sha256(fun.__code__.co_code)
         funhash = Required(bytes)

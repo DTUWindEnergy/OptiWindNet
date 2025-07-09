@@ -13,7 +13,7 @@ from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
 from ..interarraylib import calcload
 
-__all__ = ('EW_presolver',)
+__all__ = ()
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
