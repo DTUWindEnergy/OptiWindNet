@@ -34,13 +34,13 @@ from optiwindnet.svg import svgplot
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.interface import assign_cables
-from optiwindnet.interarraylib import G_from_S, calcload
+from optiwindnet.interarraylib import G_from_S, calcload, as_normalized
 
 # Heuristics
 from optiwindnet.heuristics import EW_presolver
 
 # Metaheuristics
-from optiwindnet.baselines.hgs import iterative_hgs_cvrp
+from optiwindnet.baselines.hgs import iterative_hgs_cvrp, hgs_multiroot
 
 # MILP
 from optiwindnet.MILP import solver_factory, ModelOptions
@@ -216,7 +216,7 @@ class WindFarmNetwork:
         Updates the network from terse link representation.
         Optionally updates node coordinates.
         """
-
+        terse_links = [int(x) for x in terse_links]
         # --- Added block: check input format ---
         terse_links = np.asarray(terse_links)
 
@@ -406,7 +406,7 @@ class Heuristic(OptiWindNetSolver):
         return S, G
     
 class MetaHeuristic(OptiWindNetSolver):
-    def __init__(self, time_limit, solver='HGS', gates_limit: int | None = None, max_iter=10, seed: int = 0, verbose=False, **kwargs):
+    def __init__(self, time_limit, solver='HGS', gates_limit: int | None = None, max_iter=10, balanced=False, seed: int = 0, verbose=False, **kwargs):
         # Call the base class initialization
         self.time_limit = time_limit
         self.gates_limit = gates_limit
@@ -414,7 +414,9 @@ class MetaHeuristic(OptiWindNetSolver):
         self.verbose = verbose
         self.max_iter = max_iter
         self.gates_limit = gates_limit
+        self.balanced = balanced
         self.seed = seed
+        
 
     def optimize(self, A, P, cables, cables_capacity, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
@@ -423,7 +425,14 @@ class MetaHeuristic(OptiWindNetSolver):
 
         # optimizing
         if self.solver.lower() in ['hgs', 'hybrid genetic search', 'hybrid_genetic_search']:
-            S = iterative_hgs_cvrp(A, capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
+            R = A.graph['R']
+            if R == 1:
+                S = iterative_hgs_cvrp(as_normalized(A), capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
+            else:
+                S = hgs_multiroot(as_normalized(A), capacity=cables_capacity, time_limit=self.time_limit, balanced=self.balanced, seed=self.seed)
+                if verbose and self.gates_limit:
+                    print('WARNING: hgs_multiroot is used for plants with more than one substation and gates-limit is neglected (hgs_multiroot is not capable of limiting number of feeders)')
+
         else:
             raise ValueError(
                 f"{self.solver} is not among the supported Meta-Heuristic solvers. Choose among: HGS.")
