@@ -34,8 +34,9 @@ from .geometric import is_triangle_pair_a_convex_quadrilateral
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
 
-logger = logging.getLogger(__name__)
-debug, info, warn = logger.debug, logger.info, logger.warning
+_lggr = logging.getLogger(__name__)
+debug, info, warn = _lggr.debug, _lggr.info, _lggr.warning
+
 F = NodeTagger()
 NULL = np.iinfo(int).min
 _MAX_TRIANGLE_ASPECT_RATIO = 50.

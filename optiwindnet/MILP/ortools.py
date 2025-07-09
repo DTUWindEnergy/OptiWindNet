@@ -19,8 +19,10 @@ from ..interarraylib import G_from_S
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint
 
-logger = logging.getLogger(__name__)
-error, warn, info = logger.error, logger.warning, logger.info
+__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+
+_lggr = logging.getLogger(__name__)
+error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 
 class _SolutionStore(cp_model.CpSolverSolutionCallback):
@@ -315,8 +317,17 @@ def make_min_length_model(
 
 def warmup_model(model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
                  ) -> cp_model.CpModel:
-    '''
+    '''Set initial solution into `model`.
+
     Changes `model` in-place.
+
+    Args:
+      model: CP-Sat model to apply the solution to.
+      metadata: indices to the model's variables.
+      S: solution topology
+
+    Returns:
+      The same model instance that was provided, now with a solution.
     '''
     R, T = metadata.R, metadata.T
     model.ClearHints()

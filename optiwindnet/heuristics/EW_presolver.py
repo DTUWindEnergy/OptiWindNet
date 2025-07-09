@@ -13,8 +13,10 @@ from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
 from ..interarraylib import calcload
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+__all__ = ('EW_presolver',)
+
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 F = NodeTagger()
 
@@ -254,7 +256,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             subroot_[n] = sr_v
             subtree_[n] = subtree
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        if lggr.isEnabledFor(logging.DEBUG) and pq:
+        if _lggr.isEnabledFor(logging.DEBUG) and pq:
             debug('heap top: <%s>, «%s» %.3f', F[pq[0][-2]],
                   tuple(F[x] for x in pq[0][-1]), pq[0][0])
         else:

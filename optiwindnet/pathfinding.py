@@ -19,10 +19,12 @@ from .geometric import rotation_checkers_factory
 from .interarraylib import bfs_subtree_loads, scaffolded
 from .utils import NodeTagger
 
-logger = logging.getLogger(__name__)
-debug, info, warn = logger.debug, logger.info, logger.warning
-F = NodeTagger()
+__all__ = ('PathFinder',)
 
+_lggr = logging.getLogger(__name__)
+debug, info, warn = _lggr.debug, _lggr.info, _lggr.warning
+
+F = NodeTagger()
 NULL = np.iinfo(int).min
 PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop'.split())
 

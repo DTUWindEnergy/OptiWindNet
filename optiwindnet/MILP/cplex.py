@@ -12,8 +12,10 @@ from .pyomo import SolverPyomo, topology_from_mip_sol
 from ..pathfinding import PathFinder
 from ..interarraylib import G_from_S
 
-logger = logging.getLogger(__name__)
-error, info = logger.error, logger.info
+__all__ = ()
+
+_lggr = logging.getLogger(__name__)
+error, info = _lggr.error, _lggr.info
 
 
 class SolverCplex(SolverPyomo, PoolHandler):

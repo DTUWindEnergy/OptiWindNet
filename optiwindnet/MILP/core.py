@@ -14,10 +14,11 @@ from makefun import with_signature
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 
-__all__ = ('Topology', 'FeederRoute', 'FeederLimit', 'ModelOptions')
+__all__ = ('Solver', 'Topology', 'FeederRoute', 'FeederLimit', 'ModelOptions',
+           'investigate_pool', 'ModelMetadata', 'SolutionInfo')
 
-logger = logging.getLogger(__name__)
-error, info = logger.error, logger.info
+_lggr = logging.getLogger(__name__)
+error, info = _lggr.error, _lggr.info
 
 
 def _identifier_from_class_name(c: type) -> str:
@@ -124,6 +125,7 @@ class SolutionInfo():
 
 
 class Solver(abc.ABC):
+    'Common interface to multiple MILP solvers'
     name: str
     metadata: ModelMetadata
     solver: Any
@@ -133,12 +135,31 @@ class Solver(abc.ABC):
     @abc.abstractmethod
     def set_problem(self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
                     model_options: ModelOptions):
-        'Define the problem geometry, available edges and tree properties'
+        '''Define the problem geometry, available edges and tree properties
+
+        Args:
+          P: planar embedding of the location
+          A: available edges for the location
+          capacity: maximum number of terminals in a subtree
+          model_options: tree properties - see ModelOptions.help()
+        '''
         pass
 
     @abc.abstractmethod
     def solve(self, time_limit: int, mip_gap: float,
               options: dict[str, Any] = {}, verbose: bool = False) -> SolutionInfo:
+        '''Run the MILP solver search.
+
+        Args:
+          time_limit: maximum time (s) the solver is allowed to run.
+          mip_gap: relative difference from incumbent solution to lower bound
+            at which the search may be stopped before time_limit is reached.
+          options: additional options to pass to solver (see solver manual).
+          
+        Returns:
+          General information about the solution search (use get_solution() for
+            the actual solution).
+        '''
         pass
 
     @abc.abstractmethod

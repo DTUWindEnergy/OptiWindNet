@@ -4,6 +4,7 @@
 from heapq import heappush, heappop
 import itertools
 
+__all__ = ()
 
 class PriorityQueue(list):
 

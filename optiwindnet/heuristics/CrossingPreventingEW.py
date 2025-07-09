@@ -17,9 +17,10 @@ from ..crossings import edge_crossings
 from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
 
+__all__ = ('CPEW',)
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 F = NodeTagger()
 
@@ -504,7 +505,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
             subroot_[n] = sr_v
             subtree_[n] = subtree
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        if lggr.isEnabledFor(logging.DEBUG) and pq:
+        if _lggr.isEnabledFor(logging.DEBUG) and pq:
             debug('heap top: <%s>, «%s» %.3f', F[pq[0][-2]],
                   tuple(F[x] for x in pq[0][-1]), pq[0][0])
         else:
@@ -552,7 +553,7 @@ def CPEW(G_base, capacity=8, delaunay_based=True, maxiter=10000,
             check_heap4crossings(root, sr_v)
     # END: main loop
 
-    if lggr.isEnabledFor(logging.DEBUG):
+    if _lggr.isEnabledFor(logging.DEBUG):
         not_marked = []
         for root in roots:
             for subroot in G[root]:

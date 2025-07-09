@@ -7,9 +7,10 @@ import networkx as nx
 from .crossings import list_edge_crossings
 from .interarraylib import calcload, NodeTagger
 
+__all__ = ('repair_routeset_path',)
 
-logger = logging.getLogger(__name__)
-warn = logger.warning
+_lggr = logging.getLogger(__name__)
+warn = _lggr.warning
 F = NodeTagger()
 
 

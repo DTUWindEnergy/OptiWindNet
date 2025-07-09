@@ -20,9 +20,10 @@ from ..utils import Alerter, NodeStr, NodeTagger
 from .priorityqueue import PriorityQueue
 from ..interarraylib import L_from_G, fun_fingerprint
 
+__all__ = ('OBEW',)
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 F = NodeTagger()
 
@@ -1216,7 +1217,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
     debug('FINISHED – Detour nodes added: %d', D)
 
-    if lggr.isEnabledFor(logging.DEBUG):
+    if _lggr.isEnabledFor(logging.DEBUG):
         not_marked = []
         for root in roots:
             for proximal in G[root]:

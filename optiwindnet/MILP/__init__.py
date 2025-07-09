@@ -6,8 +6,8 @@ from .core import ModelOptions
 
 __all__ = ('ModelOptions', 'solver_factory')
 
-lggr = logging.getLogger(__name__)
-error = lggr.error
+_lggr = logging.getLogger(__name__)
+error = _lggr.error
 
 def solver_factory(solver_name: str):
     '''Create a Solver object tied to the specified external MILP solver.

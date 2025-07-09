@@ -19,8 +19,10 @@ from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import fun_fingerprint, G_from_S
 from ..pathfinding import PathFinder
 
-logger = logging.getLogger(__name__)
-error, warn, info = logger.error, logger.warning, logger.info
+__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+
+_lggr = logging.getLogger(__name__)
+error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 # NOTE: SCIP has solution pool which can be accessed with PySCIPOpt: getSols()
 # TODO: move scip to scip.py and implement:
@@ -384,8 +386,16 @@ def make_min_length_model(
 
 def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) \
         -> pyo.ConcreteModel:
-    '''
+    '''Set initial solution into `model`.
+
     Changes `model` in-place.
+
+    Args:
+      model: pyomo model to apply the solution to.
+      S: solution topology
+
+    Returns:
+      The same model instance that was provided, now with a solution.
     '''
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
