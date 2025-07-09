@@ -11,7 +11,7 @@ import networkx as nx
 
 import pyomo.environ as pyo
 
-from .core import (
+from ._core import (
     Topology, FeederRoute, FeederLimit, Solver, ModelOptions, SolutionInfo,
     ModelMetadata
 )

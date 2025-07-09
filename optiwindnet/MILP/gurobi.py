@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 import networkx as nx
 import pyomo.environ as pyo
-from .core import (
+from ._core import (
     SolutionInfo, PoolHandler, investigate_pool, FeederRoute, Topology
 )
 from .pyomo import SolverPyomo, topology_from_mip_sol

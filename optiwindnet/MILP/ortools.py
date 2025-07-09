@@ -10,7 +10,7 @@ import networkx as nx
 
 from ortools.sat.python import cp_model
 
-from .core import (
+from ._core import (
     Topology, FeederRoute, FeederLimit, Solver, PoolHandler, ModelOptions,
     ModelMetadata, SolutionInfo, investigate_pool,
 )

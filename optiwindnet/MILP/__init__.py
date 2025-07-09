@@ -2,12 +2,10 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-from .core import ModelOptions
-
-__all__ = ('ModelOptions', 'solver_factory')
+from ._core import (Solver, Topology, FeederRoute, FeederLimit, ModelOptions,
+                    investigate_pool, ModelMetadata, SolutionInfo)
 
 _lggr = logging.getLogger(__name__)
-error = _lggr.error
 
 def solver_factory(solver_name: str):
     '''Create a Solver object tied to the specified external MILP solver.
@@ -39,5 +37,5 @@ def solver_factory(solver_name: str):
             from .pyomo import SolverPyomo
             return SolverPyomo(solver_name, prefix='appsi_')
         case _:
-            error('Unsupported solver: %s', solver_name)
+            _lggr.error('Unsupported solver: %s', solver_name)
             return None
