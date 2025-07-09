@@ -1,5 +1,13 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+'''Database model v2 for storage of locations and route sets.
+
+Tables:
+  NodeSet: location definition
+  RouteSet: routeset (i.e. a record of G)
+  Method: info on algorithm & options to produce routesets
+  Machine: info on machine that generated a routeset
+'''
 
 import datetime
 import os
@@ -7,25 +15,30 @@ import os
 from pony.orm import (Database, IntArray, Json, Optional, PrimaryKey, Required,
                       Set)
 
+from . import naive_utc_now
 
-def open_database(filename, create_db=False):
+__all__ = ('open_database',)
+
+
+def open_database(filepath: str, create_db: bool = False) -> Database:
+    '''Opens the sqlite database v2 file specified in `filepath`.
+
+    Args:
+      filepath: path to database file
+      create_db: True -> create a new file if it does not exist
+    
+    Returns:
+      Database object (Pony ORM)
+    '''
     db = Database()
     define_entities(db)
-    db.bind('sqlite', os.path.abspath(os.path.expanduser(filename)),
+    db.bind('sqlite', os.path.abspath(os.path.expanduser(filepath)),
             create_db=create_db)
     db.generate_mapping(create_tables=True)
     return db
 
 
-def define_entities(db):
-    '''
-    Database model for storage of layouts.
-    Tables:
-    - NodeSet: site
-    - RouteSet: routeset (i.e. a record of G)
-    - Method: info on algorithm & options to produce layouts
-    - Machine: info on machine that generated a layout
-    '''
+def define_entities(db: Database):
 
     class NodeSet(db.Entity):
         # hashlib.sha256(VertexC + boundary).digest()
@@ -70,7 +83,7 @@ def define_entities(db):
         tentative = Optional(IntArray)
         rogue = Optional(IntArray)
         timestamp = Optional(datetime.datetime,
-                             default=datetime.datetime.utcnow)
+                             default=naive_utc_now)
         misc = Optional(Json)
         stuntC = Optional(bytes)  # coords of border stunts
         # len(clone2prime) == C + D
@@ -86,7 +99,7 @@ def define_entities(db):
         # options is a dict of function parameters
         options = Required(Json)
         timestamp = Required(datetime.datetime,
-                             default=datetime.datetime.utcnow)
+                             default=naive_utc_now)
         funfile = Required(str)
         # hashlib.sha256(fun.__code__.co_code)
         funhash = Required(bytes)

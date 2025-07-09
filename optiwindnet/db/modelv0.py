@@ -1,30 +1,43 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+'''Database model v0 for storage of locations and route sets.
+
+Tables:
+  NodeSet: location definition
+  RouteSet: routeset (i.e. a record of G)
+  Method: info on algorithm & options to produce routesets
+  Machine: info on machine that generated a routeset
+'''
 
 import datetime
 import os
 
 from pony.orm import Database, IntArray, Optional, PrimaryKey, Required, Set
 
+from . import naive_utc_now
 
-def open_database(filename, create_db=False):
+__all__ = ('open_database',)
+
+
+def open_database(filepath: str, create_db: bool = False) -> Database:
+    '''Opens the sqlite database v2 file specified in `filepath`.
+
+    Args:
+      filepath: path to database file
+      create_db: True -> create a new file if it does not exist
+    
+    Returns:
+      Database object (Pony ORM)
+    '''
     db = Database()
     define_entities(db)
-    db.bind('sqlite', os.path.abspath(os.path.expanduser(filename)),
+    db.bind('sqlite', os.path.abspath(os.path.expanduser(filepath)),
             create_db=create_db)
     db.generate_mapping(create_tables=True)
     return db
 
 
-def define_entities(db):
-    '''
-    Database model for storage of layouts.
-    Tables:
-    - NodeSet: site
-    - EdgeSet: layout
-    - Method: info on algorithm & options to produce layouts
-    - Machine: info on machine that generated a layout
-    '''
+def define_entities(db: Database):
 
     class NodeSet(db.Entity):
         # hashlib.sha256(VertexC + boundary).digest()
@@ -59,7 +72,7 @@ def define_entities(db):
         runtime = Optional(float)
         runtime_unit = Optional(str)
         machine = Optional(lambda: Machine)
-        timestamp = Optional(datetime.datetime, default=datetime.datetime.utcnow)
+        timestamp = Optional(datetime.datetime, default=naive_utc_now)
         # DetourC = Optional(bytes)  # superceeded by D and clone2prime
         # misc is a pickled python dictionary
         misc = Optional(bytes)
@@ -73,21 +86,9 @@ def define_entities(db):
         # capacity = Required(int)
         # options is a dict of function parameters
         options = Required(str)
-        timestamp = Required(datetime.datetime, default=datetime.datetime.utcnow)
+        timestamp = Required(datetime.datetime, default=naive_utc_now)
         EdgeSets = Set(EdgeSet)
 
     class Machine(db.Entity):
         name = Required(str, unique=True)
         EdgeSets = Set(EdgeSet)
-
-    # class CableSet(db.Entity):
-    #     name = Required(str)
-    #     cableset = Required(bytes)
-    #     EdgeSets = Set(EdgeSet)
-    #     max_capacity = Required(int)
-    #     # name = Required(str)
-    #     # types = Required(int)
-    #     # areas = Required(IntArray)  # mm²
-    #     # capacities  = Required(IntArray)  # num of wtg
-    #     # EdgeSets = Set(EdgeSet)
-    #     # max_capacity = Required(int)
