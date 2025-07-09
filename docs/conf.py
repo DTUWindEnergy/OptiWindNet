@@ -51,8 +51,8 @@ extensions = [
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
-    'numpy': ('https://docs.scipy.org/doc/numpy/', None),
-    'scipy': ('https://docs.scipy.org/doc/scipy/reference/', None),
+    'numpy': ('https://numpy.org/doc/stable/', None),
+    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
 }
 
 # Add any paths that contain templates here, relative to this directory.
@@ -285,6 +285,7 @@ epub_exclude_files = ['search.html']
 
 def skip_empty_all_submodules(app, what, name, obj, skip, options):
     # Only consider modules
+    print(f"autoapi-skip-member: {what=} {name=}")
     if what == "module":
         # Get the __all__ attribute, default to None if not present
         module_all = getattr(obj, "__all__", None)
