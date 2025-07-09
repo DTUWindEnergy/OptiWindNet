@@ -23,6 +23,8 @@ from .interarraylib import L_from_site
 _lggr = logging.getLogger(__name__)
 info = _lggr.info
 
+__all__ = ('L_from_yaml', 'L_from_pbf', 'load_repository')
+
 F = NodeTagger()
 
 
@@ -51,13 +53,28 @@ def _get_entries(entries):
 
 def _translate_latlonstr(entry_list):
     translated = []
+    min = sec = 0.
     for tag, lat, lon in _get_entries(entry_list):
         latlon = []
         for ll in (lat, lon):
-            val, hemisphere = ll.split("'")
-            deg, sec = val.split('°')
-            latlon.append((float(deg) + float(sec)/60)
-                          * (1 if hemisphere in ('N', 'E') else -1))
+            deg, *tail = ll.split('°')
+            if tail:
+                min, *tail = tail[0].split("'")
+                if not tail:
+                    hemisphere = min.strip()
+                    min = 0.
+                else:
+                    sec, *tail = tail[0].split('"')
+                    if not tail:
+                        hemisphere = sec.strip()
+                        sec = 0.
+                    else:
+                        hemisphere = tail[0].strip()
+                latlon.append((float(deg) + (float(min) + float(sec)/60)/60)
+                              * (1 if hemisphere in ('N', 'E') else -1))
+            else:
+                # entry is a signed fractional degree without hemisphere letter
+                latlon.append(float(deg))
         translated.append((tag, *utm.from_latlon(*latlon)))
     return translated
 
@@ -92,24 +109,29 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     Two options available for COORDINATE_FORMAT: "planar" and "latlon".
 
-    Format "planar" is: [tag] easting northing. Example:
-    TAG 234.2 5212.5
+    Format "planar" is: [tag] easting northing. Example::
 
-    Format "latlon" is: [tag] latitude longitude. Example:
-    TAG 11°22.333'N 44°55.666'E
+      TAG 234.2 5212.5
 
-    The [tag] is optional. Only this specific latlon format is supported.
+    Format "latlon" is: [tag] latitude longitude. Example::
+
+      TAG1 11°22.333'N 44°55.666'E
+      TAG2 11.3563°N 44.8903°E
+      TAG3 11°22'20"N 44°55'40"E
+
+    The [tag] is optional. Ensure no spaces within a latitude or longitude.
 
     The coordinate pair may be separated by "," or ";" and may be enclosed in
-    "[]" or "()". Example:
-    TAG [234.2, 5212.5]
+    "[]" or "()". Example::
+
+      TAG [234.2, 5212.5]
 
     Args:
-        filepath: path to `.yaml` file to read.
-        handle: Short moniker for the site.
+      filepath: path to `.yaml` file to read.
+      handle: Short moniker for the site.
 
     Returns:
-        Unconnected locations graph L.
+      Unconnected locations graph L.
     '''
     if isinstance(filepath, str):
         filepath = Path(filepath)
@@ -465,7 +487,7 @@ def load_repository(handles2names=(
         ('.yaml', _site_handles_yaml),
         ('.osm.pbf', _site_handles_pbf),
         )) -> NamedTuple:
-    base_dir = files(__package__ + '.data')
+    base_dir = files(__package__) / 'data'
     if isinstance(handles2names, dict):
         # assume all files have .yaml extension
         return namedtuple('SiteRepository', handles2name)(
