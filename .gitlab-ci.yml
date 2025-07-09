@@ -34,12 +34,12 @@ test_windows:
 # ===== DEPLOY optiwindnet docs=====
 make_pages:
   pages: true
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH 
-      changes:
-        - docs/**/*
-  stage:  
-    deploy
+  # rules:
+  #   - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  #     changes:
+  #       - docs/**/*
+  when: manual
+  stage: deploy
   script:
     - apt-get update
     - apt-get -y install make pandoc graphviz
@@ -50,7 +50,7 @@ make_pages:
     - cd ../; mv docs/build/html public/
   artifacts:
     paths:
-    - public
+      - public
   tags: 
     - linux
 
