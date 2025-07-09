@@ -282,3 +282,16 @@ epub_exclude_files = ['search.html']
 
 
 # -- Extension configuration -------------------------------------------------
+
+def skip_empty_all_submodules(app, what, name, obj, skip, options):
+    # Only consider modules
+    if what == "module":
+        # Get the __all__ attribute, default to None if not present
+        module_all = getattr(obj, "__all__", None)
+        # If __all__ exists and is empty, skip this module
+        if module_all is not None and len(module_all) == 0:
+            return True
+    return None  # Use default behavior otherwise
+
+def setup(app):
+    app.connect("autoapi-skip-member", skip_empty_all_submodules)
