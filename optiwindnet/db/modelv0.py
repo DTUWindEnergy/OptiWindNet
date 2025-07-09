@@ -3,10 +3,10 @@
 '''Database model v0 for storage of locations and route sets.
 
 Tables:
-  NodeSet: location definition
-  RouteSet: routeset (i.e. a record of G)
-  Method: info on algorithm & options to produce routesets
-  Machine: info on machine that generated a routeset
+  - NodeSet: location definition
+  - RouteSet: routeset (i.e. a record of G)
+  - Method: info on algorithm & options to produce routesets
+  - Machine: info on machine that generated a routeset
 '''
 
 import datetime
@@ -16,7 +16,7 @@ from pony.orm import Database, IntArray, Optional, PrimaryKey, Required, Set
 
 from ._core import _naive_utc_now
 
-__all__ = ('open_database',)
+__all__ = ()
 
 
 def open_database(filepath: str, create_db: bool = False) -> Database:

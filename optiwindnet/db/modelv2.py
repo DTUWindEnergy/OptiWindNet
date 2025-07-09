@@ -3,10 +3,10 @@
 '''Database model v2 for storage of locations and route sets.
 
 Tables:
-  NodeSet: location definition
-  RouteSet: routeset (i.e. a record of G)
-  Method: info on algorithm & options to produce routesets
-  Machine: info on machine that generated a routeset
+  - NodeSet: location definition
+  - RouteSet: routeset (i.e. a record of G)
+  - Method: info on algorithm & options to produce routesets
+  - Machine: info on machine that generated a routeset
 '''
 
 import datetime
