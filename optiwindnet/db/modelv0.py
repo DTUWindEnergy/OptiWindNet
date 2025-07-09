@@ -14,7 +14,7 @@ import os
 
 from pony.orm import Database, IntArray, Optional, PrimaryKey, Required, Set
 
-from . import _naive_utc_now
+from ._core import _naive_utc_now
 
 __all__ = ('open_database',)
 
