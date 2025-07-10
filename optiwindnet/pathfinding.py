@@ -22,7 +22,7 @@ from .utils import NodeTagger
 __all__ = ('PathFinder',)
 
 _lggr = logging.getLogger(__name__)
-debug, info, warn = _lggr.debug, _lggr.info, _lggr.warning
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 F = NodeTagger()
 NULL = np.iinfo(int).min
@@ -47,8 +47,8 @@ class PathNodes(dict):
     def add(self, _source: int, sector: int, parent: int, dist: float,
             d_hop: float) -> int:
         if parent not in self:
-            logger.error('attempted to add an edge in `PathNodes` to '
-                         'nonexistent parent (%d)', parent)
+            error('attempted to add an edge in `PathNodes` to '
+                  'nonexistent parent (%d)', parent)
         _parent = self.prime_from_id[parent]
         for prev_id in self.ids_from_prime_sector[_source, sector]:
             if self[prev_id].parent == parent:
@@ -625,8 +625,8 @@ class PathFinder():
                  for sec, id in I_path[hook].items())
                 for hook in hookchoices))
             if not path_options:
-                logger.error('subtree of node %s has no non-crossing paths to '
-                             'any root: leaving gate as-is', F[n])
+                error('subtree of node %s has no non-crossing paths to '
+                      'any root: leaving gate as-is', F[n])
                 # unable to fix this crossing
                 failed_detours.append((r, n))
                 continue
@@ -643,13 +643,13 @@ class PathFinder():
                 path.append(paths.prime_from_id[id])
                 pseudonode = paths[id]
             if not math.isclose(sum(dists), dist):
-                logger.error('distance sum (%.1f) != best distance (%.1f), '
-                             'hook = %d, path: %s', sum(dists), dist, hook,
-                             path)
+                error('distance sum (%.1f) != best distance (%.1f), '
+                      'hook = %d, path: %s', sum(dists), dist, hook,
+                      path)
 
             debug('path: %s', path)
             if len(path) < 2:
-                logger.error('no path found for %d-%d', r, n)
+                error('no path found for %d-%d', r, n)
                 continue
             added_clones = len(path) - 2
             Clone = list(range(clone_idx, clone_idx + added_clones))
