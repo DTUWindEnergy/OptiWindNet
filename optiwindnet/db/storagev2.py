@@ -16,7 +16,7 @@ import numpy as np
 from pony import orm
 
 from ..interarraylib import calcload
-from ..utils import NodeTagger
+from ..utils import NodeTagger, make_handle
 
 __all__ = ()
 
@@ -297,10 +297,12 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     for k, v in misc.items():
         misc[k] = oddtypes_to_serializable(v)
     length = G.size(weight='length')
+    handle = G.graph.get('handle')
+    if handle is None:
+        handle = make_handle(G.graph['name'])
     packed_G = dict(
         R=R, T=T, C=C, D=D,
-        handle=G.graph.get('handle',
-                           G.graph['name'].strip().replace(' ', '_')),
+        handle=handle,
         capacity=G.graph['capacity'],
         length=length,
         creator=G.graph['creator'],
