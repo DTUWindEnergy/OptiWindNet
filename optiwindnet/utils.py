@@ -3,7 +3,13 @@
 
 import inspect
 from collections import namedtuple
+import re
 
+__all__ = ()
+
+
+def make_handle(s):
+    return re.sub(r'\W|^(?=\d)', '_', s)
 
 def namedtuplify(namedtuple_typename='', **kwargs):
     NamedTuplified = namedtuple(namedtuple_typename,

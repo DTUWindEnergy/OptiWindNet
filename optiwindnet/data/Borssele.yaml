@@ -11,6 +11,8 @@
 # Wind turbines Borssele IV.map
 # Wind turbines Borssele V.map
 
+HANDLE: borssele
+
 OPERATOR:
   - Ørsted # 1 and 2
   - Blauwwind II Consortium # 3, 4, 5

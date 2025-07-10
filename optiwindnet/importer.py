@@ -4,11 +4,9 @@
 import re
 import logging
 from itertools import chain, zip_longest
-from collections import namedtuple, defaultdict
+from collections import namedtuple
 from pathlib import Path
-from typing import NamedTuple, Iterable
 from importlib.resources import files
-from functools import reduce
 
 import networkx as nx
 import numpy as np
@@ -17,7 +15,7 @@ import yaml
 import esy.osm.pbf
 import shapely as shp
 
-from .utils import NodeTagger
+from .utils import NodeTagger, make_handle
 from .interarraylib import L_from_site
 
 _lggr = logging.getLogger(__name__)
@@ -137,6 +135,10 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         filepath = Path(filepath)
     # read wind power plant site YAML file
     parsed_dict = yaml.safe_load(open(filepath, 'r', encoding='utf8'))
+    name = filepath.stem
+    handle = parsed_dict.get('HANDLE')
+    if handle is None:
+        handle = make_handle(name)
     # default format is "latlon"
     format = parsed_dict.get('COORDINATE_FORMAT', 'latlon')
     Border, BorderTag = coordinate_parser[format](parsed_dict['EXTENTS'])
@@ -193,7 +195,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     G = nx.Graph(T=T, R=R, B=B,
                  VertexC=VertexC,
                  border=np.array(border, dtype=np.int_),
-                 name=filepath.stem,
+                 name=name,
                  handle=handle,
                  **optional)
 
@@ -247,6 +249,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                 match power_kind:
                     case 'plant':
                         plant_name = e.tags.get('name:en') or e.tags.get('name')
+                        handle = e.tags.get('handle') or make_handle(name)
                         if border_raw is not None:
                             raise ValueError('Only a single border is supported.')
                         border_raw = [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
@@ -267,6 +270,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                     match power_kind:
                         case 'plant':
                             plant_name = e.tags.get('name:en') or e.tags.get('name')
+                            handle = e.tags.get('handle') or make_handle(name)
                             for m in e.members:
                                 eid, cls, kind = m
                                 match cls:
@@ -380,127 +384,25 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     return L
 
 
-_site_handles_yaml = dict(
-    anholt='Anholt',
-    borkum='Borkum Riffgrund 1',
-    borkum2='Borkum Riffgrund 2',
-    borssele='Borssele',
-    butendiek='Butendiek',
-    dantysk='DanTysk',
-    doggerA='Dogger Bank A',
-    dudgeon='Dudgeon',
-    anglia='East Anglia ONE',
-    gode='Gode Wind 1',
-    gabbin='Greater Gabbard Inner',
-    gwynt='Gwynt y Mor',
-    hornsea='Hornsea One',
-    hornsea2w='Hornsea Two West',
-    horns='Horns Rev 1',
-    horns2='Horns Rev 2',
-    horns3='Horns Rev 3',
-    london='London Array',
-    moray='Moray East',
-    moraywest='Moray West',
-    ormonde='Ormonde',
-    race='Race Bank',
-    rampion='Rampion',
-    rødsand2='Rødsand 2',
-    sofia='Sofia',
-    thanet='Thanet',
-    triton='Triton Knoll',
-    walney1='Walney 1',
-    walney2='Walney 2',
-    walneyext='Walney Extension',
-    sands='West of Duddon Sands',
-    yi_2019='Yi-2019',
-    cazzaro_2022='Cazzaro-2022',
-    cazzaro_2022G140='Cazzaro-2022G-140',
-    cazzaro_2022G210='Cazzaro-2022G-210',
-    taylor_2023='Taylor-2023',
-)
+def load_repository(path: Path | str | None = None) -> tuple[nx.Graph, ...]:
+    """Load locations from files of known formats into a namedtuple.
 
-_site_handles_pbf = dict(
-    amalia='Princess Amalia',
-    amrumbank='Amrumbank West',
-    arkona='Arkona',
-    baltic2='Baltic 2',
-    bard='BARD Offshore 1',
-    beatrice='Beatrice',
-    belwind='Belwind',
-    binhainorthH2='SPIC Binhai North H2',
-    bodhi='Laoting Bodhi Island',
-    eagle='Baltic Eagle',
-    fecamp='Fecamp',
-    gemini1='Gemini 1',
-    gemini2='Gemini 2',
-    glotech1='Global Tech 1',
-    hohesee='Hohe See',
-    jiaxing1='Zhejiang Jiaxing 1',
-    kfA='Kriegers Flak A',
-    kfB='Kriegers Flak B',
-    kustzuid='Hollandse Kust Zuid',
-    lillgrund='Lillgrund',
-    lincs='Lincs',
-    meerwind='Meerwind',
-    merkur='Merkur',
-    nanpeng='CECEP Yangjiang Nanpeng Island',
-    neart='Neart na Gaoithe',
-    nordsee='Nordsee One',
-    northwind='Northwind',
-    nysted='Nysted',
-    robin='Robin Rigg',
-    rudongdemo='CGN Rudong Demonstration',
-    rudongH10='Rudong H10',
-    rudongH6='Rudong H6',
-    rudongH8='Rudong H8',
-    sandbank='Sandbank',
-    seagreen='Seagreen',
-    shengsi2='Shengsi 2',
-    sheringham='Sheringham Shoal',
-    vejamate='Veja Mate',
-    vineyard='Vineyard Wind 1',
-    wikinger='Wikinger',
-    brieuc='Saint-Brieuc',
-    nazaire='Saint-Nazaire',
-    riffgat='Riffgat',
-    humber='Humber Gateway',
-    rough='Westermost Rough',
-    bucht='Deutsche Bucht',
-    nordseeost='Nordsee Ost',
-    kaskasi='Kaskasi',
-    albatros='Albatros',
-    luchterduinen='Luchterduinen',
-    norther='Norther',
-    mermaid='Mermaid',
-    rentel='Rentel',
-    triborkum='Trianel Windpark Borkum',
-    galloper='Galloper Inner',
-)
+    Each file (.yaml or .osm.pbf) is translated into a location graph and
+    included as an attribute in the returned namedtuple. The attribute name
+    can be specified in the .yaml with the field `HANDLE` or in the .osm.pbf
+    file with the tag `handle` applied to the power plant object.
 
-_site_handles = _site_handles_yaml | _site_handles_pbf
-
-_READERS = {
-        '.yaml': L_from_yaml,
-        '.osm.pbf': L_from_pbf,
-        }
-
-
-def load_repository(handles2names=(
-        ('.yaml', _site_handles_yaml),
-        ('.osm.pbf', _site_handles_pbf),
-        )) -> NamedTuple:
-    base_dir = files(__package__) / 'data'
-    if isinstance(handles2names, dict):
-        # assume all files have .yaml extension
-        return namedtuple('SiteRepository', handles2name)(
-            *(L_from_yaml(base_dir / fname, handle)
-              for handle, fname in handles2names.items()))
-    elif isinstance(handles2names, Iterable):
-        # handle multiple file extensions
-        return namedtuple('SiteRepository',
-                          reduce(lambda a, b: a | b,
-                                 (m for _, m in handles2names)))(
-            *sum((tuple(_READERS[ext](base_dir / (fname + ext), handle)
-                        for handle, fname in handle2name.items())
-                 for ext, handle2name in handles2names),
-                 tuple()))
+    Args:
+      path: Path to look for location files (non-recursive). If omited, the
+        locations included in optiwindnet are loaded.
+    Returns:
+      Named tuple which has the location handles as attribute identifiers.
+    """
+    if path is None:
+        path = files(__package__) / 'data'
+    else:
+        path = Path(path)
+    locations = [L_from_yaml(file) for file in path.glob('*.yaml')]
+    locations.extend(L_from_pbf(file) for file in path.glob('*.osm.pbf'))
+    handles = tuple(L.graph['handle'] for L in locations)
+    return namedtuple('Locations', handles)(*locations)
