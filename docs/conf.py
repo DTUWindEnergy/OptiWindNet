@@ -167,8 +167,11 @@ nbsphinx_prolog = r"""
 # Options for loading require.js
 #nbsphinx_requirejs_options = {'async': 'async'}
 
-mathjax_config = {
-    'TeX': {'equationNumbers': {'autoNumber': 'AMS', 'useLabelIds': True}},
+mathjax3_config = {
+    'tex': {
+        'tags': {'autoNumber': 'ams',
+                 'useLabelIds': True}
+    },
 }
 
 # Additional files needed for generating LaTeX/PDF output:
