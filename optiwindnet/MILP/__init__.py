@@ -2,8 +2,15 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-from ._core import (Solver, Topology, FeederRoute, FeederLimit, ModelOptions,
-                    investigate_pool, ModelMetadata, SolutionInfo)
+from ._core import (
+    Solver, Topology, FeederRoute, FeederLimit, ModelOptions, ModelMetadata,
+    SolutionInfo
+)
+
+__all__ = (
+    'Solver', 'Topology', 'FeederRoute', 'FeederLimit', 'ModelOptions',
+    'ModelMetadata', 'SolutionInfo', 'solver_factory', 
+)
 
 _lggr = logging.getLogger(__name__)
 

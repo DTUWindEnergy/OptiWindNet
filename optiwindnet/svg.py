@@ -240,8 +240,8 @@ class Drawable():
         if github_bugfix:
             # this is a workaround for GitHub's bug in rendering svg utf8 text
             # (only when the svg is inside an ipynb notebook)
-            desc_lines = [l.encode('ascii', 'xmlcharrefreplace').decode()
-                          for l in desc_lines]
+            desc_lines = [line.encode('ascii', 'xmlcharrefreplace').decode()
+                          for line in desc_lines]
 
         linesE: list[svg.Element] = [
             svg.TSpan(x=self.bottom_right_anchor['x'],# dx=svg.Length(-0.2, 'em'),

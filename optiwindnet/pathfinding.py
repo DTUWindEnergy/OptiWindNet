@@ -232,7 +232,7 @@ class PathFinder():
             # the other side is a pinched portal and has a distinct sector.
             return NULL
         is_gate = any(_node in Gate for Gate in self.hooks2check)
-        _node_degree = self.G.degree[_node]
+        _node_degree = len(self.G._adj[_node])
         if is_gate and _node_degree == 1:
             # special case where a branch with 1 node uses a non_embed gate
             if _node == portal[0]:
@@ -447,7 +447,7 @@ class PathFinder():
                 self.uncharted[portal] = 0
                 self.uncharted[right, left] = 0
 
-                if left >= ST or (left in G.nodes and G.degree[left] == 0):
+                if left >= ST or (left in G.nodes and len(G._adj[left]) == 0):
                     sec_left = NULL
                 else:
                     sec_left = right
@@ -617,7 +617,7 @@ class PathFinder():
             # set of nodes to examine is different depending on `branched`
             hookchoices = ([n for n in subtree if n < T]
                            if self.branched else
-                           [n, next(h for h in subtree if G.degree[h] == 1)])
+                           [n, next(h for h in subtree if len(G._adj[h]) == 1)])
             debug('hookchoices: %s', hookchoices)
 
             path_options = list(chain.from_iterable(

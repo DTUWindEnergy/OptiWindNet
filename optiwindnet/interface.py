@@ -132,7 +132,6 @@ def G_from_table(table: np.ndarray[:, :], G_base: nx.Graph,
     G.graph.update(G_base.graph)
     G.add_nodes_from(G_base.nodes(data=True))
     R = G_base.graph['R']
-    T = G_base.graph['T']
 
     # indexing differences:
     # table starts at 1, while G starts at -R

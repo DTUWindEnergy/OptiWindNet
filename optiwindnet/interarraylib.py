@@ -157,7 +157,7 @@ def calcload(G):
     for root in roots:
         G.nodes[root]['load'] = 0
         for subroot in G[root]:
-            subtree_load = bfs_subtree_loads(G, root, [subroot], subtree)
+            _ = bfs_subtree_loads(G, root, [subroot], subtree)
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
         total_load += G.nodes[root]['load']

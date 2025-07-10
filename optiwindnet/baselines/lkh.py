@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 import networkx as nx
 import numpy as np
+from scipy.spatial.distance import cdist
 
 from .utils import length_matrix_single_depot_from_G
 from ..interarraylib import fun_fingerprint
@@ -93,7 +94,7 @@ def lkh_acvrp(A: nx.Graph, *, capacity: int, time_limit: int,
     )
     data = dict(
         # DEMAND_SECTION='\n'.join(f'{i} 1' for i in range(T)) + f'\n{T} 0',
-        DEPOT_SECTION=f'1\n-1',
+        DEPOT_SECTION='1\n-1',
         EDGE_WEIGHT_SECTION=edge_weights,
     )
 

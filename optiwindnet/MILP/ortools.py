@@ -91,7 +91,7 @@ class SolverORTools(Solver, PoolHandler):
         solver.parameters.relative_gap_limit = mip_gap
         solver.parameters.log_search_progress = verbose
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
-        result = solver.solve(model, storer)
+        _ = solver.solve(model, storer)
         storer.solutions.reverse()
         self.solution_pool = storer.solutions
         _, self._value_map = storer.solutions[0]

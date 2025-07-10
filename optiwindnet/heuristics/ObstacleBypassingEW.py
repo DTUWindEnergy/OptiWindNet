@@ -194,12 +194,12 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         _subroot, _u, _v = fnT[[subroot, u, v]]
         uvA = angles[_v, root] - angles[_u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
-        l, h = (_v, _u) if swaped else (_u, _v)
-        lR, hR, srR = anglesRank[(l, h, _subroot), root]
-        W = lR > hR  # wraps +-pi
-        L = less(lR, srR)  # angle(low) <= angle(probe)
-        H = less(srR, hR)  # angle(probe) <= angle(high)
-        if ~W & L & H | W & ~L & H | W & L & ~H:
+        lo, hi = (_v, _u) if swaped else (_u, _v)
+        loR, hiR, srR = anglesRank[(lo, hi, _subroot), root]
+        W = loR > hiR  # wraps +-pi
+        supL = less(loR, srR)  # angle(low) <= angle(probe)
+        infH = less(srR, hiR)  # angle(probe) <= angle(high)
+        if ~W & supL & infH | W & ~supL & infH | W & supL & ~infH:
             if not is_same_side(*VertexC[[_u, _v, root, _subroot]]):
                 # crossing subroot
                 debug('<crossing> discarding «%s–%s»: would cross subroot <%s>',
@@ -1078,7 +1078,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                         if is_bunch_split_by_corner(
                                 BarrierC,
                                 *VertexC[fnT[[a, corner, b]]])[0]:
-                            debug(f'[%d] «%s–%s» would cross %s–%s–%s',
+                            debug('[%d] «%s–%s» would cross %s–%s–%s',
                                   i, F[u], F[v], F[a], F[corner], F[b])
                             eX.append((a, corner, b))
                             skip = True

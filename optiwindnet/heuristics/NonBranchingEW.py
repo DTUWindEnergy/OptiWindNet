@@ -133,12 +133,12 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
         less = np.less_equal if touch_is_cross else np.less
         uvA = angles[v, root] - angles[u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
-        l, h = (v, u) if swaped else (u, v)
-        lR, hR, srR = anglesRank[(l, h, subroot), root]
-        W = lR > hR  # wraps +-pi
-        L = less(lR, srR)  # angle(low) <= angle(probe)
-        H = less(srR, hR)  # angle(probe) <= angle(high)
-        if ~W & L & H | W & ~L & H | W & L & ~H:
+        lo, hi = (v, u) if swaped else (u, v)
+        loR, hiR, srR = anglesRank[(lo, hi, subroot), root]
+        W = loR > hiR  # wraps +-pi
+        supL = less(loR, srR)  # angle(low) <= angle(probe)
+        infH = less(srR, hiR)  # angle(probe) <= angle(high)
+        if ~W & supL & infH | W & ~supL & infH | W & supL & ~infH:
             if not is_same_side(*VertexC[[u, v, root, subroot]]):
                 # crossing subroot
                 debug('<crossing> discarding «%s–%s»: would cross subroot <%s>',
@@ -462,7 +462,7 @@ def NBEW(G_base, capacity=8, delaunay_based=True, rootlust=0., maxiter=10000,
         dropLo, dropHi = subtree_span_[sr_u]
         unionLo, unionHi = union_limits(root, u, dropLo, dropHi,
                                         v, keepLo, keepHi)
-        debug(f'<angle_span> //%s:%s//', F[unionLo], F[unionHi])
+        debug('<angle_span> //%s:%s//', F[unionLo], F[unionHi])
 
         # check which feeders are within the union's angle span
         lR, hR = anglesRank[(unionLo, unionHi), root]
