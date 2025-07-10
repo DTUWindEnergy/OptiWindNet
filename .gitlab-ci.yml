@@ -34,23 +34,23 @@ test_windows:
 # ===== DEPLOY optiwindnet docs=====
 make_pages:
   pages: true
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH 
-      changes:
-        - docs/**/*
-  stage:  
-    deploy
+  # rules:
+  #   - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  #     changes:
+  #       - docs/**/*
+  when: manual
+  stage: deploy
   script:
     - apt-get update
     - apt-get -y install make pandoc graphviz
-    - pip install --upgrade pip ipython ipykernel sphinx nbsphinx autoapi sphinx_rtd_theme sphinx-autoapi furo
+    - pip install --upgrade pip ipython ipykernel sphinx nbsphinx autoapi sphinx_rtd_theme sphinx-autoapi furo setuptools-scm
     - ipython kernel install --name "python3" --user
     - pip install .[test,docs] --upgrade --no-deps
     - cd docs; make html
     - cd ../; mv docs/build/html public/
   artifacts:
     paths:
-    - public
+      - public
   tags: 
     - linux
 

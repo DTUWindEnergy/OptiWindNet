@@ -10,11 +10,12 @@ Tool for designing and optimizing the electrical cable network (collection syste
 https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 """
 
-__license__ = "MIT"
+__license__ = 'MIT'
 
 try:  # pragma: no cover
     # version.py created when installing optiwindnet
     from optiwindnet import version
+
     __version__ = version.__version__
     __release__ = version.__version__
 except BaseException:  # pragma: no cover

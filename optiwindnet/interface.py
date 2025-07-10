@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import numpy as np
-import numpy.lib.recfunctions as nprec
-import networkx as nx
 from functools import partial
 
-from .heuristics import CPEW, NBEW, OBEW, ClassicEW
-from .interarraylib import calcload, F
+import networkx as nx
+import numpy as np
+import numpy.lib.recfunctions as nprec
+
+from .heuristics import CPEW, NBEW, OBEW
+from .interarraylib import F, calcload
+
+__all__ = ('assign_cables',)
 
 heuristics = {
     'CPEW': CPEW,
@@ -21,12 +24,12 @@ def translate2global_optimizer(G):
     VertexC = G.graph['VertexC']
     R = G.graph['R']
     T = G.graph['T']
-    X, Y = np.hstack((VertexC[-1:-1 - R:-1].T, VertexC[:T].T))
+    X, Y = np.hstack((VertexC[-1 : -1 - R : -1].T, VertexC[:T].T))
     return dict(WTc=T, OSSc=R, X=X, Y=Y)
 
 
 def assign_cables(G, cables):
-    '''Assign a cable type to each edge of `G` and update attribute 'cost'.
+    """Assign a cable type to each edge of `G` and update attribute 'cost'.
 
     Each edge is assigned the cheapest cable type that can carry its load. The
     edge attribute 'cable' is the index in `cables` of the type chosen.
@@ -36,11 +39,10 @@ def assign_cables(G, cables):
       cables: [(«capacity», «cost»), ...] in increasing capacity order (each
         cable entry must be a tuple) or numpy.ndarray where each row represents
         one cable type
-    '''
+    """
 
     Nc = len(cables)
-    dt = np.dtype([('capacity', int),
-                   ('cost', float)])
+    dt = np.dtype([('capacity', int), ('cost', float)])
     if isinstance(cables, np.ndarray):
         cable_ = nprec.unstructured_to_structured(cables, dtype=dt)
     else:
@@ -52,10 +54,12 @@ def assign_cables(G, cables):
     for u, v, data in G.edges(data=True):
         i = capacity_.searchsorted(data['load']).item()
         if i >= len(capacity_):
-            print(f'ERROR: Load for edge ⟨{u, v}⟩: {data["load"]} '
-                  f'exceeds maximum cable capacity {capacity_[-1]}.')
+            print(
+                f'ERROR: Load for edge ⟨{u, v}⟩: {data["load"]} '
+                f'exceeds maximum cable capacity {capacity_[-1]}.'
+            )
         data['cable'] = i
-        data['cost'] = data['length']*cable_['cost'][i].item()
+        data['cost'] = data['length'] * cable_['cost'][i].item()
         if data['load'] > capacity:
             capacity = data['load']
     G.graph['cables'] = cable_
@@ -80,8 +84,8 @@ def assign_subtree(G):
 
 
 def L_from_XYR(X, Y, R=1, name='unnamed', borderC=None):
-    '''Create location graph L from node coordinates split in X and Y.
-    
+    """Create location graph L from node coordinates split in X and Y.
+
     This function assumes that the first R coordinates in X/Y are OSSs.
 
     Args:
@@ -91,58 +95,65 @@ def L_from_XYR(X, Y, R=1, name='unnamed', borderC=None):
 
     Returns:
       Location graph L.
-    '''
+    """
     assert len(X) == len(Y), 'ERROR: X and Y lengths must match'
     T = len(X) - R
 
     # create networkx graph
     if borderC is None:
-        borderC = np.array((
-            (min(X), min(Y)),
-            (min(X), max(Y)),
-            (max(X), max(Y)),
-            (max(X), min(Y))))
+        borderC = np.array(
+            ((min(X), min(Y)), (min(X), max(Y)), (max(X), max(Y)), (max(X), min(Y)))
+        )
     B = borderC.shape[0]
     border = list(range(T, T + B))
-    L = nx.Graph(R=R, T=T, B=B, border=border, name=name,
-                 VertexC=np.r_[np.c_[X[R:], Y[R:]],
-                               np.c_[X[R-1::-1], Y[R-1::-1]],
-                               borderC])
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'})
-                      for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'})
-                      for r in range(-R, 0)))
+    L = nx.Graph(
+        R=R,
+        T=T,
+        B=B,
+        border=border,
+        name=name,
+        VertexC=np.r_[
+            np.c_[X[R:], Y[R:]], np.c_[X[R - 1 :: -1], Y[R - 1 :: -1]], borderC
+        ],
+    )
+    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
+    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
     return L
 
 
-def G_from_table(table: np.ndarray[:, :], G_base: nx.Graph,
-                 capacity: int | None = None, cost_scale: float = 1e3) \
-                 -> nx.Graph:
-    '''Create a networkx Graph with nodes and data from G_base and edges from
+def G_from_table(
+    table: np.ndarray[:, :],
+    G_base: nx.Graph,
+    capacity: int | None = None,
+    cost_scale: float = 1e3,
+) -> nx.Graph:
+    """Create a networkx Graph with nodes and data from G_base and edges from
     a table.
 
     (e.g. the S matrix of juru's `global_optimizer`)
 
     Args:
       table: [ [u, v, length, cable type, load (WT number), cost] ]
-    '''
+    """
     G = nx.Graph()
     G.graph.update(G_base.graph)
     G.add_nodes_from(G_base.nodes(data=True))
     R = G_base.graph['R']
-    T = G_base.graph['T']
 
     # indexing differences:
     # table starts at 1, while G starts at -R
-    edges = (table[:, :2].astype(int) - R - 1)
+    edges = table[:, :2].astype(int) - R - 1
 
     G.add_edges_from(edges)
     nx.set_edge_attributes(
-        G, {(int(u), int(v)):
-            dict(length=length, cable=cable, load=load, cost=cost)
-            for (u, v), length, (cable, load), cost in
-            zip(edges, table[:, 2], table[:, 3:5].astype(int),
-                cost_scale*table[:, 5])})
+        G,
+        {
+            (int(u), int(v)): dict(length=length, cable=cable, load=load, cost=cost)
+            for (u, v), length, (cable, load), cost in zip(
+                edges, table[:, 2], table[:, 3:5].astype(int), cost_scale * table[:, 5]
+            )
+        },
+    )
     G.graph['has_loads'] = True
     G.graph['has_costs'] = True
     G.graph['creator'] = 'G_from_table()'
@@ -152,12 +163,12 @@ def G_from_table(table: np.ndarray[:, :], G_base: nx.Graph,
 
 
 def G_from_TG(S, G_base, capacity=None, load_col=4):
-    '''DEPRECATED in favor of `G_from_table()`
+    """DEPRECATED in favor of `G_from_table()`
 
     Creates a networkx graph with nodes and data from G_base and edges from
     a S matrix.
     S matrix: [ [u, v, length, load (WT number), cable type], ...]
-    '''
+    """
     G = nx.Graph()
     G.graph.update(G_base.graph)
     G.add_nodes_from(G_base.nodes(data=True))
@@ -183,8 +194,7 @@ def G_from_TG(S, G_base, capacity=None, load_col=4):
     if S.shape[1] >= 4:
         for (u, v), load in zip(edges, S[:, load_col]):
             Gload = G.edges[u, v]['load']
-            assert Gload == load, (
-                f'<G.edges[{u}, {v}]> {Gload} != {load} <S matrix>')
+            assert Gload == load, f'<G.edges[{u}, {v}]> {Gload} != {load} <S matrix>'
     G.graph['has_loads'] = True
     G.graph['creator'] = 'G_from_TG()'
     G.graph['prevented_crossings'] = 0
@@ -192,7 +202,7 @@ def G_from_TG(S, G_base, capacity=None, load_col=4):
 
 
 def table_from_G(G):
-    '''Create a table representing the edges of G.
+    """Create a table representing the edges of G.
 
     Args:
       G: graph to convert to table
@@ -200,7 +210,7 @@ def table_from_G(G):
     Returns:
       table: [ («u», «v», «length», «load (WT number)», «cable type»,
         «edge cost»), ...] (table is a numpy record array)
-    '''
+    """
     R = G.graph['R']
     Ne = G.number_of_edges()
 
@@ -213,22 +223,25 @@ def table_from_G(G):
             s = (u + R + 1) if u >= 0 else abs(u)
             t = (v + R + 1) if v >= 0 else abs(v)
             # print(u, v, '->', s, t)
-            yield (s, t, data['length'], data['load'], data['cable'],
-                   data['cost'])
+            yield (s, t, data['length'], data['load'], data['cable'], data['cost'])
 
-    table = np.fromiter(edge_parser(G.edges(data=True)),
-                        dtype=[('u', int),
-                               ('v', int),
-                               ('length', float),
-                               ('load', int),
-                               ('cable', int),
-                               ('cost', float)],
-                        count=Ne)
+    table = np.fromiter(
+        edge_parser(G.edges(data=True)),
+        dtype=[
+            ('u', int),
+            ('v', int),
+            ('length', float),
+            ('load', int),
+            ('cable', int),
+            ('cost', float),
+        ],
+        count=Ne,
+    )
     return table
 
 
-class HeuristicFactory():
-    '''Initializes a heuristic algorithm.
+class HeuristicFactory:
+    """Initializes a heuristic algorithm.
 
     Args:
       T: number of nodes
@@ -239,10 +252,9 @@ class HeuristicFactory():
       name: site name
 
     (increasing capacity along cables' elements)
-    '''
+    """
 
-    def __init__(self, T, R, rootC, boundaryC, heuristic, cables,
-                 name='unnamed'):
+    def __init__(self, T, R, rootC, boundaryC, heuristic, cables, name='unnamed'):
         self.T = T
         self.R = R
         self.cables = cables
@@ -250,27 +262,26 @@ class HeuristicFactory():
         self.VertexC = np.empty((T + R, 2), dtype=float)
         self.VertexC[T:] = rootC
         # create networkx graph
-        self.G_base = nx.Graph(R=R,
-                               VertexC=self.VertexC,
-                               boundary=boundaryC,
-                               name=name)
-        self.G_base.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'})
-                                    for n in range(T)))
-        self.G_base.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'})
-                                    for r in range(-R, 0)))
+        self.G_base = nx.Graph(R=R, VertexC=self.VertexC, boundary=boundaryC, name=name)
+        self.G_base.add_nodes_from(
+            ((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T))
+        )
+        self.G_base.add_nodes_from(
+            ((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0))
+        )
         self.heuristic = heuristics[heuristic]
 
     def calccost(self, X, Y):
         assert len(X) == len(Y) == self.T
-        self.VertexC[:self.T, 0] = X
-        self.VertexC[:self.T, 1] = Y
+        self.VertexC[: self.T, 0] = X
+        self.VertexC[: self.T, 1] = Y
         self.G = self.heuristic(self.G_base, capacity=self.k)
         calcload(self.G)
         assign_cables(self.G, self.cables)
         return self.G.size(weight='cost')
 
     def get_table(self):
-        '''Create a table representing the edges of the solution.
+        """Create a table representing the edges of the solution.
 
         Must have called cost() at least once. Only the last call's layout is
         available.
@@ -278,13 +289,13 @@ class HeuristicFactory():
         Returns:
           table: [ («u», «v», «length», «load (WT number)», «cable type»,
             «edge cost»), ...] (table is a numpy record array)
-        '''
+        """
         return table_from_G(self.G)
 
 
 def heuristic_wrapper(X, Y, cables, R=1, heuristic='CPEW', return_graph=False):
-    '''Run a heuristic on a location defined by X/Y coordinates.
-    
+    """Run a heuristic on a location defined by X/Y coordinates.
+
     This function assumes that the first R coordinates in X/Y are OSSs.
     (increasing capacity along `cables`' elements)
 
@@ -298,7 +309,7 @@ def heuristic_wrapper(X, Y, cables, R=1, heuristic='CPEW', return_graph=False):
 
     Returns:
       Location graph L.
-    '''
+    """
     G_base = L_from_XYR(X, Y, R)
     G = heuristics[heuristic](G_base, capacity=cables[-1][1])
     calcload(G)

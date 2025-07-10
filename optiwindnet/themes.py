@@ -2,9 +2,11 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 from collections import defaultdict
+
 import darkdetect
 
-class Colors():
+
+class Colors:
     kind2color: dict
     kind2alpha: dict
     kind2style: dict
@@ -20,8 +22,8 @@ class Colors():
     def __init__(self, dark: bool | None = None):
         if dark is None:
             dark = darkdetect.isDark()
-        
-        self.kind2alpha = defaultdict(lambda: 1.)
+
+        self.kind2alpha = defaultdict(lambda: 1.0)
         self.kind2alpha['virtual'] = 0.4
         # kind2style is used only by plotting.py
         self.kind2style = {
@@ -42,11 +44,11 @@ class Colors():
         }
         # kind2dasharray is used only by svg.py
         self.kind2dasharray = dict(
-                tentative='18 15',
-                rogue='25 5',
-                extended='18 15',
-                contour_extended='18 15',
-                scaffold='10 10',
+            tentative='18 15',
+            rogue='25 5',
+            extended='18 15',
+            contour_extended='18 15',
+            scaffold='10 10',
         )
         if dark:
             self.kind2color = {
@@ -85,7 +87,7 @@ class Colors():
                 'contour': 'black',
                 'planar': 'darkorchid',
                 'constraint': 'darkcyan',
-                'border':  'dimgray',
+                'border': 'dimgray',
                 'unspecified': 'black',
                 None: 'black',
                 'detour': 'royalblue',
@@ -99,8 +101,25 @@ class Colors():
             self.root_face = 'black'
             self.root_edge = self.border_face
         # matplotlib tab20
-        self.colors = ('#1f77b4', '#aec7e8', '#ff7f0e', '#ffbb78', '#2ca02c',
-                       '#98df8a', '#d62728', '#ff9896', '#9467bd', '#c5b0d5',
-                       '#8c564b', '#c49c94', '#e377c2', '#f7b6d2', '#7f7f7f',
-                       '#c7c7c7', '#bcbd22', '#dbdb8d', '#17becf', '#9edae5')
-
+        self.colors = (
+            '#1f77b4',
+            '#aec7e8',
+            '#ff7f0e',
+            '#ffbb78',
+            '#2ca02c',
+            '#98df8a',
+            '#d62728',
+            '#ff9896',
+            '#9467bd',
+            '#c5b0d5',
+            '#8c564b',
+            '#c49c94',
+            '#e377c2',
+            '#f7b6d2',
+            '#7f7f7f',
+            '#c7c7c7',
+            '#bcbd22',
+            '#dbdb8d',
+            '#17becf',
+            '#9edae5',
+        )

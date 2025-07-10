@@ -26,7 +26,7 @@ Section 3.2
 	notebooks/42-Paper_3.2_MILP_model_comparison
 
 Sections 3.3 and 3.4
-===================
+====================
 
     .. toctree::
         :maxdepth: 1

@@ -1,6 +1,7 @@
 # D. Cazzaro, and D. Pisinger, Balanced cable routing for offshore wind farms
 # with obstacles, Networks. 80 (2022), 386–406. https://doi.org/10.1002/net.22100
 
+HANDLE: cazzaro_2022G210
 COORDINATE_FORMAT: planar
 LANDSCAPE_ANGLE: 28.8
 EXTENTS: [[108470.5497978666, 119195.57369096177], [112128.76087598801, 116946.12609401425],

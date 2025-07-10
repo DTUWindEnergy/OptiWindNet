@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import numpy as np
 import networkx as nx
+import numpy as np
 from scipy.spatial.distance import cdist
 
 
 def length_matrix_single_depot_from_G(
-        A: nx.Graph, *, scale: float
-        ) -> tuple[np.ndarray, float]:
+    A: nx.Graph, *, scale: float
+) -> tuple[np.ndarray, float]:
     """Edge length matrix for VRP-based solvers.
     It is assumed that the problem has been pre-scaled, such that multiplying
     all lengths by `scale` will place them within a numerically stable range.
@@ -32,23 +32,22 @@ def length_matrix_single_depot_from_G(
     L, len_max:
         Matrix of lengths and maximum length value (below +inf).
     """
-    R, T, VertexC, d2roots = (A.graph.get(k)
-                              for k in ('R', 'T', 'VertexC', 'd2roots'))
+    R, T, VertexC, d2roots = (A.graph.get(k) for k in ('R', 'T', 'VertexC', 'd2roots'))
     assert R == 1, 'ERROR: only single depot supported'
     if A.number_of_edges() == 0:
         # bring depot to before the clients
         VertexCmod = np.r_[VertexC[-R:], VertexC[:T]]
-        L = cdist(VertexCmod, VertexCmod)*scale
+        L = cdist(VertexCmod, VertexCmod) * scale
         len_max = L.max()
     else:
         # non-available edges will have infinite length
         L = np.full((T + R, T + R), np.inf)
         len_max = d2roots[:T, 0].max()
         for u, v, length in A.edges(data='length'):
-            L[u + 1, v + 1] = L[v + 1, u + 1] = length*scale
+            L[u + 1, v + 1] = L[v + 1, u + 1] = length * scale
             len_max = max(len_max, length)
-        L[0, 1:] = d2roots[:T, 0]*scale
+        L[0, 1:] = d2roots[:T, 0] * scale
         len_max *= scale
     # make return to depot always free
-    L[:, 0] = 0.
+    L[:, 0] = 0.0
     return L, len_max

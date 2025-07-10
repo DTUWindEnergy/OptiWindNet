@@ -3,17 +3,19 @@
 
 import logging
 from typing import Any
+
 import networkx as nx
 import pyomo.environ as pyo
-from .core import (
-    SolutionInfo, PoolHandler, investigate_pool, FeederRoute, Topology
-)
-from .pyomo import SolverPyomo, topology_from_mip_sol
-from ..pathfinding import PathFinder
-from ..interarraylib import G_from_S
 
-logger = logging.getLogger(__name__)
-error, info = logger.error, logger.info
+from ..interarraylib import G_from_S
+from ..pathfinding import PathFinder
+from ._core import FeederRoute, PoolHandler, SolutionInfo, Topology, investigate_pool
+from .pyomo import SolverPyomo, topology_from_mip_sol
+
+__all__ = ()
+
+_lggr = logging.getLogger(__name__)
+error, info = _lggr.error, _lggr.info
 
 
 class SolverCplex(SolverPyomo, PoolHandler):
@@ -29,9 +31,13 @@ class SolverCplex(SolverPyomo, PoolHandler):
     def __init__(self) -> None:
         self.solver = pyo.SolverFactory('cplex', solver_io='python')
 
-    def solve(self, time_limit: int, mip_gap: float,
-              options: dict[str, Any] = {}, verbose: bool = False
-        ) -> SolutionInfo:
+    def solve(
+        self,
+        time_limit: int,
+        mip_gap: float,
+        options: dict[str, Any] = {},
+        verbose: bool = False,
+    ) -> SolutionInfo:
         solution_info = super().solve(time_limit, mip_gap, options, verbose)
         cplex = self.solver._solver_model
         num_solutions = cplex.solution.pool.get_num()
@@ -48,10 +54,12 @@ class SolverCplex(SolverPyomo, PoolHandler):
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
             S = self.topology_from_mip_pool()
-            S.graph['creator'] += self.name
+            S.graph['creator'] += '.' + self.name
             G = PathFinder(
-                G_from_S(S, A), P, A,
-                branched=model_options['topology'] is Topology.BRANCHED
+                G_from_S(S, A),
+                P,
+                A,
+                branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
             S, G = investigate_pool(P, A, self)

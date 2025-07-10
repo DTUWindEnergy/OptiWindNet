@@ -1,27 +1,27 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import time
 import logging
+import time
 
 import networkx as nx
 from scipy.stats import rankdata
 
-from ..geometric import assign_root
 from ..crossings import edge_crossings
-from ..utils import NodeTagger
-from .priorityqueue import PriorityQueue
+from ..geometric import assign_root
 from ..interarraylib import calcload
+from ..utils import F
+from .priorityqueue import PriorityQueue
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+__all__ = ()
 
-F = NodeTagger()
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
-    '''Modified Esau-Williams heuristic for C-MST with limited crossings
-    
+    """Modified Esau-Williams heuristic for C-MST with limited crossings
+
     Args:
         A: available edges graph
         capacity: maximum link capacity
@@ -29,7 +29,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
 
     Returns:
         Solution topology.
-    '''
+    """
 
     start_time = time.perf_counter()
     R, T = (Aʹ.graph[k] for k in 'RT')
@@ -98,8 +98,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
-                if (subroot_[v] in forbidden or
-                        len(subtree_[v]) > capacity_left):
+                if subroot_[v] in forbidden or len(subtree_[v]) > capacity_left:
                     # useless edges
                     edges2discard.append((u, v))
                 else:
@@ -107,17 +106,16 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
                     if W <= sr_d2root:
                         # useful edges
                         # v's proximity to root is used as tie-breaker
-                        choices.append(
-                            (W, d2rootsRank[v, A.nodes[v]['root']], u, v))
+                        choices.append((W, d2rootsRank[v, A.nodes[v]['root']], u, v))
         if not choices:
-            return None, 0., edges2discard
+            return None, 0.0, edges2discard
         choices.sort()
         best_W, best_rank, *best_edge = choices[0]
         for W, rank, *edge in choices[1:]:
-            if W > margin*best_W:
+            if W > margin * best_W:
                 # no more edges within margin
                 break
-            if  rank < best_rank:
+            if rank < best_rank:
                 best_W, best_rank, best_edge = W, rank, edge
         tradeoff = best_W - sr_d2root
         return best_edge, tradeoff, edges2discard
@@ -139,8 +137,13 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             # tradeoff calculation
             pq.add(tradeoff, subroot, edge)
             ComponIn[subroot_[edge[1]]].add(subroot)
-            debug('<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
-                  F[subroot], F[edge[0]], F[edge[1]], tradeoff)
+            debug(
+                '<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
+                F[subroot],
+                F[edge[0]],
+                F[edge[1]],
+                tradeoff,
+            )
         else:
             # no viable edge is better than subroot for this node
             debug('<cancelling> %s', F[subroot])
@@ -151,8 +154,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>',
-                  F[u], F[v])
+            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>', F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
@@ -177,8 +179,15 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
 
         if componin != is_reverse:
             # TODO: Why did I expect always False here? It is sometimes True.
-            debug('«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
-                  F[u], F[v], F[sr_u], F[sr_v], componin, is_reverse)
+            debug(
+                '«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
+                F[u],
+                F[v],
+                F[sr_u],
+                F[sr_v],
+                componin,
+                is_reverse,
+            )
 
         # END: block to be simplified
 
@@ -221,8 +230,12 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         eX = edge_crossings(u, v, S, diagonals)
 
         if eX:
-            debug('<edge_crossing> discarding «%s–%s»: would cross %s',
-                  F[u], F[v], tuple((F[s], F[t]) for s, t in eX))
+            debug(
+                '<edge_crossing> discarding «%s–%s»: would cross %s',
+                F[u],
+                F[v],
+                tuple((F[s], F[t]) for s, t in eX),
+            )
             # abort_edge_addition(sr_u, u, v)
             prevented_crossings += 1
             ban_queued_union(sr_u, u, v)
@@ -254,9 +267,13 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             subroot_[n] = sr_v
             subtree_[n] = subtree
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        if lggr.isEnabledFor(logging.DEBUG) and pq:
-            debug('heap top: <%s>, «%s» %.3f', F[pq[0][-2]],
-                  tuple(F[x] for x in pq[0][-1]), pq[0][0])
+        if _lggr.isEnabledFor(logging.DEBUG) and pq:
+            debug(
+                'heap top: <%s>, «%s» %.3f',
+                F[pq[0][-2]],
+                tuple(F[x] for x in pq[0][-1]),
+                pq[0][0],
+            )
         else:
             debug('heap EMPTY')
         #  G.add_edge(u, v, **A.edges[u, v])
