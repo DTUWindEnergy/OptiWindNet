@@ -30,7 +30,6 @@ from .geometric import (
     complete_graph,
 )
 from .interarraylib import NodeTagger
-from .geometric import is_triangle_pair_a_convex_quadrilateral
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
 
