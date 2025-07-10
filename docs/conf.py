@@ -290,11 +290,18 @@ def skip_empty_all_submodules(app, what, name, obj, skip, options):
     # Only consider modules
     if what == "module":
         # Get the __all__ attribute, default to None if not present
-        module_all = getattr(obj, "__all__", None)
-        # If __all__ exists and is empty, skip this module
-        print(f"autoapi-skip-member: {what=} {name=} len(__all__){module_all is not None and len(module_all)}")
-        if module_all is not None and len(module_all) == 0:
+        #  module_all = getattr(obj, "__all__", None)
+        children = getattr(obj, 'children')
+        if children is None:
             return True
+        try:
+            index = children.index('__all__')
+        except ValueError:
+            return True
+        all = children[index]
+        if len(all) == 0:
+            return True
+        print(f"autoapi-skip-member: {name=} {index=} {all=}")
     return None  # Use default behavior otherwise
 
 def setup(app):
