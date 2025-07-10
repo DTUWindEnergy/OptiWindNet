@@ -2,8 +2,8 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import inspect
-from collections import namedtuple
 import re
+from collections import namedtuple
 
 __all__ = ()
 
@@ -11,13 +11,13 @@ __all__ = ()
 def make_handle(s):
     return re.sub(r'\W|^(?=\d)', '_', s)
 
+
 def namedtuplify(namedtuple_typename='', **kwargs):
-    NamedTuplified = namedtuple(namedtuple_typename,
-                                tuple(str(kw) for kw in kwargs))
+    NamedTuplified = namedtuple(namedtuple_typename, tuple(str(kw) for kw in kwargs))
     return NamedTuplified(**kwargs)
 
 
-class NodeTagger():
+class NodeTagger:
     # 50 digits, 'I' and 'l' were dropped
     alphabet = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ'
     value = {c: i for i, c in enumerate(alphabet)}
@@ -27,7 +27,7 @@ class NodeTagger():
         digit_value = 1
         if b50[0] < 'α':
             for digit in b50[::-1]:
-                dec += self.value[digit]*digit_value
+                dec += self.value[digit] * digit_value
                 digit_value *= 50
             return dec
         else:
@@ -54,17 +54,14 @@ class NodeTagger():
 F = NodeTagger()
 
 
-class NodeStr():
-
+class NodeStr:
     def __init__(self, fnT, T):
         self.fnT = fnT
         self.T = T
 
     def __call__(self, u, *args):
-        nodes = tuple((self.fnT[n], n)
-                      for n in (u,) + args if n is not None)
-        out = '–'.join(F[n_] + ('' if n < self.T else f'({F[n]})')
-                       for n_, n in nodes)
+        nodes = tuple((self.fnT[n], n) for n in (u,) + args if n is not None)
+        out = '–'.join(F[n_] + ('' if n < self.T else f'({F[n]})') for n_, n in nodes)
         if len(nodes) > 1:
             out = f'«{out}»'
         else:
@@ -72,8 +69,7 @@ class NodeStr():
         return out
 
 
-class Alerter():
-
+class Alerter:
     def __init__(self, where, varname):
         self.where = where
         self.varname = varname

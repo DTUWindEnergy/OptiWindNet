@@ -1,22 +1,28 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import math
 import logging
-from typing import Any
+import math
 from itertools import chain
-import networkx as nx
+from typing import Any
 
+import networkx as nx
 from ortools.sat.python import cp_model
 
-from ._core import (
-    Topology, FeederRoute, FeederLimit, Solver, PoolHandler, ModelOptions,
-    ModelMetadata, SolutionInfo, investigate_pool,
-)
-from ..pathfinding import PathFinder
-from ..interarraylib import G_from_S
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
-from ..interarraylib import fun_fingerprint
+from ..interarraylib import G_from_S, fun_fingerprint
+from ..pathfinding import PathFinder
+from ._core import (
+    FeederLimit,
+    FeederRoute,
+    ModelMetadata,
+    ModelOptions,
+    PoolHandler,
+    SolutionInfo,
+    Solver,
+    Topology,
+    investigate_pool,
+)
 
 __all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
 
@@ -25,7 +31,8 @@ error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 
 class _SolutionStore(cp_model.CpSolverSolutionCallback):
-    '''Ad hoc implementation of a callback that stores solutions to a pool.'''
+    """Ad hoc implementation of a callback that stores solutions to a pool."""
+
     solutions: list[tuple[float, dict]]
 
     def __init__(self, model: cp_model.CpModel):
@@ -48,37 +55,46 @@ class _SolutionStore(cp_model.CpSolverSolutionCallback):
 
 
 class SolverORTools(Solver, PoolHandler):
-    '''OR-Tools CpSolver wrapper.
+    """OR-Tools CpSolver wrapper.
 
     This class wraps and changes the behavior of CpSolver in order to save all
     solutions found to a pool. Meant to be used with `investigate_pool()`.
-    '''
+    """
+
     name: str = 'ortools'
     solution_pool: list[tuple[float, dict]]
     solver: cp_model.CpSolver
 
     def __init__(self):
-        self.solver = cp_model.CpSolver() 
+        self.solver = cp_model.CpSolver()
 
     def set_problem(
-            self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
-            model_options: ModelOptions, warmstart: nx.Graph | None = None
-        ):
+        self,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        capacity: int,
+        model_options: ModelOptions,
+        warmstart: nx.Graph | None = None,
+    ):
         self.P, self.A, self.capacity = P, A, capacity
         self.model_options = model_options
-        model, metadata = make_min_length_model(self.A, self.capacity,
-                                                **model_options)
+        model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
         self.model, self.metadata = model, metadata
 
-    def solve(self, time_limit: int, mip_gap: float,
-              options: dict[str, Any] = {}, verbose: bool = False) -> SolutionInfo:
-        '''Wrapper for CpSolver.solve() that saves all solutions.
+    def solve(
+        self,
+        time_limit: int,
+        mip_gap: float,
+        options: dict[str, Any] = {},
+        verbose: bool = False,
+    ) -> SolutionInfo:
+        """Wrapper for CpSolver.solve() that saves all solutions.
 
         This method uses a custom CpSolverSolutionCallback to fill a solution
         pool stored in the attribute self.solutions.
-        '''
+        """
         try:
             model, solver = self.model, self.solver
         except AttributeError as exc:
@@ -96,13 +112,13 @@ class SolverORTools(Solver, PoolHandler):
         self.solution_pool = storer.solutions
         _, self._value_map = storer.solutions[0]
         self.num_solutions = len(storer.solutions)
-        bound=solver.best_objective_bound
-        objective=solver.objective_value
+        bound = solver.best_objective_bound
+        objective = solver.objective_value
         solution_info = SolutionInfo(
             runtime=solver.wall_time,
             bound=bound,
             objective=objective,
-            relgap=1. - bound/objective,
+            relgap=1.0 - bound / objective,
             termination=solver.status_name(),
         )
         self.solution_info, self.solver_options = solution_info, options
@@ -116,8 +132,10 @@ class SolverORTools(Solver, PoolHandler):
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
             S = self.topology_from_mip_pool()
             G = PathFinder(
-                G_from_S(S, A), P, A,
-                branched=model_options['topology'] is Topology.BRANCHED
+                G_from_S(S, A),
+                P,
+                A,
+                branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
             S, G = investigate_pool(P, A, self)
@@ -131,7 +149,7 @@ class SolverORTools(Solver, PoolHandler):
     def value(self, literal: cp_model.IntVar) -> int:
         return self._value_map[literal.index]
 
-    def objective_at(self, index:int) -> float:
+    def objective_at(self, index: int) -> float:
         objective_value, self._value_map = self.solution_pool[index]
         return objective_value
 
@@ -143,28 +161,30 @@ class SolverORTools(Solver, PoolHandler):
 
 
 def make_min_length_model(
-        A: nx.Graph, capacity: int, *,
-        topology: Topology = Topology.BRANCHED,
-        feeder_route: FeederRoute = FeederRoute.SEGMENTED,
-        feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
-        balanced: bool = False,
-        max_feeders: int = 0
+    A: nx.Graph,
+    capacity: int,
+    *,
+    topology: Topology = Topology.BRANCHED,
+    feeder_route: FeederRoute = FeederRoute.SEGMENTED,
+    feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+    balanced: bool = False,
+    max_feeders: int = 0,
 ) -> tuple[cp_model.CpModel, ModelMetadata]:
-    '''Make discrete optimization model over link set A.
+    """Make discrete optimization model over link set A.
 
     Build OR-tools CP-SAT model for the collector system length minimization.
-    
+
     Args:
       A: graph with the available edges to choose from
       capacity: maximum link flow capacity
       topology: one of Topology.{BRANCHED, RADIAL}
-      feeder_route: 
+      feeder_route:
         FeederRoute.SEGMENTED -> feeder routes may be detoured around subtrees;
-        FeederRoute.STRAIGHT -> feeder routes must be straight, direct lines 
+        FeederRoute.STRAIGHT -> feeder routes must be straight, direct lines
       feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
         MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}
       max_feeders: only used if feeder_limit is FeederLimit.SPECIFIED
-    '''
+    """
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -175,8 +195,7 @@ def make_min_length_model(
     _T = range(T)
     _R = range(-R, 0)
 
-    E = tuple(((u, v) if u < v else (v, u))
-              for u, v in A_nodes.edges())
+    E = tuple(((u, v) if u < v else (v, u)) for u, v in A_nodes.edges())
     # using directed node-node links -> create the reversed tuples
     Eʹ = tuple((v, u) for u, v in E)
     # set of feeders to all roots
@@ -191,8 +210,9 @@ def make_min_length_model(
     ##############
 
     k = capacity
-    weight_ = (2*tuple(A[u][v]['length'] for u, v in E)
-              + tuple(d2roots[t, r] for t, r in stars))
+    weight_ = 2 * tuple(A[u][v]['length'] for u, v in E) + tuple(
+        d2roots[t, r] for t, r in stars
+    )
 
     #############
     # Variables #
@@ -231,20 +251,24 @@ def make_min_length_model(
 
     # flow conservation with possibly non-unitary node power
     for t in _T:
-        m.add(sum((flow_[t, n] - flow_[n, t]) for n in A_nodes.neighbors(t))
-              + sum(flow_[t, r] for r in _R)
-              == A.nodes[t].get('power', 1))
+        m.add(
+            sum((flow_[t, n] - flow_[n, t]) for n in A_nodes.neighbors(t))
+            + sum(flow_[t, r] for r in _R)
+            == A.nodes[t].get('power', 1)
+        )
 
     # feeder limits
-    min_feeders = math.ceil(T/k)
+    min_feeders = math.ceil(T / k)
     all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
     is_equal_not_bounded = False
     if feeder_limit is FeederLimit.UNLIMITED:
         # valid inequality: number of gates is at least the minimum
         m.add(all_feeder_vars_sum >= min_feeders)
         if balanced:
-            warn('Model option <balanced = True> is incompatible with <feeder_limit'
-                 ' = UNLIMITED>: model will not enforce balanced subtrees.')
+            warn(
+                'Model option <balanced = True> is incompatible with <feeder_limit'
+                ' = UNLIMITED>: model will not enforce balanced subtrees.'
+            )
     else:
         if feeder_limit is FeederLimit.SPECIFIED:
             if max_feeders == min_feeders:
@@ -264,19 +288,20 @@ def make_min_length_model(
         if is_equal_not_bounded:
             m.add(all_feeder_vars_sum == min_feeders)
         else:
-            m.add_linear_constraint(all_feeder_vars_sum, min_feeders,
-                                    max_feeders)
+            m.add_linear_constraint(all_feeder_vars_sum, min_feeders, max_feeders)
         # enforce balanced subtrees (subtree loads differ at most by one unit)
         if balanced:
             if not is_equal_not_bounded:
-                warn('Model option <balanced = True> is incompatible with '
-                     'having a range of possible feeder counts: model will '
-                     'not enforce balanced subtrees.')
+                warn(
+                    'Model option <balanced = True> is incompatible with '
+                    'having a range of possible feeder counts: model will '
+                    'not enforce balanced subtrees.'
+                )
             else:
-                feeder_min_load = T//min_feeders
+                feeder_min_load = T // min_feeders
                 if feeder_min_load < capacity:
                     for t, r in stars:
-                        m.add(flow_[t, r] >= link_[t, r]*feeder_min_load)
+                        m.add(flow_[t, r] >= link_[t, r] * feeder_min_load)
 
     # radial or branched topology
     if topology is Topology.RADIAL:
@@ -289,8 +314,10 @@ def make_min_length_model(
     # valid inequalities
     for t in _T:
         # incoming flow limit
-        m.add(sum(flow_[n, t] for n in A_nodes.neighbors(t))
-              <= k - A.nodes[t].get('power', 1))
+        m.add(
+            sum(flow_[n, t] for n in A_nodes.neighbors(t))
+            <= k - A.nodes[t].get('power', 1)
+        )
         # only one out-edge per terminal
         m.add(sum(link_[t, n] for n in chain(A_nodes.neighbors(t), _R)) == 1)
 
@@ -304,19 +331,23 @@ def make_min_length_model(
     # Store metadata #
     ##################
 
-    model_options= dict(topology=topology,
-                        feeder_route=feeder_route,
-                        feeder_limit=feeder_limit,
-                        max_feeders=max_feeders)
-    metadata = ModelMetadata(R, T, k, linkset, link_, flow_,
-                             model_options, fun_fingerprint())
+    model_options = dict(
+        topology=topology,
+        feeder_route=feeder_route,
+        feeder_limit=feeder_limit,
+        max_feeders=max_feeders,
+    )
+    metadata = ModelMetadata(
+        R, T, k, linkset, link_, flow_, model_options, fun_fingerprint()
+    )
 
     return m, metadata
 
 
-def warmup_model(model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
-                 ) -> cp_model.CpModel:
-    '''Set initial solution into `model`.
+def warmup_model(
+    model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
+) -> cp_model.CpModel:
+    """Set initial solution into `model`.
 
     Changes `model` in-place.
 
@@ -327,10 +358,10 @@ def warmup_model(model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
 
     Returns:
       The same model instance that was provided, now with a solution.
-    '''
+    """
     R, T = metadata.R, metadata.T
     model.ClearHints()
-    for u, v in metadata.linkset[:(len(metadata.linkset) - R*T)//2]:
+    for u, v in metadata.linkset[: (len(metadata.linkset) - R * T) // 2]:
         edgeD = S.edges.get((u, v))
         if edgeD is None:
             model.add_hint(metadata.link_[u, v], False)
@@ -343,7 +374,7 @@ def warmup_model(model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
             model.add_hint(metadata.flow_[u, v], edgeD['load'])
             model.add_hint(metadata.link_[v, u], False)
             model.add_hint(metadata.flow_[v, u], 0)
-    for t, r in metadata.linkset[-R*T:]:
+    for t, r in metadata.linkset[-R * T :]:
         edgeD = S.edges.get((t, r))
         model.add_hint(metadata.link_[t, r], edgeD is not None)
         model.add_hint(metadata.flow_[t, r], 0 if edgeD is None else edgeD['load'])
@@ -351,10 +382,10 @@ def warmup_model(model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
     return model
 
 
-def topology_from_mip_sol(*, metadata: ModelMetadata,
-                          solver: SolverORTools|cp_model.CpSolver,
-                          **kwargs) -> nx.Graph:
-    '''Create a topology graph from the OR-tools solution to the MILP model.
+def topology_from_mip_sol(
+    *, metadata: ModelMetadata, solver: SolverORTools | cp_model.CpSolver, **kwargs
+) -> nx.Graph:
+    """Create a topology graph from the OR-tools solution to the MILP model.
 
     Args:
       metadata: attributes of the solved model
@@ -362,16 +393,18 @@ def topology_from_mip_sol(*, metadata: ModelMetadata,
       kwargs: not used (signature compatibility)
     Returns:
       Graph topology `S` from the solution.
-    '''
+    """
     # in ortools, the solution is in the solver instance not in the model
     S = nx.Graph(R=metadata.R, T=metadata.T)
     # Get active links and if flow is reversed (i.e. from small to big)
-    rev_from_link = {(u, v): u < v
-                     for (u, v), use in metadata.link_.items()
-                     if solver.boolean_value(use)}
+    rev_from_link = {
+        (u, v): u < v
+        for (u, v), use in metadata.link_.items()
+        if solver.boolean_value(use)
+    }
     S.add_weighted_edges_from(
-        ((u, v, solver.value(metadata.flow_[u, v]))
-         for (u, v) in rev_from_link.keys()), weight='load'
+        ((u, v, solver.value(metadata.flow_[u, v])) for (u, v) in rev_from_link.keys()),
+        weight='load',
     )
     # set the 'reverse' edge attribute
     nx.set_edge_attributes(S, rev_from_link, name='reverse')

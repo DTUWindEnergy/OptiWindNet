@@ -1,31 +1,51 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import math
 import pickle
 import sys
-import math
 from hashlib import sha256
 
 import networkx as nx
 import numpy as np
 
-from .utils import NodeTagger
 from .geometric import rotate
+from .utils import F
 
 __all__ = (
-    'describe_G', 'pathdist', 'count_diagonals', 'bfs_subtree_loads',
-    'calcload', 'site_fingerprint', 'fun_fingerprint', 'L_from_site',
-    'G_from_S', 'S_from_G', 'L_from_G', 'as_single_root', 'as_normalized',
-    'as_rescaled', 'as_undetoured', 'as_hooked_to_nearest', 'as_hooked_to_head',
-    'make_remap', 'scaffolded'
+    'describe_G',
+    'pathdist',
+    'count_diagonals',
+    'bfs_subtree_loads',
+    'calcload',
+    'site_fingerprint',
+    'fun_fingerprint',
+    'L_from_site',
+    'G_from_S',
+    'S_from_G',
+    'L_from_G',
+    'as_single_root',
+    'as_normalized',
+    'as_rescaled',
+    'as_undetoured',
+    'as_hooked_to_nearest',
+    'as_hooked_to_head',
+    'make_remap',
+    'scaffolded',
 )
 
-F = NodeTagger()
-
 _essential_graph_attrs = (
-    'R', 'T', 'B', 'VertexC', 'name', 'handle', 'border',  # required
-    'obstacles', 'landscape_angle',  # optional
-    'norm_scale', 'norm_offset',  # optional
+    'R',
+    'T',
+    'B',
+    'VertexC',
+    'name',
+    'handle',
+    'border',  # required
+    'obstacles',
+    'landscape_angle',  # optional
+    'norm_scale',
+    'norm_offset',  # optional
 )
 
 
@@ -37,24 +57,23 @@ def describe_G(G):
     RootL = {-r: G.nodes[-r].get('label', F[-r]) for r in roots}
     info = []
     info.append(f'κ = {capacity}, T = {T}')
-    feeder_info = [f'{rootL}: {G.degree[r]}'
-                   for r, rootL in RootL.items()]
-    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(T/capacity)
+    feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
+    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(T / capacity)
     info.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
-    length = G.size(weight="length")
+    length = G.size(weight='length')
     if length > 0:
         intdigits = int(np.floor(np.log10(length))) + 1
         info.append(f'Σλ = {round(length, max(0, 5 - intdigits))} m')
-    if ('has_costs' in G.graph):
+    if 'has_costs' in G.graph:
         info.append('{:.0f} €'.format(G.size(weight='cost')))
     return info
 
 
 def update_lengths(G):
-    '''Adds missing edge lengths.
+    """Adds missing edge lengths.
 
     Changes G in place.
-    '''
+    """
     VertexC = G.graph['VertexC']
     for u, v, dataE in G.edges(data=True):
         if 'length' not in dataE:
@@ -62,12 +81,12 @@ def update_lengths(G):
 
 
 def pathdist(G, path):
-    '''Calculate the total length of a `path` of nodes in `G`.
+    """Calculate the total length of a `path` of nodes in `G`.
 
     Uses the nodes' coordinates (does not rely on edge attributes).
-    '''
+    """
     VertexC = G.graph['VertexC']
-    dist = 0.
+    dist = 0.0
     p = path[0]
     for n in path[1:]:
         dist += np.hypot(*(VertexC[p] - VertexC[n]).T).item()
@@ -76,7 +95,7 @@ def pathdist(G, path):
 
 
 def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
-    '''Count the number of Delaunay diagonals (extended edges) of `A` in `S`.
+    """Count the number of Delaunay diagonals (extended edges) of `A` in `S`.
 
     Args:
       S: solution topology
@@ -88,7 +107,7 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 
     Raises:
       ValueError: if an edge of unknown kind is found.
-    '''
+    """
     delaunay = 0
     extended = 0
     gates = 0
@@ -111,14 +130,14 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 
 
 def bfs_subtree_loads(G, parent, children, subtree):
-    '''Recurse down the subtree, updating edge and node attributes.
+    """Recurse down the subtree, updating edge and node attributes.
 
     Meant to be called by `calcload()`, but can be used independently (e.g.
     from PathFinder). Nodes must not have a 'load' attribute.
 
     Returns:
       Total number of descendant nodes
-    '''
+    """
     T = G.graph['T']
     nodeD = G.nodes[parent]
     default = 1 if parent < T else 0  # load is 1 for wtg nodes
@@ -138,13 +157,13 @@ def bfs_subtree_loads(G, parent, children, subtree):
 
 
 def calcload(G):
-    '''Calculate link loads and updates edge and node attributes of G.
+    """Calculate link loads and updates edge and node attributes of G.
 
     Perform a breadth-first-traversal of each root's subtree. As each node is
     visited, its subtree id and the load leaving it are stored as its
     attribute (keys 'subtree' and 'load', respectively). Also the edges'
     'load' attributes are updated accordingly.
-    '''
+    """
     R, T = (G.graph[k] for k in 'RT')
     roots = range(-R, 0)
     for _, data in G.nodes(data=True):
@@ -166,14 +185,17 @@ def calcload(G):
     G.graph['max_load'] = max_load
 
 
-def site_fingerprint(VertexC: np.ndarray, boundary: np.ndarray) \
-        -> tuple[bytes, dict[str, bytes]]:
+def site_fingerprint(
+    VertexC: np.ndarray, boundary: np.ndarray
+) -> tuple[bytes, dict[str, bytes]]:
     #  VertexCpkl = pickle.dumps(np.round(VertexC, 2))
     #  boundarypkl = pickle.dumps(np.round(boundary, 2))
     VertexCpkl = pickle.dumps(VertexC)
     boundarypkl = pickle.dumps(boundary)
-    return (sha256(VertexCpkl + boundarypkl).digest(),
-            dict(VertexC=VertexCpkl, boundary=boundarypkl))
+    return (
+        sha256(VertexCpkl + boundarypkl).digest(),
+        dict(VertexC=VertexCpkl, boundary=boundarypkl),
+    )
 
 
 def fun_fingerprint(fun=None) -> dict[str, bytes | str]:
@@ -182,14 +204,14 @@ def fun_fingerprint(fun=None) -> dict[str, bytes | str]:
     else:
         fcode = fun.__code__
     return dict(
-            funhash=sha256(fcode.co_code).digest(),
-            funfile=fcode.co_filename,
-            funname=fcode.co_name,
-            )
+        funhash=sha256(fcode.co_code).digest(),
+        funfile=fcode.co_filename,
+        funname=fcode.co_name,
+    )
 
 
 def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
-    '''Create L from a location's attributes.
+    """Create L from a location's attributes.
 
     Args:
       VertexC: numpy.ndarray (V, 2) with x, y pos. of wtg + oss (total V)
@@ -205,7 +227,7 @@ def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
     Returns:
       Graph containing N = R + T nodes and no edges. All keyword arguments are
         made available as graph attributes.
-    '''
+    """
     if 'handle' not in kwargs:
         kwargs['handle'] = 'L_from_site'
     if 'name' not in kwargs:
@@ -216,28 +238,25 @@ def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
             kwargs['B'] = border.shape[0]
         else:
             kwargs['B'] = 0
-    L = nx.Graph(T=T, R=R,
-                 VertexC=VertexC,
-                 **kwargs)
+    L = nx.Graph(T=T, R=R, VertexC=VertexC, **kwargs)
 
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'})
-                      for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'})
-                      for r in range(-R, 0)))
+    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
+    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
     return L
 
 
 def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
-    '''Create G from S and A.
+    """Create G from S and A.
 
     Graph `S` contains the topology of a routeset network (nodes only, no
     contours or detours). `S` must have been created from the available edges
     in `A`, whose contour information is used to obtain a routeset `G`
     (possibly with contours, but not with detours – use PathFinder afterward).
-    '''
+    """
     R, T, B = (A.graph[k] for k in 'RTB')
-    VertexC, d2roots, diagonals = (A.graph[k] for k in
-                                   ('VertexC', 'd2roots', 'diagonals'))
+    VertexC, d2roots, diagonals = (
+        A.graph[k] for k in ('VertexC', 'd2roots', 'diagonals')
+    )
     G = nx.create_empty_copy(A)
     for k in ('capacity', 'has_loads', 'max_load', 'creator', 'solver_details'):
         value = S.graph.get(k)
@@ -245,7 +264,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
             G.graph[k] = value
     nx.set_node_attributes(G, S.nodes)
     # remove supertriangle coordinates from VertexC
-    G.graph['VertexC'] = np.vstack((VertexC[:-R - 3], VertexC[-R:]))
+    G.graph['VertexC'] = np.vstack((VertexC[: -R - 3], VertexC[-R:]))
     # non_A_edges are the far-reaching gates and ocasionally the result of
     # a poor solver (e.g. LKH-3)
     non_A_edges = S.edges - A.edges
@@ -286,8 +305,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                     # check the other diagonals that cross ⟨s, t⟩ (in A)
                     for side in ((u, s), (s, v), (v, t), (t, u)):
                         side = side if side[0] < side[1] else side[::-1]
-                        if (side in diagonals.inv
-                                and diagonals.inv[side] in S.edges):
+                        if side in diagonals.inv and diagonals.inv[side] in S.edges:
                             # side's diagonal is in S -> Xing
                             st_is_tentative = True
                             break
@@ -298,14 +316,19 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         load = S[s][t]['load']
         st_reverse = S.nodes[s]['load'] < S.nodes[t]['load']
         if st_is_tentative:
-            G.add_edge(s, t, length=AedgeD['length'], load=load,
-                       reverse=st_reverse, kind='tentative')
+            G.add_edge(
+                s,
+                t,
+                length=AedgeD['length'],
+                load=load,
+                reverse=st_reverse,
+                kind='tentative',
+            )
             tentative.append((s, t))
             continue
         if midpath is None:
             # no contour in A's ⟨s, t⟩ -> straightforward
-            G.add_edge(s, t, length=AedgeD['length'], load=load,
-                       reverse=st_reverse)
+            G.add_edge(s, t, length=AedgeD['length'], load=load, reverse=st_reverse)
             continue
         # contour edge
         shortcuts = AedgeD.get('shortcuts')
@@ -316,14 +339,24 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                     # ⟨s, t⟩ is a gate -> make it tentative
                     # This is a hack. It will force PathFinder to check for
                     # crossings and the edge will be confirmed a non-A gate.
-                    G.add_edge(s, t,
-                               kind='tentative', reverse=False, load=load,
-                               length=np.hypot(*(VertexC[s] - VertexC[t]).T)).item()
+                    G.add_edge(
+                        s,
+                        t,
+                        kind='tentative',
+                        reverse=False,
+                        load=load,
+                        length=np.hypot(*(VertexC[s] - VertexC[t]).T),
+                    ).item()
                     tentative.append((s, t))
                     continue
-                G.add_edge(s, t,
-                           kind='contour', reverse=st_reverse, load=load,
-                           length=AedgeD['length'])
+                G.add_edge(
+                    s,
+                    t,
+                    kind='contour',
+                    reverse=st_reverse,
+                    load=load,
+                    length=AedgeD['length'],
+                )
                 shortened_contours[(s, t)] = midpath, []
                 continue
             shortpath = midpath.copy()
@@ -340,38 +373,60 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
             iC += 1
             G.add_node(v, kind='contour', load=load, subtree=subtree_id)
             reverse = st_reverse == (u < v)
-            G.add_edge(u, v, length=length.item(), load=load, kind='contour',
-                       reverse=reverse, A_edge=(s, t))
+            G.add_edge(
+                u,
+                v,
+                length=length.item(),
+                load=load,
+                kind='contour',
+                reverse=reverse,
+                A_edge=(s, t),
+            )
             u = v
         reverse = st_reverse == (u < t)
-        G.add_edge(u, t, length=lengths[-1].item(), load=load, kind='contour',
-                   reverse=reverse, A_edge=(s, t))
+        G.add_edge(
+            u,
+            t,
+            length=lengths[-1].item(),
+            load=load,
+            kind='contour',
+            reverse=reverse,
+            A_edge=(s, t),
+        )
     if shortened_contours:
         G.graph['shortened_contours'] = shortened_contours
     if clone2prime:
         fnT = np.arange(iC + R)
-        fnT[T + B:-R] = clone2prime
+        fnT[T + B : -R] = clone2prime
         fnT[-R:] = range(-R, 0)
-        G.graph.update(fnT=fnT,
-                       clone2prime=clone2prime,
-                       C=len(clone2prime))
+        G.graph.update(fnT=fnT, clone2prime=clone2prime, C=len(clone2prime))
     # add to G the S edges that are not in A
     rogue = []
     for s, t in non_A_edges:
         s, t = (s, t) if s < t else (t, s)
         if s < 0:
             # far-reaching gate
-            G.add_edge(s, t, length=d2roots[t, s].item(), kind='tentative',
-                       load=S.nodes[t]['load'], reverse=False)
+            G.add_edge(
+                s,
+                t,
+                length=d2roots[t, s].item(),
+                kind='tentative',
+                load=S.nodes[t]['load'],
+                reverse=False,
+            )
             tentative.append((s, t))
         else:
             # rogue edge (not supposed to be on the routeset, poor solver)
             st_reverse = S.edges[s, t]['reverse']
-            load = (S.nodes[s]['load']
-                    if st_reverse else
-                    S.nodes[t]['load'])
-            G.add_edge(s, t, length=np.hypot(*(VertexC[s] - VertexC[t])).item(),
-                       kind='rogue', load=load, reverse=st_reverse)
+            load = S.nodes[s]['load'] if st_reverse else S.nodes[t]['load']
+            G.add_edge(
+                s,
+                t,
+                length=np.hypot(*(VertexC[s] - VertexC[t])).item(),
+                kind='rogue',
+                load=load,
+                reverse=st_reverse,
+            )
             rogue.append((s, t))
     if rogue:
         G.graph['rogue'] = rogue
@@ -392,20 +447,18 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                 crossings = False
                 s, t = st
                 # ensure u–s–v–t is ccw
-                u, v = ((r, n)
-                        if (P[r][t]['cw'] == s and P[n][s]['cw'] == t) else
-                        (n, r))
+                u, v = (r, n) if (P[r][t]['cw'] == s and P[n][s]['cw'] == t) else (n, r)
                 # examine the two triangles ⟨s, t⟩ belongs to
                 for a, b, c in ((s, t, u), (t, s, v)):
                     # this is for diagonals crossing diagonals
                     d = P[c][b]['ccw']
                     diag_da = (a, d) if a < d else (d, a)
-                    if (d == P[b][c]['cw'] and diag_da in G.edges):
+                    if d == P[b][c]['cw'] and diag_da in G.edges:
                         crossings = True
                         break
                     e = P[a][c]['ccw']
                     diag_eb = (e, b) if e < b else (b, e)
-                    if (e == P[c][a]['cw'] and diag_eb in G.edges):
+                    if e == P[c][a]['cw'] and diag_eb in G.edges:
                         crossings = True
                         break
                 if crossings:
@@ -429,8 +482,8 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
 
 
 def S_from_G(G: nx.Graph) -> nx.Graph:
-    '''Get `G`'s topology (contours, detours, lengths, coords are dropped).
-    
+    """Get `G`'s topology (contours, detours, lengths, coords are dropped).
+
     If using S to warm-start a MILP model, call after `S_from_G()`:
     * `as_hooked_to_nearest()`: for branching (tree) models
     * `as_hooked_to_head()`: for non-branching (path) models
@@ -443,18 +496,18 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
 
     Returns:
         topology of `G`
-    '''
+    """
     R, T = (G.graph[k] for k in 'RT')
     capacity = G.graph['capacity']
     has_loads = G.graph.get('has_loads', False)
     S = nx.Graph(
-        T=T, R=R,
+        T=T,
+        R=R,
         capacity=capacity,
     )
     # create a topology graph S from the results
     for r in range(-R, 0):
-        S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']}
-                                     if has_loads else {}))
+        S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']} if has_loads else {}))
         on_hold = None
         for edge in nx.dfs_edges(G, r):
             u, v = edge
@@ -465,10 +518,13 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
                 u = on_hold
             if has_loads:
                 v_load = G.nodes[v]['load']
-                S.add_node(v, kind='wtg', load=v_load,
-                           subtree=G.nodes[v]['subtree'])
-                S.add_edge(u, v, load=G.edges[edge]['load'],
-                           reverse=(G.nodes[u]['load'] < v_load) == (u < v))
+                S.add_node(v, kind='wtg', load=v_load, subtree=G.nodes[v]['subtree'])
+                S.add_edge(
+                    u,
+                    v,
+                    load=G.edges[edge]['load'],
+                    reverse=(G.nodes[u]['load'] < v_load) == (u < v),
+                )
             else:
                 S.add_node(v, kind='wtg')
                 S.add_edge(u, v)
@@ -487,7 +543,7 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
 
 
 def L_from_G(G: nx.Graph) -> nx.Graph:
-    '''Return new location with nodes and site attributes from G.
+    """Return new location with nodes and site attributes from G.
 
     The returned location graph `L` retains only roots, nodes and basic graph
     attributes. All edges and remaining attributes are not carried from `G`.
@@ -497,26 +553,27 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
 
     Returns:
       Site graph (no edges) with lean attributes.
-    '''
+    """
     R, T = (G.graph[k] for k in 'RT')
-    L = nx.Graph(**{k: G.graph[k]
-                    for k in _essential_graph_attrs if k in G.graph})
+    L = nx.Graph(**{k: G.graph[k] for k in _essential_graph_attrs if k in G.graph})
     stunts_primes = G.graph.get('stunts_primes')
     if stunts_primes:
         VertexC = G.graph['VertexC']
-        L.graph['VertexC'] = np.vstack((VertexC[:-R - len(stunts_primes)],
-                                        VertexC[-R:]))
+        L.graph['VertexC'] = np.vstack(
+            (VertexC[: -R - len(stunts_primes)], VertexC[-R:])
+        )
         L.graph['B'] -= len(stunts_primes)
-    L.add_nodes_from(((n, {'label': label})
-                      for n, label in G.nodes(data='label')
-                      if 0 <= n < T), kind='wtg')
+    L.add_nodes_from(
+        ((n, {'label': label}) for n, label in G.nodes(data='label') if 0 <= n < T),
+        kind='wtg',
+    )
     for r in range(-R, 0):
         L.add_node(r, label=G.nodes[r].get('label'), kind='oss')
     return L
 
 
 def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
-    '''Make a shallow copy of an instance and reduce its roots to one.
+    """Make a shallow copy of an instance and reduce its roots to one.
 
     The output's root is the centroid of the input's roots.
 
@@ -525,13 +582,13 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
 
     Returns:
       location with a single root.
-    '''
+    """
     R, VertexCʹ = (Lʹ.graph[k] for k in ('R', 'VertexC'))
     L = Lʹ.copy()
     if R <= 1:
         return L
     L.remove_nodes_from(range(-R, -1))
-    VertexC = VertexCʹ[:-R + 1].copy()
+    VertexC = VertexCʹ[: -R + 1].copy()
     VertexC[-1] = VertexCʹ[-R:].mean(axis=0)
     L.graph.update(VertexC=VertexC, R=1)
     L.graph['name'] += '.1_OSS'
@@ -539,9 +596,10 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     return L
 
 
-def as_normalized(Aʹ: nx.Graph, *, offset: float | None = None,
-                  scale: float | None = None) -> nx.Graph:
-    '''Make a shallow copy of an instance and shift and scale its geometry.
+def as_normalized(
+    Aʹ: nx.Graph, *, offset: float | None = None, scale: float | None = None
+) -> nx.Graph:
+    """Make a shallow copy of an instance and shift and scale its geometry.
 
     Coordinates are subtracted by graph attribute 'norm_offset'.
     All lengths and coordinates are multiplied by graph attribute 'norm_scale'.
@@ -556,7 +614,7 @@ def as_normalized(Aʹ: nx.Graph, *, offset: float | None = None,
 
     Returns:
         A copy of the instance with changed coordinates and linear metrics.
-    '''
+    """
     A = Aʹ.copy()
     if offset is None:
         offset = Aʹ.graph['norm_offset']
@@ -565,13 +623,13 @@ def as_normalized(Aʹ: nx.Graph, *, offset: float | None = None,
     A.graph['is_normalized'] = True
     for _, _, eData in A.edges(data=True):
         eData['length'] *= scale
-    A.graph['VertexC'] = scale*(Aʹ.graph['VertexC'] - offset)
-    A.graph['d2roots'] = scale*Aʹ.graph['d2roots']
+    A.graph['VertexC'] = scale * (Aʹ.graph['VertexC'] - offset)
+    A.graph['d2roots'] = scale * Aʹ.graph['d2roots']
     return A
 
 
 def as_rescaled(Gʹ: nx.Graph, L: nx.Graph) -> nx.Graph:
-    '''Revert normalization done by `as_normalized()`.
+    """Revert normalization done by `as_normalized()`.
 
     Args:
       Gʹ: routeset to rescale to pre-normalization size.
@@ -580,14 +638,14 @@ def as_rescaled(Gʹ: nx.Graph, L: nx.Graph) -> nx.Graph:
 
     Returns:
       Routeset with coordinates and lengths at site scale.
-    '''
+    """
     if not Gʹ.graph.get('is_normalized', False):
         # Gʹ is not marked as normalized
         return Gʹ
     G = Gʹ.copy()
     # alternatively, we could do the math, but this safeguards the coord's hash
     G.graph['VertexC'] = L.graph['VertexC']
-    denorm_factor = 1/G.graph['norm_scale']
+    denorm_factor = 1 / G.graph['norm_scale']
     for _, _, eData in G.edges(data=True):
         eData['length'] *= denorm_factor
     d2roots = L.graph.get('d2roots')
@@ -602,7 +660,7 @@ def as_rescaled(Gʹ: nx.Graph, L: nx.Graph) -> nx.Graph:
 
 
 def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
-    '''Create an undetoured version of Gʹ.
+    """Create an undetoured version of Gʹ.
 
     Creates a shallow copy of `Gʹ` without detour nodes (and possibly *with*
     the resulting crossings). Changed links' 'kind' become 'tentative'.
@@ -610,7 +668,7 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
     This is to be applyed to a routeset that already has detours. It serves to
     re-run PathFinder on a detoured routeset, but it is not the best solution
     to prepare a routeset to be used as warmstart (re-hooking is missing).
-    '''
+    """
     G = Gʹ.copy()
     C, D = (G.graph.get(k, 0) for k in 'CD')
     if not D:
@@ -624,13 +682,16 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
             G.remove_edge(n, r)
             while n >= T:
                 rev = n
-                n, = G.neighbors(rev)
+                (n,) = G.neighbors(rev)
                 G.remove_node(rev)
-            G.add_edge(r, n,
-                       load=G.nodes[n]['load'],
-                       kind='tentative',
-                       reverse=False,
-                       length=np.hypot(*(VertexC[n] - VertexC[r]).T))
+            G.add_edge(
+                r,
+                n,
+                load=G.nodes[n]['load'],
+                kind='tentative',
+                reverse=False,
+                length=np.hypot(*(VertexC[n] - VertexC[r]).T),
+            )
             tentative.append((r, n))
     del G.graph['D']
     if C:
@@ -643,7 +704,7 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
 
 
 def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
-    '''Make tentative feeders link to the nearest-to-root node of each subtree.
+    """Make tentative feeders link to the nearest-to-root node of each subtree.
 
     Output may be branched (use with care with path routesets).
 
@@ -656,14 +717,15 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     Args:
       G: routeset or topology S
       d2roots: distance from nodes to roots (e.g. A.graph['d2roots'])
-    '''
+    """
     assert Gʹ.graph.get('has_loads')
     G = Gʹ.copy()
     R, T = G.graph['R'], G.graph['T']
     # mappings to quickly obtain all nodes on a subtree
     num_subtree = sum(G.degree[r] for r in range(-R, 0))
-    nodes_from_subtree_id = np.fromiter((list() for _ in range(num_subtree)),
-                                        count=num_subtree, dtype=object)
+    nodes_from_subtree_id = np.fromiter(
+        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+    )
     subtree_from_node = np.empty((T,), dtype=object)
     for n, subtree_id in G.nodes(data='subtree'):
         if 0 <= n < T:
@@ -675,25 +737,31 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     # TODO: rehook should take into account the other roots
     #       see PathFinder.create_detours()
     tentative = []
-    hook_getter = ((r, nb) for r in range(-R, 0)
-                   for nb in tuple(G.neighbors(r)))
+    hook_getter = ((r, nb) for r in range(-R, 0) for nb in tuple(G.neighbors(r)))
     for r, hook in G.graph.pop('tentative', hook_getter):
         subtree = subtree_from_node[hook]
         new_hook = subtree[np.argmin(d2roots[subtree, r])]
         if new_hook != hook:
             subtree_load = G.nodes[hook]['load']
             G.remove_edge(r, hook)
-            G.add_edge(r, new_hook, length=d2roots[new_hook, r],
-                       kind='tentative', load=subtree_load)
+            G.add_edge(
+                r,
+                new_hook,
+                length=d2roots[new_hook, r],
+                kind='tentative',
+                load=subtree_load,
+            )
             for node in subtree:
                 del G.nodes[node]['load']
 
             ref_load = G.nodes[r]['load']
             G.nodes[r]['load'] = ref_load - subtree_load
-            total_parent_load = bfs_subtree_loads(G, r, [new_hook],
-                                                  G.nodes[new_hook]['subtree'])
-            assert total_parent_load == ref_load, \
+            total_parent_load = bfs_subtree_loads(
+                G, r, [new_hook], G.nodes[new_hook]['subtree']
+            )
+            assert total_parent_load == ref_load, (
                 f'parent ({total_parent_load}) != expected load ({ref_load})'
+            )
         else:
             # only necessary if using hook_getter (e.g. Gʹ is a S)
             G[r][new_hook]['kind'] = 'tentative'
@@ -703,7 +771,7 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
 
 def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
-    '''Make tentative feeders link to the nearest-to-root end of each string.
+    """Make tentative feeders link to the nearest-to-root end of each string.
 
     Only works with solutions where subtrees are paths (radial topology).
 
@@ -717,18 +785,20 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     Args:
       S: solution topology
       d2roots: distance from nodes to roots (e.g. A.graph['d2roots'])
-    '''
+    """
     assert Sʹ.graph.get('has_loads')
     S = Sʹ.copy()
     R, T = S.graph['R'], S.graph['T']
     # mappings to quickly obtain all nodes on a subtree
     S_T = nx.subgraph_view(Sʹ, filter_node=lambda n: n >= 0)
     num_subtree = sum(S.degree[r] for r in range(-R, 0))
-    nodes_from_subtree_id = np.fromiter((list() for _ in range(num_subtree)),
-                                        count=num_subtree, dtype=object)
+    nodes_from_subtree_id = np.fromiter(
+        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+    )
     subtree_from_node = np.empty((T,), dtype=object)
     headtail_from_subtree_id = np.fromiter(
-        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object)
+        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+    )
     headtail_from_node = np.empty((T,), dtype=object)
     for n, subtree_id in S.nodes(data='subtree'):
         if 0 <= n < T:
@@ -744,8 +814,7 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     # TODO: rehook should take into account the other roots
     #       see PathFinder.create_detours()
     tentative = []
-    hook_getter = ((r, nb) for r in range(-R, 0)
-                   for nb in tuple(S.neighbors(r)))
+    hook_getter = ((r, nb) for r in range(-R, 0) for nb in tuple(S.neighbors(r)))
     for r, hook in S.graph.pop('tentative', hook_getter):
         headtail = headtail_from_node[hook]
         new_hook = headtail[np.argmin(d2roots[headtail, r])]
@@ -758,10 +827,12 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
             ref_load = S.nodes[r]['load']
             S.nodes[r]['load'] = ref_load - subtree_load
-            total_parent_load = bfs_subtree_loads(S, r, [new_hook],
-                                                  S.nodes[new_hook]['subtree'])
-            assert total_parent_load == ref_load, \
+            total_parent_load = bfs_subtree_loads(
+                S, r, [new_hook], S.nodes[new_hook]['subtree']
+            )
+            assert total_parent_load == ref_load, (
                 f'parent ({total_parent_load}) != expected load ({ref_load})'
+            )
         else:
             # only necessary if using hook_getter (e.g. Gʹ is a S)
             S[r][new_hook]['kind'] = 'tentative'
@@ -771,7 +842,7 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
 
 def make_remap(G, refG, H, refH):
-    '''Create a mapping between two representations of the same site.
+    """Create a mapping between two representations of the same site.
 
     CAUTION: only WTG node remapping is implemented.
 
@@ -785,19 +856,20 @@ def make_remap(G, refG, H, refH):
       refG: two nodes to used as references.
       H: routeset with valid representation.
       refH: two nodes corresponding to `refG`
-    '''
+    """
     T = G.graph['T']
     VertexC = G.graph['VertexC'][:T]
     vecref = VertexC[refG[1]] - VertexC[refG[0]]
     angleG = np.arctan2(*vecref)
     scaleG = np.hypot(*vecref)
-    GvertC = (VertexC - VertexC[refG[0]])/scaleG
+    GvertC = (VertexC - VertexC[refG[0]]) / scaleG
     VertexC = H.graph['VertexC'][:T]
     vecref = VertexC[refH[1]] - VertexC[refH[0]]
     angleH = np.arctan2(*vecref)
     scaleH = np.hypot(*vecref)
-    HvertC = rotate((VertexC - VertexC[refH[0]])/scaleH,
-                    180*(angleH - angleG)/np.pi)
+    HvertC = rotate(
+        (VertexC - VertexC[refH[0]]) / scaleH, 180 * (angleH - angleG) / np.pi
+    )
     remap = {}
     for i, coordH in enumerate(HvertC):
         j = np.argmin(np.hypot(*(GvertC - coordH).T))
@@ -806,7 +878,7 @@ def make_remap(G, refG, H, refH):
 
 
 def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
-    '''Create a new graph merging G and P.
+    """Create a new graph merging G and P.
 
     Useful for visualizing the funnels explored by `pathfinding.PathFinder`.
     `G` must have been created using `P`.
@@ -817,7 +889,7 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
 
     Returns:
       Merged graph (pass to `plotting.gplot()` or 'svg.svgplot()`).
-    '''
+    """
     scaff = P.to_undirected()
     scaff.graph.update(G.graph)
     for attr in 'fnT C'.split():
@@ -844,11 +916,10 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
     VertexC = G.graph['VertexC']
     supertriangleC = P.graph['supertriangleC']
     if G.graph.get('is_normalized'):
-        supertriangleC = G.graph['norm_scale']*(supertriangleC
-                                                - G.graph['norm_offset'])
-    VertexC = np.vstack((VertexC[:-R],
-                         supertriangleC,
-                         VertexC[-R:]))
+        supertriangleC = G.graph['norm_scale'] * (
+            supertriangleC - G.graph['norm_offset']
+        )
+    VertexC = np.vstack((VertexC[:-R], supertriangleC, VertexC[-R:]))
     scaff.graph.update(VertexC=VertexC, fnT=fnT)
     if 'capacity' in scaff.graph:
         # hack to prevent `gplot()` from showing infobox

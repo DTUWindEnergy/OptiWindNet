@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
-'''Database model v0 for storage of locations and route sets.
+"""Database model v0 for storage of locations and route sets.
 
 Tables:
   - NodeSet: location definition
   - RouteSet: routeset (i.e. a record of G)
   - Method: info on algorithm & options to produce routesets
   - Machine: info on machine that generated a routeset
-'''
+"""
 
 import datetime
 import os
@@ -20,25 +20,25 @@ __all__ = ()
 
 
 def open_database(filepath: str, create_db: bool = False) -> Database:
-    '''Opens the sqlite database v2 file specified in `filepath`.
+    """Opens the sqlite database v2 file specified in `filepath`.
 
     Args:
       filepath: path to database file
       create_db: True -> create a new file if it does not exist
-    
+
     Returns:
       Database object (Pony ORM)
-    '''
+    """
     db = Database()
     define_entities(db)
-    db.bind('sqlite', os.path.abspath(os.path.expanduser(filepath)),
-            create_db=create_db)
+    db.bind(
+        'sqlite', os.path.abspath(os.path.expanduser(filepath)), create_db=create_db
+    )
     db.generate_mapping(create_tables=True)
     return db
 
 
 def define_entities(db: Database):
-
     class NodeSet(db.Entity):
         # hashlib.sha256(VertexC + boundary).digest()
         digest = PrimaryKey(bytes)

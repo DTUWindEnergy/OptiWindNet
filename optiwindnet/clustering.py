@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-from heapq import heappop, heappush
 import math
+from heapq import heappop, heappush
+
 import networkx as nx
 
 __all__ = ('clusterize',)
 
 
 def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
-    '''Partition the terminals of A into one cluster per root.
+    """Partition the terminals of A into one cluster per root.
 
     For the moment, it enforces the minimum number of feeders, i.e.
     ceil(T/capacity).
@@ -17,9 +18,9 @@ def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
     The algorithm guarantees that the number of feeders for the entire location
     is not increased by the clustering. This means only one partition may have
     a subtree with capacity slack. It does not attempt to make uniform-sized
-    clusters, terminals tend to be allocated to the closest root (distance 
+    clusters, terminals tend to be allocated to the closest root (distance
     measured in `P_paths` - see `make_planar_embedding()`).
-    '''
+    """
     R, T = (A.graph[k] for k in 'RT')
     d2roots = A.graph['d2roots']
     mainheap = []
@@ -33,8 +34,8 @@ def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
         d = d2roots[n, r]
         heappush(mainheap, (d, n, r))
 
-    total_feeders = math.ceil(T/capacity)
-    num_slack = total_feeders*capacity - T
+    total_feeders = math.ceil(T / capacity)
+    num_slack = total_feeders * capacity - T
 
     # expeller function
     def expel_from(r, blocked=[]):
@@ -68,16 +69,18 @@ def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
         expel = expel_[r]
         was_cluster_round = (len(cluster) % capacity) == 0
         # the (- 1) is because we just popped a node but have not assigned it
-        threshold = sum((capacity - len(clu) % capacity)
-                        for clu in cluster_) - num_slack - 1
+        threshold = (
+            sum((capacity - len(clu) % capacity) for clu in cluster_) - num_slack - 1
+        )
         # add first and expel later if necessary
         cluster.add(n)
         for i in idx_[r]:
             heappush(expel, (d2roots[n, i] - d, n, i))
-        if (len(mainheap) <= threshold
-                and was_cluster_round
-                and not all((len(cluster_[i]) % capacity == 0)
-                            for i in idx_[r])):
+        if (
+            len(mainheap) <= threshold
+            and was_cluster_round
+            and not all((len(cluster_[i]) % capacity == 0) for i in idx_[r])
+        ):
             # cluster is overfull: expel
             expel_from(r)
 

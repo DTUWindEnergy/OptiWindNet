@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import time
 import logging
+import time
 from collections import defaultdict
 
 import networkx as nx
@@ -10,27 +10,39 @@ import numpy as np
 from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 
-from ..geometric import (
-    angle, angle_helpers, apply_edge_exemptions, assign_root, is_same_side,
-    is_bunch_split_by_corner, is_crossing, angle_oracles_factory
-)
 from ..crossings import edge_crossings
-from ..mesh import make_planar_embedding
-from ..utils import Alerter, NodeStr, NodeTagger
-from .priorityqueue import PriorityQueue
+from ..geometric import (
+    angle,
+    angle_helpers,
+    angle_oracles_factory,
+    apply_edge_exemptions,
+    assign_root,
+    is_bunch_split_by_corner,
+    is_crossing,
+    is_same_side,
+)
 from ..interarraylib import L_from_G, fun_fingerprint
+from ..mesh import make_planar_embedding
+from ..utils import Alerter, F, NodeStr
+from .priorityqueue import PriorityQueue
 
 __all__ = ()
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
-F = NodeTagger()
 
-
-def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
-         MARGIN=1e-4, warnwhere=None, weightfun=None):
-    '''Obstacle Bypassing Esau-Williams heuristic for C-MST.
+def OBEW(
+    L,
+    capacity=8,
+    rootlust=None,
+    maxiter=10000,
+    maxDepth=4,
+    MARGIN=1e-4,
+    warnwhere=None,
+    weightfun=None,
+):
+    """Obstacle Bypassing Esau-Williams heuristic for C-MST.
 
     Recommended `rootlust`: '0.6*cur_capacity/capacity'
 
@@ -42,13 +54,14 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
     Returns:
         G_cmst: networkx.Graph
-    '''
+    """
 
     start_time = time.perf_counter()
 
     if warnwhere is not None:
         Awarn = Alerter(warnwhere, 'i')
     else:  # could check if debug is True and make warn = print
+
         def Awarn(*args, **kwargs):
             pass
 
@@ -58,15 +71,15 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     # rootlust_formula = f'0.6*cur_capacity/(capacity - 1)'
 
     if rootlust is None:
+
         def rootlustfun(_):
-            return 0.
+            return 0.0
     else:
         rootlustfun = eval('lambda cur_capacity: ' + rootlust, locals())
     # rootlust = lambda cur_capacity: 0.7*(cur_capacity/(capacity - 1))**2
 
     # save relevant options to store in the graph later
-    options = dict(MARGIN=MARGIN, variant='C',
-                   rootlust=rootlust)
+    options = dict(MARGIN=MARGIN, variant='C', rootlust=rootlust)
 
     R, T, B = (L.graph[k] for k in 'RTB')
     _T = range(T)
@@ -115,10 +128,9 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     # BEGIN: create initial star graph
     G = L_from_G(L) if L.number_of_edges() > 0 else L.copy()
     G.add_weighted_edges_from(
-        ((n, r, d2roots[n, r]) for n, r in A.nodes(data='root')),
-        weight='length')
-    nx.set_node_attributes(
-        G, {n: r for n, r in A.nodes(data='root')}, 'root')
+        ((n, r, d2roots[n, r]) for n, r in A.nodes(data='root')), weight='length'
+    )
+    nx.set_node_attributes(G, {n: r for n, r in A.nodes(data='root')}, 'root')
     # END: create initial star graph
 
     # BEGIN: helper data structures
@@ -129,7 +141,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
-    subtree_ = [[t] for t in _T] + (B + Dmax)*[None]
+    subtree_ = [[t] for t in _T] + (B + Dmax) * [None]
     # TODO: fnT might be better named Pof (Prime of)
     # <fnT>: farm node translation table
     #        to be used when indexing: VertexC, d2roots, angles, etc
@@ -146,7 +158,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
     n2s = NodeStr(fnT, T)
     # <subroot_>: maps vertices (terminals and clones) to subroot terminals
-    subroot_ = list(_T) + (B + Dmax)*[None]
+    subroot_ = list(_T) + (B + Dmax) * [None]
 
     # mappings from components (identified by their subroots)
     # <ComponIn>: maps component to set of components queued to merge in
@@ -193,7 +205,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         # get the primes of all nodes
         _subroot, _u, _v = fnT[[subroot, u, v]]
         uvA = angles[_v, root] - angles[_u, root]
-        swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
+        swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
         lo, hi = (_v, _u) if swaped else (_u, _v)
         loR, hiR, srR = anglesRank[(lo, hi, _subroot), root]
         W = loR > hiR  # wraps +-pi
@@ -202,8 +214,12 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         if ~W & supL & infH | W & ~supL & infH | W & supL & ~infH:
             if not is_same_side(*VertexC[[_u, _v, root, _subroot]]):
                 # crossing subroot
-                debug('<crossing> discarding «%s–%s»: would cross subroot <%s>',
-                      F[u], F[v], F[subroot])
+                debug(
+                    '<crossing> discarding «%s–%s»: would cross subroot <%s>',
+                    F[u],
+                    F[v],
+                    F[subroot],
+                )
                 return True
         return False
 
@@ -224,8 +240,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
-                if (subroot_[v] in forbidden or
-                        len(subtree_[v]) > capacity_left):
+                if subroot_[v] in forbidden or len(subtree_[v]) > capacity_left:
                     # useless edges
                     edges2discard.append((u, v))
                 else:
@@ -254,8 +269,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
-                if (subroot_[v] in forbidden or
-                        len(subtree_[v]) > capacity_left):
+                if subroot_[v] in forbidden or len(subtree_[v]) > capacity_left:
                     # useless edges
                     edges2discard.append((u, v))
                 else:
@@ -267,18 +281,22 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                         #  tiebreaker = d2rootsRank[fnT[v], A[u][v]['root']]
                         tiebreaker = d2rootsRank[fnT[v], A.nodes[v]['root']]
                         # weighted_edges.append((W, tiebreaker, u, v))
-                        weighted_edges.append((W - d2rGain*root_lust,
-                                               tiebreaker, u, v))
+                        weighted_edges.append(
+                            (W - d2rGain * root_lust, tiebreaker, u, v)
+                        )
         return weighted_edges, edges2discard
 
     def sort_union_choices(weighted_edges):
         # this function could be outside esauwilliams()
         unordchoices = np.array(
             weighted_edges,
-            dtype=[('weight', np.float64),
-                   ('vd2rootR', np.int_),
-                   ('u', np.int_),
-                   ('v', np.int_)])
+            dtype=[
+                ('weight', np.float64),
+                ('vd2rootR', np.int_),
+                ('u', np.int_),
+                ('v', np.int_),
+            ],
+        )
         # result = np.argsort(unordchoices, order=['weight'])
         # unordchoices  = unordchoices[result]
 
@@ -288,7 +306,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         # purpose is to favor radial alignment of components
         tempchoices = unordchoices.copy()
         tempchoices['weight'] /= tempchoices['weight'].min()
-        tempchoices['weight'] = (20*tempchoices['weight']).round()  # 5%
+        tempchoices['weight'] = (20 * tempchoices['weight']).round()  # 5%
 
         result = np.argsort(tempchoices, order=['weight', 'vd2rootR'])
         choices = unordchoices[result]
@@ -317,8 +335,13 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             tradeoff = weight - d2roots[fnT[subroot], A.nodes[subroot]['root']]
             pq.add(tradeoff, subroot, (u, v))
             ComponIn[subroot_[v]].add(subroot)
-            debug('<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
-                  F[subroot], F[u], F[v], -tradeoff)
+            debug(
+                '<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
+                F[subroot],
+                F[u],
+                F[v],
+                -tradeoff,
+            )
 
         else:
             # no viable edge is better than subroot for this node
@@ -340,8 +363,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>',
-                  F[u], F[v])
+            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>', F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
@@ -366,8 +388,15 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
         if componin != is_reverse:
             # TODO: Why did I expect always False here? It is sometimes True.
-            debug('«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
-                  F[u], F[v], F[sr_u], F[sr_v], componin, is_reverse)
+            debug(
+                '«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
+                F[u],
+                F[v],
+                F[sr_u],
+                F[sr_v],
+                componin,
+                is_reverse,
+            )
 
         # END: block to be simplified
 
@@ -376,8 +405,9 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            print('<<<< UNLIKELY <abort_edge_addition()> '
-                  f'{n2s(u, v)} not in A.edges >>>>')
+            print(
+                f'<<<< UNLIKELY <abort_edge_addition()> {n2s(u, v)} not in A.edges >>>>'
+            )
         ComponIn[subroot_[v]].remove(sr_u)
         enqueue_best_union(sr_u)
 
@@ -385,18 +415,27 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     def get_subtrees_closest_node(subroot, origin):
         componodes = subtree_[subroot]
         if len(componodes) > 1:
-            dist = np.squeeze(cdist(VertexC[fnT[componodes]],
-                                    VertexC[np.newaxis, fnT[origin]]))
+            dist = np.squeeze(
+                cdist(VertexC[fnT[componodes]], VertexC[np.newaxis, fnT[origin]])
+            )
         else:
-            dist = np.array([np.hypot(*(VertexC[fnT[componodes[0]]]
-                                        - VertexC[np.newaxis, fnT[origin]]).T)])
+            dist = np.array(
+                [
+                    np.hypot(
+                        *(
+                            VertexC[fnT[componodes[0]]]
+                            - VertexC[np.newaxis, fnT[origin]]
+                        ).T
+                    )
+                ]
+            )
         idx = np.argmin(dist)
         closest = componodes[idx]
         return closest
 
     def get_crossings(s, t, detour_waiver=False):
-        '''generic crossings checker
-        common node is not crossing'''
+        """generic crossings checker
+        common node is not crossing"""
         s_, t_ = fnT[[s, t]]
         st = (s_, t_) if s_ < t_ else (t_, s_)
         if st in P.edges or st in diagonals:
@@ -427,36 +466,38 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         # TODO: THIS RELIES ON precalculated crossings
         sC, tC = VertexC[fnT[[s, t]]]
         rootC = VertexC[-R:]
-        if np.logical_or.reduce(((sC - rootC)*(tC - rootC)).sum(axis=1) < 0):
+        if np.logical_or.reduce(((sC - rootC) * (tC - rootC)).sum(axis=1) < 0):
             # pre-calculation pruned edges with more than 90° angle
             # so the output will be equivalent to finding a crossings
             return (None,)
         Xlist = []
-        for (w, x) in Xings[frozenset(fnT[[s, t]])]:
+        for w, x in Xings[frozenset(fnT[[s, t]])]:
             if G.has_edge(w, x):
                 # debug and print(f'{n2s(w, x)} crosses {n2s(s, t)}')
                 Xlist.append((w, x))
         return Xlist
 
-    def plan_detour(root, blocked, goal_, u, v, barrierLo,
-                    barrierHi, savings, depth=0, remove=set()):
-        '''
+    def plan_detour(
+        root, blocked, goal_, u, v, barrierLo, barrierHi, savings, depth=0, remove=set()
+    ):
+        """
         (blocked, goal_) is the detour segment
         (u, v) is an edge crossing it
         barrierLo/Hi are the extremes of the subtree of (u, v) wrt root
         savings = <benefit of the edge addition> - <previous detours>
-        '''
+        """
         # print(f'[{i}] <plan_detour_recursive[{depth}]> {n2s(u, v)} '
         #       f'blocking {n2s(blocked, goal_)}')
         goalC = VertexC[goal_]
         subroot = subroot_[blocked]
         detourHop = DetourHop[subroot]
         blocked_ = fnT[blocked]
-        Awarn(f'({depth}) ' +
-              ('@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n' if depth == 0
-               else '') +
-              f'{n2s(u, v)} blocks {n2s(blocked)}, '
-              f'subroot: {n2s(subroot)}')
+        Awarn(
+            f'({depth}) '
+            + ('@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n' if depth == 0 else '')
+            + f'{n2s(u, v)} blocks {n2s(blocked)}, '
+            f'subroot: {n2s(subroot)}'
+        )
 
         # <refL>: length of the edge crossed by (u, v) – reference of cost
         if goal_ < 0:  # goal_ is a root
@@ -490,15 +531,22 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
         store = []
         # look for detours on the Lo and Hi sides of barrier
-        for corner_, loNotHi, sidelabel in ((barrierLo, True, 'Lo'),
-                                            (barrierHi, False, 'Hi')):
+        for corner_, loNotHi, sidelabel in (
+            (barrierLo, True, 'Lo'),
+            (barrierHi, False, 'Hi'),
+        ):
             Awarn(f'({depth}|{sidelabel}) BEGIN: {n2s(corner_)}')
 
             # block for possible future change (does nothing)
             nearest_root = -R + np.argmin(d2roots[corner_])
             if nearest_root != root:
-                debug('[%d] corner: %s is closest to %s than to %s',
-                      i, corner_, nearest_root, root)
+                debug(
+                    '[%d] corner: %s is closest to %s than to %s',
+                    i,
+                    corner_,
+                    nearest_root,
+                    root,
+                )
 
             # block for finding the best hook
             cornerC = VertexC[corner_]
@@ -507,11 +555,16 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 Blocked.remove(rem)
             if is_blocked_a_clone:
                 for j, (hop2check, prevhop) in enumerate(
-                        zip(detourHop[blockedHopI::-1],
-                            detourHop[blockedHopI - 1::-1])):
+                    zip(detourHop[blockedHopI::-1], detourHop[blockedHopI - 1 :: -1])
+                ):
                     if j == 2:
-                        debug('[%d] (2nd iter) depth: %d, blocked: %s, '
-                              'subroot: %s', i, depth, blocked, subroot)
+                        debug(
+                            '[%d] (2nd iter) depth: %d, blocked: %s, subroot: %s',
+                            i,
+                            depth,
+                            blocked,
+                            subroot,
+                        )
                         # break
                     hop2check_ = fnT[hop2check]
                     is_hop_a_barriers_clone = hop2check_ in Barrier
@@ -520,12 +573,13 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     hop2checkC = VertexC[hop2check_]
                     discrim = angle(prevhopC, hop2checkC, cornerC) > 0
                     is_concave_at_hop2check = (
-                        (not is_hop_a_barriers_clone and
-                         (discrim != detourLoNotHi[hop2check])) or
-                        (is_hop_a_barriers_clone and
-                         (discrim != loNotHi)))
-                    Awarn(f'concavity check at {n2s(hop2check)}: '
-                          f'{is_concave_at_hop2check}')
+                        not is_hop_a_barriers_clone
+                        and (discrim != detourLoNotHi[hop2check])
+                    ) or (is_hop_a_barriers_clone and (discrim != loNotHi))
+                    Awarn(
+                        f'concavity check at {n2s(hop2check)}: '
+                        f'{is_concave_at_hop2check}'
+                    )
                     if is_concave_at_hop2check:
                         # Awarn(f'CONCAVE at {n2s(hop2check)}')
                         #       f'at {n2s(hop2check)}: {is_concave_at_hop2check}, '
@@ -534,15 +588,15 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                             if prevhop >= T and hop2check not in Barrier:
                                 prevprevhop = detourHop[blockedHopI - j - 2]
                                 prevprevhopC = VertexC[fnT[prevprevhop]]
-                                prevhopSubTreeC = \
-                                    VertexC[[h for h in subtree_[prevhop_]
-                                             if h < T]]
+                                prevhopSubTreeC = VertexC[
+                                    [h for h in subtree_[prevhop_] if h < T]
+                                ]
                                 # TODO: the best thing would be to use here the
                                 #       same split algorithm used later
                                 #       (barrsplit)
                                 if is_bunch_split_by_corner(
-                                        prevhopSubTreeC, cornerC,
-                                        prevhopC, prevprevhopC)[0]:
+                                    prevhopSubTreeC, cornerC, prevhopC, prevprevhopC
+                                )[0]:
                                     break
                             # get_crossings(corner_, prevhop_)):
                             # <detour can actually bypass the previous one>
@@ -551,8 +605,9 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     else:
                         break
             # get the distance from every node in Blocked to corner
-            D2corner = np.squeeze(cdist(VertexC[fnT[Blocked]],
-                                        VertexC[np.newaxis, corner_]))
+            D2corner = np.squeeze(
+                cdist(VertexC[fnT[Blocked]], VertexC[np.newaxis, corner_])
+            )
             if not D2corner.shape:
                 D2corner = [float(D2corner)]
             hookI = np.argmin(D2corner)
@@ -564,10 +619,9 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             shift = hook != blocked
             if shift and is_blocked_a_clone:
                 prevhop_ = blocked_
-                for hop in detourHop[blockedHopI - 1::-1]:
+                for hop in detourHop[blockedHopI - 1 :: -1]:
                     hop_ = fnT[hop]
-                    prevL += np.hypot(*(VertexC[hop_] -
-                                        VertexC[prevhop_]))
+                    prevL += np.hypot(*(VertexC[hop_] - VertexC[prevhop_]))
                     Awarn(f'adding {n2s(hop_, prevhop_)}')
                     prevhop_ = hop_
                     if hop == hook or hop < T:
@@ -595,12 +649,12 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     store.append((addedL, path, LoNotHi, direct, shift))
                     continue
             Awarn(f'hook: {n2s(hook)}')
-            nearL = (d2roots[corner_, goal_] if goal_ < 0
-                     else np.hypot(*(goalC - cornerC)))
+            nearL = (
+                d2roots[corner_, goal_] if goal_ < 0 else np.hypot(*(goalC - cornerC))
+            )
             farL = D2corner[hookI]
             addedL = farL + nearL - prevL
-            Awarn(f'{n2s(hook, corner_, goal_)} '
-                 f'addedL: {addedL:.0f}')
+            Awarn(f'{n2s(hook, corner_, goal_)} addedL: {addedL:.0f}')
             if addedL > savings:
                 # <detour is more costly than the savings from (u, v)>
                 store.append((np.inf, (hook, corner_)))
@@ -612,12 +666,15 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             BarrierC = VertexC[fnT[BarrierPrime]]
 
             is_barrier_split, insideI, outsideI = is_bunch_split_by_corner(
-                BarrierC, hookC, cornerC, goalC)
+                BarrierC, hookC, cornerC, goalC
+            )
 
             # TODO: think if this subroot edge waiver is correct
-            FarX = [farX for farX in get_crossings(hook, corner_,
-                                                   detour_waiver=True)
-                    if farX[0] >= 0 and farX[1] >= 0]
+            FarX = [
+                farX
+                for farX in get_crossings(hook, corner_, detour_waiver=True)
+                if farX[0] >= 0 and farX[1] >= 0
+            ]
             # this will condense multiple edges from the same subtree into one
             FarXsubtree = {subroot_[s]: (s, t) for s, t in FarX}
 
@@ -630,9 +687,10 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 # TODO: these criteria are too ad hoc, improve it
                 if subroot_[barrierX_] in FarXsubtree:
                     del FarXsubtree[subroot_[barrierX_]]
-                elif (barrierX_ not in G[corner_]
-                      and d2roots[barrierX_, root] >
-                        1.1*d2roots[fnT[hook], root]):
+                elif (
+                    barrierX_ not in G[corner_]
+                    and d2roots[barrierX_, root] > 1.1 * d2roots[fnT[hook], root]
+                ):
                     # <this is a spurious barrier split>
                     # ignore this barrier split
                     is_barrier_split = False
@@ -644,8 +702,10 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             # possible check to include: (something like this)
             # if (anglesRank[corner_, root] >
             #     anglesRank[ComponHiLim[subroot_[blocked], root]]
-            Awarn(f'barrsplit: {is_barrier_split}, inside: {len(insideI)}, '
-                  f'outside: {len(outsideI)}, total: {len(BarrierC)}')
+            Awarn(
+                f'barrsplit: {is_barrier_split}, inside: {len(insideI)}, '
+                f'outside: {len(outsideI)}, total: {len(BarrierC)}'
+            )
             # if is_barrier_split or get_crossings(corner_, goal_):
             barrAddedL = 0
             nearX = get_crossings(corner_, goal_, detour_waiver=True)
@@ -660,23 +720,28 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             elif is_barrier_split:
                 # <barrier slightly split>
                 # go around small interferences with the barrier itself
-                Awarn(f'SPLIT: {n2s(hook, corner_)} leaves '
-                      f'{n2s(BarrierPrime[barrHackI])} isolated')
+                Awarn(
+                    f'SPLIT: {n2s(hook, corner_)} leaves '
+                    f'{n2s(BarrierPrime[barrHackI])} isolated'
+                )
                 # will the FarX code handle this case?
                 barrierXC = BarrierC[barrHackI]
                 # barrpath = (hook, barrierX, corner_)
                 # two cases: barrHop before or after corner_
-                corner1st = (d2rootsRank[barrierX_, root] <
-                             d2rootsRank[corner_, root])
+                corner1st = d2rootsRank[barrierX_, root] < d2rootsRank[corner_, root]
                 if corner1st:
-                    barrAddedL = (np.hypot(*(goalC - barrierXC))
-                                  + np.hypot(*(cornerC - barrierXC))
-                                  - nearL)
+                    barrAddedL = (
+                        np.hypot(*(goalC - barrierXC))
+                        + np.hypot(*(cornerC - barrierXC))
+                        - nearL
+                    )
                     barrhop = (barrierX_,)
                 else:
-                    barrAddedL = (np.hypot(*(hookC - barrierXC))
-                                  + np.hypot(*(cornerC - barrierXC))
-                                  - farL)
+                    barrAddedL = (
+                        np.hypot(*(hookC - barrierXC))
+                        + np.hypot(*(cornerC - barrierXC))
+                        - farL
+                    )
                     barrhop = (corner_,)
                     corner_ = barrierX_
                 Awarn(f'barrAddedL: {barrAddedL:.0f}')
@@ -687,26 +752,34 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 barrLoNotHi = tuple()
 
             if len(FarXsubtree) > 1:
-                Awarn(f'NOT IMPLEMENTED: many ({len(FarXsubtree)}) '
-                      f'crossings of {n2s(hook, corner_)} ('
-                      f'{", ".join([n2s(a, b) for a, b in FarXsubtree.values()])})')
+                Awarn(
+                    f'NOT IMPLEMENTED: many ({len(FarXsubtree)}) '
+                    f'crossings of {n2s(hook, corner_)} ('
+                    f'{", ".join([n2s(a, b) for a, b in FarXsubtree.values()])})'
+                )
                 store.append((np.inf, (hook, corner_)))
                 continue
             elif FarXsubtree:  # there is one crossing
                 subbarrier, farX = FarXsubtree.popitem()
                 # print('farX:', n2s(*farX))
                 if depth > maxDepth:
-                    warn('<plan_detour[%d]> max depth (%s) exceeded.',
-                         depth, maxDepth)
+                    warn('<plan_detour[%d]> max depth (%s) exceeded.', depth, maxDepth)
                     store.append((np.inf, (hook, corner_)))
                     continue
                 else:
                     new_barrierLo, new_barrierHi = subtree_span__[root][subbarrier]
                     remaining_savings = savings - addedL
                     subdetour = plan_detour(
-                        root, hook, corner_, *farX, new_barrierLo,
-                        new_barrierHi, remaining_savings, depth + 1,
-                        remove=not2hook)
+                        root,
+                        hook,
+                        corner_,
+                        *farX,
+                        new_barrierLo,
+                        new_barrierHi,
+                        remaining_savings,
+                        depth + 1,
+                        remove=not2hook,
+                    )
                     if subdetour is None:
                         store.append((np.inf, (hook, corner_)))
                         continue
@@ -753,8 +826,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             else:  # there are no crossings
                 path = (hook, corner_, *barrhop)
                 LoNotHi = (*barrLoNotHi,)
-            Awarn(f'{sidelabel} STORE: {n2s(*path)}'
-                  f' addedL: {addedL:.0f}')
+            Awarn(f'{sidelabel} STORE: {n2s(*path)} addedL: {addedL:.0f}')
             # TODO: properly check for direct connection
             # TODO: if shift: test if there is a direct path
             #       from hook to root
@@ -766,13 +838,17 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         if store[0][0] < savings or store[1][0] < savings:
             loNotHi = store[0][0] < store[1][0]
             cost, path, LoNotHi, direct, shift = store[not loNotHi]
-            Awarn(f'({depth}) '
-                  f'take: {n2s(*store[not loNotHi][1], goal_)} (@{cost:.0f}), '
-                  f'drop: {n2s(*store[loNotHi][1], goal_)} '
-                  f'(@{store[loNotHi][0]:.0f})')
-            debug(f'<plan_detour[{depth}]>: {n2s(u, v)} crosses '
-                  f'{n2s(blocked, goal_)} but {n2s(*path, goal_)} '
-                  'may be used instead.')
+            Awarn(
+                f'({depth}) '
+                f'take: {n2s(*store[not loNotHi][1], goal_)} (@{cost:.0f}), '
+                f'drop: {n2s(*store[loNotHi][1], goal_)} '
+                f'(@{store[loNotHi][0]:.0f})'
+            )
+            debug(
+                f'<plan_detour[{depth}]>: {n2s(u, v)} crosses '
+                f'{n2s(blocked, goal_)} but {n2s(*path, goal_)} '
+                'may be used instead.'
+            )
             return (path, cost, LoNotHi + (loNotHi,), shift)
         return None
 
@@ -801,10 +877,10 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         G.add_node(corner, kind='detour', root=G.nodes[hook]['root'])
         log.append((i, 'addDN', (corner_, corner)))
         # add detour edges
-        length = np.hypot(*(VertexC[fnT[hook]] -
-                            VertexC[corner_]).T)
-        G.add_edge(hook, corner, length=length,
-                   kind='detour', color='yellow', style='dashed')
+        length = np.hypot(*(VertexC[fnT[hook]] - VertexC[corner_]).T)
+        G.add_edge(
+            hook, corner, length=length, kind='detour', color='yellow', style='dashed'
+        )
         log.append((i, 'addDE', (hook, corner, fnT[hook], corner_)))
         return corner
 
@@ -817,8 +893,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         # update detourLoNotHi
         detourLoNotHi[corner] = loNotHi
         # update edges lengths
-        farL = np.hypot(*(VertexC[fnT[hook]]
-                          - VertexC[corner_]).T)
+        farL = np.hypot(*(VertexC[fnT[hook]] - VertexC[corner_]).T)
         # print(f'[{i}] updating {n2s(hook, corner)}')
         G[hook][corner].update(length=farL)
         log.append((i, 'movDN', (hook, corner, fnT[hook], corner_)))
@@ -833,8 +908,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         if not Corner_:
             # <a direct feeder replacing previous feeder>
             # TODO: this case is very outdated, probably wrong
-            debug('[%d] <make_detour> direct subroot «%s–%s»',
-                  i, hook, root)
+            debug('[%d] <make_detour> direct subroot «%s–%s»', i, hook, root)
             # remove previous proximal
             commited_[root].remove(blocked)
             subtree_[subroot].remove(blocked)
@@ -842,8 +916,9 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             log.append((i, 'remE', (blocked, root)))
             # make a new direct feeder
             length = d2roots[fnT[hook], root]
-            G.add_edge(hook, root, length=length,
-                       kind='detour', color='yellow', style='dashed')
+            G.add_edge(
+                hook, root, length=length, kind='detour', color='yellow', style='dashed'
+            )
             log.append((i, 'addDE', (hook, root, fnT[hook], root)))
             commited_[root].add(hook)
         else:
@@ -865,8 +940,14 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     hook = corner
                 # add the last feeder segment: last corner node to root
                 length = d2roots[corner_, root]
-                G.add_edge(corner, root, length=length,
-                           kind='detour', color='yellow', style='dashed')
+                G.add_edge(
+                    corner,
+                    root,
+                    length=length,
+                    kind='detour',
+                    color='yellow',
+                    style='dashed',
+                )
                 log.append((i, 'addDE', (corner, root, corner_, root)))
                 commited_[root].add(corner)
             else:
@@ -885,23 +966,26 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     j = 0
                     stales = iter(detourHop[1:])
                     k = abs(newN) if newN < 0 else 0
-                    new2stale_cut = detourHop[k:k + 2]
+                    new2stale_cut = detourHop[k : k + 2]
                     detourHop.clear()
                     detourHop.append(hook)
                 else:
-                    stales = iter(detourHop[j + 1:])
+                    stales = iter(detourHop[j + 1 :])
                     newN += j
                     k = j + (abs(newN) if newN < 0 else 0)
-                    new2stale_cut = detourHop[k:k + 2]
-                    del detourHop[j + 1:]
+                    new2stale_cut = detourHop[k : k + 2]
+                    del detourHop[j + 1 :]
                 # print(f'[{i}] <make_detour> removing {n2s(*new2stale_cut)}, '
                 #       f'{new2stale_cut in G.edges}')
                 # newN += j
                 # TODO: this is not handling the case of more stale hops than
                 #       necessary for the detour path (must at least cleanup G)
                 if newN < 0:
-                    debug('[%d] WARNING <make_detour> more stales than '
-                          'needed: %d', i, abs(newN))
+                    debug(
+                        '[%d] WARNING <make_detour> more stales than needed: %d',
+                        i,
+                        abs(newN),
+                    )
                     while newN < 0:
                         stale = next(stales)
                         G.remove_node(stale)
@@ -921,13 +1005,16 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                         if j == newN:
                             # add new2stale_cut edge
                             # print(f'[{i}] adding {n2s(hook, stale)}')
-                            G.add_edge(hook, stale, kind='detour',
-                                       color='yellow', style='dashed')
-                            log.append((i, 'addDE', (hook, stale,
-                                                     fnT[hook], corner_)))
+                            G.add_edge(
+                                hook,
+                                stale,
+                                kind='detour',
+                                color='yellow',
+                                style='dashed',
+                            )
+                            log.append((i, 'addDE', (hook, stale, fnT[hook], corner_)))
                         # move the stale corners to their new places
-                        corner = move_corner(stale, hook, corner_,
-                                             subroot, loNotHi)
+                        corner = move_corner(stale, hook, corner_, subroot, loNotHi)
                     hook = corner
                 # update the subroot edge length
                 nearL = d2roots[corner_, root]
@@ -953,22 +1040,32 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             keepLo, keepHi = subtree_span_[sr_v]
             dropLo, dropHi = subtree_span_[sr_u]
             unionLo[root], unionHi[root] = union_limits(
-                root, u, dropLo, dropHi, v, keepLo, keepHi)
-            debug('<angle_span> root %s: //%s:%s// ',
-                  F[root], F[unionLo[root]], F[unionHi[root]])
+                root, u, dropLo, dropHi, v, keepLo, keepHi
+            )
+            debug(
+                '<angle_span> root %s: //%s:%s// ',
+                F[root],
+                F[unionLo[root]],
+                F[unionHi[root]],
+            )
 
         abort = False
         Detour = {}
 
         for root in roots2check:
             for proximal in commited_[root] - {v}:
-                if (is_crossing_feeder(root, proximal, u, v,
-                                       touch_is_cross=True) or
-                        (proximal >= T and fnT[proximal] in (u, v) and
-                         (is_bunch_split_by_corner(
-                             VertexC[fnT[union]],
-                             *VertexC[fnT[[DetourHop[subroot_[proximal]][-2],
-                                          proximal, root]]])[0]))):
+                if is_crossing_feeder(root, proximal, u, v, touch_is_cross=True) or (
+                    proximal >= T
+                    and fnT[proximal] in (u, v)
+                    and (
+                        is_bunch_split_by_corner(
+                            VertexC[fnT[union]],
+                            *VertexC[
+                                fnT[[DetourHop[subroot_[proximal]][-2], proximal, root]]
+                            ],
+                        )[0]
+                    )
+                ):
                     # print('getting detour')
                     # detour = plan_detour(root, proximal,
                     #                     u, v, unionLo[root],
@@ -976,37 +1073,58 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     # TODO: it would be worth checking if changing roots is the
                     #       shortest path to avoid the (u, v) block
                     detour = plan_detour(
-                        root, proximal, root, u, v,
-                        unionLo[root], unionHi[root], -tradeoff)
+                        root,
+                        proximal,
+                        root,
+                        u,
+                        v,
+                        unionLo[root],
+                        unionHi[root],
+                        -tradeoff,
+                    )
                     if detour is not None:
                         Detour[proximal] = detour
                     else:
-                        debug('<check_feeder_crossings> discarding «%s–%s»: '
-                              'would block subroot %s', F[u], F[v], proximal)
+                        debug(
+                            '<check_feeder_crossings> discarding «%s–%s»: '
+                            'would block subroot %s',
+                            F[u],
+                            F[v],
+                            proximal,
+                        )
                         abort = True
                         break
             if abort:
                 break
 
         if not abort and Detour:
-            debug('<check_feeder_crossings> detour options: %s',
-                  tuple(path for path, _, _, _ in Detour.values()))
+            debug(
+                '<check_feeder_crossings> detour options: %s',
+                tuple(path for path, _, _, _ in Detour.values()),
+            )
             # <crossing detected but detours are possible>
             detoursCost = sum((cost for _, cost, _, _ in Detour.values()))
             if detoursCost < -tradeoff:
                 # add detours to G
-                detdesc = [f'blocked {n2s(blocked)}, '
-                           f'subroot {n2s(subroot_[blocked])}, '
-                           f'{n2s(*path)} '
-                           f'@{cost:.0f}'
-                           for blocked, (path, cost, loNotHi, shift)
-                           in Detour.items()]
+                detdesc = [
+                    f'blocked {n2s(blocked)}, '
+                    f'subroot {n2s(subroot_[blocked])}, '
+                    f'{n2s(*path)} '
+                    f'@{cost:.0f}'
+                    for blocked, (path, cost, loNotHi, shift) in Detour.items()
+                ]
                 Awarn('\n' + '\n'.join(detdesc))
                 for blocked, (path, _, LoNotHi, shift) in Detour.items():
                     make_detour(blocked, path, LoNotHi, shift)
             else:
-                debug('Multiple Detour cancelled for «%s–%s» (tradeoff = %.0f)'
-                      ' × (cost = %.0f):', F[u], F[v], -tradeoff, detoursCost)
+                debug(
+                    'Multiple Detour cancelled for «%s–%s» (tradeoff = %.0f)'
+                    ' × (cost = %.0f):',
+                    F[u],
+                    F[v],
+                    -tradeoff,
+                    detoursCost,
+                )
                 abort = True
         return abort, unionLo, unionHi
 
@@ -1018,8 +1136,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
 
     # BEGIN: main loop
     def loop():
-        '''Takes a step in the iterative tree building process.
-        Return value [bool]: not done.'''
+        """Takes a step in the iterative tree building process.
+        Return value [bool]: not done."""
         nonlocal i, prevented_crossings, tradeoff
         while True:
             i += 1
@@ -1067,25 +1185,37 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     Corner = []
                     # below are the 2 cases in which a new edge
                     # will join two subtrees across a detour edge
-                    if (s >= T and (s_ == u or s_ == v) and
-                            s != DetourHop[subroot_[s]][-1]):
+                    if (
+                        s >= T
+                        and (s_ == u or s_ == v)
+                        and s != DetourHop[subroot_[s]][-1]
+                    ):
                         Corner.append(s)
-                    if (t >= T and (t_ == u or t_ == v) and
-                            t != DetourHop[subroot_[t]][-1]):
+                    if (
+                        t >= T
+                        and (t_ == u or t_ == v)
+                        and t != DetourHop[subroot_[t]][-1]
+                    ):
                         Corner.append(t)
                     for corner in Corner:
                         a, b = G[corner]
                         if is_bunch_split_by_corner(
-                                BarrierC,
-                                *VertexC[fnT[[a, corner, b]]])[0]:
-                            debug('[%d] «%s–%s» would cross %s–%s–%s',
-                                  i, F[u], F[v], F[a], F[corner], F[b])
+                            BarrierC, *VertexC[fnT[[a, corner, b]]]
+                        )[0]:
+                            debug(
+                                '[%d] «%s–%s» would cross %s–%s–%s',
+                                i,
+                                F[u],
+                                F[v],
+                                F[a],
+                                F[corner],
+                                F[b],
+                            )
                             eX.append((a, corner, b))
                             skip = True
                     if skip:
                         continue
-                    if is_crossing(uC, vC, *VertexC[fnT[[s, t]]],
-                                   touch_is_cross=False):
+                    if is_crossing(uC, vC, *VertexC[fnT[[s, t]]], touch_is_cross=False):
                         eXtmp.append((s, t))
                         if s in eXnodes:
                             nodes2check.add(s)
@@ -1097,19 +1227,25 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                     if s in nodes2check:
                         for w in G[s]:
                             if w != t and not is_same_side(
-                                    uC, vC, *VertexC[fnT[[w, t]]]):
+                                uC, vC, *VertexC[fnT[[w, t]]]
+                            ):
                                 eX.append((s, t))
                     elif t in nodes2check:
                         for w in G[t]:
                             if w != s and not is_same_side(
-                                    uC, vC, *VertexC[fnT[[w, s]]]):
+                                uC, vC, *VertexC[fnT[[w, s]]]
+                            ):
                                 eX.append((s, t))
                     else:
                         eX.append((s, t))
 
             if eX:
-                debug('<edge_crossing> discarding «%s–%s»: would cross %s',
-                      F[u], F[v], tuple((F[s], F[t]) for s, t in eX))
+                debug(
+                    '<edge_crossing> discarding «%s–%s»: would cross %s',
+                    F[u],
+                    F[v],
+                    tuple((F[s], F[t]) for s, t in eX),
+                )
                 # abort_edge_addition(sr_u, u, v)
                 prevented_crossings += 1
                 ban_queued_union(sr_u, u, v)
@@ -1123,12 +1259,13 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
             root = G.nodes[sr_v]['root']
             r2drop = G.nodes[sr_u]['root']
             if root != r2drop:
-                debug(f'<distinct_roots>: [{F[u]}] is bound to '
-                      f'[{F[r2drop]}], while'
-                      f'[{F[v]}] is to {F[root]}.')
+                debug(
+                    f'<distinct_roots>: [{F[u]}] is bound to '
+                    f'[{F[r2drop]}], while'
+                    f'[{F[v]}] is to {F[root]}.'
+                )
 
-            abort, unionLo, unionHi = check_feeder_crossings(u, v, sr_v,
-                                                           sr_u)
+            abort, unionLo, unionHi = check_feeder_crossings(u, v, sr_v, sr_u)
             if abort:
                 prevented_crossings += 1
                 ban_queued_union(sr_u, u, v)
@@ -1194,6 +1331,7 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 # sr_v}):
                 for subroot in ComponIn[sr_u] | ComponIn[sr_v]:
                     stale_subtrees.add(subroot)
+
     # END: main loop
 
     log = []
@@ -1206,13 +1344,13 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         old2new = np.arange(T + B, T + B + D)
         mask = np.ones(D, dtype=bool)
         for s in Stale:
-            old2new[s - T - B + 1:] -= 1
+            old2new[s - T - B + 1 :] -= 1
             mask[s - T - B] = False
         mapping = dict(zip(range(T + B, T + B + D), old2new))
         for k in Stale:
             mapping.pop(k)
         nx.relabel_nodes(G, mapping, copy=False)
-        fnT[T + B:T + B + D - len(Stale)] = fnT[T + B:T + B + D][mask]
+        fnT[T + B : T + B + D - len(Stale)] = fnT[T + B : T + B + D][mask]
         D -= len(Stale)
 
     debug('FINISHED – Detour nodes added: %d', D)
@@ -1224,8 +1362,10 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
                 if proximal not in commited_[root]:
                     not_marked.append(proximal)
         if not_marked:
-            debug('@@@@ WARNING: proximals %s were not commited @@@@',
-                  tuple(F[subroot] for subroot in not_marked))
+            debug(
+                '@@@@ WARNING: proximals %s were not commited @@@@',
+                tuple(F[subroot] for subroot in not_marked),
+            )
 
     # algorithm finished, store some info in the graph object
     G.graph.update(
@@ -1233,7 +1373,8 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
         capacity=capacity,
         runtime=time.perf_counter() - start_time,
         d2roots=d2roots,
-        method_options= options | dict(
+        method_options=options
+        | dict(
             fun_fingerprint=fun_fingerprint(),
         ),
         solver_details=dict(
@@ -1243,6 +1384,6 @@ def OBEW(L, capacity=8, rootlust=None, maxiter=10000, maxDepth=4,
     )
     if D > 0:
         G.graph['D'] = D
-        G.graph['fnT'] = np.concatenate((fnT[:T + B + D], fnT[-R:]))
+        G.graph['fnT'] = np.concatenate((fnT[: T + B + D], fnT[-R:]))
 
     return G

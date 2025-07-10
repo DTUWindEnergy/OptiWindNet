@@ -5,6 +5,7 @@
 #  and SWAP\* Neighborhood]
 # (https://arxiv.org/abs/2012.10384)
 from dataclasses import asdict
+
 import hybgensea as hgs
 import numpy as np
 from py.io import StdCaptureFD
@@ -28,9 +29,8 @@ def _solution_time(log, objective) -> float:
 
 
 def do_hgs(W, coordinates, vehicles, capacity, solver_options):
-
     demands = np.ones(coordinates.shape[1], dtype=float)
-    demands[0] = 0.  # depot demand = 0
+    demands[0] = 0.0  # depot demand = 0
 
     data = dict(
         x_coordinates=coordinates[0],
@@ -47,10 +47,8 @@ def do_hgs(W, coordinates, vehicles, capacity, solver_options):
     ap = hgs.AlgorithmParameters(**solver_options)
     hgs_solver = hgs.Solver(parameters=ap, verbose=True)
 
-    result, log, _ = StdCaptureFD.call(hgs_solver.solve_cvrp, data,
-                                       rounding=False)
-    
+    result, log, _ = StdCaptureFD.call(hgs_solver.solve_cvrp, data, rounding=False)
+
     solution_time = _solution_time(log, result.cost)
 
-    return (result.routes, result.time, solution_time, result.cost, log,
-            asdict(ap))
+    return (result.routes, result.time, solution_time, result.cost, log, asdict(ap))
