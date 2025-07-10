@@ -217,7 +217,7 @@ def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
             info(f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length")
             break
         Sʹ = pool.topology_from_mip_pool()
-        Sʹ.graph['creator'] += pool.name
+        Sʹ.graph['creator'] += '.' + pool.name
         Gʹ = PathFinder(
             G_from_S(Sʹ, A), planar=P, A=A, branched=branched
         ).create_detours()

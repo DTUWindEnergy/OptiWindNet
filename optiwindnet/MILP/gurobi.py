@@ -70,7 +70,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
                 S = self.topology_from_mip_pool()
-                S.graph['creator'] += self.name
+                S.graph['creator'] += '.' + self.name
                 G = PathFinder(
                     G_from_S(S, A), P, A,
                     branched=model_options['topology'] is Topology.BRANCHED

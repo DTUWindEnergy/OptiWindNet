@@ -2,7 +2,6 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
-import os
 import logging
 from typing import Any
 from itertools import chain
@@ -153,7 +152,7 @@ def make_min_length_model(
 ) -> tuple[cp_model.CpModel, ModelMetadata]:
     '''Make discrete optimization model over link set A.
 
-    Build ILP CP OR-tools model for the collector system length minimization.
+    Build OR-tools CP-SAT model for the collector system length minimization.
     
     Args:
       A: graph with the available edges to choose from
@@ -239,7 +238,7 @@ def make_min_length_model(
     # feeder limits
     min_feeders = math.ceil(T/k)
     all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
-    equal_not_bounded= False
+    is_equal_not_bounded = False
     if feeder_limit is FeederLimit.UNLIMITED:
         # valid inequality: number of gates is at least the minimum
         m.add(all_feeder_vars_sum >= min_feeders)
@@ -249,11 +248,11 @@ def make_min_length_model(
     else:
         if feeder_limit is FeederLimit.SPECIFIED:
             if max_feeders == min_feeders:
-                equal_not_bounded= True
+                is_equal_not_bounded = True
             elif max_feeders < min_feeders:
                 raise ValueError('max_feeders is below the minimum necessary')
         elif feeder_limit is FeederLimit.MINIMUM:
-            equal_not_bounded = True
+            is_equal_not_bounded = True
         elif feeder_limit is FeederLimit.MIN_PLUS1:
             max_feeders = min_feeders + 1
         elif feeder_limit is FeederLimit.MIN_PLUS2:
@@ -262,14 +261,14 @@ def make_min_length_model(
             max_feeders = min_feeders + 3
         else:
             raise NotImplementedError('Unknown value:', feeder_limit)
-        if equal_not_bounded:
+        if is_equal_not_bounded:
             m.add(all_feeder_vars_sum == min_feeders)
         else:
             m.add_linear_constraint(all_feeder_vars_sum, min_feeders,
                                     max_feeders)
         # enforce balanced subtrees (subtree loads differ at most by one unit)
         if balanced:
-            if not equal_not_bounded:
+            if not is_equal_not_bounded:
                 warn('Model option <balanced = True> is incompatible with '
                      'having a range of possible feeder counts: model will '
                      'not enforce balanced subtrees.')
@@ -322,7 +321,7 @@ def warmup_model(model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
     Changes `model` in-place.
 
     Args:
-      model: CP-Sat model to apply the solution to.
+      model: CP-SAT model to apply the solution to.
       metadata: indices to the model's variables.
       S: solution topology
 
@@ -355,14 +354,14 @@ def warmup_model(model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
 def topology_from_mip_sol(*, metadata: ModelMetadata,
                           solver: SolverORTools|cp_model.CpSolver,
                           **kwargs) -> nx.Graph:
-    '''Create a topology nx.Graph from the OR-tools solution to the MILP model.
+    '''Create a topology graph from the OR-tools solution to the MILP model.
 
     Args:
       metadata: attributes of the solved model
       solver: solver instance that solved the model
       kwargs: not used (signature compatibility)
     Returns:
-      Graph topology from the solution.
+      Graph topology `S` from the solution.
     '''
     # in ortools, the solution is in the solver instance not in the model
     S = nx.Graph(R=metadata.R, T=metadata.T)
@@ -395,7 +394,7 @@ def topology_from_mip_sol(*, metadata: ModelMetadata,
         capacity=metadata.capacity,
         max_load=max_load,
         has_loads=True,
-        creator='MILP.' + os.path.basename(__file__),
+        creator='MILP.' + __name__,
         solver_details={},
     )
     return S

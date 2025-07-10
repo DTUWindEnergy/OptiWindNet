@@ -407,13 +407,13 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) \
 
 def topology_from_mip_sol(*, model: pyo.ConcreteModel,
                           **kwargs) -> nx.Graph:
-    '''Create a topology nx.Graph from the solution to the Pyomo MILP model.
+    '''Create a topology graph from the solution to the Pyomo MILP model.
 
     Args:
       model: pyomo model instance
       kwargs: not used (signature compatibility)
     Returns:
-      Graph topology from the solution.
+      Graph topology `S` from the solution.
     '''
     # in pyomo, the solution is in the model instance not in the solver
     S = nx.Graph(R=len(model.R), T=len(model.T))
@@ -446,7 +446,7 @@ def topology_from_mip_sol(*, model: pyo.ConcreteModel,
         capacity=model.k.value,
         max_load=max_load,
         has_loads=True,
-        creator='MILP.' + os.path.basename(__file__),
+        creator='MILP.' + __name__,
         solver_details={},
     )
     return S
