@@ -6,8 +6,10 @@ import numpy.lib.recfunctions as nprec
 import networkx as nx
 from functools import partial
 
-from .heuristics import CPEW, NBEW, OBEW, ClassicEW
+from .heuristics import CPEW, NBEW, OBEW
 from .interarraylib import calcload, F
+
+__all__ = ('assign_cables',)
 
 heuristics = {
     'CPEW': CPEW,
