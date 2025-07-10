@@ -289,20 +289,23 @@ epub_exclude_files = ['search.html']
 def skip_empty_all_submodules(app, what, name, obj, skip, options):
     # Only consider modules
     if what == "module":
+        print(f'autoapi-skip-member: module {name=}', end=' | ')
         # Get the __all__ attribute, default to None if not present
         #  module_all = getattr(obj, "__all__", None)
         children = obj.obj.get('children')
         if children is None:
+            print('no children')
             return True
-        print('children is of type', type(children))
         try:
             index = children.index('__all__')
         except ValueError:
+            print(f'__all__ not found in {children=}')
             return True
         all = children[index]
         if len(all) == 0:
+            print('__all__ is empty')
             return True
-        print(f"autoapi-skip-member: {name=} {index=} {all=}")
+        print(f"fallback to default")
     return None  # Use default behavior otherwise
 
 def setup(app):
