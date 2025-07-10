@@ -291,7 +291,7 @@ def skip_empty_all_submodules(app, what, name, obj, skip, options):
     if what == "module":
         # Get the __all__ attribute, default to None if not present
         #  module_all = getattr(obj, "__all__", None)
-        children = getattr(obj, 'children')
+        children = getattr(obj.obj, 'children')
         if children is None:
             return True
         try:
