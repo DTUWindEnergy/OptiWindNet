@@ -15,8 +15,8 @@ import networkx as nx
 import numpy as np
 from pony import orm
 
-from optiwindnet.interarraylib import calcload
-from optiwindnet.utils import NodeTagger
+from ..interarraylib import calcload
+from ..utils import NodeTagger
 
 __all__ = ()
 
@@ -43,7 +43,14 @@ _misc_not = {'VertexC', 'anglesYhp', 'anglesXhp', 'anglesRank', 'angles',
 
 
 def L_from_nodeset(nodeset: object) -> nx.Graph:
-    '''Create the networkx Graph (nodes only) for a given nodeset.'''
+    '''Translate a NodeSet database entry to a location graph.
+
+    Args:
+      nodeset: an entry from the database NodeSet table.
+
+    Returns:
+      Graph L containing the positions and location metadata.
+    '''
     T = nodeset.T
     R = nodeset.R
     # assert B == sum(n >= T for n in nodeset.constraint_vertices)
@@ -72,6 +79,14 @@ def L_from_nodeset(nodeset: object) -> nx.Graph:
 
 
 def G_from_routeset(routeset: object) -> nx.Graph:
+    '''Translate a RouteSet database entry to a routeset graph.
+
+    Args:
+      routeset: an entry from the database RouteSet table.
+
+    Returns:
+      Graph G containing the routeset.
+    '''
     nodeset = routeset.nodes
     R = nodeset.R
     G = L_from_nodeset(nodeset)

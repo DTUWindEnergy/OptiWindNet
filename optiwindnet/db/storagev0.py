@@ -11,8 +11,8 @@ import networkx as nx
 import numpy as np
 from pony.orm import db_session
 
-from optiwindnet.interarraylib import calcload
-from optiwindnet.utils import NodeTagger
+from ..interarraylib import calcload
+from ..utils import NodeTagger
 
 __all__ = ()
 
