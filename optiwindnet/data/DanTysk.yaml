@@ -12,6 +12,8 @@
 # where {} is:
 # Wind turbines DanTysk.map 
 
+HANDLE: dantysk
+
 OPERATOR: Vattenfall
 
 TURBINE:

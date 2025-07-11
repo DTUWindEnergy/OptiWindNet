@@ -4,17 +4,19 @@
 import logging
 from types import SimpleNamespace
 from typing import Any
+
 import networkx as nx
 import pyomo.environ as pyo
-from .core import (
-    SolutionInfo, PoolHandler, investigate_pool, FeederRoute, Topology
-)
-from .pyomo import SolverPyomo, topology_from_mip_sol
-from ..pathfinding import PathFinder
-from ..interarraylib import G_from_S
 
-logger = logging.getLogger(__name__)
-error, info = logger.error, logger.info
+from ..interarraylib import G_from_S
+from ..pathfinding import PathFinder
+from ._core import FeederRoute, PoolHandler, SolutionInfo, Topology, investigate_pool
+from .pyomo import SolverPyomo, topology_from_mip_sol
+
+__all__ = ()
+
+_lggr = logging.getLogger(__name__)
+error, info = _lggr.error, _lggr.info
 
 
 class SolverGurobi(SolverPyomo, PoolHandler):
@@ -28,12 +30,16 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         # dummy attribute `solver` to be used by SolverPyomo.set_problem()
         self.solver = SimpleNamespace(warm_start_capable=lambda: True)
 
-    def solve(self, time_limit: int, mip_gap: float,
-              options: dict[str, Any] = {}, verbose: bool = False
-        ) -> SolutionInfo:
-        '''
+    def solve(
+        self,
+        time_limit: int,
+        mip_gap: float,
+        options: dict[str, Any] = {},
+        verbose: bool = False,
+    ) -> SolutionInfo:
+        """
         This will keep the Gurobi license in use until a call to `get_solution()`.
-        '''
+        """
         model = self.model
         try:
             model = self.model
@@ -41,8 +47,12 @@ class SolverGurobi(SolverPyomo, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         base_options = self.options | dict(timelimit=time_limit, mipgap=mip_gap)
-        solver = pyo.SolverFactory('gurobi', solver_io='python', manage_env=True,
-                                   options=base_options|options)
+        solver = pyo.SolverFactory(
+            'gurobi',
+            solver_io='python',
+            manage_env=True,
+            options=base_options | options,
+        )
         self.solver = solver
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
         result = solver.solve(model, **self.solve_kwargs, tee=verbose)
@@ -51,31 +61,35 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         bound = result['Problem'][0]['Lower bound']
         solution_info = SolutionInfo(
             runtime=result['Solver'][0]['Wallclock time'],
-            bound = bound,
-            objective = objective,
-            relgap = 1. - bound/objective,
-            termination = result['Solver'][0]['Termination condition'].name,
+            bound=bound,
+            objective=objective,
+            relgap=1.0 - bound / objective,
+            termination=result['Solver'][0]['Termination condition'].name,
         )
         self.solution_info, self.solver_options = solution_info, options
         info('>>> Solution <<<\n%s\n', solution_info)
         self.num_solutions = solver._solver_model.getAttr('SolCount')
         return solution_info
 
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
-        P, A, model_options = self.P, self.A, self.model_options
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        if A is None:
+            A = self.A
+        P, model_options = self.P, self.model_options
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
                 S = self.topology_from_mip_pool()
-                S.graph['creator'] += self.name
+                S.graph['creator'] += '.' + self.name
                 G = PathFinder(
-                    G_from_S(S, A), P, A,
-                    branched=model_options['topology'] is Topology.BRANCHED
+                    G_from_S(S, A),
+                    P,
+                    A,
+                    branched=model_options['topology'] is Topology.BRANCHED,
                 ).create_detours()
             else:
                 S, G = investigate_pool(P, A, self)
         except Exception as exc:
             raise exc
-        else: 
+        else:
             G.graph.update(self._make_graph_attributes())
             return S, G
         finally:

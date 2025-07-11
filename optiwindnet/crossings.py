@@ -1,21 +1,19 @@
 import math
-from collections.abc import Iterator, Iterable
-from bidict import bidict
+from collections.abc import Iterable, Iterator
 from itertools import chain
-import numpy as np
+
 import networkx as nx
+import numpy as np
+from bidict import bidict
+
+from .geometric import angle_helpers, is_bunch_split_by_corner, is_same_side
 from .interarraylib import calcload
-from .geometric import (
-    is_same_side,
-    is_bunch_split_by_corner,
-    angle_helpers
-)
 
 
-def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
-                           fnT: np.ndarray | None = None,
-                           EPSILON=1e-15) -> list:
-    '''List all crossings between edges in the `Edge` (E×2) numpy array.
+def get_interferences_list(
+    Edge: np.ndarray, VertexC: np.ndarray, fnT: np.ndarray | None = None, EPSILON=1e-15
+) -> list:
+    """List all crossings between edges in the `Edge` (E×2) numpy array.
 
     Coordinates must be provided in the `VertexC` (V×2) array.
 
@@ -24,7 +22,7 @@ def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
     must be provided.
 
     Should be used when edges are not limited to the expanded Delaunay set.
-    '''
+    """
     crossings = []
     if fnT is None:
         V = VertexC[Edge[:, 1]] - VertexC[Edge[:, 0]]
@@ -33,7 +31,7 @@ def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
     for i, ((UVx, UVy), (u, v)) in enumerate(zip(V[:-1], Edge[:-1])):
         u_, v_ = (u, v) if fnT is None else fnT[[u, v]]
         (uCx, uCy), (vCx, vCy) = VertexC[[u_, v_]]
-        for (STx, STy), (s, t) in zip(-V[i+1:], Edge[i+1:]):
+        for (STx, STy), (s, t) in zip(-V[i + 1 :], Edge[i + 1 :]):
             s_, t_ = (s, t) if fnT is None else fnT[[s, t]]
             if s_ == u_ or t_ == u_ or s_ == v_ or t_ == v_:
                 # <edges have a common node>
@@ -66,9 +64,9 @@ def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
             ST = STx, STy
 
             # denominator
-            f = STx*UVy - STy*UVx
+            f = STx * UVy - STy * UVx
             # TODO: verify if this arbitrary tolerance is appropriate
-            if math.isclose(f, 0., abs_tol=1e-5):
+            if math.isclose(f, 0.0, abs_tol=1e-5):
                 # segments are parallel
                 # TODO: there should be check for branch splitting in parallel
                 #       cases with touching points
@@ -77,30 +75,29 @@ def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
             C = uCx - sCx, uCy - sCy
             touch_found = []
             Xcount = 0
-            for k, num in enumerate((Px*Qy - Py*Qx)
-                                    for (Px, Py), (Qx, Qy) in
-                                    ((C, ST), (UV, C))):
+            for k, num in enumerate(
+                (Px * Qy - Py * Qx) for (Px, Py), (Qx, Qy) in ((C, ST), (UV, C))
+            ):
                 if f > 0:
                     if -EPSILON <= num <= f + EPSILON:  # num < 0 or f < num:
                         Xcount += 1
                         if math.isclose(num, 0, abs_tol=EPSILON):
-                            touch_found.append(2*k)
+                            touch_found.append(2 * k)
                         if math.isclose(num, f, abs_tol=EPSILON):
-                            touch_found.append(2*k + 1)
+                            touch_found.append(2 * k + 1)
                 else:
                     if f - EPSILON <= num <= EPSILON:  # 0 < num or num < f:
                         Xcount += 1
                         if math.isclose(num, 0, abs_tol=EPSILON):
-                            touch_found.append(2*k)
+                            touch_found.append(2 * k)
                         if math.isclose(num, f, abs_tol=EPSILON):
-                            touch_found.append(2*k + 1)
+                            touch_found.append(2 * k + 1)
 
             if Xcount == 2:
                 # segments cross or touch
                 uvst = (u, v, s, t)
                 if touch_found:
-                    assert len(touch_found) == 1, \
-                        'ERROR: too many touching points.'
+                    assert len(touch_found) == 1, 'ERROR: too many touching points.'
                     #  p = uvst[touch_found[0]]
                     p = touch_found[0]
                 else:
@@ -109,8 +106,9 @@ def get_interferences_list(Edge: np.ndarray, VertexC: np.ndarray,
     return crossings
 
 
-def edge_crossings(u: int, v: int, G: nx.Graph, diagonals: bidict) \
-        -> list[tuple[int, int]]:
+def edge_crossings(
+    u: int, v: int, G: nx.Graph, diagonals: bidict
+) -> list[tuple[int, int]]:
     u, v = (u, v) if u < v else (v, u)
     st = diagonals.get((u, v))
     conflicting = []
@@ -127,19 +125,20 @@ def edge_crossings(u: int, v: int, G: nx.Graph, diagonals: bidict) \
 
         # two triangles may contain ⟨s, t⟩, each defined by their non-st vertex
         for hat in (u, v):
-            for diag in (diagonals.inv.get((w, y) if w < y else (y, w))
-                         for w, y in ((s, hat), (hat, t))):
+            for diag in (
+                diagonals.inv.get((w, y) if w < y else (y, w))
+                for w, y in ((s, hat), (hat, t))
+            ):
                 if diag is not None and diag[0] >= 0:
                     conflicting.append(diag)
     return [edge for edge in conflicting if edge in G.edges]
 
 
-def edgeset_edgeXing_iter(diagonals: bidict) \
-        -> Iterator[list[tuple[int, int]]]:
-    '''Iterator over all edge crossings in an expanded Delaunay edge set `A`.
+def edgeset_edgeXing_iter(diagonals: bidict) -> Iterator[list[tuple[int, int]]]:
+    """Iterator over all edge crossings in an expanded Delaunay edge set `A`.
 
     Each crossing is a 2 or 3-tuple of (u, v) edges. Does not include gates.
-    '''
+    """
     checked = set()
     for (u, v), (s, t) in diagonals.items():
         # ⟨u, v⟩ is a diagonal of Delaunay ⟨s, t⟩
@@ -157,19 +156,24 @@ def edgeset_edgeXing_iter(diagonals: bidict) \
                 continue
             checked.add(triangle)
             conflicting = [uv]
-            for diag in (diagonals.inv.get((w, y) if w < y else (y, w))
-                         for w, y in ((s, hat), (hat, t))):
+            for diag in (
+                diagonals.inv.get((w, y) if w < y else (y, w))
+                for w, y in ((s, hat), (hat, t))
+            ):
                 if diag is not None and diag[0] >= 0:
                     conflicting.append(diag)
             if len(conflicting) > 1:
                 yield conflicting
 
 
-def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
-                  borders: Iterable | None = None,
-                  touch_is_cross: bool = True) \
-        -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
-    '''Iterate over all crossings between gates and edges/borders in G.
+def gateXing_iter(
+    G: nx.Graph,
+    *,
+    hooks: Iterable | None = None,
+    borders: Iterable | None = None,
+    touch_is_cross: bool = True,
+) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
+    """Iterate over all crossings between gates and edges/borders in G.
 
     If `hooks` is `None`, all nodes that are not a root neighbor are
     considered. Used in constraint generation for ILP model.
@@ -184,7 +188,7 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
 
     Yields:
       Pair of (edge, gate) that cross (each a 2-tuple of nodes).
-    '''
+    """
     R, T, VertexC = (G.graph[k] for k in ('R', 'T', 'VertexC'))
     fnT = G.graph.get('fnT')
     roots = range(-R, 0)
@@ -201,7 +205,7 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
         Edge = chain(Edge, borders)
     if hooks is None:
         all_nodes = np.arange(T)
-        IGate = [all_nodes]*R
+        IGate = [all_nodes] * R
     else:
         IGate = hooks
     # it is important to consider touch as crossing
@@ -219,14 +223,14 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
             rank = anglesRank[:, root]
             rootC = VertexC[root]
             uvA = ang[v] - ang[u]
-            swaped = (-np.pi < uvA) & (uvA < 0.) | (np.pi < uvA)
-            l, h = (v, u) if swaped else (u, v)
-            lR, hR = rank[l], rank[h]
+            swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
+            lo, hi = (v, u) if swaped else (u, v)
+            loR, hiR = rank[lo], rank[hi]
             pR_ = rank[iGate]
-            W = lR > hR  # wraps +-pi
-            L = less(lR, pR_)  # angle(low) <= angle(probe)
-            H = less(pR_, hR)  # angle(probe) <= angle(high)
-            is_rank_within = ~W & L & H | W & ~L & H | W & L & ~H
+            W = loR > hiR  # wraps +-pi
+            supL = less(loR, pR_)  # angle(low) <= angle(probe)
+            infH = less(pR_, hiR)  # angle(probe) <= angle(high)
+            is_rank_within = ~W & supL & infH | W & ~supL & infH | W & supL & ~infH
             for n in iGate[np.flatnonzero(is_rank_within)].tolist():
                 # this test confirms the crossing because `is_rank_within`
                 # established that root–n is on a line crossing u–v
@@ -238,7 +242,7 @@ def gateXing_iter(G: nx.Graph, *, hooks: Iterable | None = None,
 
 
 def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
-    '''Validate G's tree topology and absence of crossings.
+    """Validate G's tree topology and absence of crossings.
 
     Check if the routeset represented by G's edges is topologically sound,
     repects capacity and has no edge crossings nor branch splitting.
@@ -251,7 +255,7 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
 
     Example::
 
-      F = NodeTagger()
+      from optiwindnet.utils import F
       Xings = validate_routeset(G)
         for u, v, s, t in Xings:
           if u != v:
@@ -259,7 +263,7 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
           else:
             print(f'detour @ {F[u]} splits {F[s]}–{F[v]}–{F[t]}')
 
-    '''
+    """
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     VertexC = G.graph['VertexC']
@@ -312,7 +316,7 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
     # ¿do we need a special case for a detour segment going through a node?
 
     # check detour nodes for branch-splitting
-    for d, d_ in zip(range(T, T + D), fnT[T:T + D]):
+    for d, d_ in zip(range(T, T + D), fnT[T : T + D]):
         if G.degree[d_] == 1:
             # trivial case: no way to break a branch apart
             continue
@@ -330,9 +334,10 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
     return Xings
 
 
-def list_edge_crossings(S: nx.Graph, A: nx.Graph) \
-        -> list[tuple[tuple[int, int], tuple[int, int]]]:
-    '''List edge×edge crossings for the network topology in S.
+def list_edge_crossings(
+    S: nx.Graph, A: nx.Graph
+) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """List edge×edge crossings for the network topology in S.
 
     `S` must only use extended Delaunay edges. It will not detect crossings
     of non-extDelaunay gates or detours.
@@ -343,7 +348,7 @@ def list_edge_crossings(S: nx.Graph, A: nx.Graph) \
 
     Returns:
       list of 2-tuple (crossing) of 2-tuple (edge, ordered)
-    '''
+    """
     eeXings = []
     checked = set()
     diagonals = A.graph['diagonals']
@@ -357,8 +362,10 @@ def list_edge_crossings(S: nx.Graph, A: nx.Graph) \
                 eeXings.append((st, (u, v)))
             s, t = st
             # ⟨s, t⟩ may be part of up to two triangles, check their 4 sides
-            sides = (((w, y) if w < y else (y, w))
-                     for w, y in ((u, s), (s, v), (v, t), (t, u)))
+            sides = (
+                ((w, y) if w < y else (y, w))
+                for w, y in ((u, s), (s, v), (v, t), (t, u))
+            )
             for side in sides:
                 diag = diagonals.inv.get(side, False)
                 if diag and diag in S.edges and diag not in checked:

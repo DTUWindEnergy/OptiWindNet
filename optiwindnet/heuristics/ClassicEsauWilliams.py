@@ -1,32 +1,37 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import time
 import logging
+import time
 
-import numpy as np
 import networkx as nx
+import numpy as np
 from scipy.stats import rankdata
 
-from ..mesh import delaunay
 from ..geometric import apply_edge_exemptions, assign_root, complete_graph
-from ..utils import NodeTagger
+from ..mesh import delaunay
+from ..utils import F
 from .priorityqueue import PriorityQueue
 
+__all__ = ()
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
-
-F = NodeTagger()
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
-def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
-              weightfun=None, weight_attr='length'):
-    '''Classic Esau-Williams heuristic for C-MST
+def ClassicEW(
+    G_base,
+    capacity=8,
+    delaunay_based=False,
+    maxiter=10000,
+    weightfun=None,
+    weight_attr='length',
+):
+    """Classic Esau-Williams heuristic for C-MST
     inputs:
     G_base: networkx.Graph
     c: capacity
-    returns G_cmst: networkx.Graph'''
+    returns G_cmst: networkx.Graph"""
 
     start_time = time.perf_counter()
     # grab relevant options to store in the graph later
@@ -45,7 +50,7 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
             apply_edge_exemptions(A)
         # TODO: decide whether to keep this 'else' (to get edge arcs)
         # else:
-            # apply_edge_exemptions(A)
+        # apply_edge_exemptions(A)
     else:
         A = complete_graph(G_base)
 
@@ -67,7 +72,8 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
     G = nx.create_empty_copy(G_base)
     G.add_weighted_edges_from(
         ((n, r, d2roots[n, r]) for n, r in A.nodes(data='root') if n >= 0),
-        weight=weight_attr)
+        weight=weight_attr,
+    )
     # END: create initial star graph
 
     # BEGIN: helper data structures
@@ -112,8 +118,7 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
-                if (subroot_[v] in forbidden or
-                        len(subtree_[v]) > capacity_left):
+                if subroot_[v] in forbidden or len(subtree_[v]) > capacity_left:
                     # useless edges
                     edges2discard.append((u, v))
                 else:
@@ -129,10 +134,13 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
         # this function could be outside esauwilliams()
         unordchoices = np.array(
             weighted_edges,
-            dtype=[('weight', np.float64),
-                   ('vd2rootR', np.int_),
-                   ('u', np.int_),
-                   ('v', np.int_)])
+            dtype=[
+                ('weight', np.float64),
+                ('vd2rootR', np.int_),
+                ('u', np.int_),
+                ('v', np.int_),
+            ],
+        )
         # result = np.argsort(unordchoices, order=['weight'])
         # unordchoices  = unordchoices[result]
 
@@ -170,8 +178,13 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
             tradeoff = weight - d2roots[subroot, A.nodes[subroot]['root']]
             pq.add(tradeoff, subroot, (u, v))
             ComponIn[subroot_[v]].add(subroot)
-            debug('<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
-                  F[subroot], F[u], F[v], tradeoff)
+            debug(
+                '<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
+                F[subroot],
+                F[u],
+                F[v],
+                tradeoff,
+            )
         else:
             # no viable edge is better than subroot for this node
             # this becomes a final subroot
@@ -192,8 +205,7 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>',
-                  F[u], F[v])
+            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>', F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
@@ -218,8 +230,15 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
 
         if componin != is_reverse:
             # TODO: Why did I expect always False here? It is sometimes True.
-            debug('«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
-                  F[u], F[v], F[sr_u], F[sr_v], componin, is_reverse)
+            debug(
+                '«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
+                F[u],
+                F[v],
+                F[sr_u],
+                F[sr_v],
+                componin,
+                is_reverse,
+            )
 
         # END: block to be simplified
 
@@ -275,9 +294,13 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
             subroot_[n] = sr_v
             subtree_[n] = subtree
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        if lggr.isEnabledFor(logging.DEBUG) and pq:
-            debug('heap top: <%s>, «%s» %.3f', F[pq[0][-2]],
-                  tuple(F[x] for x in pq[0][-1]), pq[0][0])
+        if _lggr.isEnabledFor(logging.DEBUG) and pq:
+            debug(
+                'heap top: <%s>, «%s» %.3f',
+                F[pq[0][-2]],
+                tuple(F[x] for x in pq[0][-1]),
+                pq[0][0],
+            )
         else:
             debug('heap EMPTY')
         G.add_edge(u, v, **{weight_attr: A[u][v][weight_attr]})
@@ -308,15 +331,17 @@ def ClassicEW(G_base, capacity=8, delaunay_based=False, maxiter=10000,
                 stale_subtrees.add(subroot)
     # END: main loop
 
-    if lggr.isEnabledFor(logging.DEBUG):
+    if _lggr.isEnabledFor(logging.DEBUG):
         not_marked = []
         for root in roots:
             for subroot in G[root]:
                 if subroot not in commited_[root]:
                     not_marked.append(subroot)
         if not_marked:
-            debug('@@@@ WARNING: subroots %s were not commited @@@@',
-                  tuple(F[subroot] for subroot in not_marked))
+            debug(
+                '@@@@ WARNING: subroots %s were not commited @@@@',
+                tuple(F[subroot] for subroot in not_marked),
+            )
 
     # algorithm finished, store some info in the graph object
     G.graph['iterations'] = i
