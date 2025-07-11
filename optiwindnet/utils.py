@@ -2,7 +2,14 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import inspect
+import re
 from collections import namedtuple
+
+__all__ = ()
+
+
+def make_handle(s):
+    return re.sub(r'\W|^(?=\d)', '_', s)
 
 
 def namedtuplify(namedtuple_typename='', **kwargs):

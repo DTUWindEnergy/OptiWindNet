@@ -12,6 +12,8 @@ from .geometric import rotate
 from .interarraylib import describe_G
 from .themes import Colors
 
+__all__ = ('SvgRepr', 'svgplot')
+
 
 class SvgRepr:
     """
@@ -356,7 +358,8 @@ class Drawable:
             # this is a workaround for GitHub's bug in rendering svg utf8 text
             # (only when the svg is inside an ipynb notebook)
             desc_lines = [
-                l.encode('ascii', 'xmlcharrefreplace').decode() for l in desc_lines
+                line.encode('ascii', 'xmlcharrefreplace').decode()
+                for line in desc_lines
             ]
 
         text_linesE: list[svg.Element] = [

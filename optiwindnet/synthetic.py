@@ -5,9 +5,9 @@ import networkx as nx
 import numpy as np
 from scipy.spatial import ConvexHull
 
-from .utils import NodeTagger
+from .utils import F
 
-F = NodeTagger()
+__all__ = ()
 
 
 def toyfarm():

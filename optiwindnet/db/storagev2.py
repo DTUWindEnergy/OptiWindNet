@@ -15,10 +15,10 @@ import networkx as nx
 import numpy as np
 from pony import orm
 
-from optiwindnet.interarraylib import calcload
-from optiwindnet.utils import NodeTagger
+from ..interarraylib import calcload
+from ..utils import F, make_handle
 
-F = NodeTagger()
+__all__ = ()
 
 PackType = Mapping[str, Any]
 
@@ -92,7 +92,14 @@ _misc_not = {
 
 
 def L_from_nodeset(nodeset: object) -> nx.Graph:
-    """Create the networkx Graph (nodes only) for a given nodeset."""
+    """Translate a NodeSet database entry to a location graph.
+
+    Args:
+      nodeset: an entry from the database NodeSet table.
+
+    Returns:
+      Graph L containing the positions and location metadata.
+    """
     T = nodeset.T
     R = nodeset.R
     # assert B == sum(n >= T for n in nodeset.constraint_vertices)
@@ -128,6 +135,14 @@ def L_from_nodeset(nodeset: object) -> nx.Graph:
 
 
 def G_from_routeset(routeset: object) -> nx.Graph:
+    """Translate a RouteSet database entry to a routeset graph.
+
+    Args:
+      routeset: an entry from the database RouteSet table.
+
+    Returns:
+      Graph G containing the routeset.
+    """
     nodeset = routeset.nodes
     R = nodeset.R
     G = L_from_nodeset(nodeset)
@@ -341,12 +356,15 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     for k, v in misc.items():
         misc[k] = oddtypes_to_serializable(v)
     length = G.size(weight='length')
+    handle = G.graph.get('handle')
+    if handle is None:
+        handle = make_handle(G.graph['name'])
     packed_G = dict(
         R=R,
         T=T,
         C=C,
         D=D,
-        handle=G.graph.get('handle', G.graph['name'].strip().replace(' ', '_')),
+        handle=handle,
         capacity=G.graph['capacity'],
         length=length,
         creator=G.graph['creator'],

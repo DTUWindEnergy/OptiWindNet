@@ -13,10 +13,10 @@ import networkx as nx
 import numpy as np
 from pony import orm
 
-from optiwindnet.interarraylib import calcload, site_fingerprint
-from optiwindnet.utils import NodeTagger
+from ..interarraylib import calcload, site_fingerprint
+from ..utils import F
 
-F = NodeTagger()
+__all__ = ()
 
 PackType = Mapping[str, Any]
 

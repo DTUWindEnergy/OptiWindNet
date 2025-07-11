@@ -23,13 +23,13 @@ from ..geometric import (
 )
 from ..interarraylib import L_from_G, fun_fingerprint
 from ..mesh import make_planar_embedding
-from ..utils import Alerter, NodeStr, NodeTagger
+from ..utils import Alerter, F, NodeStr
 from .priorityqueue import PriorityQueue
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+__all__ = ()
 
-F = NodeTagger()
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 def OBEW(
@@ -206,12 +206,12 @@ def OBEW(
         _subroot, _u, _v = fnT[[subroot, u, v]]
         uvA = angles[_v, root] - angles[_u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
-        l, h = (_v, _u) if swaped else (_u, _v)
-        lR, hR, srR = anglesRank[(l, h, _subroot), root]
-        W = lR > hR  # wraps +-pi
-        L = less(lR, srR)  # angle(low) <= angle(probe)
-        H = less(srR, hR)  # angle(probe) <= angle(high)
-        if ~W & L & H | W & ~L & H | W & L & ~H:
+        lo, hi = (_v, _u) if swaped else (_u, _v)
+        loR, hiR, srR = anglesRank[(lo, hi, _subroot), root]
+        W = loR > hiR  # wraps +-pi
+        supL = less(loR, srR)  # angle(low) <= angle(probe)
+        infH = less(srR, hiR)  # angle(probe) <= angle(high)
+        if ~W & supL & infH | W & ~supL & infH | W & supL & ~infH:
             if not is_same_side(*VertexC[[_u, _v, root, _subroot]]):
                 # crossing subroot
                 debug(
@@ -1203,7 +1203,7 @@ def OBEW(
                             BarrierC, *VertexC[fnT[[a, corner, b]]]
                         )[0]:
                             debug(
-                                f'[%d] «%s–%s» would cross %s–%s–%s',
+                                '[%d] «%s–%s» would cross %s–%s–%s',
                                 i,
                                 F[u],
                                 F[v],
@@ -1355,7 +1355,7 @@ def OBEW(
 
     debug('FINISHED – Detour nodes added: %d', D)
 
-    if lggr.isEnabledFor(logging.DEBUG):
+    if _lggr.isEnabledFor(logging.DEBUG):
         not_marked = []
         for root in roots:
             for proximal in G[root]:

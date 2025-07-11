@@ -10,11 +10,13 @@ import pyomo.environ as pyo
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from .core import FeederRoute, PoolHandler, SolutionInfo, Topology, investigate_pool
+from ._core import FeederRoute, PoolHandler, SolutionInfo, Topology, investigate_pool
 from .pyomo import SolverPyomo, topology_from_mip_sol
 
-logger = logging.getLogger(__name__)
-error, info = logger.error, logger.info
+__all__ = ()
+
+_lggr = logging.getLogger(__name__)
+error, info = _lggr.error, _lggr.info
 
 
 class SolverGurobi(SolverPyomo, PoolHandler):
@@ -69,12 +71,14 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         self.num_solutions = solver._solver_model.getAttr('SolCount')
         return solution_info
 
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
-        P, A, model_options = self.P, self.A, self.model_options
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        if A is None:
+            A = self.A
+        P, model_options = self.P, self.model_options
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
                 S = self.topology_from_mip_pool()
-                S.graph['creator'] += self.name
+                S.graph['creator'] += '.' + self.name
                 G = PathFinder(
                     G_from_S(S, A),
                     P,

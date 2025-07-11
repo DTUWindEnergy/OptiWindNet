@@ -17,11 +17,12 @@ from .crossings import gateXing_iter
 from .geometric import rotation_checkers_factory
 from .interarraylib import bfs_subtree_loads, scaffolded
 from .mesh import planar_flipped_by_routeset
-from .utils import NodeTagger
+from .utils import F
 
-logger = logging.getLogger(__name__)
-debug, info, warn = logger.debug, logger.info, logger.warning
-F = NodeTagger()
+__all__ = ('PathFinder',)
+
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
 PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop'.split())
@@ -47,7 +48,7 @@ class PathNodes(dict):
         self, _source: int, sector: int, parent: int, dist: float, d_hop: float
     ) -> int:
         if parent not in self:
-            logger.error(
+            error(
                 'attempted to add an edge in `PathNodes` to nonexistent parent (%d)',
                 parent,
             )
@@ -243,7 +244,7 @@ class PathFinder:
             # the other side is a pinched portal and has a distinct sector.
             return NULL
         is_gate = any(_node in Gate for Gate in self.hooks2check)
-        _node_degree = self.G.degree[_node]
+        _node_degree = len(self.G._adj[_node])
         if is_gate and _node_degree == 1:
             # special case where a branch with 1 node uses a non_embed gate
             if _node == portal[0]:
@@ -477,7 +478,7 @@ class PathFinder:
                 self.uncharted[portal] = 0
                 self.uncharted[right, left] = 0
 
-                if left >= ST or (left in G.nodes and G.degree[left] == 0):
+                if left >= ST or (left in G.nodes and len(G._adj[left]) == 0):
                     sec_left = NULL
                 else:
                     sec_left = right
@@ -657,7 +658,7 @@ class PathFinder:
             hookchoices = (
                 [n for n in subtree if n < T]
                 if self.branched
-                else [n, next(h for h in subtree if G.degree[h] == 1)]
+                else [n, next(h for h in subtree if len(G._adj[h]) == 1)]
             )
             debug('hookchoices: %s', hookchoices)
 
@@ -671,7 +672,7 @@ class PathFinder:
                 )
             )
             if not path_options:
-                logger.error(
+                error(
                     'subtree of node %s has no non-crossing paths to '
                     'any root: leaving gate as-is',
                     F[n],
@@ -691,7 +692,7 @@ class PathFinder:
                 path.append(paths.prime_from_id[id])
                 pseudonode = paths[id]
             if not math.isclose(sum(dists), dist):
-                logger.error(
+                error(
                     'distance sum (%.1f) != best distance (%.1f), hook = %d, path: %s',
                     sum(dists),
                     dist,
@@ -701,7 +702,7 @@ class PathFinder:
 
             debug('path: %s', path)
             if len(path) < 2:
-                logger.error('no path found for %d-%d', r, n)
+                error('no path found for %d-%d', r, n)
                 continue
             added_clones = len(path) - 2
             Clone = list(range(clone_idx, clone_idx + added_clones))

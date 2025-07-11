@@ -9,13 +9,12 @@ from itertools import chain
 from typing import Any
 
 import networkx as nx
-import psutil
 import pyomo.environ as pyo
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
 from ..pathfinding import PathFinder
-from .core import (
+from ._core import (
     FeederLimit,
     FeederRoute,
     ModelMetadata,
@@ -25,8 +24,10 @@ from .core import (
     Topology,
 )
 
-logger = logging.getLogger(__name__)
-error, warn, info = logger.error, logger.warning, logger.info
+__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+
+_lggr = logging.getLogger(__name__)
+error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 # NOTE: SCIP has solution pool which can be accessed with PySCIPOpt: getSols()
 # TODO: move scip to scip.py and implement:
@@ -47,7 +48,7 @@ _optkey = dict(
 
 _default_options = dict(
     cbc=dict(
-        threads=len(psutil.Process().cpu_affinity()),
+        threads=os.cpu_count(),
         timeMode='elapsed',
         # the parameters below and more can be experimented with
         # http://www.decom.ufop.br/haroldo/files/cbcCommandLine.pdf
@@ -99,7 +100,7 @@ class SolverPyomo(Solver):
         else:
             self.solve_kwargs = {}
             if warmstart is not None:
-                warn(f'Solver <{self.name}> is not capable of warm-starting.')
+                warn('Solver <%s> is not capable of warm-starting.', self.name)
         self.model, self.metadata = model, metadata
 
     def solve(
@@ -139,8 +140,10 @@ class SolverPyomo(Solver):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
-        P, A, model_options = self.P, self.A, self.model_options
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        if A is None:
+            A = self.A
+        P, model_options = self.P, self.model_options
         S = topology_from_mip_sol(model=self.model)
         S.graph['creator'] += self.name
         G = PathFinder(
@@ -163,6 +166,7 @@ def make_min_length_model(
     topology: Topology = Topology.BRANCHED,
     feeder_route: FeederRoute = FeederRoute.SEGMENTED,
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+    balanced: bool = False,
     max_feeders: int = 0,
 ) -> tuple[pyo.ConcreteModel, ModelMetadata]:
     """Make discrete optimization model over link set A.
@@ -295,8 +299,8 @@ def make_min_length_model(
     )
 
     # feeder limits
+    min_feeders = math.ceil(T / m.k)
     if feeder_limit is not FeederLimit.UNLIMITED:
-        min_feeders = math.ceil(T / m.k)
 
         def feeder_limit_eq_rule(m):
             return sum(m.link_[t, r] for r in _R for t in _T) == min_feeders
@@ -322,6 +326,32 @@ def make_min_length_model(
             raise NotImplementedError('Unknown value:', feeder_limit)
         m.cons_feeder_limit = pyo.Constraint(rule=feeder_rule)
 
+        # enforce balanced subtrees (subtree loads differ at most by one unit)
+        if balanced:
+            if feeder_rule is not feeder_limit_eq_rule:
+                warn(
+                    'Model option <balanced = True> is incompatible with '
+                    'having a range of possible feeder counts: model will '
+                    'not enforce balanced subtrees.'
+                )
+            else:
+                feeder_min_load = T // min_feeders
+                if feeder_min_load < capacity:
+                    m.cons_balanced = pyo.Constraint(
+                        m.T,
+                        m.R,
+                        rule=(
+                            lambda m, t, r: m.flow_[t, r]
+                            >= m.link_[t, r] * feeder_min_load
+                        ),
+                    )
+    elif balanced:
+        warn(
+            'Model option <balanced = True> is incompatible with <feeder_limit'
+            ' = UNLIMITED>: model will not enforce balanced subtrees.'
+        )
+
+        # auxiliary variables
     # radial or branched topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
@@ -383,8 +413,16 @@ def make_min_length_model(
 
 
 def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
-    """
+    """Set initial solution into `model`.
+
     Changes `model` in-place.
+
+    Args:
+      model: pyomo model to apply the solution to.
+      S: solution topology
+
+    Returns:
+      The same model instance that was provided, now with a solution.
     """
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
@@ -395,13 +433,13 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
 
 
 def topology_from_mip_sol(*, model: pyo.ConcreteModel, **kwargs) -> nx.Graph:
-    """Create a topology nx.Graph from the solution to the Pyomo MILP model.
+    """Create a topology graph from the solution to the Pyomo MILP model.
 
     Args:
       model: pyomo model instance
       kwargs: not used (signature compatibility)
     Returns:
-      Graph topology from the solution.
+      Graph topology `S` from the solution.
     """
     # in pyomo, the solution is in the model instance not in the solver
     S = nx.Graph(R=len(model.R), T=len(model.T))
@@ -434,7 +472,7 @@ def topology_from_mip_sol(*, model: pyo.ConcreteModel, **kwargs) -> nx.Graph:
         capacity=model.k.value,
         max_load=max_load,
         has_loads=True,
-        creator='MILP.' + os.path.basename(__file__),
+        creator='MILP.' + __name__,
         solver_details={},
     )
     return S

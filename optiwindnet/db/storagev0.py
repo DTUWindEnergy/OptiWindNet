@@ -11,16 +11,16 @@ import networkx as nx
 import numpy as np
 from pony.orm import db_session
 
-from optiwindnet.interarraylib import calcload
-from optiwindnet.utils import NodeTagger
+from ..interarraylib import calcload
+from ..utils import F
+
+__all__ = ()
 
 # Coordinates use arrays of floats.
 # Somehow, nodesets with the same coordinates were getting different digests,
 # when the code ran on different computers.
 # Rouding to a fixed (small) number of decimal place to fix it.
 COORDINATES_DECIMAL_PLACES = 2
-
-F = NodeTagger()
 
 
 def graph_from_edgeset(edgeset):

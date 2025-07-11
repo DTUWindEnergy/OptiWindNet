@@ -10,9 +10,31 @@ import networkx as nx
 import numpy as np
 
 from .geometric import rotate
-from .utils import NodeTagger
+from .utils import F
 
-F = NodeTagger()
+__all__ = (
+    'describe_G',
+    'pathdist',
+    'count_diagonals',
+    'bfs_subtree_loads',
+    'calcload',
+    'site_fingerprint',
+    'fun_fingerprint',
+    'L_from_site',
+    'G_from_S',
+    'S_from_G',
+    'L_from_G',
+    'S_from_terse_links',
+    'terse_links_from_S',
+    'as_single_root',
+    'as_normalized',
+    'as_rescaled',
+    'as_undetoured',
+    'as_hooked_to_nearest',
+    'as_hooked_to_head',
+    'make_remap',
+    'scaffolded',
+)
 
 _essential_graph_attrs = (
     'R',
@@ -156,7 +178,7 @@ def calcload(G):
     for root in roots:
         G.nodes[root]['load'] = 0
         for subroot in G[root]:
-            subtree_load = bfs_subtree_loads(G, root, [subroot], subtree)
+            _ = bfs_subtree_loads(G, root, [subroot], subtree)
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
         total_load += G.nodes[root]['load']
@@ -550,6 +572,45 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     for r in range(-R, 0):
         L.add_node(r, label=G.nodes[r].get('label'), kind='oss')
     return L
+
+
+def S_from_terse_links(terse_links, **kwargs):
+    """Create a solution topology graph `S` from its `terse_links` encoding.
+
+    Inverse function of `terse_links_from_S()`.
+
+    Args:
+      terse_links: tree links encoded as 1D array (edges are: i->terse_links[i])
+    Returns:
+      Solution topology S.
+    """
+    T = terse_links.shape[0]
+    S = nx.Graph(T=T, R=abs(terse_links.min()), **kwargs)
+    S.add_edges_from(tuple(zip(range(T), terse_links)))
+    calcload(S)
+    if 'capacity' not in kwargs:
+        S.graph['capacity'] = S.graph['max_load']
+    return S
+
+
+def terse_links_from_S(S):
+    """Make a terse representation of the topology `S` as a 1D array.
+
+    Inverse function of `S_from_terse_links()`.
+
+    Args:
+      S: solution topology (must be a tree)
+    Returns:
+      1D array representing the links of S (edges are: i->terse_links[i])
+    """
+    T = S.graph['T']
+    terse_links = np.zeros((T,), dtype=np.int_)
+    # convert the graph to array representing the tree (edges i->terse[i])
+    for u, v, edgeD in S.edges(data=True):
+        u, v = (u, v) if u < v else (v, u)
+        i, target = (u, v) if edgeD["reverse"] else (v, u)
+        terse_links[i] = target
+    return terse_links
 
 
 def as_single_root(Lʹ: nx.Graph) -> nx.Graph:

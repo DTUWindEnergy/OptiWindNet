@@ -6,11 +6,12 @@ import logging
 import networkx as nx
 
 from .crossings import list_edge_crossings
-from .interarraylib import NodeTagger, calcload
+from .interarraylib import calcload
 
-logger = logging.getLogger(__name__)
-warn = logger.warning
-F = NodeTagger()
+__all__ = ('repair_routeset_path',)
+
+_lggr = logging.getLogger(__name__)
+warn = _lggr.warning
 
 
 def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:

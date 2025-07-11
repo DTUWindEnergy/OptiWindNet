@@ -3,7 +3,6 @@
 
 import logging
 import math
-import os
 from itertools import chain
 from typing import Any
 
@@ -13,7 +12,7 @@ from ortools.sat.python import cp_model
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
 from ..pathfinding import PathFinder
-from .core import (
+from ._core import (
     FeederLimit,
     FeederRoute,
     ModelMetadata,
@@ -25,8 +24,10 @@ from .core import (
     investigate_pool,
 )
 
-logger = logging.getLogger(__name__)
-info = logger.info
+__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+
+_lggr = logging.getLogger(__name__)
+error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 
 class _SolutionStore(cp_model.CpSolverSolutionCallback):
@@ -104,10 +105,9 @@ class SolverORTools(Solver, PoolHandler):
             setattr(solver.parameters, key, val)
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.relative_gap_limit = mip_gap
-        solver.log_callback = print
         solver.parameters.log_search_progress = verbose
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
-        result = solver.solve(model, storer)
+        _ = solver.solve(model, storer)
         storer.solutions.reverse()
         self.solution_pool = storer.solutions
         _, self._value_map = storer.solutions[0]
@@ -125,8 +125,10 @@ class SolverORTools(Solver, PoolHandler):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def get_solution(self) -> tuple[nx.Graph, nx.Graph]:
-        P, A, model_options = self.P, self.A, self.model_options
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        if A is None:
+            A = self.A
+        P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
             S = self.topology_from_mip_pool()
             G = PathFinder(
@@ -165,11 +167,12 @@ def make_min_length_model(
     topology: Topology = Topology.BRANCHED,
     feeder_route: FeederRoute = FeederRoute.SEGMENTED,
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
+    balanced: bool = False,
     max_feeders: int = 0,
 ) -> tuple[cp_model.CpModel, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
-    Build ILP CP OR-tools model for the collector system length minimization.
+    Build OR-tools CP-SAT model for the collector system length minimization.
 
     Args:
       A: graph with the available edges to choose from
@@ -257,18 +260,23 @@ def make_min_length_model(
     # feeder limits
     min_feeders = math.ceil(T / k)
     all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
-    equal_not_bounded = False
+    is_equal_not_bounded = False
     if feeder_limit is FeederLimit.UNLIMITED:
         # valid inequality: number of gates is at least the minimum
         m.add(all_feeder_vars_sum >= min_feeders)
+        if balanced:
+            warn(
+                'Model option <balanced = True> is incompatible with <feeder_limit'
+                ' = UNLIMITED>: model will not enforce balanced subtrees.'
+            )
     else:
         if feeder_limit is FeederLimit.SPECIFIED:
             if max_feeders == min_feeders:
-                equal_not_bounded = True
+                is_equal_not_bounded = True
             elif max_feeders < min_feeders:
                 raise ValueError('max_feeders is below the minimum necessary')
         elif feeder_limit is FeederLimit.MINIMUM:
-            equal_not_bounded = True
+            is_equal_not_bounded = True
         elif feeder_limit is FeederLimit.MIN_PLUS1:
             max_feeders = min_feeders + 1
         elif feeder_limit is FeederLimit.MIN_PLUS2:
@@ -277,10 +285,23 @@ def make_min_length_model(
             max_feeders = min_feeders + 3
         else:
             raise NotImplementedError('Unknown value:', feeder_limit)
-        if equal_not_bounded:
+        if is_equal_not_bounded:
             m.add(all_feeder_vars_sum == min_feeders)
         else:
             m.add_linear_constraint(all_feeder_vars_sum, min_feeders, max_feeders)
+        # enforce balanced subtrees (subtree loads differ at most by one unit)
+        if balanced:
+            if not is_equal_not_bounded:
+                warn(
+                    'Model option <balanced = True> is incompatible with '
+                    'having a range of possible feeder counts: model will '
+                    'not enforce balanced subtrees.'
+                )
+            else:
+                feeder_min_load = T // min_feeders
+                if feeder_min_load < capacity:
+                    for t, r in stars:
+                        m.add(flow_[t, r] >= link_[t, r] * feeder_min_load)
 
     # radial or branched topology
     if topology is Topology.RADIAL:
@@ -326,8 +347,17 @@ def make_min_length_model(
 def warmup_model(
     model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
 ) -> cp_model.CpModel:
-    """
+    """Set initial solution into `model`.
+
     Changes `model` in-place.
+
+    Args:
+      model: CP-SAT model to apply the solution to.
+      metadata: indices to the model's variables.
+      S: solution topology
+
+    Returns:
+      The same model instance that was provided, now with a solution.
     """
     R, T = metadata.R, metadata.T
     model.ClearHints()
@@ -355,14 +385,14 @@ def warmup_model(
 def topology_from_mip_sol(
     *, metadata: ModelMetadata, solver: SolverORTools | cp_model.CpSolver, **kwargs
 ) -> nx.Graph:
-    """Create a topology nx.Graph from the OR-tools solution to the MILP model.
+    """Create a topology graph from the OR-tools solution to the MILP model.
 
     Args:
       metadata: attributes of the solved model
       solver: solver instance that solved the model
       kwargs: not used (signature compatibility)
     Returns:
-      Graph topology from the solution.
+      Graph topology `S` from the solution.
     """
     # in ortools, the solution is in the solver instance not in the model
     S = nx.Graph(R=metadata.R, T=metadata.T)
@@ -397,7 +427,7 @@ def topology_from_mip_sol(
         capacity=metadata.capacity,
         max_load=max_load,
         has_loads=True,
-        creator='MILP.' + os.path.basename(__file__),
+        creator='MILP.' + __name__,
         solver_details={},
     )
     return S

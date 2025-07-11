@@ -10,13 +10,13 @@ from scipy.stats import rankdata
 from ..crossings import edge_crossings
 from ..geometric import assign_root
 from ..interarraylib import calcload
-from ..utils import NodeTagger
+from ..utils import F
 from .priorityqueue import PriorityQueue
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+__all__ = ()
 
-F = NodeTagger()
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
@@ -267,7 +267,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             subroot_[n] = sr_v
             subtree_[n] = subtree
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        if lggr.isEnabledFor(logging.DEBUG) and pq:
+        if _lggr.isEnabledFor(logging.DEBUG) and pq:
             debug(
                 'heap top: <%s>, «%s» %.3f',
                 F[pq[0][-2]],

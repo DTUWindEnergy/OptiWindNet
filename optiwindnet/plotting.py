@@ -13,8 +13,11 @@ from matplotlib.path import Path
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 
 from .geometric import rotate
-from .interarraylib import NodeTagger, describe_G
+from .interarraylib import describe_G
 from .themes import Colors
+from .utils import F
+
+__all__ = ('gplot', 'pplot')
 
 FONTSIZE_LABEL = 5
 FONTSIZE_LOAD = 7
@@ -26,8 +29,6 @@ NODESIZE_LABELED = 75
 NODESIZE_LABELED_ROOT = 32
 NODESIZE_DETOUR = 90
 NODESIZE_LABELED_DETOUR = 155
-
-F = NodeTagger()
 
 
 def _is_ccw(X, Y):
@@ -250,7 +251,7 @@ def gplot(
             ax=ax,
             labels=RootL,
             font_size=FONTSIZE_ROOT_LABEL,
-            font_color='black' if dark else 'yellow',
+            font_color=c.bg_color,
         )
         for artist in arts.values():
             artist.set_clip_on(False)

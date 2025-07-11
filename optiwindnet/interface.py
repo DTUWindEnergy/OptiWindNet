@@ -7,8 +7,10 @@ import networkx as nx
 import numpy as np
 import numpy.lib.recfunctions as nprec
 
-from .heuristics import CPEW, NBEW, OBEW, ClassicEW
+from .heuristics import CPEW, NBEW, OBEW
 from .interarraylib import F, calcload
+
+__all__ = ('assign_cables',)
 
 heuristics = {
     'CPEW': CPEW,
@@ -137,7 +139,6 @@ def G_from_table(
     G.graph.update(G_base.graph)
     G.add_nodes_from(G_base.nodes(data=True))
     R = G_base.graph['R']
-    T = G_base.graph['T']
 
     # indexing differences:
     # table starts at 1, while G starts at -R

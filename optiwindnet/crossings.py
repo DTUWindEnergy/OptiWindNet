@@ -224,13 +224,13 @@ def gateXing_iter(
             rootC = VertexC[root]
             uvA = ang[v] - ang[u]
             swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
-            l, h = (v, u) if swaped else (u, v)
-            lR, hR = rank[l], rank[h]
+            lo, hi = (v, u) if swaped else (u, v)
+            loR, hiR = rank[lo], rank[hi]
             pR_ = rank[iGate]
-            W = lR > hR  # wraps +-pi
-            L = less(lR, pR_)  # angle(low) <= angle(probe)
-            H = less(pR_, hR)  # angle(probe) <= angle(high)
-            is_rank_within = ~W & L & H | W & ~L & H | W & L & ~H
+            W = loR > hiR  # wraps +-pi
+            supL = less(loR, pR_)  # angle(low) <= angle(probe)
+            infH = less(pR_, hiR)  # angle(probe) <= angle(high)
+            is_rank_within = ~W & supL & infH | W & ~supL & infH | W & supL & ~infH
             for n in iGate[np.flatnonzero(is_rank_within)].tolist():
                 # this test confirms the crossing because `is_rank_within`
                 # established that root–n is on a line crossing u–v
@@ -255,7 +255,7 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
 
     Example::
 
-      F = NodeTagger()
+      from optiwindnet.utils import F
       Xings = validate_routeset(G)
         for u, v, s, t in Xings:
           if u != v:

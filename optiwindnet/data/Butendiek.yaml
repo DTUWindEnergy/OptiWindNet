@@ -12,6 +12,8 @@
 # where {} is:
 # Wind turbines Butendiek.map 
 
+HANDLE: butendiek
+
 OPERATOR: wpd AG
 
 TURBINE:

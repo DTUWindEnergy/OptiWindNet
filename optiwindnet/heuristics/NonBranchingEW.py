@@ -10,7 +10,6 @@ from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
 from ..geometric import (
-    angle,
     angle_helpers,
     angle_oracles_factory,
     apply_edge_exemptions,
@@ -20,13 +19,13 @@ from ..geometric import (
     is_same_side,
 )
 from ..mesh import delaunay
-from ..utils import NodeTagger
+from ..utils import F
 from .priorityqueue import PriorityQueue
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+__all__ = ()
 
-F = NodeTagger()
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 def NBEW(
@@ -145,12 +144,12 @@ def NBEW(
         less = np.less_equal if touch_is_cross else np.less
         uvA = angles[v, root] - angles[u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
-        l, h = (v, u) if swaped else (u, v)
-        lR, hR, srR = anglesRank[(l, h, subroot), root]
-        W = lR > hR  # wraps +-pi
-        L = less(lR, srR)  # angle(low) <= angle(probe)
-        H = less(srR, hR)  # angle(probe) <= angle(high)
-        if ~W & L & H | W & ~L & H | W & L & ~H:
+        lo, hi = (v, u) if swaped else (u, v)
+        loR, hiR, srR = anglesRank[(lo, hi, subroot), root]
+        W = loR > hiR  # wraps +-pi
+        supL = less(loR, srR)  # angle(low) <= angle(probe)
+        infH = less(srR, hiR)  # angle(probe) <= angle(high)
+        if ~W & supL & infH | W & ~supL & infH | W & supL & ~infH:
             if not is_same_side(*VertexC[[u, v, root, subroot]]):
                 # crossing subroot
                 debug(
@@ -504,7 +503,7 @@ def NBEW(
         keepLo, keepHi = subtree_span_[sr_v]
         dropLo, dropHi = subtree_span_[sr_u]
         unionLo, unionHi = union_limits(root, u, dropLo, dropHi, v, keepLo, keepHi)
-        debug(f'<angle_span> //%s:%s//', F[unionLo], F[unionHi])
+        debug('<angle_span> //%s:%s//', F[unionLo], F[unionHi])
 
         # check which feeders are within the union's angle span
         lR, hR = anglesRank[(unionLo, unionHi), root]
@@ -592,7 +591,7 @@ def NBEW(
             subroot_[n] = sr_v
             subtree_[n] = subtree
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        if lggr.isEnabledFor(logging.DEBUG) and pq:
+        if _lggr.isEnabledFor(logging.DEBUG) and pq:
             debug(
                 'heap top: <%s>, «%s» %.3f',
                 F[pq[0][-2]],
@@ -643,7 +642,7 @@ def NBEW(
             check_heap4crossings(root, sr_v)
     # END: main loop
 
-    if lggr.isEnabledFor(logging.DEBUG):
+    if _lggr.isEnabledFor(logging.DEBUG):
         not_marked = []
         for root in roots:
             for subroot in G[root]:

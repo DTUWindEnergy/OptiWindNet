@@ -4,6 +4,8 @@
 # The East area would make the polygon non-convex, which
 # is not implemented at the moment.
 
+HANDLE: hornsea2w
+
 OPERATOR: Ørsted
 
 TURBINE:

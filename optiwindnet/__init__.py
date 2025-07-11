@@ -2,17 +2,15 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 # author, version, license, and long description
-__version__ = '0.0.1'
 __author__ = 'Mauricio Souza de Alencar'
 
 __doc__ = """
-`interarray` implements extensions to the Esau-Williams heuristic for the
-capacitaded minimum spanning tree (CMST) problem.
+Tool for designing and optimizing the electrical cable network (collection system) for offshore wind power plants.
 
 https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 """
 
-__license__ = 'LGPL-2.1-or-later'
+__license__ = 'MIT'
 
 try:  # pragma: no cover
     # version.py created when installing optiwindnet

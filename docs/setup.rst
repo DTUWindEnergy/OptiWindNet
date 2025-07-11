@@ -3,7 +3,7 @@
 Requirements
 ============
 
-*OptiWindNet* has been tested on Windows 10 and on Linux systems, but should run on Windows 11 and MacOSX as well.
+*OptiWindNet* has been tested on Windows 10/11 and on Linux systems, but should run on MacOSX as well.
 
 A recent Python version (3.10+) is required to run *OptiWindNet*, and the use of a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
 

@@ -10,13 +10,13 @@ from scipy.stats import rankdata
 
 from ..geometric import apply_edge_exemptions, assign_root, complete_graph
 from ..mesh import delaunay
-from ..utils import NodeTagger
+from ..utils import F
 from .priorityqueue import PriorityQueue
 
-lggr = logging.getLogger(__name__)
-debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
+__all__ = ()
 
-F = NodeTagger()
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 def ClassicEW(
@@ -294,7 +294,7 @@ def ClassicEW(
             subroot_[n] = sr_v
             subtree_[n] = subtree
         debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
-        if lggr.isEnabledFor(logging.DEBUG) and pq:
+        if _lggr.isEnabledFor(logging.DEBUG) and pq:
             debug(
                 'heap top: <%s>, «%s» %.3f',
                 F[pq[0][-2]],
@@ -331,7 +331,7 @@ def ClassicEW(
                 stale_subtrees.add(subroot)
     # END: main loop
 
-    if lggr.isEnabledFor(logging.DEBUG):
+    if _lggr.isEnabledFor(logging.DEBUG):
         not_marked = []
         for root in roots:
             for subroot in G[root]:
