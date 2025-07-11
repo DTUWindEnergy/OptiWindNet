@@ -91,7 +91,7 @@ class SolverPyomo(Solver):
         else:
             self.solve_kwargs = {}
             if warmstart is not None:
-                warn(f'Solver <{self.name}> is not capable of warm-starting.')
+                warn('Solver <%s> is not capable of warm-starting.', self.name)
         self.model, self.metadata = model, metadata
 
     def solve(self, time_limit: int, mip_gap: float,
