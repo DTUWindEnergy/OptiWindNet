@@ -36,37 +36,35 @@ def graph_from_edgeset(edgeset):
         misc = pickle.loads(pickled_misc)
         creator = misc['edges_created_by']
         iterations = misc.get('iterations', 1)
-    G = nx.Graph(name=nodeset.name,
-                 R=R, T=T, handle=nodeset.handle,
-                 VertexC=VertexC,
-                 capacity=edgeset.capacity,
-                 boundary=pickle.loads(nodeset.boundary),
-                 landscape_angle=nodeset.landscape_angle,
-                 funname=edgeset.method.funname,
-                 edges_created_by=creator,
-                 iterations=iterations)
+    G = nx.Graph(
+        name=nodeset.name,
+        R=R,
+        T=T,
+        handle=nodeset.handle,
+        VertexC=VertexC,
+        capacity=edgeset.capacity,
+        boundary=pickle.loads(nodeset.boundary),
+        landscape_angle=nodeset.landscape_angle,
+        funname=edgeset.method.funname,
+        edges_created_by=creator,
+        iterations=iterations,
+    )
 
-    G.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'})
-                      for n in range(T)))
-    G.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'})
-                      for r in range(-R, 0)))
+    G.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
+    G.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
 
     D = edgeset.D or 0
     if D > 0:
         G.graph['D'] = D
         detournodes = range(T, T + D)
-        G.add_nodes_from(((s, {'kind': 'detour'})
-                          for s in detournodes))
+        G.add_nodes_from(((s, {'kind': 'detour'}) for s in detournodes))
         clone2prime = edgeset.clone2prime
-        assert len(clone2prime) == D, \
-            'len(EdgeSet.clone2prime) != EdgeSet.D'
+        assert len(clone2prime) == D, 'len(EdgeSet.clone2prime) != EdgeSet.D'
         fnT = np.arange(T + D + R)
-        fnT[T: T + D] = clone2prime
+        fnT[T : T + D] = clone2prime
         fnT[-R:] = range(-R, 0)
         G.graph['fnT'] = fnT
-        AllnodesC = np.vstack((VertexC[:T],
-                               VertexC[clone2prime],
-                               VertexC[-R:]))
+        AllnodesC = np.vstack((VertexC[:T], VertexC[clone2prime], VertexC[-R:]))
     else:
         AllnodesC = VertexC
 
@@ -78,8 +76,7 @@ def graph_from_edgeset(edgeset):
         for _, _, edgeD in G.edges(detournodes, data=True):
             edgeD['kind'] = 'detour'
     calc_length = G.size(weight='length')
-    assert abs(calc_length - edgeset.length) < 1, (
-        f'{calc_length} != {edgeset.length}')
+    assert abs(calc_length - edgeset.length) < 1, f'{calc_length} != {edgeset.length}'
 
     if edgeset.method.options is not None:
         G.graph['creation_options'] = json.loads(edgeset.method.options)
@@ -100,7 +97,7 @@ def packnodes(G):
         R=R,
         VertexC=VertexCpkl,
         boundary=boundarypkl,
-        landscape_angle=G.graph.get('landscape_angle', 0.),
+        landscape_angle=G.graph.get('landscape_angle', 0.0),
     )
     return pack
 
@@ -130,49 +127,63 @@ def add_if_absent(entity, pack):
 
 
 def method_from_graph(G, db):
-    '''Returns primary key of the entry.'''
+    """Returns primary key of the entry."""
     pack = packmethod(G.graph['edges_fun'], G.graph['creation_options'])
     return add_if_absent(db.Method, pack)
 
 
 def nodeset_from_graph(G, db):
-    '''Returns primary key of the entry.'''
+    """Returns primary key of the entry."""
     pack = packnodes(G)
     return add_if_absent(db.NodeSet, pack)
 
 
 def edgeset_from_graph(G, db):
-    '''Adds a new EdgeSet entry in the database, using the data in `G`.
+    """Adds a new EdgeSet entry in the database, using the data in `G`.
     If the NodeSet or Method are not yet in the database, they will be added.
-    '''
-    misc_not = {'VertexC', 'anglesYhp', 'anglesXhp', 'anglesRank', 'angles',
-                'd2rootsRank', 'd2roots', 'name', 'boundary', 'capacity',
-                'runtime', 'runtime_unit', 'edges_fun', 'D', 'DetourC', 'fnT',
-                'crossings', 'landscape_angle'}
+    """
+    misc_not = {
+        'VertexC',
+        'anglesYhp',
+        'anglesXhp',
+        'anglesRank',
+        'angles',
+        'd2rootsRank',
+        'd2roots',
+        'name',
+        'boundary',
+        'capacity',
+        'runtime',
+        'runtime_unit',
+        'edges_fun',
+        'D',
+        'DetourC',
+        'fnT',
+        'crossings',
+        'landscape_angle',
+    }
     nodesetID = nodeset_from_graph(G, db)
-    methodID = method_from_graph(G, db),
+    methodID = (method_from_graph(G, db),)
     machineID = get_machineID(db)
     R = G.graph['R']
     edgepack = dict(
-            edges=pickle.dumps(
-                np.array([((u, v) if u < v else (v, u))
-                          for u, v in G.edges])),
-            length=G.size(weight='length'),
-            gates=[len(G[root]) for root in range(-R, 0)],
-            capacity=G.graph['capacity'],
-            runtime=G.graph['runtime'],
-            runtime_unit=G.graph['runtime_unit'],
-            misc=pickle.dumps({key: G.graph[key]
-                               for key in G.graph.keys() - misc_not}),
+        edges=pickle.dumps(
+            np.array([((u, v) if u < v else (v, u)) for u, v in G.edges])
+        ),
+        length=G.size(weight='length'),
+        gates=[len(G[root]) for root in range(-R, 0)],
+        capacity=G.graph['capacity'],
+        runtime=G.graph['runtime'],
+        runtime_unit=G.graph['runtime_unit'],
+        misc=pickle.dumps({key: G.graph[key] for key in G.graph.keys() - misc_not}),
     )
 
     D = G.graph.get('D')
     if D is not None and D > 0:
         T_plus_D = G.number_of_nodes() - R
-        assert len(G.graph['fnT']) == T_plus_D + R, \
-            "len(fnT) != T + D + R"
+        assert len(G.graph['fnT']) == T_plus_D + R, 'len(fnT) != T + D + R'
         edgepack['D'] = D
-        edgepack['clone2prime'] = G.graph['fnT'][T_plus_D - D: T_plus_D]
+        edgepack['clone2prime'] = G.graph['fnT'][T_plus_D - D : T_plus_D]
     else:
         edgepack['D'] = 0
     with db_session:
@@ -191,7 +202,7 @@ def get_machineID(db):
         machine = hostname
     else:
         if hostname.startswith('n-'):
-            machine = fqdn[len(hostname):]
+            machine = fqdn[len(hostname) :]
         else:
             machine = fqdn
     with db_session:
@@ -204,28 +215,27 @@ def get_machineID(db):
 
 
 def G_by_method(G, method, db):
-    '''Fetch from the database a layout for `G` by `method`.
+    """Fetch from the database a layout for `G` by `method`.
     `G` must be a layout solution with the necessary info in the G.graph dict.
     `method` is a Method.
-    '''
+    """
     farmname = G.name
     c = G.graph['capacity']
-    es = db.EdgeSet.get(lambda e:
-                        e.nodes.name == farmname and
-                        e.method is method and
-                        e.capacity == c)
+    es = db.EdgeSet.get(
+        lambda e: e.nodes.name == farmname and e.method is method and e.capacity == c
+    )
     Gdb = graph_from_edgeset(es)
     calcload(Gdb)
     return Gdb
 
 
 def Gs_from_attrs(farm, methods, capacities, db):
-    '''Fetch from the database a list of tuples of layouts.
+    """Fetch from the database a list of tuples of layouts.
     (each tuple has one G for each of `methods`)
     `farm` must have the desired NodeSet name in the `name` attribute.
     `methods` is a tuple of Method instances.
     `capacities` is an int or sequence thereof.
-    '''
+    """
     Gs = []
     if not isinstance(methods, Sequence):
         methods = (methods,)
@@ -234,11 +244,14 @@ def Gs_from_attrs(farm, methods, capacities, db):
     for c in capacities:
         Gtuple = tuple(
             graph_from_edgeset(
-                db.EdgeSet.get(lambda e:
-                               e.nodes.name == farm.name and
-                               e.method is m and
-                               e.capacity == c))
-            for m in methods)
+                db.EdgeSet.get(
+                    lambda e: e.nodes.name == farm.name
+                    and e.method is m
+                    and e.capacity == c
+                )
+            )
+            for m in methods
+        )
         for G in Gtuple:
             calcload(G)
         if len(Gtuple) == 1:

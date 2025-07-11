@@ -24,11 +24,13 @@ def make_reel(S, G, filename):
             drawable.add_edge(u, v)
             # update node colors
             if u >= 0:
-                drawable.terminals_group.elements[u].fill = \
-                    c.colors[S.nodes[u]['subtree'] % num_colors]
+                drawable.terminals_group.elements[u].fill = c.colors[
+                    S.nodes[u]['subtree'] % num_colors
+                ]
             if v >= 0:
-                drawable.terminals_group.elements[v].fill = \
-                    c.colors[S.nodes[v]['subtree'] % num_colors]
+                drawable.terminals_group.elements[v].fill = c.colors[
+                    S.nodes[v]['subtree'] % num_colors
+                ]
 
         # plot and rasterize
         luna = pylunasvg.Document.load_from_data(drawable.to_svg())
@@ -50,6 +52,5 @@ def make_reel(S, G, filename):
 
     gifsicle = which('gifsicle')
     if gifsicle is not None:
-         subprocess.run([gifsicle, '--batch', '--optimize=3', '--colors=256', filename])
-    return 
-
+        subprocess.run([gifsicle, '--batch', '--optimize=3', '--colors=256', filename])
+    return

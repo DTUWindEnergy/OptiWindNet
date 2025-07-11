@@ -12,11 +12,12 @@ capacitaded minimum spanning tree (CMST) problem.
 https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 """
 
-__license__ = "LGPL-2.1-or-later"
+__license__ = 'LGPL-2.1-or-later'
 
 try:  # pragma: no cover
     # version.py created when installing optiwindnet
     from optiwindnet import version
+
     __version__ = version.__version__
     __release__ = version.__version__
 except BaseException:  # pragma: no cover

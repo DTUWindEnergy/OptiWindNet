@@ -2,23 +2,23 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import re
-from itertools import chain, zip_longest
-from collections import namedtuple, defaultdict
-from pathlib import Path
-from typing import NamedTuple, Iterable
-from importlib.resources import files
+from collections import defaultdict, namedtuple
 from functools import reduce
+from importlib.resources import files
+from itertools import chain, zip_longest
+from pathlib import Path
+from typing import Iterable, NamedTuple
 
 import networkx as nx
 import numpy as np
-import utm
-import yaml
 import osmium
 import shapely as shp
 import shapely.wkb as wkblib
+import utm
+import yaml
 
-from .utils import NodeTagger
 from .interarraylib import L_from_site
+from .utils import NodeTagger
 
 F = NodeTagger()
 
@@ -53,16 +53,18 @@ def _translate_latlonstr(entry_list):
         for ll in (lat, lon):
             val, hemisphere = ll.split("'")
             deg, sec = val.split('°')
-            latlon.append((float(deg) + float(sec)/60)
-                          * (1 if hemisphere in ('N', 'E') else -1))
+            latlon.append(
+                (float(deg) + float(sec) / 60) * (1 if hemisphere in ('N', 'E') else -1)
+            )
         translated.append((tag, *utm.from_latlon(*latlon)))
     return translated
 
 
 def _parser_latlon(entry_list):
     # separate data into columns
-    tags, eastings, northings, zone_numbers, zone_letters = \
-        zip(*_translate_latlonstr(entry_list))
+    tags, eastings, northings, zone_numbers, zone_letters = zip(
+        *_translate_latlonstr(entry_list)
+    )
     # all coordinates must belong to the same UTM zone
     assert all(num == zone_numbers[0] for num in zone_numbers[1:])
     assert all(letter == zone_letters[0] for letter in zone_letters[1:])
@@ -85,7 +87,7 @@ coordinate_parser = dict(
 
 
 def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
-    '''Import wind farm data from .yaml file.
+    """Import wind farm data from .yaml file.
 
     Two options available for COORDINATE_FORMAT: "planar" and "latlon".
 
@@ -107,7 +109,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     Returns:
         Unconnected locations graph L.
-    '''
+    """
     if isinstance(filepath, str):
         filepath = Path(filepath)
     # read wind power plant site YAML file
@@ -120,7 +122,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     T = Node.shape[0]
     R = Root.shape[0]
     B = Border.shape[0]
-    border=np.arange(T, T + B)
+    border = np.arange(T, T + B)
     optional = {}
     obstacles = parsed_dict.get('OBSTACLES')
     obstacleC_ = []
@@ -134,25 +136,33 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             obstacleC_.append(obstacleC)
         optional['obstacles'] = indices
 
-    VertexC=np.vstack((Node, Border, *obstacleC_, Root))
+    VertexC = np.vstack((Node, Border, *obstacleC_, Root))
 
     lsangle = parsed_dict.get('LANDSCAPE_ANGLE')
     if lsangle is not None:
         optional['landscape_angle'] = lsangle
 
     # create networkx graph
-    G = nx.Graph(T=T, R=R, B=B,
-                 VertexC=VertexC,
-                 border=border,
-                 name=filepath.stem,
-                 handle=handle,
-                 **optional)
+    G = nx.Graph(
+        T=T,
+        R=R,
+        B=B,
+        VertexC=VertexC,
+        border=border,
+        name=filepath.stem,
+        handle=handle,
+        **optional,
+    )
 
     # populate graph G
-    G.add_nodes_from((n, {'kind': 'wtg', 'label': (tag if tag else F[n])})
-                      for n, tag in zip_longest(range(T), NodeTag))
-    G.add_nodes_from((r, {'kind': 'oss', 'label': (tag if tag else F[r])})
-                      for r, tag in zip_longest(range(-R, 0), RootTag))
+    G.add_nodes_from(
+        (n, {'kind': 'wtg', 'label': (tag if tag else F[n])})
+        for n, tag in zip_longest(range(T), NodeTag)
+    )
+    G.add_nodes_from(
+        (r, {'kind': 'oss', 'label': (tag if tag else F[r])})
+        for r, tag in zip_longest(range(-R, 0), RootTag)
+    )
     return G
 
 
@@ -167,29 +177,25 @@ class GetAllData(osmium.SimpleHandler):
     def node(self, n):
         power = n.tags.get('power') or n.tags.get('construction:power')
         if power in ['generator', 'substation', 'transformer']:
-            self.elements[power]['nodes'].append((
-                dict(n.tags),
-                wkblib.loads(wkbfab.create_point(n), hex=True)
-            ))
+            self.elements[power]['nodes'].append(
+                (dict(n.tags), wkblib.loads(wkbfab.create_point(n), hex=True))
+            )
 
     def way(self, w):
         power = w.tags.get('power') or w.tags.get('construction:power')
         if power in ['plant', 'substation', 'transformer']:
-            self.elements[power]['ways'].append((
-                dict(w.tags),
-                wkblib.loads(wkbfab.create_linestring(w), hex=True)
-            ))
+            self.elements[power]['ways'].append(
+                (dict(w.tags), wkblib.loads(wkbfab.create_linestring(w), hex=True))
+            )
 
     def relation(self, r):
-        self.elements[r.tags.get('power')
-                      or r.tags.get('construction:power')
-                      or 'other']['rels'].append(
-                          (r.replace(tags=dict(r.tags),
-                                     members=list(r.members))))
+        self.elements[
+            r.tags.get('power') or r.tags.get('construction:power') or 'other'
+        ]['rels'].append((r.replace(tags=dict(r.tags), members=list(r.members))))
 
 
 def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
-    '''Import wind farm data from .osm.pbf file.
+    """Import wind farm data from .osm.pbf file.
 
     Args:
         filepath: path to `.osm.pbf` file to read.
@@ -197,11 +203,12 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     Returns:
         Unconnected locations graph L.
-    '''
+    """
     if isinstance(filepath, str):
         filepath = Path(filepath)
-    assert ['.osm', '.pbf'] == filepath.suffixes[-2:], \
+    assert ['.osm', '.pbf'] == filepath.suffixes[-2:], (
         'Argument `filepath` does not have `.osm.pbf` extension.'
+    )
     name = filepath.stem[:-4]
     # read wind power plant site OpenStreetMap's Protobuffer file
     getter = GetAllData()
@@ -218,10 +225,12 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     T = len(wtg)
 
     # Substations
-    ossn = ([point for tags, point in data['substation']['nodes']]
-            + [point for tags, point in data['transformer']['nodes']])
-    ossw = ([ring.centroid for tags, ring in data['substation']['ways']]
-            + [ring.centroid for tags, ring in data['transformer']['ways']])
+    ossn = [point for tags, point in data['substation']['nodes']] + [
+        point for tags, point in data['transformer']['nodes']
+    ]
+    ossw = [ring.centroid for tags, ring in data['substation']['ways']] + [
+        ring.centroid for tags, ring in data['transformer']['ways']
+    ]
     if ossn and ossw:
         print(f'«{name}» Warning: substations found both as nodes and ways.')
     oss = ossn + ossw
@@ -230,9 +239,8 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     # Boundary
     plant_ways = data['plant'].get('ways')
     if plant_ways is not None:
-        assert len(plant_ways) == 1, \
-                'Not Implemented: power plant with multiple areas.'
-        (tags, ring), = plant_ways
+        assert len(plant_ways) == 1, 'Not Implemented: power plant with multiple areas.'
+        ((tags, ring),) = plant_ways
         plant_name = tags.get('name:en') or tags.get('name')
         boundary = ring
     else:
@@ -246,11 +254,15 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         print(f'«{name}» Relations found: ', plant_rels)
 
     # Build site data structure
-    latlon = np.array(tuple(chain(
-        ((n.y, n.x) for n in wtg),
-        boundary.coords.__array__()[:-1, ::-1],
-        ((n.y, n.x) for n in oss),
-        )), dtype=float
+    latlon = np.array(
+        tuple(
+            chain(
+                ((n.y, n.x) for n in wtg),
+                boundary.coords.__array__()[:-1, ::-1],
+                ((n.y, n.x) for n in oss),
+            )
+        ),
+        dtype=float,
     )
     # TODO: find the UTM sector that includes the most coordinates among
     # vertices and boundary (bin them in 6° sectors and count). Then insert
@@ -261,15 +273,17 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     # TODO: use the wtg names as node labels if available
     #       this means bringing the core of L_from_site here
     L = L_from_site(
-            T=T, R=R, B=B,
-            VertexC=VertexC,
-            border=np.arange(T, T + B),
-            name=name,
-            handle=handle,
-            )
+        T=T,
+        R=R,
+        B=B,
+        VertexC=VertexC,
+        border=np.arange(T, T + B),
+        name=name,
+        handle=handle,
+    )
     if plant_name is not None:
         L.graph['OSM_name'] = plant_name
-    boundary_utm = shp.Polygon(shell=VertexC[T:T + B])
+    boundary_utm = shp.Polygon(shell=VertexC[T : T + B])
     x, y = boundary_utm.minimum_rotated_rectangle.exterior.coords.xy
     side0 = np.hypot(x[1] - x[0], y[1] - y[0])
     side1 = np.hypot(x[2] - x[1], y[2] - y[1])
@@ -277,9 +291,9 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         angle = np.arctan2((x[1] - x[0]), (y[1] - y[0])).item()
     else:
         angle = np.arctan2((x[2] - x[1]), (y[2] - y[1])).item()
-    if abs(angle) > np.pi/2:
+    if abs(angle) > np.pi / 2:
         angle += np.pi if angle < 0 else -np.pi
-    L.graph['landscape_angle'] = 180*angle/np.pi
+    L.graph['landscape_angle'] = 180 * angle / np.pi
     return L
 
 
@@ -380,27 +394,39 @@ _site_handles_pbf = dict(
 _site_handles = _site_handles_yaml | _site_handles_pbf
 
 _READERS = {
-        '.yaml': L_from_yaml,
-        '.osm.pbf': L_from_pbf,
-        }
+    '.yaml': L_from_yaml,
+    '.osm.pbf': L_from_pbf,
+}
 
 
-def load_repository(handles2names=(
+def load_repository(
+    handles2names=(
         ('.yaml', _site_handles_yaml),
         ('.osm.pbf', _site_handles_pbf),
-        )) -> NamedTuple:
+    ),
+) -> NamedTuple:
     base_dir = files(__package__ + '.data')
     if isinstance(handles2names, dict):
         # assume all files have .yaml extension
         return namedtuple('SiteRepository', handles2name)(
-            *(L_from_yaml(base_dir / fname, handle)
-              for handle, fname in handles2names.items()))
+            *(
+                L_from_yaml(base_dir / fname, handle)
+                for handle, fname in handles2names.items()
+            )
+        )
     elif isinstance(handles2names, Iterable):
         # handle multiple file extensions
-        return namedtuple('SiteRepository',
-                          reduce(lambda a, b: a | b,
-                                 (m for _, m in handles2names)))(
-            *sum((tuple(_READERS[ext](base_dir / (fname + ext), handle)
-                        for handle, fname in handle2name.items())
-                 for ext, handle2name in handles2names),
-                 tuple()))
+        return namedtuple(
+            'SiteRepository', reduce(lambda a, b: a | b, (m for _, m in handles2names))
+        )(
+            *sum(
+                (
+                    tuple(
+                        _READERS[ext](base_dir / (fname + ext), handle)
+                        for handle, fname in handle2name.items()
+                    )
+                    for ext, handle2name in handles2names
+                ),
+                tuple(),
+            )
+        )

@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-from heapq import heappush, heappop
 import itertools
+from heapq import heappop, heappush
 
 
 class PriorityQueue(list):
-
     def __init__(self):
         super().__init__(self)
         # self.entries = []
@@ -14,9 +13,9 @@ class PriorityQueue(list):
         self.counter = itertools.count()
 
     def add(self, priority, tag, payload):
-        '''lowest priority pops first, payload cannot be None.
+        """lowest priority pops first, payload cannot be None.
         an addition with an already existing tag will cancel the
-        previous entry.'''
+        previous entry."""
         if payload is None:
             raise ValueError('payload cannot be None.')
         if tag in self.tags:
@@ -26,7 +25,7 @@ class PriorityQueue(list):
         heappush(self, entry)
 
     def strip(self):
-        '''removes all cancelled entries from the queue top'''
+        """removes all cancelled entries from the queue top"""
         while self:
             if self[0][-1] is None:
                 heappop(self)
@@ -39,7 +38,7 @@ class PriorityQueue(list):
         self.strip()
 
     def top(self):
-        'returns the payload with lowest priority'
+        "returns the payload with lowest priority"
         priority, count, tag, payload = heappop(self)
         del self.tags[tag]
         self.strip()

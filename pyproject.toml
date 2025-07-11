@@ -81,3 +81,9 @@ optiwindnet = ['data/*']
 
 [tool.setuptools_scm]
 version_file = "optiwindnet/version.py"
+
+[tool.black]
+skip-string-normalization = true
+
+[tool.ruff.format]
+quote-style = "single"

@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import base64
 import io
 import json
 from collections.abc import Sequence
 from functools import partial
-from itertools import pairwise, chain
 from hashlib import sha256
-import base64
+from itertools import chain, pairwise
 from socket import getfqdn, gethostname
 from typing import Any, Mapping
 
@@ -24,48 +24,106 @@ PackType = Mapping[str, Any]
 
 # Set of not-to-store keys commonly found in G routesets (they are either
 # already stored in database fields or are cheap to regenerate or too big.
-_misc_not = {'VertexC', 'anglesYhp', 'anglesXhp', 'anglesRank', 'angles',
-             'd2rootsRank', 'd2roots', 'name', 'boundary', 'capacity', 'B',
-             'runtime', 'runtime_unit', 'edges_fun', 'D', 'DetourC', 'fnT',
-             'landscape_angle', 'Root', 'creation_options', 'G_nodeset', 'T',
-             'non_A_gates', 'funfile', 'funhash', 'funname', 'diagonals',
-             'planar', 'has_loads', 'R', 'Subtree', 'handle', 'non_A_edges',
-             'max_load', 'fun_fingerprint', 'hull', 'solver_log',
-             'length_mismatch_on_db_read', 'gnT', 'C', 'border', 'obstacles',
-             'num_diagonals', 'crossings_map', 'tentative', 'method_options',
-             'is_normalized', 'norm_scale', 'norm_offset', 'detextra', 'rogue',
-             'clone2prime', 'valid', 'path_in_P', 'shortened_contours',
-             'nonAedges', 'method', 'num_stunts', 'crossings', 'creator',
-             'inter_terminal_clearance_min', 'inter_terminal_clearance_safe',
-             'stunts_primes'}
+_misc_not = {
+    'VertexC',
+    'anglesYhp',
+    'anglesXhp',
+    'anglesRank',
+    'angles',
+    'd2rootsRank',
+    'd2roots',
+    'name',
+    'boundary',
+    'capacity',
+    'B',
+    'runtime',
+    'runtime_unit',
+    'edges_fun',
+    'D',
+    'DetourC',
+    'fnT',
+    'landscape_angle',
+    'Root',
+    'creation_options',
+    'G_nodeset',
+    'T',
+    'non_A_gates',
+    'funfile',
+    'funhash',
+    'funname',
+    'diagonals',
+    'planar',
+    'has_loads',
+    'R',
+    'Subtree',
+    'handle',
+    'non_A_edges',
+    'max_load',
+    'fun_fingerprint',
+    'hull',
+    'solver_log',
+    'length_mismatch_on_db_read',
+    'gnT',
+    'C',
+    'border',
+    'obstacles',
+    'num_diagonals',
+    'crossings_map',
+    'tentative',
+    'method_options',
+    'is_normalized',
+    'norm_scale',
+    'norm_offset',
+    'detextra',
+    'rogue',
+    'clone2prime',
+    'valid',
+    'path_in_P',
+    'shortened_contours',
+    'nonAedges',
+    'method',
+    'num_stunts',
+    'crossings',
+    'creator',
+    'inter_terminal_clearance_min',
+    'inter_terminal_clearance_safe',
+    'stunts_primes',
+}
 
 
 def L_from_nodeset(nodeset: object) -> nx.Graph:
-    '''Create the networkx Graph (nodes only) for a given nodeset.'''
+    """Create the networkx Graph (nodes only) for a given nodeset."""
     T = nodeset.T
     R = nodeset.R
     # assert B == sum(n >= T for n in nodeset.constraint_vertices)
     B = nodeset.B
-    border = np.array(nodeset.constraint_vertices[:nodeset.constraint_groups[0]])
-    name=nodeset.name
+    border = np.array(nodeset.constraint_vertices[: nodeset.constraint_groups[0]])
+    name = nodeset.name
     L = nx.Graph(
-         R=R, T=T, B=B,
-         name=name,
-         handle=((name if name[0] != '!' else name[1:name.index('!', 1)])
-                 .strip().lower().replace(' ', '_')),
-         border=border,
-         VertexC=np.lib.format.read_array(io.BytesIO(nodeset.VertexC)),
-         landscape_angle=nodeset.landscape_angle,
+        R=R,
+        T=T,
+        B=B,
+        name=name,
+        handle=(
+            (name if name[0] != '!' else name[1 : name.index('!', 1)])
+            .strip()
+            .lower()
+            .replace(' ', '_')
+        ),
+        border=border,
+        VertexC=np.lib.format.read_array(io.BytesIO(nodeset.VertexC)),
+        landscape_angle=nodeset.landscape_angle,
     )
     if len(nodeset.constraint_groups) > 1:
         obstacle_idx = np.cumsum(np.array(nodeset.constraint_groups))
         L.graph.update(
-            obstacles=[np.array(nodeset.constraint_vertices[a:b])
-                       for a, b in pairwise(obstacle_idx)])
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'})
-                      for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'})
-                      for r in range(-R, 0)))
+            obstacles=[
+                np.array(nodeset.constraint_vertices[a:b])
+                for a, b in pairwise(obstacle_idx)
+            ]
+        )
+    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
+    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
     return L
 
 
@@ -74,7 +132,8 @@ def G_from_routeset(routeset: object) -> nx.Graph:
     R = nodeset.R
     G = L_from_nodeset(nodeset)
     G.graph.update(
-        C=routeset.C, D=routeset.D,
+        C=routeset.C,
+        D=routeset.D,
         handle=routeset.handle,
         capacity=routeset.capacity,
         creator=routeset.creator,
@@ -87,25 +146,25 @@ def G_from_routeset(routeset: object) -> nx.Graph:
         ),
         runtime=routeset.runtime,
         method_options=routeset.method.options,
-        **routeset.misc)
+        **routeset.misc,
+    )
 
     if routeset.detextra is not None:
         G.graph['detextra'] = routeset.detextra
 
     if routeset.stuntC:
-        stuntC=np.lib.format.read_array(io.BytesIO(routeset.stuntC))
+        stuntC = np.lib.format.read_array(io.BytesIO(routeset.stuntC))
         num_stunts = len(stuntC)
         G.graph['num_stunts'] = num_stunts
         G.graph['B'] += num_stunts
         VertexC = G.graph['VertexC']
-        G.graph['VertexC'] = np.vstack((VertexC[:-R], stuntC,
-                                        VertexC[-R:]))
+        G.graph['VertexC'] = np.vstack((VertexC[:-R], stuntC, VertexC[-R:]))
     untersify_to_G(G, terse=routeset.edges, clone2prime=routeset.clone2prime)
     calc_length = G.size(weight='length')
     #  assert abs(calc_length/routeset.length - 1) < 1e-5, (
     #      f"recreated graph's total length ({calc_length:.0f}) != "
     #      f"stored total length ({routeset.length:.0f})")
-    if abs(calc_length/routeset.length - 1) > 1e-5:
+    if abs(calc_length / routeset.length - 1) > 1e-5:
         G.graph['length_mismatch_on_db_read'] = calc_length - routeset.length
     if routeset.rogue:
         for u, v in zip(routeset.rogue[::2], routeset.rogue[1::2]):
@@ -122,8 +181,7 @@ def packnodes(G: nx.Graph) -> PackType:
     num_stunts = G.graph.get('num_stunts')
     if num_stunts:
         B -= num_stunts
-        VertexC = np.vstack((VertexC[:T + B],
-                             VertexC[-R:]))
+        VertexC = np.vstack((VertexC[: T + B], VertexC[-R:]))
     VertexC_npy_io = io.BytesIO()
     np.lib.format.write_array(VertexC_npy_io, VertexC, version=(3, 0))
     VertexC_npy = VertexC_npy_io.getvalue()
@@ -133,16 +191,20 @@ def packnodes(G: nx.Graph) -> PackType:
         name = G.name + base64.b64encode(digest).decode('ascii')
     else:
         name = G.name
-    constraint_vertices = list(chain((G.graph.get('border', ()),),
-                                     G.graph.get('obstacles', ())))
+    constraint_vertices = list(
+        chain((G.graph.get('border', ()),), G.graph.get('obstacles', ()))
+    )
     pack = dict(
-        T=T, R=R, B=B,
+        T=T,
+        R=R,
+        B=B,
         name=name,
         VertexC=VertexC_npy,
         constraint_groups=[p.shape[0] for p in constraint_vertices],
-        constraint_vertices=np.concatenate(constraint_vertices,
-                                           dtype=int, casting='unsafe'),
-        landscape_angle=G.graph.get('landscape_angle', 0.),
+        constraint_vertices=np.concatenate(
+            constraint_vertices, dtype=int, casting='unsafe'
+        ),
+        landscape_angle=G.graph.get('landscape_angle', 0.0),
         digest=digest,
     )
     return pack
@@ -175,22 +237,22 @@ def add_if_absent(entity: object, pack: PackType) -> bytes:
 
 
 def method_from_G(G: nx.Graph, db: orm.Database) -> bytes:
-    '''
+    """
     Returns:
         Primary key of the entry.
-    '''
+    """
     pack = packmethod(G.graph['method_options'])
     return add_if_absent(db.Method, pack)
 
 
 def nodeset_from_G(G: nx.Graph, db: orm.Database) -> bytes:
-    '''Returns primary key of the entry.'''
+    """Returns primary key of the entry."""
     pack = packnodes(G)
     return add_if_absent(db.NodeSet, pack)
 
 
 def terse_pack_from_G(G: nx.Graph) -> PackType:
-    '''Convert `G`'s edges to a format suitable for storing in the database.
+    """Convert `G`'s edges to a format suitable for storing in the database.
 
     Although graph `G` in undirected, the edge attribute `'reverse'` and its
     nodes' numbers encode the direction of power flow. The terse
@@ -200,7 +262,7 @@ def terse_pack_from_G(G: nx.Graph) -> PackType:
         dict with keys:
             edges: where ⟨i, edges[i]⟩ is a directed edge of `G`
             clone2prime: mapping the above-T clones to below-T nodes
-    '''
+    """
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     terse = np.empty((T + C + D,), dtype=int)
@@ -217,15 +279,14 @@ def terse_pack_from_G(G: nx.Graph) -> PackType:
             terse[i - B] = target
     terse_pack = dict(edges=terse)
     if C > 0 or D > 0:
-        terse_pack['clone2prime'] = G.graph['fnT'][T + B: -R]
+        terse_pack['clone2prime'] = G.graph['fnT'][T + B : -R]
     return terse_pack
 
 
-def untersify_to_G(G: nx.Graph, terse: np.ndarray,
-                   clone2prime: list) -> None:
-    '''
+def untersify_to_G(G: nx.Graph, terse: np.ndarray, clone2prime: list) -> None:
+    """
     Changes G in place!
-    '''
+    """
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     VertexC = G.graph['VertexC']
@@ -237,14 +298,15 @@ def untersify_to_G(G: nx.Graph, terse: np.ndarray,
         G.add_nodes_from(contournodes, kind='contour')
         G.add_nodes_from(detournodes, kind='detour')
         fnT = np.arange(R + T + B + C + D)
-        fnT[T + B: T + B + C + D] = clone2prime
+        fnT[T + B : T + B + C + D] = clone2prime
         fnT[-R:] = range(-R, 0)
         G.graph['fnT'] = fnT
         Length = np.hypot(*(VertexC[fnT[terse]] - VertexC[fnT[source]]).T)
     else:
         Length = np.hypot(*(VertexC[terse] - VertexC[source]).T)
     G.add_weighted_edges_from(
-        zip(source.tolist(), terse, Length.tolist()), weight='length')
+        zip(source.tolist(), terse, Length.tolist()), weight='length'
+    )
     if clone2prime:
         for _, _, edgeD in G.edges(contournodes, data=True):
             edgeD['kind'] = 'contour'
@@ -274,16 +336,17 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     terse_pack = terse_pack_from_G(G)
-    misc = {key: G.graph[key]
-            for key in G.graph.keys() - _misc_not}
+    misc = {key: G.graph[key] for key in G.graph.keys() - _misc_not}
     #  print('Storing in `misc`:', *misc.keys())
     for k, v in misc.items():
         misc[k] = oddtypes_to_serializable(v)
     length = G.size(weight='length')
     packed_G = dict(
-        R=R, T=T, C=C, D=D,
-        handle=G.graph.get('handle',
-                           G.graph['name'].strip().replace(' ', '_')),
+        R=R,
+        T=T,
+        C=C,
+        D=D,
+        handle=G.graph.get('handle', G.graph['name'].strip().replace(' ', '_')),
         capacity=G.graph['capacity'],
         length=length,
         creator=G.graph['creator'],
@@ -297,7 +360,7 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     num_stunts = G.graph.get('num_stunts')
     if num_stunts:
         VertexC = G.graph['VertexC']
-        stuntC = VertexC[T + B - num_stunts: T + B].copy()
+        stuntC = VertexC[T + B - num_stunts : T + B].copy()
         stuntC_npy_io = io.BytesIO()
         np.lib.format.write_array(stuntC_npy_io, stuntC, version=(3, 0))
         packed_G['stuntC'] = stuntC_npy_io.getvalue()
@@ -309,13 +372,18 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
         ('tentative', concatenate_tuples),
         ('rogue', concatenate_tuples),
     )
-    packed_G.update({k: (fun(G.graph[k]) if fun else G.graph[k])
-                     for k, fun in pack_if_given if k in G.graph})
+    packed_G.update(
+        {
+            k: (fun(G.graph[k]) if fun else G.graph[k])
+            for k, fun in pack_if_given
+            if k in G.graph
+        }
+    )
     return packed_G
 
 
 def store_G(G: nx.Graph, db: orm.Database) -> int:
-    '''Store `G`'s data to a new `RouteSet` record in the database `db`.
+    """Store `G`'s data to a new `RouteSet` record in the database `db`.
 
     If the NodeSet or Method are not yet in the database, they will be added.
 
@@ -325,10 +393,10 @@ def store_G(G: nx.Graph, db: orm.Database) -> int:
 
     Returns:
         Primary key of the newly created RouteSet record.
-    '''
+    """
     packed_G = pack_G(G)
     nodesetID = nodeset_from_G(G, db)
-    methodID = method_from_G(G, db),
+    methodID = (method_from_G(G, db),)
     machineID = get_machine_pk(db)
     with orm.db_session:
         packed_G.update(
@@ -349,7 +417,7 @@ def get_machine_pk(db: orm.Database) -> int:
         machine = hostname
     else:
         if hostname.startswith('n-'):
-            machine = fqdn[len(hostname):]
+            machine = fqdn[len(hostname) :]
         else:
             machine = fqdn
     with orm.db_session:
@@ -360,31 +428,35 @@ def get_machine_pk(db: orm.Database) -> int:
 
 
 def G_by_method(G: nx.Graph, method: object, db: orm.Database) -> nx.Graph:
-    '''Fetch from the database a layout for `G` by `method`.
+    """Fetch from the database a layout for `G` by `method`.
     `G` must be a layout solution with the necessary info in the G.graph dict.
     `method` is a Method.
-    '''
+    """
     farmname = G.name
     c = G.graph['capacity']
-    rs = db.RouteSet.get(lambda rs:
-                         rs.nodes.name == farmname and
-                         rs.method is method and
-                         rs.capacity == c)
+    rs = db.RouteSet.get(
+        lambda rs: rs.nodes.name == farmname
+        and rs.method is method
+        and rs.capacity == c
+    )
     Gdb = G_from_routeset(rs)
     calcload(Gdb)
     return Gdb
 
 
-def Gs_from_attrs(farm: object, methods: object | Sequence[object],
-                  capacities: int | Sequence[int],
-                  db: orm.Database) -> list[tuple[nx.Graph]]:
-    '''
+def Gs_from_attrs(
+    farm: object,
+    methods: object | Sequence[object],
+    capacities: int | Sequence[int],
+    db: orm.Database,
+) -> list[tuple[nx.Graph]]:
+    """
     Fetch from the database a list (one per capacity) of tuples (one per
     method) of layouts.
     `farm` must have the desired NodeSet name in the `name` attribute.
     `methods` is a (sequence of) Method instance(s).
     `capacities` is a (sequence of) int(s).
-    '''
+    """
     Gs = []
     if not isinstance(methods, Sequence):
         methods = (methods,)
@@ -393,11 +465,14 @@ def Gs_from_attrs(farm: object, methods: object | Sequence[object],
     for c in capacities:
         Gtuple = tuple(
             G_from_routeset(
-                db.RouteSet.get(lambda rs:
-                                rs.nodes.name == farm.name and
-                                rs.method is m and
-                                rs.capacity == c))
-            for m in methods)
+                db.RouteSet.get(
+                    lambda rs: rs.nodes.name == farm.name
+                    and rs.method is m
+                    and rs.capacity == c
+                )
+            )
+            for m in methods
+        )
         for G in Gtuple:
             calcload(G)
         Gs.append(Gtuple)

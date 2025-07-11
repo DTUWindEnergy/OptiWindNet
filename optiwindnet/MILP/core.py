@@ -3,15 +3,17 @@
 
 import abc
 from enum import auto
+
 try:
     from enum import StrEnum
 except ImportError:
     # workaround for python < 3.11
     from backports.strenum import StrEnum
-from typing import Any, Mapping
-from dataclasses import dataclass, asdict
-import networkx as nx
 import logging
+from dataclasses import asdict, dataclass
+from typing import Any, Mapping
+
+import networkx as nx
 from makefun import with_signature
 
 from ..interarraylib import G_from_S
@@ -22,14 +24,14 @@ error, info = logger.error, logger.info
 
 
 def _identifier_from_class_name(c: type) -> str:
-    'Convert a camel-case class name to a snake-case identifier'
+    "Convert a camel-case class name to a snake-case identifier"
     s = c.__name__
-    return s[0].lower() + ''.join('_' + c.lower() if c.isupper()
-                                  else c for c in s[1:])
+    return s[0].lower() + ''.join('_' + c.lower() if c.isupper() else c for c in s[1:])
 
 
 class Topology(StrEnum):
-    'Set the topology of subtrees in the solution.'
+    "Set the topology of subtrees in the solution."
+
     RADIAL = auto()
     BRANCHED = auto()
     DEFAULT = BRANCHED
@@ -37,14 +39,15 @@ class Topology(StrEnum):
 
 class FeederRoute(StrEnum):
     'If feeder routes must be "straight" or can be detoured ("segmented").'
+
     STRAIGHT = auto()
     SEGMENTED = auto()
     DEFAULT = SEGMENTED
 
 
 class FeederLimit(StrEnum):
-    'Whether to limit the maximum number of feeders, if set to "specified", '\
-    'additional kwarg "max_feeders" must be given.'
+    'Whether to limit the maximum number of feeders, if set to "specified", additional kwarg "max_feeders" must be given.'
+
     UNLIMITED = auto()
     SPECIFIED = auto()
     MINIMUM = auto()
@@ -55,13 +58,17 @@ class FeederLimit(StrEnum):
 
 
 class ModelOptions(dict):
-    hints = {_identifier_from_class_name(kind): kind
-             for kind in (Topology, FeederRoute, FeederLimit)}
+    hints = {
+        _identifier_from_class_name(kind): kind
+        for kind in (Topology, FeederRoute, FeederLimit)
+    }
 
     @with_signature(
         '__init__(self, *, '
-        + ', '.join(f'{k}: {v.__name__} = "{v.DEFAULT.value}"'
-                    for k, v in hints.items()) + ')'
+        + ', '.join(
+            f'{k}: {v.__name__} = "{v.DEFAULT.value}"' for k, v in hints.items()
+        )
+        + ')'
     )
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -72,15 +79,16 @@ class ModelOptions(dict):
     @classmethod
     def help(cls):
         for k, v in cls.hints.items():
-            print(f'{k} in {{'
-                  + ", ".join(f"\"{m}\"" for m in v.__members__.values()
-                              if m != 'default')
-                  + f'}} default: {cls.hints[k].DEFAULT.value}\n'
-                  f'    {v.__doc__}\n')
+            print(
+                f'{k} in {{'
+                + ', '.join(f'"{m}"' for m in v.__members__.values() if m != 'default')
+                + f'}} default: {cls.hints[k].DEFAULT.value}\n'
+                f'    {v.__doc__}\n'
+            )
 
 
 @dataclass(slots=True)
-class ModelMetadata():
+class ModelMetadata:
     R: int
     T: int
     capacity: int
@@ -88,12 +96,12 @@ class ModelMetadata():
     link_: Mapping
     flow_: Mapping
     model_options: dict
-    fun_fingerprint: dict[str, str|bytes]
+    fun_fingerprint: dict[str, str | bytes]
     warmed_by: str = ''
 
 
 @dataclass(slots=True)
-class SolutionInfo():
+class SolutionInfo:
     runtime: float
     bound: float
     objective: float
@@ -109,14 +117,24 @@ class Solver(abc.ABC):
     solution_info: SolutionInfo
 
     @abc.abstractmethod
-    def set_problem(self, P: nx.PlanarEmbedding, A: nx.Graph, capacity: int,
-                    model_options: ModelOptions):
-        'Define the problem geometry, available edges and tree properties'
+    def set_problem(
+        self,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        capacity: int,
+        model_options: ModelOptions,
+    ):
+        "Define the problem geometry, available edges and tree properties"
         pass
 
     @abc.abstractmethod
-    def solve(self, time_limit: int, mip_gap: float,
-              options: dict[str, Any] = {}, verbose: bool = False) -> SolutionInfo:
+    def solve(
+        self,
+        time_limit: int,
+        mip_gap: float,
+        options: dict[str, Any] = {},
+        verbose: bool = False,
+    ) -> SolutionInfo:
         pass
 
     @abc.abstractmethod
@@ -146,21 +164,22 @@ class PoolHandler(abc.ABC):
 
     @abc.abstractmethod
     def objective_at(self, index: int) -> float:
-        'Get objective value from solution pool at position `index`'
+        "Get objective value from solution pool at position `index`"
         pass
-    
+
     @abc.abstractmethod
     def topology_from_mip_pool(self) -> nx.Graph:
-        'Build topology from the pool solution at the last requested position'
+        "Build topology from the pool solution at the last requested position"
         pass
 
 
-def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
-        ) -> tuple[nx.Graph, nx.Graph]:
-    '''Go through the CpSat's solutions checking which has the shortest length
-    after applying the detours with PathFinder.'''
+def investigate_pool(
+    P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
+) -> tuple[nx.Graph, nx.Graph]:
+    """Go through the CpSat's solutions checking which has the shortest length
+    after applying the detours with PathFinder."""
     Λ = float('inf')
-    branched=pool.model_options['topology'] is Topology.BRANCHED   
+    branched = pool.model_options['topology'] is Topology.BRANCHED
     num_solutions = pool.num_solutions
     info(f'Solution pool has {num_solutions} solutions.')
     for i in range(num_solutions):
@@ -179,7 +198,6 @@ def investigate_pool(P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
             G.graph['pool_entry'] = i, λ
             info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
         else:
-            info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')            
+            info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')
     G.graph['pool_count'] = num_solutions
     return S, G
-

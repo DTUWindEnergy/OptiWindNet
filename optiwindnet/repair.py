@@ -2,11 +2,11 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
+
 import networkx as nx
 
 from .crossings import list_edge_crossings
-from .interarraylib import calcload, NodeTagger
-
+from .interarraylib import NodeTagger, calcload
 
 logger = logging.getLogger(__name__)
 warn = logger.warning
@@ -14,15 +14,13 @@ F = NodeTagger()
 
 
 def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
-    '''
+    """
     `S` has loads, is a rootless subgraph_view and non-branching
-    '''
+    """
     # non-branching graphs only, gates and detours removed
     if S.degree[n] == 2:
         u, v = S[n]
-        head, tail = ((u, v)
-                      if S.nodes[u]['load'] > S.nodes[v]['load'] else
-                      (v, u))
+        head, tail = (u, v) if S.nodes[u]['load'] > S.nodes[v]['load'] else (v, u)
         # go towards the gate
         gate_leaf = []
         for fwd, back in ((head, tail), (tail, head)):
@@ -37,7 +35,7 @@ def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
             gate = None
         else:
             gate = back = n
-        fwd, = S[n]
+        (fwd,) = S[n]
         while S.degree[fwd] == 2:
             s, t = S[fwd]
             fwd, back = (s, fwd) if t == back else (t, fwd)
@@ -49,13 +47,13 @@ def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
 
 
 def list_path(S: nx.Graph, n: int) -> list[int]:
-    '''
+    """
     `S` has loads, no gate or detour edges
     all subtrees of `S` are paths
     `n` must be an extremity of the path
-    '''
+    """
     path = [n]
-    far, = S[n]
+    (far,) = S[n]
     while S.degree[far] == 2:
         s, t = S[far]
         far, n = (s, far) if t == n else (t, far)
@@ -64,29 +62,29 @@ def list_path(S: nx.Graph, n: int) -> list[int]:
     return path if S.nodes[far]['load'] == 1 else path[::-1]
 
 
-def _find_fix_choices_path(A: nx.Graph, swapS: int, src_path: list[int],
-                           dst_path: list[int]) -> list[tuple]:
+def _find_fix_choices_path(
+    A: nx.Graph, swapS: int, src_path: list[int], dst_path: list[int]
+) -> list[tuple]:
     # this is named «...»_path because we could make a version that allows
     # branching and call it «...»_tree.
-    '''
+    """
     Swap node `swapS` with one of the nodes of `dst_path`. For each swap, try
     all possible point of insertion of `swapS` into `dst_path`.
 
     how it works:
     - Several node swapping choices are examined within the edges in `A`.
     - A list where each item is a feasible modification package is returned.
-    '''
+    """
     i_end = len(dst_path)
     choices = []
     hookS_cut, hookS_alt = (
         (src_path[1], src_path[-1])
-        if swapS == src_path[0] else
-        (src_path[-2], src_path[0])
+        if swapS == src_path[0]
+        else (src_path[-2], src_path[0])
     )
     gateD = dst_path[0]
     edges_del_0 = [(swapS, hookS_cut)]
-    for hookS, freeS in ((hookS_cut, hookS_alt),
-                         (hookS_alt, hookS_cut)):
+    for hookS, freeS in ((hookS_cut, hookS_alt), (hookS_alt, hookS_cut)):
         for i, swapD in enumerate(dst_path):
             # loop through nodes of dst_path (to remove)
             if swapD not in A[hookS]:
@@ -98,44 +96,49 @@ def _find_fix_choices_path(A: nx.Graph, swapS: int, src_path: list[int],
             # B) insert swapS in swapD's place (cannot bypass swapD)
             # C) gate or leaf of dst_path as swapD (insert swapS anywhere)
             # D) none of the above is possible
-            if (0 < i < i_end - 1):  # mid-path swapD (remove)
+            if 0 < i < i_end - 1:  # mid-path swapD (remove)
                 nearD_, farD_ = dst_path[i - 1], dst_path[i + 1]
                 edges_del_1 = [(nearD_, swapD), (swapD, farD_)]
                 if nearD_ in A[farD_]:
                     # bypassing of swapD is possible
                     edges_add_1 = [(nearD_, farD_)]
-                    dst_path_ = dst_path[:i] + dst_path[i + 1:]
+                    dst_path_ = dst_path[:i] + dst_path[i + 1 :]
                     # case (A)
                     for nearD, farD in zip(dst_path_[:-1], dst_path_[1:]):
                         # loop through mid-positions in dst_path_ (insert)
                         if nearD in A[swapS] and farD in A[swapS]:
                             # fix found
-                            edges_del = (edges_del_0 + edges_del_1
-                                         + [(nearD, farD)])
-                            edges_add = (edges_add_0 + edges_add_1
-                                         + [(nearD, swapS),
-                                            (swapS, farD)])
-                            choices.append((gateD, swapD, freeS, edges_del,
-                                            edges_add))
-                    for hookD, D_gated in ((dst_path_[0], False),
-                                           (dst_path_[-1], True)):
+                            edges_del = edges_del_0 + edges_del_1 + [(nearD, farD)]
+                            edges_add = (
+                                edges_add_0
+                                + edges_add_1
+                                + [(nearD, swapS), (swapS, farD)]
+                            )
+                            choices.append((gateD, swapD, freeS, edges_del, edges_add))
+                    for hookD, D_gated in (
+                        (dst_path_[0], False),
+                        (dst_path_[-1], True),
+                    ):
                         # loop through extreme-positions in dst_path_ (extend)
                         if hookD in A[swapS]:
                             # fix found
                             edges_del = edges_del_0 + edges_del_1
-                            edges_add = (edges_add_0 + edges_add_1
-                                         + [(hookD, swapS)])
-                            choices.append((gateD if D_gated else swapS, swapD,
-                                            freeS, edges_del, edges_add))
+                            edges_add = edges_add_0 + edges_add_1 + [(hookD, swapS)]
+                            choices.append(
+                                (
+                                    gateD if D_gated else swapS,
+                                    swapD,
+                                    freeS,
+                                    edges_del,
+                                    edges_add,
+                                )
+                            )
                     if nearD_ in A[swapS] and farD_ in A[swapS]:
                         # case (B) – single insertion position in dst
                         # fix found
                         edges_del = edges_del_0 + edges_del_1
-                        edges_add = (edges_add_0 +
-                                     [(nearD_, swapS),
-                                      (swapS, farD_)])
-                        choices.append((gateD, swapD, freeS, edges_del,
-                                        edges_add))
+                        edges_add = edges_add_0 + [(nearD_, swapS), (swapS, farD_)]
+                        choices.append((gateD, swapD, freeS, edges_del, edges_add))
                     else:
                         # case (D) – nothing to do
                         continue
@@ -143,34 +146,45 @@ def _find_fix_choices_path(A: nx.Graph, swapS: int, src_path: list[int],
                 # case (C)
                 dst_path_, hookD, D_gated = (
                     (dst_path[1:], dst_path[1], False)
-                    if i == 0 else
-                    (dst_path[:-1], dst_path[-2], True)
+                    if i == 0
+                    else (dst_path[:-1], dst_path[-2], True)
                 )
                 edges_del_1 = [(swapD, hookD)]
                 for nearD, farD in zip(dst_path_[:-1], dst_path_[1:]):
                     # loop through mid-positions in dst_path_ (to insert)
                     if nearD in A[swapS] and farD in A[swapS]:
                         # fix found
-                        edges_del = (edges_del_0 + edges_del_1
-                                     + [(nearD, farD)])
-                        edges_add = (edges_add_0
-                                     + [(nearD, swapS),
-                                        (swapS, farD)])
-                        choices.append((gateD if D_gated else hookD,
-                                        swapD, freeS, edges_del, edges_add))
+                        edges_del = edges_del_0 + edges_del_1 + [(nearD, farD)]
+                        edges_add = edges_add_0 + [(nearD, swapS), (swapS, farD)]
+                        choices.append(
+                            (
+                                gateD if D_gated else hookD,
+                                swapD,
+                                freeS,
+                                edges_del,
+                                edges_add,
+                            )
+                        )
                 if hookD in A[swapS]:
                     # fix found
                     edges_del = edges_del_0 + edges_del_1
-                    edges_add = (edges_add_0 + [(hookD, swapS)])
-                    choices.append((gateD if D_gated else swapS,
-                                    swapD, freeS, edges_del, edges_add))
+                    edges_add = edges_add_0 + [(hookD, swapS)]
+                    choices.append(
+                        (
+                            gateD if D_gated else swapS,
+                            swapD,
+                            freeS,
+                            edges_del,
+                            edges_add,
+                        )
+                    )
     return choices  # ((gateD, swapD, freeS, edges_del, edges_add), ...)
 
 
 def _quantify_choices(S, A, swapS, src_path, dst_path, choices):
     quant_choices = []
-    rootS, = (n for n in S[src_path[0]] if n < 0)
-    rootD, = (n for n in S[dst_path[0]] if n < 0)
+    (rootS,) = (n for n in S[src_path[0]] if n < 0)
+    (rootD,) = (n for n in S[dst_path[0]] if n < 0)
     d2roots = A.graph['d2roots']
     for gateD, swapD, freeS, edges_del, edges_add in choices:
         gates_del = []
@@ -199,16 +213,21 @@ def _quantify_choices(S, A, swapS, src_path, dst_path, choices):
             )
             gates_add.append((rootD, gateD))
             change += minDd2root
-        change += (sum(A[u][v]['length'] for u, v in edges_add)
-                   - sum(A[u][v]['length'] for u, v in edges_del))
-        quant_choices.append((change, (edges_del, edges_add, gates_del,
-                                       gates_add)))
+        change += sum(A[u][v]['length'] for u, v in edges_add) - sum(
+            A[u][v]['length'] for u, v in edges_del
+        )
+        quant_choices.append((change, (edges_del, edges_add, gates_del, gates_add)))
     return quant_choices
 
 
-def _apply_choice(S: nx.Graph, A: nx.Graph, edges_del: list[tuple[int, int]],
-        edges_add: list[tuple[int, int]], gates_del: list[tuple[int, int]],
-        gates_add: list[tuple[int, int]]) -> nx.Graph:
+def _apply_choice(
+    S: nx.Graph,
+    A: nx.Graph,
+    edges_del: list[tuple[int, int]],
+    edges_add: list[tuple[int, int]],
+    gates_del: list[tuple[int, int]],
+    gates_add: list[tuple[int, int]],
+) -> nx.Graph:
     d2roots = A.graph['d2roots']
     # for edges: add first, then del
     S.add_edges_from(edges_add)
@@ -226,7 +245,7 @@ def _apply_choice(S: nx.Graph, A: nx.Graph, edges_del: list[tuple[int, int]],
 
 def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
     # naming: suffix _path as opposed to _tree -> Sʹ is non-branching
-    '''
+    """
 
     This is only able to repair crossings where one of the paths is split in
     either a leaf and a path or a hook and a path.
@@ -237,11 +256,13 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
 
     Returns:
         Topology without the crossing in a shallow copy of `Sʹ`.
-    '''
+    """
 
     if 'C' in Sʹ.graph or 'D' in Sʹ.graph:
-        print('ERROR: no changes made - `repair_routeset_path()` requires '
-              '`Sʹ` as a topology.')
+        print(
+            'ERROR: no changes made - `repair_routeset_path()` requires '
+            '`Sʹ` as a topology.'
+        )
         return Sʹ
     P = A.graph['planar']
     diagonals = A.graph['diagonals']
@@ -267,41 +288,43 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
                 if s < 0 or t < 0:
                     # diagonal of ⟨u, v⟩ is a gate
                     continue
-                if (((s, t) in S.edges
-                        or (s, t) in edges_add)
-                        and (s, t) not in edges_del):
+                if ((s, t) in S.edges or (s, t) in edges_add) and (
+                    s,
+                    t,
+                ) not in edges_del:
                     # crossing with diagonal
                     return False
             else:
                 # ⟨u, v⟩ is a diagonal of Delaunay ⟨s, t⟩
                 s, t = st
-                if (((s, t) in S.edges
-                        or (s, t) in edges_add)
-                        and (s, t) not in edges_del):
+                if ((s, t) in S.edges or (s, t) in edges_add) and (
+                    s,
+                    t,
+                ) not in edges_del:
                     # crossing with Delaunay edge
                     return False
 
                 # TODO: update the code below to use the bidict diagonals
                 # ensure u–s–v–t is ccw
-                u, v = ((u, v)
-                        if (P[u][t]['cw'] == s and P[v][s]['cw'] == t) else
-                        (v, u))
+                u, v = (u, v) if (P[u][t]['cw'] == s and P[v][s]['cw'] == t) else (v, u)
                 # examine the two triangles ⟨s, t⟩ belongs to
                 for a, b, c in ((s, t, u), (t, s, v)):
                     # this is for diagonals crossing diagonals (4 checks)
                     d = P[c][b]['ccw']
                     diag_da = (a, d) if a < d else (d, a)
-                    if (d == P[b][c]['cw']
-                            and (diag_da in S.edges
-                                 or diag_da in edges_add)
-                            and diag_da not in edges_del):
+                    if (
+                        d == P[b][c]['cw']
+                        and (diag_da in S.edges or diag_da in edges_add)
+                        and diag_da not in edges_del
+                    ):
                         return False
                     e = P[a][c]['ccw']
                     diag_eb = (e, b) if e < b else (b, e)
-                    if (e == P[c][a]['cw']
-                            and (diag_eb in S.edges
-                                 or diag_eb in edges_add)
-                            and diag_eb not in edges_del):
+                    if (
+                        e == P[c][a]['cw']
+                        and (diag_eb in S.edges or diag_eb in edges_add)
+                        and diag_eb not in edges_del
+                    ):
                         return False
         return True
 
@@ -345,8 +368,10 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
             src_dst_swap.append((gateT, gateV, t))
 
         if not src_dst_swap:
-            warn('Crossing repair is only implemented for the cases where the '
-                 'split results in at least one single-noded branch fragment.')
+            warn(
+                'Crossing repair is only implemented for the cases where the '
+                'split results in at least one single-noded branch fragment.'
+            )
             outstanding_crossings.append((uv, st))
             continue
         quant_choices = []

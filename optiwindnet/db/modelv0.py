@@ -10,21 +10,22 @@ from pony.orm import Database, IntArray, Optional, PrimaryKey, Required, Set
 def open_database(filename, create_db=False):
     db = Database()
     define_entities(db)
-    db.bind('sqlite', os.path.abspath(os.path.expanduser(filename)),
-            create_db=create_db)
+    db.bind(
+        'sqlite', os.path.abspath(os.path.expanduser(filename)), create_db=create_db
+    )
     db.generate_mapping(create_tables=True)
     return db
 
 
 def define_entities(db):
-    '''
+    """
     Database model for storage of layouts.
     Tables:
     - NodeSet: site
     - EdgeSet: layout
     - Method: info on algorithm & options to produce layouts
     - Machine: info on machine that generated a layout
-    '''
+    """
 
     class NodeSet(db.Entity):
         # hashlib.sha256(VertexC + boundary).digest()

@@ -4,28 +4,28 @@
 import datetime
 import os
 
-from pony.orm import (Database, IntArray, Json, Optional, PrimaryKey, Required,
-                      Set)
+from pony.orm import Database, IntArray, Json, Optional, PrimaryKey, Required, Set
 
 
 def open_database(filename, create_db=False):
     db = Database()
     define_entities(db)
-    db.bind('sqlite', os.path.abspath(os.path.expanduser(filename)),
-            create_db=create_db)
+    db.bind(
+        'sqlite', os.path.abspath(os.path.expanduser(filename)), create_db=create_db
+    )
     db.generate_mapping(create_tables=True)
     return db
 
 
 def define_entities(db):
-    '''
+    """
     Database model for storage of layouts.
     Tables:
     - NodeSet: site
     - EdgeSet: layout
     - Method: info on algorithm & options to produce layouts
     - Machine: info on machine that generated a layout
-    '''
+    """
 
     class NodeSet(db.Entity):
         # hashlib.sha256(VertexC + boundary).digest()
@@ -55,8 +55,7 @@ def define_entities(db):
         R = Required(int)
         # number of Detour nodes
         D = Optional(int, default=0)
-        timestamp = Optional(datetime.datetime,
-                             default=datetime.datetime.utcnow)
+        timestamp = Optional(datetime.datetime, default=datetime.datetime.utcnow)
         misc = Optional(Json)
         clone2prime = Optional(IntArray)
         edges = Required(IntArray)
@@ -67,8 +66,7 @@ def define_entities(db):
         funname = Required(str)
         # options is a dict of function parameters
         options = Required(Json)
-        timestamp = Required(datetime.datetime,
-                             default=datetime.datetime.utcnow)
+        timestamp = Required(datetime.datetime, default=datetime.datetime.utcnow)
         funfile = Required(str)
         # hashlib.sha256(fun.__code__.co_code)
         funhash = Required(bytes)

@@ -1,8 +1,9 @@
 import math
 from dataclasses import asdict
-import numpy as np
-import networkx as nx
+
 import hybgensea as hgs
+import networkx as nx
+import numpy as np
 from py.io import StdCaptureFD
 
 from ..interarraylib import fun_fingerprint
@@ -17,10 +18,15 @@ from . import length_matrix_single_depot_from_G
 #  F = NodeTagger()
 
 
-def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
-             vehicles: int | None = None, seed: int = 0) \
-                     -> nx.Graph:
-    '''Solves the OCVRP using HGS-CVRP with links from `A`
+def hgs_cvrp(
+    A: nx.Graph,
+    *,
+    capacity: float,
+    time_limit: float,
+    vehicles: int | None = None,
+    seed: int = 0,
+) -> nx.Graph:
+    """Solves the OCVRP using HGS-CVRP with links from `A`
 
     Wraps HybGenSea, which provides bindings to the HGS-CVRP library (Hybrid
     Genetic Search solver for Capacitated Vehicle Routing Problems). This
@@ -37,9 +43,8 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
 
     Returns:
         Solution topology.
-    '''
-    R, T, VertexC = (
-        A.graph[k] for k in ('R', 'T', 'VertexC'))
+    """
+    R, T, VertexC = (A.graph[k] for k in ('R', 'T', 'VertexC'))
     assert R == 1, 'ERROR: only single depot supported'
 
     # Solver initialization
@@ -72,18 +77,20 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
     # coordinates. Distance_matrix is used for cost calculation if provided.
     # The additional coordinates will be helpful in speeding up the algorithm.
     demands = np.ones(T + R, dtype=float)
-    demands[0] = 0.  # depot demand = 0
-    weights, w_max = length_matrix_single_depot_from_G(A, scale=1.)
-    vehicles_min = math.ceil(T/capacity)
+    demands[0] = 0.0  # depot demand = 0
+    weights, w_max = length_matrix_single_depot_from_G(A, scale=1.0)
+    vehicles_min = math.ceil(T / capacity)
     if vehicles is None or vehicles <= vehicles_min:
         if vehicles is not None and vehicles < vehicles_min:
-            print(f'Vehicle number ({vehicles}) too low for feasibilty '
-                  f'with capacity ({capacity}). Setting to {vehicles_min}.')
+            print(
+                f'Vehicle number ({vehicles}) too low for feasibilty '
+                f'with capacity ({capacity}). Setting to {vehicles_min}.'
+            )
         # set to minimum feasible vehicle number
         vehicles = vehicles_min
     # HGS-CVRP crashes if distance_matrix has inf values, but there must
     # be a strong incentive to choose A edges only. (5× is arbitrary)
-    distance_matrix = weights.clip(max=5*w_max)
+    distance_matrix = weights.clip(max=5 * w_max)
     data = dict(
         x_coordinates=x_coordinates,
         y_coordinates=y_coordinates,
@@ -95,12 +102,12 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
         depot=0,
     )
 
-    result, out, err = StdCaptureFD.call(hgs_solver.solve_cvrp, data,
-                                         rounding=False)
+    result, out, err = StdCaptureFD.call(hgs_solver.solve_cvrp, data, rounding=False)
 
     # create a topology graph S from the results
     S = nx.Graph(
-        T=T, R=R,
+        T=T,
+        R=R,
         handle=A.graph['handle'],
         capacity=capacity,
         has_loads=True,
@@ -109,9 +116,12 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
         runtime=result.time,
         solver_log=out,
         solution_time=_solution_time(out, result.cost),
-        method_options=dict(solver_name='HGS-CVRP',
-                            complete=A.number_of_edges() == 0,
-                            fun_fingerprint=fun_fingerprint()) | asdict(ap),
+        method_options=dict(
+            solver_name='HGS-CVRP',
+            complete=A.number_of_edges() == 0,
+            fun_fingerprint=fun_fingerprint(),
+        )
+        | asdict(ap),
         #  solver_details=dict(
         #  )
     )
@@ -121,13 +131,14 @@ def hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
         branch_load = len(branch)
         max_load = max(max_load, branch_load)
         loads = range(branch_load, 0, -1)
-        S.add_nodes_from(((n, {'load': load})
-                          for n, load in zip(branch, loads)),
-                         subtree=subtree_id)
+        S.add_nodes_from(
+            ((n, {'load': load}) for n, load in zip(branch, loads)), subtree=subtree_id
+        )
         branch_roll = [-1] + branch[:-1]
         reverses = tuple(u < v for u, v in zip(branch, branch_roll))
-        edgeD = ({'load': load, 'reverse': reverse}
-                 for load, reverse in zip(loads, reverses))
+        edgeD = (
+            {'load': load, 'reverse': reverse} for load, reverse in zip(loads, reverses)
+        )
         S.add_edges_from(zip(branch_roll, branch, edgeD))
     root_load = sum(S.nodes[n]['load'] for n in S.neighbors(-1))
     S.nodes[-1]['load'] = root_load
@@ -153,10 +164,16 @@ def _solution_time(log, objective) -> float:
     return float(line.split(' ')[-1])
 
 
-def iterative_hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
-                       vehicles: int | None = None, seed: int = 0,
-                       max_iter: int = 10) -> nx.Graph:
-    '''Iterate until crossing-free solution is found (`hgs_cvrp()` wrapper).
+def iterative_hgs_cvrp(
+    A: nx.Graph,
+    *,
+    capacity: float,
+    time_limit: float,
+    vehicles: int | None = None,
+    seed: int = 0,
+    max_iter: int = 10,
+) -> nx.Graph:
+    """Iterate until crossing-free solution is found (`hgs_cvrp()` wrapper).
 
     Each time a solution with a crossing is produced, one of the offending
     edges is removed from `A` and the solver is called again. In the same
@@ -168,20 +185,22 @@ def iterative_hgs_cvrp(A: nx.Graph, *, capacity: float, time_limit: float,
 
     Returns:
         Solution S
-    '''
+    """
 
     def remove_solve_repair(edge, Aʹ, num_crossings):
         # TODO: use a filtered subgraph view instead of copying
         A = Aʹ.copy()
         A.remove_edge(*edge)
-        S = hgs_cvrp(A, capacity=capacity, time_limit=time_limit,
-                     vehicles=vehicles, seed=seed)
+        S = hgs_cvrp(
+            A, capacity=capacity, time_limit=time_limit, vehicles=vehicles, seed=seed
+        )
         S = repair_routeset_path(S, A)
         return S, A, (S.graph.get('num_crossings', 0) < num_crossings)
 
     # solve
-    S = hgs_cvrp(A, capacity=capacity, time_limit=time_limit,
-                 vehicles=vehicles, seed=seed)
+    S = hgs_cvrp(
+        A, capacity=capacity, time_limit=time_limit, vehicles=vehicles, seed=seed
+    )
     # repair
     S = repair_routeset_path(S, A)
     # TODO: accumulate solution_time throughout the iterations
