@@ -1,49 +1,47 @@
-from shapely.geometry import Polygon
-from shapely.ops import unary_union
-from shapely.validation import explain_validity
-from matplotlib.patches import Polygon as MplPolygon
-from matplotlib.collections import PatchCollection
-import matplotlib.pyplot as plt
-import numpy as np
+
+import logging
+
 ###################
 # OptiWindNet API #
 ###################
-
 from abc import ABC, abstractmethod
-from typing import Any, Mapping
 from pathlib import Path
-import copy
+from typing import Any, Mapping
+
 import numpy as np
 import yaml
 import yaml_include
-import logging
-import numpy as np
+#from matplotlib.collections import PatchCollection
+#from matplotlib.patches import Polygon as MplPolygon
+#from shapely.geometry import Polygon
+# from shapely.ops import unary_union
+# from shapely.validation import explain_validity
 
 # Local utilities
-from optiwindnet.utils import NodeTagger
-F = NodeTagger()
+# from optiwindnet.utils import NodeTagger
+
+# F = NodeTagger()
 
 PackType = Mapping[str, Any]
 
 # optiwindnet modules
-from .api_utils import from_coordinates, plot_org_buff
-
-from optiwindnet.importer import L_from_yaml, L_from_pbf, L_from_site
-from optiwindnet.plotting import gplot, pplot
-from optiwindnet.svg import svgplot
-from optiwindnet.mesh import make_planar_embedding
-from optiwindnet.pathfinding import PathFinder
-from optiwindnet.interface import assign_cables
-from optiwindnet.interarraylib import G_from_S, calcload, as_normalized
+# Metaheuristics
+from optiwindnet.baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 
 # Heuristics
 from optiwindnet.heuristics import EW_presolver
-
-# Metaheuristics
-from optiwindnet.baselines.hgs import iterative_hgs_cvrp, hgs_multiroot
+from optiwindnet.importer import L_from_pbf, L_from_site, L_from_yaml, load_repository
+from optiwindnet.interarraylib import G_from_S, as_normalized, calcload
+from optiwindnet.interface import assign_cables
+from optiwindnet.mesh import make_planar_embedding
 
 # MILP
-from optiwindnet.MILP import solver_factory, ModelOptions
+from optiwindnet.MILP import ModelOptions, solver_factory
+from optiwindnet.pathfinding import PathFinder
+from optiwindnet.plotting import gplot, pplot
+from optiwindnet.svg import svgplot
+
+from .api_utils import from_coordinates, plot_org_buff
 
 #################################################
 #                                               #
@@ -52,17 +50,27 @@ from optiwindnet.MILP import solver_factory, ModelOptions
 logger = logging.getLogger(__name__)
 error, warning, info = logger.error, logger.warning, logger.info
 
+
 class WindFarmNetwork:
     """
-    Represents a wind farm electrical network, capable of processing 
+    Represents a wind farm electrical network, capable of processing
     layout data from different formats and computing network properties.
     """
 
-    def __init__(self, cables, turbinesC=None, substationsC=None,
-                 borderC=None, obstaclesC=None,
-                 name='', handle='', L=None, router=None, buffer_dist = 0):
-
-         # Use a default router (heuristic Esau_Williams) if none is provided
+    def __init__(
+        self,
+        cables,
+        turbinesC=None,
+        substationsC=None,
+        borderC=None,
+        obstaclesC=None,
+        name='',
+        handle='',
+        L=None,
+        router=None,
+        buffer_dist=0,
+    ):
+        # Use a default router (heuristic Esau_Williams) if none is provided
         if router is None:
             router = Heuristic(solver='Esau_Williams')
         self.router = router
@@ -71,27 +79,45 @@ class WindFarmNetwork:
         cables_array = np.array(cables)
         if isinstance(cables, int):
             cables = [(cables, 1)]
-        elif cables_array.ndim == 1 and cables_array.shape[0] == 1 and isinstance(cables_array.item(), int):
+        elif (
+            cables_array.ndim == 1
+            and cables_array.shape[0] == 1
+            and isinstance(cables_array.item(), int)
+        ):
             cables = [(int(cables_array[0]), 1)]
-        elif (cables_array.ndim == 1 and cables_array.shape[0] == 2):
+        elif cables_array.ndim == 1 and cables_array.shape[0] == 2:
             cables = [(int(cables_array[0]), float(cables_array[1]))]
         elif cables_array.ndim == 2:
             if cables_array.shape[1] == 2:
                 cables = [(int(cap), float(cost)) for cap, cost in cables_array]
         else:
-            raise ValueError(f"Invalid cable values: {cables}")
-
+            raise ValueError(f'Invalid cable values: {cables}')
 
         self.cables = cables
         self.cables_capacity = max(c[0] for c in cables)
 
         # Construct layout from coordinates if not directly provided
         if turbinesC is not None and substationsC is not None:
-            L = from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist)
+            if L is not None:
+                warning(
+                    'Both coordinates and L are given, optiwindnet prioritize coordinates over L and neglects the provided L.'
+                )
+            L = from_coordinates(
+                self,
+                turbinesC,
+                substationsC,
+                borderC,
+                obstaclesC,
+                name,
+                handle,
+                buffer_dist,
+            )
         elif L is None:
-            raise ValueError('Both turbinesC and substationsC must be provided!')
-        
-        self.L = L # Location graph
+            raise ValueError(
+                'Both turbinesC and substationsC must be provided! Or alternatively L should be given.'
+            )
+
+        self.L = L  # Location graph
 
         # Create planar embedding from L
         self.P, self.A = make_planar_embedding(L)
@@ -102,12 +128,12 @@ class WindFarmNetwork:
 
     def cost(self):
         """Returns the total cost of the network."""
-        return self.G.size(weight="cost")
+        return self.G.size(weight='cost')
 
     def length(self):
         """Returns the total cable length of the network."""
-        return self.G.size(weight="length")
-    
+        return self.G.size(weight='length')
+
     def plot_original_vs_buffered(self):
         """Plot original and buffered borders and obstacles on a single plot."""
         # get coordinates
@@ -117,37 +143,71 @@ class WindFarmNetwork:
         obstacles_bufferedC = self._obstacles_bufferedC
 
         plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC)
-    
-        
+
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
         """Creates a WindFarmNetwork instance from a YAML file."""
         if not isinstance(filepath, str):
-            raise TypeError("Filepath must be a string")
+            raise TypeError('Filepath must be a string')
 
         L = L_from_yaml(filepath)
         return cls(L=L, **kwargs)
-    
+
     @classmethod
     def from_pbf(cls, filepath: str, **kwargs):
         """Creates a WindFarmNetwork instance from a PBF file."""
         if not isinstance(filepath, str):
-            error("Filepath must be a string")
+            error('Filepath must be a string')
 
         L = L_from_pbf(filepath)
         return cls(L=L, **kwargs)
-        
+
+    @classmethod
+    def from_repository(cls, repo_obj: Any, name: str, **kwargs: Any):
+        """
+        Create a WindFarmNetwork from one entry of the object
+        returned by `load_repository()`.
+
+        Parameters
+        ----------
+        repo_obj : Any
+            The object returned by `load_repository()`; expected to act
+            like a named-tuple, where each attribute is a `networkx.Graph`.
+        name : str
+            The attribute name to extract (e.g. "seagreen").
+        **kwargs
+            Additional keyword arguments forwarded to `__init__`.
+
+        Returns
+        -------
+        WindFarmNetwork
+        """
+        try:
+            graph = getattr(repo_obj, name)
+        except AttributeError as exc:
+            raise ValueError(
+                f"'{name}' not found in repository. "
+                f'Available options: {", ".join(repo_obj._fields)}'
+            ) from exc
+
+        if not isinstance(graph, nx.Graph):
+            raise TypeError(
+                f"Repository entry '{name}' is not a networkx.Graph "
+                f'(got {type(graph).__name__})'
+            )
+
+        return cls(graph, **kwargs)
+
     @classmethod
     def from_windIO(cls, filepath: str, **kwargs):
         """Creates a WindFarmNetwork instance from WindIO yaml file."""
         if not isinstance(filepath, str):
-            raise TypeError("Filepath must be a string")
-        
+            raise TypeError('Filepath must be a string')
+
         fpath = Path(filepath)
 
-        yaml.add_constructor(
-            "!include", yaml_include.Constructor(base_dir='data'))
-        
+        yaml.add_constructor('!include', yaml_include.Constructor(base_dir='data'))
+
         with open(fpath, 'r') as f:
             system = yaml.full_load(f)
 
@@ -164,39 +224,43 @@ class WindFarmNetwork:
         name_tokens = fpath.stem.split('_')
 
         # Construct L
-        L = L_from_site(R=R, T=T, VertexC=np.vstack((terminalC, borderC, rootC)),
-                        border=np.arange(T, T + borderC.shape[0]),
-                        name=' '.join(name_tokens),
-                        handle=f"{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}")
+        L = L_from_site(
+            R=R,
+            T=T,
+            VertexC=np.vstack((terminalC, borderC, rootC)),
+            border=np.arange(T, T + borderC.shape[0]),
+            name=' '.join(name_tokens),
+            handle=f'{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}',
+        )
 
         return cls(L=L, **kwargs)
 
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
         return svgplot(self.G)._repr_svg_()
-    
+
     def plot(self, *args, **kwargs):
         """Plots the final optimized network."""
         return gplot(self.G, *args, **kwargs)
-    
+
     def plot_location(self, **kwargs):
         """Plots the location (vertices and borders)."""
         return gplot(self.L, **kwargs)
-    
+
     def plot_available_links(self, **kwargs):
         """Plots the available links from planar embedding."""
         return gplot(self.A, **kwargs)
-    
+
     def plot_navigation_mesh(self, **kwargs):
         """Plots the navigation mesh (planar graph and adjacency)."""
         return pplot(self.P, self.A, **kwargs)
-    
+
     def plot_selected_links(self, **kwargs):
         """Plots the currently selected links in cable layout (chosen from available links)."""
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
         return gplot(G_tentative, **kwargs)
-    
+
     def terse_links(self):
         """Returns a compact representation of the selected links as an array of link targets."""
         R, T = (self.S.graph[k] for k in 'RT')
@@ -211,7 +275,9 @@ class WindFarmNetwork:
 
         return terse
 
-    def update_from_terse_links(self, terse_links: np.ndarray, turbinesC=None, substationsC=None) -> None:
+    def update_from_terse_links(
+        self, terse_links: np.ndarray, turbinesC=None, substationsC=None
+    ) -> None:
         """
         Updates the network from terse link representation.
         Optionally updates node coordinates.
@@ -223,26 +289,26 @@ class WindFarmNetwork:
         # Validate input shape and type
         if not np.issubdtype(terse_links.dtype, np.integer):
             raise ValueError(
-                f"terse_links must be an array of integers. Got {terse_links.dtype} instead.\n"
-                f"Hint: You can fix it by doing terse_links = [int(x) for x in terse_links]."
+                f'terse_links must be an array of integers. Got {terse_links.dtype} instead.\n'
+                f'Hint: You can fix it by doing terse_links = [int(x) for x in terse_links].'
             )
 
         if terse_links.ndim != 1:
             raise ValueError(
-                f"terse_links must be a 1D array. Got shape {terse_links.shape} instead."
+                f'terse_links must be a 1D array. Got shape {terse_links.shape} instead.'
             )
-        
+
         # Update coordinates if provided
         if turbinesC is not None:
-            self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
-    
+            self.L.graph['VertexC'][: turbinesC.shape[0], :] = turbinesC
+
         if substationsC is not None:
-            self.L.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
-            
+            self.L.graph['VertexC'][-substationsC.shape[0] :, :] = substationsC
+
         if turbinesC is not None or substationsC is not None:
             self.P, self.A = make_planar_embedding(self.L)
 
-        # Rebuild the selected edge set
+        # Rebuild the selected edge set (links)
         self.S.remove_edges_from(list(self.S.edges()))
         for i, j in enumerate(terse_links):
             self.S.add_edge(i, j)
@@ -259,42 +325,47 @@ class WindFarmNetwork:
 
     def get_network(self):
         """Returns the network as a structured array of edge data."""
-        network_array_type = np.dtype([
-            ('src', int),
-            ('tgt', int),
-            ('length', float),
-            ('load', float),
-            ('reverse', bool),
-            ('cable', int),
-            ('cost', float),
-        ])
+        network_array_type = np.dtype(
+            [
+                ('src', int),
+                ('tgt', int),
+                ('length', float),
+                ('load', float),
+                ('reverse', bool),
+                ('cable', int),
+                ('cost', float),
+            ]
+        )
 
         def iter_edges(G, keys):
             for s, t, edgeD in G.edges(data=True):
                 yield s, t, *(edgeD[key] for key in keys)
 
-
-        network = np.fromiter(iter_edges(self.G, network_array_type.names[2:]),
-                                dtype=network_array_type, count=self.G.number_of_edges())
+        network = np.fromiter(
+            iter_edges(self.G, network_array_type.names[2:]),
+            dtype=network_array_type,
+            count=self.G.number_of_edges(),
+        )
         return network
-
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """
         Computes gradients of total cable length or cost with respect to the node positions.
         """
         if gradient_type.lower() not in ['cost', 'length']:
-            raise ValueError("gradient_type should be either 'cost' or 'length'")         
+            raise ValueError("gradient_type should be either 'cost' or 'length'")
 
         G = self.G
         VertexC = G.graph['VertexC']
         if turbinesC is not None or substationsC is not None:
-            info('wfn.gradient is not checking for the feasibility of the layout with new coordinates!')
+            info(
+                'wfn.gradient is not checking for the feasibility of the layout with new coordinates!'
+            )
             VertexC = VertexC.copy()
             if turbinesC is not None:
-                VertexC[:turbinesC.shape[0], :] = turbinesC
+                VertexC[: turbinesC.shape[0], :] = turbinesC
             if substationsC is not None:
-                VertexC[-substationsC.shape[0]:, :] = substationsC
+                VertexC[-substationsC.shape[0] :, :] = substationsC
 
         R = G.graph['R']
         T = G.graph['T']
@@ -308,14 +379,18 @@ class WindFarmNetwork:
         vec = VertexC[_u] - VertexC[_v]
         norm = np.hypot(*vec.T)
         # suppress the contributions of zero-length edges
-        norm[norm < 1e-12] = 1.
+        norm[norm < 1e-12] = 1.0
         vec /= norm[:, None]
-        
+
         if gradient_type.lower() == 'cost':
             cable_costs = np.fromiter(
-                                (G.graph['cables'][cable]['cost'] for *_, cable in G.edges(data='cable')),
-                                dtype=np.float64, count=G.number_of_edges()
-                            )
+                (
+                    G.graph['cables'][cable]['cost']
+                    for *_, cable in G.edges(data='cable')
+                ),
+                dtype=np.float64,
+                count=G.number_of_edges(),
+            )
             vec *= cable_costs[:, None]
 
         np.add.at(gradients, _u, vec)
@@ -328,36 +403,46 @@ class WindFarmNetwork:
 
         return gradients_wt, gradients_ss
 
-
     def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=None):
-
         if router is None:
             router = self.router
         else:
-            self.router = router     
-            
+            self.router = router
+
         # If new coordinates are provided, update them
         if turbinesC is not None:
-            self.L.graph['VertexC'][:turbinesC.shape[0], :] = turbinesC
-    
+            self.L.graph['VertexC'][: turbinesC.shape[0], :] = turbinesC
+
         if substationsC is not None:
-            self.L.graph['VertexC'][-substationsC.shape[0]:, :] = substationsC
-            
+            self.L.graph['VertexC'][-substationsC.shape[0] :, :] = substationsC
+
         if turbinesC is not None or substationsC is not None:
             self.P, self.A = make_planar_embedding(self.L)
-        
+
         if turbinesC is None:
-            turbinesC = self.L.graph['VertexC'][:self.L.graph['T'], :]
+            turbinesC = self.L.graph['VertexC'][: self.L.graph['T'], :]
 
         if substationsC is None:
-            substationsC = substationsC or self.L.graph['VertexC'][-self.L.graph['R']:, :]
+            substationsC = (
+                substationsC or self.L.graph['VertexC'][-self.L.graph['R'] :, :]
+            )
 
-        S, G = router(A=self.A, P=self.P, S=self.S, turbinesC=turbinesC, substationsC=substationsC, cables=self.cables, cables_capacity=self.cables_capacity, verbose=verbose)
+        S, G = router(
+            A=self.A,
+            P=self.P,
+            S=self.S,
+            turbinesC=turbinesC,
+            substationsC=substationsC,
+            cables=self.cables,
+            cables_capacity=self.cables_capacity,
+            verbose=verbose,
+        )
         self.S = S
         self.G = G
 
         terse_links = self.terse_links()
         return terse_links
+
 
 class OptiWindNetSolver(ABC):
     def __init__(self, **kwargs):
@@ -372,7 +457,10 @@ class OptiWindNetSolver(ABC):
 
     def __call__(self, turbinesC=None, substationsC=None, verbose=False, **kwargs):
         """Make the instance callable, calling optimize() internally."""
-        return self.optimize(turbinesC=turbinesC, substationsC=substationsC, verbose=verbose, **kwargs)  
+        return self.optimize(
+            turbinesC=turbinesC, substationsC=substationsC, verbose=verbose, **kwargs
+        )
+
 
 class Heuristic(OptiWindNetSolver):
     def __init__(self, solver='Esau_Williams', maxiter=10000, verbose=False, **kwargs):
@@ -387,7 +475,6 @@ class Heuristic(OptiWindNetSolver):
         self.maxiter = maxiter
 
     def optimize(self, A, P, cables, cables_capacity, verbose=None, **kwargs):
-
         if verbose is None:
             verbose = self.verbose
 
@@ -396,7 +483,7 @@ class Heuristic(OptiWindNetSolver):
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
         else:
             pass
-            
+
         G_tentative = G_from_S(S, A)
 
         G = PathFinder(G_tentative, planar=P, A=A).create_detours()
@@ -404,9 +491,20 @@ class Heuristic(OptiWindNetSolver):
         assign_cables(G, cables)
 
         return S, G
-    
+
+
 class MetaHeuristic(OptiWindNetSolver):
-    def __init__(self, time_limit, solver='HGS', gates_limit: int | None = None, max_iter=10, balanced=False, seed: int = 0, verbose=False, **kwargs):
+    def __init__(
+        self,
+        time_limit,
+        solver='HGS',
+        gates_limit: int | None = None,
+        max_iter=10,
+        balanced=False,
+        seed: int = 0,
+        verbose=False,
+        **kwargs,
+    ):
         # Call the base class initialization
         self.time_limit = time_limit
         self.gates_limit = gates_limit
@@ -416,7 +514,6 @@ class MetaHeuristic(OptiWindNetSolver):
         self.gates_limit = gates_limit
         self.balanced = balanced
         self.seed = seed
-        
 
     def optimize(self, A, P, cables, cables_capacity, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
@@ -424,56 +521,96 @@ class MetaHeuristic(OptiWindNetSolver):
             verbose = self.verbose
 
         # optimizing
-        if self.solver.lower() in ['hgs', 'hybrid genetic search', 'hybrid_genetic_search']:
+        if self.solver.lower() in [
+            'hgs',
+            'hybrid genetic search',
+            'hybrid_genetic_search',
+        ]:
             R = A.graph['R']
             if R == 1:
-                S = iterative_hgs_cvrp(as_normalized(A), capacity=cables_capacity, time_limit=self.time_limit, max_iter=self.max_iter, vehicles=self.gates_limit, seed=self.seed)
+                S = iterative_hgs_cvrp(
+                    as_normalized(A),
+                    capacity=cables_capacity,
+                    time_limit=self.time_limit,
+                    max_iter=self.max_iter,
+                    vehicles=self.gates_limit,
+                    seed=self.seed,
+                )
             else:
-                S = hgs_multiroot(as_normalized(A), capacity=cables_capacity, time_limit=self.time_limit, balanced=self.balanced, seed=self.seed)
+                S = hgs_multiroot(
+                    as_normalized(A),
+                    capacity=cables_capacity,
+                    time_limit=self.time_limit,
+                    balanced=self.balanced,
+                    seed=self.seed,
+                )
                 if verbose and self.gates_limit:
-                    print('WARNING: hgs_multiroot is used for plants with more than one substation and gates-limit is neglected (hgs_multiroot is not capable of limiting number of feeders)')
+                    print(
+                        'WARNING: hgs_multiroot is used for plants with more than one substation and gates-limit is neglected (hgs_multiroot is not capable of limiting number of feeders)'
+                    )
 
         else:
             raise ValueError(
-                f"{self.solver} is not among the supported Meta-Heuristic solvers. Choose among: HGS.")
-        
+                f'{self.solver} is not among the supported Meta-Heuristic solvers. Choose among: HGS.'
+            )
+
         G_tentative = G_from_S(S, A)
 
         G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
         assign_cables(G, cables)
-        
+
         return S, G
 
+
 class MILP(OptiWindNetSolver):
-    def __init__(self, solver_name, time_limit, mip_gap, solver_options=None, model_options=None, verbose=False, **kwargs):
+    def __init__(
+        self,
+        solver_name,
+        time_limit,
+        mip_gap,
+        solver_options=None,
+        model_options=None,
+        verbose=False,
+        **kwargs,
+    ):
         self.time_limit = time_limit
         self.mip_gap = mip_gap
         self.solver_name = solver_name
         self.solver_options = solver_options or {}
         self.model_options = model_options or ModelOptions()
         self.verbose = verbose
+        self.solver = solver_factory(solver_name)
+        try:
+            self.options = self.solver.options
+        except AttributeError:
+            self.options = 'Not available'
 
-    def optimize(self, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs):
-
+    def optimize(
+        self, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
+        ):
         if verbose is None:
             verbose = self.verbose
-    
+
         # warm start
         if S_warm is not None:
             info('S is not None and the model is warmed up with the available S.')
 
-        solver = solver_factory(self.solver_name)
+        solver = self.solver
 
-        solver.set_problem(P, A, cables_capacity, warmstart=S_warm, model_options=self.model_options)
-        
-        solver.solve(time_limit=self.time_limit, mip_gap=self.mip_gap, options=self.solver_options, verbose=verbose)
+        solver.set_problem(
+            P, A, cables_capacity, warmstart=S_warm, model_options=self.model_options
+        )
+
+        solver.solve(
+            time_limit=self.time_limit,
+            mip_gap=self.mip_gap,
+            options=self.solver_options,
+            verbose=verbose,
+        )
 
         S, G = solver.get_solution()
 
         assign_cables(G, cables)
-        
+
         return S, G
-
-
-
