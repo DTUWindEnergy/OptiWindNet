@@ -107,13 +107,13 @@ def gplot(
         ax.set(**kw_axes)
     ax.set_axis_off()
     # draw farm border
+    border_opt = dict(
+        facecolor=c.border_face,
+        linestyle='dashed',
+        edgecolor=c.kind2color['border'],
+        linewidth=0.7,
+    )
     if border is not None:
-        border_opt = dict(
-            facecolor=c.border_face,
-            linestyle='dashed',
-            edgecolor=c.kind2color['border'],
-            linewidth=0.7,
-        )
         borderC = VertexC[border]
 
         if obstacles is None:
@@ -143,6 +143,10 @@ def gplot(
             path = Path(points, codes)
             patch = PathPatch(path, **border_opt)
             ax.add_patch(patch)
+    elif obstacles is not None:
+        # draw only obstacles
+        for obstacle in obstacles:
+            ax.fill(*VertexC[obstacle].T, **border_opt)
 
     # setup
     roots = range(-R, 0)
