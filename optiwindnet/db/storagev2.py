@@ -121,7 +121,7 @@ def L_from_nodeset(nodeset: object) -> nx.Graph:
         landscape_angle=nodeset.landscape_angle,
     )
     if len(border) > 0:
-        L.graph['border'] = border        
+        L.graph['border'] = border
     if len(nodeset.constraint_groups) > 1:
         obstacle_idx = np.cumsum(np.array(nodeset.constraint_groups))
         L.graph.update(
