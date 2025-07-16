@@ -608,7 +608,7 @@ def terse_links_from_S(S):
     # convert the graph to array representing the tree (edges i->terse[i])
     for u, v, edgeD in S.edges(data=True):
         u, v = (u, v) if u < v else (v, u)
-        i, target = (u, v) if edgeD["reverse"] else (v, u)
+        i, target = (u, v) if edgeD['reverse'] else (v, u)
         terse_links[i] = target
     return terse_links
 
