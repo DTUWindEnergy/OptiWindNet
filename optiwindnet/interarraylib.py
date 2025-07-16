@@ -235,11 +235,15 @@ def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
     if 'name' not in kwargs:
         kwargs['name'] = kwargs['handle']
     if 'B' not in kwargs:
+        B = 0
         border = kwargs.get('border')
         if border is not None:
-            kwargs['B'] = border.shape[0]
-        else:
-            kwargs['B'] = 0
+            B += border.shape[0]
+        obstacles = kwargs.get('obstacles')
+        if obstacles is not None:
+            for obstacle in obstacles:
+                B += obstacle.shape[0]
+        kwargs['B'] = B
     L = nx.Graph(T=T, R=R, VertexC=VertexC, **kwargs)
 
     L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
