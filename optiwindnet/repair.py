@@ -11,7 +11,7 @@ from .interarraylib import calcload
 __all__ = ('repair_routeset_path',)
 
 _lggr = logging.getLogger(__name__)
-warn = _lggr.warning
+info, warn = _lggr.info, _lggr.warning
 
 
 def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
@@ -387,7 +387,7 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
                 _quantify_choices(S, A, swapS, src_path, dst_path, choices)
             )
         if not quant_choices:
-            warn('Unrepairable: no suitable node swap found.')
+            info('Repair unsuccessful: crossing marked for removal on HGS rerun.')
             outstanding_crossings.append((uv, st))
             continue
         quant_choices.sort()
