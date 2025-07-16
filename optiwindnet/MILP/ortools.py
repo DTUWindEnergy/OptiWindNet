@@ -67,6 +67,8 @@ class SolverORTools(Solver, PoolHandler):
 
     def __init__(self):
         self.solver = cp_model.CpSolver()
+        # set default options for ortools
+        self.options = {}
 
     def set_problem(
         self,
@@ -101,7 +103,7 @@ class SolverORTools(Solver, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         storer = _SolutionStore(model)
-        for key, val in options.items():
+        for key, val in (self.options | options).items():
             setattr(solver.parameters, key, val)
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.relative_gap_limit = mip_gap
