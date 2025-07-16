@@ -34,7 +34,7 @@ def expand_polygon_safely(polygon, buffer_dist):
     if not polygon.equals(polygon.convex_hull):
         max_buffer_dist = polygon.exterior.minimum_clearance / 2
         if buffer_dist >= max_buffer_dist:
-            warning("⚠️ The defined border is non-convex and buffering may introduce unexpected changes.")
+            warning("⚠️ The defined border is non-convex and buffering may introduce unexpected changes. For visual comparison use plot_original_vs_buffered().")
     return polygon.buffer(buffer_dist, resolution=2)
 
 def shrink_polygon_safely(polygon, shrink_dist, indx):
@@ -108,14 +108,23 @@ def from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, h
                 handle=handle,
                 VertexC=vertexC
             )
+        else:    
+            border_sizes = np.array([0] + [obs.shape[0] for obs in obstaclesC])
+            B = border_sizes.sum()
+            obstacle_start_idxs = np.cumsum(border_sizes) + T
+            obstacle_ranges = [np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)]
 
-        warning('⚠️ Obstacles are given while no border coordinate is defined, optiwindnet is creating borders based on turbine and obstacle coordinates.')
-        
-        all_points = [turbinesC, substationsC]
-        all_points_flat = np.vstack(all_points)
-        hull = MultiPoint([tuple(p) for p in all_points_flat]).convex_hull
-        borderC = np.array(hull.exterior.coords[:-1])  # drop closing point
-        border_subtraction_verbose = False
+            vertexC = np.vstack((turbinesC, *obstaclesC, substationsC))
+
+            return L_from_site(
+                R=R,
+                T=T,
+                B=B,
+                obstacles=obstacle_ranges,
+                name=name,
+                handle=handle,
+                VertexC=vertexC
+            )
 
     if obstaclesC is None:
         obstaclesC = []

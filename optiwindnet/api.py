@@ -163,42 +163,6 @@ class WindFarmNetwork:
         return cls(L=L, **kwargs)
 
     @classmethod
-    def from_repository(cls, repo_obj: Any, name: str, **kwargs: Any):
-        """
-        Create a WindFarmNetwork from one entry of the object
-        returned by `load_repository()`.
-
-        Parameters
-        ----------
-        repo_obj : Any
-            The object returned by `load_repository()`; expected to act
-            like a named-tuple, where each attribute is a `networkx.Graph`.
-        name : str
-            The attribute name to extract (e.g. "seagreen").
-        **kwargs
-            Additional keyword arguments forwarded to `__init__`.
-
-        Returns
-        -------
-        WindFarmNetwork
-        """
-        try:
-            graph = getattr(repo_obj, name)
-        except AttributeError as exc:
-            raise ValueError(
-                f"'{name}' not found in repository. "
-                f'Available options: {", ".join(repo_obj._fields)}'
-            ) from exc
-
-        if not isinstance(graph, nx.Graph):
-            raise TypeError(
-                f"Repository entry '{name}' is not a networkx.Graph "
-                f'(got {type(graph).__name__})'
-            )
-
-        return cls(graph, **kwargs)
-
-    @classmethod
     def from_windIO(cls, filepath: str, **kwargs):
         """Creates a WindFarmNetwork instance from WindIO yaml file."""
         if not isinstance(filepath, str):
@@ -430,7 +394,7 @@ class WindFarmNetwork:
         S, G = router(
             A=self.A,
             P=self.P,
-            S=self.S,
+            S_warm=self.S,
             turbinesC=turbinesC,
             substationsC=substationsC,
             cables=self.cables,
@@ -599,7 +563,10 @@ class MILP(OptiWindNetSolver):
         solver = self.solver
 
         solver.set_problem(
-            P, A, cables_capacity, warmstart=S_warm, model_options=self.model_options
+            P, A,
+            capacity=cables_capacity,
+            model_options=self.model_options,
+            warmstart=S_warm,
         )
 
         solver.solve(
