@@ -720,12 +720,10 @@ def make_planar_embedding(
         ','.join(f'{F[u]}–{F[v]}' for u, v in hull_prunned_edges),
     )
 
-    A = nx.Graph(P_A_edges)
+    A = nx.Graph()
+    A.add_nodes_from(L.nodes(data=True))
+    A.add_edges_from(P_A_edges)
     nx.set_edge_attributes(A, 'delaunay', name='kind')
-    # TODO: ¿do we really need node attr kind? separate with test: node < 0
-    nx.set_node_attributes(A, 'wtg', name='kind')
-    for r in range(-R, 0):
-        A.nodes[r]['kind'] = 'oss'
 
     # Extend A with diagonals.
     diagonals = bidict()

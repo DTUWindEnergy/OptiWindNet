@@ -263,12 +263,30 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     VertexC, d2roots, diagonals = (
         A.graph[k] for k in ('VertexC', 'd2roots', 'diagonals')
     )
-    G = nx.create_empty_copy(A)
-    for k in ('capacity', 'has_loads', 'max_load', 'creator', 'solver_details'):
-        value = S.graph.get(k)
+    G = nx.create_empty_copy(S)
+    for k in (
+        'B',
+        'border',
+        'obstacles',
+        'name',
+        'landscape_angle',
+        'norm_scale',
+        'norm_offset',
+        'is_normalized',
+    ):
+        value = A.graph.get(k)
         if value is not None:
             G.graph[k] = value
-    nx.set_node_attributes(G, S.nodes)
+    nx.set_node_attributes(
+        G,
+        {n: label for n, label in A.nodes(data='label') if label is not None},
+        'label',
+    )
+    nx.set_node_attributes(G, 'wtg', 'kind')
+    for r in range(-R, 0):
+        G.nodes[r]['kind'] = 'oss'
+    if 'is_normalized' in A.graph:
+        G.graph['is_normalized'] = True
     # remove supertriangle coordinates from VertexC
     G.graph['VertexC'] = np.vstack((VertexC[: -R - 3], VertexC[-R:]))
     # non_A_edges are the far-reaching gates and ocasionally the result of
