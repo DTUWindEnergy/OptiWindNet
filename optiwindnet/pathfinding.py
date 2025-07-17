@@ -25,7 +25,7 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
-PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop'.split())
+PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop id'.split())
 
 
 class PathNodes(dict):
@@ -59,7 +59,7 @@ class PathNodes(dict):
                 return prev_id
         id = self.count
         self.count += 1
-        self[id] = PseudoNode(_source, sector, parent, dist, d_hop)
+        self[id] = PseudoNode(_source, sector, parent, dist, d_hop, id)
         self.ids_from_prime_sector[_source, sector].append(id)
         self.prime_from_id[id] = _source
         debug('pseudoedge «%d->%d» added', _source, _parent)
@@ -268,7 +268,7 @@ class PathFinder:
         # get incumbent again, as the situation may have changed
         incumbent = I_path[_new].get(new_sector)
         if incumbent is None or d_new < paths[incumbent].dist:
-            self.I_path[_new][new_sector] = new
+            I_path[_new][new_sector] = new
             debug('(%d, %d) added with d_path = %.2f', _new, _apex, d_new)
 
     def _advance_portal(self, left: int, right: int):
@@ -456,7 +456,8 @@ class PathFinder:
 
         # launch channel traversers around the roots to the prioqueue
         for r in range(-R, 0):
-            paths[r] = PseudoNode(r, r, None, 0.0, 0.0)
+            paths[r] = PseudoNode(r, r, None, 0.0, 0.0, r)
+            I_path[r][r] = paths[r]
             paths.prime_from_id[r] = r
             paths.ids_from_prime_sector[r, r] = [r]
             for left in P.neighbors(r):
