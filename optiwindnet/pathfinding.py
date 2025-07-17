@@ -326,7 +326,8 @@ class PathFinder:
         #             translation: _node = paths.prime_from_id[node]
         cw, ccw = rotation_checkers_factory(self.VertexC)
         paths = self.paths
-
+        ST = self.ST
+        
         # for next_left, next_right, new_portal_iter in portal_iter:
         for portal, side, new_portal_iter in portal_iter:
             #  print('[tra]')
@@ -340,6 +341,9 @@ class PathFinder:
                 self.bifurcation = branched_traverser
 
             _new = portal[side]
+            if _new >= ST:
+                continue
+
             _nearside = _funnel[side]
             _farside = _funnel[not side]
             test = ccw if side else cw
@@ -491,7 +495,10 @@ class PathFinder:
                 ]
 
                 # shortest paths for roots' P.neighbors is a straight line
-                I_path[left][sec_left], I_path[right][sec_right] = wedge_end
+                if left <= ST:
+                    I_path[left][sec_left] = wedge_end[0]
+                if right <= ST:
+                    I_path[right][sec_right] = wedge_end[1]
 
                 # prioritize by distance to the closest node of the portal
                 closest, d_closest = (
