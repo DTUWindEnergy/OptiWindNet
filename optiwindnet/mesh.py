@@ -359,8 +359,8 @@ def make_planar_embedding(
     # P) Set A's graph attributes.
 
     R, T, B, VertexCʹ = (L.graph[k] for k in 'R T B VertexC'.split())
-    border = L.graph.get('border')
-    obstacles = L.graph.get('obstacles', [])
+    border = L.graph.get('border', ())
+    obstacles = L.graph.get('obstacles', ())
 
     # #############################################
     # A) Scale the coordinates to avoid CDT errors.
@@ -388,17 +388,36 @@ def make_planar_embedding(
     node_xy_ = tuple(
         (x.item(), y.item()) for (x, y) in chain(VertexS[:T], VertexS[-R:])
     )
-    nodeset_xy_ = set(node_xy_[:-R])
+    terminal_xy_ = set(node_xy_[:-R])
     root_pts = shp.MultiPoint(node_xy_[-R:])
-    if border is None:
-        hull_minus_border = shp.MultiPolygon()
-        border_vertex_from_xy = {}
-        out_root_pts = shp.MultiPoint()
-    else:
-        border_vertex_from_xy = {
-            tuple(VertexS[i].tolist()): i.item() for i in chain(border, *obstacles)
-        }
 
+    # start by adding just the B-range vertices
+    border_vertex_from_xy = {tuple(VertexS[i].tolist()): i for i in range(T, T + B)}
+    # check for duplicate vertex coordinates between nodes and the B-range
+    for xy in node_xy_ & border_vertex_from_xy.keys():
+        # xy from border or obstacle vertex coincide with a node vertex
+        i_node = node_xy_.index(xy)
+        if i_node >= T:
+            # make it negative if it refers to a root
+            i_node -= T + R
+        i_border = border_vertex_from_xy[xy]
+        if i_node != i_border:
+            # border-vertex coordinates are equal to those of a node-vertex
+            # make the border-vertex translator point to the node-vertex
+            border_vertex_from_xy[xy] = i_node
+    # complete border_vertex_from_xy with node-vertices that are in the borders
+    border_vertex_from_xy.update(
+        (tuple(VertexS[i].tolist()), i.item())
+        for i in chain(border, *obstacles)
+        if i < T
+    )
+
+    if len(border) == 0:
+        hull_minus_border = shp.MultiPolygon()
+        out_root_pts = shp.MultiPoint()
+        hull_border_vertices = ()
+        hull_border_xy_ = set()
+    else:
         border_poly = shp.Polygon(shell=VertexS[border])
         out_root_pts = root_pts - border_poly
         hull_poly = (border_poly | root_pts).convex_hull
@@ -407,7 +426,9 @@ def make_planar_embedding(
         hull_border_xy_ = {
             xy for xy in hull_ring.coords[:-1] if xy in border_vertex_from_xy
         }
-        hull_border_vertices = [border_vertex_from_xy[xy] for xy in hull_border_xy_]
+        hull_border_vertices = tuple(
+            border_vertex_from_xy[xy] for xy in hull_border_xy_
+        )
 
         # Turn the main border's concave zones into concavity polygons.
         hull_minus_border = hull_poly - border_poly
@@ -473,7 +494,7 @@ def make_planar_embedding(
             for fwd in chain(old_ring_xy_[1:], (cur,)):
                 Z = border_vertex_from_xy[fwd]
                 Z_is_hull = fwd in hull_border_xy_
-                if cur in nodeset_xy_:
+                if cur in terminal_xy_:
                     # Concavity border vertex coincides with node.
                     # Therefore, create a stunt vertex for the border.
                     XY = VertexS[Y] - VertexS[X]
@@ -699,12 +720,10 @@ def make_planar_embedding(
         ','.join(f'{F[u]}–{F[v]}' for u, v in hull_prunned_edges),
     )
 
-    A = nx.Graph(P_A_edges)
+    A = nx.Graph()
+    A.add_nodes_from(L.nodes(data=True))
+    A.add_edges_from(P_A_edges)
     nx.set_edge_attributes(A, 'delaunay', name='kind')
-    # TODO: ¿do we really need node attr kind? separate with test: node < 0
-    nx.set_node_attributes(A, 'wtg', name='kind')
-    for r in range(-R, 0):
-        A.nodes[r]['kind'] = 'oss'
 
     # Extend A with diagonals.
     diagonals = bidict()
@@ -728,7 +747,7 @@ def make_planar_embedding(
     # prevent edges that cross the boudaries from going into PlanarEmbedding
     # an exception is made for edges that include a root node
     hull_concave = []
-    if border is not None:
+    if len(border) > 0:
         hull_prunned_poly = shp.Polygon(shell=VertexS[hull_prunned])
         shp.prepare(hull_prunned_poly)
         shp.prepare(border_poly)
@@ -1218,7 +1237,7 @@ def make_planar_embedding(
     # O) Calculate the area of the concave hull.
     # ##########################################
     debug('PART O')
-    if border is None:
+    if len(border) == 0:
         bX, bY = VertexC[convex_hull_A].T
     else:
         # for the bounding box, use border and roots
@@ -1251,7 +1270,6 @@ def make_planar_embedding(
         R=R,
         B=B,
         VertexC=VertexC,
-        border=border,
         name=L.name,
         handle=L.graph.get('handle', 'handleless'),
         planar=P_A,
@@ -1268,6 +1286,8 @@ def make_planar_embedding(
         inter_terminal_clearance_min=inter_terminal_clearance_min,
         inter_terminal_clearance_safe=inter_terminal_clearance_safe,
     )
+    if len(border) > 0:
+        A.graph['border'] = border
     if obstacles:
         A.graph['obstacles'] = obstacles
     if stunts_primes:

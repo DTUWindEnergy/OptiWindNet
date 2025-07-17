@@ -157,6 +157,18 @@ class Drawable:
                     ),
                 )
             )
+        elif draw_obstacles:
+            # draw only the obstacles
+            self.featuresE.append(
+                svg.Path(
+                    id='border',
+                    stroke=c.kind2color['border'],
+                    stroke_dasharray=[15, 7],
+                    stroke_width=2,
+                    fill=c.border_face,
+                    d=draw_obstacles,
+                )
+            )
 
         # root nodes
         root_side = round(1.77 * node_size)
