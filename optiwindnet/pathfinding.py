@@ -62,7 +62,7 @@ class PathNodes(dict):
         self[id] = PseudoNode(_source, sector, parent, dist, d_hop)
         self.ids_from_prime_sector[_source, sector].append(id)
         self.prime_from_id[id] = _source
-        debug('pseudoedge «%s->%s» added', F[_source], F[_parent])
+        debug('pseudoedge «%d->%d» added', _source, _parent)
         self.last_added = id
         return id
 
@@ -225,7 +225,7 @@ class PathFinder:
                 pseudonode = paths[id]
             return path, dists
         else:
-            info('Path not found for «%s»', F[n])
+            info('Path not found for «%d»', n)
             return [], []
 
     def _get_sector(self, _node: int, portal: tuple[int, int]):
@@ -243,26 +243,14 @@ class PathFinder:
             # _node may also be the prime of a contour node, which is ok, since
             # the other side is a pinched portal and has a distinct sector.
             return NULL
-        is_gate = any(_node in Gate for Gate in self.hooks2check)
-        _node_degree = len(self.G._adj[_node])
-        if is_gate and _node_degree == 1:
-            # special case where a branch with 1 node uses a non_embed gate
-            if _node == portal[0]:
-                return NULL
-            else:
-                return -self.R + np.argmin(self.d2roots[_node]).item()
-
         _opposite = portal[0] if _node == portal[1] else portal[1]
         _nbr = self.P[_node][_opposite]['ccw']
-        # this `while` loop would in some cases loop forever
-        #  while ((_node, _nbr) not in self.G.edges):
-        #      _nbr = self.P[_node][_nbr]['ccw']
-        # TODO: there is probably a better way to avoid spinning around _node
-        for _ in range(_node_degree):
+        for _ in range(len(self.P._adj[_node])):
             if (_node, _nbr) in self.G.edges:
-                break
+                return _nbr
             _nbr = self.P[_node][_nbr]['ccw']
-        return _nbr
+        # could not find a non-tentative G edge around _node
+        return NULL
 
     def _rate_wait_add(self, portal: tuple[int, int], _new: int, _apex: int, apex: int):
         I_path = self.I_path
@@ -296,9 +284,7 @@ class PathFinder:
             for s, t, side in ((left, n, 1), (n, right, 0)):
                 st_sorted = (s, t) if s < t else (t, s)
                 if st_sorted not in self.portal_set:
-                    debug('discarding (%d, %d)', s, t)
                     continue
-                debug('including (%d, %d)', s, t)
                 next_portals.append(((s, t), side))
             try:
                 # this `pop()` will raise IndexError if we are at a dead-end
@@ -310,14 +296,14 @@ class PathFinder:
                 #          else None)
                 if next_portals:
                     second, sside = next_portals[0]
-                    debug('branching (%d, %d) and (%d, %d)', *first, *second)
+                    debug('advance on (%d, %d) and branch on (%d, %d)', *first, *second)
                     yield (
                         first,
                         fside,
                         chain(((second, sside, None),), self._advance_portal(*second)),
                     )
                 else:
-                    debug('(%d, %d)', *first)
+                    debug('advance on (%d, %d)', *first)
                     yield first, fside, None
             except IndexError:
                 # dead-end reached
@@ -362,15 +348,16 @@ class PathFinder:
             #      print(f"{'RIGHT' if side else 'LEFT '} "
             #            f'nearside({F[_nearside]}) == apex({F[_apex]})')
             debug(
-                '%s new(%s) nearside(%s) farside(%s) apex(%s), wedge ends: %s %s',
+                '%s new(%d) nearside(%d) farside(%d) apex(%d), wedge ends: %d %d',
                 'RIGHT' if side else 'LEFT ',
-                F[_new],
-                F[_nearside],
-                F[_farside],
-                F[_apex],
-                F[paths.prime_from_id[wedge_end[0]]],
-                F[paths.prime_from_id[wedge_end[1]]],
+                _new,
+                _nearside,
+                _farside,
+                _apex,
+                paths.prime_from_id[wedge_end[0]],
+                paths.prime_from_id[wedge_end[1]],
             )
+            
             if _nearside == _apex or test(_nearside, _new, _apex):
                 # not infranear
                 if test(_farside, _new, _apex):
@@ -454,6 +441,7 @@ class PathFinder:
         else:
             edges_G_primed = {((u, v) if u < v else (v, u)) for u, v in G.edges}
         ST = T + B
+        self.ST = ST
         edges_P = {
             ((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST or v < ST
         }
@@ -489,19 +477,21 @@ class PathFinder:
                         )
                         if incr_edge in edges_G_primed or incr_edge in constraint_edges:
                             break
-                    if sec_left == r:
-                        sec_left = NULL
 
+                if right >= ST or (right in G.nodes and len(G._adj[right]) == 0):
+                    sec_right = NULL
+                else:
+                    sec_right = r
                 d_left = d2roots[left, r].item()
                 d_right = d2roots[right, r].item()
                 # add the first pseudo-nodes to paths
                 wedge_end = [
                     paths.add(left, sec_left, r, d_left, d_left),
-                    paths.add(right, r, r, d_right, d_right),
+                    paths.add(right, sec_right, r, d_right, d_right),
                 ]
 
                 # shortest paths for roots' P.neighbors is a straight line
-                I_path[left][sec_left], I_path[right][r] = wedge_end
+                I_path[left][sec_left], I_path[right][sec_right] = wedge_end
 
                 # prioritize by distance to the closest node of the portal
                 closest, d_closest = (
@@ -673,15 +663,15 @@ class PathFinder:
             )
             if not path_options:
                 error(
-                    'subtree of node %s has no non-crossing paths to '
+                    'subtree of node %d has no non-crossing paths to '
                     'any root: leaving gate as-is',
-                    F[n],
+                    n,
                 )
                 # unable to fix this crossing
                 failed_detours.append((r, n))
                 continue
             dist, id, hook, sect = min(path_options)
-            debug('best: hook = %s, sector = %s, dist = %.2f', F[hook], F[sect], dist)
+            debug('best: hook = %d, sector = %d, dist = %.2f', hook, sect, dist)
 
             path = [hook]
             dists = []
@@ -713,7 +703,7 @@ class PathFinder:
                     (
                         c,
                         {
-                            'label': F[c],
+                            'label': str(c),
                             'kind': 'detour',
                             'subtree': subtree_id,
                             'load': subtree_load,
@@ -770,7 +760,7 @@ class PathFinder:
                     G.nodes[parent]['load'] = ref_load - subtree_load
                 total_parent_load = bfs_subtree_loads(G, parent, [path[0]], subtree_id)
                 assert total_parent_load == ref_load, (
-                    f'detour {F[n]}–{F[path[0]]}: load calculated '
+                    f'detour {n}–{path[0]}: load calculated '
                     f'({total_parent_load}) != expected load ({ref_load})'
                 )
 
@@ -779,7 +769,7 @@ class PathFinder:
             del G[r][n]['kind']
 
         if failed_detours:
-            warn('Failed: %s', ' '.join(f'{F[u]}–{F[v]}' for u, v in failed_detours))
+            warn('Failed: %s', failed_detours)
             G.graph['tentative'] = failed_detours
         else:
             del G.graph['tentative']
