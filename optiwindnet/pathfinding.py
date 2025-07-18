@@ -509,8 +509,10 @@ class PathFinder:
         # process edges in the prioqueue
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
         _, _, traverser = heapq.heappop(prioqueue)
-        while len(prioqueue) > 0 and counter < iterations_limit:
-            #  print(f'[exp] {counter}')
+        iter = 0
+        while len(prioqueue) > 0 and iter < iterations_limit:
+            #  print(f'[exp] {iter}')
+            iter += 1
             try:
                 # make the traverser advance one portal
                 d_contender, portal, hop, is_better = next(traverser)
@@ -538,10 +540,10 @@ class PathFinder:
                     # traverser yields were bad, do not re-add to queue: get a new one
                     _, _, traverser = heapq.heappop(prioqueue)
                     
-        if counter == iterations_limit:
-            warn('PathFinder loop aborted after iterations_limit reached: %d', counter)
-        debug('PathFinder: loops performed: %d', counter)
-        self.iterations = counter
+        if iter == iterations_limit:
+            warn('PathFinder loop aborted after iterations_limit reached: %d', iter)
+        debug('PathFinder: loops performed: %d', iter)
+        self.iterations = iter
 
     def _apply_all_best_paths(self, G: nx.Graph):
         """
