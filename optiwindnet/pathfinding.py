@@ -507,44 +507,36 @@ class PathFinder:
                 counter += 1
         # process edges in the prioqueue
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
+        _, _, traverser = heapq.heappop(prioqueue)
         while len(prioqueue) > 0 and counter < iterations_limit:
-            # safeguard against infinite loop
-            counter += 1
             #  print(f'[exp] {counter}')
-
-            if self.bifurcation is None:
-                # no bifurcation, pop the best traverser from the prioqueue
-                _d_contender, _, traverser = heapq.heappop(prioqueue)
-            else:
-                # the last processed portal bifurcated
-                # add it to the queue and get the best traverser
-                d_contender, branched_traverser = self.bifurcation
-                #  print('T', counter, d_contender)
-                _d_contender, _, traverser = heapq.heappushpop(
-                    prioqueue, (d_contender, counter, branched_traverser)
-                )
-                counter += 1
-                self.bifurcation = None
-            #  print(f'[exp]_popped dist = {_d_contender:.0f}, '
-            #        f'{self.n2s(*_hop)} ')
             try:
                 # make the traverser advance one portal
                 d_contender, portal, hop, is_better = next(traverser)
             except StopIteration:
                 #  print(f'[exp]_traverser {self.n2s(*hop)} was '
                 #        'dropped (dead-end).')
-                pass
+                _, _, traverser = heapq.heappop(prioqueue)
             else:
                 if is_better or uncharted[portal]:
                     #  print(f'[exp]_pushing dist = {d_contender:.0f}, '
                     #        f'{self.n2s(*hop)} ')
-                    #  print('B', counter, d_contender)
-                    heapq.heappush(
+                    if self.bifurcation is not None:
+                        d_contender_bif, traverser_bif = self.bifurcation
+                        heapq.heappush(
+                            prioqueue, (d_contender_bif, counter, traverser_bif)
+                        )
+                        counter += 1
+                        self.bifurcation = None
+                    _, _, traverser = heapq.heappushpop(
                         prioqueue, (d_contender, counter, traverser)
                     )
-                #  else:
-                #      print(f'[exp]_traverser {self.n2s(*hop)} was '
-                #            'dropped (no better that previous traverser).')
+                    counter += 1
+                else:
+                    self.bifurcation = None
+                    # traverser yields were bad, do not re-add to queue: get a new one
+                    _, _, traverser = heapq.heappop(prioqueue)
+                    
         if counter == iterations_limit:
             warn('PathFinder loop aborted after iterations_limit reached: %d', counter)
         debug('PathFinder: loops performed: %d', counter)
