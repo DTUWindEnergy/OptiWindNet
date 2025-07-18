@@ -768,7 +768,6 @@ def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
         T=T,
         R=R,
         capacity=T,
-        handle=A.graph.get('handle'),
         creator='minimum_spanning_forest',
     )
     for u, v in zip(U, V):

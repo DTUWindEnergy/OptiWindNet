@@ -269,6 +269,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         'border',
         'obstacles',
         'name',
+        'handle',
         'landscape_angle',
         'norm_scale',
         'norm_offset',
@@ -753,7 +754,7 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
                 load=G.nodes[n]['load'],
                 kind='tentative',
                 reverse=False,
-                length=np.hypot(*(VertexC[n] - VertexC[r]).T),
+                length=np.hypot(*(VertexC[n] - VertexC[r])).item(),
             )
             tentative.append((r, n))
     del G.graph['D']
