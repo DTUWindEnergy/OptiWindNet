@@ -89,7 +89,8 @@ class AppraiserFactory:
         model = self.model
         # problem features
         capacity_12 = capacity / 12.0
-        d2roots = A.graph['d2roots']
+        T = A.graph['T']
+        d2roots = A.graph['d2roots'][:T]
         log_rel_root_dist_ = np.log(d2roots / A.graph['inter_terminal_clearance_safe'])
 
         def appraise(partial_features_):
