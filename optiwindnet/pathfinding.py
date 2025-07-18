@@ -333,7 +333,7 @@ class PathFinder:
             #      print(f"{'RIGHT' if side else 'LEFT '} "
             #            f'nearside({F[_nearside]}) == apex({F[_apex]})')
             debug(
-                '%s new(%d) nearside(%d) farside(%d) apex(%d), wedge ends: %d %d',
+                    '%s _new(%d) _nearside(%d) _farside(%d) _apex(%d), _wedge_end: %d %d, _funnel: %s',
                 'RIGHT' if side else 'LEFT ',
                 _new,
                 _nearside,
@@ -341,6 +341,7 @@ class PathFinder:
                 _apex,
                 paths.prime_from_id[wedge_end[0]],
                 paths.prime_from_id[wedge_end[1]],
+                _funnel
             )
             
             if _nearside == _apex or test(_nearside, _new, _apex):
