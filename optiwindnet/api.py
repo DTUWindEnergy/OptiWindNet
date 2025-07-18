@@ -1,28 +1,12 @@
 
 import logging
-
-###################
-# OptiWindNet API #
-###################
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Mapping
 
 import numpy as np
 import yaml
 import yaml_include
-#from matplotlib.collections import PatchCollection
-#from matplotlib.patches import Polygon as MplPolygon
-#from shapely.geometry import Polygon
-# from shapely.ops import unary_union
-# from shapely.validation import explain_validity
-
-# Local utilities
-# from optiwindnet.utils import NodeTagger
-
-# F = NodeTagger()
-
-PackType = Mapping[str, Any]
+import matplotlib.pyplot as plt
 
 # optiwindnet modules
 # Metaheuristics
@@ -43,9 +27,12 @@ from optiwindnet.svg import svgplot
 
 from .api_utils import from_coordinates, plot_org_buff
 
-#################################################
-#                                               #
-#################################################
+###################
+# OptiWindNet API #
+###################
+
+# Preserve text as editable text (not paths)
+plt.rcParams['svg.fonttype'] = 'none'
 
 logger = logging.getLogger(__name__)
 error, warning, info = logger.error, logger.warning, logger.info
@@ -546,9 +533,9 @@ class MILP(OptiWindNetSolver):
         self.verbose = verbose
         self.solver = solver_factory(solver_name)
         try:
-            self.options = self.solver.options
+            self.optiwindnet_default_options = self.solver.options
         except AttributeError:
-            self.options = 'Not available'
+            self.optiwindnet_default_options = 'Not available'
 
     def optimize(
         self, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
@@ -558,7 +545,7 @@ class MILP(OptiWindNetSolver):
 
         # warm start
         if S_warm is not None:
-            info('S is not None and the model is warmed up with the available S.')
+            info(' S is not None and the model is warmed up with the available S.')
 
         solver = self.solver
 
