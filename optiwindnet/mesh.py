@@ -310,7 +310,7 @@ def _hull_processor(
                 elif v == end:
                     to_remove.append((pivot, v))
                     debug('del_sup %d %d', pivot, v)
-                if (conc_id_u == conc_id_v):
+                if conc_id_u == conc_id_v:
                     to_remove.append((u, v))
                     conc_outer_edges.add((u, v) if u < v else (v, u))
                     debug('del_int %d %d', u, v)

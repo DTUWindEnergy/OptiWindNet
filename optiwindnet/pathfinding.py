@@ -281,7 +281,13 @@ class PathFinder:
                 #          else None)
                 if next_portals:
                     second, sside = next_portals[0]
-                    debug('portal (%d, %d): advance on (%d, %d) and branch on (%d, %d)', left, right, *first, *second)
+                    debug(
+                        'portal (%d, %d): advance on (%d, %d) and branch on (%d, %d)',
+                        left,
+                        right,
+                        *first,
+                        *second,
+                    )
                     yield (
                         first,
                         fside,
