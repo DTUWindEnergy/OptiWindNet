@@ -92,6 +92,8 @@ class PathFinder:
         A: nx.Graph | None = None,
         branched: bool = True,
         iterations_limit: int = 10000,
+        uncharted_init_count: int = 3,
+        promising_margin: float = 0.07,
     ) -> None:
         G = Gʹ.copy()
         R, T, B = (G.graph[k] for k in 'RTB')
@@ -202,6 +204,8 @@ class PathFinder:
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.hooks2check, self.iterations_limit = hooks2check, iterations_limit
+        self.uncharted_init_count = uncharted_init_count
+        self.promising_margin = promising_margin
         self._find_paths()
 
     def get_best_path(self, n: int):
@@ -310,7 +314,8 @@ class PathFinder:
         paths = self.paths
         I_path = self.I_path
         ST = self.ST
-        
+        promising_bar = 1.0 + self.promising_margin
+
         # for next_left, next_right, new_portal_iter in portal_iter:
         for portal, side, new_portal_iter in portal_iter:
             #  print('[tra]')
@@ -320,7 +325,12 @@ class PathFinder:
                 #  print(f'new channel {self.n2s(_apex, *_funnel)} -> '
                 #        f"{F[_new]} {'RIGHT' if side else 'LEFT '}")
                 branched_traverser = self._traverse_channel(
-                    d_ref, _apex, apex, _funnel.copy(), wedge_end.copy(), new_portal_iter
+                    d_ref,
+                    _apex,
+                    apex,
+                    _funnel.copy(),
+                    wedge_end.copy(),
+                    new_portal_iter,
                 )
                 self.bifurcation = d_ref, branched_traverser
 
@@ -333,7 +343,7 @@ class PathFinder:
             #      print(f"{'RIGHT' if side else 'LEFT '} "
             #            f'nearside({F[_nearside]}) == apex({F[_apex]})')
             debug(
-                    '%s _new(%d) _nearside(%d) _farside(%d) _apex(%d), _wedge_end: %d %d, _funnel: %s',
+                '%s _new(%d) _nearside(%d) _farside(%d) _apex(%d), _wedge_end: %d %d, _funnel: %s',
                 'RIGHT' if side else 'LEFT ',
                 _new,
                 _nearside,
@@ -341,9 +351,9 @@ class PathFinder:
                 _apex,
                 paths.prime_from_id[wedge_end[0]],
                 paths.prime_from_id[wedge_end[1]],
-                _funnel
+                _funnel,
             )
-            
+
             if _nearside == _apex or test(_nearside, _new, _apex):
                 # not infranear
                 if test(_farside, _new, _apex):
@@ -397,20 +407,20 @@ class PathFinder:
                     contender_wapex = paths[current_wapex].parent
                     _contender_wapex = paths.prime_from_id[contender_wapex]
                 _apex_eff, apex_eff = _current_wapex, current_wapex
-            
+
             # rate, wait, add
             d_hop = np.hypot(*(self.VertexC[_apex_eff] - self.VertexC[_new]).T).item()
             pseudoapex = paths[apex_eff]
             d_new = pseudoapex.dist + d_hop
             new_sector = self._get_sector(_new, portal)
-            incumbent = I_path[_new].get(new_sector)
-            is_better = incumbent is None or d_new < paths[incumbent].dist
-            yield d_new, portal, (_new, _apex_eff), is_better
+            keeper = I_path[_new].get(new_sector)
+            is_promising = keeper is None or d_new < promising_bar * paths[keeper].dist
+            yield d_new, portal, (_new, _apex_eff), is_promising
             new = self.paths.add(_new, new_sector, apex_eff, d_new, d_hop)
             self.uncharted[portal] = max(self.uncharted[portal] - 1, 0)
-            # get incumbent again, as the situation may have changed
-            incumbent = I_path[_new].get(new_sector)
-            if incumbent is None or d_new < paths[incumbent].dist:
+            # get keeper again, as the situation may have changed
+            keeper = I_path[_new].get(new_sector)
+            if keeper is None or d_new < paths[keeper].dist:
                 self.I_path[_new][new_sector] = new
                 debug('(%d, %d) added with d_path = %.2f', _new, _apex_eff, d_new)
 
@@ -425,7 +435,7 @@ class PathFinder:
         prioqueue = []
         # `uncharted` records whether portals have been traversed
         # (it is orientation-sensitive – two permutations)
-        uncharted = defaultdict(lambda: 3)
+        uncharted = defaultdict(lambda: self.uncharted_init_count)
         paths = self.paths = PathNodes()
         self.uncharted = uncharted
         self.bifurcation = None
@@ -502,7 +512,12 @@ class PathFinder:
                     else (right, d_right)
                 )
                 traverser = self._traverse_channel(
-                    d_closest, r, r, [left, right], wedge_end, self._advance_portal(left, right),
+                    d_closest,
+                    r,
+                    r,
+                    [left, right],
+                    wedge_end,
+                    self._advance_portal(left, right),
                 )
                 heapq.heappush(prioqueue, (d_closest, counter, traverser))
                 counter += 1
@@ -515,13 +530,13 @@ class PathFinder:
             iter += 1
             try:
                 # make the traverser advance one portal
-                d_contender, portal, hop, is_better = next(traverser)
+                d_contender, portal, hop, is_promising = next(traverser)
             except StopIteration:
                 #  print(f'[exp]_traverser {self.n2s(*hop)} was '
                 #        'dropped (dead-end).')
                 _, _, traverser = heapq.heappop(prioqueue)
             else:
-                if is_better or uncharted[portal]:
+                if is_promising or uncharted[portal]:
                     #  print(f'[exp]_pushing dist = {d_contender:.0f}, '
                     #        f'{self.n2s(*hop)} ')
                     if self.bifurcation is not None:
@@ -539,7 +554,7 @@ class PathFinder:
                     self.bifurcation = None
                     # traverser yields were bad, do not re-add to queue: get a new one
                     _, _, traverser = heapq.heappop(prioqueue)
-                    
+
         if iter == iterations_limit:
             warn('PathFinder loop aborted after iterations_limit reached: %d', iter)
         debug('PathFinder: loops performed: %d', iter)
@@ -785,6 +800,7 @@ class PathFinder:
             D=D,
             fnT=fnT,
             detextra=detextra,
+            iterations_pfinder=self.iterations,
         )
         debug(
             '<PathFinder: created %d detour vertices, total length changed by %.2f%%',
