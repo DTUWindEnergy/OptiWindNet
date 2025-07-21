@@ -382,7 +382,7 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
         np.lib.format.write_array(stuntC_npy_io, stuntC, version=(3, 0))
         packed_G['stuntC'] = stuntC_npy_io.getvalue()
     if C + D > 0:
-        packed_G['clone2prime'] = G.graph['fnT'][-C - D - R: -R].tolist()
+        packed_G['clone2prime'] = G.graph['fnT'][-C - D - R : -R].tolist()
     concatenate_tuples = partial(sum, start=())
     pack_if_given = (  # key, function to prepare data
         ('detextra', None),
