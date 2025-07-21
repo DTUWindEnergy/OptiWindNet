@@ -11,7 +11,7 @@ from typing import Callable, Self
 import networkx as nx
 import numpy as np
 import torch
-from mlhelpers.modelbuilders import model_from_file
+from mlhelpers import modelbuilders
 from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
@@ -69,10 +69,17 @@ class UnionCount(IntEnum):
 class AppraiserFactory:
     features_changed_: list[bool]
 
-    def __init__(self, model_path: str | Path):
+    def __init__(self, model_data: dict, name: str = ''):
+        # load pytorch model
+        model = getattr(modelbuilders, model_data['cls']).from_suggestions(**model_data['config'])
+        model.load_state_dict(model_data['state'])
+        self.name = name
+
+    @classmethod
+    def from_file(cls, model_path: str | Path):
         # load pytorch model
         path = Path(model_path)
-        self.model = model_from_file(model_path)
+        self.model = modelbuilders.model_from_file(model_path)
         stem = path.stem
         self.name = stem[:-4] if stem.endswith('.pkl') else stem
 
