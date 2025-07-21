@@ -91,9 +91,9 @@ class PathFinder:
         planar: nx.PlanarEmbedding,
         A: nx.Graph | None = None,
         branched: bool = True,
-        iterations_limit: int = 10000,
+        iterations_limit: int = 15000,
         uncharted_init_count: int = 3,
-        promising_margin: float = 0.07,
+        promising_margin: float = 0.1,
     ) -> None:
         G = Gʹ.copy()
         R, T, B = (G.graph[k] for k in 'RTB')
@@ -281,18 +281,24 @@ class PathFinder:
                 #          else None)
                 if next_portals:
                     second, sside = next_portals[0]
-                    debug('advance on (%d, %d) and branch on (%d, %d)', *first, *second)
+                    debug(
+                        'portal (%d, %d): advance on (%d, %d) and branch on (%d, %d)',
+                        left,
+                        right,
+                        *first,
+                        *second,
+                    )
                     yield (
                         first,
                         fside,
                         chain(((second, sside, None),), self._advance_portal(*second)),
                     )
                 else:
-                    debug('advance on (%d, %d)', *first)
+                    debug('portal (%d, %d): advance on (%d, %d)', left, right, *first)
                     yield first, fside, None
             except IndexError:
                 # dead-end reached
-                debug('dead-end: (%d, %d)', left, right)
+                debug('portal (%d, %d): DEAD-END', left, right)
                 return
             left, right = first
 
@@ -523,7 +529,7 @@ class PathFinder:
                 counter += 1
         # process edges in the prioqueue
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
-        _, _, traverser = heapq.heappop(prioqueue)
+        d_traverser, _, traverser = heapq.heappop(prioqueue)
         iter = 0
         while len(prioqueue) > 0 and iter < iterations_limit:
             #  print(f'[exp] {iter}')
@@ -534,7 +540,7 @@ class PathFinder:
             except StopIteration:
                 #  print(f'[exp]_traverser {self.n2s(*hop)} was '
                 #        'dropped (dead-end).')
-                _, _, traverser = heapq.heappop(prioqueue)
+                d_traverser, _, traverser = heapq.heappop(prioqueue)
             else:
                 if is_promising or uncharted[portal]:
                     #  print(f'[exp]_pushing dist = {d_contender:.0f}, '
@@ -546,14 +552,14 @@ class PathFinder:
                         )
                         counter += 1
                         self.bifurcation = None
-                    _, _, traverser = heapq.heappushpop(
+                    d_traverser, _, traverser = heapq.heappushpop(
                         prioqueue, (d_contender, counter, traverser)
                     )
                     counter += 1
                 else:
                     self.bifurcation = None
                     # traverser yields were bad, do not re-add to queue: get a new one
-                    _, _, traverser = heapq.heappop(prioqueue)
+                    d_traverser, _, traverser = heapq.heappop(prioqueue)
 
         if iter == iterations_limit:
             warn('PathFinder loop aborted after iterations_limit reached: %d', iter)
