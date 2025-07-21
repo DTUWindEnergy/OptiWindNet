@@ -279,7 +279,7 @@ def _hull_processor(
       P: planar embedding to process
       T: number of terminals of P
       supertriangle: indices to the supertriangles' vertices
-      vertex2cons_id_map: vertex index to concavity id map
+      vertex2conc_id_map: vertex index to concavity id map
 
     Returns:
       The convex hull, P edges to be removed and outer edges of concavities
@@ -293,7 +293,16 @@ def _hull_processor(
         source, target = tee(P.neighbors_cw_order(pivot))
         outer = begin
         for u, v in zip(source, chain(target, (next(target),))):
+            if u != begin and u != end and v != end:
+                # if ⟨u, v⟩ is not incident on a ST vertex, it is convex_hull
+                convex_hull.append(u)
             if u >= T and v >= T:
+                # (c + 1), (c + 2) are for sure not in vertex2conc_id_map.keys()
+                conc_id_u = vertex2conc_id_map.get(u, c + 1)
+                conc_id_v = vertex2conc_id_map.get(v, c + 2)
+                if conc_id_u < num_holes or conc_id_v < num_holes:
+                    # if ⟨u, v⟩ touches an obstacle, the triangle <u, v, pivot> remains
+                    continue
                 if u == outer:
                     to_remove.append((pivot, u))
                     debug('del_sup %d %d', pivot, u)
@@ -301,17 +310,11 @@ def _hull_processor(
                 elif v == end:
                     to_remove.append((pivot, v))
                     debug('del_sup %d %d', pivot, v)
-                conc_id_u = vertex2conc_id_map.get(u)
-                if (conc_id_u == vertex2conc_id_map.get(v, -1)) and (
-                    conc_id_u >= num_holes
-                ):
+                if (conc_id_u == conc_id_v):
                     to_remove.append((u, v))
                     conc_outer_edges.add((u, v) if u < v else (v, u))
                     debug('del_int %d %d', u, v)
                     outer = v
-            if u != begin and u != end and v != end:
-                # if u is not in supertriangle, it is convex_hull
-                convex_hull.append(u)
     return convex_hull, to_remove, conc_outer_edges
 
 
