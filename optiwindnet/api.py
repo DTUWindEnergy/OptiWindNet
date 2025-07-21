@@ -31,12 +31,12 @@ from .api_utils import from_coordinates, plot_org_buff
 # OptiWindNet API #
 ###################
 
-# Preserve text as editable text (not paths)
+# Keep text editable (not converted to paths) in SVG output
 plt.rcParams['svg.fonttype'] = 'none'
 
+# Set up a logger and create shortcuts for error, warning, and info logging methods
 logger = logging.getLogger(__name__)
 error, warning, info = logger.error, logger.warning, logger.info
-
 
 class WindFarmNetwork:
     """
@@ -62,7 +62,7 @@ class WindFarmNetwork:
             router = Heuristic(solver='Esau_Williams')
         self.router = router
 
-        # Ensure cables are in the expected format: list of (capacity, cost) tuples
+        # Parse and validate cables input; convert to list of (capacity, cost) tuples
         cables_array = np.array(cables)
         if isinstance(cables, int):
             cables = [(cables, 1)]
