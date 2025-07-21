@@ -1499,7 +1499,8 @@ def planar_flipped_by_routeset(
     debug('differences between G and P:')
     # get G's edges in terms of node range -R : T + B
     edges_G = {
-        ((u, v) if u < v else (v, u)) for u, v in (fnT[edge,].tolist() for edge in G.edges)
+        ((u, v) if u < v else (v, u))
+        for u, v in (fnT[edge,].tolist() for edge in G.edges)
     }
     ST = T + B
     edges_P = {((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST and v < ST}
