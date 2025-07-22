@@ -424,7 +424,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         fnT = np.arange(iC + R)
         fnT[T + B : -R] = clone2prime
         fnT[-R:] = range(-R, 0)
-        G.graph.update(fnT=fnT, clone2prime=clone2prime, C=len(clone2prime))
+        G.graph.update(fnT=fnT, C=len(clone2prime))
     # add to G the S edges that are not in A
     rogue = []
     for s, t in non_A_edges:
