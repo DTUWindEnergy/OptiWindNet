@@ -69,11 +69,11 @@ class UnionCount(IntEnum):
 class AppraiserFactory:
     features_changed_: list[bool]
 
-    def __init__(self, model_data: dict, name: str = ''):
+    def __init__(self, model_data: dict):
         # load pytorch model
-        model = getattr(modelbuilders, model_data['cls']).from_suggestions(**model_data['config'])
-        model.load_state_dict(model_data['state'])
-        self.name = name
+        self.model = getattr(modelbuilders, model_data['cls']).from_suggestions(**model_data['config'])
+        self.model.load_state_dict(model_data['state'])
+        self.name = model_data['name']
 
     @classmethod
     def from_file(cls, model_path: str | Path):
