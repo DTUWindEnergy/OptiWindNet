@@ -234,7 +234,7 @@ def from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, h
             raise ValueError(f"Turbines at indices {inside_idx} are inside the obstacle at index {i}!")
         
     border_sizes = np.array([borderC.shape[0]] + [obs.shape[0] for obs in obstaclesC])
-    B = border_sizes.sum()
+    B = border_sizes.sum().item()
     obstacle_start_idxs = np.cumsum(border_sizes) + T
 
     border_range = np.arange(T, T + borderC.shape[0])
