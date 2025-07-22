@@ -7,7 +7,9 @@ import math
 from collections import defaultdict, namedtuple
 from collections.abc import Iterable
 from itertools import chain
+from bisect import bisect_left
 
+from bitarray import bitarray
 import networkx as nx
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -92,13 +94,15 @@ class PathFinder:
         A: nx.Graph | None = None,
         branched: bool = True,
         iterations_limit: int = 15000,
-        uncharted_init_count: int = 3,
-        promising_margin: float = 0.1,
+        uncharted_init_count: int = 1,
+        promising_margin: float = 0.08,
+        bad_streak_limit: int = 8,
     ) -> None:
         G = Gʹ.copy()
         R, T, B = (G.graph[k] for k in 'RTB')
         C = G.graph.get('C', 0)
         assert not G.graph.get('D'), 'Gʹ has already has detours.'
+        self.ST = T + B
 
         # Block for facilitating the printing of debug messages.
         allnodes = np.arange(T + R + B + 3)
@@ -144,7 +148,15 @@ class PathFinder:
             return
 
         # clone2prime must be a copy of the one from Gʹ
-        clone2prime = list(G.graph.get('clone2prime', ()))
+        if C > 0:
+            fnT = G.graph['fnT']
+            clone2prime = fnT[T + B : -R].tolist()
+        else:
+            fnT = np.arange(R + T + B)
+            fnT[-R:] = range(-R, 0)
+            clone2prime = []
+        self.fnT = fnT
+        #  clone2prime = list(G.graph.get('clone2prime', ()))
         # TODO: work around PathFinder getting metrics for the supertriangle
         #       nodes -> do away with A metrics, eliminate A from args
         if A is None:
@@ -206,6 +218,23 @@ class PathFinder:
         self.hooks2check, self.iterations_limit = hooks2check, iterations_limit
         self.uncharted_init_count = uncharted_init_count
         self.promising_margin = promising_margin
+        self.bad_streak_limit = bad_streak_limit
+        self.num_revisits = 0
+        # build (vertex, sector) indexer
+        all_vert_sect = sorted(
+            chain(
+                (
+                    (n, (nb if nb < T + B else NULL))
+                    for n in range(T)
+                    for nb in G[n]
+                    if (nb, n) not in tentative
+                ),
+                ((n, NULL) for r, n in tentative if len(G._adj[n]) == 1),
+                ((b, NULL) for b in range(T, T + B + 3) if b in P.nodes),
+            )
+        )
+        self.all_vert_sect = all_vert_sect
+        debug('Number of (vertex, sector) pairs: %d', len(self.all_vert_sect))
         self._find_paths()
 
     def get_best_path(self, n: int):
@@ -241,18 +270,21 @@ class PathFinder:
         sector. The sector is a way of identifying from which side of a
         non-traversable barrier the path is reaching `_node`.
         """
-        if _node >= self.T:
-            # _node is in a border or is in the supertriangle, which means it
-            # is only reachable from one side, hence an arbitrary sector id.
-            # _node may also be the prime of a contour node, which is ok, since
-            # the other side is a pinched portal and has a distinct sector.
+        T = self.T
+        G = self.G
+        P = self.P
+        tentative = self.tentative
+        if _node >= T:
+            # _node is in a constraint edge, is a contour or is in the supertriangle,
+            # hence it is only reachable from one side -> arbitrary sector id
             return NULL
         _opposite = portal[0] if _node == portal[1] else portal[1]
-        _nbr = self.P[_node][_opposite]['ccw']
-        for _ in range(len(self.P._adj[_node])):
-            if (_node, _nbr) in self.G.edges:
-                return _nbr
-            _nbr = self.P[_node][_nbr]['ccw']
+        _nbr = P[_node][_opposite]['ccw']
+        for _ in range(len(P._adj[_node])):
+            if _nbr < T and _nbr in G[_node]:
+                if _nbr >= 0 or (_nbr, _node) not in tentative:
+                    return _nbr
+            _nbr = P[_node][_nbr]['ccw']
         # could not find a non-tentative G edge around _node
         return NULL
 
@@ -310,6 +342,7 @@ class PathFinder:
         _funnel: list[int],
         wedge_end: list[int],
         portal_iter: Iterable,
+        visited: bitarray,
     ):
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
@@ -318,9 +351,11 @@ class PathFinder:
         #             translation: _node = paths.prime_from_id[node]
         cw, ccw = rotation_checkers_factory(self.VertexC)
         paths = self.paths
+        all_vert_sect = self.all_vert_sect
         I_path = self.I_path
         ST = self.ST
         promising_bar = 1.0 + self.promising_margin
+        bad_streak = 0
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         for portal, side, new_portal_iter in portal_iter:
@@ -337,10 +372,26 @@ class PathFinder:
                     _funnel.copy(),
                     wedge_end.copy(),
                     new_portal_iter,
+                    visited.copy(),
                 )
                 self.bifurcation = d_ref, branched_traverser
 
             _new = portal[side]
+            sector_new = self._get_sector(_new, portal)
+            i_vert_sect = bisect_left(all_vert_sect, (_new, sector_new))
+            debug(
+                'searched for: (%d, %d) -> i_vert_sect=%d',
+                _new,
+                sector_new,
+                i_vert_sect,
+            )
+            if visited[i_vert_sect]:
+                # end traversal because revisiting (vertex, sector)
+                debug('Revisited node %d, sector %d', _new, sector_new)
+                self.num_revisits += 1
+                return
+            else:
+                visited[i_vert_sect] = 1
             _nearside = _funnel[side]
             _farside = _funnel[not side]
             test = ccw if side else cw
@@ -418,25 +469,35 @@ class PathFinder:
             d_hop = np.hypot(*(self.VertexC[_apex_eff] - self.VertexC[_new]).T).item()
             pseudoapex = paths[apex_eff]
             d_new = pseudoapex.dist + d_hop
-            new_sector = self._get_sector(_new, portal)
-            keeper = I_path[_new].get(new_sector)
+            keeper = I_path[_new].get(sector_new)
             is_promising = keeper is None or d_new < promising_bar * paths[keeper].dist
-            yield d_new, portal, (_new, _apex_eff), is_promising
-            new = self.paths.add(_new, new_sector, apex_eff, d_new, d_hop)
+            # for supertriangle vertices, do not update the d_ref used for prioritizing
+            # (it would be sent to the bottom of heapq beacause of the big distances)
+            if _new < ST:
+                d_ref = d_new
+            yield d_ref, portal, (_new, _apex_eff), is_promising
+            new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop)
             self.uncharted[portal] = max(self.uncharted[portal] - 1, 0)
             # get keeper again, as the situation may have changed
-            keeper = I_path[_new].get(new_sector)
+            keeper = I_path[_new].get(sector_new)
             if keeper is None or d_new < paths[keeper].dist:
-                self.I_path[_new][new_sector] = new
+                self.I_path[_new][sector_new] = new
                 debug('(%d, %d) added with d_path = %.2f', _new, _apex_eff, d_new)
+                bad_streak = 0
+            else:
+                bad_streak += 1
+                if bad_streak == self.bad_streak_limit:
+                    # several sucessive advances failed to outperform each keeper
+                    debug('Reached bad_streak_limit.')
+                    return
 
             wedge_end[side] = paths.last_added
-            d_ref = d_new
 
     def _find_paths(self):
         #  print('[exp] starting _explore()')
         G, P, R, T, B = self.G, self.P, self.R, self.T, self.B
         d2roots, d2rootsRank = self.d2roots, self.d2rootsRank
+        ST = self.ST
         iterations_limit = self.iterations_limit
         prioqueue = []
         # `uncharted` records whether portals have been traversed
@@ -457,8 +518,6 @@ class PathFinder:
             }
         else:
             edges_G_primed = {((u, v) if u < v else (v, u)) for u, v in G.edges}
-        ST = T + B
-        self.ST = ST
         edges_P = {
             ((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST or v < ST
         }
@@ -524,6 +583,7 @@ class PathFinder:
                     [left, right],
                     wedge_end,
                     self._advance_portal(left, right),
+                    bitarray(len(self.all_vert_sect)),
                 )
                 heapq.heappush(prioqueue, (d_closest, counter, traverser))
                 counter += 1
