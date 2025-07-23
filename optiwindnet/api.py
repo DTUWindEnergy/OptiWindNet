@@ -537,6 +537,12 @@ class MILP(OptiWindNetSolver):
         except AttributeError:
             self.optiwindnet_default_options = 'Not available'
 
+        if verbose and solver_name == 'ortools':
+            from IPython import get_ipython
+            shell = get_ipython().__class__.__name__
+            if shell in ('ZMQInteractiveShell',):  # Jupyter notebook or lab
+                self.solver.solver.log_callback = print
+
     def optimize(
         self, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
         ):
