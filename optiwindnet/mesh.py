@@ -1488,10 +1488,10 @@ def planar_flipped_by_routeset(
 
     Important: `G` must be free of edge×edge crossings.
     """
-    R, T, B, C, D = (G.graph.get(k, 0) for k in ('R', 'T', 'B', 'C', 'D'))
+    R, T, B, C = (G.graph.get(k, 0) for k in 'RTBC')
     fnT = G.graph.get('fnT')
     if fnT is None:
-        fnT = np.arange(R + T + B + 3 + C + D)
+        fnT = np.arange(R + T + B + 3 + C)
         fnT[-R:] = range(-R, 0)
 
     P = planar.copy()

@@ -7,7 +7,9 @@ import math
 from collections import defaultdict, namedtuple
 from collections.abc import Iterable
 from itertools import chain
+from bisect import bisect_left
 
+from bitarray import bitarray
 import networkx as nx
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -92,13 +94,16 @@ class PathFinder:
         A: nx.Graph | None = None,
         branched: bool = True,
         iterations_limit: int = 15000,
-        uncharted_init_count: int = 3,
+        uncharted_init_count: int = 2,
         promising_margin: float = 0.1,
+        bad_streak_limit: int = 10,
     ) -> None:
+        self.iterations = 0
         G = Gʹ.copy()
         R, T, B = (G.graph[k] for k in 'RTB')
         C = G.graph.get('C', 0)
         assert not G.graph.get('D'), 'Gʹ has already has detours.'
+        self.ST = T + B
 
         # Block for facilitating the printing of debug messages.
         allnodes = np.arange(T + R + B + 3)
@@ -144,7 +149,15 @@ class PathFinder:
             return
 
         # clone2prime must be a copy of the one from Gʹ
-        clone2prime = list(G.graph.get('clone2prime', ()))
+        if C > 0:
+            fnT = G.graph['fnT']
+            clone2prime = fnT[T + B : -R].tolist()
+        else:
+            fnT = np.arange(R + T + B)
+            fnT[-R:] = range(-R, 0)
+            clone2prime = []
+        self.fnT = fnT
+        #  clone2prime = list(G.graph.get('clone2prime', ()))
         # TODO: work around PathFinder getting metrics for the supertriangle
         #       nodes -> do away with A metrics, eliminate A from args
         if A is None:
@@ -206,6 +219,24 @@ class PathFinder:
         self.hooks2check, self.iterations_limit = hooks2check, iterations_limit
         self.uncharted_init_count = uncharted_init_count
         self.promising_margin = promising_margin
+        self.bad_streak_limit = bad_streak_limit
+        self.num_revisits = 0
+        self.adv_counter = 0
+        # build (vertex, sector) indexer
+        all_vert_sect = sorted(
+            chain(
+                (
+                    (n, (nb if nb < T + B else NULL))
+                    for n in range(T)
+                    for nb in G[n]
+                    if (nb, n) not in tentative
+                ),
+                ((n, NULL) for r, n in tentative if len(G._adj[n]) == 1),
+                ((b, NULL) for b in range(T, T + B + 3) if b in P.nodes),
+            )
+        )
+        self.all_vert_sect = all_vert_sect
+        debug('Number of (vertex, sector) pairs: %d', len(self.all_vert_sect))
         self._find_paths()
 
     def get_best_path(self, n: int):
@@ -241,75 +272,102 @@ class PathFinder:
         sector. The sector is a way of identifying from which side of a
         non-traversable barrier the path is reaching `_node`.
         """
-        if _node >= self.T:
-            # _node is in a border or is in the supertriangle, which means it
-            # is only reachable from one side, hence an arbitrary sector id.
-            # _node may also be the prime of a contour node, which is ok, since
-            # the other side is a pinched portal and has a distinct sector.
+        T = self.T
+        G = self.G
+        P = self.P
+        tentative = self.tentative
+        if _node >= T:
+            # _node is in a constraint edge, is a contour or is in the supertriangle,
+            # hence it is only reachable from one side -> arbitrary sector id
             return NULL
         _opposite = portal[0] if _node == portal[1] else portal[1]
-        _nbr = self.P[_node][_opposite]['ccw']
-        for _ in range(len(self.P._adj[_node])):
-            if (_node, _nbr) in self.G.edges:
-                return _nbr
-            _nbr = self.P[_node][_nbr]['ccw']
+        _nbr = P[_node][_opposite]['ccw']
+        for _ in range(len(P._adj[_node])):
+            if _nbr < T and _nbr in G[_node]:
+                if _nbr >= 0 or (_nbr, _node) not in tentative:
+                    return _nbr
+            _nbr = P[_node][_nbr]['ccw']
         # could not find a non-tentative G edge around _node
         return NULL
 
-    def _advance_portal(self, left: int, right: int):
+    def _advance_portal(self, adv_id: int, portal: tuple[int, int], traverser_args: tuple, side: int | None = None):
         P = self.P
+        prioqueue = self.prioqueue
+        portal_set = self.portal_set
+        traverser = self._traverse_channel(adv_id, *traverser_args)
+        next(traverser)
+        if side is not None:
+            try:
+                d_ref, is_promising = traverser.send((portal, side))
+            except StopIteration:
+                debug("{%d} advancer's traverser stopped before loop (before yield)", adv_id)
+                return
+            yield d_ref, portal, is_promising
+            try:
+                next(traverser)
+            except StopIteration:
+                debug("{%d} advancer's traverser stopped before loop (after yield)", adv_id)
+                return
         while True:
             # look for children portals
+            left, right = portal
             n = P[left][right]['ccw']
             if n not in P[right] or P[left][n]['ccw'] == right or n < 0:
-                # (left, right, n) is not a triangle or n is a root
+                # DEAD-END: (left, right, n) is not a triangle or n is a root
+                debug('{%d} advancer reached DEAD-END (root)', adv_id)
                 return
             # examine the other two sides of the triangle
-            next_portals = []
-            for s, t, side in ((left, n, 1), (n, right, 0)):
-                st_sorted = (s, t) if s < t else (t, s)
-                if st_sorted not in self.portal_set:
-                    continue
-                next_portals.append(((s, t), side))
-            try:
-                # this `pop()` will raise IndexError if we are at a dead-end
-                first, fside = next_portals.pop()
-                # use this instead of the if-else-block when done debugging
-                #  yield left, right, (
-                #          self._portal_iter(*next_portals[0])
-                #          if next_portals
-                #          else None)
-                if next_portals:
-                    second, sside = next_portals[0]
-                    debug(
-                        'portal (%d, %d): advance on (%d, %d) and branch on (%d, %d)',
-                        left,
-                        right,
-                        *first,
-                        *second,
-                    )
-                    yield (
-                        first,
-                        fside,
-                        chain(((second, sside, None),), self._advance_portal(*second)),
-                    )
-                else:
-                    debug('portal (%d, %d): advance on (%d, %d)', left, right, *first)
-                    yield first, fside, None
-            except IndexError:
-                # dead-end reached
-                debug('portal (%d, %d): DEAD-END', left, right)
+            portals = [(portal, side)
+                       for portal, side in (((left, n), 1), ((n, right), 0))
+                       if portal in portal_set]
+            if len(portals) == 2:
+                portal_bif, side_bif = portals[1]
+                # channel bifurcation, spawn new advancer
+                #  trace('{%d} advancer asking for traverser_args', adv_id)
+                # get traverser state
+                traverser_args = next(traverser)
+                d_ref = traverser_args[0]
+                heapq.heappush(
+                    prioqueue,
+                    (d_ref, self.adv_counter,
+                     self._advance_portal(
+                        self.adv_counter,
+                        portal_bif,
+                        traverser_args,
+                        side_bif,
+                    ))
+                )
+                self.adv_counter += 1
+                next(traverser)
+            elif not portals:
+                # DEAD-END: both triangle sides are not portals
+                debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
                 return
-            left, right = first
+            # process  portal
+            portal, side = portals[0]
+            #  trace('{%d} advancer sending (portal, side)', adv_id)
+            try:
+                d_ref, is_promising = traverser.send((portal, side))
+            except StopIteration:
+                debug("{%d} advancer's traverser stopped", adv_id)
+                return
+            yield d_ref, portal, is_promising
+            try:
+                next(traverser)
+            except StopIteration:
+                debug("{%d} advancer's traverser stopped", adv_id)
+                return
 
     def _traverse_channel(
         self,
+        trav_id,
         d_ref: float,
         _apex: int,
         apex: int,
         _funnel: list[int],
         wedge_end: list[int],
-        portal_iter: Iterable,
+        visited: bitarray,
+        bad_streak: int = 0
     ):
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
@@ -318,29 +376,46 @@ class PathFinder:
         #             translation: _node = paths.prime_from_id[node]
         cw, ccw = rotation_checkers_factory(self.VertexC)
         paths = self.paths
+        all_vert_sect = self.all_vert_sect
         I_path = self.I_path
         ST = self.ST
+        uncharted = self.uncharted
         promising_bar = 1.0 + self.promising_margin
 
         # for next_left, next_right, new_portal_iter in portal_iter:
-        for portal, side, new_portal_iter in portal_iter:
-            #  print('[tra]')
-
-            if new_portal_iter is not None:
-                # spawn a branched traverser
-                #  print(f'new channel {self.n2s(_apex, *_funnel)} -> '
-                #        f"{F[_new]} {'RIGHT' if side else 'LEFT '}")
-                branched_traverser = self._traverse_channel(
+        while True:
+            #  trace('<%d> traverser before first yield', trav_id)
+            adv_msg = yield
+            if adv_msg is None:
+                #  trace('<%d> new traverser sent for evaluation', trav_id)
+                yield (
                     d_ref,
                     _apex,
                     apex,
                     _funnel.copy(),
                     wedge_end.copy(),
-                    new_portal_iter,
+                    visited.copy(),
+                    bad_streak,
                 )
-                self.bifurcation = d_ref, branched_traverser
+                continue
+            else:
+                portal, side = adv_msg
+            #  trace('<%d> got (portal, side)', trav_id)
 
             _new = portal[side]
+            sector_new = self._get_sector(_new, portal)
+            i_vert_sect = bisect_left(all_vert_sect, (_new, sector_new))
+            if visited[i_vert_sect]:
+                # end traversal because revisiting (vertex, sector)
+                debug('<%d> Revisited node %d, sector %d', trav_id, _new, sector_new)
+                self.num_revisits += 1
+                bad_streak += 1
+                if bad_streak >= self.bad_streak_limit:
+                    # several sucessive advances failed to outperform each keeper
+                    debug('<%d> Reached bad_streak_limit.', trav_id)
+                    return
+            else:
+                visited[i_vert_sect] = 1
             _nearside = _funnel[side]
             _farside = _funnel[not side]
             test = ccw if side else cw
@@ -349,7 +424,8 @@ class PathFinder:
             #      print(f"{'RIGHT' if side else 'LEFT '} "
             #            f'nearside({F[_nearside]}) == apex({F[_apex]})')
             debug(
-                '%s _new(%d) _nearside(%d) _farside(%d) _apex(%d), _wedge_end: %d %d, _funnel: %s',
+                '<%d> %s _new(%d) _nearside(%d) _farside(%d) _apex(%d), _wedge_end: %d %d, _funnel: %s',
+                trav_id,
                 'RIGHT' if side else 'LEFT ',
                 _new,
                 _nearside,
@@ -364,7 +440,7 @@ class PathFinder:
                 # not infranear
                 if test(_farside, _new, _apex):
                     # ultrafar (⟨new, apex⟩ cuts farside)
-                    debug('ultrafar')
+                    debug('<%d> ultrafar', trav_id)
                     current_wapex = wedge_end[not side]
                     _current_wapex = paths.prime_from_id[current_wapex]
                     _funnel[not side] = _current_wapex
@@ -391,12 +467,12 @@ class PathFinder:
                     apex = current_wapex
                 else:
                     # not ultrafar nor infranear (⟨new, apex⟩ in line-of-sight)
-                    debug('inside')
+                    debug('<%d> inside', trav_id)
                 _apex_eff, apex_eff = _apex, apex
                 _funnel[side] = _new
             else:
                 # infranear (⟨new, apex⟩ cuts nearside)
-                debug('infranear')
+                debug('<%d> infranear', trav_id)
                 current_wapex = wedge_end[side]
                 _current_wapex = paths.prime_from_id[current_wapex]
                 #  print(f'{F[_current_wapex]}')
@@ -418,27 +494,38 @@ class PathFinder:
             d_hop = np.hypot(*(self.VertexC[_apex_eff] - self.VertexC[_new]).T).item()
             pseudoapex = paths[apex_eff]
             d_new = pseudoapex.dist + d_hop
-            new_sector = self._get_sector(_new, portal)
-            keeper = I_path[_new].get(new_sector)
+            keeper = I_path[_new].get(sector_new)
             is_promising = keeper is None or d_new < promising_bar * paths[keeper].dist
-            yield d_new, portal, (_new, _apex_eff), is_promising
-            new = self.paths.add(_new, new_sector, apex_eff, d_new, d_hop)
-            self.uncharted[portal] = max(self.uncharted[portal] - 1, 0)
+            # for supertriangle vertices, do not update the d_ref used for prioritizing
+            # (it would be sent to the bottom of heapq beacause of the big distances)
+            if _new < ST:
+                d_ref = d_new
+            yield d_ref, is_promising
+            #  trace('<%d> traverser after second yield', trav_id)
+            new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop)
+            uncharted[portal] = max(uncharted[portal] - 1, 0)
             # get keeper again, as the situation may have changed
-            keeper = I_path[_new].get(new_sector)
+            keeper = I_path[_new].get(sector_new)
             if keeper is None or d_new < paths[keeper].dist:
-                self.I_path[_new][new_sector] = new
-                debug('(%d, %d) added with d_path = %.2f', _new, _apex_eff, d_new)
+                self.I_path[_new][sector_new] = new
+                debug('<%d> new keeper for (%d, %d) via %d: d_path = %.2f', trav_id, _new, sector_new, _apex_eff, d_new)
+                bad_streak = 0
+            elif not math.isclose(d_new, paths[keeper].dist):
+                bad_streak += 1
+                if bad_streak >= self.bad_streak_limit:
+                    # several sucessive advances failed to outperform each keeper
+                    debug('<%d> Reached bad_streak_limit.', trav_id)
+                    return
 
             wedge_end[side] = paths.last_added
-            d_ref = d_new
 
     def _find_paths(self):
         #  print('[exp] starting _explore()')
         G, P, R, T, B = self.G, self.P, self.R, self.T, self.B
         d2roots, d2rootsRank = self.d2roots, self.d2rootsRank
+        ST = self.ST
         iterations_limit = self.iterations_limit
-        prioqueue = []
+        self.prioqueue = prioqueue = []
         # `uncharted` records whether portals have been traversed
         # (it is orientation-sensitive – two permutations)
         uncharted = defaultdict(lambda: self.uncharted_init_count)
@@ -457,14 +544,12 @@ class PathFinder:
             }
         else:
             edges_G_primed = {((u, v) if u < v else (v, u)) for u, v in G.edges}
-        ST = T + B
-        self.ST = ST
         edges_P = {
             ((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST or v < ST
         }
         constraint_edges = P.graph['constraint_edges']
         portal_set = (edges_P - edges_G_primed) - constraint_edges
-        self.portal_set = portal_set
+        self.portal_set = portal_set | {(v, u) for u, v in portal_set}
 
         counter = 0
         # launch channel traversers around the roots to the prioqueue
@@ -517,49 +602,40 @@ class PathFinder:
                     if d2rootsRank[left, r] <= d2rootsRank[right, r]
                     else (right, d_right)
                 )
-                traverser = self._traverse_channel(
+                traverser_pack = (
                     d_closest,
                     r,
                     r,
                     [left, right],
                     wedge_end,
-                    self._advance_portal(left, right),
+                    bitarray(len(self.all_vert_sect)),
+                    0,
                 )
-                heapq.heappush(prioqueue, (d_closest, counter, traverser))
-                counter += 1
+                advancer = self._advance_portal(self.adv_counter, (left, right), traverser_pack)
+                heapq.heappush(prioqueue, (d_closest, self.adv_counter, advancer))
+                self.adv_counter += 1
         # process edges in the prioqueue
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
-        d_traverser, _, traverser = heapq.heappop(prioqueue)
+        _, adv_id, advancer = heapq.heappop(prioqueue)
         iter = 0
         while len(prioqueue) > 0 and iter < iterations_limit:
-            #  print(f'[exp] {iter}')
             iter += 1
+            debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
             try:
-                # make the traverser advance one portal
-                d_contender, portal, hop, is_promising = next(traverser)
+                # advance one portal
+                d_ref, portal, is_promising = next(advancer)
             except StopIteration:
-                #  print(f'[exp]_traverser {self.n2s(*hop)} was '
-                #        'dropped (dead-end).')
-                d_traverser, _, traverser = heapq.heappop(prioqueue)
+                # advancer decided to stop, get a new one
+                _, adv_id, advancer = heapq.heappop(prioqueue)
             else:
                 if is_promising or uncharted[portal]:
-                    #  print(f'[exp]_pushing dist = {d_contender:.0f}, '
-                    #        f'{self.n2s(*hop)} ')
-                    if self.bifurcation is not None:
-                        d_contender_bif, traverser_bif = self.bifurcation
-                        heapq.heappush(
-                            prioqueue, (d_contender_bif, counter, traverser_bif)
-                        )
-                        counter += 1
-                        self.bifurcation = None
-                    d_traverser, _, traverser = heapq.heappushpop(
-                        prioqueue, (d_contender, counter, traverser)
+                    # advancer is still promising, push it back to queue and get top one
+                    _, adv_id, advancer = heapq.heappushpop(
+                        prioqueue, (d_ref, adv_id, advancer)
                     )
-                    counter += 1
                 else:
-                    self.bifurcation = None
-                    # traverser yields were bad, do not re-add to queue: get a new one
-                    d_traverser, _, traverser = heapq.heappop(prioqueue)
+                    # forget advancer and get a new one
+                    _, adv_id, advancer = heapq.heappop(prioqueue)
 
         if iter == iterations_limit:
             warn('PathFinder loop aborted after iterations_limit reached: %d', iter)
