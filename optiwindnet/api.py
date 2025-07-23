@@ -564,7 +564,7 @@ class MILP(OptiWindNetSolver):
             warmstart=S_warm,
         )
 
-        solver.solve(
+        solution_info = solver.solve(
             time_limit=self.time_limit,
             mip_gap=self.mip_gap,
             options=self.solver_options,
@@ -572,6 +572,8 @@ class MILP(OptiWindNetSolver):
         )
 
         S, G = solver.get_solution()
+
+        G.SolutionInfo = solution_info
 
         assign_cables(G, cables)
 
