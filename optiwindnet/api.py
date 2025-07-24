@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from optiwindnet.baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 
 # Heuristics
-from optiwindnet.heuristics import EW_presolver
+from optiwindnet.heuristics import EW_presolver, CPEW
 from optiwindnet.importer import L_from_pbf, L_from_site, L_from_yaml, load_repository
 from optiwindnet.interarraylib import G_from_S, as_normalized, calcload
 from optiwindnet.interface import assign_cables
@@ -415,7 +415,7 @@ class OptiWindNetSolver(ABC):
 
 class Heuristic(OptiWindNetSolver):
     def __init__(self, solver='Esau_Williams', maxiter=10000, verbose=False, **kwargs):
-        if solver not in ['Esau_Williams']:
+        if solver not in ['Esau_Williams', 'EW', 'CPEW']:
             raise ValueError(
                 f"{solver} is not among the supported Heuristic solvers. Choose among: ['Esau_Williams']."
             )
@@ -432,6 +432,8 @@ class Heuristic(OptiWindNetSolver):
         # optimizing
         if self.solver in ['Esau_Williams', 'EW']:
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
+        elif self.solver in ['CPEW']:
+            S = CPEW(A, capacity=cables_capacity, maxiter=self.maxiter)
         else:
             pass
 
