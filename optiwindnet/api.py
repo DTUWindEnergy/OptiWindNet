@@ -550,7 +550,7 @@ class MILP(OptiWindNetSolver):
             verbose = self.verbose
 
         # warm start
-        if S_warm is not None:
+        if S_warm is not None and self.solver_name != 'scip':
             info( " >>> Using warm start: the model is initialized with the provided solution S <<<")
             if verbose and not logger.isEnabledFor(logging.INFO):
                 print(">>> Using warm start: the model is initialized with the provided solution S <<<")
