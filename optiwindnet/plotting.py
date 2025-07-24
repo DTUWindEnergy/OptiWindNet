@@ -15,20 +15,19 @@ from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from .geometric import rotate
 from .interarraylib import describe_G
 from .themes import Colors
-from .utils import F
 
 __all__ = ('gplot', 'pplot')
 
 FONTSIZE_LABEL = 5
 FONTSIZE_LOAD = 7
-FONTSIZE_ROOT_LABEL = 6
+FONTSIZE_ROOT_LABEL = 4
 FONTSIZE_INFO_BOX = 12
 FONTSIZE_LEGEND_STRIP = 6
 NODESIZE = 35
-NODESIZE_LABELED = 75
-NODESIZE_LABELED_ROOT = 32
+NODESIZE_LABELED = 135
+NODESIZE_LABELED_ROOT = 92
 NODESIZE_DETOUR = 90
-NODESIZE_LABELED_DETOUR = 155
+NODESIZE_LABELED_DETOUR = 215
 
 
 def _is_ccw(X, Y):
@@ -41,7 +40,7 @@ def _is_ccw(X, Y):
 def gplot(
     G: nx.Graph,
     ax: Axes | None = None,
-    node_tag: str | None = None,
+    node_tag: str | bool | None = None,
     landscape: bool = True,
     infobox: bool = True,
     scalebar: tuple[float, str] | None = None,
@@ -157,7 +156,6 @@ def gplot(
         detour = range(T + B + C, T + B + C + D)
         pos |= dict(zip(detour, VertexC[fnT[detour]]))
         pos |= dict(zip(contour, VertexC[fnT[contour]]))
-    RootL = {r: G.nodes[r].get('label', F[r]) for r in roots[::-1]}
 
     # default value for subtree (i.e. color for unconnected nodes)
     # is the last color of the tab20 colormap (i.e. 19)
@@ -227,23 +225,31 @@ def gplot(
         arts.set_clip_on(False)
 
     # draw labels
-    font_size = dict(load=FONTSIZE_LOAD, label=FONTSIZE_LABEL, tag=FONTSIZE_ROOT_LABEL)
     if node_tag is not None:
-        if node_tag == 'load' and 'has_loads' not in G.graph:
-            node_tag = 'label'
-        labels = nx.get_node_attributes(G, node_tag)
-        for root in roots:
-            if root in labels:
-                labels.pop(root)
-        if D:
-            for det in chain(contour, detour):
-                if det in labels:
-                    labels.pop(det)
-        for n in range(T):
-            if n not in labels:
-                labels[n] = F[n]
+        if node_tag is True:
+            labels = {t: str(t) for t in range(T)}
+            font_size = FONTSIZE_LABEL
+            root_font_size = FONTSIZE_LOAD
+            RootL = {r: str(r) for r in roots}
+        else:
+            if node_tag == 'load' and 'has_loads' not in G.graph:
+                node_tag = 'label'
+            font_size = dict(load=FONTSIZE_LOAD, label=FONTSIZE_LABEL).get(node_tag, FONTSIZE_LABEL)
+            root_font_size = FONTSIZE_ROOT_LABEL
+            labels = nx.get_node_attributes(G, node_tag)
+            for root in roots:
+                if root in labels:
+                    labels.pop(root)
+            if D:
+                for det in chain(contour, detour):
+                    if det in labels:
+                        labels.pop(det)
+            for n in range(T):
+                if n not in labels:
+                    labels[n] = str(n)
+            RootL = {r: G.nodes[r].get('label', str(r)) for r in roots[::-1]}
         arts = nx.draw_networkx_labels(
-            G, pos, ax=ax, labels=labels, font_size=font_size[node_tag]
+            G, pos, ax=ax, labels=labels, font_size=font_size
         )
         for artist in arts.values():
             artist.set_clip_on(False)
@@ -254,7 +260,7 @@ def gplot(
             pos,
             ax=ax,
             labels=RootL,
-            font_size=FONTSIZE_ROOT_LABEL,
+            font_size=root_font_size,
             font_color=c.bg_color,
         )
         for artist in arts.values():

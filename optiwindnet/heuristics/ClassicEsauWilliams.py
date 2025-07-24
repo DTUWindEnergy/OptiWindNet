@@ -3,6 +3,7 @@
 
 import logging
 import time
+from typing import Callable
 
 import networkx as nx
 import numpy as np
@@ -10,7 +11,6 @@ from scipy.stats import rankdata
 
 from ..geometric import apply_edge_exemptions, assign_root, complete_graph
 from ..mesh import delaunay
-from ..utils import F
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -20,31 +20,35 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 def ClassicEW(
-    G_base,
-    capacity=8,
-    delaunay_based=False,
-    maxiter=10000,
-    weightfun=None,
-    weight_attr='length',
-):
-    """Classic Esau-Williams heuristic for C-MST
-    inputs:
-    G_base: networkx.Graph
-    c: capacity
-    returns G_cmst: networkx.Graph"""
+    L: nx.Graph,
+    capacity: int,
+    delaunay_based: bool = False,
+    maxiter: int = 10000,
+    weightfun: Callable | None = None,
+    weight_attr: str = 'length',
+) -> nx.Graph:
+    """Classic Esau-Williams heuristic for C-MST.
+
+    Args:
+      L: location graph
+      capacity: max number of terminals in a subtree
+      maxiter: fail-safe to avoid locking in an infinite loop
+    Returns:
+      Routeset graph G
+    """
 
     start_time = time.perf_counter()
     # grab relevant options to store in the graph later
     options = dict(delaunay_based=delaunay_based)
 
-    R = G_base.graph['R']
-    T = G_base.graph['T']
+    R = L.graph['R']
+    T = L.graph['T']
     _T = range(T)
     roots = range(-R, 0)
 
     # BEGIN: prepare auxiliary graph with all allowed edges and metrics
     if delaunay_based:
-        A = delaunay(G_base, bind2root=True)
+        A = delaunay(L, bind2root=True)
         # apply weightfun on all delaunay edges
         if weightfun is not None:
             apply_edge_exemptions(A)
@@ -52,7 +56,7 @@ def ClassicEW(
         # else:
         # apply_edge_exemptions(A)
     else:
-        A = complete_graph(G_base)
+        A = complete_graph(L)
 
     assign_root(A)
     d2roots = A.graph['d2roots']
@@ -69,7 +73,7 @@ def ClassicEW(
     # END: prepare auxiliary graph with all allowed edges and metrics
 
     # BEGIN: create initial star graph
-    G = nx.create_empty_copy(G_base)
+    G = nx.create_empty_copy(L)
     G.add_weighted_edges_from(
         ((n, r, d2roots[n, r]) for n, r in A.nodes(data='root') if n >= 0),
         weight=weight_attr,
@@ -105,7 +109,7 @@ def ClassicEW(
     def commit_subroot(root, sr_v):
         commited_[root].add(sr_v)
         log.append((i, 'finalG', (sr_v, root)))
-        debug('<final> subroot [%s] added', F[sr_v])
+        debug('<final> subroot [%d] added', sr_v)
 
     def get_union_choices(subroot, forbidden=None):
         # gather all the edges leaving the subtree of subroot
@@ -157,7 +161,7 @@ def ClassicEW(
         return choices
 
     def enqueue_best_union(subroot):
-        debug('<enqueue_best_union> starting... subroot = <%s>', F[subroot])
+        debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
         # () get component expansion edges with weight
         weighted_edges, edges2discard = get_union_choices(subroot)
         # discard useless edges
@@ -167,7 +171,7 @@ def ClassicEW(
         # () check subroot crossings
         # choice = first_non_crossing(choices, subroot)
         if len(choices) > 0:
-            weight, _, u, v = choices[0]
+            weight, _, u, v = choices[0].item()
             choice = (weight, u, v)
         else:
             choice = False
@@ -179,11 +183,7 @@ def ClassicEW(
             pq.add(tradeoff, subroot, (u, v))
             ComponIn[subroot_[v]].add(subroot)
             debug(
-                '<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
-                F[subroot],
-                F[u],
-                F[v],
-                tradeoff,
+                '<pushed> sr_u <%d>, «%d~%d», tradeoff = %.3f', subroot, u, v, tradeoff
             )
         else:
             # no viable edge is better than subroot for this node
@@ -195,7 +195,7 @@ def ClassicEW(
                 root = A.nodes[subroot]['root']
                 commit_subroot(root, subroot)
                 # check_heap4crossings(root, subroot)
-            debug('<cancelling> %s', F[subroot])
+            debug('<cancelling> %d', subroot)
             if subroot in pq.tags:
                 # i=0 feeders and check_heap4crossings reverse_entry
                 # may leave accepting subtrees out of pq
@@ -205,7 +205,7 @@ def ClassicEW(
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>', F[u], F[v])
+            debug('<<< UNLIKELY <ban_queued_union()> «%d~%d» not in A >>>', u, v)
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
@@ -231,11 +231,11 @@ def ClassicEW(
         if componin != is_reverse:
             # TODO: Why did I expect always False here? It is sometimes True.
             debug(
-                '«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
-                F[u],
-                F[v],
-                F[sr_u],
-                F[sr_v],
+                '«%d~%d», sr_u <%d>, sr_v <%d> componin: %s, is_reverse: %s',
+                u,
+                v,
+                sr_u,
+                sr_v,
                 componin,
                 is_reverse,
             )
@@ -256,9 +256,8 @@ def ClassicEW(
             error('maxiter reached (%d)', i)
             break
         debug('[%d]', i)
-        # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
         if stale_subtrees:
-            debug('stale_subtrees: %s', tuple(F[subroot] for subroot in stale_subtrees))
+            debug('stale_subtrees: %s', stale_subtrees)
         while stale_subtrees:
             # enqueue_best_union(stale_subtrees.popleft())
             enqueue_best_union(stale_subtrees.pop())
@@ -266,7 +265,7 @@ def ClassicEW(
             # finished
             break
         sr_u, (u, v) = pq.top()
-        debug('<popped> «%s–%s», sr_u: <%s>', F[u], F[v], F[sr_u])
+        debug('<popped> «%d~%d», sr_u: <%d>', u, v, sr_u)
 
         sr_v = subroot_[v]
         root = A.nodes[sr_v]['root']
@@ -283,7 +282,6 @@ def ClassicEW(
         sr_v_entry = pq.tags.get(sr_v)
         if sr_v_entry is not None:
             _, _, _, (_, t) = sr_v_entry
-            # print('node', F[t], 'subroot', F[subroot_[t]])
             ComponIn[subroot_[t]].remove(sr_v)
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
@@ -293,14 +291,9 @@ def ClassicEW(
             A.nodes[n]['root'] = root
             subroot_[n] = sr_v
             subtree_[n] = subtree
-        debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
+        debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_v)
         if _lggr.isEnabledFor(logging.DEBUG) and pq:
-            debug(
-                'heap top: <%s>, «%s» %.3f',
-                F[pq[0][-2]],
-                tuple(F[x] for x in pq[0][-1]),
-                pq[0][0],
-            )
+            debug('heap top: <%d>, «%s» %.3f', pq[0][-2], pq[0][-1], pq[0][0])
         else:
             debug('heap EMPTY')
         G.add_edge(u, v, **{weight_attr: A[u][v][weight_attr]})
@@ -338,10 +331,7 @@ def ClassicEW(
                 if subroot not in commited_[root]:
                     not_marked.append(subroot)
         if not_marked:
-            debug(
-                '@@@@ WARNING: subroots %s were not commited @@@@',
-                tuple(F[subroot] for subroot in not_marked),
-            )
+            debug('@@@@ WARNING: subroots %s were not commited @@@@', not_marked)
 
     # algorithm finished, store some info in the graph object
     G.graph['iterations'] = i
