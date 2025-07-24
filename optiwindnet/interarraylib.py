@@ -246,8 +246,8 @@ def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
         kwargs['B'] = B
     L = nx.Graph(T=T, R=R, VertexC=VertexC, **kwargs)
 
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from(range(T), kind='wtg')
+    L.add_nodes_from(range(-R, 0), kind='oss')
     return L
 
 

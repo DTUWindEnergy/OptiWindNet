@@ -14,7 +14,6 @@ import numpy as np
 from pony import orm
 
 from ..interarraylib import calcload, site_fingerprint
-from ..utils import F
 
 __all__ = ()
 
@@ -77,8 +76,8 @@ def base_graph_from_nodeset(nodeset: object) -> nx.Graph:
         boundary=pickle.loads(nodeset.boundary),
         landscape_angle=nodeset.landscape_angle,
     )
-    G.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    G.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    G.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
+    G.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
     return G
 
 

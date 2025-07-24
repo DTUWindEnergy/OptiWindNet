@@ -16,7 +16,7 @@ import numpy as np
 from pony import orm
 
 from ..interarraylib import calcload
-from ..utils import F, make_handle
+from ..utils import make_handle
 
 __all__ = ()
 
@@ -128,8 +128,8 @@ def L_from_nodeset(nodeset: object, handle: str | None = None) -> nx.Graph:
                 for a, b in pairwise(obstacle_idx)
             ]
         )
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
+    L.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
     return L
 
 

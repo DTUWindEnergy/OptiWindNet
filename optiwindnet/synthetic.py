@@ -5,8 +5,6 @@ import networkx as nx
 import numpy as np
 from scipy.spatial import ConvexHull
 
-from .utils import F
-
 __all__ = ()
 
 
@@ -53,8 +51,8 @@ def toyfarm():
         name='toy',
         handle='toy',
     )
-    G.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    G.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    G.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
+    G.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
     return G
 
 
@@ -76,8 +74,8 @@ def synthfarm2graph(RootC, NodeC, BoundaryC=None, name='', handle='synthetic'):
     G = nx.Graph(
         R=R, T=T, VertexC=VertexC, boundary=BoundaryC, name=name, handle=handle
     )
-    G.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    G.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    G.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
+    G.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
     return G
 
 
