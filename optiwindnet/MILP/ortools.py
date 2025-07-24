@@ -237,8 +237,12 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
-        for (u, v), tr in gateXing_iter(A):
-            m.add_at_most_one(link_[(u, v)], link_[(v, u)], link_[tr])
+        for (u, v), (r, t) in gateXing_iter(A):
+            if u >= 0:
+                m.add_at_most_one(link_[(u, v)], link_[(v, u)], link_[t, r])
+            else:
+                # a feeder crossing another feeder (possible in multi-root instances)
+                m.add_at_most_one(link_[(u, v)], link_[t, r])
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):
