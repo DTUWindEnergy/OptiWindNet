@@ -290,7 +290,13 @@ class PathFinder:
         # could not find a non-tentative G edge around _node
         return NULL
 
-    def _advance_portal(self, adv_id: int, portal: tuple[int, int], traverser_args: tuple, side: int | None = None):
+    def _advance_portal(
+        self,
+        adv_id: int,
+        portal: tuple[int, int],
+        traverser_args: tuple,
+        side: int | None = None,
+    ):
         P = self.P
         prioqueue = self.prioqueue
         portal_set = self.portal_set
@@ -300,13 +306,19 @@ class PathFinder:
             try:
                 d_ref, is_promising = traverser.send((portal, side))
             except StopIteration:
-                debug("{%d} advancer's traverser stopped before loop (before yield)", adv_id)
+                debug(
+                    "{%d} advancer's traverser stopped before loop (before yield)",
+                    adv_id,
+                )
                 return
             yield d_ref, portal, is_promising
             try:
                 next(traverser)
             except StopIteration:
-                debug("{%d} advancer's traverser stopped before loop (after yield)", adv_id)
+                debug(
+                    "{%d} advancer's traverser stopped before loop (after yield)",
+                    adv_id,
+                )
                 return
         while True:
             # look for children portals
@@ -317,9 +329,11 @@ class PathFinder:
                 debug('{%d} advancer reached DEAD-END (root)', adv_id)
                 return
             # examine the other two sides of the triangle
-            portals = [(portal, side)
-                       for portal, side in (((left, n), 1), ((n, right), 0))
-                       if portal in portal_set]
+            portals = [
+                (portal, side)
+                for portal, side in (((left, n), 1), ((n, right), 0))
+                if portal in portal_set
+            ]
             if len(portals) == 2:
                 portal_bif, side_bif = portals[1]
                 # channel bifurcation, spawn new advancer
@@ -329,13 +343,16 @@ class PathFinder:
                 d_ref = traverser_args[0]
                 heapq.heappush(
                     prioqueue,
-                    (d_ref, self.adv_counter,
-                     self._advance_portal(
+                    (
+                        d_ref,
                         self.adv_counter,
-                        portal_bif,
-                        traverser_args,
-                        side_bif,
-                    ))
+                        self._advance_portal(
+                            self.adv_counter,
+                            portal_bif,
+                            traverser_args,
+                            side_bif,
+                        ),
+                    ),
                 )
                 self.adv_counter += 1
                 next(traverser)
@@ -367,7 +384,7 @@ class PathFinder:
         _funnel: list[int],
         wedge_end: list[int],
         visited: bitarray,
-        bad_streak: int = 0
+        bad_streak: int = 0,
     ):
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
@@ -508,7 +525,14 @@ class PathFinder:
             keeper = I_path[_new].get(sector_new)
             if keeper is None or d_new < paths[keeper].dist:
                 self.I_path[_new][sector_new] = new
-                debug('<%d> new keeper for (%d, %d) via %d: d_path = %.2f', trav_id, _new, sector_new, _apex_eff, d_new)
+                debug(
+                    '<%d> new keeper for (%d, %d) via %d: d_path = %.2f',
+                    trav_id,
+                    _new,
+                    sector_new,
+                    _apex_eff,
+                    d_new,
+                )
                 bad_streak = 0
             elif not math.isclose(d_new, paths[keeper].dist):
                 bad_streak += 1
@@ -611,7 +635,9 @@ class PathFinder:
                     bitarray(len(self.all_vert_sect)),
                     0,
                 )
-                advancer = self._advance_portal(self.adv_counter, (left, right), traverser_pack)
+                advancer = self._advance_portal(
+                    self.adv_counter, (left, right), traverser_pack
+                )
                 heapq.heappush(prioqueue, (d_closest, self.adv_counter, advancer))
                 self.adv_counter += 1
         # process edges in the prioqueue

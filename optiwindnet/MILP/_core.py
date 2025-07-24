@@ -106,7 +106,9 @@ class ModelOptions(dict):
         for k, v in cls.hints.items():
             print(
                 f'{k} in {{'
-                + ', '.join(f'"{m}"' for n, m in v.__members__.items() if n != 'DEFAULT')
+                + ', '.join(
+                    f'"{m}"' for n, m in v.__members__.items() if n != 'DEFAULT'
+                )
                 + f'}} default: {cls.hints[k].DEFAULT.value}\n'
                 f'    {v.__doc__}\n'
             )
