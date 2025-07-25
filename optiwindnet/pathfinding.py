@@ -305,85 +305,53 @@ class PathFinder:
         traverser = self._traverse_channel(adv_id, *traverser_args)
         next(traverser)
         if side is not None:
-            try:
-                priority, is_promising = traverser.send((portal, side))
-            except StopIteration:
-                debug(
-                    "{%d} advancer's traverser stopped before loop (before yield)",
-                    adv_id,
-                )
-                return
+            priority, is_promising = traverser.send((portal, side))
             yield priority, portal, is_promising
-            try:
-                next(traverser)
-            except StopIteration:
-                debug(
-                    "{%d} advancer's traverser stopped before loop (after yield)",
-                    adv_id,
-                )
-                return
+            next(traverser)
         while True:
-            # look for children portals
+            # look if there is a triangle ahead of portal
             left, right = portal
             n = P[left][right]['ccw']
             if n not in P[right] or P[left][n]['ccw'] == right or n < 0:
                 # DEAD-END: (left, right, n) is not a triangle or n is a root
                 debug('{%d} advancer reached DEAD-END (root)', adv_id)
                 return
-            # examine the other two sides of the triangle
+            # check whether the other two sides of the triangle are portals
             portals = [
                 (portal, side)
                 for portal, side in (((left, n), 1), ((n, right), 0))
                 if portal in portal_set
             ]
             if len(portals) == 2:
+                # BIFURCATION: spawn new advancer
                 portal_bif, side_bif = portals[1]
-                # channel bifurcation, spawn new advancer
                 #  trace('{%d} advancer asking for traverser_args', adv_id)
                 # get traverser state
                 traverser_args = next(traverser)
-                priority = traverser_args[0]
-                heapq.heappush(
-                    prioqueue,
-                    (
-                        priority,
-                        self.adv_counter,
-                        self._advance_portal(
-                            self.adv_counter,
-                            portal_bif,
-                            traverser_args,
-                            side_bif,
-                        ),
-                    ),
+                advancer = self._advance_portal(
+                    self.adv_counter,
+                    portal_bif,
+                    traverser_args,
+                    side_bif,
                 )
+                heapq.heappush(prioqueue, (traverser_args[0], self.adv_counter, advancer))
                 self.adv_counter += 1
                 next(traverser)
             elif not portals:
                 # DEAD-END: both triangle sides are not portals
                 if 0 <= n <= T:
                     # there is a (node, sector) to update inside the dead-end
-                    try:
-                        priority, is_promising = traverser.send(((left, n), 1))
-                        # no need to yield, but make sure the last path pnode is added
-                        next(traverser)
-                    except StopIteration:
-                        pass
+                    priority, is_promising = traverser.send(((left, n), 1))
+                    # no need to yield, but make sure the last path pnode is added
+                    next(traverser)
                 debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
                 return
-            # process  portal
+            # process portal
             portal, side = portals[0]
             #  trace('{%d} advancer sending (portal, side)', adv_id)
-            try:
-                priority, is_promising = traverser.send((portal, side))
-            except StopIteration:
-                debug("{%d} advancer's traverser stopped", adv_id)
-                return
+            priority, is_promising = traverser.send((portal, side))
             yield priority, portal, is_promising
-            try:
-                next(traverser)
-            except StopIteration:
-                debug("{%d} advancer's traverser stopped", adv_id)
-                return
+            next(traverser)
 
     def _traverse_channel(
         self,
@@ -409,6 +377,7 @@ class PathFinder:
         I_path = self.I_path
         ST = self.ST
         uncharted = self.uncharted
+        bad_streak_limit = self.bad_streak_limit
         promising_bar = 1.0 + self.promising_margin
 
         # for next_left, next_right, new_portal_iter in portal_iter:
@@ -436,14 +405,9 @@ class PathFinder:
             sector_new = self._get_sector(_new, portal)
             i_vert_sect = bisect_left(all_vert_sect, (_new, sector_new))
             if visited[i_vert_sect]:
-                # end traversal because revisiting (vertex, sector)
                 debug('<%d> Revisited node %d, sector %d', trav_id, _new, sector_new)
                 self.num_revisits += 1
                 bad_streak += 1
-                if bad_streak >= self.bad_streak_limit:
-                    # several sucessive advances failed to outperform each keeper
-                    debug('<%d> Reached bad_streak_limit.', trav_id)
-                    return
             else:
                 visited[i_vert_sect] = 1
             _nearside = _funnel[side]
@@ -525,7 +489,12 @@ class PathFinder:
             pseudoapex = paths[apex_eff]
             d_new = pseudoapex.dist + d_hop
             keeper = I_path[_new].get(sector_new)
-            is_promising = keeper is None or d_new < promising_bar * paths[keeper].dist
+            is_promising = (
+                keeper is None or (
+                    d_new < promising_bar * paths[keeper].dist
+                    and bad_streak <= bad_streak_limit
+                )
+            )
             # for supertriangle vertices, do not update the d_ref used for prioritizing
             # (it would be sent to the bottom of heapq beacause of the big distances)
             if _new < ST:
@@ -549,10 +518,6 @@ class PathFinder:
                 bad_streak = 0
             elif not math.isclose(d_new, paths[keeper].dist):
                 bad_streak += 1
-                if bad_streak >= self.bad_streak_limit:
-                    # several sucessive advances failed to outperform each keeper
-                    debug('<%d> Reached bad_streak_limit.', trav_id)
-                    return
 
             wedge_end[side] = paths.last_added
 
