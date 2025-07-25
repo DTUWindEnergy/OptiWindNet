@@ -306,14 +306,14 @@ class PathFinder:
         next(traverser)
         if side is not None:
             try:
-                d_ref, is_promising = traverser.send((portal, side))
+                priority, is_promising = traverser.send((portal, side))
             except StopIteration:
                 debug(
                     "{%d} advancer's traverser stopped before loop (before yield)",
                     adv_id,
                 )
                 return
-            yield d_ref, portal, is_promising
+            yield priority, portal, is_promising
             try:
                 next(traverser)
             except StopIteration:
@@ -342,11 +342,11 @@ class PathFinder:
                 #  trace('{%d} advancer asking for traverser_args', adv_id)
                 # get traverser state
                 traverser_args = next(traverser)
-                d_ref = traverser_args[0]
+                priority = traverser_args[0]
                 heapq.heappush(
                     prioqueue,
                     (
-                        d_ref,
+                        priority,
                         self.adv_counter,
                         self._advance_portal(
                             self.adv_counter,
@@ -363,7 +363,7 @@ class PathFinder:
                 if 0 <= n <= T:
                     # there is a (node, sector) to update inside the dead-end
                     try:
-                        d_ref, is_promising = traverser.send(((left, n), 1))
+                        priority, is_promising = traverser.send(((left, n), 1))
                         # no need to yield, but make sure the last path pnode is added
                         next(traverser)
                     except StopIteration:
@@ -374,11 +374,11 @@ class PathFinder:
             portal, side = portals[0]
             #  trace('{%d} advancer sending (portal, side)', adv_id)
             try:
-                d_ref, is_promising = traverser.send((portal, side))
+                priority, is_promising = traverser.send((portal, side))
             except StopIteration:
                 debug("{%d} advancer's traverser stopped", adv_id)
                 return
-            yield d_ref, portal, is_promising
+            yield priority, portal, is_promising
             try:
                 next(traverser)
             except StopIteration:
@@ -388,7 +388,7 @@ class PathFinder:
     def _traverse_channel(
         self,
         trav_id: int,
-        d_ref: float,
+        priority: tuple[float, float],
         root: int,
         _apex: int,
         apex: int,
@@ -418,7 +418,7 @@ class PathFinder:
             if adv_msg is None:
                 #  trace('<%d> new traverser sent for evaluation', trav_id)
                 yield (
-                    d_ref,
+                    priority,
                     root,
                     _apex,
                     apex,
@@ -529,8 +529,8 @@ class PathFinder:
             # for supertriangle vertices, do not update the d_ref used for prioritizing
             # (it would be sent to the bottom of heapq beacause of the big distances)
             if _new < ST:
-                d_ref = d_new/d2roots[_new, root]
-            yield d_ref, is_promising
+                priority = d_new/d2roots[_new, root], d_new
+            yield priority, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
             new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop)
             uncharted[portal] = max(uncharted[portal] - 1, 0)
@@ -639,14 +639,14 @@ class PathFinder:
                     if d2rootsRank[left, r] <= d2rootsRank[right, r]
                     else (right, d_right)
                 )
+                priority = (1., d_closest)
                 traverser_pack = (
-                    #  d_closest,  # d_ref
-                    1.,  # d_ref
+                    priority,
                     r,  # root
                     r,  # _apex
                     r,  # apex
                     [left, right],  # _funnel
-                    wedge_end,  # wedge_end
+                    wedge_end,
                     bitarray(len(self.all_vert_sect)),  # visited
                     0,  # bad_streak
                 )
@@ -654,11 +654,11 @@ class PathFinder:
                     self.adv_counter, (left, right), traverser_pack
                 )
                 #  heapq.heappush(prioqueue, (d_closest, self.adv_counter, advancer))
-                heapq.heappush(prioqueue, (1., self.adv_counter, advancer))
+                heapq.heappush(prioqueue, (priority, self.adv_counter, advancer))
                 self.adv_counter += 1
         # process edges in the prioqueue
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
-        d_ref, adv_id, advancer = heapq.heappop(prioqueue)
+        priority, adv_id, advancer = heapq.heappop(prioqueue)
         iter = 0
         while len(prioqueue) > 0 and iter < iterations_limit:
             iter += 1
@@ -666,19 +666,19 @@ class PathFinder:
             debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
             try:
                 # advance one portal
-                d_ref, portal, is_promising = next(advancer)
+                priority, portal, is_promising = next(advancer)
             except StopIteration:
                 # advancer decided to stop, get a new one
-                d_ref, adv_id, advancer = heapq.heappop(prioqueue)
+                priority, adv_id, advancer = heapq.heappop(prioqueue)
             else:
                 if is_promising or uncharted[portal]:
                     # advancer is still promising, push it back to queue and get top one
-                    d_ref, adv_id, advancer = heapq.heappushpop(
-                        prioqueue, (d_ref, adv_id, advancer)
+                    priority, adv_id, advancer = heapq.heappushpop(
+                        prioqueue, (priority, adv_id, advancer)
                     )
                 else:
                     # forget advancer and get a new one
-                    d_ref, adv_id, advancer = heapq.heappop(prioqueue)
+                    priority, adv_id, advancer = heapq.heappop(prioqueue)
 
         if iter == iterations_limit:
             warn('PathFinder loop aborted after iterations_limit reached: %d', iter)
