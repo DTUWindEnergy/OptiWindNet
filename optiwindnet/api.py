@@ -372,19 +372,15 @@ class WindFarmNetwork:
         if turbinesC is not None or substationsC is not None:
             self.P, self.A = make_planar_embedding(self.L)
 
-        # if turbinesC is None:
-        #     turbinesC = self.L.graph['VertexC'][: self.L.graph['T'], :]
-
-        # if substationsC is None:
-        #     substationsC = (
-        #         substationsC or self.L.graph['VertexC'][-self.L.graph['R'] :, :]
-        #     )
+        D = self.G.graph['D'] if hasattr(self, 'G') and self.G is not None and 'D' in self.G.graph else 0
+        S_warm_has_detour = D > 0
 
         S, G = router(
             L=self.L,
             A=self.A,
             P=self.P,
             S_warm=self.S,
+            S_warm_has_detour=S_warm_has_detour,
             cables=self.cables,
             cables_capacity=self.cables_capacity,
             verbose=verbose,
@@ -402,13 +398,13 @@ class OptiWindNetSolver(ABC):
         pass
 
     @abstractmethod
-    def optimize(self, L=None, A=None, P=None, cables=None, cables_capacity=None, verbose=False, **kwargs):
+    def optimize(self,  L=None, A=None, P=None, cables=None, cables_capacity=None, S_warm=None, S_warm_has_detour=False, verbose=False, **kwargs):
         pass
 
-    def __call__(self,  L=None, A=None, P=None, cables=None, cables_capacity=None, S_warm=None, verbose=False):
+    def __call__(self,  L=None, A=None, P=None, cables=None, cables_capacity=None, S_warm=None, S_warm_has_detour=False, verbose=False):
         """Make the instance callable, calling optimize() internally."""
         return self.optimize(
-             L=L, A=A, P=P, cables=cables, cables_capacity=cables_capacity, S_warm=S_warm, verbose=verbose)
+             L=L, A=A, P=P, cables=cables, cables_capacity=cables_capacity, S_warm=S_warm, S_warm_has_detour=S_warm_has_detour, verbose=verbose)
 
 
 class Heuristic(OptiWindNetSolver):
@@ -548,23 +544,72 @@ class MILP(OptiWindNetSolver):
                 self.solver.solver.log_callback = print
 
     def optimize(
-        self, P, A, cables, cables_capacity, S_warm=None, verbose=None, router_previous=None, **kwargs):
+        self, P, A, cables, cables_capacity, S_warm=None, S_warm_has_detour=False, verbose=None, router_previous=None, **kwargs):
         if verbose is None:
             verbose = self.verbose
 
         # warm start
+        from optiwindnet.utils import F
+        import math
 
-        # if self.model_options['topology']=='radial' and topology_previous != 'radial':
-        #     print('No warmstarting')
+        # Access key components
+        model_options = self.model_options
+        if S_warm is not None:
+            R = S_warm.graph['R']
+            T = S_warm.graph['T']
+            capacity = cables_capacity
 
-        if S_warm is not None and self.solver_name != 'scip':
-            info( " >>> Using warm start: the model is initialized with the provided solution S <<<")
-            if verbose and not logger.isEnabledFor(logging.INFO):
-                print(">>> Using warm start: the model is initialized with the provided solution S <<<")
+            # Roots and labels
+            roots = range(1, R + 1)
+            RootL = {-r: S_warm.nodes[-r].get('label', F[-r]) for r in roots}
 
-        else:
-            if verbose or logger.isEnabledFor(logging.INFO):
-                print(">>> No warmstarting! <<<")
+            # Checks
+            reasons = []
+
+            # Feeder constraint
+            feeder_counts = [S_warm.degree[r] for r in RootL]
+            feeder_limit_mode = model_options.get('feeder_limit', 'unlimited')
+            feeder_minimum = math.ceil(T / capacity)
+
+            # Compute numeric feeder limit
+            if feeder_limit_mode == 'unlimited':
+                feeder_limit = float('inf')  # effectively no limit
+            elif feeder_limit_mode == 'specified':
+                feeder_limit = model_options.get('feeder_route')
+            elif feeder_limit_mode == 'minimum':
+                feeder_limit = feeder_minimum
+            elif feeder_limit_mode == 'min_plus1':
+                feeder_limit = feeder_minimum + 1
+            elif feeder_limit_mode == 'min_plus2':
+                feeder_limit = feeder_minimum + 2
+            elif feeder_limit_mode == 'min_plus3':
+                feeder_limit = feeder_minimum + 3
+
+            if feeder_counts[0] > feeder_limit:
+                reasons.append(f"number of feeders ({feeder_counts[0]}) exceeds feeder limit ({feeder_limit})")
+
+            # Detour constraint
+            if S_warm_has_detour and model_options.get('feeder_route') == 'straight':
+                reasons.append('detours present but feeder_route is set to "straight"')
+
+            # Topology constraint
+            branched_nodes = [n for n in S_warm.nodes if n > 0 and S_warm.degree[n] > 2]
+            if branched_nodes and model_options.get('topology') == 'radial':
+                reasons.append('branched structure not allowed under "radial" topology')
+
+            # Output final message
+            if reasons:
+                print()
+                print("Warning: No warmstarting (even though a solution is available) due to the following reason(s):")
+                for reason in reasons:
+                    print(f"    - {reason}")
+                print()
+            elif self.solver_name != 'scip':
+                info( " >>> Using warm start: the model is initialized with the provided solution S <<<")
+                if verbose and not logger.isEnabledFor(logging.INFO):
+                    print(">>> Using warm start: the model is initialized with the provided solution S <<<")
+        elif verbose or logger.isEnabledFor(logging.INFO):
+                print(">>> No solution is avalaible for warmstarting! <<<")
 
         solver = self.solver
 
