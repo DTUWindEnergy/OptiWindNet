@@ -387,8 +387,9 @@ class PathFinder:
 
     def _traverse_channel(
         self,
-        trav_id,
+        trav_id: int,
         d_ref: float,
+        root: int,
         _apex: int,
         apex: int,
         _funnel: list[int],
@@ -403,6 +404,7 @@ class PathFinder:
         #             translation: _node = paths.prime_from_id[node]
         cw, ccw = rotation_checkers_factory(self.VertexC)
         paths = self.paths
+        d2roots = self.d2roots
         all_vert_sect = self.all_vert_sect
         I_path = self.I_path
         ST = self.ST
@@ -417,6 +419,7 @@ class PathFinder:
                 #  trace('<%d> new traverser sent for evaluation', trav_id)
                 yield (
                     d_ref,
+                    root,
                     _apex,
                     apex,
                     _funnel.copy(),
@@ -526,7 +529,7 @@ class PathFinder:
             # for supertriangle vertices, do not update the d_ref used for prioritizing
             # (it would be sent to the bottom of heapq beacause of the big distances)
             if _new < ST:
-                d_ref = d_new
+                d_ref = d_new/d2roots[_new, root]
             yield d_ref, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
             new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop)
@@ -637,41 +640,45 @@ class PathFinder:
                     else (right, d_right)
                 )
                 traverser_pack = (
-                    d_closest,
-                    r,
-                    r,
-                    [left, right],
-                    wedge_end,
-                    bitarray(len(self.all_vert_sect)),
-                    0,
+                    #  d_closest,  # d_ref
+                    1.,  # d_ref
+                    r,  # root
+                    r,  # _apex
+                    r,  # apex
+                    [left, right],  # _funnel
+                    wedge_end,  # wedge_end
+                    bitarray(len(self.all_vert_sect)),  # visited
+                    0,  # bad_streak
                 )
                 advancer = self._advance_portal(
                     self.adv_counter, (left, right), traverser_pack
                 )
-                heapq.heappush(prioqueue, (d_closest, self.adv_counter, advancer))
+                #  heapq.heappush(prioqueue, (d_closest, self.adv_counter, advancer))
+                heapq.heappush(prioqueue, (1., self.adv_counter, advancer))
                 self.adv_counter += 1
         # process edges in the prioqueue
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
-        _, adv_id, advancer = heapq.heappop(prioqueue)
+        d_ref, adv_id, advancer = heapq.heappop(prioqueue)
         iter = 0
         while len(prioqueue) > 0 and iter < iterations_limit:
             iter += 1
+            #  print(f'{d_ref:.5f} {len(prioqueue)}', end='|')
             debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
             try:
                 # advance one portal
                 d_ref, portal, is_promising = next(advancer)
             except StopIteration:
                 # advancer decided to stop, get a new one
-                _, adv_id, advancer = heapq.heappop(prioqueue)
+                d_ref, adv_id, advancer = heapq.heappop(prioqueue)
             else:
                 if is_promising or uncharted[portal]:
                     # advancer is still promising, push it back to queue and get top one
-                    _, adv_id, advancer = heapq.heappushpop(
+                    d_ref, adv_id, advancer = heapq.heappushpop(
                         prioqueue, (d_ref, adv_id, advancer)
                     )
                 else:
                     # forget advancer and get a new one
-                    _, adv_id, advancer = heapq.heappop(prioqueue)
+                    d_ref, adv_id, advancer = heapq.heappop(prioqueue)
 
         if iter == iterations_limit:
             warn('PathFinder loop aborted after iterations_limit reached: %d', iter)
