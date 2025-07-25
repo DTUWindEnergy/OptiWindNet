@@ -325,12 +325,9 @@ def OBEW(
         # discard useless edges
         A.remove_edges_from(edges2discard)
         # () sort choices
-        choices = sort_union_choices(weighted_edges) if weighted_edges else []
-        if len(choices) > 0:
-            choice = choices[0].item()
+        if weighted_edges:
+            weight, _, u, v = sort_union_choices(weighted_edges)[0].tolist()
             # merging is better than subroot, submit entry to pq
-            # weight, u, v = choice
-            weight, _, u, v = choice
             # tradeoff calculation
             tradeoff = weight - d2roots[fnT[subroot], A.nodes[subroot]['root']]
             pq.add(tradeoff, subroot, (u, v))
