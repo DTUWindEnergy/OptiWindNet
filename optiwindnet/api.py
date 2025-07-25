@@ -15,7 +15,7 @@ from optiwindnet.baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 # Heuristics
 from optiwindnet.heuristics import EW_presolver, CPEW
 from optiwindnet.importer import L_from_pbf, L_from_site, L_from_yaml, load_repository
-from optiwindnet.interarraylib import G_from_S, as_normalized, calcload
+from optiwindnet.interarraylib import G_from_S, S_from_G, as_normalized, calcload
 from optiwindnet.interface import assign_cables
 from optiwindnet.mesh import make_planar_embedding
 
@@ -379,6 +379,7 @@ class WindFarmNetwork:
             )
 
         S, G = router(
+            L=self.L,
             A=self.A,
             P=self.P,
             S_warm=self.S,
@@ -417,7 +418,7 @@ class Heuristic(OptiWindNetSolver):
     def __init__(self, solver='Esau_Williams', maxiter=10000, verbose=False, **kwargs):
         if solver not in ['Esau_Williams', 'EW', 'CPEW']:
             raise ValueError(
-                f"{solver} is not among the supported Heuristic solvers. Choose among: ['Esau_Williams']."
+                f"{solver} is not among the supported Heuristic solvers. Choose among: ['Esau_Williams', 'CPEW']."
             )
 
         # Call the base class initialization
@@ -425,7 +426,7 @@ class Heuristic(OptiWindNetSolver):
         self.solver = solver
         self.maxiter = maxiter
 
-    def optimize(self, A, P, cables, cables_capacity, verbose=None, **kwargs):
+    def optimize(self, L, A, P, cables, cables_capacity, verbose=None, **kwargs):
         if verbose is None:
             verbose = self.verbose
 
@@ -433,7 +434,8 @@ class Heuristic(OptiWindNetSolver):
         if self.solver in ['Esau_Williams', 'EW']:
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
         elif self.solver in ['CPEW']:
-            S = CPEW(A, capacity=cables_capacity, maxiter=self.maxiter)
+            G_cpew = CPEW(L, capacity=cables_capacity, maxiter=self.maxiter)
+            S = S_from_G(G_cpew)
         else:
             pass
 
@@ -468,7 +470,7 @@ class MetaHeuristic(OptiWindNetSolver):
         self.balanced = balanced
         self.seed = seed
 
-    def optimize(self, A, P, cables, cables_capacity, verbose=None, **kwargs):
+    def optimize(self, L, A, P, cables, cables_capacity, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -546,7 +548,7 @@ class MILP(OptiWindNetSolver):
                 self.solver.solver.log_callback = print
 
     def optimize(
-        self, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
+        self, L, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
         ):
         if verbose is None:
             verbose = self.verbose
