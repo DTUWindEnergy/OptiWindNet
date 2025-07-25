@@ -134,44 +134,15 @@ def ClassicEW(
                         weighted_edges.append((W, tiebreaker, u, v))
         return weighted_edges, edges2discard
 
-    def sort_union_choices(weighted_edges):
-        # this function could be outside esauwilliams()
-        unordchoices = np.array(
-            weighted_edges,
-            dtype=[
-                ('weight', np.float64),
-                ('vd2rootR', np.int_),
-                ('u', np.int_),
-                ('v', np.int_),
-            ],
-        )
-        # result = np.argsort(unordchoices, order=['weight'])
-        # unordchoices  = unordchoices[result]
-
-        # DEVIATION FROM Esau-Williams
-        # rounding of weight to make ties more likely
-        # tie-breaking by proximity of 'v' node to root
-        # purpose is to favor radial alignment of components
-        tempchoices = unordchoices.copy()
-        # tempchoices['weight'] /= tempchoices['weight'].min()
-        # tempchoices['weight'] = (20*tempchoices['weight']).round()  # 5%
-
-        result = np.argsort(tempchoices, order=['weight', 'vd2rootR'])
-        choices = unordchoices[result]
-        return choices
-
     def enqueue_best_union(subroot):
         debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
         # () get component expansion edges with weight
         weighted_edges, edges2discard = get_union_choices(subroot)
         # discard useless edges
         A.remove_edges_from(edges2discard)
-        # () sort choices
-        choices = sort_union_choices(weighted_edges) if weighted_edges else []
-        # () check subroot crossings
-        # choice = first_non_crossing(choices, subroot)
-        if len(choices) > 0:
-            weight, _, u, v = choices[0].item()
+        if weighted_edges:
+            # () sort choices
+            weight, _, u, v = min(weighted_edges)
             choice = (weight, u, v)
         else:
             choice = False
@@ -200,47 +171,6 @@ def ClassicEW(
                 # i=0 feeders and check_heap4crossings reverse_entry
                 # may leave accepting subtrees out of pq
                 pq.cancel(subroot)
-
-    def ban_queued_union(sr_u, u, v):
-        if (u, v) in A.edges:
-            A.remove_edge(u, v)
-        else:
-            debug('<<< UNLIKELY <ban_queued_union()> «%d~%d» not in A >>>', u, v)
-        sr_v = subroot_[v]
-        # TODO: think about why a discard was needed
-        ComponIn[sr_v].discard(sr_u)
-        # stale_subtrees.appendleft(sr_u)
-        stale_subtrees.add(sr_u)
-        # enqueue_best_union(sr_u)
-
-        # BEGIN: block to be simplified
-        is_reverse = False
-        componin = sr_v in ComponIn[sr_u]
-        reverse_entry = pq.tags.get(sr_v)
-        if reverse_entry is not None:
-            _, _, _, (s, t) = reverse_entry
-            if (t, s) == (u, v):
-                # TODO: think about why a discard was needed
-                ComponIn[sr_u].discard(sr_v)
-                # this is assymetric on purpose (i.e. not calling
-                # pq.cancel(sr_u), because enqueue_best_union will do)
-                pq.cancel(sr_v)
-                enqueue_best_union(sr_v)
-                is_reverse = True
-
-        if componin != is_reverse:
-            # TODO: Why did I expect always False here? It is sometimes True.
-            debug(
-                '«%d~%d», sr_u <%d>, sr_v <%d> componin: %s, is_reverse: %s',
-                u,
-                v,
-                sr_u,
-                sr_v,
-                componin,
-                is_reverse,
-            )
-
-        # END: block to be simplified
 
     # initialize pq
     for n in _T:
