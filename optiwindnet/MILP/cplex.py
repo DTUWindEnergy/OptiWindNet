@@ -47,7 +47,7 @@ class SolverCplex(SolverPyomo, PoolHandler):
             range(num_solutions), key=cplex.solution.pool.get_objective_value
         )
         # set the selected (last visited) soln to the best one
-        self.soln = self.sorted_index[0]
+        self.soln = self.sorted_index_[0]
         self.vars = self.solver._pyomo_var_to_ndx_map.keys()
         return solution_info
 
