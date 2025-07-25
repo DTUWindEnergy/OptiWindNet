@@ -58,6 +58,8 @@ class WindFarmNetwork:
         buffer_dist=0,
     ):
         # Use a default router (heuristic Esau_Williams) if none is provided
+        
+        self.router_privious = None
         if router is None:
             router = Heuristic(solver='Esau_Williams')
         self.router = router
@@ -370,27 +372,26 @@ class WindFarmNetwork:
         if turbinesC is not None or substationsC is not None:
             self.P, self.A = make_planar_embedding(self.L)
 
-        if turbinesC is None:
-            turbinesC = self.L.graph['VertexC'][: self.L.graph['T'], :]
+        # if turbinesC is None:
+        #     turbinesC = self.L.graph['VertexC'][: self.L.graph['T'], :]
 
-        if substationsC is None:
-            substationsC = (
-                substationsC or self.L.graph['VertexC'][-self.L.graph['R'] :, :]
-            )
+        # if substationsC is None:
+        #     substationsC = (
+        #         substationsC or self.L.graph['VertexC'][-self.L.graph['R'] :, :]
+        #     )
 
         S, G = router(
             L=self.L,
             A=self.A,
             P=self.P,
             S_warm=self.S,
-            turbinesC=turbinesC,
-            substationsC=substationsC,
             cables=self.cables,
             cables_capacity=self.cables_capacity,
             verbose=verbose,
         )
         self.S = S
         self.G = G
+        self.router_privious = self.router
 
         terse_links = self.terse_links()
         return terse_links
@@ -401,24 +402,22 @@ class OptiWindNetSolver(ABC):
         pass
 
     @abstractmethod
-    def optimize(self, turbinesC=None, substationsC=None, verbose=None, **kwargs):
-        """
-        Perform cable layout optimization. Must be implemented by subclasses.
-        """
+    def optimize(self, L=None, A=None, P=None, cables=None, cables_capacity=None, verbose=False, **kwargs):
         pass
 
-    def __call__(self, turbinesC=None, substationsC=None, verbose=False, **kwargs):
+    def __call__(self,  L=None, A=None, P=None, cables=None, cables_capacity=None, S_warm=None, verbose=False):
         """Make the instance callable, calling optimize() internally."""
         return self.optimize(
-            turbinesC=turbinesC, substationsC=substationsC, verbose=verbose, **kwargs
-        )
+             L=L, A=A, P=P, cables=cables, cables_capacity=cables_capacity, S_warm=S_warm, verbose=verbose)
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, solver='Esau_Williams', maxiter=10000, verbose=False, **kwargs):
-        if solver not in ['Esau_Williams', 'EW', 'CPEW']:
+    def __init__(self, solver='Esau_Williams', maxiter=10000, verbose=False, **kwargs,):
+        super().__init__(**kwargs)
+        SUPPORTED = ['Esau_Williams', 'EW', 'CPEW']
+        if solver not in SUPPORTED:
             raise ValueError(
-                f"{solver} is not among the supported Heuristic solvers. Choose among: ['Esau_Williams', 'CPEW']."
+                f"{solver} is not among the supported Heuristic solvers. Choose among: {SUPPORTED}."
             )
 
         # Call the base class initialization
@@ -453,24 +452,24 @@ class MetaHeuristic(OptiWindNetSolver):
         self,
         time_limit,
         solver='HGS',
-        gates_limit: int | None = None,
+        feeder_limit: int | None = None,
         max_iter=10,
         balanced=False,
         seed: int = 0,
         verbose=False,
         **kwargs,
     ):
+        super().__init__(**kwargs)
         # Call the base class initialization
         self.time_limit = time_limit
-        self.gates_limit = gates_limit
         self.solver = solver
         self.verbose = verbose
         self.max_iter = max_iter
-        self.gates_limit = gates_limit
+        self.feeder_limit = feeder_limit
         self.balanced = balanced
         self.seed = seed
 
-    def optimize(self, L, A, P, cables, cables_capacity, verbose=None, **kwargs):
+    def optimize(self, A, P, cables, cables_capacity, S_warm=None, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -488,7 +487,7 @@ class MetaHeuristic(OptiWindNetSolver):
                     capacity=cables_capacity,
                     time_limit=self.time_limit,
                     max_iter=self.max_iter,
-                    vehicles=self.gates_limit,
+                    vehicles=self.feeder_limit,
                     seed=self.seed,
                 )
             else:
@@ -499,9 +498,9 @@ class MetaHeuristic(OptiWindNetSolver):
                     balanced=self.balanced,
                     seed=self.seed,
                 )
-                if verbose and self.gates_limit:
+                if verbose and self.feeder_limit:
                     print(
-                        'WARNING: hgs_multiroot is used for plants with more than one substation and gates-limit is neglected (hgs_multiroot is not capable of limiting number of feeders)'
+                        'WARNING: HGS is used for a plant with more than one substation and feeder-limit is neglected (The current implementation of HGS does not support limiting the number of feeders in multi-substation plants.)'
                     )
 
         else:
@@ -529,6 +528,7 @@ class MILP(OptiWindNetSolver):
         verbose=False,
         **kwargs,
     ):
+        super().__init__(**kwargs)
         self.time_limit = time_limit
         self.mip_gap = mip_gap
         self.solver_name = solver_name
@@ -548,16 +548,23 @@ class MILP(OptiWindNetSolver):
                 self.solver.solver.log_callback = print
 
     def optimize(
-        self, L, P, A, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
-        ):
+        self, P, A, cables, cables_capacity, S_warm=None, verbose=None, router_previous=None, **kwargs):
         if verbose is None:
             verbose = self.verbose
 
         # warm start
+
+        # if self.model_options['topology']=='radial' and topology_previous != 'radial':
+        #     print('No warmstarting')
+
         if S_warm is not None and self.solver_name != 'scip':
             info( " >>> Using warm start: the model is initialized with the provided solution S <<<")
             if verbose and not logger.isEnabledFor(logging.INFO):
                 print(">>> Using warm start: the model is initialized with the provided solution S <<<")
+
+        else:
+            if verbose or logger.isEnabledFor(logging.INFO):
+                print(">>> No warmstarting! <<<")
 
         solver = self.solver
 
