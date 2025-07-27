@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+from bisect import insort
 import logging
 import math
 from collections import defaultdict
@@ -206,9 +207,11 @@ def _edges_and_hull_from_cdt(
 
 
 def _planar_from_cdt_triangles(
-    mesh: cdt.Triangulation, vertmap: Indices
+    mesh: cdt.Triangulation, vertmap: Indices, get_triangles: bool = False
 ) -> tuple[
-    tuple[IndexTrios, np.ndarray[tuple[int], np.dtype[np.bool_]]], set[tuple[int, int]]
+    tuple[IndexTrios, np.ndarray[tuple[int], np.dtype[np.bool_]]],
+    set[tuple[int, int]],
+    list[tuple[int]],
 ]:
     """Convert from a PythonCDT.Triangulation to NetworkX.PlanarEmbedding.
 
@@ -225,12 +228,19 @@ def _planar_from_cdt_triangles(
     num_tri = mesh.triangles_count()
     triangleI = np.empty((num_tri, 3), dtype=np.int_)
     neighborI = np.empty((num_tri, 3), dtype=np.int_)
+    sorted_triangles = []
 
     for i, tri in enumerate(mesh.triangles):
-        triangleI[i] = vertmap[tri.vertices]
+        vertices = vertmap[tri.vertices]
+        triangleI[i] = vertices
         neighborI[i] = tuple(
             (NULL if n == cdt.NO_NEIGHBOR else n) for n in tri.neighbors
         )
+        if get_triangles:
+            triangle = vertices.tolist()
+            triangle.sort()
+            insort(sorted_triangles, tuple(triangle))
+
     # formula for number of triangulation's edges is: 3*V - H - 3
     # H = 3 since CDT's Hull is always the supertriangle
     # and because we count half-edges, use expression × 2
@@ -239,7 +249,9 @@ def _planar_from_cdt_triangles(
     ref_is_cw_ = np.empty((num_half_edges,), dtype=np.bool_)
     _halfedges_from_triangulation(triangleI, neighborI, halfedges, ref_is_cw_)
     edges = set((u.item(), v.item()) for u, v in halfedges[:, :2] if u < v)
-    return (halfedges, ref_is_cw_), edges
+    # create triangles ordered list
+
+    return (halfedges, ref_is_cw_), edges, sorted_triangles
 
 
 def _P_from_halfedge_pack(
@@ -670,7 +682,7 @@ def make_planar_embedding(
     )
     mesh.insert_vertices(V2d_nodes)
 
-    P_A_halfedge_pack, P_A_edges = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
+    P_A_halfedge_pack, P_A_edges, _ = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
     P_A = _P_from_halfedge_pack(P_A_halfedge_pack)
     P_A_edges.difference_update((u, v) for v in supertriangle for u in P_A[v])
 
@@ -844,7 +856,7 @@ def make_planar_embedding(
         )
         mesh.insert_vertices(V2d_holes)
         mesh.insert_edges(edgesCDT_obstacles)
-        _, P_edges = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
+        _, P_edges, _ = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
         # Here we use the changes in CDT triangulation to identify the P_A
         # edges that cross obstacles or lay in their vicinity.
         edges_to_examine = P_A_edges - P_edges
@@ -963,8 +975,11 @@ def make_planar_embedding(
     # K) Build the planar embedding of the constrained triangulation.
     # ###############################################################
     debug('PART K')
-    P_halfedge_pack, P_edges = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
+    P_halfedge_pack, P_edges, triangles = _planar_from_cdt_triangles(
+        mesh, vertex_from_iCDT, get_triangles=True
+    )
     P = _P_from_halfedge_pack(P_halfedge_pack)
+    P.graph['triangles'] = triangles
 
     # Remove edges inside the concavities
     for ring in chain(concavities, holes):
