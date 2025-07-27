@@ -71,7 +71,9 @@ class AppraiserFactory:
 
     def __init__(self, model_data: dict):
         # load pytorch model
-        self.model = getattr(modelbuilders, model_data['cls']).from_suggestions(**model_data['config'])
+        self.model = getattr(modelbuilders, model_data['cls']).from_suggestions(
+            **model_data['config']
+        )
         self.model.load_state_dict(model_data['state'])
         self.name = model_data['name']
 
