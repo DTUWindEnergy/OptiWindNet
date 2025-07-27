@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-from bisect import insort
+from bisect import bisect_left
 import logging
 import math
 from collections import defaultdict
@@ -228,7 +228,6 @@ def _planar_from_cdt_triangles(
     num_tri = mesh.triangles_count()
     triangleI = np.empty((num_tri, 3), dtype=np.int_)
     neighborI = np.empty((num_tri, 3), dtype=np.int_)
-    sorted_triangles = []
 
     for i, tri in enumerate(mesh.triangles):
         vertices = vertmap[tri.vertices]
@@ -236,10 +235,12 @@ def _planar_from_cdt_triangles(
         neighborI[i] = tuple(
             (NULL if n == cdt.NO_NEIGHBOR else n) for n in tri.neighbors
         )
-        if get_triangles:
-            triangle = vertices.tolist()
-            triangle.sort()
-            insort(sorted_triangles, tuple(triangle))
+    if get_triangles:
+        # sort each triangle's vertices and the list of triangles
+        triangles = [tuple(sorted(tri.tolist())) for tri in triangleI]
+        triangles.sort()
+    else:
+        triangles = None
 
     # formula for number of triangulation's edges is: 3*V - H - 3
     # H = 3 since CDT's Hull is always the supertriangle
@@ -251,7 +252,7 @@ def _planar_from_cdt_triangles(
     edges = set((u.item(), v.item()) for u, v in halfedges[:, :2] if u < v)
     # create triangles ordered list
 
-    return (halfedges, ref_is_cw_), edges, sorted_triangles
+    return (halfedges, ref_is_cw_), edges, triangles
 
 
 def _P_from_halfedge_pack(
@@ -1510,6 +1511,7 @@ def planar_flipped_by_routeset(
         fnT[-R:] = range(-R, 0)
 
     P = planar.copy()
+    triangles = P.graph['triangles']
     if diagonals is not None:
         diags = diagonals.copy()
     else:
@@ -1525,6 +1527,8 @@ def planar_flipped_by_routeset(
     stack = list(edges_G - edges_P)
     # gates to the bottom of the stack
     stack.sort()
+    triangle_ids_to_remove = []
+    triangles_to_add = []
     while stack:
         u, v = stack.pop()
         if u < 0 and (u, v) not in diags:
@@ -1575,4 +1579,21 @@ def planar_flipped_by_routeset(
                 diags.inv.pop(wy, None)
         P.add_half_edge(u, v, cw=s)
         P.add_half_edge(v, u, cw=t)
+        # store triangle removals and additions
+        triangle_ids_to_remove.extend(
+            (
+                bisect_left(triangles, tuple(sorted((u, s, t)))),
+                bisect_left(triangles, tuple(sorted((v, s, t)))),
+            )
+        )
+        triangles_to_add.extend(tuple(sorted((s, u, v))), tuple(sorted((t, u, v))))
+    if triangles_to_add:
+        upd_triangles = [
+            tri
+            for i, tri in enumerate(triangles)
+            if i not in set(triangle_ids_to_remove)
+        ]
+        upd_triangles.extend(triangles_to_add)
+        upd_triangles.sort()
+        P.graph['triangles'] = upd_triangles
     return P
