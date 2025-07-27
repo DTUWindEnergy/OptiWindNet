@@ -25,7 +25,9 @@ from optiwindnet.pathfinding import PathFinder
 from optiwindnet.plotting import gplot, pplot
 from optiwindnet.svg import svgplot
 
-from .api_utils import from_coordinates, plot_org_buff
+from .api_utils import from_coordinates, plot_org_buff, check_warmstart_feasibility
+from .api_utils import parse_cables_input, enable_ortools_logging_if_jupyter, extract_network_as_array, check_warmstart_feasibility, plot_org_buff, from_coordinates
+
 
 ###################
 # OptiWindNet API #
@@ -65,25 +67,8 @@ class WindFarmNetwork:
         self.router = router
 
         # Parse and validate cables input; convert to list of (capacity, cost) tuples
-        cables_array = np.array(cables)
-        if isinstance(cables, int):
-            cables = [(cables, 1)]
-        elif (
-            cables_array.ndim == 1
-            and cables_array.shape[0] == 1
-            and isinstance(cables_array.item(), int)
-        ):
-            cables = [(int(cables_array[0]), 1)]
-        elif cables_array.ndim == 1 and cables_array.shape[0] == 2:
-            cables = [(int(cables_array[0]), float(cables_array[1]))]
-        elif cables_array.ndim == 2:
-            if cables_array.shape[1] == 2:
-                cables = [(int(cap), float(cost)) for cap, cost in cables_array]
-        else:
-            raise ValueError(f'Invalid cable values: {cables}')
-
-        self.cables = cables
-        self.cables_capacity = max(c[0] for c in cables)
+        self.cables = parse_cables_input(cables)
+        self.cables_capacity = max(c[0] for c in self.cables)
 
         # Construct layout from coordinates if not directly provided
         if turbinesC is not None and substationsC is not None:
@@ -278,28 +263,7 @@ class WindFarmNetwork:
 
     def get_network(self):
         """Returns the network as a structured array of edge data."""
-        network_array_type = np.dtype(
-            [
-                ('src', int),
-                ('tgt', int),
-                ('length', float),
-                ('load', float),
-                ('reverse', bool),
-                ('cable', int),
-                ('cost', float),
-            ]
-        )
-
-        def iter_edges(G, keys):
-            for s, t, edgeD in G.edges(data=True):
-                yield s, t, *(edgeD[key] for key in keys)
-
-        network = np.fromiter(
-            iter_edges(self.G, network_array_type.names[2:]),
-            dtype=network_array_type,
-            count=self.G.number_of_edges(),
-        )
-        return network
+        return extract_network_as_array(self.G)
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """
@@ -538,78 +502,23 @@ class MILP(OptiWindNetSolver):
             self.optiwindnet_default_options = 'Not available'
 
         if verbose and solver_name == 'ortools':
-            from IPython import get_ipython
-            shell = get_ipython().__class__.__name__
-            if shell in ('ZMQInteractiveShell',):  # Jupyter notebook or lab
-                self.solver.solver.log_callback = print
+            enable_ortools_logging_if_jupyter(self.solver)
 
     def optimize(
         self, P, A, cables, cables_capacity, S_warm=None, S_warm_has_detour=False, verbose=None, router_previous=None, **kwargs):
         if verbose is None:
             verbose = self.verbose
 
-        # warm start
-        from optiwindnet.utils import F
-        import math
-
-        # Access key components
-        model_options = self.model_options
-        if S_warm is not None:
-            R = S_warm.graph['R']
-            T = S_warm.graph['T']
-            capacity = cables_capacity
-
-            # Roots and labels
-            roots = range(1, R + 1)
-            RootL = {-r: S_warm.nodes[-r].get('label', F[-r]) for r in roots}
-
-            # Checks
-            reasons = []
-
-            # Feeder constraint
-            feeder_counts = [S_warm.degree[r] for r in RootL]
-            feeder_limit_mode = model_options.get('feeder_limit', 'unlimited')
-            feeder_minimum = math.ceil(T / capacity)
-
-            # Compute numeric feeder limit
-            if feeder_limit_mode == 'unlimited':
-                feeder_limit = float('inf')  # effectively no limit
-            elif feeder_limit_mode == 'specified':
-                feeder_limit = model_options.get('feeder_route')
-            elif feeder_limit_mode == 'minimum':
-                feeder_limit = feeder_minimum
-            elif feeder_limit_mode == 'min_plus1':
-                feeder_limit = feeder_minimum + 1
-            elif feeder_limit_mode == 'min_plus2':
-                feeder_limit = feeder_minimum + 2
-            elif feeder_limit_mode == 'min_plus3':
-                feeder_limit = feeder_minimum + 3
-
-            if feeder_counts[0] > feeder_limit:
-                reasons.append(f"number of feeders ({feeder_counts[0]}) exceeds feeder limit ({feeder_limit})")
-
-            # Detour constraint
-            if S_warm_has_detour and model_options.get('feeder_route') == 'straight':
-                reasons.append('detours present but feeder_route is set to "straight"')
-
-            # Topology constraint
-            branched_nodes = [n for n in S_warm.nodes if n > 0 and S_warm.degree[n] > 2]
-            if branched_nodes and model_options.get('topology') == 'radial':
-                reasons.append('branched structure not allowed under "radial" topology')
-
-            # Output final message
-            if reasons:
-                print()
-                print("Warning: No warmstarting (even though a solution is available) due to the following reason(s):")
-                for reason in reasons:
-                    print(f"    - {reason}")
-                print()
-            elif self.solver_name != 'scip':
-                info( " >>> Using warm start: the model is initialized with the provided solution S <<<")
-                if verbose and not logger.isEnabledFor(logging.INFO):
-                    print(">>> Using warm start: the model is initialized with the provided solution S <<<")
-        elif verbose or logger.isEnabledFor(logging.INFO):
-                print(">>> No solution is avalaible for warmstarting! <<<")
+        warmstart_state = check_warmstart_feasibility(
+            S_warm=S_warm,
+            cables_capacity=cables_capacity,
+            model_options=self.model_options, 
+            S_warm_has_detour=S_warm_has_detour,
+            solver_name=self.solver_name,
+            verbose=verbose,
+            logger=None)
+        
+        # maybe if warmstart_state is False deactivate the warmstarting procedure in MILP?
 
         solver = self.solver
 

@@ -6,6 +6,8 @@ from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.path import Path
 from optiwindnet.importer import L_from_site
 import logging
+import math
+from IPython import get_ipython
 
 
 from itertools import pairwise
@@ -252,3 +254,148 @@ def from_coordinates(self, turbinesC, substationsC, borderC, obstaclesC, name, h
         handle=handle,
         VertexC=vertexC
     )
+
+def check_warmstart_feasibility(S_warm, cables_capacity, model_options, 
+                                S_warm_has_detour, solver_name, verbose=False, logger=None):
+    if logger is None:
+        logger = logging.getLogger()
+
+    if S_warm is None:
+        if verbose or logger.isEnabledFor(logging.INFO):
+            print(">>> No solution is available for warmstarting! <<<")
+        return False
+
+    R = S_warm.graph['R']
+    T = S_warm.graph['T']
+    capacity = cables_capacity
+
+    roots = range(1, R + 1)
+    RootL = {-r: S_warm.nodes[-r].get('label', F[-r]) for r in roots}
+
+    reasons = []
+
+    # Feeder constraints
+    feeder_counts = [S_warm.degree[r] for r in RootL]
+    feeder_limit_mode = model_options.get('feeder_limit', 'unlimited')
+    feeder_minimum = math.ceil(T / capacity)
+
+    if feeder_limit_mode == 'unlimited':
+        feeder_limit = float('inf')
+    elif feeder_limit_mode == 'specified':
+        feeder_limit = model_options.get('feeder_route')
+    elif feeder_limit_mode == 'minimum':
+        feeder_limit = feeder_minimum
+    elif feeder_limit_mode == 'min_plus1':
+        feeder_limit = feeder_minimum + 1
+    elif feeder_limit_mode == 'min_plus2':
+        feeder_limit = feeder_minimum + 2
+    elif feeder_limit_mode == 'min_plus3':
+        feeder_limit = feeder_minimum + 3
+    else:
+        feeder_limit = float('inf')  # fallback
+
+    if feeder_counts[0] > feeder_limit:
+        reasons.append(f"number of feeders ({feeder_counts[0]}) exceeds feeder limit ({feeder_limit})")
+
+    # Detour constraint
+    if S_warm_has_detour and model_options.get('feeder_route') == 'straight':
+        reasons.append('detours present but feeder_route is set to "straight"')
+
+    # Topology constraint
+    branched_nodes = [n for n in S_warm.nodes if n > 0 and S_warm.degree[n] > 2]
+    if branched_nodes and model_options.get('topology') == 'radial':
+        reasons.append('branched structure not allowed under "radial" topology')
+
+    # Output
+    if reasons:
+        print()
+        print("Warning: No warmstarting (even though a solution is available) due to the following reason(s):")
+        for reason in reasons:
+            print(f"    - {reason}")
+        print()
+        return False
+    elif solver_name != 'scip':
+        msg = ">>> Using warm start: the model is initialized with the provided solution S <<<"
+        if verbose and not logger.isEnabledFor(logging.INFO):
+            print(msg)
+        else:
+            logger.info(msg)
+        return True
+    else:
+        return False
+    
+
+
+def parse_cables_input(cables):
+    cables_array = np.array(cables)
+    if isinstance(cables, int):
+        return [(cables, 1)]
+    elif cables_array.ndim == 1 and cables_array.shape[0] == 1 and isinstance(cables_array.item(), int):
+        return [(int(cables_array[0]), 1)]
+    elif cables_array.ndim == 1 and cables_array.shape[0] == 2:
+        return [(int(cables_array[0]), float(cables_array[1]))]
+    elif cables_array.ndim == 2 and cables_array.shape[1] == 2:
+        return [(int(cap), float(cost)) for cap, cost in cables_array]
+    else:
+        raise ValueError(f'Invalid cable values: {cables}')
+
+def enable_ortools_logging_if_jupyter(solver):
+    shell = get_ipython().__class__.__name__
+    if shell in ('ZMQInteractiveShell',):  # Jupyter notebook or lab
+        solver.solver.log_callback = print
+
+def compute_edge_gradients(G, gradient_type='length'):
+    if gradient_type.lower() not in ['cost', 'length']:
+        raise ValueError("gradient_type should be either 'cost' or 'length'")
+
+    VertexC = G.graph['VertexC']
+    R = G.graph['R']
+    T = G.graph['T']
+    gradients = np.zeros_like(VertexC)
+
+    fnT = G.graph.get('fnT')
+    if fnT is not None:
+        _u, _v = fnT[np.array(G.edges)].T
+    else:
+        _u, _v = np.array(G.edges).T
+
+    vec = VertexC[_u] - VertexC[_v]
+    norm = np.hypot(*vec.T)
+    norm[norm < 1e-12] = 1.0
+    vec /= norm[:, None]
+
+    if gradient_type.lower() == 'cost':
+        cable_costs = np.fromiter(
+            (G.graph['cables'][cable]['cost'] for *_, cable in G.edges(data='cable')),
+            dtype=np.float64,
+            count=G.number_of_edges(),
+        )
+        vec *= cable_costs[:, None]
+
+    np.add.at(gradients, _u, vec)
+    np.subtract.at(gradients, _v, vec)
+
+    return gradients[:T], gradients[-R:]
+
+def extract_network_as_array(G):
+    network_array_type = np.dtype([
+        ('src', int),
+        ('tgt', int),
+        ('length', float),
+        ('load', float),
+        ('reverse', bool),
+        ('cable', int),
+        ('cost', float),
+    ])
+
+    def iter_edges(G, keys):
+        for s, t, edgeD in G.edges(data=True):
+            yield s, t, *(edgeD[key] for key in keys)
+
+    network = np.fromiter(
+        iter_edges(G, network_array_type.names[2:]),
+        dtype=network_array_type,
+        count=G.number_of_edges(),
+    )
+    return network
+
