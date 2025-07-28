@@ -334,7 +334,9 @@ class PathFinder:
                     traverser_args,
                     side_bif,
                 )
-                heapq.heappush(prioqueue, (traverser_args[0], self.adv_counter, advancer))
+                heapq.heappush(
+                    prioqueue, (traverser_args[0], self.adv_counter, advancer)
+                )
                 self.adv_counter += 1
                 next(traverser)
             elif not portals:
@@ -489,16 +491,14 @@ class PathFinder:
             pseudoapex = paths[apex_eff]
             d_new = pseudoapex.dist + d_hop
             keeper = I_path[_new].get(sector_new)
-            is_promising = (
-                keeper is None or (
-                    d_new < promising_bar * paths[keeper].dist
-                    and bad_streak <= bad_streak_limit
-                )
+            is_promising = keeper is None or (
+                d_new < promising_bar * paths[keeper].dist
+                and bad_streak <= bad_streak_limit
             )
             # for supertriangle vertices, do not update the d_ref used for prioritizing
             # (it would be sent to the bottom of heapq beacause of the big distances)
             if _new < ST:
-                priority = d_new/d2roots[_new, root], d_new
+                priority = d_new / d2roots[_new, root], d_new
             yield priority, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
             new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop)
@@ -604,7 +604,7 @@ class PathFinder:
                     if d2rootsRank[left, r] <= d2rootsRank[right, r]
                     else (right, d_right)
                 )
-                priority = (1., d_closest)
+                priority = (1.0, d_closest)
                 traverser_pack = (
                     priority,
                     r,  # root
