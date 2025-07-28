@@ -234,7 +234,9 @@ def gplot(
         else:
             if node_tag == 'load' and 'has_loads' not in G.graph:
                 node_tag = 'label'
-            font_size = dict(load=FONTSIZE_LOAD, label=FONTSIZE_LABEL).get(node_tag, FONTSIZE_LABEL)
+            font_size = dict(load=FONTSIZE_LOAD, label=FONTSIZE_LABEL).get(
+                node_tag, FONTSIZE_LABEL
+            )
             root_font_size = FONTSIZE_ROOT_LABEL
             labels = nx.get_node_attributes(G, node_tag)
             for root in roots:
