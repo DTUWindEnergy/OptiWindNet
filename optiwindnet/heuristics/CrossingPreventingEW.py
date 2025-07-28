@@ -218,7 +218,8 @@ def CPEW(
         nonlocal prevented_crossings
         found = False
         # BEGIN: for loop that picks an edge
-        for weight, tiebreaker, u, v in choices.tolist():
+        for choice in choices:
+            weight, tiebreaker, u, v = choice.tolist()
             found = True
             root = A[u][v]['root']
 
