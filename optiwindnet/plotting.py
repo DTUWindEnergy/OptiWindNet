@@ -225,48 +225,37 @@ def gplot(
         arts.set_clip_on(False)
 
     # draw labels
-    if node_tag is not None:
-        if node_tag is True:
-            labels = {t: str(t) for t in range(T)}
-            font_size = FONTSIZE_LABEL
-            root_font_size = FONTSIZE_LOAD
-            RootL = {r: str(r) for r in roots}
-        else:
-            if node_tag == 'load' and 'has_loads' not in G.graph:
-                node_tag = 'label'
-            font_size = dict(load=FONTSIZE_LOAD, label=FONTSIZE_LABEL).get(
-                node_tag, FONTSIZE_LABEL
-            )
-            root_font_size = FONTSIZE_ROOT_LABEL
-            labels = nx.get_node_attributes(G, node_tag)
-            for root in roots:
-                if root in labels:
-                    labels.pop(root)
-            if D:
-                for det in chain(contour, detour):
-                    if det in labels:
-                        labels.pop(det)
-            for n in range(T):
-                if n not in labels:
-                    labels[n] = str(n)
-            RootL = {r: G.nodes[r].get('label', str(r)) for r in roots[::-1]}
-        arts = nx.draw_networkx_labels(
-            G, pos, ax=ax, labels=labels, font_size=font_size
+    if 'has_loads' in G.graph and node_tag == 'load':
+        label_options = dict(
+            labels={n: G.nodes[n]['load'] for n in range(-R, T)},
+            font_size=(
+                {t: FONTSIZE_LOAD for t in range(T)}
+                | {r: FONTSIZE_LABEL for r in range(-R, 0)}
+            ),
         )
-        for artist in arts.values():
-            artist.set_clip_on(False)
-    # root nodes' labels
-    if node_tag is not None:
-        arts = nx.draw_networkx_labels(
-            G,
-            pos,
-            ax=ax,
-            labels=RootL,
-            font_size=root_font_size,
-            font_color=c.bg_color,
+    elif isinstance(node_tag, str):
+        # 'label' or some other node attr from node_tag
+        label_options = dict(
+            labels={n: G.nodes[n][node_tag] for n in range(-R, T)},
+            font_size=(
+                {t: FONTSIZE_LABEL for t in range(T)}
+                | {r: FONTSIZE_ROOT_LABEL for r in range(-R, 0)}
+            ),
         )
-        for artist in arts.values():
-            artist.set_clip_on(False)
+    elif node_tag is True:
+        # use the node number as label
+        label_options = dict(
+            labels={n: str(n) for n in range(-R, T)},
+            font_size=(
+                {t: FONTSIZE_LABEL for t in range(T)}
+                | {r: FONTSIZE_LOAD for r in range(-R, 0)}
+            ),
+        )
+    else:
+        label_options = dict(labels={})
+    arts = nx.draw_networkx_labels(G, pos, ax=ax, **label_options)
+    for artist in arts.values():
+        artist.set_clip_on(False)
 
     if scalebar is not None:
         bar = AnchoredSizeBar(ax.transData, *scalebar, 'lower right', frameon=False)
