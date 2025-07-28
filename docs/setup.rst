@@ -8,7 +8,7 @@ Requirements
 A recent Python version (3.10+) is required to run *OptiWindNet*, and the use of a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
 
 * `Python <https://www.python.org/downloads/>`_, which provides: ``venv`` virtual environment creator and ``pip`` package manager;
-* or `Miniforge <https://conda-forge.org/download/>`_ (`Anaconda or Miniconda <https://www.anaconda.com/download/success>`_ also work), which provides: ``conda`` environment and package manager.
+* or `Miniforge <https://conda-forge.org/download/>`_ (`Anaconda or Miniconda <https://www.anaconda.com/download/success>`_ also work, as long as the environment uses the ``conda-forge`` channel), which provides: ``conda`` environment and package manager.
 
 .. _Installation:
 

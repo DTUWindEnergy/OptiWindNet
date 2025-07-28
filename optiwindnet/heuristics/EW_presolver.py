@@ -10,7 +10,6 @@ from scipy.stats import rankdata
 from ..crossings import edge_crossings
 from ..geometric import assign_root
 from ..interarraylib import calcload
-from ..utils import F
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -19,16 +18,16 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
-def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
+def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter: int = 10000) -> nx.Graph:
     """Modified Esau-Williams heuristic for C-MST with limited crossings
 
     Args:
-        A: available edges graph
-        capacity: maximum link capacity
-        maxiter: fail-safe to avoid locking in an infinite loop
+      Aʹ: available links graph
+      capacity: max number of terminals in a subtree
+      maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
-        Solution topology.
+      Solution topology S.
     """
 
     start_time = time.perf_counter()
@@ -121,7 +120,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         return best_edge, tradeoff, edges2discard
 
     def enqueue_best_union(subroot):
-        debug('<enqueue_best_union> starting... subroot = <%s>', F[subroot])
+        debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
         if edges2ban:
             debug('<<<<<<<edges2ban>>>>>>>>>>> _%d_', len(edges2ban))
         while edges2ban:
@@ -138,15 +137,15 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             pq.add(tradeoff, subroot, edge)
             ComponIn[subroot_[edge[1]]].add(subroot)
             debug(
-                '<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
-                F[subroot],
-                F[edge[0]],
-                F[edge[1]],
+                '<pushed> sr_u <%d>, «%d~%d», tradeoff = %.3f',
+                subroot,
+                edge[0],
+                edge[1],
                 tradeoff,
             )
         else:
             # no viable edge is better than subroot for this node
-            debug('<cancelling> %s', F[subroot])
+            debug('<cancelling> %d', subroot)
             if subroot in pq.tags:
                 pq.cancel(subroot)
 
@@ -154,7 +153,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>', F[u], F[v])
+            debug('<<< UNLIKELY <ban_queued_union()> «%d~%d» not in A >>>', u, v)
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
@@ -180,11 +179,11 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         if componin != is_reverse:
             # TODO: Why did I expect always False here? It is sometimes True.
             debug(
-                '«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
-                F[u],
-                F[v],
-                F[sr_u],
-                F[sr_v],
+                '«%d~%d», sr_u <%d>, sr_v <%d> componin: %s, is_reverse: %s',
+                u,
+                v,
+                sr_u,
+                sr_v,
                 componin,
                 is_reverse,
             )
@@ -203,9 +202,8 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             error('maxiter reached (%d)', i)
             break
         debug('[%d]', i)
-        # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
         if stale_subtrees:
-            debug('stale_subtrees: %s', tuple(F[subroot] for subroot in stale_subtrees))
+            debug('stale_subtrees: %s', stale_subtrees)
         while stale_subtrees:
             # enqueue_best_union(stale_subtrees.popleft())
             enqueue_best_union(stale_subtrees.pop())
@@ -213,7 +211,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             # finished
             break
         sr_u, (u, v) = pq.top()
-        debug('<popped> «%s–%s», sr_u: <%s>', F[u], F[v], F[sr_u])
+        debug('<popped> «%d~%d», sr_u: <%d>', u, v, sr_u)
 
         # TODO: main loop should do only
         # - pop from pq
@@ -230,12 +228,7 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         eX = edge_crossings(u, v, S, diagonals)
 
         if eX:
-            debug(
-                '<edge_crossing> discarding «%s–%s»: would cross %s',
-                F[u],
-                F[v],
-                tuple((F[s], F[t]) for s, t in eX),
-            )
+            debug('<edge_crossing> discarding «%d~%d»: would cross %s', u, v, eX)
             # abort_edge_addition(sr_u, u, v)
             prevented_crossings += 1
             ban_queued_union(sr_u, u, v)
@@ -256,7 +249,6 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
         sr_v_entry = pq.tags.get(sr_v)
         if sr_v_entry is not None:
             _, _, _, (_, t) = sr_v_entry
-            # print('node', F[t], 'subroot', F[subroot_[t]])
             ComponIn[subroot_[t]].remove(sr_v)
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
@@ -266,14 +258,9 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter=10000) -> nx.Graph:
             A.nodes[n]['root'] = root
             subroot_[n] = sr_v
             subtree_[n] = subtree
-        debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
+        debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_v)
         if _lggr.isEnabledFor(logging.DEBUG) and pq:
-            debug(
-                'heap top: <%s>, «%s» %.3f',
-                F[pq[0][-2]],
-                tuple(F[x] for x in pq[0][-1]),
-                pq[0][0],
-            )
+            debug('heap top: <%d>, «%s» %.3f', pq[0][-2], pq[0][-1], pq[0][0])
         else:
             debug('heap EMPTY')
         #  G.add_edge(u, v, **A.edges[u, v])

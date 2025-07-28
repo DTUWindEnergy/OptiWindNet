@@ -5,7 +5,6 @@ import heapq
 import logging
 import math
 from collections import defaultdict, namedtuple
-from collections.abc import Iterable
 from itertools import chain
 from bisect import bisect_left
 
@@ -19,7 +18,6 @@ from .crossings import gateXing_iter
 from .geometric import rotation_checkers_factory
 from .interarraylib import bfs_subtree_loads, scaffolded
 from .mesh import planar_flipped_by_routeset
-from .utils import F
 
 __all__ = ('PathFinder',)
 

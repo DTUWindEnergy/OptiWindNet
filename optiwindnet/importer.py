@@ -5,7 +5,7 @@ import logging
 import re
 from collections import namedtuple
 from importlib.resources import files
-from itertools import chain, zip_longest
+from itertools import chain
 from pathlib import Path
 
 import esy.osm.pbf
@@ -16,7 +16,7 @@ import utm
 import yaml
 
 from .interarraylib import L_from_site
-from .utils import F, make_handle
+from .utils import make_handle
 
 _lggr = logging.getLogger(__name__)
 info = _lggr.info
@@ -205,14 +205,12 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     )
 
     # populate graph G
-    G.add_nodes_from(
-        (n, {'kind': 'wtg', 'label': (tag if tag else F[n])})
-        for n, tag in zip_longest(range(T), TerminalTag)
-    )
-    G.add_nodes_from(
-        (r, {'kind': 'oss', 'label': (tag if tag else F[r])})
-        for r, tag in zip_longest(range(-R, 0), RootTag)
-    )
+    G.add_nodes_from(range(T), kind='wtg')
+    if TerminalTag:
+        nx.set_node_attributes(G, {t: TerminalTag[t] for t in range(T)}, name='label')
+    G.add_nodes_from(range(-R, 0), kind='oss')
+    if RootTag:
+        nx.set_node_attributes(G, {-R + r: RootTag[r] for r in range(R)}, name='label')
     return G
 
 

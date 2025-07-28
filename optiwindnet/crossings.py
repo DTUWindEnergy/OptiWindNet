@@ -255,13 +255,12 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
 
     Example::
 
-      from optiwindnet.utils import F
       Xings = validate_routeset(G)
         for u, v, s, t in Xings:
           if u != v:
-            print(f'{F[u]}–{F[v]} crosses {F[s]}–{F[t]}')
+            print(f'{u}–{v} crosses {s}–{t}')
           else:
-            print(f'detour @ {F[u]} splits {F[s]}–{F[v]}–{F[t]}')
+            print(f'detour @ {u} splits {s}–{v}–{t}')
 
     """
     R, T, B = (G.graph[k] for k in 'RTB')

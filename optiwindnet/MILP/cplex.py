@@ -42,9 +42,12 @@ class SolverCplex(SolverPyomo, PoolHandler):
         cplex = self.solver._solver_model
         num_solutions = cplex.solution.pool.get_num()
         self.num_solutions, self.cplex = num_solutions, cplex
+        # make the ranked soln list (position 0 holds the lowest objective)
         self.sorted_index_ = sorted(
             range(num_solutions), key=cplex.solution.pool.get_objective_value
         )
+        # set the selected (last visited) soln to the best one
+        self.soln = self.sorted_index_[0]
         self.vars = self.solver._pyomo_var_to_ndx_map.keys()
         return solution_info
 

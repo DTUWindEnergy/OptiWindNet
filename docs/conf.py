@@ -12,13 +12,10 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-import os
-import sys
-from pathlib import Path
-from setuptools_scm import get_version
-sys.path.insert(0, os.path.abspath('..'))
-
-version = get_version(root='..', relative_to=__file__)
+from importlib.metadata import version as get_version
+release: str = get_version('optiwindnet')
+# for example take major/minor
+version: str = ".".join(release.split('.')[:2])
 
 # -- Project information -----------------------------------------------------
 
