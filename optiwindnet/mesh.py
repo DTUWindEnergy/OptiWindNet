@@ -443,15 +443,16 @@ def make_planar_embedding(
         hull_poly = (border_poly | out_root_pts).convex_hull
         hull_ring = hull_poly.boundary
 
-        hull_border_xy_ = {xy for xy in hull_ring.coords[:-1]
-                           if xy in border_vertex_from_xy}
-        hull_border_vertices = [border_vertex_from_xy[xy]
-                                for xy in hull_border_xy_]
+        hull_border_xy_ = {
+            xy for xy in hull_ring.coords[:-1] if xy in border_vertex_from_xy
+        }
+        hull_border_vertices = [border_vertex_from_xy[xy] for xy in hull_border_xy_]
 
         # check for nodes on the border, but that do not define the border
         border_ring = border_poly.exterior
-        nodes_on_the_border = (border_ring & shp.MultiPoint(node_xy_)
-                               - shp.MultiPoint(border_ring.coords))
+        nodes_on_the_border = border_ring & shp.MultiPoint(node_xy_) - shp.MultiPoint(
+            border_ring.coords
+        )
         if not nodes_on_the_border.is_empty:
             u = border[-1]
             intersects = []
