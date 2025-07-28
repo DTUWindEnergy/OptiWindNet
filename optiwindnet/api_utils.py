@@ -260,8 +260,10 @@ def check_warmstart_feasibility(S_warm, cables_capacity, model_options,
     if logger is None:
         logger = logging.getLogger()
 
+    verbose_warmstart = verbose or logger.isEnabledFor(logging.INFO)
+
     if S_warm is None:
-        if verbose or logger.isEnabledFor(logging.INFO):
+        if verbose_warmstart:
             print(">>> No solution is available for warmstarting! <<<")
         return False
 
@@ -307,7 +309,7 @@ def check_warmstart_feasibility(S_warm, cables_capacity, model_options,
         reasons.append('branched structure not allowed under "radial" topology')
 
     # Output
-    if reasons:
+    if reasons and verbose_warmstart:
         print()
         print("Warning: No warmstarting (even though a solution is available) due to the following reason(s):")
         for reason in reasons:
@@ -316,10 +318,8 @@ def check_warmstart_feasibility(S_warm, cables_capacity, model_options,
         return False
     elif solver_name != 'scip':
         msg = ">>> Using warm start: the model is initialized with the provided solution S <<<"
-        if verbose and not logger.isEnabledFor(logging.INFO):
+        if verbose_warmstart:
             print(msg)
-        else:
-            logger.info(msg)
         return True
     else:
         return False
