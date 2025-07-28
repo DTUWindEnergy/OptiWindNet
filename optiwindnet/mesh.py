@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+from bisect import bisect_left
 import logging
 import math
 from collections import defaultdict
@@ -206,9 +207,11 @@ def _edges_and_hull_from_cdt(
 
 
 def _planar_from_cdt_triangles(
-    mesh: cdt.Triangulation, vertmap: Indices
+    mesh: cdt.Triangulation, vertmap: Indices, get_triangles: bool = False
 ) -> tuple[
-    tuple[IndexTrios, np.ndarray[tuple[int], np.dtype[np.bool_]]], set[tuple[int, int]]
+    tuple[IndexTrios, np.ndarray[tuple[int], np.dtype[np.bool_]]],
+    set[tuple[int, int]],
+    list[tuple[int]],
 ]:
     """Convert from a PythonCDT.Triangulation to NetworkX.PlanarEmbedding.
 
@@ -227,10 +230,18 @@ def _planar_from_cdt_triangles(
     neighborI = np.empty((num_tri, 3), dtype=np.int_)
 
     for i, tri in enumerate(mesh.triangles):
-        triangleI[i] = vertmap[tri.vertices]
+        vertices = vertmap[tri.vertices]
+        triangleI[i] = vertices
         neighborI[i] = tuple(
             (NULL if n == cdt.NO_NEIGHBOR else n) for n in tri.neighbors
         )
+    if get_triangles:
+        # sort each triangle's vertices and the list of triangles
+        triangles = [tuple(sorted(tri.tolist())) for tri in triangleI]
+        triangles.sort()
+    else:
+        triangles = None
+
     # formula for number of triangulation's edges is: 3*V - H - 3
     # H = 3 since CDT's Hull is always the supertriangle
     # and because we count half-edges, use expression × 2
@@ -239,7 +250,9 @@ def _planar_from_cdt_triangles(
     ref_is_cw_ = np.empty((num_half_edges,), dtype=np.bool_)
     _halfedges_from_triangulation(triangleI, neighborI, halfedges, ref_is_cw_)
     edges = set((u.item(), v.item()) for u, v in halfedges[:, :2] if u < v)
-    return (halfedges, ref_is_cw_), edges
+    # create triangles ordered list
+
+    return (halfedges, ref_is_cw_), edges, triangles
 
 
 def _P_from_halfedge_pack(
@@ -279,7 +292,7 @@ def _hull_processor(
       P: planar embedding to process
       T: number of terminals of P
       supertriangle: indices to the supertriangles' vertices
-      vertex2cons_id_map: vertex index to concavity id map
+      vertex2conc_id_map: vertex index to concavity id map
 
     Returns:
       The convex hull, P edges to be removed and outer edges of concavities
@@ -293,7 +306,16 @@ def _hull_processor(
         source, target = tee(P.neighbors_cw_order(pivot))
         outer = begin
         for u, v in zip(source, chain(target, (next(target),))):
+            if u != begin and u != end and v != end:
+                # if ⟨u, v⟩ is not incident on a ST vertex, it is convex_hull
+                convex_hull.append(u)
             if u >= T and v >= T:
+                # (c + 1), (c + 2) are for sure not in vertex2conc_id_map.keys()
+                conc_id_u = vertex2conc_id_map.get(u, c + 1)
+                conc_id_v = vertex2conc_id_map.get(v, c + 2)
+                if conc_id_u < num_holes or conc_id_v < num_holes:
+                    # if ⟨u, v⟩ touches an obstacle, the triangle <u, v, pivot> remains
+                    continue
                 if u == outer:
                     to_remove.append((pivot, u))
                     debug('del_sup %d %d', pivot, u)
@@ -301,17 +323,11 @@ def _hull_processor(
                 elif v == end:
                     to_remove.append((pivot, v))
                     debug('del_sup %d %d', pivot, v)
-                conc_id_u = vertex2conc_id_map.get(u)
-                if (conc_id_u == vertex2conc_id_map.get(v, -1)) and (
-                    conc_id_u >= num_holes
-                ):
+                if conc_id_u == conc_id_v:
                     to_remove.append((u, v))
                     conc_outer_edges.add((u, v) if u < v else (v, u))
                     debug('del_int %d %d', u, v)
                     outer = v
-            if u != begin and u != end and v != end:
-                # if u is not in supertriangle, it is convex_hull
-                convex_hull.append(u)
     return convex_hull, to_remove, conc_outer_edges
 
 
@@ -359,8 +375,8 @@ def make_planar_embedding(
     # P) Set A's graph attributes.
 
     R, T, B, VertexCʹ = (L.graph[k] for k in 'R T B VertexC'.split())
-    border = L.graph.get('border')
-    obstacles = L.graph.get('obstacles', [])
+    border = L.graph.get('border', ())
+    obstacles = L.graph.get('obstacles', ())
 
     # #############################################
     # A) Scale the coordinates to avoid CDT errors.
@@ -389,17 +405,36 @@ def make_planar_embedding(
         (x.item(), y.item()) for (x, y) in chain(VertexS[:T], VertexS[-R:])
     )
     node_vertex_from_xy = dict(zip(node_xy_, chain(range(T), range(-R, 0))))
-    nodeset_xy_ = set(node_xy_[:-R])
+    terminal_xy_ = set(node_xy_[:-R])
     root_pts = shp.MultiPoint(node_xy_[-R:])
-    if border is None:
-        hull_minus_border = shp.MultiPolygon()
-        border_vertex_from_xy = {}
-        out_root_pts = shp.MultiPoint()
-    else:
-        border_vertex_from_xy = {
-            tuple(VertexS[i].tolist()): i.item() for i in chain(border, *obstacles)
-        }
 
+    # start by adding just the B-range vertices
+    border_vertex_from_xy = {tuple(VertexS[i].tolist()): i for i in range(T, T + B)}
+    # check for duplicate vertex coordinates between nodes and the B-range
+    for xy in node_xy_ & border_vertex_from_xy.keys():
+        # xy from border or obstacle vertex coincide with a node vertex
+        i_node = node_xy_.index(xy)
+        if i_node >= T:
+            # make it negative if it refers to a root
+            i_node -= T + R
+        i_border = border_vertex_from_xy[xy]
+        if i_node != i_border:
+            # border-vertex coordinates are equal to those of a node-vertex
+            # make the border-vertex translator point to the node-vertex
+            border_vertex_from_xy[xy] = i_node
+    # complete border_vertex_from_xy with node-vertices that are in the borders
+    border_vertex_from_xy.update(
+        (tuple(VertexS[i].tolist()), i.item())
+        for i in chain(border, *obstacles)
+        if i < T
+    )
+
+    if len(border) == 0:
+        hull_minus_border = shp.MultiPolygon()
+        out_root_pts = shp.MultiPoint()
+        hull_border_vertices = ()
+        hull_border_xy_ = set()
+    else:
         border_poly = shp.Polygon(shell=VertexS[border])
 
         # create a hull_poly that includes roots outside of border_poly
@@ -514,7 +549,7 @@ def make_planar_embedding(
             for fwd in chain(old_ring_xy_[1:], (cur,)):
                 Z = border_vertex_from_xy[fwd]
                 Z_is_hull = fwd in hull_border_xy_
-                if cur in nodeset_xy_:
+                if cur in terminal_xy_:
                     # Concavity border vertex coincides with node.
                     # Therefore, create a stunt vertex for the border.
                     XY = VertexS[Y] - VertexS[X]
@@ -680,7 +715,7 @@ def make_planar_embedding(
     )
     mesh.insert_vertices(V2d_nodes)
 
-    P_A_halfedge_pack, P_A_edges = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
+    P_A_halfedge_pack, P_A_edges, _ = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
     P_A = _P_from_halfedge_pack(P_A_halfedge_pack)
     P_A_edges.difference_update((u, v) for v in supertriangle for u in P_A[v])
 
@@ -733,12 +768,10 @@ def make_planar_embedding(
         ','.join(f'{F[u]}–{F[v]}' for u, v in hull_prunned_edges),
     )
 
-    A = nx.Graph(P_A_edges)
+    A = nx.Graph()
+    A.add_nodes_from(L.nodes(data=True))
+    A.add_edges_from(P_A_edges)
     nx.set_edge_attributes(A, 'delaunay', name='kind')
-    # TODO: ¿do we really need node attr kind? separate with test: node < 0
-    nx.set_node_attributes(A, 'wtg', name='kind')
-    for r in range(-R, 0):
-        A.nodes[r]['kind'] = 'oss'
 
     # Extend A with diagonals.
     diagonals = bidict()
@@ -762,7 +795,7 @@ def make_planar_embedding(
     # prevent edges that cross the boudaries from going into PlanarEmbedding
     # an exception is made for edges that include a root node
     hull_concave = []
-    if border is not None:
+    if len(border) > 0:
         hull_prunned_poly = shp.Polygon(shell=VertexS[hull_prunned])
         shp.prepare(hull_prunned_poly)
         shp.prepare(border_poly)
@@ -856,7 +889,7 @@ def make_planar_embedding(
         )
         mesh.insert_vertices(V2d_holes)
         mesh.insert_edges(edgesCDT_obstacles)
-        _, P_edges = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
+        _, P_edges, _ = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
         # Here we use the changes in CDT triangulation to identify the P_A
         # edges that cross obstacles or lay in their vicinity.
         edges_to_examine = P_A_edges - P_edges
@@ -975,8 +1008,11 @@ def make_planar_embedding(
     # K) Build the planar embedding of the constrained triangulation.
     # ###############################################################
     debug('PART K')
-    P_halfedge_pack, P_edges = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
+    P_halfedge_pack, P_edges, triangles = _planar_from_cdt_triangles(
+        mesh, vertex_from_iCDT, get_triangles=True
+    )
     P = _P_from_halfedge_pack(P_halfedge_pack)
+    P.graph['triangles'] = triangles
 
     # Remove edges inside the concavities
     for ring in chain(concavities, holes):
@@ -1252,7 +1288,7 @@ def make_planar_embedding(
     # O) Calculate the area of the concave hull.
     # ##########################################
     debug('PART O')
-    if border is None:
+    if len(border) == 0:
         bX, bY = VertexC[convex_hull_A].T
     else:
         # for the bounding box, use border and roots
@@ -1285,7 +1321,6 @@ def make_planar_embedding(
         R=R,
         B=B,
         VertexC=VertexC,
-        border=border,
         name=L.name,
         handle=L.graph.get('handle', 'handleless'),
         planar=P_A,
@@ -1302,6 +1337,8 @@ def make_planar_embedding(
         inter_terminal_clearance_min=inter_terminal_clearance_min,
         inter_terminal_clearance_safe=inter_terminal_clearance_safe,
     )
+    if len(border) > 0:
+        A.graph['border'] = border
     if obstacles:
         A.graph['obstacles'] = obstacles
     if stunts_primes:
@@ -1499,13 +1536,14 @@ def planar_flipped_by_routeset(
 
     Important: `G` must be free of edge×edge crossings.
     """
-    R, T, B, C, D = (G.graph.get(k, 0) for k in ('R', 'T', 'B', 'C', 'D'))
+    R, T, B, C = (G.graph.get(k, 0) for k in 'RTBC')
     fnT = G.graph.get('fnT')
     if fnT is None:
-        fnT = np.arange(R + T + B + 3 + C + D)
+        fnT = np.arange(R + T + B + 3 + C)
         fnT[-R:] = range(-R, 0)
 
     P = planar.copy()
+    triangles = P.graph['triangles']
     if diagonals is not None:
         diags = diagonals.copy()
     else:
@@ -1513,13 +1551,16 @@ def planar_flipped_by_routeset(
     debug('differences between G and P:')
     # get G's edges in terms of node range -R : T + B
     edges_G = {
-        ((u, v) if u < v else (v, u)) for u, v in (fnT[edge,] for edge in G.edges)
+        ((u, v) if u < v else (v, u))
+        for u, v in (fnT[edge,].tolist() for edge in G.edges)
     }
     ST = T + B
     edges_P = {((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST and v < ST}
     stack = list(edges_G - edges_P)
     # gates to the bottom of the stack
     stack.sort()
+    triangle_ids_to_remove = []
+    triangles_to_add = []
     while stack:
         u, v = stack.pop()
         if u < 0 and (u, v) not in diags:
@@ -1570,4 +1611,21 @@ def planar_flipped_by_routeset(
                 diags.inv.pop(wy, None)
         P.add_half_edge(u, v, cw=s)
         P.add_half_edge(v, u, cw=t)
+        # store triangle removals and additions
+        triangle_ids_to_remove.extend(
+            (
+                bisect_left(triangles, tuple(sorted((u, s, t)))),
+                bisect_left(triangles, tuple(sorted((v, s, t)))),
+            )
+        )
+        triangles_to_add.extend((tuple(sorted((s, u, v))), tuple(sorted((t, u, v)))))
+    if triangles_to_add:
+        upd_triangles = [
+            tri
+            for i, tri in enumerate(triangles)
+            if i not in set(triangle_ids_to_remove)
+        ]
+        upd_triangles.extend(triangles_to_add)
+        upd_triangles.sort()
+        P.graph['triangles'] = upd_triangles
     return P

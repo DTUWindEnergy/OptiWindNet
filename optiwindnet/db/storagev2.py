@@ -16,7 +16,7 @@ import numpy as np
 from pony import orm
 
 from ..interarraylib import calcload
-from ..utils import F, make_handle
+from ..utils import make_handle
 
 __all__ = ()
 
@@ -91,7 +91,7 @@ _misc_not = {
 }
 
 
-def L_from_nodeset(nodeset: object) -> nx.Graph:
+def L_from_nodeset(nodeset: object, handle: str | None = None) -> nx.Graph:
     """Translate a NodeSet database entry to a location graph.
 
     Args:
@@ -106,21 +106,20 @@ def L_from_nodeset(nodeset: object) -> nx.Graph:
     B = nodeset.B
     border = np.array(nodeset.constraint_vertices[: nodeset.constraint_groups[0]])
     name = nodeset.name
+    name = name if name[0] != '!' else name[1 : name.index('!', 1)]
+    if handle is None:
+        handle = make_handle(name)
     L = nx.Graph(
         R=R,
         T=T,
         B=B,
         name=name,
-        handle=(
-            (name if name[0] != '!' else name[1 : name.index('!', 1)])
-            .strip()
-            .lower()
-            .replace(' ', '_')
-        ),
-        border=border,
+        handle=handle,
         VertexC=np.lib.format.read_array(io.BytesIO(nodeset.VertexC)),
         landscape_angle=nodeset.landscape_angle,
     )
+    if len(border) > 0:
+        L.graph['border'] = border
     if len(nodeset.constraint_groups) > 1:
         obstacle_idx = np.cumsum(np.array(nodeset.constraint_groups))
         L.graph.update(
@@ -129,8 +128,8 @@ def L_from_nodeset(nodeset: object) -> nx.Graph:
                 for a, b in pairwise(obstacle_idx)
             ]
         )
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
+    L.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
     return L
 
 
@@ -382,6 +381,8 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
         stuntC_npy_io = io.BytesIO()
         np.lib.format.write_array(stuntC_npy_io, stuntC, version=(3, 0))
         packed_G['stuntC'] = stuntC_npy_io.getvalue()
+    if C + D > 0:
+        packed_G['clone2prime'] = G.graph['fnT'][-C - D - R : -R].tolist()
     concatenate_tuples = partial(sum, start=())
     pack_if_given = (  # key, function to prepare data
         ('detextra', None),

@@ -217,7 +217,6 @@ def lkh_acvrp(
         creator='baselines.lkh',
         T=T,
         R=R,
-        handle=A.graph['handle'],
         has_loads=True,
         capacity=capacity,
         objective=float(minimum) / scale,

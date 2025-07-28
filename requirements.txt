@@ -1,5 +1,6 @@
 python >=3.11
 bidict >=0.23.1
+bitarray >=3.4.2
 condeltri >=0.0.2
 darkdetect >=0.8.0
 esy.osm.pbf >=0.1.1
@@ -8,7 +9,7 @@ makefun >=1.15.6
 matplotlib >=3.10.1
 networkx >=3.4.2
 numba >=0.60
-numpy >=2.0
+numpy >=2.0,<2.3
 ortools >=9.12.4544
 pony >=0.7.18
 py >=1.11.0

@@ -11,12 +11,12 @@ OptiWindNet
 
 Tool for designing and optimizing the electrical cable network (collection system) for offshore wind power plants.
 
-Documentation: [https://topfarm.pages.windenergy.dtu.dk/OptiWindNet](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet)
-- [Quickstart](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/Quickstart)
+Documentation: [https://optiwindnet.readthedocs.io](https://optiwindnet.readthedocs.io)
+- [Quickstart](https://optiwindnet.readthedocs.io/stable/notebooks/Quickstart.html)
 - [Download the Jupyter notebooks](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks) used in the documentation.
 - [Report an issue](https://github.com/DTUWindEnergy/OptiWindNet/issues) (mirror of OptiWindNet on GitHub)
-- [API Reference](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/autoapi/optiwindnet/index.html)
-- [How to Cite](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/index.html#how-to-cite)
+- [API Reference](https://optiwindnet.readthedocs.io/stable/autoapi/index.html)
+- [How to Cite](https://optiwindnet.readthedocs.io/stable/index.html#how-to-cite)
 
 Installation
 ------------
@@ -25,7 +25,7 @@ Installation
 pip install optiwindnet
 ```
 
-Detailed instructions in [Installation](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/setup#Installation).
+Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/setup.html#installation).
 
 Requirements
 ------------

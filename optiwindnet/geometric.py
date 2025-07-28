@@ -10,6 +10,7 @@ from typing import Callable, Literal, NewType
 
 import networkx as nx
 import numba as nb
+from numba.np.extensions import cross2d
 import numpy as np
 from numpy.typing import NDArray
 from scipy.sparse import coo_array
@@ -191,7 +192,7 @@ def angle_numpy(
     # dot_prod = np.dot(A, B) if len(A) >= len(B) else np.dot(B, A)
     dot_prod = A @ B.T  # if len(A) >= len(B) else np.dot(B, A)
     # return np.arctan2(np.cross(A, B), np.dot(A, B))
-    return np.arctan2(np.cross(A, B), dot_prod)
+    return np.arctan2(cross2d(A, B), dot_prod)
 
 
 def angle(aC, pivotC, bC):
@@ -240,7 +241,7 @@ def angle_oracles_factory(
 
     def union_limits(
         root: int, u: int, LO: int, HI: int, v: int, lo: int, hi: int
-    ) -> tuple[float, float]:
+    ) -> tuple[int, int]:
         LOR, HIR, loR, hiR = anglesRank[(LO, HI, lo, hi), root]
         lo_within = is_within(loR, LOR, HIR)
         hi_within = is_within(hiR, LOR, HIR)
@@ -768,7 +769,6 @@ def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
         T=T,
         R=R,
         capacity=T,
-        handle=A.graph.get('handle'),
         creator='minimum_spanning_forest',
     )
     for u, v in zip(U, V):

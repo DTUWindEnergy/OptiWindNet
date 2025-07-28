@@ -235,15 +235,19 @@ def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
     if 'name' not in kwargs:
         kwargs['name'] = kwargs['handle']
     if 'B' not in kwargs:
+        B = 0
         border = kwargs.get('border')
         if border is not None:
-            kwargs['B'] = border.shape[0]
-        else:
-            kwargs['B'] = 0
+            B += border.shape[0]
+        obstacles = kwargs.get('obstacles')
+        if obstacles is not None:
+            for obstacle in obstacles:
+                B += obstacle.shape[0]
+        kwargs['B'] = B
     L = nx.Graph(T=T, R=R, VertexC=VertexC, **kwargs)
 
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from(range(T), kind='wtg')
+    L.add_nodes_from(range(-R, 0), kind='oss')
     return L
 
 
@@ -259,12 +263,31 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     VertexC, d2roots, diagonals = (
         A.graph[k] for k in ('VertexC', 'd2roots', 'diagonals')
     )
-    G = nx.create_empty_copy(A)
-    for k in ('capacity', 'has_loads', 'max_load', 'creator', 'solver_details'):
-        value = S.graph.get(k)
+    G = nx.create_empty_copy(S)
+    for k in (
+        'B',
+        'border',
+        'obstacles',
+        'name',
+        'handle',
+        'landscape_angle',
+        'norm_scale',
+        'norm_offset',
+        'is_normalized',
+    ):
+        value = A.graph.get(k)
         if value is not None:
             G.graph[k] = value
-    nx.set_node_attributes(G, S.nodes)
+    nx.set_node_attributes(
+        G,
+        {n: label for n, label in A.nodes(data='label') if label is not None},
+        'label',
+    )
+    nx.set_node_attributes(G, 'wtg', 'kind')
+    for r in range(-R, 0):
+        G.nodes[r]['kind'] = 'oss'
+    if 'is_normalized' in A.graph:
+        G.graph['is_normalized'] = True
     # remove supertriangle coordinates from VertexC
     G.graph['VertexC'] = np.vstack((VertexC[: -R - 3], VertexC[-R:]))
     # non_A_edges are the far-reaching gates and ocasionally the result of
@@ -401,7 +424,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         fnT = np.arange(iC + R)
         fnT[T + B : -R] = clone2prime
         fnT[-R:] = range(-R, 0)
-        G.graph.update(fnT=fnT, clone2prime=clone2prime, C=len(clone2prime))
+        G.graph.update(fnT=fnT, C=len(clone2prime))
     # add to G the S edges that are not in A
     rogue = []
     for s, t in non_A_edges:
@@ -608,7 +631,7 @@ def terse_links_from_S(S):
     # convert the graph to array representing the tree (edges i->terse[i])
     for u, v, edgeD in S.edges(data=True):
         u, v = (u, v) if u < v else (v, u)
-        i, target = (u, v) if edgeD["reverse"] else (v, u)
+        i, target = (u, v) if edgeD['reverse'] else (v, u)
         terse_links[i] = target
     return terse_links
 
@@ -731,7 +754,7 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
                 load=G.nodes[n]['load'],
                 kind='tentative',
                 reverse=False,
-                length=np.hypot(*(VertexC[n] - VertexC[r]).T),
+                length=np.hypot(*(VertexC[n] - VertexC[r])).item(),
             )
             tentative.append((r, n))
     del G.graph['D']

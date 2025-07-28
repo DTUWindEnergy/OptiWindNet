@@ -67,6 +67,8 @@ class SolverORTools(Solver, PoolHandler):
 
     def __init__(self):
         self.solver = cp_model.CpSolver()
+        # set default options for ortools
+        self.options = {}
 
     def set_problem(
         self,
@@ -101,7 +103,7 @@ class SolverORTools(Solver, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         storer = _SolutionStore(model)
-        for key, val in options.items():
+        for key, val in (self.options | options).items():
             setattr(solver.parameters, key, val)
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.relative_gap_limit = mip_gap
@@ -235,8 +237,12 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
-        for (u, v), tr in gateXing_iter(A):
-            m.add_at_most_one(link_[(u, v)], link_[(v, u)], link_[tr])
+        for (u, v), (r, t) in gateXing_iter(A):
+            if u >= 0:
+                m.add_at_most_one(link_[(u, v)], link_[(v, u)], link_[t, r])
+            else:
+                # a feeder crossing another feeder (possible in multi-root instances)
+                m.add_at_most_one(link_[(u, v)], link_[t, r])
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):

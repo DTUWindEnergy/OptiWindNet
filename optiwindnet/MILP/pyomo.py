@@ -247,12 +247,15 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
-        m.cons_feederXedge = pyo.Constraint(
-            gateXing_iter(A),
-            rule=lambda m, u, v, r, n: (
-                m.link_[u, v] + m.link_[v, u] + m.link_[r, n] <= 1
-            ),
-        )
+
+        def feederXedge_rule(m, u, v, r, t):
+            if u >= 0:
+                return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
+            else:
+                # a feeder crossing another feeder (possible in multi-root instances)
+                return m.link_[u, v] + m.link_[t, r] <= 1
+
+        m.cons_feederXedge = pyo.Constraint(gateXing_iter(A), rule=feederXedge_rule)
 
     # edge-edge crossings
     def edgeXedge_rule(m, *vertices):

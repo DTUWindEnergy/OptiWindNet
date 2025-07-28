@@ -124,8 +124,8 @@ class Drawable:
                 draw_obstacles.append(
                     'M' + ' '.join(str(c) for c in VertexS[obstacle].flat) + 'z'
                 )
-        # border with obstacles as holes
         if border is not None:
+            # border with obstacles as holes
             self.borderE.append(
                 svg.Path(
                     id='border',
@@ -146,6 +146,18 @@ class Drawable:
                             draw_obstacles,
                         )
                     ),
+                )
+            )
+        elif draw_obstacles:
+            # draw only the obstacles
+            self.borderE.append(
+                svg.Path(
+                    id='border',
+                    stroke=c.kind2color['border'],
+                    stroke_dasharray=[15, 7],
+                    stroke_width=2,
+                    fill=c.border_face,
+                    d=draw_obstacles,
                 )
             )
 
