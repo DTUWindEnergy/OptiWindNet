@@ -43,10 +43,10 @@ dependencies = [
 ]
 
 [project.urls]
-'Documentation'= 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/'
+'Documentation'= 'https://optiwindnet.readthedocs.io/'
 # 'Changelog'= 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/'
 'Source code'= 'https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet'
-'Issue tracker'= 'https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/issues'
+'Issue tracker'= 'https://github.com/DTUWindEnergy/OptiWindNet/issues'
 
 [project.optional-dependencies]
 test  = [ 'pytest',  # for testing
