@@ -1586,7 +1586,7 @@ def planar_flipped_by_routeset(
                 bisect_left(triangles, tuple(sorted((v, s, t)))),
             )
         )
-        triangles_to_add.extend(tuple(sorted((s, u, v))), tuple(sorted((t, u, v))))
+        triangles_to_add.extend((tuple(sorted((s, u, v))), tuple(sorted((t, u, v)))))
     if triangles_to_add:
         upd_triangles = [
             tri
