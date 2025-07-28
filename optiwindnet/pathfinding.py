@@ -611,7 +611,10 @@ class PathFinder:
                     0,
                 )
                 advancer = self._advance_portal(
-                    self.adv_counter, (left, right), traverser_pack, bitarray(len(triangles))
+                    self.adv_counter,
+                    (left, right),
+                    traverser_pack,
+                    bitarray(len(triangles)),
                 )
                 heapq.heappush(prioqueue, (d_closest, self.adv_counter, advancer))
                 self.adv_counter += 1
