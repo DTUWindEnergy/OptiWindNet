@@ -20,9 +20,9 @@ test_windows:
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
-    - conda config --add channels defaults
+    - conda update conda
     - conda env create --file environment.yml
-    - if ($LASTEXITCODE) {conda env update -n optiwindnet_env --file environment.yml}
+    - if ($LASTEXITCODE) {conda env update --prune -n optiwindnet_env --file environment.yml}
     - conda activate optiwindnet_env
     - python --version
     - pip install -e .[test]
