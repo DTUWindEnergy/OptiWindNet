@@ -6,7 +6,7 @@ import math
 import os
 from collections import namedtuple
 from itertools import chain
-from typing import Any
+from typing import Any, Sequence
 
 import networkx as nx
 import pyomo.environ as pyo
@@ -167,7 +167,7 @@ def make_min_length_model(
     feeder_route: FeederRoute = FeederRoute.SEGMENTED,
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
     balanced: bool = False,
-    max_feeders: int = 0,
+    max_feeders: int | Sequence = 0,
 ) -> tuple[pyo.ConcreteModel, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -311,12 +311,28 @@ def make_min_length_model(
         def feeder_limit_ub_rule(m):
             return sum(m.link_[t, r] for r in _R for t in _T) <= max_feeders
 
+        def feeder_limit_eq_per_root_rule(m, r):
+            return sum(m.link_[t, r] for t in _T) == max_feeders[r]
+
+        def feeder_limit_ub_per_root_rule(m, r):
+            return sum(m.link_[t, r] for t in _T) <= max_feeders[r]
+
         feeder_rule = feeder_limit_ub_rule
+        feeder_limit_per_root = False
         if feeder_limit is FeederLimit.SPECIFIED:
-            if max_feeders == min_feeders:
-                feeder_rule = feeder_limit_eq_rule
-            elif max_feeders < min_feeders:
-                raise ValueError('max_feeders is below the minimum necessary')
+            if isinstance(max_feeders, Sequence):
+                feeder_limit_per_root = True
+                feeder_rule = feeder_limit_ub_per_root_rule
+                total_feeders = sum(max_feeders)
+                if total_feeders == min_feeders:
+                    feeder_rule = feeder_limit_eq_per_root_rule
+                elif total_feeders < min_feeders:
+                    raise ValueError('sum(max_feeders) is below the minimum necessary')
+            else:
+                if max_feeders == min_feeders:
+                    feeder_rule = feeder_limit_eq_rule
+                elif max_feeders < min_feeders:
+                    raise ValueError('max_feeders is below the minimum necessary')
         elif feeder_limit is FeederLimit.MINIMUM:
             feeder_rule = feeder_limit_eq_rule
         elif feeder_limit is FeederLimit.MIN_PLUS1:
@@ -327,7 +343,10 @@ def make_min_length_model(
             max_feeders = min_feeders + 3
         else:
             raise NotImplementedError('Unknown value:', feeder_limit)
-        m.cons_feeder_limit = pyo.Constraint(rule=feeder_rule)
+        if feeder_limit_per_root:
+            m.cons_feeder_limit = pyo.Constraint(m.R, rule=feeder_rule)
+        else:
+            m.cons_feeder_limit = pyo.Constraint(rule=feeder_rule)
 
         # enforce balanced subtrees (subtree loads differ at most by one unit)
         if balanced:

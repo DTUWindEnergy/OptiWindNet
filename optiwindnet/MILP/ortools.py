@@ -4,7 +4,7 @@
 import logging
 import math
 from itertools import chain
-from typing import Any
+from typing import Any, Sequence
 
 import networkx as nx
 from ortools.sat.python import cp_model
@@ -170,7 +170,7 @@ def make_min_length_model(
     feeder_route: FeederRoute = FeederRoute.SEGMENTED,
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
     balanced: bool = False,
-    max_feeders: int = 0,
+    max_feeders: int | Sequence = 0,
 ) -> tuple[cp_model.CpModel, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -276,11 +276,20 @@ def make_min_length_model(
                 ' = UNLIMITED>: model will not enforce balanced subtrees.'
             )
     else:
+        feeder_limit_per_root = False
         if feeder_limit is FeederLimit.SPECIFIED:
-            if max_feeders == min_feeders:
-                is_equal_not_bounded = True
-            elif max_feeders < min_feeders:
-                raise ValueError('max_feeders is below the minimum necessary')
+            if isinstance(max_feeders, Sequence):
+                feeder_limit_per_root = True
+                total_feeders = sum(max_feeders)
+                if total_feeders == min_feeders:
+                    is_equal_not_bounded = True
+                elif total_feeders < min_feeders:
+                    raise ValueError('sum(max_feeders) is below the minimum necessary')
+            else:
+                if max_feeders == min_feeders:
+                    is_equal_not_bounded = True
+                elif max_feeders < min_feeders:
+                    raise ValueError('max_feeders is below the minimum necessary')
         elif feeder_limit is FeederLimit.MINIMUM:
             is_equal_not_bounded = True
         elif feeder_limit is FeederLimit.MIN_PLUS1:
@@ -291,7 +300,13 @@ def make_min_length_model(
             max_feeders = min_feeders + 3
         else:
             raise NotImplementedError('Unknown value:', feeder_limit)
-        if is_equal_not_bounded:
+        if feeder_limit_per_root:
+            for r in _R:
+                if is_equal_not_bounded:
+                    m.add(sum(link_[t, r] for t in _T) == max_feeders[r])
+                else:
+                    m.add(sum(link_[t, r] for t in _T) <= max_feeders[r])
+        elif is_equal_not_bounded:
             m.add(all_feeder_vars_sum == min_feeders)
         else:
             m.add_linear_constraint(all_feeder_vars_sum, min_feeders, max_feeders)
