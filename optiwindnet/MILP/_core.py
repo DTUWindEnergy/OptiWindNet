@@ -4,7 +4,12 @@
 import abc
 import logging
 from dataclasses import asdict, dataclass
-from enum import StrEnum, auto
+try:
+    from enum import StrEnum, auto
+except ImportError:
+    # workaround for python < 3.11
+    from backports.strenum import StrEnum
+    from enum import auto
 from itertools import chain
 from typing import Any, Mapping
 
