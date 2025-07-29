@@ -264,6 +264,9 @@ class PathFinder:
             # hence it is only reachable from one side -> arbitrary sector id
             return NULL
         _opposite = portal[0] if _node == portal[1] else portal[1]
+        if _opposite in G._adj[_node]:
+            # special case: visiting a DEAD-END
+            return _opposite
         _nbr = P[_node][_opposite]['ccw']
         for _ in range(len(P._adj[_node])):
             if _nbr < T and _nbr in G[_node]:
@@ -282,6 +285,7 @@ class PathFinder:
         side: int | None = None,
     ):
         P = self.P
+        T = self.T
         prioqueue = self.prioqueue
         portal_set = self.portal_set
         triangles = P.graph['triangles']
@@ -303,7 +307,7 @@ class PathFinder:
                 debug('{%d} advancer revisited triangle', adv_id)
                 return
             is_triangle_seen[triangle_idx] = 1
-            # examine the other two sides of the triangle
+            # check whether the other two sides of the triangle are portals
             portals = [
                 (portal, side)
                 for portal, side in (((left, n), 1), ((n, right), 0))
@@ -334,6 +338,11 @@ class PathFinder:
                 next(traverser)
             elif not portals:
                 # DEAD-END: both triangle sides are not portals
+                if 0 <= n <= T:
+                    # there is a (node, sector) to update inside the dead-end
+                    d_ref, is_promising = traverser.send(((left, n), 1))
+                    # no need to yield, but make sure the last path pnode is added
+                    next(traverser)
                 debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
                 return
             # process  portal
