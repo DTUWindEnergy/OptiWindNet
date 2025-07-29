@@ -28,7 +28,6 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
-from .utils import F
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
 
@@ -732,7 +731,7 @@ def make_planar_embedding(
         for u, v in zip(source, chain(target, (next(target),))):
             if u != begin and u != end and v != end:
                 convex_hull_A.append(u)
-    debug('convex_hull_A: %s', '–'.join(F[n] for n in convex_hull_A))
+    debug('convex_hull_A: %s', convex_hull_A)
     P_A.remove_nodes_from(supertriangle)
 
     # Prune flat triangles from P_A (criterion is aspect_ratio > `max_tri_AR`).
@@ -763,11 +762,8 @@ def make_planar_embedding(
     u, v = hull_prunned[0], hull_prunned[-1]
     uv = (u, v) if u < v else (v, u)
     hull_prunned_edges.add(uv)
-    debug('hull_prunned: %s', '–'.join(F[n] for n in hull_prunned))
-    debug(
-        'hull_prunned_edges: %s',
-        ','.join(f'{F[u]}–{F[v]}' for u, v in hull_prunned_edges),
-    )
+    debug('hull_prunned: %s', hull_prunned)
+    debug('hull_prunned_edges: %s', hull_prunned_edges)
 
     A = nx.Graph()
     A.add_nodes_from(L.nodes(data=True))
@@ -820,7 +816,7 @@ def make_planar_embedding(
                         # TODO: figure out how to avoid repeated outlier nodes
                         warn(
                             'unable to include in hull_concave: %s',
-                            ' '.join(F[n] for n in hull_stack[-pushed:]),
+                            hull_stack[-pushed:],
                         )
                         hull_outliers = A.graph.get('hull_outliers')
                         if hull_outliers is not None:
@@ -844,7 +840,7 @@ def make_planar_embedding(
                     v = hull_stack.pop()
     if not hull_concave:
         hull_concave = hull_prunned
-    debug('hull_concave: %s', '–'.join(F[n] for n in hull_concave))
+    debug('hull_concave: %s', hull_concave)
 
     # ##########################################
     # H) Insert the obstacles' constraint edges.
@@ -1107,7 +1103,7 @@ def make_planar_embedding(
         # For the edges in A that are not in P, we find their corresponding
         # shortest path in P_path and update the length attribute in A.
         length, path = nx.bidirectional_dijkstra(P_paths, u, v, weight='length')
-        debug('A_edge: %s–%s length: %.3f; path: %s', F[u], F[v], length, path)
+        debug('A_edge: %d–%d length: %.3f; path: %s', u, v, length, path)
         if all(n >= T for n in path[1:-1]):
             # keep only paths that only have border vertices between nodes
             edgeD = A[path[0]][path[-1]]
@@ -1122,14 +1118,8 @@ def make_planar_embedding(
                 # skip to shortcut if b is in a concavity and is a neighbor of
                 # the supertriangle
                 if b_conc_id < num_holes or all(n not in P[b] for n in supertriangle):
-                    debug(
-                        's: %s; b: %s; t: %s; b_conc_id: %s',
-                        F[s],
-                        F[b],
-                        F[t],
-                        b_conc_id,
-                    )
-                    debug([(F[n], vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
+                    debug('s: %d; b: %d; t: %d; b_conc_id: %d', s, b, t, b_conc_id)
+                    #  debug([(n, vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
                     nbs = P.neighbors_cw_order(b)
                     skip_test = True
                     for a in nbs:
@@ -1152,18 +1142,7 @@ def make_planar_embedding(
                         c = next(P.neighbors_cw_order(b))
                         if P[b][a]['cw'] == c:
                             skip_test = False
-                    debug(
-                        'a: %d %s; c: %d %s; s: %d %s, t: %d %s; %s',
-                        a,
-                        F[a],
-                        c,
-                        F[c],
-                        s,
-                        F[s],
-                        t,
-                        F[t],
-                        skip_test,
-                    )
+                    debug('a: %d; c: %d; s: %d, t: %d; %s', a, c, s, t, skip_test)
                     if skip_test or not (
                         cw(a, b, c) or ((a == s or cw(a, b, s)) == cw(s, b, t))
                     ):
@@ -1186,7 +1165,7 @@ def make_planar_embedding(
                     edgeD['shortcuts'] = [b]
                 else:
                     shortcuts.append(b)
-                debug('(%d) %s %s %s shortcut', i, F[s], F[b], F[t])
+                debug('(%d) %d %d %d shortcut', i, s, b, t)
             edgeD.update(  # midpath-> which P edges the A edge maps to
                 # (so that PathFinder works)
                 midpath=midpath,
@@ -1439,7 +1418,7 @@ def _deprecated_planar_flipped_by_routeset(
         if v >= T and u not in seen_endpoints:
             uvA = G[u][v]['A_edge']
             seen_endpoints.add(uvA[0] if uvA[1] == u else uvA[1])
-            print('path_uv:', F[u], F[v], '->', F[uvA[0]], F[uvA[1]])
+            print('path_uv:', u, v, '->', uvA[0], uvA[1])
             u, v = uvA if uvA[0] < uvA[1] else uvA[::-1]
             path_uv = [u] + A[u][v]['path'] + [v]
             # now ⟨u, v⟩ represents the corresponding edge in A
