@@ -92,9 +92,9 @@ class PathFinder:
         A: nx.Graph | None = None,
         branched: bool = True,
         iterations_limit: int = 15000,
-        uncharted_init_count: int = 2,
+        traversals_limit: int = 2,
         promising_margin: float = 0.1,
-        bad_streak_limit: int = 10,
+        bad_streak_limit: int = 9,
     ) -> None:
         self.iterations = 0
         G = Gʹ.copy()
@@ -215,7 +215,7 @@ class PathFinder:
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.hooks2check, self.iterations_limit = hooks2check, iterations_limit
-        self.uncharted_init_count = uncharted_init_count
+        self.traversals_limit = traversals_limit
         self.promising_margin = promising_margin
         self.bad_streak_limit = bad_streak_limit
         self.num_revisits = 0
@@ -288,23 +288,9 @@ class PathFinder:
         traverser = self._traverse_channel(adv_id, *traverser_args)
         next(traverser)
         if side is not None:
-            try:
-                d_ref, is_promising = traverser.send((portal, side))
-            except StopIteration:
-                debug(
-                    "{%d} advancer's traverser stopped before loop (before yield)",
-                    adv_id,
-                )
-                return
+            d_ref, is_promising = traverser.send((portal, side))
             yield d_ref, portal, is_promising
-            try:
-                next(traverser)
-            except StopIteration:
-                debug(
-                    "{%d} advancer's traverser stopped before loop (after yield)",
-                    adv_id,
-                )
-                return
+            next(traverser)
         while True:
             # look for children portals
             left, right = portal
@@ -353,17 +339,9 @@ class PathFinder:
             # process  portal
             portal, side = portals[0]
             #  trace('{%d} advancer sending (portal, side)', adv_id)
-            try:
-                d_ref, is_promising = traverser.send((portal, side))
-            except StopIteration:
-                debug("{%d} advancer's traverser stopped", adv_id)
-                return
+            d_ref, is_promising = traverser.send((portal, side))
             yield d_ref, portal, is_promising
-            try:
-                next(traverser)
-            except StopIteration:
-                debug("{%d} advancer's traverser stopped", adv_id)
-                return
+            next(traverser)
 
     def _traverse_channel(
         self,
@@ -384,8 +362,9 @@ class PathFinder:
         paths = self.paths
         I_path = self.I_path
         ST = self.ST
-        uncharted = self.uncharted
+        num_traversals = self.num_traversals
         promising_bar = 1.0 + self.promising_margin
+        bad_streak_limit = self.bad_streak_limit
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         while True:
@@ -487,7 +466,9 @@ class PathFinder:
             pseudoapex = paths[apex_eff]
             d_new = pseudoapex.dist + d_hop
             keeper = I_path[_new].get(sector_new)
-            is_promising = keeper is None or d_new < promising_bar * paths[keeper].dist
+            is_promising = bad_streak < bad_streak_limit and (
+                keeper is None or d_new < promising_bar * paths[keeper].dist
+            )
             # for supertriangle vertices, do not update the d_ref used for prioritizing
             # (it would be sent to the bottom of heapq beacause of the big distances)
             if _new < ST:
@@ -495,7 +476,7 @@ class PathFinder:
             yield d_ref, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
             new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop)
-            uncharted[portal] = max(uncharted[portal] - 1, 0)
+            num_traversals[portal] += 1
             # get keeper again, as the situation may have changed
             keeper = I_path[_new].get(sector_new)
             if keeper is None or d_new < paths[keeper].dist:
@@ -511,10 +492,6 @@ class PathFinder:
                 bad_streak = 0
             elif not math.isclose(d_new, paths[keeper].dist):
                 bad_streak += 1
-                if bad_streak >= self.bad_streak_limit:
-                    # several sucessive advances failed to outperform each keeper
-                    debug('<%d> Reached bad_streak_limit.', trav_id)
-                    return
 
             wedge_end[side] = paths.last_added
 
@@ -525,12 +502,11 @@ class PathFinder:
         ST = self.ST
         iterations_limit = self.iterations_limit
         self.prioqueue = prioqueue = []
-        # `uncharted` records whether portals have been traversed
-        # (it is orientation-sensitive – two permutations)
-        uncharted = defaultdict(lambda: self.uncharted_init_count)
+        num_traversals = defaultdict(lambda: 0)
+        self.num_traversals = num_traversals
+        traversals_limit = self.traversals_limit
         paths = self.paths = PathNodes()
         triangles = P.graph['triangles']
-        self.uncharted = uncharted
         self.bifurcation = None
         I_path = defaultdict(dict)
         self.I_path = I_path
@@ -565,9 +541,8 @@ class PathFinder:
                     # (left, right, root) not a triangle
                     # or (left, right) is not a portal
                     continue
-                # flag initial portals as visited
-                self.uncharted[portal] = 0
-                self.uncharted[right, left] = 0
+                # flag initial portal as visited
+                num_traversals[right, left] = traversals_limit
 
                 if left >= ST or (left in G.nodes and len(G._adj[left]) == 0):
                     sec_left = NULL
@@ -632,7 +607,7 @@ class PathFinder:
                 # advancer decided to stop, get a new one
                 _, adv_id, advancer = heapq.heappop(prioqueue)
             else:
-                if is_promising or uncharted[portal]:
+                if is_promising or num_traversals[portal] < traversals_limit:
                     # advancer is still promising, push it back to queue and get top one
                     _, adv_id, advancer = heapq.heappushpop(
                         prioqueue, (d_ref, adv_id, advancer)
