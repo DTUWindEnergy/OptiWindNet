@@ -4,6 +4,7 @@
 import abc
 import logging
 from dataclasses import asdict, dataclass
+
 try:
     from enum import StrEnum, auto
 except ImportError:
