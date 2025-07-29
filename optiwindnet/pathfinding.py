@@ -15,7 +15,7 @@ from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 
 from .crossings import gateXing_iter
-from .geometric import rotation_checkers_factory
+from .geometric import CoordPair, rotation_checkers_factory
 from .interarraylib import bfs_subtree_loads, scaffolded
 from .mesh import planar_flipped_by_routeset
 
@@ -356,6 +356,7 @@ class PathFinder:
         self,
         trav_id: int,
         priority: tuple[float, float],
+        refC: CoordPair,
         root: int,
         _apex: int,
         apex: int,
@@ -368,9 +369,11 @@ class PathFinder:
         #     - _node: the index it contains maps to a coordinate in VertexC
         #     - node: contains a pseudonode index (i.e. an index in self.paths)
         #             translation: _node = paths.prime_from_id[node]
-        cw, ccw = rotation_checkers_factory(self.VertexC)
+        VertexC = self.VertexC
+        cw, ccw = rotation_checkers_factory(VertexC)
         paths = self.paths
         d2roots = self.d2roots
+        ST = self.ST
         I_path = self.I_path
         num_traversals = self.num_traversals
         bad_streak_limit = self.bad_streak_limit
@@ -384,6 +387,7 @@ class PathFinder:
                 #  trace('<%d> new traverser sent for evaluation', trav_id)
                 yield (
                     priority,
+                    refC,
                     root,
                     _apex,
                     apex,
@@ -481,8 +485,24 @@ class PathFinder:
                 bad_streak <= bad_streak_limit
                 and d_new < promising_bar * paths[keeper].dist
             )
+            _opposite = portal[not side]
+            new_is_ST = _new >= ST
+            opposite_is_ST = _opposite >= ST
+            if new_is_ST:
+                mid_portalC = VertexC[_opposite]
+                ref = _opposite
+            elif opposite_is_ST:
+                mid_portalC = VertexC[_new]
+                ref = _new
+            else:
+                mid_portalC = VertexC[portal,].sum(axis=0)/2
+                ref = _new
+            mid_portal_dist = priority[1] + np.hypot(*(mid_portalC - refC))
+            refC = mid_portalC
             #  is_promising = (keeper is None) or (bad_streak < bad_streak_limit)
-            priority = d_new / d2roots[_new, root], d_new
+            priority = mid_portal_dist / d2roots[ref, root], mid_portal_dist
+            #  priority = d_new / d2roots[_new, root], d_new
+            #  priority = mid_portal_dist, d_new
             #  print(f'[{trav_id}]', _new, keeper, bad_streak, is_promising)
             yield priority, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
@@ -512,6 +532,7 @@ class PathFinder:
         #  print('[exp] starting _explore()')
         G, P, R, T, B = self.G, self.P, self.R, self.T, self.B
         d2roots, d2rootsRank = self.d2roots, self.d2rootsRank
+        VertexC = self.VertexC
         ST = self.ST
         iterations_limit = self.iterations_limit
         self.prioqueue = prioqueue = []
@@ -596,6 +617,7 @@ class PathFinder:
                 priority = (1.0, d_closest)
                 traverser_pack = (
                     priority,
+                    VertexC[r],
                     r,  # root
                     r,  # _apex
                     r,  # apex
