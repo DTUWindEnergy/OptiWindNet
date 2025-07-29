@@ -1132,7 +1132,7 @@ def make_planar_embedding(
                         continue
                     skip_test = True
                     for c in nbs:
-                        if vertex2conc_id_map.get(c, -1) == b_conc_id and c not in P[a]:
+                        if vertex2conc_id_map.get(c, -1) == b_conc_id:
                             if P[b][a]['cw'] == c:
                                 skip_test = False
                                 break
@@ -1143,8 +1143,22 @@ def make_planar_embedding(
                         if P[b][a]['cw'] == c:
                             skip_test = False
                     debug('a: %d; c: %d; s: %d, t: %d; %s', a, c, s, t, skip_test)
-                    if skip_test or not (
-                        cw(a, b, c) or ((a == s or cw(a, b, s)) == cw(s, b, t))
+                    if (
+                        skip_test
+                        or (
+                            # a close to t, c close to s
+                            ccw(a, b, c)
+                            and ccw(a, b, s)
+                            and cw(s, b, t)
+                            and cw(c, b, t)
+                        )
+                        or (
+                            # a close to s, c close to t
+                            ccw(a, b, c)
+                            and (a == s or cw(a, b, s))
+                            and ccw(s, b, t)
+                            and (c == t or ccw(c, b, t))
+                        )
                     ):
                         i += 1
                         debug('Took the 2nd continue.')
