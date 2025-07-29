@@ -220,21 +220,6 @@ class PathFinder:
         self.bad_streak_limit = bad_streak_limit
         self.num_revisits = 0
         self.adv_counter = 0
-        # build (vertex, sector) indexer
-        all_vert_sect = sorted(
-            chain(
-                (
-                    (n, (nb if nb < T + B else NULL))
-                    for n in range(T)
-                    for nb in G[n]
-                    if (nb, n) not in tentative
-                ),
-                ((n, NULL) for r, n in tentative if len(G._adj[n]) == 1),
-                ((b, NULL) for b in range(T, T + B + 3) if b in P.nodes),
-            )
-        )
-        self.all_vert_sect = all_vert_sect
-        debug('Number of (vertex, sector) pairs: %d', len(self.all_vert_sect))
         self._find_paths()
 
     def get_best_path(self, n: int):
@@ -296,12 +281,14 @@ class PathFinder:
         adv_id: int,
         portal: tuple[int, int],
         traverser_args: tuple,
+        is_triangle_seen: bitarray,
         side: int | None = None,
     ):
         P = self.P
         T = self.T
         prioqueue = self.prioqueue
         portal_set = self.portal_set
+        triangles = P.graph['triangles']
         traverser = self._traverse_channel(adv_id, *traverser_args)
         next(traverser)
         if side is not None:
@@ -309,13 +296,17 @@ class PathFinder:
             yield priority, portal, is_promising
             next(traverser)
         while True:
-            # look if there is a triangle ahead of portal
+            # look for children portals
             left, right = portal
             n = P[left][right]['ccw']
             if n not in P[right] or P[left][n]['ccw'] == right or n < 0:
-                # DEAD-END: (left, right, n) is not a triangle or n is a root
-                debug('{%d} advancer reached DEAD-END (root)', adv_id)
+                debug('{%d} advancer reached DEAD-END (root or mesh edge)', adv_id)
                 return
+            triangle_idx = bisect_left(triangles, tuple(sorted([left, right, n])))
+            if is_triangle_seen[triangle_idx]:
+                debug('{%d} advancer revisited triangle', adv_id)
+                return
+            is_triangle_seen[triangle_idx] = 1
             # check whether the other two sides of the triangle are portals
             portals = [
                 (portal, side)
@@ -323,19 +314,25 @@ class PathFinder:
                 if portal in portal_set
             ]
             if len(portals) == 2:
-                # BIFURCATION: spawn new advancer
                 portal_bif, side_bif = portals[1]
+                # channel bifurcation, spawn new advancer
                 #  trace('{%d} advancer asking for traverser_args', adv_id)
                 # get traverser state
                 traverser_args = next(traverser)
-                advancer = self._advance_portal(
-                    self.adv_counter,
-                    portal_bif,
-                    traverser_args,
-                    side_bif,
-                )
+                priority = traverser_args[0]
                 heapq.heappush(
-                    prioqueue, (traverser_args[0], self.adv_counter, advancer)
+                    prioqueue,
+                    (
+                        priority,
+                        self.adv_counter,
+                        self._advance_portal(
+                            self.adv_counter,
+                            portal_bif,
+                            traverser_args,
+                            is_triangle_seen.copy(),
+                            side_bif,
+                        ),
+                    ),
                 )
                 self.adv_counter += 1
                 next(traverser)
@@ -364,7 +361,6 @@ class PathFinder:
         apex: int,
         _funnel: list[int],
         wedge_end: list[int],
-        visited: bitarray,
         bad_streak: int = 0,
     ):
         # variable naming notation:
@@ -375,7 +371,6 @@ class PathFinder:
         cw, ccw = rotation_checkers_factory(self.VertexC)
         paths = self.paths
         d2roots = self.d2roots
-        all_vert_sect = self.all_vert_sect
         I_path = self.I_path
         ST = self.ST
         uncharted = self.uncharted
@@ -395,7 +390,6 @@ class PathFinder:
                     apex,
                     _funnel.copy(),
                     wedge_end.copy(),
-                    visited.copy(),
                     bad_streak,
                 )
                 continue
@@ -405,13 +399,6 @@ class PathFinder:
 
             _new = portal[side]
             sector_new = self._get_sector(_new, portal)
-            i_vert_sect = bisect_left(all_vert_sect, (_new, sector_new))
-            if visited[i_vert_sect]:
-                debug('<%d> Revisited node %d, sector %d', trav_id, _new, sector_new)
-                self.num_revisits += 1
-                bad_streak += 1
-            else:
-                visited[i_vert_sect] = 1
             _nearside = _funnel[side]
             _farside = _funnel[not side]
             test = ccw if side else cw
@@ -495,7 +482,7 @@ class PathFinder:
                 d_new < promising_bar * paths[keeper].dist
                 and bad_streak <= bad_streak_limit
             )
-            # for supertriangle vertices, do not update the d_ref used for prioritizing
+            # for supertriangle vertices, do not update the priority used for prioritizing
             # (it would be sent to the bottom of heapq beacause of the big distances)
             if _new < ST:
                 priority = d_new / d2roots[_new, root], d_new
@@ -532,6 +519,7 @@ class PathFinder:
         # (it is orientation-sensitive – two permutations)
         uncharted = defaultdict(lambda: self.uncharted_init_count)
         paths = self.paths = PathNodes()
+        triangles = P.graph['triangles']
         self.uncharted = uncharted
         self.bifurcation = None
         I_path = defaultdict(dict)
@@ -612,13 +600,14 @@ class PathFinder:
                     r,  # apex
                     [left, right],  # _funnel
                     wedge_end,
-                    bitarray(len(self.all_vert_sect)),  # visited
                     0,  # bad_streak
                 )
                 advancer = self._advance_portal(
-                    self.adv_counter, (left, right), traverser_pack
+                    self.adv_counter,
+                    (left, right),
+                    traverser_pack,
+                    bitarray(len(triangles)),
                 )
-                #  heapq.heappush(prioqueue, (d_closest, self.adv_counter, advancer))
                 heapq.heappush(prioqueue, (priority, self.adv_counter, advancer))
                 self.adv_counter += 1
         # process edges in the prioqueue
@@ -627,7 +616,6 @@ class PathFinder:
         iter = 0
         while len(prioqueue) > 0 and iter < iterations_limit:
             iter += 1
-            #  print(f'{d_ref:.5f} {len(prioqueue)}', end='|')
             debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
             try:
                 # advance one portal
