@@ -790,6 +790,9 @@ class PathFinder:
                         n,
                         path[0],
                     )
+                    subtree_load = G.nodes[n]['load']
+                    G.nodes[r]['load'] -= subtree_load
+                    G.nodes[path[-1]]['load'] += subtree_load
                 G.add_weighted_edges_from(
                     zip(path[:1] + Clone, Clone + path[-1:], dists),
                     weight='length',
