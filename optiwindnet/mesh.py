@@ -1271,21 +1271,16 @@ def make_planar_embedding(
                     # skip border and root vertices and paths without borders
                     continue
                 debug('updating d2root of ⟨%d, %d⟩ (path %s)', r, n, path)
-                b_path = (*(p for p in path[1:-1] if p >= T), path[-1])
-                s = n
-                real_path = [s]
-                shortcut = False
+                b_path = (*(p for p in path[1:-1] if p >= T), n)
+                s = r
+                real_path = [r]
                 for b, t in pairwise(b_path):
-                    if shortcut:
-                        shortcut = False
-                        continue
-                    if is_midpoint_shortable(s, b, t):
-                        shortcut = True
-                        s = t
-                    else:
+                    if not is_midpoint_shortable(s, b, t):
+                        real_path.append(b)
                         s = b
-                    real_path.append(s)
+                real_path.append(n)
                 if len(real_path) > 2:
+                    debug('d2roots[%d, %d] updated', n, r)
                     node_d2roots = A.nodes[n].get('d2roots')
                     if node_d2roots is None:
                         A.nodes[n]['d2roots'] = {r: d2roots[n, r]}
