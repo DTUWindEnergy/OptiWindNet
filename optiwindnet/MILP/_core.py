@@ -6,7 +6,7 @@ import logging
 from dataclasses import asdict, dataclass
 from enum import StrEnum, auto
 from itertools import chain
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import networkx as nx
 from makefun import with_signature
@@ -75,6 +75,11 @@ class ModelOptions(dict):
             int,
             0,
             'Maximum number of feeders (used only if <feeder_limit = "specified">)',
+        ),
+        max_loads=(
+            Sequence,
+            0,
+            'Maximum loads per root',
         ),
     )
 

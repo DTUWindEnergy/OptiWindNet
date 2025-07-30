@@ -168,6 +168,7 @@ def make_min_length_model(
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
     balanced: bool = False,
     max_feeders: int | Sequence = 0,
+    max_loads: Sequence = None
 ) -> tuple[pyo.ConcreteModel, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -373,7 +374,10 @@ def make_min_length_model(
             ' = UNLIMITED>: model will not enforce balanced subtrees.'
         )
 
-        # auxiliary variables
+    if max_loads is not None:
+        m.cons_max_loads = pyo.Constraint(m.R, rule=lambda m, r: sum(m.flow_[t, r] for t in _T) <= max_loads[r])
+
+    # auxiliary variables
     # radial or branched topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
