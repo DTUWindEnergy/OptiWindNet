@@ -1143,26 +1143,27 @@ def make_planar_embedding(
                         if P[b][a]['cw'] == c:
                             skip_test = False
                     debug('a: %d; c: %d; s: %d, t: %d; %s', a, c, s, t, skip_test)
-                    if (
-                        skip_test
-                        or (
-                            # a close to t, c close to s
-                            ccw(a, b, c)
-                            and ccw(a, b, s)
-                            and cw(s, b, t)
-                            and cw(c, b, t)
-                        )
-                        or (
-                            # a close to s, c close to t
-                            ccw(a, b, c)
-                            and (a == s or cw(a, b, s))
-                            and ccw(s, b, t)
-                            and (c == t or ccw(c, b, t))
-                        )
-                    ):
+                    if skip_test:
                         i += 1
                         debug('Took the 2nd continue.')
                         continue
+                    elif ccw(a, b, c):
+                        ccw_abs = ccw(a, b, s)
+                        cw_sbt = cw(s, b, t)
+                        cw_cbt = cw(c, b, t)
+                        if (
+                            # a close to t, c close to s
+                            (ccw_abs and cw_sbt and cw_cbt)
+                            # a close to s, c close to t
+                            or (
+                                (a == s or not ccw_abs)
+                                and not cw_sbt
+                                and (c == t or not cw_cbt)
+                            )
+                        ):
+                            i += 1
+                            debug('Took the 2nd continue.')
+                            continue
                 # PERFORM SHORTCUT
                 # TODO: The entire new path should go for a 2nd pass if it
                 #       changed here. Unlikely to change in the 2nd pass.
