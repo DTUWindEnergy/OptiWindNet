@@ -5,7 +5,7 @@ from bisect import bisect_left
 import logging
 import math
 from collections import defaultdict
-from itertools import chain, combinations, tee
+from itertools import chain, combinations, tee, pairwise
 from typing import Literal, NewType
 
 import condeltri as cdt
@@ -1096,7 +1096,63 @@ def make_planar_embedding(
     # M) Revisit A to update edges crossing borders with P_path contours.
     # ###################################################################
     debug('PART M')
+
     cw, ccw = rotation_checkers_factory(VertexC)
+    # auxiliary function for parts M and N
+
+    def is_midpoint_shortable(s, b, t):
+        # Check if each vertex at the border is necessary.
+        # The vertex is kept if the border angle and the path angle
+        # point to the same side. Otherwise, remove the vertex.
+        b_conc_id = vertex2conc_id_map[b]
+        # skip to shortcut if b is in a concavity and is a neighbor of
+        # the supertriangle
+        if b_conc_id < num_holes or all(n not in P[b] for n in supertriangle):
+            debug('s: %d; b: %d; t: %d; b_conc_id: %d', s, b, t, b_conc_id)
+            #  debug([(n, vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
+            nbs = P.neighbors_cw_order(b)
+            skip_test = True
+            for a in nbs:
+                if vertex2conc_id_map.get(a, -1) == b_conc_id:
+                    skip_test = False
+                    break
+            if skip_test:
+                debug('Took the 1st continue.')
+                return False
+            skip_test = True
+            for c in nbs:
+                if vertex2conc_id_map.get(c, -1) == b_conc_id:
+                    if P[b][a]['cw'] == c:
+                        skip_test = False
+                        break
+                    a = c
+            if c == a:
+                # no nb remaining after making a = c, c <- first nb
+                c = next(P.neighbors_cw_order(b))
+                if P[b][a]['cw'] == c:
+                    skip_test = False
+            debug('a: %d; c: %d; s: %d, t: %d; %s', a, c, s, t, skip_test)
+            if skip_test:
+                debug('Took the 2nd continue.')
+                return False
+            elif ccw(a, b, c):
+                ccw_abs = ccw(a, b, s)
+                cw_sbt = cw(s, b, t)
+                cw_cbt = cw(c, b, t)
+                if (
+                    # a close to t, c close to s
+                    (ccw_abs and cw_sbt and cw_cbt)
+                    # a close to s, c close to t
+                    or (
+                        (a == s or not ccw_abs)
+                        and not cw_sbt
+                        and (c == t or not cw_cbt)
+                    )
+                ):
+                    debug('Took the 2nd continue.')
+                    return False
+            return True
+
     corner_to_A_edges = defaultdict(list)
     A_edges_to_revisit = []
     for u, v in A.edges - P_paths.edges:
@@ -1110,77 +1166,27 @@ def make_planar_embedding(
             midpath = path[1:-1].copy() if u < v else path[-2:0:-1].copy()
             i = 0
             while i <= len(path) - 3:
-                # Check if each vertex at the border is necessary.
-                # The vertex is kept if the border angle and the path angle
-                # point to the same side. Otherwise, remove the vertex.
                 s, b, t = path[i : i + 3]
-                b_conc_id = vertex2conc_id_map[b]
-                # skip to shortcut if b is in a concavity and is a neighbor of
-                # the supertriangle
-                if b_conc_id < num_holes or all(n not in P[b] for n in supertriangle):
-                    debug('s: %d; b: %d; t: %d; b_conc_id: %d', s, b, t, b_conc_id)
-                    #  debug([(n, vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
-                    nbs = P.neighbors_cw_order(b)
-                    skip_test = True
-                    for a in nbs:
-                        if vertex2conc_id_map.get(a, -1) == b_conc_id:
-                            skip_test = False
-                            break
-                    if skip_test:
-                        i += 1
-                        debug('Took the 1st continue.')
-                        continue
-                    skip_test = True
-                    for c in nbs:
-                        if vertex2conc_id_map.get(c, -1) == b_conc_id:
-                            if P[b][a]['cw'] == c:
-                                skip_test = False
-                                break
-                            a = c
-                    if c == a:
-                        # no nb remaining after making a = c, c <- first nb
-                        c = next(P.neighbors_cw_order(b))
-                        if P[b][a]['cw'] == c:
-                            skip_test = False
-                    debug('a: %d; c: %d; s: %d, t: %d; %s', a, c, s, t, skip_test)
-                    if skip_test:
-                        i += 1
-                        debug('Took the 2nd continue.')
-                        continue
-                    elif ccw(a, b, c):
-                        ccw_abs = ccw(a, b, s)
-                        cw_sbt = cw(s, b, t)
-                        cw_cbt = cw(c, b, t)
-                        if (
-                            # a close to t, c close to s
-                            (ccw_abs and cw_sbt and cw_cbt)
-                            # a close to s, c close to t
-                            or (
-                                (a == s or not ccw_abs)
-                                and not cw_sbt
-                                and (c == t or not cw_cbt)
-                            )
-                        ):
-                            i += 1
-                            debug('Took the 2nd continue.')
-                            continue
-                # PERFORM SHORTCUT
-                # TODO: The entire new path should go for a 2nd pass if it
-                #       changed here. Unlikely to change in the 2nd pass.
-                #       Reason: a shortcut may change the geometry in such
-                #       way as to make additional shortcuts possible.
-                del path[i + 1]
-                length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
-                shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
-                length += shortcut_length
-                # changing P_paths for the case of revisiting this block
-                P_paths.add_edge(s, t, length=shortcut_length)
-                shortcuts = edgeD.get('shortcuts')
-                if shortcuts is None:
-                    edgeD['shortcuts'] = [b]
+                if is_midpoint_shortable(s, b, t):
+                    # PERFORM SHORTCUT
+                    # TODO: The entire new path should go for a 2nd pass if it
+                    #       changed here. Unlikely to change in the 2nd pass.
+                    #       Reason: a shortcut may change the geometry in such
+                    #       way as to make additional shortcuts possible.
+                    del path[i + 1]
+                    length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
+                    shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
+                    length += shortcut_length
+                    # changing P_paths for the case of revisiting this block
+                    P_paths.add_edge(s, t, length=shortcut_length)
+                    shortcuts = edgeD.get('shortcuts')
+                    if shortcuts is None:
+                        edgeD['shortcuts'] = [b]
+                    else:
+                        shortcuts.append(b)
+                    debug('(%d) %d %d %d shortcut', i, s, b, t)
                 else:
-                    shortcuts.append(b)
-                debug('(%d) %d %d %d shortcut', i, s, b, t)
+                    i += 1
             edgeD.update(  # midpath-> which P edges the A edge maps to
                 # (so that PathFinder works)
                 midpath=midpath,
@@ -1265,19 +1271,31 @@ def make_planar_embedding(
                     # skip border and root vertices and paths without borders
                     continue
                 debug('updating d2root of ⟨%d, %d⟩ (path %s)', r, n, path)
-                node_d2roots = A.nodes[n].get('d2roots')
-                if node_d2roots is None:
-                    A.nodes[n]['d2roots'] = {r: d2roots[n, r]}
-                else:
-                    node_d2roots.update({r: d2roots[n, r]})
-                new_length = 0.0
-                s = path[0]
-                for t in (p for p in path[1:-1] if p >= T):
-                    # only add the lengths between constraint vertices
-                    new_length += np.hypot(*(VertexC[s] - VertexC[t]).T).item()
-                    s = t
-                new_length += np.hypot(*(VertexC[s] - VertexC[n]).T).item()
-                d2roots[n, r] = new_length
+                b_path = (*(p for p in path[1:-1] if p >= T), path[-1])
+                s = n
+                real_path = [s]
+                shortcut = False
+                for b, t in pairwise(b_path):
+                    if shortcut:
+                        shortcut = False
+                        continue
+                    if is_midpoint_shortable(s, b, t):
+                        shortcut = True
+                        s = t
+                    else:
+                        s = b
+                    real_path.append(s)
+                if len(real_path) > 2:
+                    node_d2roots = A.nodes[n].get('d2roots')
+                    if node_d2roots is None:
+                        A.nodes[n]['d2roots'] = {r: d2roots[n, r]}
+                    else:
+                        node_d2roots.update({r: d2roots[n, r]})
+                    d2roots[n, r] = (
+                        np.hypot(*(VertexC[real_path[1:]] - VertexC[real_path[:-1]]).T)
+                        .sum()
+                        .item()
+                    )
 
     # ##########################################
     # O) Calculate the area of the concave hull.
