@@ -47,7 +47,8 @@ def gplot(
     hide_ST: bool = True,
     legend: bool = False,
     min_dpi: int = 192,
-    dark=None,
+    dark: bool | None = None,
+    tag_border: bool = False,
     **kwargs,
 ) -> Axes:
     """Plot site and routeset contained in G.
@@ -291,6 +292,12 @@ def gplot(
         )
         if info_art is not None:
             ax.add_artist(info_art)
+    if tag_border:
+        border_ = border if border is not None else []
+        obstacles_ = obstacles if obstacles is not None else [()]
+        print(VertexC.shape)
+        for b in chain(border_, *(obstacles_)):
+            ax.text(*VertexC[b], str(b), color=c.fg_color, size=FONTSIZE_ROOT_LABEL)
     if hide_ST and VertexC.shape[0] > R + T + B:
         # coordinates include the supertriangle, adjust view limits to hide it
         nonStC = np.r_[VertexC[: T + B], VertexC[-R:]]
