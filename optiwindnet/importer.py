@@ -234,7 +234,9 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     plant_name = None
     nodes = {}
     substations = []
+    substation_labels = []
     turbines = []
+    turbine_labels = []
     border_raw = None
     obstacles_raw = []
     ways = {}
@@ -243,13 +245,17 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             case esy.osm.pbf.Node():
                 nodes[e.id] = e
                 power_kind = e.tags.get('power')
+                label = e.tags.get('name') or e.tags.get('ref')
                 match power_kind:
                     case 'substation' | 'transformer':
                         substations.append(e.lonlat[::-1])
+                        substation_labels.append(label)
                     case 'generator':
                         turbines.append(e.lonlat[::-1])
+                        turbine_labels.append(label)
                     case _:
                         info('Unhandled power category for Node: %s', power_kind)
+
             case esy.osm.pbf.Way():
                 power_kind = e.tags.get('power')
                 if power_kind is None:
@@ -262,9 +268,11 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                             raise ValueError('Only a single border is supported.')
                         border_raw = [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
                     case 'substation' | 'transformer':
+                        label = e.tags.get('name') or e.tags.get('ref')
                         substations.append(
                             [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
                         )
+                        substation_labels.append(label)
                     case 'generator':
                         info('Generator must be Node, not Way.')
                     case None:
@@ -385,6 +393,11 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         name=name,
         handle=handle,
     )
+    for labels, start in ((substation_labels, -R), (turbine_labels, 0)):
+        if any(labels):
+            for i, label in enumerate(labels, start=start):
+                if label is not None:
+                    L.nodes[i]['label'] = label
     if border is not None:
         L.graph['border'] = np.array(border, dtype=np.int_)
         if obstacles:
