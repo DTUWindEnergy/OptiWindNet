@@ -476,16 +476,22 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                 # examine the two triangles ⟨s, t⟩ belongs to
                 for a, b, c in ((s, t, u), (t, s, v)):
                     # this is for diagonals crossing diagonals
-                    d = P[c][b]['ccw']
-                    diag_da = (a, d) if a < d else (d, a)
-                    if d == P[b][c]['cw'] and diag_da in G.edges:
-                        crossings = True
-                        break
-                    e = P[a][c]['ccw']
-                    diag_eb = (e, b) if e < b else (b, e)
-                    if e == P[c][a]['cw'] and diag_eb in G.edges:
-                        crossings = True
-                        break
+                    cbD = P[c].get(b)
+                    # was triangle edge removed (constraint Xing)? if yes, no diagonal
+                    if cbD is not None:
+                        d = cbD['ccw']
+                        diag_da = (a, d) if a < d else (d, a)
+                        if d == P[b][c]['cw'] and diag_da in G.edges:
+                            crossings = True
+                            break
+                    acD = P[a].get(c)
+                    # was triangle edge removed (constraint Xing)? if yes, no diagonal
+                    if acD is not None:
+                        e = acD['ccw']
+                        diag_eb = (e, b) if e < b else (b, e)
+                        if e == P[c][a]['cw'] and diag_eb in G.edges:
+                            crossings = True
+                            break
                 if crossings:
                     G[r][n]['kind'] = 'tentative'
                     tentative.append((r, n))
