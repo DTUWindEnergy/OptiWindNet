@@ -17,10 +17,7 @@ from scipy.stats import rankdata
 from ..crossings import edge_crossings
 from ..geometric import angle_helpers, angle_oracles_factory, assign_root
 from ..interarraylib import as_normalized, calcload
-from ..utils import NodeTagger
 from .priorityqueue import PriorityQueue
-
-F = NodeTagger()
 
 lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
@@ -397,7 +394,7 @@ def data_driven_hybrid(
             # this handles subtrees that became isolated
             S.add_edge(subroot, root)
             A.remove_nodes_from(subtree_[subroot])
-            debug('<refresh> subroot <%s> finalized (isolated)', F[subroot])
+            debug('<refresh> subroot <%d> finalized (isolated)', subroot)
             is_feederless_[subroot] = False
             purge_log[i].append(tuple(subtree_[subroot]))
             steps_log[i].append((subroot, root))
@@ -407,7 +404,6 @@ def data_driven_hybrid(
         if unfeas_links:
             A.remove_edges_from(unfeas_links)
             purge_log[i].append(tuple(unfeas_links))
-        fresh_subtrees.add(subroot)
         whoneeds_[subroot] = feas_unions
         cat_feas_unions = UnionCount.encode(len(feas_unions))
         cat_feas_links = LinkCount.encode(num_feas_links)
@@ -436,7 +432,7 @@ def data_driven_hybrid(
             debug(
                 'stale_subtrees (%d): %s',
                 len(stale_subtrees),
-                tuple(F[sr] for sr in stale_subtrees),
+                stale_subtrees,
             )
         links_to_upd = []
         links_features = []
@@ -458,12 +454,7 @@ def data_driven_hybrid(
         if not pq:
             # finished
             break
-        debug(
-            'heap top post-refresh: <%s>, «%s» %.3f',
-            F[pq[0][-1]],
-            tuple(F[x] for x in pq[0][-2]),
-            -pq[0][0],
-        )
+        debug('heap top loop-top: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
 
         # get best link
         uv_uniq, sr_dropped = pq.top()
@@ -475,7 +466,7 @@ def data_driven_hybrid(
         # convert uv_uniq back to ⟨source, target⟩
         u, v = uv_uniq if subroot_[uv_uniq[0]] == sr_dropped else uv_uniq[::-1]
         sr_kept = subroot_[v]
-        debug('<popped> «%s–%s», sr_u: <%s>', F[u], F[v], F[sr_dropped])
+        debug('<popped> «%d~%d», sr_u: <%d>', u, v, sr_dropped)
 
         root = A.nodes[sr_kept]['root']
         subtree = subtree_[sr_kept]
@@ -490,7 +481,7 @@ def data_driven_hybrid(
         debug(f'<angle_span> //%s//', union_span_[root])
 
         # edge addition starts here
-        debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_kept])
+        debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
         S.add_edge(u, v)
         steps_log[i].append((u, v))
 
@@ -508,7 +499,7 @@ def data_driven_hybrid(
         if len(subtree) == capacity:
             stale_subtrees.discard(sr_kept)
             S.add_edge(sr_kept, root)
-            debug('subroot <%s> finalized (full load)', F[sr_kept])
+            debug('subroot <%d> finalized (full load)', sr_kept)
             is_feederless_[sr_kept] = False
             steps_log[i].append((sr_kept, root))
             for s, t in A.edges(subtree):
@@ -546,12 +537,7 @@ def data_driven_hybrid(
         stale_subtrees.discard(sr_dropped)
 
         if pq:
-            debug(
-                'heap top pre-refresh: <%s>, «%s» %.3f',
-                F[pq[0][-1]],
-                tuple(F[x] for x in pq[0][-2]),
-                -pq[0][0],
-            )
+            debug('heap top loop-end: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
         else:
             debug('heap EMPTY')
     # END: main loop
