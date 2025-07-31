@@ -390,6 +390,7 @@ def data_driven_hybrid(
         # all that can no longer link to subtree_[subroot] are stale
 
         stale_subtrees.update(link_caused_staleness - fresh_subtrees)
+        fresh_subtrees.add(subroot)
         if not feas_unions:
             # this handles subtrees that became isolated
             S.add_edge(subroot, root)
