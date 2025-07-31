@@ -1,33 +1,32 @@
-
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 import yaml_include
-import matplotlib.pyplot as plt
 
 # optiwindnet modules
-# Metaheuristics
 from optiwindnet.baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
-
-# Heuristics
-from optiwindnet.heuristics import EW_presolver, CPEW
+from optiwindnet.heuristics import CPEW, EW_presolver
 from optiwindnet.importer import L_from_pbf, L_from_site, L_from_yaml, load_repository
 from optiwindnet.interarraylib import G_from_S, S_from_G, as_normalized, calcload
 from optiwindnet.interface import assign_cables
 from optiwindnet.mesh import make_planar_embedding
-
-# MILP
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.plotting import gplot, pplot
 from optiwindnet.svg import svgplot
 
-from .api_utils import from_coordinates, plot_org_buff, check_warmstart_feasibility
-from .api_utils import parse_cables_input, enable_ortools_logging_if_jupyter, extract_network_as_array, check_warmstart_feasibility, plot_org_buff, from_coordinates
-
+from .api_utils import (
+    check_warmstart_feasibility,
+    enable_ortools_logging_if_jupyter,
+    extract_network_as_array,
+    from_coordinates,
+    parse_cables_input,
+    plot_org_buff,
+)
 
 ###################
 # OptiWindNet API #
@@ -39,6 +38,7 @@ plt.rcParams['svg.fonttype'] = 'none'
 # Set up a logger and create shortcuts for error, warning, and info logging methods
 logger = logging.getLogger(__name__)
 error, warning, info = logger.error, logger.warning, logger.info
+
 
 class WindFarmNetwork:
     """
@@ -60,8 +60,7 @@ class WindFarmNetwork:
         buffer_dist=0,
     ):
         # Use a default router (heuristic Esau_Williams) if none is provided
-        
-        self.router_privious = None
+
         if router is None:
             router = Heuristic(solver='Esau_Williams')
         self.router = router
@@ -336,7 +335,11 @@ class WindFarmNetwork:
         if turbinesC is not None or substationsC is not None:
             self.P, self.A = make_planar_embedding(self.L)
 
-        D = self.G.graph['D'] if hasattr(self, 'G') and self.G is not None and 'D' in self.G.graph else 0
+        D = (
+            self.G.graph['D']
+            if hasattr(self, 'G') and self.G is not None and 'D' in self.G.graph
+            else 0
+        )
         S_warm_has_detour = D > 0
 
         S, G = router(
@@ -351,7 +354,6 @@ class WindFarmNetwork:
         )
         self.S = S
         self.G = G
-        self.router_privious = self.router
 
         terse_links = self.terse_links()
         return terse_links
@@ -362,22 +364,57 @@ class OptiWindNetSolver(ABC):
         pass
 
     @abstractmethod
-    def optimize(self,  L=None, A=None, P=None, cables=None, cables_capacity=None, S_warm=None, S_warm_has_detour=False, verbose=False, **kwargs):
+    def optimize(
+        self,
+        L=None,
+        A=None,
+        P=None,
+        cables=None,
+        cables_capacity=None,
+        S_warm=None,
+        S_warm_has_detour=False,
+        verbose=False,
+        **kwargs,
+    ):
         pass
 
-    def __call__(self,  L=None, A=None, P=None, cables=None, cables_capacity=None, S_warm=None, S_warm_has_detour=False, verbose=False):
+    def __call__(
+        self,
+        L=None,
+        A=None,
+        P=None,
+        cables=None,
+        cables_capacity=None,
+        S_warm=None,
+        S_warm_has_detour=False,
+        verbose=False,
+    ):
         """Make the instance callable, calling optimize() internally."""
         return self.optimize(
-             L=L, A=A, P=P, cables=cables, cables_capacity=cables_capacity, S_warm=S_warm, S_warm_has_detour=S_warm_has_detour, verbose=verbose)
+            L=L,
+            A=A,
+            P=P,
+            cables=cables,
+            cables_capacity=cables_capacity,
+            S_warm=S_warm,
+            S_warm_has_detour=S_warm_has_detour,
+            verbose=verbose,
+        )
 
 
 class Heuristic(OptiWindNetSolver):
-    def __init__(self, solver='Esau_Williams', maxiter=10000, verbose=False, **kwargs,):
+    def __init__(
+        self,
+        solver='Esau_Williams',
+        maxiter=10000,
+        verbose=False,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         SUPPORTED = ['Esau_Williams', 'EW', 'CPEW']
         if solver not in SUPPORTED:
             raise ValueError(
-                f"{solver} is not among the supported Heuristic solvers. Choose among: {SUPPORTED}."
+                f'{solver} is not among the supported Heuristic solvers. Choose among: {SUPPORTED}.'
             )
 
         # Call the base class initialization
@@ -419,8 +456,8 @@ class MetaHeuristic(OptiWindNetSolver):
         verbose=False,
         **kwargs,
     ):
-        super().__init__(**kwargs)
         # Call the base class initialization
+        super().__init__(**kwargs)
         self.time_limit = time_limit
         self.solver = solver
         self.verbose = verbose
@@ -429,7 +466,9 @@ class MetaHeuristic(OptiWindNetSolver):
         self.balanced = balanced
         self.seed = seed
 
-    def optimize(self, A, P, cables, cables_capacity, S_warm=None, verbose=None, **kwargs):
+    def optimize(
+        self, A, P, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
+    ):
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -505,25 +544,37 @@ class MILP(OptiWindNetSolver):
             enable_ortools_logging_if_jupyter(self.solver)
 
     def optimize(
-        self, P, A, cables, cables_capacity, S_warm=None, S_warm_has_detour=False, verbose=None, router_previous=None, **kwargs):
+        self,
+        P,
+        A,
+        cables,
+        cables_capacity,
+        S_warm=None,
+        S_warm_has_detour=False,
+        verbose=None,
+        router_previous=None,
+        **kwargs,
+    ):
         if verbose is None:
             verbose = self.verbose
 
         warmstart_state = check_warmstart_feasibility(
             S_warm=S_warm,
             cables_capacity=cables_capacity,
-            model_options=self.model_options, 
+            model_options=self.model_options,
             S_warm_has_detour=S_warm_has_detour,
             solver_name=self.solver_name,
             verbose=verbose,
-            logger=None)
-        
-        # maybe if warmstart_state is False deactivate the warmstarting procedure in MILP?
+            logger=None,
+        )
+
+        # To Do: maybe if warmstart_state is False deactivate the warmstarting procedure in MILP?
 
         solver = self.solver
 
         solver.set_problem(
-            P, A,
+            P,
+            A,
             capacity=cables_capacity,
             model_options=self.model_options,
             warmstart=S_warm,
