@@ -62,7 +62,7 @@ class WindFarmNetwork:
         # Use a default router (heuristic Esau_Williams) if none is provided
 
         if router is None:
-            router = Heuristic(solver='Esau_Williams')
+            router = Heuristic(solver_name='Esau_Williams')
         self.router = router
 
         # Parse and validate cables input; convert to list of (capacity, cost) tuples
@@ -359,7 +359,7 @@ class WindFarmNetwork:
         return terse_links
 
 
-class OptiWindNetSolver(ABC):
+class Router(ABC):
     def __init__(self, **kwargs):
         pass
 
@@ -402,24 +402,24 @@ class OptiWindNetSolver(ABC):
         )
 
 
-class Heuristic(OptiWindNetSolver):
+class Heuristic(Router):
     def __init__(
         self,
-        solver='Esau_Williams',
+        solver_name='Esau_Williams',
         maxiter=10000,
         verbose=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         SUPPORTED = ['Esau_Williams', 'EW', 'CPEW']
-        if solver not in SUPPORTED:
+        if solver_name not in SUPPORTED:
             raise ValueError(
-                f'{solver} is not among the supported Heuristic solvers. Choose among: {SUPPORTED}.'
+                f'{solver_name} is not among the supported Heuristic solvers. Choose among: {SUPPORTED}.'
             )
 
         # Call the base class initialization
         self.verbose = verbose
-        self.solver = solver
+        self.solver_name = solver_name
         self.maxiter = maxiter
 
     def optimize(self, L, A, P, cables, cables_capacity, verbose=None, **kwargs):
@@ -427,9 +427,9 @@ class Heuristic(OptiWindNetSolver):
             verbose = self.verbose
 
         # optimizing
-        if self.solver in ['Esau_Williams', 'EW']:
+        if self.solver_name in ['Esau_Williams', 'EW']:
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
-        elif self.solver in ['CPEW']:
+        elif self.solver_name in ['CPEW']:
             G_cpew = CPEW(L, capacity=cables_capacity, maxiter=self.maxiter)
             S = S_from_G(G_cpew)
         else:
@@ -444,11 +444,11 @@ class Heuristic(OptiWindNetSolver):
         return S, G
 
 
-class MetaHeuristic(OptiWindNetSolver):
+class MetaHeuristic(Router):
     def __init__(
         self,
         time_limit,
-        solver='HGS',
+        solver_name='HGS',
         feeder_limit: int | None = None,
         max_iter=10,
         balanced=False,
@@ -459,7 +459,7 @@ class MetaHeuristic(OptiWindNetSolver):
         # Call the base class initialization
         super().__init__(**kwargs)
         self.time_limit = time_limit
-        self.solver = solver
+        self.solver_name = solver_name
         self.verbose = verbose
         self.max_iter = max_iter
         self.feeder_limit = feeder_limit
@@ -474,10 +474,9 @@ class MetaHeuristic(OptiWindNetSolver):
             verbose = self.verbose
 
         # optimizing
-        if self.solver.lower() in [
+        if self.solver_name.lower() in [
             'hgs',
             'hybrid genetic search',
-            'hybrid_genetic_search',
         ]:
             R = A.graph['R']
             if R == 1:
@@ -504,7 +503,7 @@ class MetaHeuristic(OptiWindNetSolver):
 
         else:
             raise ValueError(
-                f'{self.solver} is not among the supported Meta-Heuristic solvers. Choose among: HGS.'
+                f'{self.solver_name} is not among the supported Meta-Heuristic solvers. Choose among: HGS.'
             )
 
         G_tentative = G_from_S(S, A)
@@ -516,7 +515,7 @@ class MetaHeuristic(OptiWindNetSolver):
         return S, G
 
 
-class MILP(OptiWindNetSolver):
+class MILP(Router):
     def __init__(
         self,
         solver_name,
