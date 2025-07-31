@@ -22,8 +22,8 @@ LANDSCAPE_ANGLE:
 COORDINATE_FORMAT: latlon
 
 # The fields below must be sequence of coordinate pairs according to
-# COORDINATE_FORMAT. Optionally, a tag for each coordinate may be provided:
-#   TAG 11°22.333'N 44°55.666'E
+# COORDINATE_FORMAT. Optionally, a label for each coordinate may be provided:
+#   LABEL 11°22.333'N 44°55.666'E
 
 # EXTENTS must define a polygon with vertices in counter-clockwise orientation.
 # (required)

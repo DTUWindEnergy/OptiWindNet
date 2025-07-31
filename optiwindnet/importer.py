@@ -50,7 +50,7 @@ def _get_entries(entries):
 def _translate_latlonstr(entry_list):
     translated = []
     min = sec = 0.0
-    for tag, lat, lon in _get_entries(entry_list):
+    for label, lat, lon in _get_entries(entry_list):
         latlon = []
         for ll in (lat, lon):
             deg, *tail = ll.split('°')
@@ -73,28 +73,28 @@ def _translate_latlonstr(entry_list):
             else:
                 # entry is a signed fractional degree without hemisphere letter
                 latlon.append(float(deg))
-        translated.append((tag, *utm.from_latlon(*latlon)))
+        translated.append((label, *utm.from_latlon(*latlon)))
     return translated
 
 
 def _parser_latlon(entry_list):
     # separate data into columns
-    tags, eastings, northings, zone_numbers, zone_letters = zip(
+    labels, eastings, northings, zone_numbers, zone_letters = zip(
         *_translate_latlonstr(entry_list)
     )
     # all coordinates must belong to the same UTM zone
     assert all(num == zone_numbers[0] for num in zone_numbers[1:])
     assert all(letter == zone_letters[0] for letter in zone_letters[1:])
-    return np.c_[eastings, northings], (tags if any(tags) else ())
+    return np.c_[eastings, northings], (labels if any(labels) else ())
 
 
 def _parser_planar(entry_list):
-    tags = []
+    labels = []
     coords = []
-    for tag, easting, northing in _get_entries(entry_list):
-        tags.append(tag)
+    for label, easting, northing in _get_entries(entry_list):
+        labels.append(label)
         coords.append((float(easting), float(northing)))
-    return np.array(coords, dtype=float), (tags if any(tags) else ())
+    return np.array(coords, dtype=float), (labels if any(labels) else ())
 
 
 coordinate_parser = dict(
@@ -108,22 +108,22 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     Two options available for COORDINATE_FORMAT: "planar" and "latlon".
 
-    Format "planar" is: [tag] easting northing. Example::
+    Format "planar" is: [label] easting northing. Example::
 
-      TAG 234.2 5212.5
+      LABEL 234.2 5212.5
 
-    Format "latlon" is: [tag] latitude longitude. Example::
+    Format "latlon" is: [label] latitude longitude. Example::
 
-      TAG1 11°22.333'N 44°55.666'E
-      TAG2 11.3563°N 44.8903°E
-      TAG3 11°22'20"N 44°55'40"E
+      LABEL1 11°22.333'N 44°55.666'E
+      LABEL2 11.3563°N 44.8903°E
+      LABEL3 11°22'20"N 44°55'40"E
 
-    The [tag] is optional. Ensure no spaces within a latitude or longitude.
+    The [label] is optional. Ensure no spaces within a latitude or longitude.
 
     The coordinate pair may be separated by "," or ";" and may be enclosed in
     "[]" or "()". Example::
 
-      TAG [234.2, 5212.5]
+      LABEL [234.2, 5212.5]
 
     Args:
       filepath: path to `.yaml` file to read.
@@ -142,9 +142,9 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         handle = make_handle(name)
     # default format is "latlon"
     format = parsed_dict.get('COORDINATE_FORMAT', 'latlon')
-    Border, BorderTag = coordinate_parser[format](parsed_dict['EXTENTS'])
-    Root, RootTag = coordinate_parser[format](parsed_dict['SUBSTATIONS'])
-    Terminal, TerminalTag = coordinate_parser[format](parsed_dict['TURBINES'])
+    Border, BorderLabel = coordinate_parser[format](parsed_dict['EXTENTS'])
+    Root, RootLabel = coordinate_parser[format](parsed_dict['SUBSTATIONS'])
+    Terminal, TerminalLabel = coordinate_parser[format](parsed_dict['TURBINES'])
     T = Terminal.shape[0]
     R = Root.shape[0]
     node_xy = {xy: i for i, xy in enumerate(map(tuple, Terminal))}
@@ -206,11 +206,11 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     # populate graph G
     G.add_nodes_from(range(T), kind='wtg')
-    if TerminalTag:
-        nx.set_node_attributes(G, {t: TerminalTag[t] for t in range(T)}, name='label')
+    if TerminalLabel:
+        nx.set_node_attributes(G, {t: TerminalLabel[t] for t in range(T)}, name='label')
     G.add_nodes_from(range(-R, 0), kind='oss')
-    if RootTag:
-        nx.set_node_attributes(G, {-R + r: RootTag[r] for r in range(R)}, name='label')
+    if RootLabel:
+        nx.set_node_attributes(G, {-R + r: RootLabel[r] for r in range(R)}, name='label')
     return G
 
 
