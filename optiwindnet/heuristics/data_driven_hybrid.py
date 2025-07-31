@@ -23,7 +23,7 @@ lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
-__version = 'DDHv2'
+__version = 'DDHv3'
 
 
 class LinkCount(IntEnum):
@@ -279,6 +279,7 @@ def data_driven_hybrid(
     cat_feas_links_ = [-1] * T
     cat_feas_unions_ = [-1] * T
     extent_min_ = [-1.0] * T
+    rank = tuple(set() for _ in range(len(UnionCount)))
     # <i>: iteration counter
     i = 0
 
@@ -408,17 +409,22 @@ def data_driven_hybrid(
         whoneeds_[subroot] = feas_unions
         cat_feas_unions = UnionCount.encode(len(feas_unions))
         cat_feas_links = LinkCount.encode(num_feas_links)
-        if (
-            (cat_feas_links != cat_feas_links_[subroot])
-            or (cat_feas_unions != cat_feas_unions_[subroot])
-            or (extent_min != extent_min_[subroot])
-        ):
+        update_stales = False
+        if cat_feas_unions != cat_feas_unions_[subroot]:
+            rank[cat_feas_unions_[subroot]].remove(subroot)
+            rank[cat_feas_unions].add(subroot)
+            cat_feas_unions_[subroot] = cat_feas_unions
+            update_stales = True
+        if cat_feas_links != cat_feas_links_[subroot]:
+            cat_feas_links_[subroot] = cat_feas_links
+            update_stales = True
+        if extent_min != extent_min_[subroot]:
+            extent_min_[subroot] = extent_min
+            update_stales = True
+        if update_stales:
             # since the current subtree had features changes, all that depend
             # on it must be marked as stale
             stale_subtrees.update(whoneeds_[subroot] - fresh_subtrees)
-            cat_feas_unions_[subroot] = cat_feas_unions
-            cat_feas_links_[subroot] = cat_feas_links
-            extent_min_[subroot] = extent_min
         return proper_links, proper_features_
 
     loop = True
