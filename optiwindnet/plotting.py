@@ -228,7 +228,7 @@ def gplot(
     # draw labels
     if 'has_loads' in G.graph and node_tag == 'load':
         label_options = dict(
-            labels={n: G.nodes[n]['load'] for n in range(-R, T)},
+            labels={n: G.nodes[n].get('load', '-') for n in range(-R, T)},
             font_size=(
                 {t: FONTSIZE_LOAD for t in range(T)}
                 | {r: FONTSIZE_LABEL for r in range(-R, 0)}
@@ -237,7 +237,7 @@ def gplot(
     elif isinstance(node_tag, str):
         # 'label' or some other node attr from node_tag
         label_options = dict(
-            labels={n: G.nodes[n][node_tag] for n in range(-R, T)},
+            labels={n: G.nodes[n].get(node_tag, '') for n in range(-R, T)},
             font_size=(
                 {t: FONTSIZE_LABEL for t in range(T)}
                 | {r: FONTSIZE_ROOT_LABEL for r in range(-R, 0)}
