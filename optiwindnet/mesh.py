@@ -5,7 +5,7 @@ from bisect import bisect_left
 import logging
 import math
 from collections import defaultdict
-from itertools import chain, combinations, tee
+from itertools import chain, combinations, tee, pairwise
 from typing import Literal, NewType
 
 import condeltri as cdt
@@ -28,7 +28,6 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
-from .utils import F
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
 
@@ -404,6 +403,7 @@ def make_planar_embedding(
     node_xy_ = tuple(
         (x.item(), y.item()) for (x, y) in chain(VertexS[:T], VertexS[-R:])
     )
+    node_vertex_from_xy = dict(zip(node_xy_, chain(range(T), range(-R, 0))))
     terminal_xy_ = set(node_xy_[:-R])
     root_pts = shp.MultiPoint(node_xy_[-R:])
 
@@ -435,16 +435,55 @@ def make_planar_embedding(
         hull_border_xy_ = set()
     else:
         border_poly = shp.Polygon(shell=VertexS[border])
+
+        # create a hull_poly that includes roots outside of border_poly
+        # TODO: move this to a location sanitization pre-make_planar_embedding
         out_root_pts = root_pts - border_poly
-        hull_poly = (border_poly | root_pts).convex_hull
+        hull_poly = (border_poly | out_root_pts).convex_hull
         hull_ring = hull_poly.boundary
 
         hull_border_xy_ = {
             xy for xy in hull_ring.coords[:-1] if xy in border_vertex_from_xy
         }
-        hull_border_vertices = tuple(
-            border_vertex_from_xy[xy] for xy in hull_border_xy_
+        hull_border_vertices = [border_vertex_from_xy[xy] for xy in hull_border_xy_]
+
+        # check for nodes on the border, but that do not define the border
+        border_ring = border_poly.exterior
+        nodes_on_the_border = border_ring & shp.MultiPoint(node_xy_) - shp.MultiPoint(
+            border_ring.coords
         )
+        if not nodes_on_the_border.is_empty:
+            u = border[-1]
+            intersects = []
+            for i, v in enumerate(border):
+                edge_line = shp.LineString(VertexS[(u, v),])
+                intersection = edge_line & nodes_on_the_border
+                if not intersection.is_empty:
+                    if isinstance(intersection, shp.Point):
+                        intersects.append((i, intersection.coords[0]))
+                    else:
+                        # multiple points covered by segment ⟨u, v⟩
+                        pts = []
+                        ref = VertexS[u]
+                        for pt in intersection.geoms:
+                            ptC = pt.coords[0]
+                            pts.append((np.hypot(*(ptC - ref)), ptC))
+                        # sort by closeness to VertexC[u]
+                        pts.sort()
+                        for _, ptC in pts:
+                            intersects.append((i, ptC))
+                u = v
+            info('INTERSECTS: %s', intersects)
+            info('border: %s', border)
+            aux_border = border.tolist()
+            offset = 0
+            for i, xy in intersects:
+                n = node_vertex_from_xy[xy]
+                aux_border.insert(i + offset, n)
+                border_vertex_from_xy[xy] = n
+                offset += 1
+            info('aux_border: %s', aux_border)
+            border_poly = shp.Polygon(shell=VertexS[aux_border])
 
         # Turn the main border's concave zones into concavity polygons.
         hull_minus_border = hull_poly - border_poly
@@ -593,13 +632,6 @@ def make_planar_embedding(
     # ###########################################
     debug('PART D')
 
-    node_vertex_from_xy = {
-        (x.item(), y.item()): i
-        for i, (x, y) in chain(
-            enumerate(VertexS[:T]), enumerate(VertexS[-R:], start=-R)
-        )
-    }
-
     if not out_root_pts.is_empty:
         border = np.array(
             [
@@ -699,7 +731,7 @@ def make_planar_embedding(
         for u, v in zip(source, chain(target, (next(target),))):
             if u != begin and u != end and v != end:
                 convex_hull_A.append(u)
-    debug('convex_hull_A: %s', '–'.join(F[n] for n in convex_hull_A))
+    debug('convex_hull_A: %s', convex_hull_A)
     P_A.remove_nodes_from(supertriangle)
 
     # Prune flat triangles from P_A (criterion is aspect_ratio > `max_tri_AR`).
@@ -730,11 +762,8 @@ def make_planar_embedding(
     u, v = hull_prunned[0], hull_prunned[-1]
     uv = (u, v) if u < v else (v, u)
     hull_prunned_edges.add(uv)
-    debug('hull_prunned: %s', '–'.join(F[n] for n in hull_prunned))
-    debug(
-        'hull_prunned_edges: %s',
-        ','.join(f'{F[u]}–{F[v]}' for u, v in hull_prunned_edges),
-    )
+    debug('hull_prunned: %s', hull_prunned)
+    debug('hull_prunned_edges: %s', hull_prunned_edges)
 
     A = nx.Graph()
     A.add_nodes_from(L.nodes(data=True))
@@ -787,7 +816,7 @@ def make_planar_embedding(
                         # TODO: figure out how to avoid repeated outlier nodes
                         warn(
                             'unable to include in hull_concave: %s',
-                            ' '.join(F[n] for n in hull_stack[-pushed:]),
+                            hull_stack[-pushed:],
                         )
                         hull_outliers = A.graph.get('hull_outliers')
                         if hull_outliers is not None:
@@ -811,7 +840,7 @@ def make_planar_embedding(
                     v = hull_stack.pop()
     if not hull_concave:
         hull_concave = hull_prunned
-    debug('hull_concave: %s', '–'.join(F[n] for n in hull_concave))
+    debug('hull_concave: %s', hull_concave)
 
     # ##########################################
     # H) Insert the obstacles' constraint edges.
@@ -1067,93 +1096,97 @@ def make_planar_embedding(
     # M) Revisit A to update edges crossing borders with P_path contours.
     # ###################################################################
     debug('PART M')
+
     cw, ccw = rotation_checkers_factory(VertexC)
+    # auxiliary function for parts M and N
+
+    def is_midpoint_shortable(s, b, t):
+        # Check if each vertex at the border is necessary.
+        # The vertex is kept if the border angle and the path angle
+        # point to the same side. Otherwise, remove the vertex.
+        b_conc_id = vertex2conc_id_map[b]
+        # skip to shortcut if b is in a concavity and is a neighbor of
+        # the supertriangle
+        if b_conc_id < num_holes or all(n not in P[b] for n in supertriangle):
+            debug('s: %d; b: %d; t: %d; b_conc_id: %d', s, b, t, b_conc_id)
+            #  debug([(n, vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
+            nbs = P.neighbors_cw_order(b)
+            skip_test = True
+            for a in nbs:
+                if vertex2conc_id_map.get(a, -1) == b_conc_id:
+                    skip_test = False
+                    break
+            if skip_test:
+                debug('Took the 1st continue.')
+                return False
+            skip_test = True
+            for c in nbs:
+                if vertex2conc_id_map.get(c, -1) == b_conc_id:
+                    if P[b][a]['cw'] == c:
+                        skip_test = False
+                        break
+                    a = c
+            if c == a:
+                # no nb remaining after making a = c, c <- first nb
+                c = next(P.neighbors_cw_order(b))
+                if P[b][a]['cw'] == c:
+                    skip_test = False
+            debug('a: %d; c: %d; s: %d, t: %d; %s', a, c, s, t, skip_test)
+            if skip_test:
+                debug('Took the 2nd continue.')
+                return False
+            elif ccw(a, b, c):
+                ccw_abs = ccw(a, b, s)
+                cw_sbt = cw(s, b, t)
+                cw_cbt = cw(c, b, t)
+                if (
+                    # a close to t, c close to s
+                    (ccw_abs and cw_sbt and cw_cbt)
+                    # a close to s, c close to t
+                    or (
+                        (a == s or not ccw_abs)
+                        and not cw_sbt
+                        and (c == t or not cw_cbt)
+                    )
+                ):
+                    debug('Took the 2nd continue.')
+                    return False
+            return True
+
     corner_to_A_edges = defaultdict(list)
     A_edges_to_revisit = []
     for u, v in A.edges - P_paths.edges:
         # For the edges in A that are not in P, we find their corresponding
         # shortest path in P_path and update the length attribute in A.
         length, path = nx.bidirectional_dijkstra(P_paths, u, v, weight='length')
-        debug('A_edge: %s–%s length: %.3f; path: %s', F[u], F[v], length, path)
+        debug('A_edge: %d–%d length: %.3f; path: %s', u, v, length, path)
         if all(n >= T for n in path[1:-1]):
             # keep only paths that only have border vertices between nodes
             edgeD = A[path[0]][path[-1]]
             midpath = path[1:-1].copy() if u < v else path[-2:0:-1].copy()
             i = 0
             while i <= len(path) - 3:
-                # Check if each vertex at the border is necessary.
-                # The vertex is kept if the border angle and the path angle
-                # point to the same side. Otherwise, remove the vertex.
                 s, b, t = path[i : i + 3]
-                b_conc_id = vertex2conc_id_map[b]
-                # skip to shortcut if b is in a concavity and is a neighbor of
-                # the supertriangle
-                if b_conc_id < num_holes or all(n not in P[b] for n in supertriangle):
-                    debug(
-                        's: %s; b: %s; t: %s; b_conc_id: %s',
-                        F[s],
-                        F[b],
-                        F[t],
-                        b_conc_id,
-                    )
-                    debug([(F[n], vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
-                    nbs = P.neighbors_cw_order(b)
-                    skip_test = True
-                    for a in nbs:
-                        if vertex2conc_id_map.get(a, -1) == b_conc_id:
-                            skip_test = False
-                            break
-                    if skip_test:
-                        i += 1
-                        debug('Took the 1st continue.')
-                        continue
-                    skip_test = True
-                    for c in nbs:
-                        if vertex2conc_id_map.get(c, -1) == b_conc_id and c not in P[a]:
-                            if P[b][a]['cw'] == c:
-                                skip_test = False
-                                break
-                            a = c
-                    if c == a:
-                        # no nb remaining after making a = c, c <- first nb
-                        c = next(P.neighbors_cw_order(b))
-                        if P[b][a]['cw'] == c:
-                            skip_test = False
-                    debug(
-                        'a: %d %s; c: %d %s; s: %d %s, t: %d %s; %s',
-                        a,
-                        F[a],
-                        c,
-                        F[c],
-                        s,
-                        F[s],
-                        t,
-                        F[t],
-                        skip_test,
-                    )
-                    if skip_test or not (
-                        cw(a, b, c) or ((a == s or cw(a, b, s)) == cw(s, b, t))
-                    ):
-                        i += 1
-                        debug('Took the 2nd continue.')
-                        continue
-                # PERFORM SHORTCUT
-                # TODO: The entire new path should go for a 2nd pass if it
-                #       changed here. Unlikely to change in the 2nd pass.
-                #       Reason: a shortcut may change the geometry in such
-                #       way as to make additional shortcuts possible.
-                del path[i + 1]
-                length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
-                shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
-                length += shortcut_length
-                # changing P_paths for the case of revisiting this block
-                P_paths.add_edge(s, t, length=shortcut_length)
-                shortcuts = edgeD.get('shortcuts')
-                if shortcuts is None:
-                    edgeD['shortcuts'] = [b]
+                if is_midpoint_shortable(s, b, t):
+                    # PERFORM SHORTCUT
+                    # TODO: The entire new path should go for a 2nd pass if it
+                    #       changed here. Unlikely to change in the 2nd pass.
+                    #       Reason: a shortcut may change the geometry in such
+                    #       way as to make additional shortcuts possible.
+                    del path[i + 1]
+                    length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
+                    shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
+                    length += shortcut_length
+                    # changing P_paths for the case of revisiting this block
+                    P_paths.add_edge(s, t, length=shortcut_length)
+                    shortcuts = edgeD.get('shortcuts')
+                    if shortcuts is None:
+                        edgeD['shortcuts'] = [b]
+                    else:
+                        shortcuts.append(b)
+                    debug('(%d) %d %d %d shortcut', i, s, b, t)
                 else:
-                    shortcuts.append(b)
-                debug('(%d) %s %s %s shortcut', i, F[s], F[b], F[t])
+                    i += 1
             edgeD.update(  # midpath-> which P edges the A edge maps to
                 # (so that PathFinder works)
                 midpath=midpath,
@@ -1238,19 +1271,26 @@ def make_planar_embedding(
                     # skip border and root vertices and paths without borders
                     continue
                 debug('updating d2root of ⟨%d, %d⟩ (path %s)', r, n, path)
-                node_d2roots = A.nodes[n].get('d2roots')
-                if node_d2roots is None:
-                    A.nodes[n]['d2roots'] = {r: d2roots[n, r]}
-                else:
-                    node_d2roots.update({r: d2roots[n, r]})
-                new_length = 0.0
-                s = path[0]
-                for t in (p for p in path[1:-1] if p >= T):
-                    # only add the lengths between constraint vertices
-                    new_length += np.hypot(*(VertexC[s] - VertexC[t]).T).item()
-                    s = t
-                new_length += np.hypot(*(VertexC[s] - VertexC[n]).T).item()
-                d2roots[n, r] = new_length
+                b_path = (*(p for p in path[1:-1] if p >= T), n)
+                s = r
+                real_path = [r]
+                for b, t in pairwise(b_path):
+                    if not is_midpoint_shortable(s, b, t):
+                        real_path.append(b)
+                        s = b
+                real_path.append(n)
+                if len(real_path) > 2:
+                    debug('d2roots[%d, %d] updated', n, r)
+                    node_d2roots = A.nodes[n].get('d2roots')
+                    if node_d2roots is None:
+                        A.nodes[n]['d2roots'] = {r: d2roots[n, r]}
+                    else:
+                        node_d2roots.update({r: d2roots[n, r]})
+                    d2roots[n, r] = (
+                        np.hypot(*(VertexC[real_path[1:]] - VertexC[real_path[:-1]]).T)
+                        .sum()
+                        .item()
+                    )
 
     # ##########################################
     # O) Calculate the area of the concave hull.
@@ -1406,7 +1446,7 @@ def _deprecated_planar_flipped_by_routeset(
         if v >= T and u not in seen_endpoints:
             uvA = G[u][v]['A_edge']
             seen_endpoints.add(uvA[0] if uvA[1] == u else uvA[1])
-            print('path_uv:', F[u], F[v], '->', F[uvA[0]], F[uvA[1]])
+            print('path_uv:', u, v, '->', uvA[0], uvA[1])
             u, v = uvA if uvA[0] < uvA[1] else uvA[::-1]
             path_uv = [u] + A[u][v]['path'] + [v]
             # now ⟨u, v⟩ represents the corresponding edge in A
