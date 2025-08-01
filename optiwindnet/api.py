@@ -62,7 +62,7 @@ class WindFarmNetwork:
         # Use a default router (heuristic Esau_Williams) if none is provided
 
         if router is None:
-            router = Heuristic(solver_name='Esau_Williams')
+            router = EWRouter(solver_name='Esau_Williams')
         self.router = router
 
         # Parse and validate cables input; convert to list of (capacity, cost) tuples
@@ -263,6 +263,15 @@ class WindFarmNetwork:
     def get_network(self):
         """Returns the network as a structured array of edge data."""
         return extract_network_as_array(self.G)
+    
+    def map_detour_vertex(self):
+        if self.G.graph.get('C') or self.G.graph.get('D'):
+            R, T, B = (self.G.graph[k] for k in 'RTB')
+            map = dict(enumerate(
+                (n.item() for n in self.G.graph['fnT'][T + B:-R]),
+                start=T + B
+            ))
+        return map
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """
@@ -402,38 +411,35 @@ class Router(ABC):
         )
 
 
-class Heuristic(Router):
+class EWRouter(Router):
     def __init__(
         self,
-        solver_name='Esau_Williams',
         maxiter=10000,
+        feeder_route='segmented',
         verbose=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        SUPPORTED = ['Esau_Williams', 'EW', 'CPEW']
-        if solver_name not in SUPPORTED:
-            raise ValueError(
-                f'{solver_name} is not among the supported Heuristic solvers. Choose among: {SUPPORTED}.'
-            )
 
         # Call the base class initialization
         self.verbose = verbose
-        self.solver_name = solver_name
         self.maxiter = maxiter
+        self.feeder_route = feeder_route
 
     def optimize(self, L, A, P, cables, cables_capacity, verbose=None, **kwargs):
         if verbose is None:
             verbose = self.verbose
 
         # optimizing
-        if self.solver_name in ['Esau_Williams', 'EW']:
+        if self.feeder_route=='segmented':
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
-        elif self.solver_name in ['CPEW']:
+        elif self.feeder_route=='straight':
             G_cpew = CPEW(L, capacity=cables_capacity, maxiter=self.maxiter)
             S = S_from_G(G_cpew)
         else:
-            pass
+            raise ValueError(
+                f'{self.feeder_route} is not among the valid feeder_route values. Choose among: ("segmented", "straight").'
+            )
 
         G_tentative = G_from_S(S, A)
 
@@ -444,11 +450,10 @@ class Heuristic(Router):
         return S, G
 
 
-class MetaHeuristic(Router):
+class HGSRouter(Router):
     def __init__(
         self,
         time_limit,
-        solver_name='HGS',
         feeder_limit: int | None = None,
         max_iter=10,
         balanced=False,
@@ -459,7 +464,6 @@ class MetaHeuristic(Router):
         # Call the base class initialization
         super().__init__(**kwargs)
         self.time_limit = time_limit
-        self.solver_name = solver_name
         self.verbose = verbose
         self.max_iter = max_iter
         self.feeder_limit = feeder_limit
@@ -474,37 +478,28 @@ class MetaHeuristic(Router):
             verbose = self.verbose
 
         # optimizing
-        if self.solver_name.lower() in [
-            'hgs',
-            'hybrid genetic search',
-        ]:
-            R = A.graph['R']
-            if R == 1:
-                S = iterative_hgs_cvrp(
-                    as_normalized(A),
-                    capacity=cables_capacity,
-                    time_limit=self.time_limit,
-                    max_iter=self.max_iter,
-                    vehicles=self.feeder_limit,
-                    seed=self.seed,
-                )
-            else:
-                S = hgs_multiroot(
-                    as_normalized(A),
-                    capacity=cables_capacity,
-                    time_limit=self.time_limit,
-                    balanced=self.balanced,
-                    seed=self.seed,
-                )
-                if verbose and self.feeder_limit:
-                    print(
-                        'WARNING: HGS is used for a plant with more than one substation and feeder-limit is neglected (The current implementation of HGS does not support limiting the number of feeders in multi-substation plants.)'
-                    )
-
-        else:
-            raise ValueError(
-                f'{self.solver_name} is not among the supported Meta-Heuristic solvers. Choose among: HGS.'
+        R = A.graph['R']
+        if R == 1:
+            S = iterative_hgs_cvrp(
+                as_normalized(A),
+                capacity=cables_capacity,
+                time_limit=self.time_limit,
+                max_iter=self.max_iter,
+                vehicles=self.feeder_limit,
+                seed=self.seed,
             )
+        else:
+            S = hgs_multiroot(
+                as_normalized(A),
+                capacity=cables_capacity,
+                time_limit=self.time_limit,
+                balanced=self.balanced,
+                seed=self.seed,
+            )
+            if verbose and self.feeder_limit:
+                print(
+                    'WARNING: HGSRouter is used for a plant with more than one substation and feeder-limit is neglected (The current implementation of HGSRouter does not support limiting the number of feeders in multi-substation plants.)'
+                )
 
         G_tentative = G_from_S(S, A)
 
@@ -515,7 +510,7 @@ class MetaHeuristic(Router):
         return S, G
 
 
-class MILP(Router):
+class MILPRouter(Router):
     def __init__(
         self,
         solver_name,
@@ -567,7 +562,7 @@ class MILP(Router):
             logger=None,
         )
 
-        # To Do: maybe if warmstart_state is False deactivate the warmstarting procedure in MILP?
+        # To Do: maybe if warmstart_state is False deactivate the warmstarting procedure in MILPRouter?
 
         solver = self.solver
 
