@@ -372,12 +372,13 @@ class PathFinder:
         VertexC = self.VertexC
         cw, ccw = rotation_checkers_factory(VertexC)
         paths = self.paths
+        I_path = self.I_path
         d2roots = self.d2roots
         ST = self.ST
         I_path = self.I_path
         num_traversals = self.num_traversals
-        bad_streak_limit = self.bad_streak_limit
         promising_bar = 1.0 + self.promising_margin
+        bad_streak_limit = self.bad_streak_limit
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         while True:
@@ -540,9 +541,9 @@ class PathFinder:
         # (it is orientation-sensitive – two permutations)
         #  num_traversals = defaultdict(lambda: self.traversals_limit)
         num_traversals = defaultdict(lambda: 0)
+        self.num_traversals = num_traversals
         paths = self.paths = PathNodes()
         triangles = P.graph['triangles']
-        self.num_traversals = num_traversals
         self.bifurcation = None
         I_path = defaultdict(dict)
         self.I_path = I_path
@@ -823,6 +824,9 @@ class PathFinder:
                         n,
                         path[0],
                     )
+                    subtree_load = G.nodes[n]['load']
+                    G.nodes[r]['load'] -= subtree_load
+                    G.nodes[path[-1]]['load'] += subtree_load
                 G.add_weighted_edges_from(
                     zip(path[:1] + Clone, Clone + path[-1:], dists),
                     weight='length',

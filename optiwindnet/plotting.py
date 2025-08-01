@@ -47,7 +47,8 @@ def gplot(
     hide_ST: bool = True,
     legend: bool = False,
     min_dpi: int = 192,
-    dark=None,
+    dark: bool | None = None,
+    tag_border: bool = False,
     **kwargs,
 ) -> Axes:
     """Plot site and routeset contained in G.
@@ -57,23 +58,24 @@ def gplot(
     Extra arguments given to gplot() will be forwarded to Figure().
 
     Args:
-        ax: Axes instance to plot into. If `None`, opens a new figure.
-        node_tag: text label inside each node `None`, 'load' or 'label' (or
-            any of the nodes' attributes).
-        landscape: True -> rotate the plot by G's attribute 'landscape_angle'.
-        infobox: Draw text box with summary of G's main properties: capacity,
-            number of turbines, number of feeders, total cable length.
-        scalebar: (span_in_data_units, label) add a small bar to indicate the
-            plotted features' scale (lower right corner).
-        hide_ST: If coordinates include a Delaunay supertriangle, adjust the
-            viewport to fit only the actual vertices (i.e. no ST vertices).
-        legend: Add description of linestyles and node shapes.
-        min_dpi: Minimum dots per inch to use. matplotlib's default is used if
-            it is greater than this value.
-        **kwargs: passed on to matplotlib's Figure()
+      ax: Axes instance to plot into. If `None`, opens a new figure.
+      node_tag: text tag inside each node (e.g. 'load', 'label' or any of
+        the nodes' attributes). If `True`, tags the nodes with their numbers.
+      tag_border: if True, all border and obstacle vertices get a number tag.
+      landscape: True -> rotate the plot by G's attribute 'landscape_angle'.
+      infobox: Draw text box with summary of G's main properties: capacity,
+        number of turbines, number of feeders, total cable length.
+      scalebar: (span_in_data_units, label) add a small bar to indicate the
+        plotted features' scale (lower right corner).
+      hide_ST: If coordinates include a Delaunay supertriangle, adjust the
+        viewport to fit only the actual vertices (i.e. no ST vertices).
+      legend: Add description of linestyles and node shapes.
+      min_dpi: Minimum dots per inch to use. matplotlib's default is used if
+        it is greater than this value.
+      **kwargs: passed on to matplotlib's Figure()
 
     Returns:
-        Axes instance containing the plot.
+      Axes instance containing the plot.
     """
     c = Colors(dark)
 
@@ -227,7 +229,7 @@ def gplot(
     # draw labels
     if 'has_loads' in G.graph and node_tag == 'load':
         label_options = dict(
-            labels={n: G.nodes[n]['load'] for n in range(-R, T)},
+            labels={n: G.nodes[n].get('load', '-') for n in range(-R, T)},
             font_size=(
                 {t: FONTSIZE_LOAD for t in range(T)}
                 | {r: FONTSIZE_LABEL for r in range(-R, 0)}
@@ -236,7 +238,7 @@ def gplot(
     elif isinstance(node_tag, str):
         # 'label' or some other node attr from node_tag
         label_options = dict(
-            labels={n: G.nodes[n][node_tag] for n in range(-R, T)},
+            labels={n: G.nodes[n].get(node_tag, '') for n in range(-R, T)},
             font_size=(
                 {t: FONTSIZE_LABEL for t in range(T)}
                 | {r: FONTSIZE_ROOT_LABEL for r in range(-R, 0)}
@@ -291,6 +293,12 @@ def gplot(
         )
         if info_art is not None:
             ax.add_artist(info_art)
+    if tag_border:
+        border_ = border if border is not None else []
+        obstacles_ = obstacles if obstacles is not None else [()]
+        print(VertexC.shape)
+        for b in chain(border_, *(obstacles_)):
+            ax.text(*VertexC[b], str(b), color=c.fg_color, size=FONTSIZE_ROOT_LABEL)
     if hide_ST and VertexC.shape[0] > R + T + B:
         # coordinates include the supertriangle, adjust view limits to hide it
         nonStC = np.r_[VertexC[: T + B], VertexC[-R:]]
