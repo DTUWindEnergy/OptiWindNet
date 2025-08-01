@@ -171,6 +171,7 @@ def make_min_length_model(
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
     balanced: bool = False,
     max_feeders: int | Sequence = 0,
+    max_loads: Sequence = None,
 ) -> tuple[cp_model.CpModel, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -324,6 +325,11 @@ def make_min_length_model(
                     for t, r in stars:
                         m.add(flow_[t, r] >= link_[t, r] * feeder_min_load)
 
+    # limit loads per root
+    if max_loads is not None:
+        for r in _R:
+            m.add(sum(flow_[t, r] for t in _T) <= max_loads[r])
+    
     # radial or branched topology
     if topology is Topology.RADIAL:
         for t in _T:
