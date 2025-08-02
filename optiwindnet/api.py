@@ -271,6 +271,8 @@ class WindFarmNetwork:
                 (n.item() for n in self.G.graph['fnT'][T + B:-R]),
                 start=T + B
             ))
+        else:
+            map = {}
         return map
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
