@@ -7,7 +7,7 @@ import numpy as np
 import yaml
 import yaml_include
 
-# optiwindnet modules
+# OptiWindNet modules
 from optiwindnet.baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from optiwindnet.heuristics import CPEW, EW_presolver
 from optiwindnet.importer import L_from_pbf, L_from_site, L_from_yaml, load_repository
@@ -59,10 +59,9 @@ class WindFarmNetwork:
         router=None,
         buffer_dist=0,
     ):
-        # Use a default router (heuristic Esau_Williams) if none is provided
-
+        # Use a default router if none is provided
         if router is None:
-            router = EWRouter(solver_name='Esau_Williams')
+            router = EWRouter()
         self.router = router
 
         # Parse and validate cables input; convert to list of (capacity, cost) tuples
@@ -73,7 +72,7 @@ class WindFarmNetwork:
         if turbinesC is not None and substationsC is not None:
             if L is not None:
                 warning(
-                    'Both coordinates and L are given, optiwindnet prioritize coordinates over L and neglects the provided L.'
+                    'Both coordinates and L are given, OptiWindNet prioritizes coordinates over L and neglects the provided L.'
                 )
             L = from_coordinates(
                 self,
