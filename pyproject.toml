@@ -59,6 +59,8 @@ test  = [ 'pytest',  # for testing
 docs = [
           'sphinx',
           'nbsphinx', 
+          'myst-parser',
+          'myst-nb',
           'furo',
           'sphinx-versioned-docs',
           'sphinx-autoapi',
