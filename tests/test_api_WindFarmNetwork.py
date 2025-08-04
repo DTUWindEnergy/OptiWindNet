@@ -1,10 +1,7 @@
-
 import pytest
 import numpy as np
-from typing import Any
-from pony.orm import db_session
+import pickle
 from optiwindnet.api import WindFarmNetwork, EWRouter, HGSRouter, MILPRouter
-from optiwindnet.db import modelv2
 from optiwindnet.db.storagev2 import G_from_routeset
 from optiwindnet.interarraylib import L_from_G, L_from_site
 
@@ -12,64 +9,52 @@ from optiwindnet.interarraylib import L_from_G, L_from_site
 
 @pytest.fixture(scope="module")
 def db():
-    db = modelv2.open_database('tests/test_files/db_testing.sqlite')
+    with open("tests/test_files/G_tests.pkl", "rb") as f:
+        db = pickle.load(f)
     yield db
-    # No explicit `db.close()` needed if Pony handles context
-    del db
 
-
-# ========== Factory Fixture for G, L ==========
+# ========== Fixture Factory for G, L ==========
 
 @pytest.fixture
 def LG_from_database(db):
-    def _load(rs_id: int):
-        with db_session:
-            rs = db.RouteSet[rs_id]
-            G = G_from_routeset(rs)
-            L = L_from_G(G)
-            G_info = {
-                'id': rs.id,
-                'capacity': rs.capacity,
-                'detextra': rs.detextra,
-                'length': rs.length,
-                'creator': rs.creator,
-                'gap': rs.misc.get('gap', None),
-            }
-            return G, L, G_info
-    return _load
+    def _factory(label):
+        G = db[label]
+        L = L_from_G(G)
+        return L, G
+    return _factory
 
-
-# ========== Factory Fixture for Coordinate-Based Site ==========
+# ========== Fixture Factory for Coordinate-Based Site ==========
 
 @pytest.fixture
 def site_from_database(db):
-    def _load(rs_id: int) -> dict[str, Any]:
-        with db_session:
-            rs = db.RouteSet[rs_id]
-            G = G_from_routeset(rs)
-            VertexC = G.graph['VertexC']
-            T = G.graph['T']
-            R = G.graph['R']
+    def _factory(label):
+        G = db[label]
 
-            return {
-                "turbinesC": VertexC[:T],
-                "substationsC": VertexC[-R:] if R > 0 else np.empty((0, 2)),
-                "borderC": VertexC[G.graph.get('border', [])] if 'border' in G.graph else np.empty((0, 2)),
-                "obstaclesC": [VertexC[o] for o in G.graph.get('obstacles', [])],
-                "name": G.graph.get("name", f"routeset_{rs_id}"),
-                "handle": G.graph.get("handle", f"rs_{rs_id}"),
-            }
-    return _load
+        VertexC = G.graph['VertexC']
+        T = G.graph['T']
+        R = G.graph['R']
+        print([VertexC[o] for o in G.graph.get('obstacles', [])])
 
+        return {
+            "turbinesC": VertexC[:T],
+            "substationsC": VertexC[-R:] if R > 0 else np.empty((0, 2)),
+            "borderC": VertexC[G.graph.get('border', [])] if 'border' in G.graph else np.empty((0, 2)),
+            "obstaclesC": [VertexC[o] for o in G.graph.get('obstacles', [])],
+            "handle": G.graph['handle'],
+            "name": G.graph['name'],
+            "landscape_angle": G.graph['landscape_angle'],
+        }
+    return _factory
 
 # ========== Graph Assertion Helpers ==========
 
-def assert_graph_equal(G1, G2, ignored_graph_keys={'label', 'landscape_angle', 'obstacles'}):
-    # Structural checks
+def assert_graph_equal(G1, G2, ignored_graph_keys=None):
+    if ignored_graph_keys is None:
+        ignored_graph_keys = set()
+
     assert set(G1.nodes) == set(G2.nodes), "Node sets differ"
     assert set(G1.edges) == set(G2.edges), "Edge sets differ"
 
-    # Node attribute checks
     for n in G1.nodes:
         attrs1 = G1.nodes[n]
         attrs2 = G2.nodes[n]
@@ -77,7 +62,6 @@ def assert_graph_equal(G1, G2, ignored_graph_keys={'label', 'landscape_angle', '
         filtered2 = {k: v for k, v in attrs2.items() if k != 'label'}
         assert filtered1 == filtered2, f"Node {n} attributes differ: {filtered1} != {filtered2}"
 
-    # Graph-level attribute comparison (filtered)
     keys1 = set(G1.graph.keys()) - ignored_graph_keys
     keys2 = set(G2.graph.keys()) - ignored_graph_keys
     assert keys1 == keys2, f"Graph keys mismatch: {keys1.symmetric_difference(keys2)}"
@@ -97,193 +81,111 @@ def assert_graph_equal(G1, G2, ignored_graph_keys={'label', 'landscape_angle', '
         else:
             assert v1 == v2, f"Mismatch in graph['{k}']: {v1} != {v2}"
 
+# ========== Test ==========
 
-def test_wfn_initialization(LG_from_database, site_from_database, caplog):
-
-    rs_id = 10
-
-    _, expected_L, G_info = LG_from_database(rs_id)
-    site = site_from_database(rs_id)
-
-    # Test that missing both L and coordinates raises error
+def test_wfn_fails_without_coordinates_or_L():
     with pytest.raises(ValueError, match="Both turbinesC and substationsC must be provided! Or alternatively L should be given."):
-        WindFarmNetwork(cables=5)
+        WindFarmNetwork(cables=7)
+
+
+def test_wfn_warns_when_L_and_coordinates_given(LG_from_database, site_from_database, caplog):
+    expected_L, _ = LG_from_database("eagle_EWRouter")
+    site = site_from_database("eagle_EWRouter")
 
     with caplog.at_level("WARNING"):
         WindFarmNetwork(
-            cables=[(10, 100)],
+            cables=7,
             turbinesC=site['turbinesC'],
             substationsC=site['substationsC'],
             L=expected_L
         )
 
     assert any("OptiWindNet prioritizes coordinates over L" in message for message in caplog.messages)
-    
-    # Test that missing cables raises error
+
+
+def test_wfn_fails_without_cables(site_from_database):
+    site = site_from_database("eagle_EWRouter")
     with pytest.raises(TypeError, match="missing 1 required positional argument: 'cables'"):
-        WindFarmNetwork()  # missing cables
+        WindFarmNetwork(
+            turbinesC=site['turbinesC'],
+            substationsC=site['substationsC']
+        )
 
-    wfn1 = WindFarmNetwork(
-        cables=[(G_info['capacity'], 100)],  # simplify cable input for test
-        turbinesC=site['turbinesC'],
-        substationsC=site['substationsC'],
-        borderC=site['borderC'],
-        obstaclesC=site['obstaclesC'],
-        name=site['name'],
-        handle=site['handle']
-    )
 
-    assert_graph_equal(wfn1.L, expected_L)
+def test_wfn_from_coordinates_matches_expected_L(LG_from_database, site_from_database):
+    expected_L, _ = LG_from_database("eagle_EWRouter")
+    site = site_from_database("eagle_EWRouter")
+
+    kwargs = {
+        "cables": 7,
+        "turbinesC": site["turbinesC"],
+        "substationsC": site["substationsC"],
+        "handle": site['handle'],
+        "name": site['name'],
+        "landscape_angle": site['landscape_angle'],
+    }
+
+    if site["borderC"].size > 0:
+        kwargs["borderC"] = site["borderC"]
+
+    if site["obstaclesC"]:
+        kwargs["obstaclesC"] = site["obstaclesC"]
+
+    wfn1 = WindFarmNetwork(**kwargs)
+
+    assert_graph_equal(wfn1.L, expected_L, ignored_graph_keys={'norm_offset', 'norm_scale', 'obstacles'})
     assert isinstance(wfn1.router, EWRouter)
 
-    # test for from L
-    wfn2 = WindFarmNetwork(
-        cables=[G_info['capacity']],  # simplify cable input for test
-        L=expected_L,
-    )
 
-    assert_graph_equal(wfn2.L, expected_L)
+def test_wfn_from_L_matches_expected_L(LG_from_database):
+    expected_L, _ = LG_from_database("eagle_EWRouter")
 
-    # test cables formatting
-    wfn = WindFarmNetwork(
-        cables=7,  # simplify cable input for test
-        L=expected_L,
-    )
-    assert np.array_equal(wfn.cables, [(7, 1)])
+    wfn2 = WindFarmNetwork(cables=7, L=expected_L)
+    assert_graph_equal(wfn2.L, expected_L, ignored_graph_keys={'norm_offset', 'norm_scale', 'obstacles'})
 
-    wfn = WindFarmNetwork(
-    cables=(7, 100),  # simplify cable input for test
-    L=expected_L,
-    )
-    assert np.array_equal(wfn.cables, [(7, 100)])
 
-    wfn = WindFarmNetwork(
-        cables=[(5, 100), (7, 150), (9, 200)] ,  # simplify cable input for test
-        L=expected_L,
-        )
-    assert np.array_equal(wfn.cables, [(5, 100), (7, 150), (9, 200)])
+@pytest.mark.parametrize("cables_input, expected_array", [
+    (7, [(7, 1)]),
+    ((7, 100), [(7, 100)]),
+    ([(5, 100), (7, 150), (9, 200)], [(5, 100), (7, 150), (9, 200)]),
+])
+def test_wfn_cable_formats(LG_from_database, cables_input, expected_array):
+    expected_L, _ = LG_from_database("eagle_EWRouter")
+    wfn = WindFarmNetwork(cables=cables_input, L=expected_L)
+    assert np.array_equal(wfn.cables, expected_array)
 
-    
+
+def test_wfn_invalid_cables_raises(LG_from_database):
+    expected_L, _ = LG_from_database("eagle_EWRouter")
+
     with pytest.raises(ValueError, match="Invalid cable values"):
         WindFarmNetwork(cables=(5, 7, 9), L=expected_L)
 
-def test_hgs_router(LG_from_database, site_from_database, caplog):
 
-    rs_id = 3617
+@pytest.mark.parametrize("label, router, ignored_keys", [
+    ("eagle_EWRouter", None, {'runtime'}),
+    ("eagle_EWRouter_straight", EWRouter(feeder_route='straight'), {'runtime'}),
+    ("taylor_EWRouter", None, {'runtime'}),
+    ("taylor_EWRouter_straight", EWRouter(feeder_route='straight'), {'runtime'}),
+    ("eagle_HGSRouter", HGSRouter(time_limit=2), {'solution_time'}),
+    ("eagle_HGSRouter_feeder_limit", HGSRouter(time_limit=2, feeder_limit=0), {'solution_time'}),
+    ("taylor_HGSRouter", HGSRouter(time_limit=2), {'solution_time'}),
+    ("taylor_HGSRouter_feeder_limit", HGSRouter(time_limit=2, feeder_limit=0), {'solution_time'}),
+    ("eagle_MILPRouter", MILPRouter(solver_name='ortools', time_limit=5, mip_gap=0.005), {'runtime', 'bound', 'pool_count', 'relgap'}),
+])
 
-    expected_G, expected_L, G_info = LG_from_database(rs_id)
 
-    wfn = WindFarmNetwork(
-        cables=G_info['capacity'] ,  # simplify cable input for test
-        L=expected_L,
-        )
-    
-    wfn.optimize(router=HGSRouter(time_limit=1))
-
-    assert_graph_equal(wfn.G, expected_G)
-
-def test_milp_router(LG_from_database, site_from_database, caplog):
-
-    rs_id = 6
-
-    expected_G, expected_L, G_info = LG_from_database(rs_id)
+def test_router_variants(LG_from_database, label, router, ignored_keys):
+    expected_L, G = LG_from_database(label)
+    print(G.graph['capacity'])
 
     wfn = WindFarmNetwork(
-        cables=G_info['capacity'] ,  # simplify cable input for test
+        cables=G.graph['capacity'],
         L=expected_L,
-        )
-    
-    wfn.optimize(router=MILPRouter(solver_name='cplex', time_limit=20, mip_gap=0.005))
+    )
 
-    assert_graph_equal(wfn.G, expected_G)
+    wfn.optimize(router=router)
 
+    ignored_keys = ignored_keys or set()
+    assert_graph_equal(wfn.G, G, ignored_graph_keys=ignored_keys)
 
-    #############################################
-    # TO ADD
-    # wfn = WindFarmNetwork.from_yaml()
-    # wfn = WindFarmNetwork.from_pbf()
-    # wfn = WindFarmNetwork.from_windIO()
-    ############################################
-
-
-# def test_optimize_returns_valid_terse_links(simple_network):
-#     terse = simple_network.optimize()
-#     T = simple_network.L.graph['T']
-
-#     assert isinstance(terse, np.ndarray)
-#     assert terse.shape == (T,)
-#     assert np.issubdtype(terse.dtype, np.integer)
-#     assert (terse != np.arange(T)).all()  # No self-loops
-
-# def test_cost_and_length(simple_network):
-#     simple_network.optimize()
-#     cost = simple_network.cost()
-#     length = simple_network.length()
-
-#     assert isinstance(cost, (int, float))
-#     assert isinstance(length, (int, float))
-#     assert cost >= 0
-#     assert length >= 0
-
-# def test_get_network(simple_network):
-#     simple_network.optimize()
-#     net = simple_network.get_network()
-
-#     assert isinstance(net, np.ndarray)
-#     assert net.dtype.names is not None  # structured array expected
-#     assert {'src', 'tgt', 'length', 'load', 'reverse', 'cable', 'cost'}.issubset(net.dtype.names)
-
-# def test_gradient_outputs(simple_network):
-#     simple_network.optimize()
-#     grad_t, grad_s = simple_network.gradient()
-
-#     assert isinstance(grad_t, np.ndarray)
-#     assert isinstance(grad_s, np.ndarray)
-#     assert grad_t.shape[1] == 2
-#     assert grad_s.shape[1] == 2
-#     assert np.isfinite(grad_t).all()
-#     assert np.isfinite(grad_s).all()
-
-# def test_gradient_type_variants(simple_network):
-#     simple_network.optimize()
-
-#     for kind in ['length', 'cost']:
-#         grad_t, grad_s = simple_network.gradient(gradient_type=kind)
-#         assert grad_t.shape[1] == 2
-
-#     with pytest.raises(ValueError):
-#         simple_network.gradient(gradient_type='invalid')
-
-# def test_update_from_terse_links(simple_network):
-#     terse = simple_network.optimize()
-#     new_G = simple_network.update_from_terse_links(terse)
-
-#     assert new_G is not None
-#     assert isinstance(new_G.graph['VertexC'], np.ndarray)
-
-# def test_terse_links_correctness(simple_network):
-#     terse = simple_network.optimize()
-#     T = simple_network.L.graph['T']
-
-#     assert terse.shape == (T,)
-#     assert all(isinstance(x, (int, np.integer)) for x in terse)
-
-# def test_map_detour_vertex(simple_network):
-#     simple_network.optimize()
-#     mapping = simple_network.map_detour_vertex()
-
-#     if mapping:  # Only test if detours exist
-#         assert isinstance(mapping, dict)
-#         for k, v in mapping.items():
-#             assert isinstance(k, int)
-#             assert isinstance(v, int)
-
-# def test_plot_methods_do_not_crash(simple_network):
-#     simple_network.optimize()
-
-#     # These should render but not return data (no assert needed)
-#     simple_network.plot()
-#     simple_network.plot_location()
-#     simple_network.plot_available_links()
-#     simple_network.plot_selected_links()
-#     simple_network.plot_navigation_mesh()
