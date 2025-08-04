@@ -269,7 +269,7 @@ def data_driven_hybrid(
 
     # other structures
     # <pq>: queue prioritized by lowest negative appraisal
-    pq = PriorityQueue()
+    #  pq = PriorityQueue()
     # enqueue_best_union()
     # <stale_subtrees>: deque for components that need to go through
     # stale_subtrees = deque()
@@ -279,7 +279,9 @@ def data_driven_hybrid(
     cat_feas_links_ = [-1] * T
     cat_feas_unions_ = [-1] * T
     extent_min_ = [-1.0] * T
-    rank = tuple(set() for _ in range(len(UnionCount)))
+    # indexed by the cat_feas_unions of the subroots:
+    prioset_ = tuple(set() for _ in range(len(UnionCount)))
+    top_link_ = [None] * T
     # <i>: iteration counter
     i = 0
 
@@ -377,8 +379,8 @@ def data_driven_hybrid(
                 num_feas_links += 1
                 feas_unions.add(sr_v)
                 extent_min = min(extent_min, extent)
-        for uv_uniq in unfeas_links:
-            pq.cancel(uv_uniq)
+        #  for uv_uniq in unfeas_links:
+        #      pq.cancel(uv_uniq)
             #  if uv_uniq in pq.tags:
             #      pq.cancel(uv_uniq)
             #  else:
@@ -410,9 +412,13 @@ def data_driven_hybrid(
         cat_feas_unions = UnionCount.encode(len(feas_unions))
         cat_feas_links = LinkCount.encode(num_feas_links)
         update_stales = False
-        if cat_feas_unions != cat_feas_unions_[subroot]:
-            rank[cat_feas_unions_[subroot]].remove(subroot)
-            rank[cat_feas_unions].add(subroot)
+        prev_cat_feas_unions = cat_feas_unions_[subroot]
+        if cat_feas_unions != prev_cat_feas_unions:
+            if prev_cat_feas_unions >= 0:
+                #  prioset_[prev_cat_feas_unions].remove(subroot)
+                prioset_[prev_cat_feas_unions].discard(subroot)
+            if len(proper_links) > 0:
+                prioset_[cat_feas_unions].add(subroot)
             cat_feas_unions_[subroot] = cat_feas_unions
             update_stales = True
         if cat_feas_links != cat_feas_links_[subroot]:
@@ -443,37 +449,52 @@ def data_driven_hybrid(
             )
         links_to_upd = []
         links_features = []
+        link_groups = []
+        #  print(stale_subtrees)
         while stale_subtrees:
             subroot = stale_subtrees.pop()
             proper_links, proper_features = refresh_subtree(subroot)
-            links_to_upd.extend(proper_links)
-            links_features.extend(proper_features)
+            #  print(subroot, proper_links)
+            if proper_links:
+                link_groups.append((subroot, len(proper_links)))
+                links_to_upd.extend(proper_links)
+                links_features.extend(proper_features)
 
+
+        #  print('LINK_GROUPS\n', link_groups)
+        #  print('PRIOSET\n', prioset_)
         # appraise and enqueue links
         if links_features:
             appraisals = appraise(links_features)
             appraisal_log[i] = tuple(links_to_upd), appraisals
-            for link, (sr_u, *_), appraisal in zip(
-                links_to_upd, links_features, appraisals
-            ):
-                pq.add(-appraisal, link, sr_u)
+            j = 0
+            for sr_u, num_appraisals in link_groups:
+                # get best-appraised link for each subroot
+                i, j = j, j + num_appraisals
+                top_link_[sr_u] = max(zip(appraisals[i: j].tolist(), links_to_upd[i: j]))
 
-        if not pq:
+        for tier_id, prioset in enumerate(prioset_):
+            if prioset:
+                # get the best-appraised link from the highest-priority non-empty tier
+                appraisal, uv_uniq, sr_dropped = max((*top_link_[sr], sr) for sr in prioset)
+                prioset.remove(sr_dropped)
+                break
+        else:
             # finished
             break
-        debug('heap top loop-top: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
+        #  debug('heap top loop-top: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
 
-        # get best link
-        uv_uniq, sr_dropped = pq.top()
         # TODO: reassess this hack
         if uv_uniq not in A.edges:
             stale_log[i] = uv_uniq
-            debug('>>> popped link ⟨%s⟩ is not in A anymore <<<', uv_uniq)
+            #  debug('>>> popped link ⟨%s⟩ is not in A anymore <<<', uv_uniq)
+            print(f'>>> popped link ⟨{uv_uniq}⟩ is not in A anymore <<<')
+            prioset_[tier_id].discard(sr_dropped)
             continue
         # convert uv_uniq back to ⟨source, target⟩
         u, v = uv_uniq if subroot_[uv_uniq[0]] == sr_dropped else uv_uniq[::-1]
         sr_kept = subroot_[v]
-        debug('<popped> «%d~%d», sr_u: <%d>', u, v, sr_dropped)
+        debug('<popped> «%d~%d», sr_u: <%d>, appraisal: %.3f', u, v, sr_dropped, appraisal)
 
         root = A.nodes[sr_kept]['root']
         subtree = subtree_[sr_kept]
@@ -509,8 +530,8 @@ def data_driven_hybrid(
             debug('subroot <%d> finalized (full load)', sr_kept)
             is_feederless_[sr_kept] = False
             steps_log[i].append((sr_kept, root))
-            for s, t in A.edges(subtree):
-                pq.cancel((s, t) if s < t else (t, s))
+            #  prioset_[cat_feas_unions_[sr_kept]].remove(sr_kept)
+            prioset_[cat_feas_unions_[sr_kept]].discard(sr_kept)
             A.remove_nodes_from(subtree)
             purge_log[i].append(tuple(subtree))
             for sr in whoneeds_[sr_dropped]:
@@ -536,17 +557,17 @@ def data_driven_hybrid(
         for s, t in edge_crossings(u, v, A, diagonals):
             A.remove_edge(s, t)
             purge_log[i].append(((s, t),))
-            pq.cancel((s, t) if s < t else (t, s))
             stale_subtrees.add(subroot_[s])
             stale_subtrees.add(subroot_[t])
         # in case sr_dropped was marked as stale because of crossings
         # TODO: rethink why not: stale_subtrees.remove(sr_dropped)
         stale_subtrees.discard(sr_dropped)
+        #  print('TOP_LINK\n', top_link_)
 
-        if pq:
-            debug('heap top loop-end: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
-        else:
-            debug('heap EMPTY')
+        #  if pq:
+        #      debug('heap top loop-end: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
+        #  else:
+        #      debug('heap EMPTY')
     # END: main loop
 
     # add missing feeders (possibly sub-capacity components)
