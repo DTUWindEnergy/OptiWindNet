@@ -58,6 +58,7 @@ class WindFarmNetwork:
         L=None,
         router=None,
         buffer_dist=0,
+        **kwargs,
     ):
         # Use a default router if none is provided
         if router is None:
@@ -83,6 +84,7 @@ class WindFarmNetwork:
                 name,
                 handle,
                 buffer_dist,
+                **kwargs,
             )
         elif L is None:
             raise ValueError(
@@ -167,6 +169,7 @@ class WindFarmNetwork:
             border=np.arange(T, T + borderC.shape[0]),
             name=' '.join(name_tokens),
             handle=f'{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}',
+            **kwargs
         )
 
         return cls(L=L, **kwargs)
