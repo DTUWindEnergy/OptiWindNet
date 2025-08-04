@@ -22,6 +22,7 @@ def hgs_cvrp(
     time_limit: float,
     vehicles: int | None = None,
     seed: int = 0,
+    keep_log: bool = False,
 ) -> nx.Graph:
     """Solves the OCVRP using HGS-CVRP with links from `A`
 
@@ -105,16 +106,17 @@ def hgs_cvrp(
         objective=cost,
         creator='baselines.hgs',
         runtime=runtime,
-        solver_log=log,
         solution_time=solution_time,
         method_options=dict(
             solver_name='HGS-CVRP',
             feeders_above_min=feeders_above_min,
             complete=A.number_of_edges() == 0,
-            fun_fingerprint=fun_fingerprint(),
+            fun_fingerprint=_hgs_cvrp_fun_fingerprint,
         )
         | algo_params,
     )
+    if keep_log:
+        S.graph['method_log'] = log
     if vehicles is not None:
         S.graph['solver_details'] = dict(vehicles=vehicles)
 
@@ -140,6 +142,9 @@ def hgs_cvrp(
     return S
 
 
+_hgs_cvrp_fun_fingerprint = fun_fingerprint(hgs_cvrp)
+
+
 def iterative_hgs_cvrp(
     A: nx.Graph,
     *,
@@ -148,6 +153,7 @@ def iterative_hgs_cvrp(
     vehicles: int | None = None,
     seed: int = 0,
     max_iter: int = 10,
+    keep_log: bool = False,
 ) -> nx.Graph:
     """Iterate until crossing-free solution is found (`hgs_cvrp()` wrapper).
 
@@ -175,7 +181,12 @@ def iterative_hgs_cvrp(
 
     # solve
     S = hgs_cvrp(
-        A, capacity=capacity, time_limit=time_limit, vehicles=vehicles, seed=seed
+        A,
+        capacity=capacity,
+        time_limit=time_limit,
+        vehicles=vehicles,
+        seed=seed,
+        keep_log=keep_log,
     )
     # repair
     S = repair_routeset_path(S, A)
@@ -259,6 +270,7 @@ def hgs_multiroot(
     time_limit: float,
     balanced: bool = False,
     seed: int = 0,
+    keep_log: bool = False,
 ) -> nx.Graph:
     R, T = (A.graph[k] for k in 'RT')
     VertexC = A.graph['VertexC']
@@ -311,17 +323,18 @@ def hgs_multiroot(
         objective=sum(cost_),
         creator='baselines.hgs',
         runtime=max(runtime_),
-        solver_log=log_,
         solution_time=solution_time_,
         method_options=dict(
             solver_name='HGS-CVRP',
             complete=A.number_of_edges() == 0,
-            fun_fingerprint=fun_fingerprint(),
+            fun_fingerprint=_hgs_multiroot_fun_fingerprint,
         )
         | algo_params[0],
         #  solver_details=dict(
         #  )
     )
+    if keep_log:
+        S.graph['method_log'] = log_
     subtree_id_start = 0
     for r, (routes, indices) in enumerate(zip(routes_, indices_), start=-R):
         branches = (indices[route] for route in routes)
@@ -347,3 +360,6 @@ def hgs_multiroot(
         'ERROR: root node load does not match T.'
     )
     return S
+
+
+_hgs_multiroot_fun_fingerprint = fun_fingerprint(hgs_multiroot)

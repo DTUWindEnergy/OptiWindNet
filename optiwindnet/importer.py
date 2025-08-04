@@ -210,7 +210,9 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         nx.set_node_attributes(G, {t: TerminalLabel[t] for t in range(T)}, name='label')
     G.add_nodes_from(range(-R, 0), kind='oss')
     if RootLabel:
-        nx.set_node_attributes(G, {-R + r: RootLabel[r] for r in range(R)}, name='label')
+        nx.set_node_attributes(
+            G, {-R + r: RootLabel[r] for r in range(R)}, name='label'
+        )
     return G
 
 

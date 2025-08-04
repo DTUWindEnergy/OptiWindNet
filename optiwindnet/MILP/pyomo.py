@@ -146,6 +146,7 @@ class SolverPyomo(Solver):
         P, model_options = self.P, self.model_options
         S = topology_from_mip_sol(model=self.model)
         S.graph['creator'] += self.name
+        S.graph['fun_fingerprint'] = make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
             P,
@@ -409,10 +410,20 @@ def make_min_length_model(
         max_feeders=max_feeders,
     )
     metadata = ModelMetadata(
-        R, T, capacity, m.linkset, m.link_, m.flow_, model_options, fun_fingerprint()
+        R,
+        T,
+        capacity,
+        m.linkset,
+        m.link_,
+        m.flow_,
+        model_options,
+        _make_min_length_model_fingerprint,
     )
 
     return m, metadata
+
+
+_make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
 
 def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:

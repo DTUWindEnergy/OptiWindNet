@@ -9,7 +9,7 @@ from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
 from ..geometric import assign_root
-from ..interarraylib import calcload
+from ..interarraylib import calcload, fun_fingerprint
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -18,7 +18,9 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
-def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter: int = 10000) -> nx.Graph:
+def EW_presolver(
+    Aʹ: nx.Graph, capacity: int, maxiter: int = 10000, keep_log: bool = False
+) -> nx.Graph:
     """Modified Esau-Williams heuristic for C-MST with limited crossings
 
     Args:
@@ -311,10 +313,15 @@ def EW_presolver(Aʹ: nx.Graph, capacity: int, maxiter: int = 10000) -> nx.Graph
         runtime=time.perf_counter() - start_time,
         capacity=capacity,
         creator='EW_presolver',
-        solver_details=dict(
-            log=log,
-            iterations=i,
-            prevented_crossings=prevented_crossings,
+        iterations=i,
+        prevented_crossings=prevented_crossings,
+        method_options=dict(
+            fun_fingerprint=_EW_presolver_fun_fingerprint,
         ),
     )
+    if keep_log:
+        S.graph['method_log'] = log
     return S
+
+
+_EW_presolver_fun_fingerprint = fun_fingerprint(EW_presolver)
