@@ -344,10 +344,20 @@ def make_min_length_model(
         max_feeders=max_feeders,
     )
     metadata = ModelMetadata(
-        R, T, k, linkset, link_, flow_, model_options, fun_fingerprint()
+        R,
+        T,
+        k,
+        linkset,
+        link_,
+        flow_,
+        model_options,
+        _make_min_length_model_fingerprint,
     )
 
     return m, metadata
+
+
+_make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
 
 def warmup_model(
