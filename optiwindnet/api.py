@@ -221,21 +221,20 @@ class WindFarmNetwork:
         Updates the network from terse link representation.
         Optionally updates node coordinates.
         """
-        terse_links = [int(x) for x in terse_links]
-        # --- Added block: check input format ---
-        terse_links = np.asarray(terse_links)
-
-        # Validate input shape and type
         if not np.issubdtype(terse_links.dtype, np.integer):
             raise ValueError(
-                f'terse_links must be an array of integers. Got {terse_links.dtype} instead.\n'
-                f'Hint: You can fix it by doing terse_links = [int(x) for x in terse_links].'
+                f'terse_links must be an array of integers. Got {terse_links.dtype} instead.'
             )
-
+        print(terse_links.ndim)
+        
         if terse_links.ndim != 1:
             raise ValueError(
                 f'terse_links must be a 1D array. Got shape {terse_links.shape} instead.'
             )
+        
+        terse_links = [int(x) for x in terse_links]
+
+        terse_links = np.asarray(terse_links)
 
         # Update coordinates if provided
         if turbinesC is not None:
@@ -248,7 +247,10 @@ class WindFarmNetwork:
             self.P, self.A = make_planar_embedding(self.L)
 
         # Rebuild the selected edge set (links)
+        if self.S is None:
+            self.S = self.L
         self.S.remove_edges_from(list(self.S.edges()))
+
         for i, j in enumerate(terse_links):
             self.S.add_edge(i, j)
 
