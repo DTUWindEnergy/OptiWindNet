@@ -1,10 +1,52 @@
 import pytest
 import numpy as np
 import pickle
-from optiwindnet.api import WindFarmNetwork, EWRouter
-#from tests.assertions import assert_graph_equal
+from optiwindnet.api import WindFarmNetwork, EWRouter, HGSRouter, MILPRouter
+from optiwindnet.db.storagev2 import G_from_routeset
+from optiwindnet.interarraylib import L_from_G, L_from_site
 
-# ========== Assertions ==========
+# ========== Database Fixture ==========
+
+@pytest.fixture(scope="module")
+def db():
+    with open("tests/test_files/G_tests.pkl", "rb") as f:
+        db = pickle.load(f)
+    yield db
+
+# ========== Fixture Factory for G, L ==========
+
+@pytest.fixture
+def LG_from_database(db):
+    def _factory(label):
+        G = db[label]
+        L = L_from_G(G)
+        return L, G
+    return _factory
+
+# ========== Fixture Factory for Coordinate-Based Site ==========
+
+@pytest.fixture
+def site_from_database(db):
+    def _factory(label):
+        G = db[label]
+
+        VertexC = G.graph['VertexC']
+        T = G.graph['T']
+        R = G.graph['R']
+        print([VertexC[o] for o in G.graph.get('obstacles', [])])
+
+        return {
+            "turbinesC": VertexC[:T],
+            "substationsC": VertexC[-R:] if R > 0 else np.empty((0, 2)),
+            "borderC": VertexC[G.graph.get('border', [])] if 'border' in G.graph else np.empty((0, 2)),
+            "obstaclesC": [VertexC[o] for o in G.graph.get('obstacles', [])],
+            "handle": G.graph['handle'],
+            "name": G.graph['name'],
+            "landscape_angle": G.graph['landscape_angle'],
+        }
+    return _factory
+
+# ========== Graph Assertion Helpers ==========
 
 def assert_graph_equal(G1, G2, ignored_graph_keys=None):
     if ignored_graph_keys is None:
@@ -118,4 +160,32 @@ def test_wfn_invalid_cables_raises(LG_from_database):
 
     with pytest.raises(ValueError, match="Invalid cable values"):
         WindFarmNetwork(cables=(5, 7, 9), L=expected_L)
+
+
+@pytest.mark.parametrize("label, router, ignored_keys", [
+    ("eagle_EWRouter", None, {'runtime'}),
+    ("eagle_EWRouter_straight", EWRouter(feeder_route='straight'), {'runtime'}),
+    ("taylor_EWRouter", None, {'runtime'}),
+    ("taylor_EWRouter_straight", EWRouter(feeder_route='straight'), {'runtime'}),
+    ("eagle_HGSRouter", HGSRouter(time_limit=2), {'solution_time'}),
+    ("eagle_HGSRouter_feeder_limit", HGSRouter(time_limit=2, feeder_limit=0), {'solution_time'}),
+    ("taylor_HGSRouter", HGSRouter(time_limit=2), {'solution_time'}),
+    ("taylor_HGSRouter_feeder_limit", HGSRouter(time_limit=2, feeder_limit=0), {'solution_time'}),
+    ("eagle_MILPRouter", MILPRouter(solver_name='ortools', time_limit=5, mip_gap=0.005), {'runtime', 'bound', 'pool_count', 'relgap'}),
+])
+
+
+def test_router_variants(LG_from_database, label, router, ignored_keys):
+    expected_L, G = LG_from_database(label)
+    print(G.graph['capacity'])
+
+    wfn = WindFarmNetwork(
+        cables=G.graph['capacity'],
+        L=expected_L,
+    )
+
+    wfn.optimize(router=router)
+
+    ignored_keys = ignored_keys or set()
+    assert_graph_equal(wfn.G, G, ignored_graph_keys=ignored_keys)
 
