@@ -45,10 +45,10 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
     ("eagle_EWRouter_straight", EWRouter(feeder_route='straight'), {'runtime'}),
     ("taylor_EWRouter", None, {'runtime'}),
     ("taylor_EWRouter_straight", EWRouter(feeder_route='straight'), {'runtime'}),
-    ("eagle_HGSRouter", HGSRouter(time_limit=2), {'solution_time'}),
-    ("eagle_HGSRouter_feeder_limit", HGSRouter(time_limit=2, feeder_limit=0), {'solution_time'}),
-    ("taylor_HGSRouter", HGSRouter(time_limit=2), {'solution_time'}),
-    ("taylor_HGSRouter_feeder_limit", HGSRouter(time_limit=2, feeder_limit=0), {'solution_time'}),
+    ("eagle_HGSRouter", HGSRouter(time_limit=2), {'solution_time', 'runtime'}),
+    ("eagle_HGSRouter_feeder_limit", HGSRouter(time_limit=2, feeder_limit=0), {'solution_time', 'runtime'}),
+    ("taylor_HGSRouter", HGSRouter(time_limit=2), {'solution_time', 'runtime'}),
+    ("taylor_HGSRouter_feeder_limit", HGSRouter(time_limit=2, feeder_limit=0), {'solution_time', 'runtime'}),
     ("eagle_MILPRouter", MILPRouter(solver_name='ortools', time_limit=5, mip_gap=0.005), {'runtime', 'bound', 'pool_count', 'relgap'}),
 ])
 
@@ -66,4 +66,3 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
 
     ignored_keys = ignored_keys or set()
     assert_graph_equal(wfn.G, G, ignored_graph_keys=ignored_keys)
-
