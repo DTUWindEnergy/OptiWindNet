@@ -96,6 +96,10 @@ class PathFinder:
         promising_margin: float = 0.1,
         bad_streak_limit: int = 9,
     ) -> None:
+        self.iterations_limit = iterations_limit
+        self.traversals_limit = traversals_limit
+        self.promising_margin = promising_margin
+        self.bad_streak_limit = bad_streak_limit
         self.iterations = 0
         G = Gʹ.copy()
         R, T, B = (G.graph[k] for k in 'RTB')
@@ -190,7 +194,9 @@ class PathFinder:
                 u = s
                 if shortpath:
                     # there may be more than one edge cloning same border vertex
-                    choices = [v for v in G[u] if v >= clone_offset and fnT[v] == shortpath[0]]
+                    choices = [
+                        v for v in G[u] if v >= clone_offset and fnT[v] == shortpath[0]
+                    ]
                     if len(choices) > 1:
                         # checks just one more hop -> bizarre cases may lead to error
                         nb = t if len(shortpath) <= 1 else shortpath[1]
@@ -232,10 +238,7 @@ class PathFinder:
         self.branched = branched
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
-        self.hooks2check, self.iterations_limit = hooks2check, iterations_limit
-        self.traversals_limit = traversals_limit
-        self.promising_margin = promising_margin
-        self.bad_streak_limit = bad_streak_limit
+        self.hooks2check = hooks2check
         self.num_revisits = 0
         self.adv_counter = 0
         self._find_paths()
