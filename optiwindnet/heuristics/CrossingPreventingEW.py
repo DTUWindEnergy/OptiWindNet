@@ -19,6 +19,7 @@ from ..geometric import (
     is_crossing,
     is_same_side,
 )
+from ..interarraylib import fun_fingerprint
 from ..mesh import delaunay
 from ..utils import F
 from .priorityqueue import PriorityQueue
@@ -621,8 +622,9 @@ def CPEW(
     G.graph['prevented_crossings'] = prevented_crossings
     G.graph['capacity'] = capacity
     G.graph['creator'] = 'CPEW'
-    G.graph['edges_fun'] = CPEW
-    G.graph['creation_options'] = options
-    G.graph['runtime_unit'] = 's'
+    G.graph['method_options'] = options | dict(fun_fingerprint=_CPEW_fingerprint)
     G.graph['runtime'] = time.perf_counter() - start_time
     return G
+
+
+_CPEW_fingerprint = fun_fingerprint(CPEW)

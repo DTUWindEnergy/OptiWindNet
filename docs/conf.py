@@ -33,28 +33,30 @@ author = 'DTU Wind Energy'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    'myst_parser',
+    'nbsphinx',
+    #  'myst_nb',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     #  'sphinx.ext.autosectionlabel',
-    'sphinx.ext.intersphinx',
+    #  'sphinx.ext.intersphinx',
     'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
     'sphinx.ext.inheritance_diagram',
-    'nbsphinx',
     'sphinx.ext.doctest',
     'autoapi.extension',
     # 'sphinx.ext.imgconverter',
 ]
 
-intersphinx_mapping = {
-    'python': ('https://docs.python.org/3/', None),
-    'numpy': ('https://numpy.org/doc/stable/', None),
-    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
-}
+#  intersphinx_mapping = {
+#      'python': ('https://docs.python.org/3/', None),
+#      'numpy': ('https://numpy.org/doc/stable/', None),
+#      'scipy': ('https://docs.scipy.org/doc/scipy/', None),
+#  }
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+#  templates_path = ['_templates']
 
 # Auto API conf.:
 autoapi_dirs = ['../optiwindnet']
@@ -81,6 +83,7 @@ language = 'en'
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = [
+    '*/README.md',
     # Slow notebook:
     # 'notebooks/neural_network_with_tfds_data.ipynb',
     # ipynb checkpoints
@@ -194,7 +197,7 @@ html_theme = 'furo'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+#  html_static_path = ['_static']
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.

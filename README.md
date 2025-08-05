@@ -12,7 +12,7 @@ OptiWindNet
 Tool for designing and optimizing the electrical cable network (collection system) for offshore wind power plants.
 
 Documentation: [https://optiwindnet.readthedocs.io](https://optiwindnet.readthedocs.io)
-- [Quickstart](https://optiwindnet.readthedocs.io/stable/notebooks/Quickstart.html)
+- [Quickstart](https://optiwindnet.readthedocs.io/stable/notebooks/quickstart_high.html)
 - [Download the Jupyter notebooks](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks) used in the documentation.
 - [Report an issue](https://github.com/DTUWindEnergy/OptiWindNet/issues) (mirror of OptiWindNet on GitHub)
 - [API Reference](https://optiwindnet.readthedocs.io/stable/autoapi/index.html)
