@@ -17,7 +17,6 @@ from scipy.stats import rankdata
 from ..crossings import edge_crossings
 from ..geometric import angle_helpers, angle_oracles_factory, assign_root
 from ..interarraylib import as_normalized, calcload
-from .priorityqueue import PriorityQueue
 
 lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
@@ -192,7 +191,11 @@ class AppraiserFactory:
 
 
 def data_driven_hybrid(
-    Aʹ: nx.Graph, capacity: int, appraiser_factory: AppraiserFactory, maxiter=10000
+    Aʹ: nx.Graph,
+    capacity: int,
+    appraiser_factory: AppraiserFactory,
+    maxiter=10000,
+    threshold: float = -1.0,
 ) -> nx.Graph:
     """Hybrid machine-learning and Esau-Williams heuristic for C-MST
 
@@ -280,7 +283,7 @@ def data_driven_hybrid(
     cat_feas_unions_ = [-1] * T
     extent_min_ = [-1.0] * T
     # indexed by the cat_feas_unions of the subroots:
-    prioset_ = tuple(set() for _ in range(len(UnionCount)))
+    prio_tier_ = tuple(set() for _ in range(len(UnionCount)))
     top_link_ = [None] * T
     # <i>: iteration counter
     i = 0
@@ -381,10 +384,10 @@ def data_driven_hybrid(
                 extent_min = min(extent_min, extent)
         #  for uv_uniq in unfeas_links:
         #      pq.cancel(uv_uniq)
-            #  if uv_uniq in pq.tags:
-            #      pq.cancel(uv_uniq)
-            #  else:
-            #      print('attempt to cancel non-existent', F[uv_uniq[0]], F[uv_uniq[1]])
+        #  if uv_uniq in pq.tags:
+        #      pq.cancel(uv_uniq)
+        #  else:
+        #      print('attempt to cancel non-existent', F[uv_uniq[0]], F[uv_uniq[1]])
         #  print(f'[{i}] {link_caused_staleness}\n{whoneeds_[subroot]}\n{feas_unions}')
         #  assert link_caused_staleness == whoneeds_[subroot] - feas_unions, 'set mismatch'
         #  assert len(link_caused_staleness & fresh_subtrees) == 0, 'size mismatch'
@@ -415,10 +418,10 @@ def data_driven_hybrid(
         prev_cat_feas_unions = cat_feas_unions_[subroot]
         if cat_feas_unions != prev_cat_feas_unions:
             if prev_cat_feas_unions >= 0:
-                #  prioset_[prev_cat_feas_unions].remove(subroot)
-                prioset_[prev_cat_feas_unions].discard(subroot)
+                #  prio_tier_[prev_cat_feas_unions].remove(subroot)
+                prio_tier_[prev_cat_feas_unions].discard(subroot)
             if len(proper_links) > 0:
-                prioset_[cat_feas_unions].add(subroot)
+                prio_tier_[cat_feas_unions].add(subroot)
             cat_feas_unions_[subroot] = cat_feas_unions
             update_stales = True
         if cat_feas_links != cat_feas_links_[subroot]:
@@ -460,9 +463,8 @@ def data_driven_hybrid(
                 links_to_upd.extend(proper_links)
                 links_features.extend(proper_features)
 
-
         #  print('LINK_GROUPS\n', link_groups)
-        #  print('PRIOSET\n', prioset_)
+        #  print('prio_tier\n', prio_tier_)
         # appraise and enqueue links
         if links_features:
             appraisals = appraise(links_features)
@@ -471,13 +473,17 @@ def data_driven_hybrid(
             for sr_u, num_appraisals in link_groups:
                 # get best-appraised link for each subroot
                 i, j = j, j + num_appraisals
-                top_link_[sr_u] = max(zip(appraisals[i: j].tolist(), links_to_upd[i: j]))
+                top_link_[sr_u] = max(zip(appraisals[i:j].tolist(), links_to_upd[i:j]))
 
-        for tier_id, prioset in enumerate(prioset_):
-            if prioset:
+        for tier_id, prio_tier in enumerate(prio_tier_):
+            if prio_tier:
                 # get the best-appraised link from the highest-priority non-empty tier
-                appraisal, uv_uniq, sr_dropped = max((*top_link_[sr], sr) for sr in prioset)
-                prioset.remove(sr_dropped)
+                appraisal, uv_uniq, sr_dropped = max(
+                    (*top_link_[sr], sr) for sr in prio_tier
+                )
+                #  if appraisal < threshold:
+                #      continue
+                prio_tier.remove(sr_dropped)
                 break
         else:
             # finished
@@ -487,14 +493,16 @@ def data_driven_hybrid(
         # TODO: reassess this hack
         if uv_uniq not in A.edges:
             stale_log[i] = uv_uniq
-            #  debug('>>> popped link ⟨%s⟩ is not in A anymore <<<', uv_uniq)
-            print(f'>>> popped link ⟨{uv_uniq}⟩ is not in A anymore <<<')
-            prioset_[tier_id].discard(sr_dropped)
+            debug('>>> popped link ⟨%s⟩ is not in A anymore <<<', uv_uniq)
+            #  print(f'>>> popped link ⟨{uv_uniq}⟩ is not in A anymore <<<')
+            prio_tier_[tier_id].discard(sr_dropped)
             continue
         # convert uv_uniq back to ⟨source, target⟩
         u, v = uv_uniq if subroot_[uv_uniq[0]] == sr_dropped else uv_uniq[::-1]
         sr_kept = subroot_[v]
-        debug('<popped> «%d~%d», sr_u: <%d>, appraisal: %.3f', u, v, sr_dropped, appraisal)
+        debug(
+            '<popped> «%d~%d», sr_u: <%d>, appraisal: %.3f', u, v, sr_dropped, appraisal
+        )
 
         root = A.nodes[sr_kept]['root']
         subtree = subtree_[sr_kept]
@@ -530,8 +538,8 @@ def data_driven_hybrid(
             debug('subroot <%d> finalized (full load)', sr_kept)
             is_feederless_[sr_kept] = False
             steps_log[i].append((sr_kept, root))
-            #  prioset_[cat_feas_unions_[sr_kept]].remove(sr_kept)
-            prioset_[cat_feas_unions_[sr_kept]].discard(sr_kept)
+            #  prio_tier_[cat_feas_unions_[sr_kept]].remove(sr_kept)
+            prio_tier_[cat_feas_unions_[sr_kept]].discard(sr_kept)
             A.remove_nodes_from(subtree)
             purge_log[i].append(tuple(subtree))
             for sr in whoneeds_[sr_dropped]:
