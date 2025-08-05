@@ -42,6 +42,7 @@ def OBEW(
     MARGIN: float = 1e-4,
     warnwhere: Callable | None = None,
     weightfun: Callable | None = None,
+    keep_log: bool = False,
 ) -> nx.Graph:
     """Obstacle Bypassing Esau-Williams heuristic for C-MST.
 
@@ -1343,17 +1344,24 @@ def OBEW(
         capacity=capacity,
         runtime=time.perf_counter() - start_time,
         d2roots=d2roots,
-        method_options=options
-        | dict(
-            fun_fingerprint=fun_fingerprint(),
+        method_options=(
+            options
+            | dict(
+                fun_fingerprint=_OBEW_fun_fingerprint,
+            )
         ),
         solver_details=dict(
             iterations=i,
             prevented_crossings=prevented_crossings,
         ),
     )
+    if keep_log:
+        G.graph['method_log'] = log
     if D > 0:
         G.graph['D'] = D
         G.graph['fnT'] = np.concatenate((fnT[: T + B + D], fnT[-R:]))
 
     return G
+
+
+_OBEW_fun_fingerprint = fun_fingerprint(OBEW)
