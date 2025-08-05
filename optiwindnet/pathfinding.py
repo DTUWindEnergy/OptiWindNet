@@ -96,6 +96,10 @@ class PathFinder:
         promising_margin: float = 0.1,
         bad_streak_limit: int = 9,
     ) -> None:
+        self.iterations_limit = iterations_limit
+        self.traversals_limit = traversals_limit
+        self.promising_margin = promising_margin
+        self.bad_streak_limit = bad_streak_limit
         self.iterations = 0
         G = Gʹ.copy()
         R, T, B = (G.graph[k] for k in 'RTB')
@@ -180,29 +184,49 @@ class PathFinder:
             # G has edges that shortcut some longer paths along P edges.
             # We need to put these paths back in G to flip some of P's edges.
             # The changes made here are undone in `create_detours()`.
+            edges_to_remove = []
+            edges_to_add = []
             clone_offset = T + B
             for (s, t), (midpath, shortpath) in shortened_contours.items():
                 # G follows shortpath, but we want it to follow midpath
                 subtree_id = G.nodes[t]['subtree']
                 stored_edges = []
-                path = [s] + shortpath + [t]
-                for u_, v_ in zip(path[:-1], path[1:]):
-                    u = u_ if u_ < T else (clone_offset + clone2prime.index(u_))
-                    v = v_ if v_ < T else (clone_offset + clone2prime.index(v_))
+                u = s
+                if shortpath:
+                    # there may be more than one edge cloning same border vertex
+                    choices = [
+                        v for v in G[u] if v >= clone_offset and fnT[v] == shortpath[0]
+                    ]
+                    if len(choices) > 1:
+                        # checks just one more hop -> bizarre cases may lead to error
+                        nb = t if len(shortpath) <= 1 else shortpath[1]
+                        for v in choices:
+                            if (G._adj[v].keys() - {u}).pop() == nb:
+                                break
+                    else:
+                        v = choices[0]
+                else:
+                    v = t
+                while v != t:
                     stored_edges.append((u, v, G[u][v]))
-                    # the nodes are left for later reuse
-                    G.remove_edge(u, v)
+                    edges_to_remove.append((u, v))
+                    u, v = v, (G._adj[v].keys() - {u}).pop()
+                stored_edges.append((u, v, G[u][v]))
+                edges_to_remove.append((u, v))
                 helper_edges = []
                 u = s
                 for v in midpath:
                     # this will use border nodes, watchout!
+                    G.add_node(v)
                     helper_edges.append((u, v))
-                    G.add_edge(u, v, kind='contour')
+                    edges_to_add.append((u, v))
                     G.nodes[v]['subtree'] = subtree_id
                     u = v
                 helper_edges.append((u, t))
-                G.add_edge(u, t, kind='contour')
+                edges_to_add.append((u, t))
                 saved_shortened_contours.append((stored_edges, helper_edges))
+            G.remove_edges_from(edges_to_remove)
+            G.add_edges_from(edges_to_add, kind='contour')
         P = planar_flipped_by_routeset(
             G, planar=planar, VertexC=VertexC, diagonals=diagonals
         )
@@ -214,10 +238,7 @@ class PathFinder:
         self.branched = branched
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
-        self.hooks2check, self.iterations_limit = hooks2check, iterations_limit
-        self.traversals_limit = traversals_limit
-        self.promising_margin = promising_margin
-        self.bad_streak_limit = bad_streak_limit
+        self.hooks2check = hooks2check
         self.num_revisits = 0
         self.adv_counter = 0
         self._find_paths()
