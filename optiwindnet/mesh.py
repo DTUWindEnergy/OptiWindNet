@@ -1079,12 +1079,15 @@ def make_planar_embedding(
     P_paths = nx.Graph(P_edges)
 
     # this adds diagonals to P_paths, but not diagonals that cross constraints
+    P_diags = bidict()
     for u, v in P_edges - hull_prunned_edges:
         if (u, v) in constraint_edges:
             continue
         uvD = P[u][v]
         s, t = uvD['cw'], uvD['ccw']
         if is_triangle_pair_a_convex_quadrilateral(*VertexC[[u, v, s, t]]):
+            s, t = (s, t) if s < t else (t, s)
+            P_diags[(s, t)] = (u, v)
             P_paths.add_edge(s, t)
 
     nx.set_edge_attributes(P_paths, A_edge_length, name='length')
@@ -1155,60 +1158,83 @@ def make_planar_embedding(
 
     corner_to_A_edges = defaultdict(list)
     A_edges_to_revisit = []
+    remove_from_A = []
     for u, v in A.edges - P_paths.edges:
         # For the edges in A that are not in P, we find their corresponding
         # shortest path in P_path and update the length attribute in A.
         length, path = nx.bidirectional_dijkstra(P_paths, u, v, weight='length')
         debug('A_edge: %d–%d length: %.3f; path: %s', u, v, length, path)
-        if all(n >= T for n in path[1:-1]):
-            # keep only paths that only have border vertices between nodes
-            edgeD = A[path[0]][path[-1]]
-            midpath = path[1:-1].copy() if u < v else path[-2:0:-1].copy()
-            i = 0
-            while i <= len(path) - 3:
-                s, b, t = path[i : i + 3]
-                if is_midpoint_shortable(s, b, t):
-                    # PERFORM SHORTCUT
-                    # TODO: The entire new path should go for a 2nd pass if it
-                    #       changed here. Unlikely to change in the 2nd pass.
-                    #       Reason: a shortcut may change the geometry in such
-                    #       way as to make additional shortcuts possible.
-                    del path[i + 1]
-                    length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
-                    shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
-                    length += shortcut_length
-                    # changing P_paths for the case of revisiting this block
-                    P_paths.add_edge(s, t, length=shortcut_length)
-                    shortcuts = edgeD.get('shortcuts')
-                    if shortcuts is None:
-                        edgeD['shortcuts'] = [b]
-                    else:
-                        shortcuts.append(b)
-                    debug('(%d) %d %d %d shortcut', i, s, b, t)
-                else:
-                    i += 1
-            edgeD.update(  # midpath-> which P edges the A edge maps to
-                # (so that PathFinder works)
-                midpath=midpath,
-                # contour_... edges may include direct ones that are
-                # diverted because P_paths does not include them
-                kind='contour_' + edgeD['kind'],
-            )
-            if len(path) > 2:
-                edgeD['length'] = length
-                u, v = (u, v) if u < v else (v, u)
-                for p in path[1:-1]:
-                    corner_to_A_edges[p].append((u, v))
-        else:
+        uv_uniq = (u, v) if u < v else (v, u)
+        if any(n < T for n in path[1:-1]):
             # remove edge because the path goes through some wtg node
-            u, v = (u, v) if u < v else (v, u)
-            A.remove_edge(u, v)
-            if (u, v) in diagonals:
-                del diagonals[(u, v)]
+            remove_from_A.append(uv_uniq)
+            continue
+        else:
+            diag = diagonals.get(uv_uniq) or diagonals.inv.get(uv_uniq)
+            skip = False
+            for s, t in pairwise(path):
+                st_uniq = (s, t) if s < t else (t, s)
+                wx_uniq = P_diags.get(st_uniq) or P_diags.inv.get(st_uniq)
+                # check the two ways by which the path passes between two terminals
+                if wx_uniq is None or wx_uniq == diag:
+                    continue
+                if all(n < T for n in wx_uniq):
+                    if is_triangle_pair_a_convex_quadrilateral(
+                        *VertexC[wx_uniq,], *VertexC[uv_uniq,]
+                    ):
+                        continue
+                    # remove the edge because its crossings do not match its A origin
+                    skip = True
+                    break
+            if skip:
+                remove_from_A.append(uv_uniq)
+                continue
+        # keep only paths that only have border vertices between nodes
+        edgeD = A[path[0]][path[-1]]
+        midpath = path[1:-1].copy() if u < v else path[-2:0:-1].copy()
+        i = 0
+        while i <= len(path) - 3:
+            s, b, t = path[i : i + 3]
+            if is_midpoint_shortable(s, b, t):
+                # PERFORM SHORTCUT
+                # TODO: The entire new path should go for a 2nd pass if it
+                #       changed here. Unlikely to change in the 2nd pass.
+                #       Reason: a shortcut may change the geometry in such
+                #       way as to make additional shortcuts possible.
+                del path[i + 1]
+                length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
+                shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
+                length += shortcut_length
+                # changing P_paths for the case of revisiting this block
+                P_paths.add_edge(s, t, length=shortcut_length)
+                shortcuts = edgeD.get('shortcuts')
+                if shortcuts is None:
+                    edgeD['shortcuts'] = [b]
+                else:
+                    shortcuts.append(b)
+                debug('(%d) %d %d %d shortcut', i, s, b, t)
             else:
-                # Some edges will need revisiting to maybe promote their
-                # diagonals to delaunay edges.
-                A_edges_to_revisit.append((u, v))
+                i += 1
+        edgeD.update(  # midpath-> which P edges the A edge maps to
+            # (so that PathFinder works)
+            midpath=midpath,
+            # contour_... edges may include direct ones that are
+            # diverted because P_paths does not include them
+            kind='contour_' + edgeD['kind'],
+        )
+        if len(path) > 2:
+            edgeD['length'] = length
+            for p in path[1:-1]:
+                corner_to_A_edges[p].append(uv_uniq)
+
+    for u, v in remove_from_A:
+        A.remove_edge(u, v)
+        if (u, v) in diagonals:
+            del diagonals[(u, v)]
+        else:
+            # Some edges will need revisiting to maybe promote their
+            # diagonals to delaunay edges.
+            A_edges_to_revisit.append((u, v))
 
     # Diagonals in A which have a missing origin Delaunay edge become edges.
     promoted_diagonal_from_parent_node = {}
