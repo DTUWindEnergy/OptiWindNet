@@ -91,7 +91,7 @@ class PathFinder:
       bad_streak_limit: limit on how many steps in a row without finding an improved
         path the traverser is allowed to take
 
-    Example:
+    Example::
 
       P, A = make_planar_embedding(L)  # L represents the geometry of the location
       S = some_solver(A, ...)  # S is a topology
