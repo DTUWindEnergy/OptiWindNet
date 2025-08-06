@@ -225,7 +225,6 @@ class WindFarmNetwork:
             raise ValueError(
                 f'terse_links must be an array of integers. Got {terse_links.dtype} instead.'
             )
-        print(terse_links.ndim)
         
         if terse_links.ndim != 1:
             raise ValueError(
