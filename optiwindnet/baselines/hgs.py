@@ -212,7 +212,7 @@ def iterative_hgs_cvrp(
             A = Aʹ
     if i > 0:
         S.graph['hgs_reruns'] = i
-        if i == 9:
+        if i == (max_iter - 1):
             print('Probably got stuck in an infinite loop')
     return S
 
