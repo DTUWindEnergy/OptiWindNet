@@ -141,7 +141,15 @@ def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC):
 
 
 def from_coordinates(
-    self, turbinesC, substationsC, borderC, obstaclesC, name, handle, buffer_dist, **kwargs
+    self,
+    turbinesC,
+    substationsC,
+    borderC,
+    obstaclesC,
+    name,
+    handle,
+    buffer_dist,
+    **kwargs,
 ):
     """Constructs a site graph from coordinate-based inputs."""
 
@@ -153,7 +161,9 @@ def from_coordinates(
     if borderC is None:
         if obstaclesC is None:
             vertexC = np.vstack((turbinesC, substationsC))
-            return L_from_site(R=R, T=T, B=0, name=name, handle=handle, VertexC=vertexC, **kwargs)
+            return L_from_site(
+                R=R, T=T, B=0, name=name, handle=handle, VertexC=vertexC, **kwargs
+            )
         else:
             border_sizes = np.array([0] + [obs.shape[0] for obs in obstaclesC])
             B = border_sizes.sum()
