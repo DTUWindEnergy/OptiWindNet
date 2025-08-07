@@ -1,52 +1,58 @@
 import pytest
 import numpy as np
-import pickle
+import dill
 from optiwindnet.interarraylib import L_from_G
 
-# ========== Database Fixture ==========
+# ========== Core Fixtures ==========
+
+@pytest.fixture
+def expected():
+    """Loads all expected values from the dill file for single test use."""
+    with open("tests/test_files/expected_values.dill", "rb") as f:
+        return dill.load(f)
 
 @pytest.fixture(scope="module")
 def db():
-    with open("tests/test_files/G_tests.pkl", "rb") as f:
-        db = pickle.load(f)
-    yield db
+    """Module-scoped database fixture for shared access across tests."""
+    with open("tests/test_files/expected_values.dill", "rb") as f:
+        data = dill.load(f)
+    yield data["RouterGraphs"]
 
-# ========== Fixture Factory for G, L ==========
+# ========== Factory Fixtures ==========
 
 @pytest.fixture
 def LG_from_database(db):
+    """Factory that returns (L, G) pair reconstructed from a saved graph."""
     def _factory(label):
         G = db[label]
         L = L_from_G(G)
         return L, G
     return _factory
 
-# ========== Fixture Factory for Coordinate-Based Site ==========
-
 @pytest.fixture
 def site_from_database(db):
+    """Factory that extracts coordinate-based site components from a graph."""
     def _factory(label):
         G = db[label]
-
         VertexC = G.graph['VertexC']
         T = G.graph['T']
         R = G.graph['R']
-        print([VertexC[o] for o in G.graph.get('obstacles', [])])
 
         return {
             "turbinesC": VertexC[:T],
             "substationsC": VertexC[-R:] if R > 0 else np.empty((0, 2)),
             "borderC": VertexC[G.graph.get('border', [])] if 'border' in G.graph else np.empty((0, 2)),
             "obstaclesC": [VertexC[o] for o in G.graph.get('obstacles', [])],
-            "handle": G.graph['handle'],
-            "name": G.graph['name'],
-            "landscape_angle": G.graph['landscape_angle'],
+            "handle": G.graph.get('handle'),
+            "name": G.graph.get('name'),
+            "landscape_angle": G.graph.get('landscape_angle'),
         }
     return _factory
 
-# ========== Assertions ==========
+# ========== Graph Equality Assertion ==========
 
 def assert_graph_equal(G1, G2, ignored_graph_keys=None):
+    """Deep comparison of two graphs with selective key exclusion."""
     if ignored_graph_keys is None:
         ignored_graph_keys = set()
 
@@ -67,6 +73,7 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
     for k in keys1:
         v1 = G1.graph[k]
         v2 = G2.graph[k]
+
         if isinstance(v1, np.ndarray):
             assert np.array_equal(v1, v2), f"Mismatch in graph['{k}']"
         elif isinstance(v1, list):

@@ -1,3 +1,5 @@
+import copy
+import dill
 import pickle
 
 import networkx as nx
@@ -15,9 +17,7 @@ from optiwindnet.pathfinding import PathFinder
 from optiwindnet.plotting import gplot, pplot
 from optiwindnet.svg import svgplot
 
-# from tests.assertions import assert_graph_equal
 # ========== Assertions ==========
-
 
 def assert_graph_equal(G1, G2, ignored_graph_keys=None):
     if ignored_graph_keys is None:
@@ -59,94 +59,107 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
             assert v1 == v2, f"Mismatch in graph['{k}']: {v1} != {v2}"
 
 
-# ========== Test functionss ==========
+# ========== Test functions ==========
+
+def test_make_planar_embedding(expected):
+    P_expected = copy.deepcopy(expected['P'])
+    A_expected = copy.deepcopy(expected['A'])
+
+    P_test, A_test = make_planar_embedding(expected['L'])
+
+    assert_graph_equal(P_test, P_expected)
+
+    assert set(A_test.graph['planar'].nodes) == set(A_expected.graph['planar'].nodes), \
+        "PlanarEmbedding nodes mismatch"
+    assert set(A_test.graph['planar'].edges) == set(A_expected.graph['planar'].edges), \
+        "PlanarEmbedding edges mismatch"
+
+    A_test.graph.pop('planar', None)
+    A_expected.graph.pop('planar', None)
+
+    assert_graph_equal(A_test, A_expected)
 
 
-with open('tests/test_files/expected_values_imported_functions.pkl', 'rb') as f:
-    expected = pickle.load(f)
-
-P, A = make_planar_embedding(expected['L'])
-as_normalized(A)
-expected['A'] = A
-expected['P'] = P
-
-# def test_as_normalized_returns_expected_result():
-#     A_norm = as_normalized(expected["A"])
-#     assert_graph_equal(A_norm, expected["A_norm"])
+def test_as_normalized(expected):
+    A_norm_test = as_normalized(expected['A'])
+    A_norm_expected = expected["A_norm"]
+    assert_graph_equal(A_norm_test, A_norm_expected, ignored_graph_keys={'planar'} )
 
 
-def test_g_from_s_returns_expected_edges():
-    G = G_from_S(expected['S_ew'], expected['A'])
-    assert_graph_equal(G, expected['G_from_S'])
+def test_g_from_s_(expected):
+    G_tentative_test = G_from_S(expected['S_ew'], expected['A'])
+    G_tentative_expected = expected['G_tentative']
+    assert_graph_equal(G_tentative_test, G_tentative_expected, ignored_graph_keys={'is_normalized'})
+
+def test_pathfinder(expected):
+    G_test = PathFinder(expected['G_tentative'], planar=expected['P'], A=expected['A']).create_detours()
+    G_expected = expected['G']
+    assert_graph_equal(G_test, G_expected)
 
 
-def test_s_from_g_extracts_edges():
-    S = S_from_G(expected['G_from_S'])
-    assert_graph_equal(S, expected['S_from_G'])
+def test_s_from_g(expected):
+    S_test = S_from_G(expected['G'])
+    S_expected = expected['S_from_G']
+    assert_graph_equal(S_test, S_expected)
 
 
-def test_calcload_assigns_loads_correctly():
-    G = expected['G_from_S']
-    calcload(G)
-    assert_graph_equal(G, expected['G_calcload'])
+def test_calcload(expected):
+    G_test = expected['G']
+    calcload(G_test)
+    G_expected = expected['G_calcload']
+    assert_graph_equal(G_test, G_expected)
 
 
-def test_assign_cables_applies_expected_cost():
-    G = expected['G_calcload']
-    assign_cables(G, expected['cables'])
-    assert_graph_equal(G, expected['G_assign_cables'])
+def test_assign_cables(expected):
+    G_test = expected['G_calcload']
+    assign_cables(G_test, expected['cables'])
+    G_expected = expected['G_assign_cables']
+    assert_graph_equal(G_test, G_expected)
 
 
-def test_ew_presolver():
-    S = EW_presolver(expected['A'], capacity=7)
-    assert_graph_equal(S, expected['S_ew'], ignored_graph_keys={'runtime'})
+def test_ew_presolver(expected):
+    S_test = EW_presolver(expected['A'], capacity=7)
+    S_expected = expected['S_ew']
+    assert_graph_equal(S_test, S_expected, ignored_graph_keys={'runtime'})
 
 
-def test_cpew_creates_expected_graph():
-    G = CPEW(expected['L'], capacity=7)
-    assert_graph_equal(G, expected['G_CPEW'], ignored_graph_keys={'runtime'})
+def test_cpew(expected):
+    G_test = CPEW(expected['L'], capacity=7)
+    G_expected = expected['G_CPEW']
+    assert_graph_equal(G_test, G_expected, ignored_graph_keys={'runtime'})
 
 
-def test_l_from_site_returns_expected_graph():
-    L = expected['L']
-    turbinesC = np.array(
-        [
-            L.graph['VertexC'][n]
-            for n, data in L.nodes(data=True)
-            if data['kind'] == 'wtg'
-        ]
-    )
-    substationsC = np.array(
-        [
-            L.graph['VertexC'][n]
-            for n, data in L.nodes(data=True)
-            if data['kind'] == 'oss'
-        ]
-    )
+def test_l_from_site(expected):
+    L_expected = expected['L']
+    turbinesC_test = np.array([
+        L_expected.graph['VertexC'][n]
+        for n, data in L_expected.nodes(data=True)
+        if data['kind'] == 'wtg'
+    ])
+    substationsC_test = np.array([
+        L_expected.graph['VertexC'][n]
+        for n, data in L_expected.nodes(data=True)
+        if data['kind'] == 'oss'
+    ])
 
-    vertexC = L.graph['VertexC']  # np.vstack((turbinesC, substationsC))
-    R = substationsC.shape[0]
-    T = turbinesC.shape[0]
+    vertexC_test = L_expected.graph['VertexC']
+    R_test = substationsC_test.shape[0]
+    T_test = turbinesC_test.shape[0]
 
-    L_site = L_from_site(
-        R=R, T=T, B=6, VertexC=vertexC, name='Baltic Eagle', handle='eagle'
+    L_test = L_from_site(
+        R=R_test, T=T_test, B=6, VertexC=vertexC_test, name='Baltic Eagle', handle='eagle'
     )
     assert_graph_equal(
-        L_site, L, ignored_graph_keys={'border', 'OSM_name', 'landscape_angle'}
+        L_test, L_expected,
+        ignored_graph_keys={'border', 'OSM_name', 'landscape_angle'}
     )
 
 
-def test_make_planar_embedding_expected_output():
-    P, A = make_planar_embedding(expected['L'])
-    assert_graph_equal(P, expected['P'])
-    assert_graph_equal(A, expected['A'], ignored_graph_keys={'planar'})
-
-
-def test_model_options():
-    opts = ModelOptions()
-    for key, val in expected['ModelOptions'].items():
-        assert opts[key] == val, (
-            f'Mismatch in ModelOptions[{key}]: {opts[key]} != {val}'
+def test_model_options(expected):
+    options_test = ModelOptions()
+    for key, value_expected in expected['ModelOptions'].items():
+        assert options_test[key] == value_expected, (
+            f'Mismatch in ModelOptions[{key}]: {options_test[key]} != {value_expected}'
         )
 
 
@@ -154,14 +167,14 @@ def test_model_options():
     'solver_name',
     ['ortools', 'cplex', 'gurobi', 'cbc', 'scip', 'highs', 'unknown_solver'],
 )
-def test_solver_factory_returns_expected_solver(solver_name):
-    solver = solver_factory(solver_name)
+def test_solver_factory_returns_expected_solver(solver_name, expected):
+    solver_test = solver_factory(solver_name)
     expected_type = expected['SolverTypes'].get(solver_name)
 
     if expected_type is None:
-        assert solver is None, f"Expected None for unsupported solver '{solver_name}'"
+        assert solver_test is None, f"Expected None for unsupported solver '{solver_name}'"
     else:
-        assert type(solver).__name__ == expected_type, (
+        assert type(solver_test).__name__ == expected_type, (
             f"For solver '{solver_name}', expected type '{expected_type}', "
-            f"but got '{type(solver).__name__}'"
+            f"but got '{type(solver_test).__name__}'"
         )
