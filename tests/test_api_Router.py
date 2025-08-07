@@ -114,7 +114,7 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
             {'time_limit': 60},
             {
                 'time_limit': 60,
-                'max_reruns': 10,
+                'max_retries': 10,
                 'feeder_limit': None,
                 'balanced': False,
                 'seed': 0,
@@ -126,7 +126,7 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
             {
                 'time_limit': 120,
                 'feeder_limit': 3,
-                'max_reruns': 20,
+                'max_retries': 20,
                 'balanced': True,
                 'seed': 42,
                 'verbose': True,
@@ -134,7 +134,7 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
             {
                 'time_limit': 120,
                 'feeder_limit': 3,
-                'max_reruns': 20,
+                'max_retries': 20,
                 'balanced': True,
                 'seed': 42,
                 'verbose': True,
