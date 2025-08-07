@@ -461,7 +461,7 @@ class HGSRouter(Router):
         self,
         time_limit,
         feeder_limit: int | None = None,
-        max_reruns=10,
+        max_retries=10,
         balanced=False,
         seed: int = 0,
         verbose=False,
@@ -471,7 +471,7 @@ class HGSRouter(Router):
         super().__init__(**kwargs)
         self.time_limit = time_limit
         self.verbose = verbose
-        self.max_reruns = max_reruns
+        self.max_retries = max_retries
         self.feeder_limit = feeder_limit
         self.balanced = balanced
         self.seed = seed
@@ -490,7 +490,7 @@ class HGSRouter(Router):
                 as_normalized(A),
                 capacity=cables_capacity,
                 time_limit=self.time_limit,
-                max_reruns=self.max_reruns,
+                max_retries=self.max_retries,
                 vehicles=self.feeder_limit,
                 seed=self.seed,
             )
