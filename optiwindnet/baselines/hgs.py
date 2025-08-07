@@ -152,7 +152,7 @@ def iterative_hgs_cvrp(
     time_limit: float,
     vehicles: int | None = None,
     seed: int = 0,
-    max_reruns: int = 10,
+    max_retries: int = 10,
     keep_log: bool = False,
 ) -> nx.Graph:
     """Iterate until crossing-free solution is found (`hgs_cvrp()` wrapper).
@@ -163,7 +163,7 @@ def iterative_hgs_cvrp(
 
     Args:
       *: see `hgs_cvrp()`
-      max_reruns: maximum number of retries to fix unrepairable crossings
+      max_retries: maximum number of retries to fix unrepairable crossings
 
     Returns:
       Solution S
@@ -172,7 +172,7 @@ def iterative_hgs_cvrp(
     P_A = A.graph['planar']
     diagonals = A.graph['diagonals']
     crossings = []
-    for i in range(max_reruns + 1):
+    for i in range(max_retries + 1):
         for uv, st in crossings:
             if i == 1:
                 # just copy once, on the first re-run (not to change the given A)
@@ -204,8 +204,8 @@ def iterative_hgs_cvrp(
         if not crossings:
             break
     if i > 0:
-        S.graph['hgs_reruns'] = i
-        if i == max_reruns:
+        S.graph['hgs_retries'] = i
+        if i == max_retries:
             print('Probably got stuck in an infinite loop')
     return S
 
