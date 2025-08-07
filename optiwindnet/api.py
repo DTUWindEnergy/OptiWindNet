@@ -169,7 +169,7 @@ class WindFarmNetwork:
             border=np.arange(T, T + borderC.shape[0]),
             name=' '.join(name_tokens),
             handle=f'{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}',
-            **kwargs
+            **kwargs,
         )
 
         return cls(L=L, **kwargs)
@@ -265,14 +265,15 @@ class WindFarmNetwork:
     def get_network(self):
         """Returns the network as a structured array of edge data."""
         return extract_network_as_array(self.G)
-    
+
     def map_detour_vertex(self):
         if self.G.graph.get('C') or self.G.graph.get('D'):
             R, T, B = (self.G.graph[k] for k in 'RTB')
-            map = dict(enumerate(
-                (n.item() for n in self.G.graph['fnT'][T + B:-R]),
-                start=T + B
-            ))
+            map = dict(
+                enumerate(
+                    (n.item() for n in self.G.graph['fnT'][T + B : -R]), start=T + B
+                )
+            )
         else:
             map = {}
         return map
@@ -435,9 +436,9 @@ class EWRouter(Router):
             verbose = self.verbose
 
         # optimizing
-        if self.feeder_route=='segmented':
+        if self.feeder_route == 'segmented':
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
-        elif self.feeder_route=='straight':
+        elif self.feeder_route == 'straight':
             G_cpew = CPEW(L, capacity=cables_capacity, maxiter=self.maxiter)
             S = S_from_G(G_cpew)
         else:
@@ -459,7 +460,7 @@ class HGSRouter(Router):
         self,
         time_limit,
         feeder_limit: int | None = None,
-        max_iter=10,
+        max_retries=10,
         balanced=False,
         seed: int = 0,
         verbose=False,
@@ -469,7 +470,7 @@ class HGSRouter(Router):
         super().__init__(**kwargs)
         self.time_limit = time_limit
         self.verbose = verbose
-        self.max_iter = max_iter
+        self.max_retries = max_retries
         self.feeder_limit = feeder_limit
         self.balanced = balanced
         self.seed = seed
@@ -488,7 +489,7 @@ class HGSRouter(Router):
                 as_normalized(A),
                 capacity=cables_capacity,
                 time_limit=self.time_limit,
-                max_iter=self.max_iter,
+                max_retries=self.max_retries,
                 vehicles=self.feeder_limit,
                 seed=self.seed,
             )

@@ -1236,6 +1236,9 @@ def make_planar_embedding(
             # diagonals to delaunay edges.
             A_edges_to_revisit.append((u, v))
 
+    # save P edges that are not in A and might be useful later
+    P_to_A_candidates = ((P_edges - P_A_edges) - diagonals.keys()) - constraint_edges
+
     # Diagonals in A which have a missing origin Delaunay edge become edges.
     promoted_diagonal_from_parent_node = {}
     P_A_edges_to_remove = []
@@ -1280,6 +1283,27 @@ def make_planar_embedding(
         P_A_edges_to_remove.append(uv)
     for uv in P_A_edges_to_remove:
         P_A.remove_edge(*uv)
+
+    # ###################################################################
+    # MN) Add new A edges from P (if concavities or obstacles removed clusters of A triangles)
+    # ###################################################################
+    # only locations Cazzaro 2022 G-140 and G-210 are affected by this
+    for u, v in P_to_A_candidates:
+        if u < T and v < T and not (u in hull_prunned and v in hull_prunned):
+            for s in P_A[u].keys() & P_A[v].keys():
+                suv_cw = (P_A[s][u]['cw'] == v) and cw(s, u, v)
+                suv_ccw = (P_A[s][u]['ccw'] == v) and ccw(s, u, v)
+                if (suv_cw or suv_ccw) and triangle_AR(
+                    *VertexS[[u, v, s]]
+                ) <= max_tri_AR:
+                    A.add_edge(u, v, length=P_paths[u][v]['length'], kind='delaunay')
+                    if suv_cw:
+                        P_A.add_half_edge(u, v, cw=s)
+                        P_A.add_half_edge(v, u, ccw=s)
+                    else:
+                        P_A.add_half_edge(u, v, ccw=s)
+                        P_A.add_half_edge(v, u, cw=s)
+                    break
 
     # ##################################################################
     # N) Revisit A to update d2roots according to lengths along P_paths.

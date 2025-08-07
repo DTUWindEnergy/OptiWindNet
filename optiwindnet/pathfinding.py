@@ -68,21 +68,36 @@ class PathNodes(dict):
 
 
 class PathFinder:
-    """
-    Router for gates that don't belong to the PlanarEmbedding of the graph.
-    Initialize it with a detour-free routeset `G` and it will find paths from
-    all nodes to the nearest root without crossing any used edges.
+    """Router for feeders that would cross other routes if laid in a straight line.
+
+    PathFinder finds the shortest segmented (or detoured) routes for tentative feeders
+    (i.e. those that were created without a check for crossings of other routes). The
+    path-finding is performed when the instance is initialized, but a route set is
+    returned only with a call to method `.create_detours()`.
 
     Only edges in graph attribute 'tentative' or, lacking that, edges with the
     attribute 'kind' == 'tentative' are checked for crossings.
 
-    These paths can be used to replace the existing gates that cross other
-    edges by gate paths with detours.
+    Args:
+      G: the route set without detours
+      P: the planar embedding associated with A
+      A: the available links graph
+      branched: if True, any terminal can be linked to root, else only subtrees'
+        heads/tails
+      iterations_limit: maximum number of steps in the path-finding process
+      traversals_limit: maximum number of times a single portal may be traversed
+      promissing_margin: fraction in excess of the best path that is still considered
+        promissing, so that the traverser is allowed to proceed
+      bad_streak_limit: limit on how many steps in a row without finding an improved
+        path the traverser is allowed to take
 
-    Example:
-    ========
+    Example::
 
-    H = PathFinder(G, planar=P, A=A).create_detours()
+      P, A = make_planar_embedding(L)  # L represents the geometry of the location
+      S = some_solver(A, ...)  # S is a topology
+      G_tentative = G_from_S(S, A)  # G_tentative is almost a route set
+      G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+
     """
 
     def __init__(
@@ -90,6 +105,7 @@ class PathFinder:
         Gʹ: nx.Graph,
         planar: nx.PlanarEmbedding,
         A: nx.Graph | None = None,
+        *,
         branched: bool = True,
         iterations_limit: int = 15000,
         traversals_limit: int = 2,

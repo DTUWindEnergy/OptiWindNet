@@ -152,7 +152,7 @@ def iterative_hgs_cvrp(
     time_limit: float,
     vehicles: int | None = None,
     seed: int = 0,
-    max_iter: int = 10,
+    max_retries: int = 10,
     keep_log: bool = False,
 ) -> nx.Graph:
     """Iterate until crossing-free solution is found (`hgs_cvrp()` wrapper).
@@ -162,57 +162,50 @@ def iterative_hgs_cvrp(
     way as `hgs_cvrp()`, it is recommended to pass a normalized `A`.
 
     Args:
-        *: see `hgs_cvrp()`
-        max_iter: maximum number of `hgs_cvrp()` calls in serie
+      *: see `hgs_cvrp()`
+      max_retries: maximum number of retries to fix unrepairable crossings
 
     Returns:
-        Solution S
+      Solution S
     """
 
-    def remove_solve_repair(edge, Aʹ, num_crossings):
-        # TODO: use a filtered subgraph view instead of copying
-        A = Aʹ.copy()
-        A.remove_edge(*edge)
+    P_A = A.graph['planar']
+    diagonals = A.graph['diagonals']
+    crossings = []
+    for i in range(max_retries + 1):
+        for uv, st in crossings:
+            if i == 1:
+                # just copy once, on the first re-run (not to change the given A)
+                A = A.copy()
+                P_A = P_A.copy()
+                diagonals = diagonals.copy()
+                A.graph['planar'] = P_A
+                A.graph['diagonals'] = diagonals
+            # remove the longest edge that takes part in crossing
+            w, x = uv if A.edges[uv]['length'] > A.edges[st]['length'] else st
+            wx = (w, x) if w < x else (x, w)
+            if wx in diagonals:
+                del diagonals[wx]
+            A.remove_edge(w, x)
+        # solve
         S = hgs_cvrp(
-            A, capacity=capacity, time_limit=time_limit, vehicles=vehicles, seed=seed
+            A,
+            capacity=capacity,
+            time_limit=time_limit,
+            vehicles=vehicles,
+            seed=seed,
+            keep_log=keep_log,
         )
+        # repair
         S = repair_routeset_path(S, A)
-        return S, A, (S.graph.get('num_crossings', 0) < num_crossings)
-
-    # solve
-    S = hgs_cvrp(
-        A,
-        capacity=capacity,
-        time_limit=time_limit,
-        vehicles=vehicles,
-        seed=seed,
-        keep_log=keep_log,
-    )
-    # repair
-    S = repair_routeset_path(S, A)
-    # TODO: accumulate solution_time throughout the iterations
-    #       (makes sense to add a new field)
-    for i in range(max_iter):
+        # TODO: accumulate solution_time throughout the iterations
+        #       (makes sense to add a new field)
         crossings = S.graph.get('outstanding_crossings', [])
         if not crossings:
             break
-        # there are still crossings
-        crossing_resolved = False
-        for edge in crossings[0]:
-            # try removing one edge at a time from A
-            S, Aʹ, succeeded = remove_solve_repair(edge, A, len(crossings))
-            if succeeded:
-                # TODO: maybe try comparing the quality between the edge removals
-                A = Aʹ
-                crossing_resolved = True
-                break
-        if not crossing_resolved:
-            print('WARNING: Failed to resolve crossing! Will keep trying.')
-            # use the A with the last edge removed
-            A = Aʹ
     if i > 0:
-        S.graph['hgs_reruns'] = i
-        if i == 9:
+        S.graph['hgs_retries'] = i
+        if i == max_retries:
             print('Probably got stuck in an infinite loop')
     return S
 
