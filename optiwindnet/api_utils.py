@@ -1,4 +1,3 @@
-import copy
 import logging
 import math
 from itertools import pairwise
@@ -6,13 +5,9 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import yaml
-import yaml_include
-from IPython import get_ipython
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.path import Path
-from shapely.geometry import MultiPoint, MultiPolygon, Polygon
-from shapely.ops import unary_union
+from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
 from optiwindnet.importer import L_from_site
@@ -32,7 +27,7 @@ def expand_polygon_safely(polygon, buffer_dist):
         max_buffer_dist = polygon.exterior.minimum_clearance / 2
         if buffer_dist >= max_buffer_dist:
             warning(
-                '⚠️ The defined border is non-convex and buffering may introduce unexpected changes. For visual comparison use plot_original_vs_buffered().'
+                'The defined border is non-convex and buffering may introduce unexpected changes. For visual comparison use plot_original_vs_buffered().'
             )
     return polygon.buffer(buffer_dist, resolution=2)
 
@@ -43,15 +38,15 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
 
     if shrunk_polygon.is_empty:
         warning(
-            '⚠️ Buffering by %.2f completely removed the obstacle at index %d. For visual comparison use plot_original_vs_buffered().'
-            % (shrink_dist, indx)
+            'Buffering by %.2f completely removed the obstacle at index %d. For visual comparison use plot_original_vs_buffered().',
+            shrink_dist, indx
         )
         return None
 
     elif shrunk_polygon.geom_type == 'MultiPolygon':
         warning(
-            '⚠️ Shrinking by %.2f split the obstacle at index %d into %d pieces. For visual comparison use plot_original_vs_buffered().'
-            % (shrink_dist, indx, len(shrunk_polygon.geoms))
+            'Shrinking by %.2f split the obstacle at index %d into %d pieces. For visual comparison use plot_original_vs_buffered().',
+            shrink_dist, indx, len(shrunk_polygon.geoms)
         )
         return [np.array(part.exterior.coords) for part in shrunk_polygon.geoms]
 
@@ -60,8 +55,8 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
 
     else:
         warning(
-            '⚠️ Unexpected geometry type %s after shrinking obstacle at index %d. The obstacle is totally removed. For visual comparison use plot_original_vs_buffered().'
-            % (shrunk_polygon.geom_type, indx)
+            'Unexpected geometry type %s after shrinking obstacle at index %d. The obstacle is totally removed. For visual comparison use plot_original_vs_buffered().',
+            shrunk_polygon.geom_type, indx
         )
         return None
 
@@ -196,7 +191,7 @@ def from_coordinates(
             obs_poly = Polygon(obs)
 
             if not obs_poly.is_valid:
-                warning('⚠️ Obstacle %d invalid: %s' % (i, explain_validity(obs_poly)))
+                warning('Obstacle %d invalid: %s', i, explain_validity(obs_poly))
                 obs_poly = obs_poly.buffer(0)  # Try fixing it
 
             intersection = border_polygon.boundary.intersection(obs_poly)
@@ -209,14 +204,12 @@ def from_coordinates(
                 obs_poly
             ) and not border_polygon.intersects(obs_poly):
                 warning(
-                    '⚠️ Obstacle at index %d is completely outside the border and is neglegcted.'
-                    % i
+                    'Obstacle at index %d is completely outside the border and is neglected.', i
                 )
             else:
                 # Subtract this obstacle from the border
                 warning(
-                    '⚠️ Obstacle at index %d intersects with the exteriour border and is merged into the exterior border.'
-                    % i
+                    'Obstacle at index %d intersects with the exteriour border and is merged into the exterior border.', i
                 )
                 new_border_polygon = border_polygon.difference(obs_poly)
 
@@ -390,7 +383,7 @@ def check_warmstart_feasibility(
         reasons.append('detours present but feeder_route is set to "straight"')
 
     # Topology constraint
-    branched_nodes = [n for n in S_warm.nodes if n > 0 and S_warm.degree[n] > 2]
+    branched_nodes = [n for n in S_warm.nodes if n >= 0 and S_warm.degree[n] > 2]
     if branched_nodes and model_options.get('topology') == 'radial':
         reasons.append('branched structure not allowed under "radial" topology')
 
@@ -398,14 +391,14 @@ def check_warmstart_feasibility(
     if reasons and verbose_warmstart:
         print()
         print(
-            '⚠️ Warning: No warmstarting (even though a solution is available) due to the following reason(s):'
+            'Warning: No warmstarting (even though a solution is available) due to the following reason(s):'
         )
         for reason in reasons:
             print(f'    - {reason}')
         print()
         return False
     elif solver_name != 'scip':
-        msg = '✅ Using warm start: the model is initialized with the provided solution S.'
+        msg = 'Using warm start: the model is initialized with the provided solution S.'
         if verbose_warmstart:
             print(msg)
             print()
@@ -433,9 +426,13 @@ def parse_cables_input(cables):
 
 
 def enable_ortools_logging_if_jupyter(solver):
-    shell = get_ipython().__class__.__name__
-    if shell in ('ZMQInteractiveShell',):  # Jupyter notebook or lab
-        solver.solver.log_callback = print
+    try:
+        shell = get_ipython().__class__.__name__
+    except NameError:
+        pass
+    else:
+        if shell == 'ZMQInteractiveShell':  # Jupyter notebook or lab
+            solver.solver.log_callback = print
 
 
 def compute_edge_gradients(G, gradient_type='length'):
