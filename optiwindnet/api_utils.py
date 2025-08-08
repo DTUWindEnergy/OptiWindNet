@@ -39,14 +39,17 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
     if shrunk_polygon.is_empty:
         warning(
             'Buffering by %.2f completely removed the obstacle at index %d. For visual comparison use plot_original_vs_buffered().',
-            shrink_dist, indx
+            shrink_dist,
+            indx,
         )
         return None
 
     elif shrunk_polygon.geom_type == 'MultiPolygon':
         warning(
             'Shrinking by %.2f split the obstacle at index %d into %d pieces. For visual comparison use plot_original_vs_buffered().',
-            shrink_dist, indx, len(shrunk_polygon.geoms)
+            shrink_dist,
+            indx,
+            len(shrunk_polygon.geoms),
         )
         return [np.array(part.exterior.coords) for part in shrunk_polygon.geoms]
 
@@ -56,7 +59,8 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
     else:
         warning(
             'Unexpected geometry type %s after shrinking obstacle at index %d. The obstacle is totally removed. For visual comparison use plot_original_vs_buffered().',
-            shrunk_polygon.geom_type, indx
+            shrunk_polygon.geom_type,
+            indx,
         )
         return None
 
@@ -204,12 +208,14 @@ def from_coordinates(
                 obs_poly
             ) and not border_polygon.intersects(obs_poly):
                 warning(
-                    'Obstacle at index %d is completely outside the border and is neglected.', i
+                    'Obstacle at index %d is completely outside the border and is neglected.',
+                    i,
                 )
             else:
                 # Subtract this obstacle from the border
                 warning(
-                    'Obstacle at index %d intersects with the exteriour border and is merged into the exterior border.', i
+                    'Obstacle at index %d intersects with the exteriour border and is merged into the exterior border.',
+                    i,
                 )
                 new_border_polygon = border_polygon.difference(obs_poly)
 
