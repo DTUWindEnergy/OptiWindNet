@@ -26,6 +26,7 @@ from .api_utils import (
     from_coordinates,
     parse_cables_input,
     plot_org_buff,
+    normalize_power_values,
 )
 
 ###################
@@ -65,10 +66,6 @@ class WindFarmNetwork:
             router = EWRouter()
         self.router = router
 
-        # Parse and validate cables input; convert to list of (capacity, cost) tuples
-        self.cables = parse_cables_input(cables)
-        self.cables_capacity = max(c[0] for c in self.cables)
-
         # Construct layout from coordinates if not directly provided
         if turbinesC is not None and substationsC is not None:
             if L is not None:
@@ -91,6 +88,11 @@ class WindFarmNetwork:
                 'Both turbinesC and substationsC must be provided! Or alternatively L should be given.'
             )
 
+        scale = normalize_power_values(L, max_decimal_digits=2)
+        # Parse and validate cables input; convert to list of (capacity, cost) tuples
+        self.cables = parse_cables_input(cables * scale)
+        self.cables_capacity = max(c[0] for c in self.cables)
+        
         self.L = L  # Location graph
 
         # Create planar embedding from L
