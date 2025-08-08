@@ -150,8 +150,9 @@ class Solver(abc.ABC):
     name: str
     metadata: ModelMetadata
     solver: Any
-    solver_options: dict[str, Any]
+    options: dict[str, Any]
     solution_info: SolutionInfo
+    applied_options: dict[str, Any]
 
     @abc.abstractmethod
     def set_problem(
@@ -212,7 +213,7 @@ class Solver(abc.ABC):
             method_options=dict(
                 solver_name=self.name,
                 fun_fingerprint=metadata.fun_fingerprint,
-                **self.solver_options,
+                **self.applied_options,
                 **metadata.model_options,
             ),
         )

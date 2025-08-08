@@ -115,11 +115,8 @@ class SolverPyomo(Solver):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        solver.options.update(
-            self.options
-            | options
-            | {_optkey[name].time_limit: time_limit, _optkey[name].mip_gap: mip_gap}
-        )
+        applied_options = self.options | options | {_optkey[name].time_limit: time_limit, _optkey[name].mip_gap: mip_gap}
+        solver.options.update(applied_options)
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
         result = solver.solve(model, **self.solve_kwargs, tee=verbose)
         self.result = result
@@ -136,7 +133,7 @@ class SolverPyomo(Solver):
             relgap=1.0 - bound / objective,
             termination=result['Solver'][0]['Termination condition'].name,
         )
-        self.solution_info, self.solver_options = solution_info, options
+        self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
