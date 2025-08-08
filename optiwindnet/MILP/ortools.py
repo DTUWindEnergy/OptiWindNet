@@ -103,7 +103,8 @@ class SolverORTools(Solver, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         storer = _SolutionStore(model)
-        for key, val in (self.options | options).items():
+        applied_options = self.options | options
+        for key, val in applied_options.items():
             setattr(solver.parameters, key, val)
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.relative_gap_limit = mip_gap
@@ -123,7 +124,7 @@ class SolverORTools(Solver, PoolHandler):
             relgap=1.0 - bound / objective,
             termination=solver.status_name(),
         )
-        self.solution_info, self.solver_options = solution_info, options
+        self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 

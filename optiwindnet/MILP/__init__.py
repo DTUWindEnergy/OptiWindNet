@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import logging
-
 from ._core import (
     FeederLimit,
     FeederRoute,
@@ -24,10 +22,8 @@ __all__ = (
     'solver_factory',
 )
 
-_lggr = logging.getLogger(__name__)
 
-
-def solver_factory(solver_name: str):
+def solver_factory(solver_name: str) -> Solver:
     """Create a Solver object tied to the specified external MILP solver.
 
     Note that the only solver that is a dependency of OptiWindNet is 'ortools'.
@@ -62,5 +58,4 @@ def solver_factory(solver_name: str):
 
             return SolverPyomo(solver_name, prefix='appsi_')
         case _:
-            _lggr.error('Unsupported solver: %s', solver_name)
-            return None
+            raise ValueError(f'Unsupported solver: {solver_name}')

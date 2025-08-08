@@ -554,7 +554,6 @@ class MILPRouter(Router):
         S_warm=None,
         S_warm_has_detour=False,
         verbose=None,
-        router_previous=None,
         **kwargs,
     ):
         if verbose is None:
