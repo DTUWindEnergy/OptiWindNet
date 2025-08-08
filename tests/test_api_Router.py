@@ -126,7 +126,7 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
             {
                 'time_limit': 120,
                 'feeder_limit': 3,
-                'max_retries': 20,
+                'max_retries': 7,
                 'balanced': True,
                 'seed': 42,
                 'verbose': True,
