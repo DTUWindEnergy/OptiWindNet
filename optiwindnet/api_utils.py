@@ -555,3 +555,42 @@ def normalize_power_values(graph: nx.Graph, max_decimal_digits: int = 2):
         data['power'] = int(round(data['power'] * scale))
 
     return scale
+
+
+def denormalize_power_values(G, scale: int | float):
+    """
+    De-scales graph attributes that were scaled by normalize_power_values so that:
+      - cable assignment sees correct edge 'load'
+      - gplot(node_tag='load') displays correct node 'load'
+      - infobox capacity is correct
+
+    Safely converts exact integers back to int.
+    """
+    if not scale or scale == 1:
+        return
+
+    def _descale(val):
+        x = val / scale
+        return int(x) if float(x).is_integer() else float(x)
+
+    # 1) Node 'power'
+    for _, data in G.nodes(data=True):
+        if 'power' in data:
+            data['power'] = _descale(data['power'])
+
+    # 2) Edge 'load' (used by assign_cables)
+    for _, _, data in G.edges(data=True):
+        if 'load' in data:
+            data['load'] = _descale(data['load'])
+
+    # 3) Graph 'capacity' (shown in gplot infobox)
+    if 'capacity' in G.graph:
+        G.graph['capacity'] = _descale(G.graph['capacity'])
+
+    # 4) Node 'load' (shown by gplot when node_tag='load')
+    any_node_load = False
+    for _, data in G.nodes(data=True):
+        if 'load' in data:
+            data['load'] = _descale(data['load'])
+            any_node_load = True
+

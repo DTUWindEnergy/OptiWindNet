@@ -27,6 +27,7 @@ from .api_utils import (
     parse_cables_input,
     plot_org_buff,
     normalize_power_values,
+    denormalize_power_values,
 )
 
 ###################
@@ -89,17 +90,10 @@ class WindFarmNetwork:
             )
 
         # Parse and validate cables input; convert to list of (capacity, cost) tuples
-        parse_cables = parse_cables_input(cables)
+        self.cables = parse_cables_input(cables)
         power_scale = normalize_power_values(L, max_decimal_digits=2)
-        if power_scale:
-            scaled_cables = [(int(cap) * power_scale, cost) for cap, cost in parse_cables]
-        else:
-            scaled_cables = parse_cables
+        self.power_scale = power_scale
 
-        print(power_scale)
-        print(scaled_cables)
-
-        self.cables = scaled_cables
         self.cables_capacity = max(c[0] for c in self.cables)
         
         self.L = L  # Location graph
@@ -377,6 +371,7 @@ class WindFarmNetwork:
             cables=self.cables,
             cables_capacity=self.cables_capacity,
             verbose=verbose,
+            power_scale=self.power_scale
         )
         self.S = S
         self.G = G
@@ -400,6 +395,7 @@ class Router(ABC):
         S_warm=None,
         S_warm_has_detour=False,
         verbose=False,
+        power_scale=None,
         **kwargs,
     ):
         pass
@@ -414,6 +410,7 @@ class Router(ABC):
         S_warm=None,
         S_warm_has_detour=False,
         verbose=False,
+        power_scale=None,
     ):
         """Make the instance callable, calling optimize() internally."""
         return self.optimize(
@@ -425,6 +422,7 @@ class Router(ABC):
             S_warm=S_warm,
             S_warm_has_detour=S_warm_has_detour,
             verbose=verbose,
+            power_scale=power_scale,
         )
 
 
@@ -536,6 +534,7 @@ class MILPRouter(Router):
         solver_options=None,
         model_options=None,
         verbose=False,
+        power_scale=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -545,6 +544,7 @@ class MILPRouter(Router):
         self.solver_options = solver_options or {}
         self.model_options = model_options or ModelOptions()
         self.verbose = verbose
+        self.power_scale = power_scale
         self.solver = solver_factory(solver_name)
         try:
             self.optiwindnet_default_options = self.solver.options
@@ -563,14 +563,26 @@ class MILPRouter(Router):
         S_warm=None,
         S_warm_has_detour=False,
         verbose=None,
+        power_scale=None,
         **kwargs,
     ):
         if verbose is None:
             verbose = self.verbose
 
+        # Prefer the power_scale passed at call time; fall back to the router's attribute
+        ps = power_scale if power_scale is not None else self.power_scale
+
+        if ps:
+            scaled_cables = [(int(cap) * ps, cost) for cap, cost in cables]
+            scaled_cables_capacity = cables_capacity * ps
+        else:
+            scaled_cables = cables
+            scaled_cables_capacity = cables_capacity
+
+        
         warmstart_state = check_warmstart_feasibility(
             S_warm=S_warm,
-            cables_capacity=cables_capacity,
+            cables_capacity=scaled_cables_capacity,
             model_options=self.model_options,
             S_warm_has_detour=S_warm_has_detour,
             solver_name=self.solver_name,
@@ -585,7 +597,7 @@ class MILPRouter(Router):
         solver.set_problem(
             P,
             A,
-            capacity=cables_capacity,
+            capacity=scaled_cables_capacity,
             model_options=self.model_options,
             warmstart=S_warm,
         )
@@ -601,6 +613,10 @@ class MILPRouter(Router):
 
         G.SolutionInfo = solution_info
 
+        print(ps)
+        if ps:
+            denormalize_power_values(G, ps)
+        
         assign_cables(G, cables)
 
         return S, G
