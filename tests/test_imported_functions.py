@@ -163,18 +163,14 @@ def test_model_options(expected):
         )
 
 
-@pytest.mark.parametrize(
-    'solver_name',
-    ['ortools', 'cplex', 'gurobi', 'cbc', 'scip', 'highs', 'unknown_solver'],
-)
-def test_solver_factory_returns_expected_solver(solver_name, expected):
-    solver_test = solver_factory(solver_name)
-    expected_type = expected['SolverTypes'].get(solver_name)
+solver_names = ['ortools', 'cplex', 'gurobi', 'cbc', 'scip', 'highs', 'unknown_solver']
 
-    if expected_type is None:
-        assert solver_test is None, f"Expected None for unsupported solver '{solver_name}'"
-    else:
-        assert type(solver_test).__name__ == expected_type, (
-            f"For solver '{solver_name}', expected type '{expected_type}', "
-            f"but got '{type(solver_test).__name__}'"
-        )
+@pytest.mark.parametrize('solver_name', solver_names)
+def test_solver_factory_returns_expected_solver(solver_name, expected):
+    try:
+        s = solver_factory(solver_name)
+        actual_val = type(s).__name__ if s else None
+    except ValueError as e:
+        actual_val = f"ERROR: {e}"
+
+    assert actual_val == expected['SolverTypes'][solver_name]

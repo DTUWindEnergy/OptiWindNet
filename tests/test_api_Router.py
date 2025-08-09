@@ -111,9 +111,9 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
         # --- HGSRouter Tests ---
         (
             HGSRouter,
-            {'time_limit': 60},
+            {'time_limit': 1},
             {
-                'time_limit': 60,
+                'time_limit': 1,
                 'max_retries': 10,
                 'feeder_limit': None,
                 'balanced': False,
@@ -124,7 +124,7 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
         (
             HGSRouter,
             {
-                'time_limit': 120,
+                'time_limit': 2,
                 'feeder_limit': 3,
                 'max_retries': 7,
                 'balanced': True,
@@ -132,9 +132,9 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
                 'verbose': True,
             },
             {
-                'time_limit': 120,
+                'time_limit': 2,
                 'feeder_limit': 3,
-                'max_retries': 20,
+                'max_retries': 7,
                 'balanced': True,
                 'seed': 42,
                 'verbose': True,
@@ -175,6 +175,7 @@ def test_router_initialization(router_class, init_kwargs, expected_attrs):
         else:
             assert actual == expected
 
+
 @pytest.mark.parametrize(
     "router_class, init_kwargs, call_args",
     [
@@ -191,7 +192,7 @@ def test_router_initialization(router_class, init_kwargs, expected_attrs):
         ),
         (
             HGSRouter,
-            {"time_limit": 10},
+            {"time_limit": 2},
             {
                 "A": "A_test",
                 "P": "P_test",

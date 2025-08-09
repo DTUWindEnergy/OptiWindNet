@@ -92,10 +92,16 @@ if __name__ == "__main__":
     # Solver types
     # -------------------------------
     solver_names = ['ortools', 'cplex', 'gurobi', 'cbc', 'scip', 'highs', 'unknown_solver']
-    solver_types = {
-        name: type(solver_factory(name)).__name__ if solver_factory(name) else None
-        for name in solver_names
-    }
+    
+    def safe_solver_name(name):
+        try:
+            s = solver_factory(name)
+            return type(s).__name__ if s else None
+        except ValueError as e:
+            return f"ERROR: {e}"
+
+    solver_types = {name: safe_solver_name(name) for name in solver_names}
+
     expected["SolverTypes"] = solver_types
 
     # -------------------------------
