@@ -501,3 +501,57 @@ def extract_network_as_array(G):
     )
     return network
 
+
+def normalize_power_values(graph: nx.Graph, max_decimal_digits: int = 2):
+    """
+    Scales node 'power' values in a NetworkX graph to make all powers integers.
+
+    - If a node lacks a 'power' attribute and scaling is needed, it is assigned a default power of 1.0.
+    - If any power value has more than `max_decimal_digits`, raises a ValueError.
+    - Returns the scaling factor used (1 if already all integers).
+    """
+    
+
+    powers = []
+    nodes_missing_power = []
+
+    # First pass: collect power values and detect missing ones
+    for node, data in graph.nodes(data=True):
+        if 'power' in data:
+            powers.append(data['power'])
+        else:
+            nodes_missing_power.append(node)
+
+    # Check if scaling is needed
+    scaling_needed = any(
+        isinstance(p, float) and not p.is_integer() for p in powers
+    )
+
+    if not scaling_needed:
+        return 1  # No need to scale
+
+    # Assign default 1.0 power to missing nodes
+    for node in nodes_missing_power:
+        graph.nodes[node]['power'] = 1.0
+        powers.append(1.0)
+
+    # Check decimal precision
+    max_decimals_found = 0
+    for p in powers:
+        if isinstance(p, float) and not p.is_integer():
+            decimal_part = str(p).split('.')[-1].rstrip('0')
+            max_decimals_found = max(max_decimals_found, len(decimal_part))
+
+    if max_decimals_found > max_decimal_digits:
+        raise ValueError(
+            f"Power values exceed allowed {max_decimal_digits} decimal digits (found {max_decimals_found})."
+        )
+
+    # Compute scale
+    scale = 10 ** max_decimals_found if max_decimals_found > 0 else 1
+
+    # Apply scaling
+    for node, data in graph.nodes(data=True):
+        data['power'] = int(round(data['power'] * scale))
+
+    return scale
