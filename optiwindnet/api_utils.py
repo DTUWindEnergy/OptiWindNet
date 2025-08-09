@@ -528,7 +528,7 @@ def normalize_power_values(graph: nx.Graph, max_decimal_digits: int = 2):
     )
 
     if not scaling_needed:
-        return 1  # No need to scale
+        return None
 
     # Assign default 1.0 power to missing nodes
     for node in nodes_missing_power:

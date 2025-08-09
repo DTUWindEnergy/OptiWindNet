@@ -88,9 +88,18 @@ class WindFarmNetwork:
                 'Both turbinesC and substationsC must be provided! Or alternatively L should be given.'
             )
 
-        scale = normalize_power_values(L, max_decimal_digits=2)
         # Parse and validate cables input; convert to list of (capacity, cost) tuples
-        self.cables = parse_cables_input(cables * scale)
+        parse_cables = parse_cables_input(cables)
+        power_scale = normalize_power_values(L, max_decimal_digits=2)
+        if power_scale:
+            scaled_cables = [(int(cap) * power_scale, cost) for cap, cost in parse_cables]
+        else:
+            scaled_cables = parse_cables
+
+        print(power_scale)
+        print(scaled_cables)
+
+        self.cables = scaled_cables
         self.cables_capacity = max(c[0] for c in self.cables)
         
         self.L = L  # Location graph
