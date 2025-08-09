@@ -202,7 +202,7 @@ def test_router_initialization(router_class, init_kwargs, expected_attrs):
         ),
         (
             MILPRouter,
-            {"solver_name": "cbc", "time_limit": 10, "mip_gap": 0.1},
+            {"solver_name": "ortools", "time_limit": 10, "mip_gap": 0.1},
             {
                 "A": "A_test",
                 "P": "P_test",
@@ -231,6 +231,7 @@ def test_router_call_delegates_to_optimize(router_class, init_kwargs, call_args)
         "S_warm": None,
         "S_warm_has_detour": False,
         "verbose": False,
+    "power_scale": None,
     }
     expected_args.update(call_args)
 
