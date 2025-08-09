@@ -14,11 +14,6 @@ from shapely.validation import explain_validity
 
 from optiwindnet.importer import L_from_site
 
-# Local utilities
-from optiwindnet.utils import NodeTagger
-
-F = NodeTagger()
-
 
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
@@ -356,13 +351,10 @@ def check_warmstart_feasibility(
     T = S_warm.graph['T']
     capacity = cables_capacity
 
-    roots = range(1, R + 1)
-    RootL = {-r: S_warm.nodes[-r].get('label', F[-r]) for r in roots}
-
     reasons = []
 
     # Feeder constraints
-    feeder_counts = [S_warm.degree[r] for r in RootL]
+    feeder_counts = [S_warm.degree[r] for r in range(-R, 0)]
     feeder_limit_mode = model_options.get('feeder_limit', 'unlimited')
     feeder_minimum = math.ceil(T / capacity)
 
