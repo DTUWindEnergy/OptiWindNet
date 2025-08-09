@@ -588,9 +588,7 @@ def denormalize_power_values(G, scale: int | float):
         G.graph['capacity'] = _descale(G.graph['capacity'])
 
     # 4) Node 'load' (shown by gplot when node_tag='load')
-    any_node_load = False
     for _, data in G.nodes(data=True):
         if 'load' in data:
             data['load'] = _descale(data['load'])
-            any_node_load = True
 
