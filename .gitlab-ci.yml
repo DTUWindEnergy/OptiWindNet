@@ -1,5 +1,14 @@
 image: continuumio/miniconda3
 
+stages:
+  - test
+  - deploy
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    
 # ===== TEST OptiWindNet linux=====
 test_linux:
   stage:
@@ -9,7 +18,7 @@ test_linux:
     - pip install --upgrade pip
     - pip install .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
-    # - python -m pytest
+    - python -m pytest
   tags:  # runner platform
     - linux
 
@@ -29,7 +38,7 @@ test_windows:
     - python --version
     - pip install -e .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
-    # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   tags:
     - ANMH_old  # Windows runner
 
