@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 import pytest
 
-from optiwindnet.api import EWRouter, WindFarmNetwork
+from optiwindnet.api import EWRouter, WindFarmNetwork, HGSRouter, MILPRouter
 
 # from tests.assertions import assert_graph_equal
 
@@ -343,3 +343,44 @@ def test_from_yaml(LG_from_database):
         filepath='optiwindnet/data/Taylor-2023.yaml', cables=7
     )
     assert_graph_equal(L, wfn.L, ignored_graph_keys={'norm_offset', 'norm_scale'})
+
+
+
+@pytest.mark.parametrize(
+    "router",
+    [
+        EWRouter(),
+        EWRouter(feeder_route='straight'),
+        HGSRouter(time_limit=1),
+        HGSRouter(time_limit=1, feeder_limit=1, max_retries=5, balanced=True),
+        MILPRouter(solver_name="ortools", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="cbc", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="cplex", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="gurobi", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="highs", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="scip", time_limit=2, mip_gap=0.005),
+    ],
+)
+def test_wfn_all_routers(router):
+    turbinesC = np.array([[1.0, 0], [1, 1]])
+    substationsC = np.array([[0, 0]])
+    cables = 2
+    EXPECTED_TERSE = np.array([-1, 0])
+
+    # case 1: router passed in constructor
+    wfn = WindFarmNetwork(
+        cables=cables,
+        turbinesC=turbinesC,
+        substationsC=substationsC,
+        router=router,
+    )
+    print(wfn.optimize())
+    assert np.array_equal(wfn.optimize(), EXPECTED_TERSE)
+
+    # case 2: router passed at call-time
+    wfn = WindFarmNetwork(
+        cables=cables,
+        turbinesC=turbinesC,
+        substationsC=substationsC,
+    )
+    assert np.array_equal(wfn.optimize(router=router), EXPECTED_TERSE)
