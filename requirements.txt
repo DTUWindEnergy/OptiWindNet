@@ -3,6 +3,7 @@ bidict >=0.23.1
 bitarray >=3.4.2
 condeltri >=0.0.2
 darkdetect >=0.8.0
+dill >= 0.3.9
 esy.osm.pbf >=0.1.1
 hybgensea >=0.0.1
 makefun >=1.15.6
