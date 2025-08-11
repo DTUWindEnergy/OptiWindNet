@@ -6,61 +6,54 @@ stages:
 
 workflow:
   rules:
-    - if: $CI_PIPELINE_SOURCE == "push"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    
-# ===== TEST OptiWindNet linux=====
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ===== TEST OptiWindNet linux =====
 test_linux:
-  stage:
-    test
+  stage: test
+  tags: [linux]
   script:
-    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
-    - conda update conda
-    - conda install -n base conda-libmamba-solver
+    # use bash hook (NOT PowerShell) in the Linux container
+    - eval "$(conda shell.bash hook)" || source /opt/conda/etc/profile.d/conda.sh
+    - conda update -n base -y conda
+    - conda install -n base -y conda-libmamba-solver
     - conda config --set solver libmamba
-    - conda env create --file environment.yml
-    - if ($LASTEXITCODE) {conda env update --prune -n optiwindnet_env --file environment.yml}
+    # create env or update if it already exists (bash fallback)
+    - conda env create -n optiwindnet_env -f environment.yml || conda env update -n optiwindnet_env --prune -f environment.yml
     - conda activate optiwindnet_env
-    - conda install coin-or-cbc scip
+    - conda install -n optiwindnet_env -y coin-or-cbc scip
     - python --version
     - pip install --upgrade pip
     - pip install .[test]
-    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
-    - python -m pytest
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
-  tags:  # runner platform
-    - linux
 
-# ===== TEST OptiWindNet windows=====
+# ===== TEST OptiWindNet windows =====
 test_windows:
-  stage:
-    test
+  stage: test
+  tags: [ANMH_old]   # Windows runner
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
+    # keep PowerShell hook on Windows
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
-    - conda update conda
-    - conda install -n base conda-libmamba-solver
+    - conda update -n base -y conda
+    - conda install -n base -y conda-libmamba-solver
     - conda config --set solver libmamba
-    - conda env create --file environment.yml
-    - if ($LASTEXITCODE) {conda env update --prune -n optiwindnet_env --file environment.yml}
+    # create then update if create failed (PowerShell style)
+    - conda env create -n optiwindnet_env -f environment.yml; if ($LASTEXITCODE) { conda env update -n optiwindnet_env --prune -f environment.yml }
     - conda activate optiwindnet_env
-    - conda install coin-or-cbc scip
+    - conda install -n optiwindnet_env -y coin-or-cbc scip
     - python --version
+    - pip install -U pip
     - pip install -e .[test]
-    - python -m pytest
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
-  tags:
-    - ANMH_old  # Windows runner
 
-# ===== DEPLOY optiwindnet docs=====
+# ===== DEPLOY optiwindnet docs =====
 make_pages:
   pages: true
-  # rules:
-  #   - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  #     changes:
-  #       - docs/**/*
   when: manual
   stage: deploy
+  tags: [linux]
   script:
     - apt-get update
     - apt-get -y install make pandoc graphviz
@@ -68,20 +61,15 @@ make_pages:
     - cd docs; make html
     - cd ../; mv docs/build/html public/
   artifacts:
-    paths:
-      - public
-  tags: 
-    - linux
+    paths: [public]
 
-# ===== DEPLOY publish optiwindnet on pypi=====
+# ===== DEPLOY publish optiwindnet on PyPI =====
 pypi_linux:
+  stage: deploy
+  tags: [linux]
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+.\d+.\d+/
-  stage:
-    deploy
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
   script:
     - pip install --upgrade pip build twine packaging
-    - python3 -m build
-    - twine upload dist/* -u $TWINE_USERNAME -p $TWINE_PASSWORD
-  tags:
-    - linux
+    - python -m build
+    - twine upload dist/* -u "$TWINE_USERNAME" -p "$TWINE_PASSWORD"
