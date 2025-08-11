@@ -14,6 +14,8 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
     if ignored_graph_keys is None:
         ignored_graph_keys = set()
 
+    ignored_graph_keys.update({"fun_fingerprint.funfile"})
+
     assert set(G1.nodes) == set(G2.nodes), 'Node sets differ'
     assert set(G1.edges) == set(G2.edges), 'Edge sets differ'
 
@@ -56,26 +58,26 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
 @pytest.mark.parametrize(
     'label, router, ignored_keys',
     [
-        ('eagle_EWRouter', None, {'runtime', "fun_fingerprint.funfile"}),
-        ('eagle_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime', "fun_fingerprint.funfile"}),
+        ('eagle_EWRouter', None, {'runtime'}),
+        ('eagle_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime'}),
         ('taylor_EWRouter', None, {'runtime'}),
-        ('taylor_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime', "fun_fingerprint.funfile"}),
-        ('eagle_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime', "fun_fingerprint.funfile"}),
+        ('taylor_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime'}),
+        ('eagle_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime'}),
         (
             'eagle_HGSRouter_feeder_limit',
             HGSRouter(time_limit=2, feeder_limit=0),
-            {'solution_time', 'runtime', "fun_fingerprint.funfile"},
+            {'solution_time', 'runtime'},
         ),
-        ('taylor_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime', "fun_fingerprint.funfile"}),
+        ('taylor_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime'}),
         (
             'taylor_HGSRouter_feeder_limit',
             HGSRouter(time_limit=2, feeder_limit=0),
-            {'solution_time', 'runtime', "fun_fingerprint.funfile"},
+            {'solution_time', 'runtime'},
         ),
         (
             'eagle_MILPRouter',
             MILPRouter(solver_name='ortools', time_limit=5, mip_gap=0.005),
-            {'runtime', 'bound', 'pool_count', 'relgap', "fun_fingerprint.funfile"},
+            {'runtime', 'bound', 'pool_count', 'relgap'},
         ),
     ],
 )

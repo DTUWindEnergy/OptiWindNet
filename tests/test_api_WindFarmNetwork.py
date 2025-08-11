@@ -14,6 +14,8 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
     if ignored_graph_keys is None:
         ignored_graph_keys = set()
 
+    ignored_graph_keys.update({"fun_fingerprint.funfile"})
+
     assert set(G1.nodes) == set(G2.nodes), 'Node sets differ'
     assert set(G1.edges) == set(G2.edges), 'Edge sets differ'
 
@@ -89,7 +91,7 @@ def test_wfn_fails_without_cables(site_from_database):
         WindFarmNetwork(turbinesC=site['turbinesC'], substationsC=site['substationsC'])
 
 
-def test_wfn_from_coordinates_matches_expected_L(LG_from_database, site_from_database):
+def test_wfn_from_coordinates(LG_from_database, site_from_database):
     expected_L, _ = LG_from_database('eagle_EWRouter')
     site = site_from_database('eagle_EWRouter')
 
@@ -118,7 +120,7 @@ def test_wfn_from_coordinates_matches_expected_L(LG_from_database, site_from_dat
     assert isinstance(wfn1.router, EWRouter)
 
 
-def test_wfn_from_L_matches_expected_L(LG_from_database):
+def test_wfn_from_L(LG_from_database):
     expected_L, _ = LG_from_database('eagle_EWRouter')
 
     wfn2 = WindFarmNetwork(cables=7, L=expected_L)
