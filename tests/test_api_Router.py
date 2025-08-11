@@ -31,7 +31,7 @@ from .helpers import assert_graph_equal
         (
             'eagle_MILPRouter',
             MILPRouter(solver_name='ortools', time_limit=5, mip_gap=0.005),
-            {'runtime', 'bound', 'pool_count', 'relgap'},
+            {'runtime', 'bound', 'pool_count', 'relgap', 'solver_details.strategy'},
         ),
     ],
 )
