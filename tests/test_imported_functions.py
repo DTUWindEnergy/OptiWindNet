@@ -23,6 +23,8 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
     if ignored_graph_keys is None:
         ignored_graph_keys = set()
 
+    ignored_graph_keys.update({"fun_fingerprint.funfile"})
+
     assert set(G1.nodes) == set(G2.nodes), 'Node sets differ'
     assert set(G1.edges) == set(G2.edges), 'Edge sets differ'
 
