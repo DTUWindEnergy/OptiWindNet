@@ -20,6 +20,9 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
             f'Node {n} attributes differ: {filtered1} != {filtered2}'
         )
 
+    for G in (G1, G2):
+        G.graph.get('method_options', {}).get('fun_fingerprint', {}).pop('funfile', None)
+
     keys1 = set(G1.graph.keys()) - ignored_graph_keys
     keys2 = set(G2.graph.keys()) - ignored_graph_keys
     assert keys1 == keys2, f'Graph keys mismatch: {keys1.symmetric_difference(keys2)}'
