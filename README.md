@@ -36,6 +36,29 @@ One may pre-install the dependencies in a python environment by using either:
 - [requirements.txt](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/requirements.txt?ref_type=heads&inline=false): `pip install -r requirements.txt`
 - [environment.yml](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/environment.yml?ref_type=heads&inline=false): `conda env create -f environment.yml` (name: *optiwindnet_env*)
 
+Paper
+-----
+
+The methodology implemented in *OptiWindNet* is described in the peer-reviewed cientific article:
+- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis,
+_Flexible cable routing framework for wind farm collection system optimization_,
+European Journal of Operational Research,
+2025, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
+
+```{code-block} bib
+@article{
+    SOUZADEALENCAR2025,
+    title = {Flexible cable routing framework for wind farm collection system optimization},
+    journal = {European Journal of Operational Research},
+    year = {2025},
+    issn = {0377-2217},
+    doi = {https://doi.org/10.1016/j.ejor.2025.07.069},
+    url = {https://www.sciencedirect.com/science/article/pii/S0377221725005946},
+    author = {Mauricio {Souza de Alencar} and Tuhfe Göçmen and Nicolaos A. Cutululis},
+    keywords = {Combinatorial optimization, Network design, Collection system, Wind farm},
+}
+```
+
 Acknowledgements
 ----------------
 
