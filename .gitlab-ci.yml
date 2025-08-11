@@ -6,13 +6,12 @@ stages:
 
 workflow:
   rules:
-    - if: $CI_PIPELINE_SOURCE == "push"
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    
-# ===== TEST OptiWindNet linux=====
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ===== TEST OptiWindNet linux =====
 test_linux:
-  stage:
-     test
+  stage: test
   tags:  # runner platform
     - linux
   script:
@@ -59,13 +58,8 @@ test_windows:
 make_pages:
   pages: true
   when: manual
-  # rules:
-  #   - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  #     changes:
-  #       - docs/**/*
   stage: deploy
-  tags:
-     - linux
+  tags: [linux]
   script:
     - apt-get update
     - apt-get -y install make pandoc graphviz
@@ -73,8 +67,7 @@ make_pages:
     - cd docs; make html
     - cd ../; mv docs/build/html public/
   artifacts:
-    paths:
-      - public
+    paths: [public]
 
 # ===== DEPLOY publish optiwindnet on PyPI =====
 pypi_linux:
