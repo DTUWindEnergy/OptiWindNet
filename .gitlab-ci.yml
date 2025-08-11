@@ -12,7 +12,8 @@ workflow:
 # ===== TEST OptiWindNet linux =====
 test_linux:
   stage: test
-  tags: [linux]
+  tags:  # runner platform
+    - linux
   script:
     - eval "$(conda shell.bash hook)" || source /opt/conda/etc/profile.d/conda.sh
     - conda update -n base -y conda
@@ -33,7 +34,8 @@ test_linux:
 # ===== TEST OptiWindNet windows =====
 test_windows:
   stage: test
-  tags: [ANMH_old]   # Windows runner
+  tags:
+    - ANMH_old  # Windows runner
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
