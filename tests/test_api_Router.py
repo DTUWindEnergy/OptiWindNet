@@ -56,26 +56,26 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
 @pytest.mark.parametrize(
     'label, router, ignored_keys',
     [
-        ('eagle_EWRouter', None, {'runtime'}),
-        ('eagle_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime'}),
+        ('eagle_EWRouter', None, {'runtime', "fun_fingerprint.funfile"}),
+        ('eagle_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime', "fun_fingerprint.funfile"}),
         ('taylor_EWRouter', None, {'runtime'}),
-        ('taylor_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime'}),
-        ('eagle_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime'}),
+        ('taylor_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime', "fun_fingerprint.funfile"}),
+        ('eagle_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime', "fun_fingerprint.funfile"}),
         (
             'eagle_HGSRouter_feeder_limit',
             HGSRouter(time_limit=2, feeder_limit=0),
-            {'solution_time', 'runtime'},
+            {'solution_time', 'runtime', "fun_fingerprint.funfile"},
         ),
-        ('taylor_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime'}),
+        ('taylor_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime', "fun_fingerprint.funfile"}),
         (
             'taylor_HGSRouter_feeder_limit',
             HGSRouter(time_limit=2, feeder_limit=0),
-            {'solution_time', 'runtime'},
+            {'solution_time', 'runtime', "fun_fingerprint.funfile"},
         ),
         (
             'eagle_MILPRouter',
             MILPRouter(solver_name='ortools', time_limit=5, mip_gap=0.005),
-            {'runtime', 'bound', 'pool_count', 'relgap'},
+            {'runtime', 'bound', 'pool_count', 'relgap', "fun_fingerprint.funfile"},
         ),
     ],
 )
