@@ -309,11 +309,11 @@ def test_from_yaml(LG_from_database):
         HGSRouter(time_limit=1),
         HGSRouter(time_limit=1, feeder_limit=1, max_retries=5, balanced=True),
         MILPRouter(solver_name="ortools", time_limit=2, mip_gap=0.005),
-        #MILPRouter(solver_name="cbc", time_limit=2, mip_gap=0.005),
-        #MILPRouter(solver_name="cplex", time_limit=2, mip_gap=0.005),
-        #MILPRouter(solver_name="gurobi", time_limit=2, mip_gap=0.005),
-        #MILPRouter(solver_name="highs", time_limit=2, mip_gap=0.005),
-        #MILPRouter(solver_name="scip", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="cbc", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="cplex", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="gurobi", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="highs", time_limit=2, mip_gap=0.005),
+        MILPRouter(solver_name="scip", time_limit=2, mip_gap=0.005),
     ],
 )
 def test_wfn_all_routers(router):

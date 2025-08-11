@@ -14,11 +14,20 @@ test_linux:
   stage:
     test
   script:
+    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
+    - conda update conda
+    - conda install -n base conda-libmamba-solver
+    - conda config --set solver libmamba
+    - conda env create --file environment.yml
+    - if ($LASTEXITCODE) {conda env update --prune -n optiwindnet_env --file environment.yml}
+    - conda activate optiwindnet_env
+    - conda install coin-or-cbc scip
     - python --version
     - pip install --upgrade pip
     - pip install .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
     - python -m pytest
+    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   tags:  # runner platform
     - linux
 
@@ -35,9 +44,10 @@ test_windows:
     - conda env create --file environment.yml
     - if ($LASTEXITCODE) {conda env update --prune -n optiwindnet_env --file environment.yml}
     - conda activate optiwindnet_env
+    - conda install coin-or-cbc scip
     - python --version
     - pip install -e .[test]
-    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
+    - python -m pytest
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   tags:
     - ANMH_old  # Windows runner

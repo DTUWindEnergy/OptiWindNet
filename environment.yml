@@ -6,7 +6,6 @@ dependencies:
   - bidict >=0.23.1
   - bitarray >=3.4.2
   - darkdetect >=0.8.0
-  - dill >= 0.3.9
   - makefun >=1.15.6
   - matplotlib >=3.10.1
   - networkx >=3.4.2
