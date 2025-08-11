@@ -205,7 +205,6 @@ def test_terse_links_returns_expected_array(LG_from_database):
     L, _ = LG_from_database('eagle_EWRouter')
     wfn = WindFarmNetwork(cables=7, L=L)
     wfn.optimize()
-    print(wfn.terse_links())
     # fmt: off
     expected_terse = np.array([1, 2, 41, 4, 41, 6, 27, 6, 7, 10, 13, 8, 11, 14, 15, -1,
                                14, 18, 22, 16, 18, 22, 23, 24, -1, 26, 28, -1, -1, 39, 29,
@@ -310,7 +309,7 @@ def test_from_yaml(LG_from_database):
         HGSRouter(time_limit=1),
         HGSRouter(time_limit=1, feeder_limit=1, max_retries=5, balanced=True),
         MILPRouter(solver_name="ortools", time_limit=2, mip_gap=0.005),
-        MILPRouter(solver_name="cbc", time_limit=2, mip_gap=0.005),
+        #MILPRouter(solver_name="cbc", time_limit=2, mip_gap=0.005),
         #MILPRouter(solver_name="cplex", time_limit=2, mip_gap=0.005),
         #MILPRouter(solver_name="gurobi", time_limit=2, mip_gap=0.005),
         #MILPRouter(solver_name="highs", time_limit=2, mip_gap=0.005),

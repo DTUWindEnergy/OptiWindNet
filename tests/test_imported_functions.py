@@ -78,13 +78,13 @@ def test_assign_cables(expected):
 def test_ew_presolver(expected):
     S_test = EW_presolver(expected['A'], capacity=7)
     S_expected = expected['S_ew']
-    assert_graph_equal(S_test, S_expected, ignored_graph_keys={'runtime', "fun_fingerprint.funfile"})
+    assert_graph_equal(S_test, S_expected, ignored_graph_keys={'runtime'})
 
 
 def test_cpew(expected):
     G_test = CPEW(expected['L'], capacity=7)
     G_expected = expected['G_CPEW']
-    assert_graph_equal(G_test, G_expected, ignored_graph_keys={'runtime', "fun_fingerprint.funfile"})
+    assert_graph_equal(G_test, G_expected, ignored_graph_keys={'runtime'})
 
 
 def test_l_from_site(expected):

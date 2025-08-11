@@ -37,7 +37,6 @@ from .helpers import assert_graph_equal
 )
 def test_router_variants(LG_from_database, label, router, ignored_keys):
     expected_L, G = LG_from_database(label)
-    print(G.graph['capacity'])
 
     wfn = WindFarmNetwork(
         cables=G.graph['capacity'],
