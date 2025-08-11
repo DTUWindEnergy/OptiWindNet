@@ -30,24 +30,46 @@ The tool is distributed as an open-source Python package that is suitable for us
 
 
 ## How to Cite
-Version 1.0.0
 
-`Mauricio Souza de Alencar, Amir Arasteh and Mikkel Friis-Møller. (2025, March).
-OptiWindNet 1.0.0: An open-source wind farm electrical network optimization tool. DTU Wind, Technical University of Denmark.`
+A peer-reviewed cientific article explaining the OptiWindNet framework and benchmarking it against state-of-the art methods is available (open-access) at:
+- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis,
+_Flexible cable routing framework for wind farm collection system optimization_,
+European Journal of Operational Research,
+2025, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
 
 ```{code-block} bib
-	@article{
-    	    optiwindnet1.0.0_2025,
-    	    title={OptiWindNet 1.0.0: An open-source wind farm electrical network optimization tool},
-    	    author={Mauricio Souza de Alencar, Amir Arasteh and Mikkel Friis-Møller},
-    	    url="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet",
-    	    publisher={DTU Wind, Technical University of Denmark},
-    	    year={2025},
-    	    month={3}
-	    }
+@article{
+    SOUZADEALENCAR2025,
+    title = {Flexible cable routing framework for wind farm collection system optimization},
+    journal = {European Journal of Operational Research},
+    year = {2025},
+    issn = {0377-2217},
+    doi = {https://doi.org/10.1016/j.ejor.2025.07.069},
+    url = {https://www.sciencedirect.com/science/article/pii/S0377221725005946},
+    author = {Mauricio {Souza de Alencar} and Tuhfe Göçmen and Nicolaos A. Cutululis},
+    keywords = {Combinatorial optimization, Network design, Collection system, Wind farm},
+}
 ```
-```{toctree}
 
+The OptiWindNet software package can be cited as:
+- Mauricio Souza de Alencar, Amir Arasteh and Mikkel Friis-Møller.
+_OptiWindNet: An open-source wind farm electrical network optimization tool_,
+DTU Wind and Energy Systems, Technical University of Denmark (2025, March),
+url: <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>
+
+```{code-block} bib
+@article{
+    optiwindnet_2025,
+    title={OptiWindNet: An open-source wind farm electrical network optimization tool},
+    author={Mauricio {Souza de Alencar} and Amir Arasteh and Mikkel Friis-Møller},
+    url="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet",
+    publisher={DTU Wind and Energy Systems, Technical University of Denmark},
+    year={2025},
+    month={3}
+}
+```
+
+```{toctree}
 setup
 notebooks/quickstart_high
 high_level_api

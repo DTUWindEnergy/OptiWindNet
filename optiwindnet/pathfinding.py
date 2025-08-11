@@ -4,13 +4,13 @@
 import heapq
 import logging
 import math
+from bisect import bisect_left
 from collections import defaultdict, namedtuple
 from itertools import chain
-from bisect import bisect_left
 
-from bitarray import bitarray
 import networkx as nx
 import numpy as np
+from bitarray import bitarray
 from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 
@@ -543,7 +543,7 @@ class PathFinder:
 
     def _find_paths(self):
         #  print('[exp] starting _explore()')
-        G, P, R, T, B = self.G, self.P, self.R, self.T, self.B
+        G, P, R = self.G, self.P, self.R
         d2roots, d2rootsRank = self.d2roots, self.d2rootsRank
         ST = self.ST
         iterations_limit = self.iterations_limit
@@ -573,7 +573,6 @@ class PathFinder:
         portal_set = (edges_P - edges_G_primed) - constraint_edges
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
 
-        counter = 0
         # launch channel traversers around the roots to the prioqueue
         for r in range(-R, 0):
             paths[r] = PseudoNode(r, r, None, 0.0, 0.0)
@@ -618,10 +617,8 @@ class PathFinder:
                 I_path[left][sec_left], I_path[right][sec_right] = wedge_end
 
                 # prioritize by distance to the closest node of the portal
-                closest, d_closest = (
-                    (left, d_left)
-                    if d2rootsRank[left, r] <= d2rootsRank[right, r]
-                    else (right, d_right)
+                d_closest = (
+                    d_left if d2rootsRank[left, r] <= d2rootsRank[right, r] else d_right
                 )
                 traverser_pack = (
                     d_closest,
