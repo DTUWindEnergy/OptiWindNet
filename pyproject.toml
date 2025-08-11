@@ -24,7 +24,6 @@ dependencies = [
     'bitarray >=3.4.2',
     'condeltri >=0.0.2',
     'darkdetect >=0.8.0',
-	'dill >= 0.3.9',
     'esy.osm.pbf >=0.1.1',
     'hybgensea >=0.0.1',
     'makefun >=1.15.6',
@@ -51,7 +50,8 @@ dependencies = [
 'Issue tracker'= 'https://github.com/DTUWindEnergy/OptiWindNet/issues'
 
 [project.optional-dependencies]
-test  = [ 'pytest',  # for testing
+test  = [ 'dill', # for loaoding dill data
+		  'pytest',  # for testing
           'pytest-cov',  # for calculating coverage
           'psutil',  # memory profiling
           'memory_profiler',  # memory profiling
