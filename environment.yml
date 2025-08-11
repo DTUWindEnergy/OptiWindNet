@@ -15,7 +15,6 @@ dependencies:
   - py >=1.11.0
   - pyomo >=6.9.1
   - pyyaml >=6.0.2
-  - pyyaml-include >=2.1
   - scipy >=1.15.2
   - shapely >=2.0.7
   - svg.py >=1.6.0
@@ -26,3 +25,4 @@ dependencies:
       - esy.osm.pbf >=0.1.1
       - hybgensea >=0.0.1
       - ortools >=9.12.4544
+      - pyyaml-include >=2.1
