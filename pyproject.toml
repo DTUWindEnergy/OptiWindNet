@@ -51,7 +51,10 @@ dependencies = [
 
 [project.optional-dependencies]
 test  = [ 'dill', # for loaoding dill data
-		  'pytest',  # for testing
+		  'cplex',
+          'gurobipy',
+          'highspy',
+          'pytest',  # for testing
           'pytest-cov',  # for calculating coverage
           'psutil',  # memory profiling
           'memory_profiler',  # memory profiling
