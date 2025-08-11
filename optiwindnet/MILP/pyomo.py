@@ -147,7 +147,7 @@ class SolverPyomo(Solver):
         P, model_options = self.P, self.model_options
         S = topology_from_mip_sol(model=self.model)
         S.graph['creator'] += self.name
-        S.graph['fun_fingerprint'] = make_min_length_model_fingerprint
+        S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
             P,
