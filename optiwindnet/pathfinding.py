@@ -4,13 +4,13 @@
 import heapq
 import logging
 import math
+from bisect import bisect_left
 from collections import defaultdict, namedtuple
 from itertools import chain
-from bisect import bisect_left
 
-from bitarray import bitarray
 import networkx as nx
 import numpy as np
+from bitarray import bitarray
 from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 

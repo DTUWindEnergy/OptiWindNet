@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-from bisect import bisect_left
 import logging
 import math
+from bisect import bisect_left
 from collections import defaultdict
-from itertools import chain, combinations, tee, pairwise
+from itertools import chain, combinations, pairwise, tee
 from typing import Literal, NewType
 
 import condeltri as cdt

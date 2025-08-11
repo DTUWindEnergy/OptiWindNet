@@ -10,8 +10,8 @@ from typing import Callable, Literal, NewType
 
 import networkx as nx
 import numba as nb
-from numba.np.extensions import cross2d
 import numpy as np
+from numba.np.extensions import cross2d
 from numpy.typing import NDArray
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
