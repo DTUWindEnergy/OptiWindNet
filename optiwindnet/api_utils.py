@@ -4,6 +4,7 @@ from itertools import pairwise
 
 import matplotlib.pyplot as plt
 import numpy as np
+import networkx as nx
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.path import Path
 from shapely.geometry import MultiPolygon, Polygon
