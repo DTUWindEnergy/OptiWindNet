@@ -14,15 +14,17 @@ test_linux:
   stage: test
   tags: [linux]
   script:
-    # use bash hook (NOT PowerShell) in the Linux container
     - eval "$(conda shell.bash hook)" || source /opt/conda/etc/profile.d/conda.sh
     - conda update -n base -y conda
     - conda install -n base -y conda-libmamba-solver
     - conda config --set solver libmamba
-    # create env or update if it already exists (bash fallback)
+    # ensure strict conda-forge so we don't mix with defaults
+    - conda config --add channels conda-forge
+    - conda config --set channel_priority strict
     - conda env create -n optiwindnet_env -f environment.yml || conda env update -n optiwindnet_env --prune -f environment.yml
     - conda activate optiwindnet_env
-    - conda install -n optiwindnet_env -y coin-or-cbc scip
+    # install solvers from conda-forge explicitly
+    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
     - python --version
     - pip install --upgrade pip
     - pip install .[test]
@@ -34,15 +36,17 @@ test_windows:
   tags: [ANMH_old]   # Windows runner
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
-    # keep PowerShell hook on Windows
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda update -n base -y conda
     - conda install -n base -y conda-libmamba-solver
     - conda config --set solver libmamba
-    # create then update if create failed (PowerShell style)
+    # make sure conda-forge is used with strict priority on Windows too
+    - conda config --add channels conda-forge
+    - conda config --set channel_priority strict
     - conda env create -n optiwindnet_env -f environment.yml; if ($LASTEXITCODE) { conda env update -n optiwindnet_env --prune -f environment.yml }
     - conda activate optiwindnet_env
-    - conda install -n optiwindnet_env -y coin-or-cbc scip
+    # scip is not available on Windows; install only CBC from conda-forge
+    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc
     - python --version
     - pip install -U pip
     - pip install -e .[test]
