@@ -28,7 +28,7 @@ test_linux:
     - python --version
     - pip install --upgrade pip
     - pip install .[test]
-    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - pytest --cov-config .coveragerc
 
 # ===== TEST OptiWindNet windows =====
 test_windows:
@@ -51,7 +51,7 @@ test_windows:
     - python --version
     - pip install -U pip
     - pip install -e .[test]
-    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - pytest --cov-config .coveragerc
 
 # ===== DEPLOY optiwindnet docs =====
 make_pages:
