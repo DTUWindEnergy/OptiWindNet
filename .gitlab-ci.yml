@@ -1,5 +1,3 @@
-image: continuumio/miniconda3
-
 stages:
   - test
   - deploy
@@ -12,6 +10,7 @@ workflow:
 # ===== TEST OptiWindNet linux =====
 test_linux:
   stage: test
+  image: continuumio/miniconda3
   tags:  # runner platform
     - linux
   script:
@@ -34,9 +33,9 @@ test_linux:
 # ===== TEST OptiWindNet windows =====
 test_windows:
   stage: test
-  image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
+  #image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
   tags:
-    - docker-windows  # Windows runner
+    - windows  # Windows runner
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
