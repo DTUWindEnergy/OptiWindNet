@@ -25,16 +25,18 @@ test_windows:
     # - Invoke-WebRequest -UserAgent curl https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe -OutFile Miniforge3-Windows-x86_64.exe
     # - Start-Process -Wait -FilePath Miniforge3-Windows-x86_64.exe -ArgumentList "/InstallationType=JustMe","/RegisterPython=0","/S","/D=$($env:UserProfile)\condaforge"
     # - . "$($env:UserProfile)\condaforge\shell\condabin\conda-hook.ps1"
+    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda config --set solver libmamba
     - conda config --set channel_priority strict
     - conda update conda
     - conda env create --file environment.yml
     # install packages needed for testing that are in conda but not in pypi
     - conda install --name optiwindnet_env --channel conda-forge --override-channels coin-or-cbc scip
-    - conda run --name optiwindnet_env python --version
-    - conda run --name optiwindnet_env pip install -e .[test]
-    - conda run --name optiwindnet_env python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
-    # - conda run --name optiwindnet_env pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - conda activate optiwindnet_env
+    - python --version
+    - pip install -e .[test]
+    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
+    # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   tags:
     - docker-windows
 
