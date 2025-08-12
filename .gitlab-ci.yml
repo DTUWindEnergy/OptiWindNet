@@ -28,8 +28,9 @@ test_windows:
     # - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda update conda
     - conda create --channel conda-forge --solver libmamba --name optiwindnet_env "python=3.12"
-    - conda env update --freeze-installed --name optiwindnet_env --file environment.yml
     - conda activate optiwindnet_env
+    - python --version
+    - conda env update --file environment.yml
     - python --version
     - pip install -e .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
