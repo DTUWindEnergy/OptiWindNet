@@ -20,7 +20,7 @@ from optiwindnet.plotting import gplot, pplot
 from optiwindnet.svg import svgplot
 
 from .api_utils import (
-    check_warmstart_feasibility,
+    is_warmstart_eligible,
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
     from_coordinates,
@@ -580,7 +580,7 @@ class MILPRouter(Router):
             scaled_cables_capacity = cables_capacity
 
         
-        warmstart_state = check_warmstart_feasibility(
+        warmstart_state = is_warmstart_eligible(
             S_warm=S_warm,
             cables_capacity=scaled_cables_capacity,
             model_options=self.model_options,

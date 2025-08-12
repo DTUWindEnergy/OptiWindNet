@@ -324,7 +324,7 @@ def from_coordinates(
     )
 
 
-def check_warmstart_feasibility(
+def is_warmstart_eligible(
     S_warm,
     cables_capacity,
     model_options,
