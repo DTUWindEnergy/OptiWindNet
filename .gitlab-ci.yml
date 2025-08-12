@@ -28,7 +28,7 @@ test_windows:
     # - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda update conda
     # python 3.13 seems to trigger a runaway dependency recursion involving pillow-11.3.0, qt6-main-6.9.1 and mkl-2024.2.2
-    - conda env create --name optiwindnet_env python=3.12
+    - conda env create --name optiwindnet_env 'python=3.12'
     - conda env update --name optiwindnet_env --prune --file environment.yml
     - conda activate optiwindnet_env
     - python --version
