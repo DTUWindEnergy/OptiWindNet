@@ -31,7 +31,8 @@ test_windows:
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
     # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   tags:
-    - ANMH_old  # Windows runner
+    - windows
+    # - ANMH_old  # Windows runner (DTU-3B8KV02_TOPFARM went offline in 2025-08-11)
 
 # ===== DEPLOY optiwindnet docs=====
 make_pages:
