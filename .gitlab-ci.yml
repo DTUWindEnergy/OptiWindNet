@@ -27,12 +27,10 @@ test_windows:
     # - . "$($env:UserProfile)\condaforge\shell\condabin\conda-hook.ps1"
     # - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda update conda
-    - conda create --channel conda-forge --solver libmamba --name optiwindnet_env "python=3.12"
+    - conda env create --file environment.yml
     - conda activate optiwindnet_env
     - python --version
-    - conda env update --file environment.yml
-    - python --version
-    - pip install -e .[test]
+    - pip install --no-deps -e .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
     # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   tags:
