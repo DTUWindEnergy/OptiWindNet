@@ -35,7 +35,7 @@ test_linux:
 test_windows:
   stage: test
   tags:
-    - ANMH_old  # Windows runner
+    - windows  # Windows runner
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
@@ -52,7 +52,7 @@ test_windows:
     - python --version
     - pip install -U pip
     - pip install -e .[test]
-    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - pytest --cov
 
 # ===== DEPLOY optiwindnet docs =====
 make_pages:

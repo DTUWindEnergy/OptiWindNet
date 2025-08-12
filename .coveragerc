@@ -1,0 +1,11 @@
+[run]
+branch = True
+source = optiwindnet
+omit =
+    optiwindnet/db/modelv0.py
+    tests/**
+
+[report]
+show_missing = True
+skip_covered = True
+# fail_under = 50
