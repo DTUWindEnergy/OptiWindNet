@@ -26,11 +26,13 @@ test_windows:
     # - Start-Process -Wait -FilePath Miniforge3-Windows-x86_64.exe -ArgumentList "/InstallationType=JustMe","/RegisterPython=0","/S","/D=$($env:UserProfile)\condaforge"
     # - . "$($env:UserProfile)\condaforge\shell\condabin\conda-hook.ps1"
     - conda config --set solver libmamba
+    - conda config --set channel_priority strict
     - conda update conda
     - conda env create --file environment.yml
+    - conda config --remove channels defaults
     - conda activate optiwindnet_env
     # install packages needed for testing that are in conda but not in pypi
-    - conda install coin-or-cbc scip
+    - conda install --name optiwindnet_env --channel conda-forge --override-channels coin-or-cbc scip
     - python --version
     - pip install -e .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
