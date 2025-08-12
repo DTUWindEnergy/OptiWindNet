@@ -29,6 +29,8 @@ test_windows:
     - conda update conda
     - conda env create --file environment.yml
     - conda activate optiwindnet_env
+    # install packages needed for testing that are in conda but not in pypi
+    - conda install coin-or-cbc scip
     - python --version
     - pip install -e .[test]
     - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
