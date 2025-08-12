@@ -22,7 +22,7 @@ test_windows:
   script:
     - Invoke-WebRequest -UserAgent curl https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe -OutFile Miniforge3-Windows-x86_64.exe
     - Start-Process -Wait -FilePath Miniforge3-Windows-x86_64.exe -ArgumentList "/InstallationType=JustMe","/RegisterPython=0","/S","/D=%UserProfile%\condaforge"
-    - & "%UserProfile%\condaforge\shell\condabin\conda-hook.ps1"
+    - . "%UserProfile%\condaforge\shell\condabin\conda-hook.ps1"
     # - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     # - conda update conda
     # - conda install -n base conda-libmamba-solver
