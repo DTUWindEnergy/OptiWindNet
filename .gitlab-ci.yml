@@ -7,74 +7,111 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "push"'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
+# ===== common pytest opts via variable =====
+.variables:
+  PYTEST_BASE: >-
+    --cov=optiwindnet
+    --cov-config=.coveragerc
+    --cov-report=term-missing:skip-covered
+    --cov-report=xml:coverage.xml
+    --color=no
+    -q
+
 # ===== TEST OptiWindNet linux =====
 test_linux:
   stage: test
   image: continuumio/miniconda3
-  tags:  # runner platform
-    - linux
+  tags: [linux]
   script:
     - eval "$(conda shell.bash hook)" || source /opt/conda/etc/profile.d/conda.sh
     - conda update -n base -y conda
     - conda install -n base -y conda-libmamba-solver
     - conda config --set solver libmamba
-    # ensure strict conda-forge so we don't mix with defaults
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
     - conda env create -n optiwindnet_env -f environment.yml || conda env update -n optiwindnet_env --prune -f environment.yml
     - conda activate optiwindnet_env
-    # install solvers from conda-forge explicitly
-    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
+    # solvers (linux-friendly)
+    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip || echo "SCIP may already be present or not required."
     - python --version
     - pip install --upgrade pip
     - pip install .[test]
-    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - pytest $PYTEST_BASE
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - coverage.xml
+  # optional: still keep a regex for GitLab 'coverage:' field if you like
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
 
 # ===== TEST OptiWindNet windows =====
 test_windows:
   stage: test
   image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
-  tags:
-    - docker-windows  # Windows runner
-  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
-  script:
-    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
+  tags: [docker-windows]
+  before_script:
+    # init conda for PowerShell
+    - (conda shell.powershell hook) | Out-String | ? { $_ } | Invoke-Expression
     - conda update -n base -y conda
     - conda install -n base -y conda-libmamba-solver
     - conda config --set solver libmamba
-    # make sure conda-forge is used with strict priority on Windows too
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
+  script:
     - conda env create -n optiwindnet_env -f environment.yml; if ($LASTEXITCODE) { conda env update -n optiwindnet_env --prune -f environment.yml }
     - conda activate optiwindnet_env
-    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
+    # coin-or-cbc available; scip may not be on Windows -> make optional
+    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc
+    - conda install -n optiwindnet_env -y -c conda-forge scip; if ($LASTEXITCODE) { Write-Host "SCIP not available on Windows; continuing." }
     - python --version
     - pip install -U pip
     - pip install -e .[test]
-    - pytest --cov
+    - pytest $env:PYTEST_BASE
+  variables:
+    PYTEST_BASE: >-
+      --cov=optiwindnet
+      --cov-config=.coveragerc
+      --cov-report=term-missing:skip-covered
+      --cov-report=xml:coverage.xml
+      --color=no
+      -q
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - coverage.xml
+  # keep coverage regex as a fallback for GitLab UI
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
 
 # ===== DEPLOY optiwindnet docs =====
-make_pages:
-  pages: true
-  when: manual
-  stage: deploy
-  tags: [linux]
-  script:
-    - apt-get update
-    - apt-get -y install make pandoc graphviz
-    - pip install .[docs] --upgrade
-    - cd docs; make html
-    - cd ../; mv docs/build/html public/
-  artifacts:
-    paths: [public]
+# make_pages:
+  # pages: true
+  # when: manual
+  # stage: deploy
+  # tags: [linux]
+  # script:
+    # - apt-get update
+    # - apt-get -y install make pandoc graphviz
+    # - pip install .[docs] --upgrade
+    # - cd docs; make html
+    # - cd ../; mv docs/build/html public/
+  # artifacts:
+    # paths: [public]
 
 # ===== DEPLOY publish optiwindnet on PyPI =====
-pypi_linux:
-  stage: deploy
-  tags: [linux]
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
-  script:
-    - pip install --upgrade pip build twine packaging
-    - python -m build
-    - twine upload dist/* -u "$TWINE_USERNAME" -p "$TWINE_PASSWORD"
+# pypi_linux:
+  # stage: deploy
+  # tags: [linux]
+  # rules:
+    # - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  # script:
+    # - pip install --upgrade pip build twine packaging
+    # - python -m build
+    # - twine upload dist/* -u "$TWINE_USERNAME" -p "$TWINE_PASSWORD"
