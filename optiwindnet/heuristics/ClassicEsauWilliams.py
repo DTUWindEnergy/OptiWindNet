@@ -6,7 +6,6 @@ import time
 from typing import Callable
 
 import networkx as nx
-import numpy as np
 from scipy.stats import rankdata
 
 from ..geometric import apply_edge_exemptions, assign_root, complete_graph
