@@ -7,7 +7,6 @@ dependencies:
   - bitarray >=3.4.2
   - darkdetect >=0.8.0
   - makefun >=1.15.6
-  - matplotlib-base >=3.10.1
   - networkx >=3.4.2
   - numba >=0.60
   - numpy >=2.0
@@ -24,5 +23,7 @@ dependencies:
       - condeltri >=0.0.2
       - esy.osm.pbf >=0.1.1
       - hybgensea >=0.0.1
+      # matplotlib from pypi does not install pyside6
+      - matplotlib >=3.10.1
       - ortools >=9.12.4544
       - pyyaml-include >=2.1
