@@ -39,16 +39,13 @@ test_windows:
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
-    - conda create -n cplex_env -y python=3.12 pip
-    - conda activate cplex_env    
+    - conda create -n cplex_env -y python=3.12 pip   
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
     - conda env create -n optiwindnet_env -f environment.yml; if ($LASTEXITCODE) { conda env update -n optiwindnet_env --prune -f environment.yml }
     - conda activate optiwindnet_env
     - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
-    - conda install -y cplex
-    - pip install -e .
-    - pip install dill
+    - pip install -e .[test]
     - pip install pytest pytest-cov
     - python --version
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
