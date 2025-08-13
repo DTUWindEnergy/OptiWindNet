@@ -1,2 +1,2 @@
-conda install --channel conda-forge scip coin-or-cbc numba networkx shapely scipy bitarray pillow
-pip install optiwindnet
+conda install --channel conda-forge scip coin-or-cbc
+pip install cplex gurobipy highspy optiwindnet
