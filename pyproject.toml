@@ -52,12 +52,13 @@ dependencies = [
 ]
 
 [project.urls]
+"Homepage" = "https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet"
 "Documentation" = "https://optiwindnet.readthedocs.io/"
 "Download" = "https://optiwindnet.readthedocs.io/stable/setup.html#installation"
-"Bug Tracker" = "https://github.com/DTUWindEnergy/OptiWindNet/issues"
+"Issue Tracker" = "https://github.com/DTUWindEnergy/OptiWindNet/issues"
 "Release Notes" = "https://github.com/DTUWindEnergy/OptiWindNet/tags"
 # "Changelog" = "https://github.com/DTUWindEnergy/OptiWindNet/releases"
-"Source Code" = "https://github.com/DTUWindEnergy/OptiWindNet"
+"Source" = "https://github.com/DTUWindEnergy/OptiWindNet"
 
 [project.optional-dependencies]
 test  = [ 'pytest',  # for testing
