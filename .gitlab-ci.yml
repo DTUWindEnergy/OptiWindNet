@@ -38,12 +38,12 @@ test_windows:
     PY: "3.12"
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
-    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
-    - conda create -n cplex_env -y python=3.12 pip   
+    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression   
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
-    - conda env create -n optiwindnet_env -f environment.yml; if ($LASTEXITCODE) { conda env update -n optiwindnet_env --prune -f environment.yml }
+    - conda create -n optiwindnet_env -y python=3.12 pip
     - conda activate optiwindnet_env
+    - conda env update -n optiwindnet_env --prune -f environment.yml
     - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
     - pip install -e .[test]
     - pip install pytest pytest-cov
