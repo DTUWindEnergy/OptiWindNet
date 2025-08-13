@@ -35,35 +35,35 @@ test_windows:
   tags:
     - docker-windows
   variables:
-    PY: "3.12"   # pin Python version here
+    PY: "3.12"
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda create -n cplex_env -y python=3.12 pip
     - conda activate cplex_env
-    - conda config --add channels ibmdecisionoptimization   # or your internal channel
+    - conda config --add channels ibmdecisionoptimization
     - conda config --set channel_priority strict
     - conda install -y cplex
     - pip install -e .
+    - pip install dill
     - pip install pytest pytest-cov
     - python --version
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
-
 # ===== DEPLOY optiwindnet docs =====
-make_pages:
-  pages: true
-  when: manual
-  stage: deploy
-  tags: [linux]
-  script:
-    - apt-get update
-    - apt-get -y install make pandoc graphviz
-    - pip install .[docs] --upgrade
-    - cd docs; make html
-    - cd ../; mv docs/build/html public/
-  artifacts:
-    paths: [public]
+# make_pages:
+  # pages: true
+  # when: manual
+  # stage: deploy
+  # tags: [linux]
+  # script:
+    # - apt-get update
+    # - apt-get -y install make pandoc graphviz
+    # - pip install .[docs] --upgrade
+    # - cd docs; make html
+    # - cd ../; mv docs/build/html public/
+  # artifacts:
+    # paths: [public]
 
 # ===== DEPLOY publish optiwindnet on PyPI =====
 pypi_linux:
