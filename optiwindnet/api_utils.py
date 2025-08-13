@@ -358,7 +358,7 @@ def is_warmstart_eligible(
     if feeder_limit_mode == 'unlimited':
         feeder_limit = float('inf')
     elif feeder_limit_mode == 'specified':
-        feeder_limit = model_options.get('feeder_route')
+        feeder_limit = model_options.get('max_feeders')
     elif feeder_limit_mode == 'minimum':
         feeder_limit = feeder_minimum
     elif feeder_limit_mode == 'min_plus1':
@@ -489,95 +489,4 @@ def extract_network_as_array(G):
         count=G.number_of_edges(),
     )
     return network
-
-
-def normalize_power_values(graph: nx.Graph, max_decimal_digits: int = 2):
-    """
-    Scales node 'power' values in a NetworkX graph to make all powers integers.
-
-    - If a node lacks a 'power' attribute and scaling is needed, it is assigned a default power of 1.0.
-    - If any power value has more than `max_decimal_digits`, raises a ValueError.
-    - Returns the scaling factor used (1 if already all integers).
-    """
-    
-
-    powers = []
-    nodes_missing_power = []
-
-    # First pass: collect power values and detect missing ones
-    for node, data in graph.nodes(data=True):
-        if 'power' in data:
-            powers.append(data['power'])
-        else:
-            nodes_missing_power.append(node)
-
-    # Check if scaling is needed
-    scaling_needed = any(
-        isinstance(p, float) and not p.is_integer() for p in powers
-    )
-
-    if not scaling_needed:
-        return None
-
-    # Assign default 1.0 power to missing nodes
-    for node in nodes_missing_power:
-        graph.nodes[node]['power'] = 1.0
-        powers.append(1.0)
-
-    # Check decimal precision
-    max_decimals_found = 0
-    for p in powers:
-        if isinstance(p, float) and not p.is_integer():
-            decimal_part = str(p).split('.')[-1].rstrip('0')
-            max_decimals_found = max(max_decimals_found, len(decimal_part))
-
-    if max_decimals_found > max_decimal_digits:
-        raise ValueError(
-            f"Power values exceed allowed {max_decimal_digits} decimal digits (found {max_decimals_found})."
-        )
-
-    # Compute scale
-    scale = 10 ** max_decimals_found if max_decimals_found > 0 else 1
-
-    # Apply scaling
-    for node, data in graph.nodes(data=True):
-        data['power'] = int(round(data['power'] * scale))
-
-    return scale
-
-
-def denormalize_power_values(G, scale: int | float):
-    """
-    De-scales graph attributes that were scaled by normalize_power_values so that:
-      - cable assignment sees correct edge 'load'
-      - gplot(node_tag='load') displays correct node 'load'
-      - infobox capacity is correct
-
-    Safely converts exact integers back to int.
-    """
-    if not scale or scale == 1:
-        return
-
-    def _descale(val):
-        x = val / scale
-        return int(x) if float(x).is_integer() else float(x)
-
-    # 1) Node 'power'
-    for _, data in G.nodes(data=True):
-        if 'power' in data:
-            data['power'] = _descale(data['power'])
-
-    # 2) Edge 'load' (used by assign_cables)
-    for _, _, data in G.edges(data=True):
-        if 'load' in data:
-            data['load'] = _descale(data['load'])
-
-    # 3) Graph 'capacity' (shown in gplot infobox)
-    if 'capacity' in G.graph:
-        G.graph['capacity'] = _descale(G.graph['capacity'])
-
-    # 4) Node 'load' (shown by gplot when node_tag='load')
-    for _, data in G.nodes(data=True):
-        if 'load' in data:
-            data['load'] = _descale(data['load'])
 

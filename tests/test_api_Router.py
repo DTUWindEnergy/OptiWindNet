@@ -186,7 +186,6 @@ def test_router_call_delegates_to_optimize(router_class, init_kwargs, call_args)
         "S_warm": None,
         "S_warm_has_detour": False,
         "verbose": False,
-    "power_scale": None,
     }
     expected_args.update(call_args)
 
