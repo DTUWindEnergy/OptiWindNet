@@ -9,7 +9,7 @@ name = "optiwindnet"
 description = "Tools for optimizing the electrical cable network (collection system) for offshore wind power plants."
 authors = [   { name="DTU Wind Energy"},   { name="Mauricio Souza de Alencar", email="ma___@dtu.dk" }, ]
 dynamic = ["version"]
-keywords = ["optimization", "wind farms", "routing"]
+keywords = ["optimization", "windfarm", "network", "routing"]
 classifiers = [
     "Development Status :: 4 - Beta", 
     "Intended Audience :: Developers",
