@@ -25,7 +25,6 @@ test_linux:
     - pip install pytest pytest-cov
     - python --version
     - pip install .[test]
-    - pip install -y cplex
   script:
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
@@ -42,11 +41,12 @@ test_windows:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression   
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
-    - conda create -n optiwindnet_env -y python=3.12 pip
+    - conda create -n optiwindnet_env -y python=3.12 pip=24.0
     - conda activate optiwindnet_env
     - conda env update -n optiwindnet_env --prune -f environment.yml
     - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip cplex
     - pip install -e .[test]
+    - conda install -y cplex
     - pip install pytest pytest-cov
     - python --version
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
