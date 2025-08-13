@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use OptiWindNet for scientific work, please cite the paper."
+authors:
+- family-names: "Souza de Alencar"
+  given-names: "Mauricio"
+  orcid: "https://orcid.org/0000-0002-5923-5619"
+- family-names: "Arasteh"
+  given-names: "Amir"
+  orcid: "https://orcid.org/0000-0002-5459-8170"
+- family-names: "Friis-Møller"
+  given-names: "Mikkel"
+  orcid: "https://orcid.org/0000-0002-6723-6830"
+title: "OptiWindNet: Tool for designing and optimizing the electrical cable network of offshore wind farms"
+url: "https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet"
+date-released: 2025-04-09
+preferred-citation:
+  type: article
+  authors:
+  - family-names: "Souza de Alencar"
+    given-names: "Mauricio"
+    orcid: "https://orcid.org/0000-0002-5923-5619"
+  - family-names: "Göçmen"
+    given-names: "Tuhfe"
+    orcid: "https://orcid.org/0000-0003-2825-518X"
+  - family-names: "Cutululis"
+    given-names: "Nicolaos A."
+    orcid: "https://orcid.org/0000-0003-2438-1429"
+  title: "Flexible cable routing framework for wind farm collection system optimization"
+  doi: 10.1016/j.ejor.2025.07.069
+  date-released: 2025-08-07
