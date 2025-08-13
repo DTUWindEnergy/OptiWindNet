@@ -7,7 +7,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "optiwindnet"
 description = "Tool for designing and optimizing the electrical cable network of offshore wind farms"
-authors = [   { name="DTU Wind Energy"},   { name="Mauricio Souza de Alencar", email="ma___@dtu.dk" }, ]
+authors = [ { name="DTU Wind Energy", email="mikf@dtu.dk" },
+            { name="Mauricio Souza de Alencar", email="ma___@dtu.dk" },
+            { name="Amir Arasteh", email="am___@dtu.dk" },
+]
 dynamic = ["version"]
 keywords = ["optimization", "wind farm", "network", "routing"]
 classifiers = [
@@ -49,10 +52,12 @@ dependencies = [
 ]
 
 [project.urls]
-documentation = "https://optiwindnet.readthedocs.io/"
-# changelog = 'https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/'
-repository = "https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet"
-tracker = "https://github.com/DTUWindEnergy/OptiWindNet/issues"
+"Documentation" = "https://optiwindnet.readthedocs.io/"
+"Download" = "https://optiwindnet.readthedocs.io/stable/setup.html#installation"
+"Bug Tracker" = "https://github.com/DTUWindEnergy/OptiWindNet/issues"
+"Release Notes" = "https://github.com/DTUWindEnergy/OptiWindNet/tags"
+# "Changelog" = "https://github.com/DTUWindEnergy/OptiWindNet/releases"
+"Source Code" = "https://github.com/DTUWindEnergy/OptiWindNet"
 
 [project.optional-dependencies]
 test  = [ 'pytest',  # for testing
