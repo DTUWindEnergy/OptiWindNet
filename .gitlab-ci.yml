@@ -40,9 +40,12 @@ test_windows:
   script:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda create -n cplex_env -y python=3.12 pip
-    - conda activate cplex_env
-    - conda config --add channels ibmdecisionoptimization
+    - conda activate cplex_env    
+    - conda config --add channels conda-forge
     - conda config --set channel_priority strict
+    - conda env create -n optiwindnet_env -f environment.yml; if ($LASTEXITCODE) { conda env update -n optiwindnet_env --prune -f environment.yml }
+    - conda activate optiwindnet_env
+    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
     - conda install -y cplex
     - pip install -e .
     - pip install dill
