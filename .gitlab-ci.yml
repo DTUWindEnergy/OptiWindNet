@@ -38,18 +38,14 @@ test_windows:
     PY: "3.12"   # pin Python version here
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
-    # Enable conda in PowerShell
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
-    - conda update -n base -y conda
-    - conda install -n base -y conda-libmamba-solver
-    - conda config --set solver libmamba
-    - conda config --add channels conda-forge
+    - conda create -n cplex_env -y python=3.12 pip
+    - conda activate cplex_env
+    - conda config --add channels ibmdecisionoptimization   # or your internal channel
     - conda config --set channel_priority strict
-    # Remove any old env, then create new with pinned Python version
-    - conda remove -n optiwindnet_env --all -y 2>$null ; exit 0
-    - conda create -n optiwindnet_env -y "python=$env:PY" pip pytest pytest-cov coin-or-cbc scip
-    - conda activate optiwindnet_env
-    - pip install -e .[test]
+    - conda install -y cplex
+    - pip install -e .
+    - pip install pytest pytest-cov
     - python --version
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
