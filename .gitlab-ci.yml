@@ -10,7 +10,7 @@ workflow:
 # ===== TEST OptiWindNet linux =====
 test_linux:
   stage: test
-  image: python:3.12 #continuumio/miniconda3
+  image: python:3.12
   tags:  # runner platform
     - linux
   before_script:
@@ -33,23 +33,26 @@ test_windows:
   stage: test
   image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
   tags:
-    - docker-windows  # Windows runner
+    - docker-windows
+  variables:
+    PY: "3.12"   # pin Python version here
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
+    # Enable conda in PowerShell
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda update -n base -y conda
     - conda install -n base -y conda-libmamba-solver
     - conda config --set solver libmamba
-    # make sure conda-forge is used with strict priority on Windows too
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
-    - conda env create -n optiwindnet_env -f environment.yml; if ($LASTEXITCODE) { conda env update -n optiwindnet_env --prune -f environment.yml }
+    # Remove any old env, then create new with pinned Python version
+    - conda remove -n optiwindnet_env --all -y 2>$null ; exit 0
+    - conda create -n optiwindnet_env -y "python=$env:PY" pip pytest pytest-cov coin-or-cbc scip
     - conda activate optiwindnet_env
-    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
-    - python --version
-    - pip install -U pip
     - pip install -e .[test]
+    - python --version
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+
 
 # ===== DEPLOY optiwindnet docs =====
 make_pages:
