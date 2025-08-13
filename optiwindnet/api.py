@@ -8,16 +8,17 @@ import yaml
 import yaml_include
 
 # OptiWindNet modules
-from optiwindnet.baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
-from optiwindnet.heuristics import CPEW, EW_presolver
-from optiwindnet.importer import L_from_pbf, L_from_site, L_from_yaml, load_repository
-from optiwindnet.interarraylib import G_from_S, S_from_G, as_normalized, calcload
-from optiwindnet.interface import assign_cables
-from optiwindnet.mesh import make_planar_embedding
-from optiwindnet.MILP import ModelOptions, solver_factory
-from optiwindnet.pathfinding import PathFinder
-from optiwindnet.plotting import gplot, pplot
-from optiwindnet.svg import svgplot
+from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
+from .heuristics import CPEW, EW_presolver
+from .importer import L_from_pbf, L_from_site, L_from_yaml
+from .importer import load_repository as load_repository
+from .interarraylib import G_from_S, S_from_G, as_normalized, calcload
+from .interface import assign_cables
+from .mesh import make_planar_embedding
+from .MILP import ModelOptions, solver_factory
+from .pathfinding import PathFinder
+from .plotting import gplot, pplot
+from .svg import svgplot
 
 from .api_utils import (
     is_warmstart_eligible,

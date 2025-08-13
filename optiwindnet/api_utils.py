@@ -10,7 +10,7 @@ from matplotlib.path import Path
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
-from optiwindnet.importer import L_from_site
+from .importer import L_from_site
 
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
