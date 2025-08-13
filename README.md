@@ -9,7 +9,7 @@
 OptiWindNet
 ===========
 
-Tool for designing and optimizing the electrical cable network (collection system) for offshore wind power plants.
+Tool for designing and optimizing the electrical cable network of offshore wind farms.
 
 Documentation: [https://optiwindnet.readthedocs.io](https://optiwindnet.readthedocs.io)
 - [Quickstart](https://optiwindnet.readthedocs.io/stable/notebooks/quickstart_high.html)
