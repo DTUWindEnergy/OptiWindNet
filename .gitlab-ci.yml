@@ -13,21 +13,34 @@ test_linux:
   image: python:3.12 #continuumio/miniconda3
   tags:  # runner platform
     - linux
-  script:
-    - eval "$(conda shell.bash hook)" || source /opt/conda/etc/profile.d/conda.sh
-    - conda update -n base -y conda
-    - conda install -n base -y conda-libmamba-solver
-    - conda config --set solver libmamba
-    # ensure strict conda-forge so we don't mix with defaults
-    - conda config --add channels conda-forge
-    - conda config --set channel_priority strict
-    - conda env create -n optiwindnet_env -f environment.yml || conda env update -n optiwindnet_env --prune -f environment.yml
-    - conda activate optiwindnet_env
-    # install solvers from conda-forge explicitly
-    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
+  before_script:
+    - apt-get update
+    # CBC
+    - apt-get install -y coinor-cbc coinor-libcbc-dev
+    # SCIP (use Debian 12 .deb)
+    - curl -L -o scip.deb https://www.scipopt.org/download/release/SCIPOptSuite-9.2.3-Linux-debian12.deb
+    # install with apt to auto-resolve dependencies (better than dpkg -i)
+    - apt-get install -y ./scip.deb
+    # Python deps
+    - python -m pip install -U pip
+    - pip install -r requirements.txt || true
+    - pip install pytest pytest-cov
     - python --version
     - pip install --upgrade pip
     - pip install .[test]
+  script:
+    # - eval "$(conda shell.bash hook)" || source /opt/conda/etc/profile.d/conda.sh
+    # - conda update -n base -y conda
+    # - conda install -n base -y conda-libmamba-solver
+    # - conda config --set solver libmamba
+    # #ensure strict conda-forge so we don't mix with defaults
+    # - conda config --add channels conda-forge
+    # - conda config --set channel_priority strict
+    # - conda env create -n optiwindnet_env -f environment.yml || conda env update -n optiwindnet_env --prune -f environment.yml
+    # - conda activate optiwindnet_env
+    # #install solvers from conda-forge explicitly
+    # - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
+
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
 # ===== TEST OptiWindNet windows =====
