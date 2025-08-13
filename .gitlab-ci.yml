@@ -42,7 +42,7 @@ test_windows:
     - conda create --name own_test python=3.12
     - conda activate own_test
     - conda install scip coin-or-cbc numba networkx shapely scipy bitarray
-    - pip install .[test] -e
+    - pip install -e .[test]
     - pip install pytest pytest-cov
     - python --version
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
