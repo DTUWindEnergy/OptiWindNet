@@ -22,6 +22,7 @@ def assert_graph_equal(G1, G2, ignored_graph_keys=None):
 
     for G in (G1, G2):
         G.graph.get('method_options', {}).get('fun_fingerprint', {}).pop('funfile', None)
+        G.graph.get('method_options', {}).get('fun_fingerprint', {}).pop('funhash', None)
         G.graph.get('solver_details', {}).pop('strategy', None)
 
     keys1 = set(G1.graph.keys()) - ignored_graph_keys
