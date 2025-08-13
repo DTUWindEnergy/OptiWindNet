@@ -570,7 +570,7 @@ class MILPRouter(Router):
             verbose = self.verbose
 
         # Prefer the power_scale passed at call time; fall back to the router's attribute
-        ps = power_scale if power_scale is not None else self.power_scale
+        ps = False # power_scale if power_scale is not None else self.power_scale
 
         if ps:
             scaled_cables = [(int(cap) * ps, cost) for cap, cost in cables]
@@ -613,7 +613,6 @@ class MILPRouter(Router):
 
         G.SolutionInfo = solution_info
 
-        print(ps)
         if ps:
             denormalize_power_values(G, ps)
         
