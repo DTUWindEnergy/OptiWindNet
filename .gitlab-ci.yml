@@ -16,7 +16,7 @@ test_linux:
 # ===== TEST OptiWindNet windows=====
 test_windows:
   # image: registry.windenergy.dtu.dk/dockerimages/windows-python:ltsc2019_py312
-  image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
+  image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019_py312
   stage:
     test
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
