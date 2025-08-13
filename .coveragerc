@@ -3,8 +3,9 @@ branch = True
 source = optiwindnet
 omit =
     optiwindnet/db/modelv0.py
-	optiwindnet/db/modelv{0,1}.py
-	optiwindnet/db/storagev{0.1}.py
+	optiwindnet/db/modelv1.py
+	optiwindnet/db/storagev0.py
+	optiwindnet/db/storagev1.py
 	optiwindnet/weighting.py
 	optiwindnet/synthetic.py
 	optiwindnet/baselines/lkh.py
