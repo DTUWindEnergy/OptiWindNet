@@ -25,6 +25,7 @@ test_linux:
     - pip install pytest pytest-cov
     - python --version
     - pip install .[test]
+    - pip install -y cplex
   script:
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
