@@ -34,8 +34,6 @@ test_windows:
   image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
   tags:
     - docker-windows
-  variables:
-    PY: "3.12"
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression   
@@ -47,7 +45,6 @@ test_windows:
     - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip cplex
     - python -m pip install -U pip
     - pip install -e .[test]
-    - conda install -y cplex
     - pip install pytest pytest-cov
     - python --version
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
