@@ -10,7 +10,7 @@ workflow:
 # ===== TEST OptiWindNet linux =====
 test_linux:
   stage: test
-  image: continuumio/miniconda3
+  image: python:3.12 #continuumio/miniconda3
   tags:  # runner platform
     - linux
   script:
