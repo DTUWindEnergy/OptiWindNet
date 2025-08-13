@@ -56,7 +56,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test  = [ 'dill', # for loaoding dill data
-		  #'cplex',
+		  'cplex',
           'gurobipy',
           'highspy',
           'pytest',  # for testing

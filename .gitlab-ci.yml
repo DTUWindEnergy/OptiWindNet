@@ -45,9 +45,8 @@ test_windows:
     - conda create -n optiwindnet_env -y python=3.12 pip
     - conda activate optiwindnet_env
     - conda env update -n optiwindnet_env --prune -f environment.yml
-    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip
+    - conda install -n optiwindnet_env -y -c conda-forge coin-or-cbc scip cplex
     - pip install -e .[test]
-    - conda install -y cplex
     - pip install pytest pytest-cov
     - python --version
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
