@@ -28,7 +28,7 @@ test_linux:
     - curl -L -o scip.deb https://www.scipopt.org/download/release/SCIPOptSuite-9.2.3-Linux-debian12.deb
     - apt-get install -y ./scip.deb
     - python3 -m venv tests/venv
-    - source tests/venv/Scripts/activate
+    - source tests/venv/bin/activate
     - pip install -e .[test]
     - python3 --version
   script:
