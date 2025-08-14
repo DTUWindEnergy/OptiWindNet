@@ -111,12 +111,17 @@ def test_cables_capacity_calculation(LG_from_database):
     wfn = WindFarmNetwork(cables=[(5, 100), (7, 150)], L=L)
     assert wfn.cables_capacity == 7
 
+def test_update_from_terse_links_length_error(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    with pytest.raises(ValueError, match='Length of terse_links must be equal to T'):
+        wfn.update_from_terse_links(np.array([1, 2]))
 
 def test_update_from_terse_links_invalid_type(LG_from_database):
     L, _ = LG_from_database('eagle_EWRouter')
     wfn = WindFarmNetwork(cables=7, L=L)
-    with pytest.raises(ValueError, match='terse_links must be an array of integers'):
-        wfn.update_from_terse_links(np.array([0.1, 2.0]))
+    with pytest.raises(TypeError, match='terse_links must contain only integer values'):
+        wfn.update_from_terse_links(np.array([0.1, 2.5]))
 
 
 def test_update_from_terse_links_invalid_shape(LG_from_database):
