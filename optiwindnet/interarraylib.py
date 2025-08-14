@@ -10,7 +10,6 @@ import networkx as nx
 import numpy as np
 
 from .geometric import rotate
-from .utils import F
 
 __all__ = (
     'describe_G',
@@ -56,7 +55,7 @@ def describe_G(G):
     T = G.graph['T']
     capacity = G.graph['capacity']
     roots = range(1, R + 1)
-    RootL = {-r: G.nodes[-r].get('label', F[-r]) for r in roots}
+    RootL = {-r: G.nodes[-r].get('label', f'[{-r}]') for r in roots}
     info = []
     info.append(f'κ = {capacity}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]

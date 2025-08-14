@@ -8,7 +8,7 @@ import numpy as np
 import numpy.lib.recfunctions as nprec
 
 from .heuristics import CPEW, NBEW, OBEW
-from .interarraylib import F, calcload
+from .interarraylib import calcload
 
 __all__ = ('assign_cables',)
 
@@ -116,8 +116,8 @@ def L_from_XYR(X, Y, R=1, name='unnamed', borderC=None):
             np.c_[X[R:], Y[R:]], np.c_[X[R - 1 :: -1], Y[R - 1 :: -1]], borderC
         ],
     )
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from(range(T), kind='wtg')
+    L.add_nodes_from(range(-R, 0), kind='oss')
     return L
 
 
@@ -263,12 +263,8 @@ class HeuristicFactory:
         self.VertexC[T:] = rootC
         # create networkx graph
         self.G_base = nx.Graph(R=R, VertexC=self.VertexC, boundary=boundaryC, name=name)
-        self.G_base.add_nodes_from(
-            ((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T))
-        )
-        self.G_base.add_nodes_from(
-            ((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0))
-        )
+        self.G_base.add_nodes_from(range(T), kind='wtg')
+        self.G_base.add_nodes_from(range(-R, 0), kind='oss')
         self.heuristic = heuristics[heuristic]
 
     def calccost(self, X, Y):
