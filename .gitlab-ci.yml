@@ -2,9 +2,13 @@ stages:
   - test
   - deploy
 
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+
 .test_rules:
   rules:
-    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH
       changes:
         - optiwindnet/**/*
         - tests/**/*
@@ -64,7 +68,7 @@ make_pages:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
         - docs/**/*
-    when: manual
+      when: manual
   script:
     - apt-get update
     - apt-get -y install make pandoc graphviz
