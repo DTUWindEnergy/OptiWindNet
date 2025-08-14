@@ -60,12 +60,12 @@ url: <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>
 ```{code-block} bib
 @article{
     optiwindnet_2025,
-    title={OptiWindNet: An open-source wind farm electrical network optimization tool},
+    title={OptiWindNet: Tool for designing and optimizing the electrical cable network of offshore wind farms},
     author={Mauricio {Souza de Alencar} and Amir Arasteh and Mikkel Friis-Møller},
     url="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet",
     publisher={DTU Wind and Energy Systems, Technical University of Denmark},
     year={2025},
-    month={3}
+    month={4}
 }
 ```
 
