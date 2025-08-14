@@ -5,12 +5,11 @@ from functools import partial
 
 import networkx as nx
 import numpy as np
-import numpy.lib.recfunctions as nprec
 
 from .heuristics import CPEW, NBEW, OBEW
-from .interarraylib import calcload
+from .interarraylib import assign_cables, calcload
 
-__all__ = ('assign_cables',)
+__all__ = ()
 
 heuristics = {
     'CPEW': CPEW,
@@ -26,46 +25,6 @@ def translate2global_optimizer(G):
     T = G.graph['T']
     X, Y = np.hstack((VertexC[-1 : -1 - R : -1].T, VertexC[:T].T))
     return dict(WTc=T, OSSc=R, X=X, Y=Y)
-
-
-def assign_cables(G, cables):
-    """Assign a cable type to each edge of `G` and update attribute 'cost'.
-
-    Each edge is assigned the cheapest cable type that can carry its load. The
-    edge attribute 'cable' is the index in `cables` of the type chosen.
-
-    Args:
-      G: networkx graph with edges having a 'load' attribute (use calcload(G))
-      cables: [(«capacity», «cost»), ...] in increasing capacity order (each
-        cable entry must be a tuple) or numpy.ndarray where each row represents
-        one cable type
-    """
-
-    Nc = len(cables)
-    dt = np.dtype([('capacity', int), ('cost', float)])
-    if isinstance(cables, np.ndarray):
-        cable_ = nprec.unstructured_to_structured(cables, dtype=dt)
-    else:
-        cable_ = np.fromiter(cables, dtype=dt, count=Nc)
-    capacity_ = cable_['capacity']
-    capacity = 1
-
-    # for e, data in G.edges.items():
-    for u, v, data in G.edges(data=True):
-        i = capacity_.searchsorted(data['load']).item()
-        if i >= len(capacity_):
-            print(
-                f'ERROR: Load for edge ⟨{u, v}⟩: {data["load"]} '
-                f'exceeds maximum cable capacity {capacity_[-1]}.'
-            )
-        data['cable'] = i
-        data['cost'] = data['length'] * cable_['cost'][i].item()
-        if data['load'] > capacity:
-            capacity = data['load']
-    G.graph['cables'] = cable_
-    G.graph['has_costs'] = True
-    if 'capacity' not in G.graph:
-        G.graph['capacity'] = capacity
 
 
 def assign_subtree(G):

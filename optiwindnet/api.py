@@ -12,8 +12,7 @@ from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
 from .importer import load_repository as load_repository
-from .interarraylib import G_from_S, S_from_G, as_normalized, calcload
-from .interface import assign_cables
+from .interarraylib import assign_cables, G_from_S, S_from_G, as_normalized, calcload
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, solver_factory
 from .pathfinding import PathFinder
