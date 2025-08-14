@@ -1,6 +1,7 @@
 import logging
 import math
 from itertools import pairwise
+from typing import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -323,18 +324,15 @@ def from_coordinates(
     )
 
 
-def check_warmstart_feasibility(
+def is_warmstart_eligible(
     S_warm,
     cables_capacity,
     model_options,
     S_warm_has_detour,
     solver_name,
+    logger,
     verbose=False,
-    logger=None,
 ):
-    if logger is None:
-        logger = logging.getLogger()
-
     verbose_warmstart = verbose or logger.isEnabledFor(logging.INFO)
 
     if S_warm is None:
@@ -367,7 +365,7 @@ def check_warmstart_feasibility(
     elif feeder_limit_mode == 'min_plus3':
         feeder_limit = feeder_minimum + 3
     else:
-        feeder_limit = float('inf')  # fallback
+        feeder_limit = float('inf')
 
     if feeder_counts[0] > feeder_limit:
         reasons.append(
@@ -403,22 +401,23 @@ def check_warmstart_feasibility(
         return False
 
 
-def parse_cables_input(cables):
-    cables_array = np.array(cables)
+def parse_cables_input(
+    cables: int | list[int] | list[tuple[int, float]],
+) -> list[tuple[int, float]]:
     if isinstance(cables, int):
-        return [(cables, 1)]
-    elif (
-        cables_array.ndim == 1
-        and cables_array.shape[0] == 1
-        and isinstance(cables_array.item(), int)
-    ):
-        return [(int(cables_array[0]), 1)]
-    elif cables_array.ndim == 1 and cables_array.shape[0] == 2:
-        return [(int(cables_array[0]), float(cables_array[1]))]
-    elif cables_array.ndim == 2 and cables_array.shape[1] == 2:
-        return [(int(cap), float(cost)) for cap, cost in cables_array]
-    else:
-        raise ValueError(f'Invalid cable values: {cables}')
+        # single number means the maximum capacity, set cost to 0
+        return [(cables, 0.0)]
+    elif isinstance(cables, Sequence):
+        cables_out = []
+        for entry in cables:
+            if isinstance(entry, int):
+                # any entry that is a single number is the capacity, set cost to 0
+                cables_out.append((entry, 0.0))
+            elif isinstance(entry, Sequence) and len(entry) == 2:
+                cables_out.append(tuple(entry))
+            else:
+                raise ValueError(f'Invalid cable values: {cables}')
+        return cables_out
 
 
 def enable_ortools_logging_if_jupyter(solver):
@@ -488,3 +487,104 @@ def extract_network_as_array(G):
         count=G.number_of_edges(),
     )
     return network
+
+
+def validate_terse_links(terse_links, L):
+    """
+    Validate and normalize terse_links array.
+
+    Parameters
+    ----------
+    terse_links : array-like
+        Sequence of target node indices (can be ints or integer-like floats).
+    L : graph
+        Location graph (used for range checking).
+
+    Returns
+    -------
+    np.ndarray
+        1D numpy array of dtype int64 containing the validated terse_links.
+
+    Raises
+    ------
+    ValueError or TypeError
+        If terse_links fails shape, type, or bounds checks.
+    """
+    arr = np.asarray(terse_links)
+    n_nodes = L.number_of_nodes()
+
+    # Shape check
+    if arr.ndim != 1:
+        raise ValueError(f'terse_links must be a 1D array. Got shape {arr.shape}.')
+
+    # Reject boolean dtype
+    if np.issubdtype(arr.dtype, np.bool_):
+        raise TypeError('terse_links cannot be boolean values.')
+
+    # Convert integers directly
+    if np.issubdtype(arr.dtype, np.integer):
+        ints = arr.astype(np.int64, copy=False)
+    else:
+        # Convert to float, ensure numeric
+        try:
+            floats = np.asarray(arr, dtype=np.float64)
+        except (TypeError, ValueError) as e:
+            raise TypeError(
+                'terse_links must be numeric (ints or integer-like floats).'
+            ) from e
+
+        if not np.all(np.isfinite(floats)):
+            bad = np.where(~np.isfinite(floats))[0]
+            raise TypeError(
+                f'terse_links contains non-finite values at positions {bad[:5].tolist()}.'
+            )
+
+        # Integer-like test
+        frac = np.modf(floats)[0]
+        bad = np.where(np.abs(frac) > 0)[0]
+        if bad.size:
+            sample_idx = bad[:5].tolist()
+            sample_vals = floats[sample_idx].tolist()
+            raise TypeError(
+                f'terse_links must contain only integer values; non-integer at positions '
+                f'{sample_idx} with values {sample_vals}.'
+            )
+
+        ints = floats.astype(np.int64)
+
+    # Range check
+    R = L.graph['R']
+    T = L.graph['T']
+    bad_low = np.where(ints < -R)[0]
+    bad_high = np.where(ints >= T)[0]
+
+    print(L.graph['R'])
+    print(bad_low)
+    if bad_low.size or bad_high.size:
+        details = []
+        if bad_low.size:
+            details.append(
+                f'negative indices at {bad_low[:5].tolist()} -> {ints[bad_low[:5]].tolist()}'
+            )
+        if bad_high.size:
+            details.append(
+                f'indices >= {n_nodes} at {bad_high[:5].tolist()} -> {ints[bad_high[:5]].tolist()}'
+            )
+        raise ValueError(
+            'terse_links contains out-of-range indices: ' + '; '.join(details)
+        )
+
+    #
+    if len(ints) != T:
+        raise ValueError(
+            f'Length of terse_links must be equal to T ({T}), got {len(ints)}.'
+        )
+
+    # No self-links allowed
+    self_links = np.where(ints == np.arange(ints.size))[0]
+    if self_links.size:
+        raise ValueError(
+            f'terse_links cannot contain self-links (i -> i): positions {self_links[:5].tolist()}.'
+        )
+
+    return ints

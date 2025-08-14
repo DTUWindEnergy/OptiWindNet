@@ -1,75 +1,74 @@
-image: continuumio/miniconda3
+stages:
+  - test
+  - deploy
 
-# ===== TEST OptiWindNet linux=====
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ===== TEST OptiWindNet linux =====
 test_linux:
-  stage:
-    test
-  script:
-    - python --version
-    - pip install --upgrade pip
-    - pip install .[test]
-    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
-    # - python -m pytest
+  stage: test
+  image: python:3.12
   tags:  # runner platform
     - linux
-
-# ===== TEST OptiWindNet windows=====
-test_windows:
-  # image: registry.windenergy.dtu.dk/dockerimages/windows-python:ltsc2019_py312
-  image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
-  stage:
-    test
-  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
-  script:
-    # The next 3 lines install the Miniforge3 conda
-    # - Invoke-WebRequest -UserAgent curl https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe -OutFile Miniforge3-Windows-x86_64.exe
-    # - Start-Process -Wait -FilePath Miniforge3-Windows-x86_64.exe -ArgumentList "/InstallationType=JustMe","/RegisterPython=0","/S","/D=$($env:UserProfile)\condaforge"
-    # - . "$($env:UserProfile)\condaforge\shell\condabin\conda-hook.ps1"
-    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
-    - conda config --set solver libmamba
-    - conda config --set channel_priority strict
-    - conda update conda
-    - conda env create --file environment.yml
-    # install packages needed for testing that are in conda but not in pypi
-    - conda install --name optiwindnet_env --channel conda-forge --override-channels coin-or-cbc scip
-    - conda activate optiwindnet_env
+  before_script:
+    - apt-get update
+    # CBC
+    - apt-get install -y coinor-cbc
+    # SCIP (use Debian 12 .deb)
+    - curl -L -o scip.deb https://www.scipopt.org/download/release/SCIPOptSuite-9.2.3-Linux-debian12.deb
+    # install with apt to auto-resolve dependencies (better than dpkg -i)
+    - apt-get install -y ./scip.deb
+    # Python deps
+    - pip install pytest pytest-cov
     - python --version
-    - pip install -e .[test]
-    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
-    # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - pip install .[test]
+  script:
+    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+
+# ===== TEST OptiWindNet windows =====
+test_windows:
+  stage: test
+  image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
   tags:
     - docker-windows
-
-# ===== DEPLOY optiwindnet docs=====
-make_pages:
-  pages: true
-  # rules:
-  #   - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  #     changes:
-  #       - docs/**/*
-  when: manual
-  stage: deploy
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   script:
-    - apt-get update
-    - apt-get -y install make pandoc graphviz
-    - pip install .[docs] --upgrade
-    - cd docs; make html
-    - cd ../; mv docs/build/html public/
-  artifacts:
-    paths:
-      - public
-  tags: 
-    - linux
+    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression   
+    - conda config --add channels conda-forge
+    - conda config --set channel_priority strict
+    - conda create --name own_test python=3.12
+    - conda activate own_test
+    - conda install scip coin-or-cbc numba networkx shapely scipy bitarray
+    - pip install -e .[test]
+    - pip install pytest pytest-cov
+    - python --version
+    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
-# ===== DEPLOY publish optiwindnet on pypi=====
+# ===== DEPLOY optiwindnet docs =====
+# make_pages:
+  # pages: true
+  # when: manual
+  # stage: deploy
+  # tags: [linux]
+  # script:
+    # - apt-get update
+    # - apt-get -y install make pandoc graphviz
+    # - pip install .[docs] --upgrade
+    # - cd docs; make html
+    # - cd ../; mv docs/build/html public/
+  # artifacts:
+    # paths: [public]
+
+# ===== DEPLOY publish optiwindnet on PyPI =====
 pypi_linux:
+  stage: deploy
+  tags: [linux]
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+.\d+.\d+/
-  stage:
-    deploy
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
   script:
     - pip install --upgrade pip build twine packaging
-    - python3 -m build
-    - twine upload dist/* -u $TWINE_USERNAME -p $TWINE_PASSWORD
-  tags:
-    - linux
+    - python -m build
+    - twine upload dist/* -u "$TWINE_USERNAME" -p "$TWINE_PASSWORD"

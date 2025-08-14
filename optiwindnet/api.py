@@ -2,12 +2,12 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 import yaml_include
 
-# OptiWindNet modules
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
@@ -18,9 +18,9 @@ from .MILP import ModelOptions, solver_factory
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot
-
 from .api_utils import (
-    check_warmstart_feasibility,
+    validate_terse_links,
+    is_warmstart_eligible,
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
     from_coordinates,
@@ -65,10 +65,6 @@ class WindFarmNetwork:
             router = EWRouter()
         self.router = router
 
-        # Parse and validate cables input; convert to list of (capacity, cost) tuples
-        self.cables = parse_cables_input(cables)
-        self.cables_capacity = max(c[0] for c in self.cables)
-
         # Construct layout from coordinates if not directly provided
         if turbinesC is not None and substationsC is not None:
             if L is not None:
@@ -90,6 +86,11 @@ class WindFarmNetwork:
             raise ValueError(
                 'Both turbinesC and substationsC must be provided! Or alternatively L should be given.'
             )
+
+        # Parse and validate cables input; convert to list of (capacity, cost) tuples
+        self.cables = parse_cables_input(cables)
+
+        self.cables_capacity = max(c[0] for c in self.cables)
 
         self.L = L  # Location graph
 
@@ -219,23 +220,9 @@ class WindFarmNetwork:
     ) -> None:
         """
         Updates the network from terse link representation.
-        Optionally updates node coordinates.
+        Accepts integers or integer-like floats (e.g., 3.0). Rejects non-integers.
         """
-        terse_links = [int(x) for x in terse_links]
-        # --- Added block: check input format ---
-        terse_links = np.asarray(terse_links)
-
-        # Validate input shape and type
-        if not np.issubdtype(terse_links.dtype, np.integer):
-            raise ValueError(
-                f'terse_links must be an array of integers. Got {terse_links.dtype} instead.\n'
-                f'Hint: You can fix it by doing terse_links = [int(x) for x in terse_links].'
-            )
-
-        if terse_links.ndim != 1:
-            raise ValueError(
-                f'terse_links must be a 1D array. Got shape {terse_links.shape} instead.'
-            )
+        validated_terse_links = validate_terse_links(terse_links=terse_links, L=self.L)
 
         # Update coordinates if provided
         if turbinesC is not None:
@@ -248,8 +235,12 @@ class WindFarmNetwork:
             self.P, self.A = make_planar_embedding(self.L)
 
         # Rebuild the selected edge set (links)
-        self.S.remove_edges_from(list(self.S.edges()))
-        for i, j in enumerate(terse_links):
+        if self.S is None:
+            self.S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
+        else:
+            self.S.clear_edges()
+
+        for i, j in enumerate(validated_terse_links):
             self.S.add_edge(i, j)
 
         calcload(self.S)
@@ -556,17 +547,15 @@ class MILPRouter(Router):
         if verbose is None:
             verbose = self.verbose
 
-        warmstart_state = check_warmstart_feasibility(  # noqa
+        is_warmstart_eligible(
             S_warm=S_warm,
             cables_capacity=cables_capacity,
             model_options=self.model_options,
             S_warm_has_detour=S_warm_has_detour,
             solver_name=self.solver_name,
+            logger=logging.getLogger(__name__),
             verbose=verbose,
-            logger=None,
         )
-
-        # To Do: maybe if warmstart_state is False deactivate the warmstarting procedure in MILPRouter?
 
         solver = self.solver
 

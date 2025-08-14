@@ -28,27 +28,27 @@ license-files = ["LICENSE.txt"]
 requires-python = ">= 3.10"
 dependencies = [
     "backports.strenum (>=1.3.1) ; python_version < '3.11'",
-    'bidict >=0.23.1',
-    'bitarray >=3.4.2',
-    'condeltri >=0.0.2',
-    'darkdetect >=0.8.0',
-    'esy.osm.pbf >=0.1.1',
-    'hybgensea >=0.0.1',
-    'makefun >=1.15.6',
-    'matplotlib >=3.10.1',
-    'networkx >=3.4.2',
-    'numba >=0.60',
-    'numpy >=2.0,<2.3',  # upper bound due to numba
-    'ortools >=9.12.4544',
-    'pony >=0.7.18',
-    'py >=1.11.0',
-    'Pyomo >=6.9',
-    'PyYAML >=6.0.2',
-    'pyyaml-include >=2.1',
-    'scipy >=1.15.2',
-    'shapely >=2.0.7',
-    'svg.py >=1.6.0',
-    'utm >=0.7',
+    "bidict >=0.23.1",
+    "bitarray >=3.4.2",
+    "condeltri >=0.0.2",
+    "darkdetect >=0.8.0",
+    "esy.osm.pbf >=0.1.1",
+    "hybgensea >=0.0.1",
+    "makefun >=1.15.6",
+    "matplotlib >=3.10.1",
+    "networkx >=3.4.2",
+    "numba >=0.60",
+    "numpy >=2.0,<2.3",  # upper bound due to numba
+    "ortools >=9.12.4544",
+    "pony >=0.7.18",
+    "py >=1.11.0",
+    "Pyomo >=6.9",
+    "PyYAML >=6.0.2",
+    "pyyaml-include >=2.1",
+    "scipy >=1.15.2",
+    "shapely >=2.0.7",
+    "svg.py >=1.6.0",
+    "utm >=0.7",
 ]
 
 [project.urls]
@@ -61,24 +61,32 @@ dependencies = [
 "Source" = "https://github.com/DTUWindEnergy/OptiWindNet"
 
 [project.optional-dependencies]
-test  = [ 'pytest',  # for testing
-          'pytest-cov',  # for calculating coverage
-          'psutil',  # memory profiling
-          'memory_profiler',  # memory profiling
-          'line_profiler',  # to check speed
-        ] 
+solvers = [
+  "cplex",
+  "gurobipy",
+  "highspy",
+]
+test  = [ "dill", # for loading dill data
+          "coverage",
+          "pytest",  # for testing
+          "pytest-cov",  # for calculating coverage
+          "psutil",  # memory profiling
+          "memory_profiler",  # memory profiling
+          "line_profiler",  # to check speed
+          "optiwindnet[solvers]",
+        ]
 docs = [
-          'sphinx',
-          'nbsphinx', 
-          'myst-parser',
-          'myst-nb',
-          'furo',
-          'sphinx-versioned-docs',
-          'sphinx-autoapi',
-          'sphinx_copybutton', 
-          'sphinx_sitemap', 
-          'pypandoc',
-          'setuptools-scm',
+          "sphinx",
+          "nbsphinx", 
+          "myst-parser",
+          "myst-nb",
+          "furo",
+          "sphinx-versioned-docs",
+          "sphinx-autoapi",
+          "sphinx_copybutton", 
+          "sphinx_sitemap", 
+          "pypandoc",
+          "setuptools-scm",
         ]
 
 [tool.setuptools]
@@ -90,7 +98,7 @@ include = ["optiwindnet", "optiwindnet/**/*"]
 # exclude = []
 
 [tool.setuptools.package-data]
-optiwindnet = ['data/*']
+optiwindnet = ["data/*"]
 
 [tool.setuptools_scm]
 version_file = "optiwindnet/version.py"
