@@ -358,7 +358,7 @@ def is_warmstart_eligible(
     if feeder_limit_mode == 'unlimited':
         feeder_limit = float('inf')
     elif feeder_limit_mode == 'specified':
-        feeder_limit = model_options.get('max_feeders')
+        feeder_limit = model_options['max_feeders']
     elif feeder_limit_mode == 'minimum':
         feeder_limit = feeder_minimum
     elif feeder_limit_mode == 'min_plus1':
@@ -368,7 +368,7 @@ def is_warmstart_eligible(
     elif feeder_limit_mode == 'min_plus3':
         feeder_limit = feeder_minimum + 3
     else:
-        feeder_limit = float('inf')  # fallback
+        feeder_limit = float('inf')
 
     if feeder_counts[0] > feeder_limit:
         reasons.append(
