@@ -402,8 +402,13 @@ def is_warmstart_eligible(
 
 
 def parse_cables_input(
-    cables: int | list[int] | list[tuple[int, float]],
+    cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
 ) -> list[tuple[int, float]]:
+    
+    # If input is numpy array, convert to list for uniform processing
+    if isinstance(cables, np.ndarray):
+        cables = cables.tolist()
+
     if isinstance(cables, int):
         # single number means the maximum capacity, set cost to 0
         return [(cables, 0.0)]
