@@ -1,5 +1,5 @@
 stages:
-  - test
+  - base
   - deploy
 
 workflow:
@@ -14,9 +14,9 @@ workflow:
         - tests/**/*
     - when: manual
 
-# ===== TEST OptiWindNet linux =====
+# ===== Test OptiWindNet on Linux =====
 test_linux:
-  stage: test
+  stage: base
   image: python:3.12
   tags: [linux]
   rules:
@@ -34,9 +34,9 @@ test_linux:
   script:
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
-# ===== TEST OptiWindNet windows =====
+# ===== Test OptiWindNet on Windows =====
 test_windows:
-  stage: test
+  stage: base
   image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
   tags: [docker-windows]
   rules:
@@ -59,9 +59,9 @@ test_windows:
   script:
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
-# ===== DEPLOY optiwindnet docs =====
+# ===== Update GitLab Pages =====
 make_pages:
-  stage: deploy
+  stage: base
   tags: [linux]
   pages: true
   rules:
@@ -78,7 +78,7 @@ make_pages:
   artifacts:
     paths: [public]
 
-# ===== DEPLOY publish optiwindnet on PyPI =====
+# ===== Publish new version on PyPI =====
 pypi_linux:
   stage: deploy
   tags: [linux]
