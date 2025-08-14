@@ -21,6 +21,7 @@ from .plotting import gplot, pplot
 from .svg import svgplot
 
 from .api_utils import (
+    validate_terse_links,
     is_warmstart_eligible,
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
@@ -221,21 +222,9 @@ class WindFarmNetwork:
     ) -> None:
         """
         Updates the network from terse link representation.
-        Optionally updates node coordinates.
+        Accepts integers or integer-like floats (e.g., 3.0). Rejects non-integers.
         """
-        if not np.issubdtype(terse_links.dtype, np.integer):
-            raise ValueError(
-                f'terse_links must be an array of integers. Got {terse_links.dtype} instead.'
-            )
-        
-        if terse_links.ndim != 1:
-            raise ValueError(
-                f'terse_links must be a 1D array. Got shape {terse_links.shape} instead.'
-            )
-        
-        terse_links = [int(x) for x in terse_links]
-
-        terse_links = np.asarray(terse_links)
+        validated_terse_links = validate_terse_links(terse_links=terse_links, L=self.L)
 
         # Update coordinates if provided
         if turbinesC is not None:
@@ -252,7 +241,7 @@ class WindFarmNetwork:
             self.S = self.L
         self.S.remove_edges_from(list(self.S.edges()))
 
-        for i, j in enumerate(terse_links):
+        for i, j in enumerate(validated_terse_links):
             self.S.add_edge(i, j)
 
         calcload(self.S)
@@ -566,7 +555,6 @@ class MILPRouter(Router):
             S_warm_has_detour=S_warm_has_detour,
             solver_name=self.solver_name,
             verbose=verbose,
-            logger=None,
         )
 
         # To Do: maybe if warmstart_state is False deactivate the warmstarting procedure in MILPRouter?
