@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import logging
 import math
 import pickle
 import sys
@@ -10,9 +11,12 @@ import networkx as nx
 import numpy as np
 
 from .geometric import rotate
-from .utils import F
+
+_lggr = logging.getLogger(__name__)
+debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 
 __all__ = (
+    'assign_cables',
     'describe_G',
     'pathdist',
     'count_diagonals',
@@ -51,24 +55,62 @@ _essential_graph_attrs = (
 )
 
 
+def assign_cables(G: nx.Graph, cables: list[tuple[int, float]], currency: str = '€'):
+    """Assign a cable type to each edge of `G` and update attribute 'cost'.
+
+    Each edge is assigned the cheapest cable type that can carry its load. The
+    edge attribute 'cable' is the index in `cables` of the type chosen.
+
+    Changes `G` in place.
+
+    Args:
+      G: networkx graph with edges having a 'load' attribute (use calcload(G))
+      cables: [(«capacity», «cost»), ...] in increasing capacity order (each
+        cable entry must be a tuple)
+      currency: symbol representing the unit of the cost
+    """
+
+    Nc = len(cables)
+    dt = np.dtype([('capacity', int), ('cost', float)])
+    cable_ = np.fromiter(cables, dtype=dt, count=Nc)
+    capacity_ = cable_['capacity']
+    capacity = 1
+
+    for u, v, data in G.edges(data=True):
+        i = capacity_.searchsorted(data['load']).item()
+        if i >= len(capacity_):
+            error(
+                f'Load for edge ⟨{u, v}⟩: {data["load"]} '
+                f'exceeds maximum cable capacity {capacity_[-1]}.'
+            )
+        data['cable'] = i
+        data['cost'] = data['length'] * cable_['cost'][i].item()
+        if data['load'] > capacity:
+            capacity = data['load']
+    G.graph['cables'] = cable_
+    G.graph['currency'] = currency
+    if 'capacity' not in G.graph:
+        G.graph['capacity'] = capacity
+
+
 def describe_G(G):
     R = G.graph['R']
     T = G.graph['T']
     capacity = G.graph['capacity']
     roots = range(1, R + 1)
-    RootL = {-r: G.nodes[-r].get('label', F[-r]) for r in roots}
-    info = []
-    info.append(f'κ = {capacity}, T = {T}')
+    RootL = {-r: G.nodes[-r].get('label', f'[{-r}]') for r in roots}
+    desc = []
+    desc.append(f'κ = {capacity}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
     excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(T / capacity)
-    info.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
+    desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
     length = G.size(weight='length')
     if length > 0:
         intdigits = int(np.floor(np.log10(length))) + 1
-        info.append(f'Σλ = {round(length, max(0, 5 - intdigits))} m')
-    if 'has_costs' in G.graph:
-        info.append('{:.0f} €'.format(G.size(weight='cost')))
-    return info
+        desc.append(f'Σλ = {round(length, max(0, 5 - intdigits))} m')
+    if 'currency' in G.graph:
+        desc.append(f'{G.size(weight="cost"):.0f} {G.graph["currency"]}')
+    return desc
 
 
 def update_lengths(G):

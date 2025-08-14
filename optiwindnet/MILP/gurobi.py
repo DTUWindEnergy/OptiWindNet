@@ -46,7 +46,9 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options | dict(timelimit=time_limit, mipgap=mip_gap)
+        applied_options = (
+            self.options | options | dict(timelimit=time_limit, mipgap=mip_gap)
+        )
         solver = pyo.SolverFactory(
             'gurobi',
             solver_io='python',
