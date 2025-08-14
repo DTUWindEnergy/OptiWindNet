@@ -9,7 +9,7 @@ from matplotlib.path import Path
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
-from optiwindnet.importer import L_from_site
+from .importer import L_from_site
 
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
@@ -357,7 +357,7 @@ def check_warmstart_feasibility(
     if feeder_limit_mode == 'unlimited':
         feeder_limit = float('inf')
     elif feeder_limit_mode == 'specified':
-        feeder_limit = model_options.get('feeder_route')
+        feeder_limit = model_options.get('max_feeders')
     elif feeder_limit_mode == 'minimum':
         feeder_limit = feeder_minimum
     elif feeder_limit_mode == 'min_plus1':
