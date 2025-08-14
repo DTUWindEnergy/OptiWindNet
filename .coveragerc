@@ -9,6 +9,7 @@ omit =
 	optiwindnet/weighting.py
 	optiwindnet/synthetic.py
 	optiwindnet/baselines/lkh.py
+	optiwindnet/interface.py
     tests/**
 
 [report]
