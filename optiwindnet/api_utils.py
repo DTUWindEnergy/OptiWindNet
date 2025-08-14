@@ -331,8 +331,7 @@ def is_warmstart_eligible(
     S_warm_has_detour,
     solver_name,
     verbose=False,
-    ):
-    
+):
     logger = logging.getLogger()
 
     verbose_warmstart = verbose or logger.isEnabledFor(logging.INFO)
@@ -558,7 +557,7 @@ def validate_terse_links(terse_links, L):
     T = L.graph['T']
     bad_low = np.where(ints < -R)[0]
     bad_high = np.where(ints >= T)[0]
-    
+
     print(L.graph['R'])
     print(bad_low)
     if bad_low.size or bad_high.size:
@@ -573,11 +572,13 @@ def validate_terse_links(terse_links, L):
             )
         raise ValueError(
             'terse_links contains out-of-range indices: ' + '; '.join(details)
-            )
-    
+        )
+
     #
     if len(ints) != T:
-        raise ValueError(f"Length of terse_links must be equal to T ({T}), got {len(ints)}.")
+        raise ValueError(
+            f'Length of terse_links must be equal to T ({T}), got {len(ints)}.'
+        )
 
     # No self-links allowed
     self_links = np.where(ints == np.arange(ints.size))[0]
