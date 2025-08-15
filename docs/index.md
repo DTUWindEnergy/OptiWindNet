@@ -72,6 +72,7 @@ url: <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>
 ```{toctree}
 setup
 notebooks/quickstart_high
+overview
 high_level_api
 low_level_api
 theory
