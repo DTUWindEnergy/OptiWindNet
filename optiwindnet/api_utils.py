@@ -59,10 +59,10 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
         return None
 
 
-def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC):
-    plt.figure(figsize=(10, 10))
-    plt.title('Original and Buffered Shapes')
-    ax = plt.gca()
+def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC, **kwargs):
+    fig = plt.figure(**({'layout': 'constrained'} | kwargs))
+    ax = fig.add_subplot()
+    ax.set_title('Original and Buffered Shapes')
 
     # Plot original
     ax.add_patch(
@@ -127,10 +127,9 @@ def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC):
     ax.set_ylim(all_y.min() - y_pad, all_y.max() + y_pad)
 
     ax.set_aspect('equal')
-    plt.legend()
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
+    ax.legend()
+    ax.set_axis_off()
+    return ax
 
 
 def from_coordinates(
@@ -404,7 +403,6 @@ def is_warmstart_eligible(
 def parse_cables_input(
     cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
 ) -> list[tuple[int, float]]:
-    
     # If input is numpy array, convert to list for uniform processing
     if isinstance(cables, np.ndarray):
         cables = cables.tolist()

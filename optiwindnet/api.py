@@ -109,15 +109,22 @@ class WindFarmNetwork:
         """Returns the total cable length of the network."""
         return self.G.size(weight='length')
 
-    def plot_original_vs_buffered(self):
-        """Plot original and buffered borders and obstacles on a single plot."""
-        # get coordinates
-        borderC = self._borderC_original
-        border_bufferedC = self._border_bufferedC
-        obstaclesC = self._obstaclesC_original
-        obstacles_bufferedC = self._obstacles_bufferedC
+    def plot_original_vs_buffered(self, **kwargs):
+        """Plot original and buffered borders and obstacles on a single plot.
 
-        plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC)
+        Args:
+          **kwargs: passed to matplotlib's pyplot.figure()
+
+        Returns:
+          matplotlib Axes instance.
+        """
+        return plot_org_buff(
+            self._borderC_original,
+            self._border_bufferedC,
+            self._obstaclesC_original,
+            self._obstacles_bufferedC,
+            **kwargs,
+        )
 
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
