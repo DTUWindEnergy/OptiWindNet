@@ -370,6 +370,12 @@ class WindFarmNetwork:
         terse_links = self.terse_links()
         return terse_links
 
+    def solution_info(self):
+        return {
+            k: self.G.graph[k]
+            for k in ('runtime', 'bound', 'objective', 'relgap', 'termination')
+        }
+
 
 class Router(ABC):
     def __init__(self, **kwargs):
@@ -574,16 +580,7 @@ class MILPRouter(Router):
             warmstart=S_warm,
         )
 
-        solution_info = solver.solve(
-            time_limit=self.time_limit,
-            mip_gap=self.mip_gap,
-            options=self.solver_options,
-            verbose=verbose,
-        )
-
         S, G = solver.get_solution()
-
-        G.graph['solution_info'] = solution_info
 
         assign_cables(G, cables)
 
