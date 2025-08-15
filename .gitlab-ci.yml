@@ -62,6 +62,7 @@ test_windows:
 # ===== Update GitLab Pages =====
 make_pages:
   stage: base
+  image: python:3.12
   tags: [linux]
   pages: true
   rules:
