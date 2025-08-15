@@ -583,7 +583,7 @@ class MILPRouter(Router):
 
         S, G = solver.get_solution()
 
-        G.SolutionInfo = solution_info
+        G.graph['solution_info'] = solution_info
 
         assign_cables(G, cables)
 
