@@ -196,7 +196,7 @@ class Solver(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_solution(self, A: nx.Graph | None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         """Output solution topology A and routeset G.
 
         Args:
