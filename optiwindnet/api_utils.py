@@ -493,25 +493,20 @@ def extract_network_as_array(G):
 
 
 def validate_terse_links(terse_links, L):
-    """
-    Validate and normalize terse_links array.
+    """Validate and normalize terse_links array.
 
-    Parameters
-    ----------
-    terse_links : array-like
+    Args:
+      terse_links : array-like
         Sequence of target node indices (can be ints or integer-like floats).
-    L : graph
+      L : graph
         Location graph (used for range checking).
 
-    Returns
-    -------
-    np.ndarray
-        1D numpy array of dtype int64 containing the validated terse_links.
+    Returns:
+      1D numpy array of dtype int64 containing the validated terse_links.
 
-    Raises
-    ------
-    ValueError or TypeError
-        If terse_links fails shape, type, or bounds checks.
+    Raises:
+      ValueError: terse_links fails shape or bounds checks.
+      TypeError: terse_links fails type checks.
     """
     arr = np.asarray(terse_links)
     n_nodes = L.number_of_nodes()
@@ -561,8 +556,8 @@ def validate_terse_links(terse_links, L):
     bad_low = np.where(ints < -R)[0]
     bad_high = np.where(ints >= T)[0]
 
-    print(L.graph['R'])
-    print(bad_low)
+    #  print(L.graph['R'])
+    #  print(bad_low)
     if bad_low.size or bad_high.size:
         details = []
         if bad_low.size:
