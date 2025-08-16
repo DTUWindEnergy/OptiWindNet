@@ -83,7 +83,7 @@ class WindFarmNetwork:
                 **kwargs,
             )
         elif L is None:
-            raise ValueError(
+            raise TypeError(
                 'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
             )
 

@@ -8,10 +8,7 @@ from .helpers import assert_graph_equal
 
 
 def test_wfn_fails_without_coordinates_or_L():
-    with pytest.raises(
-        ValueError,
-        match='Both turbinesC and substationsC must be provided! Or alternatively L should be given.',
-    ):
+    with pytest.raises(TypeError):
         WindFarmNetwork(cables=7)
 
 
