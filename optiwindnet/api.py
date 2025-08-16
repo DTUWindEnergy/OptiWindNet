@@ -580,6 +580,13 @@ class MILPRouter(Router):
             warmstart=S_warm,
         )
 
+        solver.solve(
+            time_limit=self.time_limit,
+            mip_gap=self.mip_gap,
+            options=self.solver_options,
+            verbose=verbose,
+        )
+
         S, G = solver.get_solution()
 
         assign_cables(G, cables)
