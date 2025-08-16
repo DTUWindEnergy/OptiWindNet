@@ -84,13 +84,13 @@ class WindFarmNetwork:
             )
         elif L is None:
             raise ValueError(
-                'Both turbinesC and substationsC must be provided! Or alternatively L should be given.'
+                'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
             )
 
         # Parse and validate cables input; convert to list of (capacity, cost) tuples
         self.cables = parse_cables_input(cables)
 
-        self.cables_capacity = max(c[0] for c in self.cables)
+        self.cables_capacity = max(self.cables)[0]
 
         self.L = L  # Location graph
 
@@ -225,8 +225,8 @@ class WindFarmNetwork:
     def update_from_terse_links(
         self, terse_links: np.ndarray, turbinesC=None, substationsC=None
     ) -> None:
-        """
-        Updates the network from terse link representation.
+        """Updates the network from terse link representation.
+
         Accepts integers or integer-like floats (e.g., 3.0). Rejects non-integers.
         """
         validated_terse_links = validate_terse_links(terse_links=terse_links, L=self.L)
@@ -331,7 +331,7 @@ class WindFarmNetwork:
 
         return gradients_wt, gradients_ss
 
-    def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=None):
+    def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=False):
         if router is None:
             router = self.router
         else:
