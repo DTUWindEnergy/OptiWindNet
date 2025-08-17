@@ -2,31 +2,31 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-import networkx as nx
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import yaml
 import yaml_include
 
+from .api_utils import (
+    enable_ortools_logging_if_jupyter,
+    extract_network_as_array,
+    from_coordinates,
+    is_warmstart_eligible,
+    parse_cables_input,
+    plot_org_buff,
+    validate_terse_links,
+)
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
 from .importer import load_repository as load_repository
-from .interarraylib import assign_cables, G_from_S, S_from_G, as_normalized, calcload
+from .interarraylib import G_from_S, S_from_G, as_normalized, assign_cables, calcload
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, solver_factory
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot
-from .api_utils import (
-    validate_terse_links,
-    is_warmstart_eligible,
-    enable_ortools_logging_if_jupyter,
-    extract_network_as_array,
-    from_coordinates,
-    parse_cables_input,
-    plot_org_buff,
-)
 
 ###################
 # OptiWindNet API #
@@ -42,8 +42,114 @@ error, warning, info = logger.error, logger.warning, logger.info
 
 class WindFarmNetwork:
     """
-    Represents a wind farm electrical network, capable of processing
-    layout data from different formats and computing network properties.
+    Representation of an offshore wind farm electrical network.
+
+    The `WindFarmNetwork` class encapsulates the data structures and methods
+    required to build, analyze, and optimize a wind farm's electrical cable layout.
+    It supports initialization from raw coordinate data or from serialized formats
+    (YAML, PBF), and provides methods for visualization, cost/length
+    evaluation, and gradient-derivation.
+
+    The network is modeled as a set of turbines, substations, site boundaries,
+    and obstacles. From these, a location graph `L` is created, which can be
+    embedded planarly (`P`, `A`), optimized (`S`, `G`).
+
+    Parameters
+    ----------
+    cables : list or array-like
+        Cable specifications, given as a list of `(capacity, cost)` tuples.
+    turbinesC : array-like of shape (n_turbines, 2), optional
+        Coordinates of wind turbines in Cartesian (x, y).
+    substationsC : array-like of shape (n_substations, 2), optional
+        Coordinates of substations in Cartesian (x, y).
+    borderC : array-like of shape (n_border_points, 2), optional
+        Polygonal coordinates defining the wind farm border.
+    obstaclesC : array-like, optional
+        One or more polygons defining exclusion zones (obstacles).
+    name : str, default=""
+        Human-readable name for the project.
+    handle : str, default=""
+        Short identifier for the project, typically used in filenames.
+    L : networkx.Graph, optional (only if turbineC and SubstaionC are provided)
+        Pre-constructed location graph. If provided, it takes precedence over coordinates.
+    router : object, optional
+        Routing algorithm instance. Defaults to `EWRouter` if not provided.
+    buffer_dist : float, default=0
+        Buffer distance used when inflating borders/obstacles.
+    **kwargs : dict
+        Additional keyword arguments forwarded to layout-construction helpers.
+
+    Attributes
+    ----------
+    cables : list of tuple
+        Parsed cable specifications, each entry is `(capacity, cost)`.
+    cables_capacity : float
+        Maximum capacity among all defined cables.
+    L : networkx.Graph
+        Location graph representing turbines, substations, borders, and obstacles.
+    P : object
+        Planar embedding of `L` (navigation mesh).
+    A : networkx.Graph
+        Adjacency graph of the planar embedding.
+    S : networkx.Graph or None
+        Current solution graph of selected links (edges between turbines and substations).
+    G : networkx.Graph or None
+        Current optimized network with assigned cables.
+    name : str
+        Project name.
+    handle : str
+        Project identifier.
+    buffer_dist : float
+        Border/obstacle buffer distance.
+    router : object
+        Router instance used for optimization.
+
+    Methods
+    -------
+    cost()
+        Return the total cost of the optimized network.
+    length()
+        Return the total cable length of the optimized network.
+    plot(...)
+        Plot the optimized network.
+    plot_location(...)
+        Plot the original location graph.
+    plot_available_links(...)
+        Plot available links from the planar embedding.
+    plot_navigation_mesh(...)
+        Plot navigation mesh with adjacency.
+    plot_selected_links(...)
+        Plot tentative link selection from available links.
+    terse_links()
+        Return compact representation of selected links.
+    update_from_terse_links(terse_links, ...)
+        Update the network from terse link encoding.
+    get_network()
+        Export the optimized network as a structured array.
+    map_detour_vertex()
+        Map detour vertices back to their original indices.
+    gradient(...)
+        Compute cable length/cost gradients wrt node positions.
+    optimize(...)
+        Run routing algorithm to find optimized cable layout using the selected router.
+    solution_info()
+        Return solver summary: runtime, objective, gap, etc.
+
+    Notes
+    -----
+    - Changing coordinate inputs (`turbinesC`, `substationsC`, `borderC`, `obstaclesC`)
+      automatically rebuilds the location graph `L` and refreshes its planar embedding.
+    - If both `L` and coordinates are provided, `L` takes precedence unless overridden.
+    - Cables are stored internally as list of tuples (capacities, costs).
+
+    Examples
+    --------
+    >>> cables = [(100, 10), (200, 20)]
+    >>> turbines = np.array([[0, 0], [1, 0], [0, 1]])
+    >>> substations = np.array([[10, 0]])
+    >>> wfn = WindFarmNetwork(cables, turbinesC=turbines, substationsC=substations)
+    >>> wfn.optimize()
+    >>> print(wfn.cost(), wfn.length())
     """
 
     def __init__(
@@ -60,46 +166,161 @@ class WindFarmNetwork:
         buffer_dist=0,
         **kwargs,
     ):
-        # Use a default router if none is provided
-        if router is None:
-            router = EWRouter()
-        self.router = router
+        # keep coord-related kwargs so rebuilds are consistent
+        self._coord_kwargs = dict(kwargs)
 
-        # Construct layout from coordinates if not directly provided
-        if turbinesC is not None and substationsC is not None:
-            if L is not None:
+        # simple fields via setters (for validation/normalization)
+        self.name = name
+        self.handle = handle
+        self.buffer_dist = buffer_dist
+        self.router = router if router is not None else EWRouter()
+        self.cables = cables  # computes cables_capacity
+
+        # coordinates
+        self._turbinesC = turbinesC
+        self._substationsC = substationsC
+        self._borderC = borderC
+        self._obstaclesC = obstaclesC
+
+        # decide source of L
+        if L is not None:
+            self._L = L
+            self._refresh_planar()
+            if turbinesC is not None and substationsC is not None:
                 warning(
-                    'Both coordinates and L are given, OptiWindNet prioritizes coordinates over L and neglects the provided L.'
+                    'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates and neglects the provided L.'
                 )
-            L = from_coordinates(
-                self,
-                turbinesC,
-                substationsC,
-                borderC,
-                obstaclesC,
-                name,
-                handle,
-                buffer_dist,
-                **kwargs,
-            )
-        elif L is None:
+        elif turbinesC is not None and substationsC is not None:
+            self._rebuild_L_from_coordinates()
+        else:
             raise TypeError(
                 'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
             )
 
-        # Parse and validate cables input; convert to list of (capacity, cost) tuples
-        self.cables = parse_cables_input(cables)
-
-        self.cables_capacity = max(self.cables)[0]
-
-        self.L = L  # Location graph
-
-        # Create planar embedding from L
-        self.P, self.A = make_planar_embedding(L)
-
-        # Initialize graph objects for S and G (to be filled later)
+        # placeholders
         self.S = None
         self.G = None
+
+    # -------- helpers --------
+    def _refresh_planar(self):
+        self.P, self.A = make_planar_embedding(self._L)
+
+    def _rebuild_L_from_coordinates(self):
+        if self._turbinesC is None or self._substationsC is None:
+            warning(
+                'Coordinate changed but cannot rebuild L until both turbinesC and substationsC are set.'
+            )
+            return
+        self._L = from_coordinates(
+            self,
+            self._turbinesC,
+            self._substationsC,
+            self._borderC,
+            self._obstaclesC,
+            self.name,
+            self.handle,
+            self.buffer_dist,
+            **self._coord_kwargs,
+        )
+        self._refresh_planar()
+        # downstream graphs depend on L/A → invalidate
+        self.S = None
+        self.G = None
+
+    # -------- properties --------
+    # L is read/write; writing L refreshes planar, and overrides coord-driven L
+    @property
+    def L(self):
+        return self._L
+
+    @L.setter
+    def L(self, value):
+        self._L = value
+        self._refresh_planar()
+        self.S = None
+        self.G = None
+
+    @property
+    def cables(self):
+        return self._cables
+
+    @cables.setter
+    def cables(self, value):
+        parsed = parse_cables_input(value)
+        self._cables = parsed
+        self.cables_capacity = max(parsed)[0]
+
+    @property
+    def router(self):
+        return self._router
+
+    @router.setter
+    def router(self, value):
+        self._router = value if value is not None else EWRouter()
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        self._name = str(value)
+
+    @property
+    def handle(self):
+        return self._handle
+
+    @handle.setter
+    def handle(self, value):
+        self._handle = str(value)
+
+    @property
+    def buffer_dist(self):
+        return self._buffer_dist
+
+    @buffer_dist.setter
+    def buffer_dist(self, value):
+        if not isinstance(value, (int, float)):
+            raise TypeError('buffer_dist must be numeric')
+        self._buffer_dist = value
+
+    # ---- coordinates:
+    # changing any of these rebuilds L, then refreshes P/A
+    @property
+    def turbinesC(self):
+        return self._turbinesC
+
+    @turbinesC.setter
+    def turbinesC(self, value):
+        self._turbinesC = value
+        self._rebuild_L_from_coordinates()
+
+    @property
+    def substationsC(self):
+        return self._substationsC
+
+    @substationsC.setter
+    def substationsC(self, value):
+        self._substationsC = value
+        self._rebuild_L_from_coordinates()
+
+    @property
+    def borderC(self):
+        return self._borderC
+
+    @borderC.setter
+    def borderC(self, value):
+        self._borderC = value
+        self._rebuild_L_from_coordinates()
+
+    @property
+    def obstaclesC(self):
+        return self._obstaclesC
+
+    @obstaclesC.setter
+    def obstaclesC(self, value):
+        self._obstaclesC = value
+        self._rebuild_L_from_coordinates()
 
     def cost(self):
         """Returns the total cost of the network."""
