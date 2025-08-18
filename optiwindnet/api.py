@@ -68,14 +68,14 @@ class WindFarmNetwork:
     def __init__(
         self,
         cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
-        turbinesC: np.ndarray = None,
-        substationsC: np.ndarray = None,
-        borderC: np.ndarray = None,
-        obstaclesC: np.ndarray = None,
+        turbinesC: np.ndarray | None = None,
+        substationsC: np.ndarray | None = None,
+        borderC: np.ndarray | None = None,
+        obstaclesC: np.ndarray | None = None,
         name: str = "",
         handle: str = "",
-        L = None,
-        router = None,
+        L: nx.Graph | None = None,
+        router: Router | None = None,
         buffer_dist: float = 0.0,
         **kwargs,
     ):
@@ -95,15 +95,15 @@ class WindFarmNetwork:
             **kwargs: Additional keyword arguments forwarded to layout-construction helpers.
 
         Notes:
-            - Changing coordinate inputs (`turbinesC`, `substationsC`, `borderC`, `obstaclesC`)
+            * Changing coordinate inputs (`turbinesC`, `substationsC`, `borderC`, `obstaclesC`)
               rebuilds the location graph `L` and refreshes its planar embedding.
-            - If both `L` and coordinates are provided, define and document the intended
+            * If both `L` and coordinates are provided, define and document the intended
               precedence (e.g., coordinates override `L`, or vice versa). Keep it here.
-            - Cables are stored internally as a list of `(capacity, cost)` tuples.
+            * Cables are stored internally as a list of `(capacity, cost)` tuples.
 
-        Examples::
+        Example::
 
-          cables = [(100, 10), (200, 20)]
+          cables = [(3, 100.0), (5, 150.0)]
           turbines = np.array([[0, 0], [1, 0], [0, 1]])
           substations = np.array([[10, 0]])
           wfn = WindFarmNetwork(cables, turbinesC=turbines, substationsC=substations)
@@ -291,15 +291,22 @@ class WindFarmNetwork:
         self._is_stale_SG = True
 
     def cost(self):
-        """Return the total cost of the optimized network."""
+        """Get the total cost of the optimized network."""
         return self.G.size(weight='cost')
 
     def length(self):
-        """Return the total cable length of the optimized network."""
+        """Get the total cable length of the optimized network."""
         return self.G.size(weight='length')
 
     def plot_original_vs_buffered(self, **kwargs):
-        """Plot original and buffered borders and obstacles on a single plot."""
+        """Plot original and buffered borders and obstacles on a single plot.
+
+        Args:
+          **kwargs: passed to matplotlib's pyplot.figure()
+
+        Returns:
+          matplotlib Axes instance.
+        """
         return plot_org_buff(
             self._borderC_original,
             self._border_bufferedC,
@@ -391,7 +398,7 @@ class WindFarmNetwork:
         return gplot(G_tentative, **kwargs)
 
     def terse_links(self):
-        """Return a compact representation of selected links."""
+        """Get a compact representation of selected links."""
         R, T = (self.S.graph[k] for k in 'RT')
         terse = np.empty(T, dtype=int)
 
@@ -457,8 +464,7 @@ class WindFarmNetwork:
         return map
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
-        """
-        Compute length/cost gradients with respect to node positions.
+        """Compute length/cost gradients with respect to node positions.
         """
         if gradient_type.lower() not in ['cost', 'length']:
             raise ValueError("gradient_type should be either 'cost' or 'length'")
@@ -547,7 +553,7 @@ class WindFarmNetwork:
         return terse_links
 
     def solution_info(self):
-        """Return solver summary (runtime, objective, gap, etc.)."""
+        """Get solver summary (runtime, objective, gap, etc.)."""
         return {
             k: self.G.graph[k]
             for k in ('runtime', 'bound', 'objective', 'relgap', 'termination')
@@ -555,13 +561,12 @@ class WindFarmNetwork:
 
 
 class Router(ABC):
-    """
-    Abstract base class for routing algorithms in OptiWindNet.
+    """Abstract base class for routing algorithms in OptiWindNet.
 
     Each Router implementation defines a `route` method that takes a planar embedding (P),
     available links graph (A), and cable data, and returns:
-      - S: the selected link graph
-      - G: the final cable layout graph with assigned cables
+      * S: the selected link graph
+      * G: the final cable layout graph with assigned cables
     """
     @abstractmethod
     def route(
@@ -573,8 +578,7 @@ class Router(ABC):
         verbose: bool,
         **kwargs,
     ) -> tuple[nx.Graph, nx.Graph]:
-        """
-        Run the routing optimization.
+        """Run the routing optimization.
 
         Args:    
           P : Planar embedding of the layout graph.
@@ -592,11 +596,10 @@ class Router(ABC):
 
 
 class EWRouter(Router):
-    """
-    A lightweight, ultra-fast router for cable layout optimization.
+    """A lightweight, ultra-fast router for cable layout optimization.
 
-    - Uses simple heuristics (segmented or straight feeders).
-    - Produces solutions in milliseconds, suitable for quick layouts or warm starts.
+    * Uses simple heuristics (segmented or straight feeders).
+    * Produces solutions in milliseconds, suitable for quick layouts or warm starts.
     """
     def __init__(
         self,
@@ -637,11 +640,10 @@ class EWRouter(Router):
 
 
 class HGSRouter(Router):
-    """
-    A fast router based on Hybrid Genetic Search (HGS).
+    """A fast router based on Hybrid Genetic Search (HGS).
 
-    - Balances solution quality and runtime.
-    - Produces solutions in seconds, suitable for fast but high-quality layouts.
+    * Balances solution quality and runtime.
+    * Produces solutions in seconds, suitable for fast but high-quality layouts.
     """
     def __init__(
         self,
@@ -701,12 +703,11 @@ class HGSRouter(Router):
 
 
 class MILPRouter(Router):
-    """
-    An exact router based on Mixed-Integer Linear Programming (MILP).
+    """An exact router based on Mixed-Integer Linear Programming (MILP).
 
-    - Uses optimization solvers (Gurobi, CBC, OR-Tools, CPLEX, Highs, SCIP).
-    - Provides provably optimal or near-optimal layouts.
-    - Might take few minutes, but ensures solution quality.
+    * Uses optimization solvers (Gurobi, CBC, OR-Tools, CPLEX, Highs, SCIP).
+    * Provides provably optimal or near-optimal layouts.
+    * Might take few minutes, but ensures solution quality.
     """
     def __init__(
         self,
