@@ -2,7 +2,7 @@ import logging
 import math
 from itertools import pairwise
 from typing import Sequence
-
+import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
@@ -492,97 +492,57 @@ def extract_network_as_array(G):
     return network
 
 
-def validate_terse_links(terse_links, L):
-    """Validate and normalize terse_links array.
+def terse_links_validation(
+    terse_links: Sequence[int | float],
+    L: nx.Graph,
+    verbose: bool = False,
+) -> bool:
+    """Check whether terse_links is a valid mapping for turbines in L.
 
     Args:
-      terse_links : array-like
-        Sequence of target node indices (can be ints or integer-like floats).
-      L : graph
-        Location graph (used for range checking).
+        terse_links: Sequence of target node indices (ints or integer-like floats).
+        L: Location graph (used for bounds and length).
+        verbose: If True, print reasons why validation failed.
 
     Returns:
-      1D numpy array of dtype int64 containing the validated terse_links.
-
-    Raises:
-      ValueError: terse_links fails shape or bounds checks.
-      TypeError: terse_links fails type checks.
+        True if valid, False otherwise.
     """
-    arr = np.asarray(terse_links)
-    n_nodes = L.number_of_nodes()
+    terse_array = np.asarray(terse_links, dtype=np.float64)
 
-    # Shape check
-    if arr.ndim != 1:
-        raise ValueError(f'terse_links must be a 1D array. Got shape {arr.shape}.')
+    # Shape check (must be 1D)
+    if terse_array.ndim != 1:
+        if verbose:
+            print(f"[Invalid] terse_links must be 1D, got shape {terse_array.shape}.")
+        return False
 
-    # Reject boolean dtype
-    if np.issubdtype(arr.dtype, np.bool_):
-        raise TypeError('terse_links cannot be boolean values.')
+    # Integer-like check (e.g., 3.0 is valid, 3.5 is not).
+    if not np.allclose(terse_array, np.rint(terse_array), atol=0, rtol=0):
+        if verbose:
+            bad_idx = np.where(terse_array != np.rint(terse_array))[0][:5].tolist()
+            bad_vals = terse_array[bad_idx].tolist()
+            print(f"[Invalid] Non-integer values at {bad_idx} -> {bad_vals}.")
+        return False
 
-    # Convert integers directly
-    if np.issubdtype(arr.dtype, np.integer):
-        ints = arr.astype(np.int64, copy=False)
-    else:
-        # Convert to float, ensure numeric
-        try:
-            floats = np.asarray(arr, dtype=np.float64)
-        except (TypeError, ValueError) as e:
-            raise TypeError(
-                'terse_links must be numeric (ints or integer-like floats).'
-            ) from e
+    # check length
+    R, T = L.graph["R"], L.graph["T"]
+    if len(terse_array) != T:
+        if verbose:
+            print(f"[Invalid] Length must be {T}, got {len(terse_array)}.")
+        return False
 
-        if not np.all(np.isfinite(floats)):
-            bad = np.where(~np.isfinite(floats))[0]
-            raise TypeError(
-                f'terse_links contains non-finite values at positions {bad[:5].tolist()}.'
-            )
+    # check range
+    if np.any((terse_array < -R) | (terse_array >= T)):
+        if verbose:
+            bad_idx = np.where((terse_array < -R) | (terse_array >= T))[0][:5].tolist()
+            bad_vals = terse_array[bad_idx].tolist()
+            print(f"[Invalid] Out-of-range values at {bad_idx} -> {bad_vals}.")
+        return False
 
-        # Integer-like test
-        frac = np.modf(floats)[0]
-        bad = np.where(np.abs(frac) > 0)[0]
-        if bad.size:
-            sample_idx = bad[:5].tolist()
-            sample_vals = floats[sample_idx].tolist()
-            raise TypeError(
-                f'terse_links must contain only integer values; non-integer at positions '
-                f'{sample_idx} with values {sample_vals}.'
-            )
+    # no self-links
+    if np.any(terse_array == np.arange(len(terse_array))):
+        if verbose:
+            bad_idx = np.where(terse_array == np.arange(len(terse_array)))[0][:5].tolist()
+            print(f"[Invalid] Self-links at positions {bad_idx}.")
+        return False
 
-        ints = floats.astype(np.int64)
-
-    # Range check
-    R = L.graph['R']
-    T = L.graph['T']
-    bad_low = np.where(ints < -R)[0]
-    bad_high = np.where(ints >= T)[0]
-
-    #  print(L.graph['R'])
-    #  print(bad_low)
-    if bad_low.size or bad_high.size:
-        details = []
-        if bad_low.size:
-            details.append(
-                f'negative indices at {bad_low[:5].tolist()} -> {ints[bad_low[:5]].tolist()}'
-            )
-        if bad_high.size:
-            details.append(
-                f'indices >= {n_nodes} at {bad_high[:5].tolist()} -> {ints[bad_high[:5]].tolist()}'
-            )
-        raise ValueError(
-            'terse_links contains out-of-range indices: ' + '; '.join(details)
-        )
-
-    #
-    if len(ints) != T:
-        raise ValueError(
-            f'Length of terse_links must be equal to T ({T}), got {len(ints)}.'
-        )
-
-    # No self-links allowed
-    self_links = np.where(ints == np.arange(ints.size))[0]
-    if self_links.size:
-        raise ValueError(
-            f'terse_links cannot contain self-links (i -> i): positions {self_links[:5].tolist()}.'
-        )
-
-    return ints
+    return True
