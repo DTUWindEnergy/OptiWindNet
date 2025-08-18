@@ -2,31 +2,31 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-import networkx as nx
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import yaml
 import yaml_include
 
+from .api_utils import (
+    enable_ortools_logging_if_jupyter,
+    extract_network_as_array,
+    from_coordinates,
+    is_warmstart_eligible,
+    parse_cables_input,
+    plot_org_buff,
+    validate_terse_links,
+)
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
 from .importer import load_repository as load_repository
-from .interarraylib import assign_cables, G_from_S, S_from_G, as_normalized, calcload
+from .interarraylib import G_from_S, S_from_G, as_normalized, assign_cables, calcload
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, solver_factory
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot
-from .api_utils import (
-    validate_terse_links,
-    is_warmstart_eligible,
-    enable_ortools_logging_if_jupyter,
-    extract_network_as_array,
-    from_coordinates,
-    parse_cables_input,
-    plot_org_buff,
-)
 
 ###################
 # OptiWindNet API #
@@ -46,6 +46,9 @@ class WindFarmNetwork:
     layout data from different formats and computing network properties.
     """
 
+    _is_stale_PA: bool = True
+    _is_stale_SG: bool = True
+
     def __init__(
         self,
         cables,
@@ -60,46 +63,185 @@ class WindFarmNetwork:
         buffer_dist=0,
         **kwargs,
     ):
-        # Use a default router if none is provided
-        if router is None:
-            router = EWRouter()
-        self.router = router
+        # keep coord-related kwargs so rebuilds are consistent
+        self._coord_kwargs = dict(kwargs)
 
-        # Construct layout from coordinates if not directly provided
-        if turbinesC is not None and substationsC is not None:
-            if L is not None:
+        # simple fields via setters (for validation/normalization)
+        self.name = name
+        self.handle = handle
+        self.buffer_dist = buffer_dist
+        self.router = router if router is not None else EWRouter()
+        self.cables = cables  # computes cables_capacity
+
+        # coordinates
+        self._turbinesC = turbinesC
+        self._substationsC = substationsC
+        self._borderC = borderC
+        self._obstaclesC = obstaclesC
+
+        # decide source of L
+        if L is not None:
+            self._L = L
+            self._refresh_planar()
+            if turbinesC is not None and substationsC is not None:
                 warning(
-                    'Both coordinates and L are given, OptiWindNet prioritizes coordinates over L and neglects the provided L.'
+                    'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates and neglects the provided L.'
                 )
-            L = from_coordinates(
-                self,
-                turbinesC,
-                substationsC,
-                borderC,
-                obstaclesC,
-                name,
-                handle,
-                buffer_dist,
-                **kwargs,
-            )
-        elif L is None:
+        elif turbinesC is not None and substationsC is not None:
+            self._rebuild_L_from_coordinates()
+        else:
             raise TypeError(
                 'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
             )
 
-        # Parse and validate cables input; convert to list of (capacity, cost) tuples
-        self.cables = parse_cables_input(cables)
+    # -------- helpers --------
+    def _refresh_planar(self):
+        self._P, self._A = make_planar_embedding(self._L)
+        self._is_stale_PA = False
 
-        self.cables_capacity = max(self.cables)[0]
+    def _rebuild_L_from_coordinates(self):
+        if self._turbinesC is None or self._substationsC is None:
+            warning(
+                'Coordinate changed but cannot rebuild L until both turbinesC and substationsC are set.'
+            )
+            return
+        self._L = from_coordinates(
+            self,
+            self._turbinesC,
+            self._substationsC,
+            self._borderC,
+            self._obstaclesC,
+            self.name,
+            self.handle,
+            self.buffer_dist,
+            **self._coord_kwargs,
+        )
+        self._is_stale_PA = True
+        self._is_stale_SG = True
 
-        self.L = L  # Location graph
+    # -------- properties --------
+    # L is read/write; writing L refreshes planar, and overrides coord-driven L
+    @property
+    def L(self):
+        return self._L
 
-        # Create planar embedding from L
-        self.P, self.A = make_planar_embedding(L)
+    @L.setter
+    def L(self, L: nx.Graph):
+        self._L = L
+        self._is_stale_PA = True
+        self._is_stale_SG = True
 
-        # Initialize graph objects for S and G (to be filled later)
-        self.S = None
-        self.G = None
+    @property
+    def P(self):
+        if self._is_stale_PA:
+            self._refresh_planar()
+        return self._P
+
+    @property
+    def A(self):
+        if self._is_stale_PA:
+            self._refresh_planar()
+        return self._A
+
+    @property
+    def S(self):
+        if self._is_stale_SG:
+            return None
+        return self._S
+
+    @property
+    def G(self):
+        if self._is_stale_SG:
+            return None
+        return self._G
+
+    @property
+    def cables(self):
+        return self._cables
+
+    @cables.setter
+    def cables(self, cables):
+        parsed = parse_cables_input(cables)
+        self._cables = parsed
+        self.cables_capacity = max(parsed)[0]
+        if not self._is_stale_SG:
+            assign_cables(self._G, cables)
+
+    @property
+    def router(self):
+        return self._router
+
+    @router.setter
+    def router(self, router):
+        self._router = router if router is not None else EWRouter()
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, name):
+        self._name = str(name)
+
+    @property
+    def handle(self):
+        return self._handle
+
+    @handle.setter
+    def handle(self, handle):
+        self._handle = str(handle)
+
+    @property
+    def buffer_dist(self):
+        return self._buffer_dist
+
+    @buffer_dist.setter
+    def buffer_dist(self, dist):
+        if not isinstance(dist, (int, float)):
+            raise TypeError('buffer_dist must be numeric')
+        self._buffer_dist = dist
+
+    # ---- coordinates:
+    # changing any of these rebuilds L, then refreshes P/A
+    @property
+    def turbinesC(self):
+        return self._turbinesC
+
+    @turbinesC.setter
+    def turbinesC(self, value):
+        self._turbinesC = value
+        self._is_stale_PA = True
+        self._is_stale_SG = True
+
+    @property
+    def substationsC(self):
+        return self._substationsC
+
+    @substationsC.setter
+    def substationsC(self, value):
+        self._substationsC = value
+        self._is_stale_PA = True
+        self._is_stale_SG = True
+
+    @property
+    def borderC(self):
+        return self._borderC
+
+    @borderC.setter
+    def borderC(self, value):
+        self._borderC = value
+        self._is_stale_PA = True
+        self._is_stale_SG = True
+
+    @property
+    def obstaclesC(self):
+        return self._obstaclesC
+
+    @obstaclesC.setter
+    def obstaclesC(self, value):
+        self._obstaclesC = value
+        self._is_stale_PA = True
+        self._is_stale_SG = True
 
     def cost(self):
         """Returns the total cost of the network."""
@@ -223,8 +365,11 @@ class WindFarmNetwork:
         return terse
 
     def update_from_terse_links(
-        self, terse_links: np.ndarray, turbinesC=None, substationsC=None
-    ) -> None:
+        self,
+        terse_links: np.ndarray,
+        turbinesC: np.ndarray | None = None,
+        substationsC: np.ndarray | None = None,
+    ):
         """Updates the network from terse link representation.
 
         Accepts integers or integer-like floats (e.g., 3.0). Rejects non-integers.
@@ -233,32 +378,26 @@ class WindFarmNetwork:
 
         # Update coordinates if provided
         if turbinesC is not None:
-            self.L.graph['VertexC'][: turbinesC.shape[0], :] = turbinesC
+            self.turbinesC = turbinesC
 
         if substationsC is not None:
-            self.L.graph['VertexC'][-substationsC.shape[0] :, :] = substationsC
+            self.substationsC = substationsC
 
-        if turbinesC is not None or substationsC is not None:
-            self.P, self.A = make_planar_embedding(self.L)
-
-        # Rebuild the selected edge set (links)
-        if self.S is None:
-            self.S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
-        else:
-            self.S.clear_edges()
-
+        S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
         for i, j in enumerate(validated_terse_links):
-            self.S.add_edge(i, j)
+            S.add_edge(i, j)
 
-        calcload(self.S)
+        calcload(S)
 
-        G_tentative = G_from_S(self.S, self.A)
+        G_tentative = G_from_S(S, self.A)
 
-        self.G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
+        self._S = S
+        self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
 
-        assign_cables(self.G, self.cables)
+        assign_cables(self._G, self.cables)
+        self._is_stale_SG = False
 
-        return self.G
+        return
 
     def get_network(self):
         """Returns the network as a structured array of edge data."""
@@ -339,33 +478,29 @@ class WindFarmNetwork:
 
         # If new coordinates are provided, update them
         if turbinesC is not None:
-            self.L.graph['VertexC'][: turbinesC.shape[0], :] = turbinesC
+            self.turbinesC = turbinesC
 
         if substationsC is not None:
-            self.L.graph['VertexC'][-substationsC.shape[0] :, :] = substationsC
+            self.substationsC = substationsC
 
-        if turbinesC is not None or substationsC is not None:
-            self.P, self.A = make_planar_embedding(self.L)
+        if not self._is_stale_SG:
+            warmstart = dict(
+                S_warm=self._S,
+                S_warm_has_detour=self._G.graph.get('D', 0) > 0,
+            )
+        else:
+            warmstart = {}
 
-        D = (
-            self.G.graph['D']
-            if hasattr(self, 'G') and self.G is not None and 'D' in self.G.graph
-            else 0
-        )
-        S_warm_has_detour = D > 0
-
-        S, G = router(
+        self._S, self._G = router(
             L=self.L,
             A=self.A,
             P=self.P,
-            S_warm=self.S,
-            S_warm_has_detour=S_warm_has_detour,
             cables=self.cables,
             cables_capacity=self.cables_capacity,
             verbose=verbose,
+            **warmstart,
         )
-        self.S = S
-        self.G = G
+        self._is_stale_SG = False
 
         terse_links = self.terse_links()
         return terse_links

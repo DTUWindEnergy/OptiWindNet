@@ -27,7 +27,7 @@ def test_wfn_warns_when_L_and_coordinates_given(
         )
 
     assert any(
-        'OptiWindNet prioritizes coordinates over L' in message
+        'OptiWindNet prioritizes L over coordinates' in message
         for message in caplog.messages
     )
 
