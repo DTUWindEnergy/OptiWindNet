@@ -75,7 +75,7 @@ class WindFarmNetwork:
         name: str = "",
         handle: str = "",
         L: nx.Graph | None = None,
-        router: Router | None = None,
+        router = None,
         buffer_dist: float = 0.0,
         **kwargs,
     ):
@@ -92,7 +92,7 @@ class WindFarmNetwork:
             L: Pre-constructed location graph. If provided, it normally takes precedence over coordinate inputs.
             router: Routing algorithm instance. Defaults to `EWRouter`.
             buffer_dist: Buffer distance to inflate borders / shrink obstacles. Defaults to 0.
-            **kwargs: Additional keyword arguments forwarded to layout-construction helpers.
+            **kwargs: Additional keyword arguments forwarded to network-construction helpers.
 
         Notes:
             * Changing coordinate inputs (`turbinesC`, `substationsC`, `borderC`, `obstaclesC`)
@@ -106,7 +106,7 @@ class WindFarmNetwork:
           cables = [(3, 100.0), (5, 150.0)]
           turbines = np.array([[0, 0], [1, 0], [0, 1]])
           substations = np.array([[10, 0]])
-          wfn = WindFarmNetwork(cables, turbinesC=turbines, substationsC=substations)
+          wfn = WindFarmNetwork(cables=cables, turbinesC=turbines, substationsC=substations)
           wfn.optimize()
           print(wfn.cost(), wfn.length())
         """
@@ -472,7 +472,7 @@ class WindFarmNetwork:
         VertexC = G.graph['VertexC']
         if turbinesC is not None or substationsC is not None:
             info(
-                'wfn.gradient is not checking for the feasibility of the layout with new coordinates!'
+                'wfn.gradient is not checking for the feasibility of the network with new coordinates!'
             )
             VertexC = VertexC.copy()
             if turbinesC is not None:
@@ -517,7 +517,7 @@ class WindFarmNetwork:
         return gradients_wt, gradients_ss
 
     def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=False):
-        """Run the routing algorithm to compute an optimized layout."""
+        """Optimize electrical network."""
         if router is None:
             router = self.router
         else:
@@ -565,7 +565,7 @@ class Router(ABC):
     Each Router implementation defines a `route` method that takes a planar embedding (P),
     available links graph (A), and cable data, and returns:
       * S: the selected link graph
-      * G: the final cable layout graph with assigned cables
+      * G: the final network graph with assigned cables
     """
     @abstractmethod
     def route(
@@ -580,7 +580,7 @@ class Router(ABC):
         """Run the routing optimization.
 
         Args:    
-          P : Planar embedding of the layout graph.
+          P : Planar embedding of the network graph.
           A : Graph of available links (edges).
           cables : list of cables, each as a (capacity, cost) tuple.
           cables_capacity : Maximum cable capacity.
@@ -595,10 +595,10 @@ class Router(ABC):
 
 
 class EWRouter(Router):
-    """A lightweight, ultra-fast router for cable layout optimization.
+    """A lightweight, ultra-fast router for electrical network optimization.
 
     * Uses simple heuristics (segmented or straight feeders).
-    * Produces solutions in milliseconds, suitable for quick layouts or warm starts.
+    * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
     """
     def __init__(
         self,
@@ -649,7 +649,7 @@ class HGSRouter(Router):
     """A fast router based on Hybrid Genetic Search (HGS).
 
     * Balances solution quality and runtime.
-    * Produces solutions in seconds, suitable for fast but high-quality layouts.
+    * Produces solutions in seconds, suitable for fast but high-quality solutions.
     """
     def __init__(
         self,
@@ -725,7 +725,7 @@ class MILPRouter(Router):
     """An exact router based on Mixed-Integer Linear Programming (MILP).
 
     * Uses optimization solvers (Gurobi, CBC, OR-Tools, CPLEX, Highs, SCIP).
-    * Provides provably optimal or near-optimal layouts.
+    * Provides provably optimal or near-optimal networks.
     * Might take few minutes, but ensures solution quality.
     """
     def __init__(
