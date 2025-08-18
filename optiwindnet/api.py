@@ -491,10 +491,9 @@ class WindFarmNetwork:
         else:
             warmstart = {}
 
-        self._S, self._G = router(
-            L=self.L,
-            A=self.A,
+        self._S, self._G = router.route(
             P=self.P,
+            A=self.A,
             cables=self.cables,
             cables_capacity=self.cables_capacity,
             verbose=verbose,
@@ -513,46 +512,17 @@ class WindFarmNetwork:
 
 
 class Router(ABC):
-    def __init__(self, **kwargs):
-        pass
-
     @abstractmethod
-    def optimize(
+    def route(
         self,
-        L=None,
-        A=None,
-        P=None,
-        cables=None,
-        cables_capacity=None,
-        S_warm=None,
-        S_warm_has_detour=False,
-        verbose=False,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        cables: list[tuple[int, float]],
+        cables_capacity: int,
+        verbose: bool,
         **kwargs,
-    ):
+    ) -> tuple[nx.Graph, nx.Graph]:
         pass
-
-    def __call__(
-        self,
-        L=None,
-        A=None,
-        P=None,
-        cables=None,
-        cables_capacity=None,
-        S_warm=None,
-        S_warm_has_detour=False,
-        verbose=False,
-    ):
-        """Make the instance callable, calling optimize() internally."""
-        return self.optimize(
-            L=L,
-            A=A,
-            P=P,
-            cables=cables,
-            cables_capacity=cables_capacity,
-            S_warm=S_warm,
-            S_warm_has_detour=S_warm_has_detour,
-            verbose=verbose,
-        )
 
 
 class EWRouter(Router):
@@ -570,7 +540,7 @@ class EWRouter(Router):
         self.maxiter = maxiter
         self.feeder_route = feeder_route
 
-    def optimize(self, L, A, P, cables, cables_capacity, verbose=None, **kwargs):
+    def route(self, P, A, cables, cables_capacity, verbose=None, **kwargs):
         if verbose is None:
             verbose = self.verbose
 
@@ -578,7 +548,7 @@ class EWRouter(Router):
         if self.feeder_route == 'segmented':
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
         elif self.feeder_route == 'straight':
-            G_cpew = CPEW(L, capacity=cables_capacity, maxiter=self.maxiter)
+            G_cpew = CPEW(A, capacity=cables_capacity, maxiter=self.maxiter)
             S = S_from_G(G_cpew)
         else:
             raise ValueError(
@@ -614,9 +584,7 @@ class HGSRouter(Router):
         self.balanced = balanced
         self.seed = seed
 
-    def optimize(
-        self, A, P, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
-    ):
+    def route(self, P, A, cables, cables_capacity, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -681,15 +649,15 @@ class MILPRouter(Router):
         if verbose and solver_name == 'ortools':
             enable_ortools_logging_if_jupyter(self.solver)
 
-    def optimize(
+    def route(
         self,
         P,
         A,
         cables,
         cables_capacity,
+        verbose=None,
         S_warm=None,
         S_warm_has_detour=False,
-        verbose=None,
         **kwargs,
     ):
         if verbose is None:

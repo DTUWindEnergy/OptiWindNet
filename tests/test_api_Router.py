@@ -1,10 +1,12 @@
-import pickle
-from unittest.mock import MagicMock
-
-import numpy as np
 import pytest
 
-from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork, ModelOptions
+from optiwindnet.api import (
+    EWRouter,
+    HGSRouter,
+    MILPRouter,
+    WindFarmNetwork,
+    ModelOptions,
+)
 from .helpers import assert_graph_equal
 # ========== Test Routers ==========
 
@@ -129,67 +131,3 @@ def test_router_initialization(router_class, init_kwargs, expected_attrs):
             assert actual == expected
         else:
             assert actual == expected
-
-
-@pytest.mark.parametrize(
-    "router_class, init_kwargs, call_args",
-    [
-        (
-            EWRouter,
-            {},
-            {
-                "L": "L_test",
-                "A": "A_test",
-                "P": "P_test",
-                "cables": "c_test",
-                "cables_capacity": 10,
-            },
-        ),
-        (
-            HGSRouter,
-            {"time_limit": 2},
-            {
-                "A": "A_test",
-                "P": "P_test",
-                "cables": "c_test",
-                "cables_capacity": 10,
-            },
-        ),
-        (
-            MILPRouter,
-            {"solver_name": "ortools", "time_limit": 10, "mip_gap": 0.1},
-            {
-                "A": "A_test",
-                "P": "P_test",
-                "cables": "c_test",
-                "cables_capacity": 10,
-            },
-        ),
-    ],
-)
-def test_router_call_delegates_to_optimize(router_class, init_kwargs, call_args):
-    router = router_class(**init_kwargs)
-
-    # Mock optimize
-    router.optimize = MagicMock(return_value="mock_output")
-
-    # Call router like a function
-    result = router(**call_args)
-
-    # Fill in default values expected by __call__
-    expected_args = {
-        "L": None,
-        "A": None,
-        "P": None,
-        "cables": None,
-        "cables_capacity": None,
-        "S_warm": None,
-        "S_warm_has_detour": False,
-        "verbose": False,
-    }
-    expected_args.update(call_args)
-
-    # Assert optimize was called correctly
-    router.optimize.assert_called_once_with(**expected_args)
-    assert result == "mock_output"
-
