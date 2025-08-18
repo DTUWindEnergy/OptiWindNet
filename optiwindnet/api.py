@@ -299,14 +299,7 @@ class WindFarmNetwork:
         return self.G.size(weight='length')
 
     def plot_original_vs_buffered(self, **kwargs):
-        """Plot original and buffered borders and obstacles on a single plot.
-
-        Args:
-          **kwargs: passed to matplotlib's pyplot.figure()
-
-        Returns:
-          matplotlib Axes instance.
-        """
+        """Plot original and buffered borders and obstacles on a single plot."""
         return plot_org_buff(
             self._borderC_original,
             self._border_bufferedC,
@@ -317,7 +310,7 @@ class WindFarmNetwork:
 
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from a YAML file."""
+        """Create a WindFarmNetwork instance from a YAML file."""
         if not isinstance(filepath, str):
             raise TypeError('Filepath must be a string')
 
@@ -326,7 +319,7 @@ class WindFarmNetwork:
 
     @classmethod
     def from_pbf(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from a PBF file."""
+        """Create a WindFarmNetwork instance from a PBF file."""
         if not isinstance(filepath, str):
             error('Filepath must be a string')
 
@@ -335,7 +328,7 @@ class WindFarmNetwork:
 
     @classmethod
     def from_windIO(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from WindIO yaml file."""
+        """Create a WindFarmNetwork instance from WindIO yaml file."""
         if not isinstance(filepath, str):
             raise TypeError('Filepath must be a string')
 
@@ -376,19 +369,19 @@ class WindFarmNetwork:
         return svgplot(self.G)._repr_svg_()
 
     def plot(self, *args, **kwargs):
-        """Plots the optimized network."""
+        """Plot the optimized network."""
         return gplot(self.G, *args, **kwargs)
 
     def plot_location(self, **kwargs):
-        """Plots the original location graph."""
+        """Plot the original location graph."""
         return gplot(self.L, **kwargs)
 
     def plot_available_links(self, **kwargs):
-        """Plots available links from planar embedding."""
+        """Plot available links from planar embedding."""
         return gplot(self.A, **kwargs)
 
     def plot_navigation_mesh(self, **kwargs):
-        """Plots navigation mesh (planar graph and adjacency)."""
+        """Plot navigation mesh (planar graph and adjacency)."""
         return pplot(self.P, self.A, **kwargs)
 
     def plot_selected_links(self, **kwargs):
@@ -417,7 +410,7 @@ class WindFarmNetwork:
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
     ):
-        """Updates the network from terse link representation.
+        """Update the network from terse link representation.
 
         Accepts integers or integer-like floats (e.g., 3.0). Rejects non-integers.
         """
@@ -563,6 +556,12 @@ class WindFarmNetwork:
 
 class Router(ABC):
     """
+    Abstract base class for routing algorithms in OptiWindNet.
+
+    Each Router implementation defines a `route` method that takes a planar embedding (P),
+    available links graph (A), and cable data, and returns:
+      - S: the selected link graph
+      - G: the final cable layout graph with assigned cables
     """
     @abstractmethod
     def route(
@@ -574,10 +573,31 @@ class Router(ABC):
         verbose: bool,
         **kwargs,
     ) -> tuple[nx.Graph, nx.Graph]:
+        """
+        Run the routing optimization.
+
+        Args:    
+          P : Planar embedding of the layout graph.
+          A : Graph of available links (edges).
+          cables : list of cables, each as a (capacity, cost) tuple.
+          cables_capacity : Maximum cable capacity.
+          verbose : Whether to print progress/logging info.
+          **kwargs : Additional algorithm-specific parameters.
+
+        Returns:
+          S : Graph of selected links.
+          G : Optimized network graph with assigned cables.
+        """
         pass
 
 
 class EWRouter(Router):
+    """
+    A lightweight, ultra-fast router for cable layout optimization.
+
+    - Uses simple heuristics (segmented or straight feeders).
+    - Produces solutions in milliseconds, suitable for quick layouts or warm starts.
+    """
     def __init__(
         self,
         maxiter=10000,
@@ -617,6 +637,12 @@ class EWRouter(Router):
 
 
 class HGSRouter(Router):
+    """
+    A fast router based on Hybrid Genetic Search (HGS).
+
+    - Balances solution quality and runtime.
+    - Produces solutions in seconds, suitable for fast but high-quality layouts.
+    """
     def __init__(
         self,
         time_limit,
@@ -675,6 +701,13 @@ class HGSRouter(Router):
 
 
 class MILPRouter(Router):
+    """
+    An exact router based on Mixed-Integer Linear Programming (MILP).
+
+    - Uses optimization solvers (Gurobi, CBC, OR-Tools, CPLEX, Highs, SCIP).
+    - Provides provably optimal or near-optimal layouts.
+    - Might take few minutes, but ensures solution quality.
+    """
     def __init__(
         self,
         solver_name,
