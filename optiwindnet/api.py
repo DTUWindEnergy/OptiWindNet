@@ -249,7 +249,6 @@ class WindFarmNetwork:
         self._buffer_dist = dist
 
     # ---- coordinates:
-    # changing any of these rebuilds L, then refreshes P/A
     @property
     def turbinesC(self):
         return self._turbinesC
@@ -586,7 +585,7 @@ class Router(ABC):
           cables : list of cables, each as a (capacity, cost) tuple.
           cables_capacity : Maximum cable capacity.
           verbose : Whether to print progress/logging info.
-          **kwargs : Additional algorithm-specific parameters.
+          **kwargs : Additional router-specific parameters.
 
         Returns:
           S : Graph of selected links.
@@ -603,11 +602,18 @@ class EWRouter(Router):
     """
     def __init__(
         self,
-        maxiter=10000,
-        feeder_route='segmented',
-        verbose=False,
+        maxiter: int = 10_000,
+        feeder_route: str = "segmented",
+        verbose: bool = False,
         **kwargs,
-    ):
+    ) -> None:
+        """Initialize a Heuristic-based router.
+        Args:
+            maxiter: Maximum iterations for EWRouter.
+            feeder_route: Feeder routing mode ("segmented" or "straight").
+            verbose: Enable verbose logging.
+        """
+        
         super().__init__(**kwargs)
 
         # Call the base class initialization
@@ -647,14 +653,27 @@ class HGSRouter(Router):
     """
     def __init__(
         self,
-        time_limit,
+        time_limit: float,
         feeder_limit: int | None = None,
-        max_retries=10,
-        balanced=False,
+        max_retries: int = 10,
+        balanced: bool = False,
         seed: int = 0,
-        verbose=False,
+        verbose: bool = False,
         **kwargs,
-    ):
+    ) -> None:
+        """Initialize an HGS-based router.
+
+        Args:
+            time_limit: Maximum runtime for a single HGS run (in seconds).
+            feeder_limit: Maximum number of feeders allowed (ignored if multiple substations).
+            max_retries: Maximum number of retries if a feasible solution is not found.
+            balanced: Whether to balance turbines/loads across feeders.
+            seed: Random seed for reproducibility.
+            verbose: Enable verbose logging.
+
+        Notes:
+            * The total runtime may reach up to `max_retries * time_limit` in the worst case.
+        """
         # Call the base class initialization
         super().__init__(**kwargs)
         self.time_limit = time_limit
@@ -711,14 +730,23 @@ class MILPRouter(Router):
     """
     def __init__(
         self,
-        solver_name,
-        time_limit,
-        mip_gap,
-        solver_options=None,
-        model_options=None,
-        verbose=False,
+        solver_name: str,
+        time_limit: int,
+        mip_gap: float,
+        solver_options: dict | None = None,
+        model_options: ModelOptions | None = None,
+        verbose: bool = False,
         **kwargs,
-    ):
+    ) -> None:
+        """Initialize an MILP-based router.
+        Args:
+            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools", "cplex", "highs", "scip").
+            time_limit: Maximum runtime (seconds).
+            mip_gap: Relative MIP optimality gap tolerance.
+            solver_options: Extra solver-specific options.
+            model_options: Options for the MILP model.
+            verbose: Enable verbose logging.
+        """
         super().__init__(**kwargs)
         self.time_limit = time_limit
         self.mip_gap = mip_gap
