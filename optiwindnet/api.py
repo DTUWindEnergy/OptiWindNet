@@ -144,6 +144,18 @@ class WindFarmNetwork:
         return self._A
 
     @property
+    def S(self):
+        if self._is_stale_SG:
+            return None
+        return self._S
+
+    @property
+    def G(self):
+        if self._is_stale_SG:
+            return None
+        return self._G
+
+    @property
     def cables(self):
         return self._cables
 
@@ -153,7 +165,7 @@ class WindFarmNetwork:
         self._cables = parsed
         self.cables_capacity = max(parsed)[0]
         if not self._is_stale_SG:
-            assign_cables(self.G, cables)
+            assign_cables(self._G, cables)
 
     @property
     def router(self):
@@ -371,17 +383,18 @@ class WindFarmNetwork:
         if substationsC is not None:
             self.substationsC = substationsC
 
-        self.S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
+        S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
         for i, j in enumerate(validated_terse_links):
-            self.S.add_edge(i, j)
+            S.add_edge(i, j)
 
-        calcload(self.S)
+        calcload(S)
 
-        G_tentative = G_from_S(self.S, self.A)
+        G_tentative = G_from_S(S, self.A)
 
-        self.G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
+        self._S = S
+        self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
 
-        assign_cables(self.G, self.cables)
+        assign_cables(self._G, self.cables)
         self._is_stale_SG = False
 
         return
@@ -465,23 +478,20 @@ class WindFarmNetwork:
 
         # If new coordinates are provided, update them
         if turbinesC is not None:
-            self.L.graph['VertexC'][: turbinesC.shape[0], :] = turbinesC
+            self.turbinesC = turbinesC
 
         if substationsC is not None:
-            self.L.graph['VertexC'][-substationsC.shape[0] :, :] = substationsC
-
-        if turbinesC is not None or substationsC is not None:
-            self.P, self.A = make_planar_embedding(self.L)
+            self.substationsC = substationsC
 
         if not self._is_stale_SG:
             warmstart = dict(
-                S_warm=self.S,
-                S_warm_has_detour=self.G.graph.get('D', 0) > 0,
+                S_warm=self._S,
+                S_warm_has_detour=self._G.graph.get('D', 0) > 0,
             )
         else:
             warmstart = {}
 
-        self.S, self.G = router(
+        self._S, self._G = router(
             L=self.L,
             A=self.A,
             P=self.P,
@@ -490,7 +500,7 @@ class WindFarmNetwork:
             verbose=verbose,
             **warmstart,
         )
-        self.is_stale_SG = False
+        self._is_stale_SG = False
 
         terse_links = self.terse_links()
         return terse_links
