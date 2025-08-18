@@ -41,25 +41,72 @@ error, warning, info = logger.error, logger.warning, logger.info
 
 
 class WindFarmNetwork:
-    """
-    Represents a wind farm electrical network, capable of processing
-    layout data from different formats and computing network properties.
+    """Wind farm electrical network.
+
+    Models, analyzes, and optimizes the electrical collection system of a wind
+    farm (turbines, substations, borders, obstacles). Provides visualization,
+    cost/length evaluation, and gradient tools. Builds a location graph (`L`)
+    and derives planar/solution/optimized graphs (`P`, `A`, `S`, `G`).
+
+    Attributes:
+        cables: Cable specification as (capacity, cost).
+        cables_capacity: Maximum cable capacity.
+        L: Location graph (turbines, substations, borders, obstacles).
+        P: Planar embedding of `L` (navigation mesh).
+        A: Adjacency graph of the planar embedding.
+        S: Selected links (solution).
+        G: Optimized network with assigned cables.
+        name: Project name.
+        handle: Project identifier.
+        buffer_dist: Border/obstacle buffer distance.
+        router: Router instance used for optimization.
     """
 
     def __init__(
         self,
-        cables,
-        turbinesC=None,
-        substationsC=None,
-        borderC=None,
-        obstaclesC=None,
-        name='',
-        handle='',
-        L=None,
-        router=None,
-        buffer_dist=0,
+        cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
+        turbinesC: np.ndarray = None,
+        substationsC: np.ndarray = None,
+        borderC: np.ndarray = None,
+        obstaclesC: np.ndarray = None,
+        name: str = "",
+        handle: str = "",
+        L = None,
+        router = None,
+        buffer_dist: float = 0.0,
         **kwargs,
     ):
+        """Initialize a wind farm electrical network.
+
+        Args:
+            cables: Cable specifications as `(capacity, cost)` tuples.
+            turbinesC: Turbine coordinates (x, y).
+            substationsC: Substation coordinates (x, y).
+            borderC: Polygonal border coordinates.
+            obstaclesC: One or more polygons for exclusion zones.
+            name: Human-readable project name. Defaults to "".
+            handle: Short identifier (e.g., for filenames). Defaults to "".
+            L: Pre-constructed location graph. If provided, it normally takes precedence over coordinate inputs.
+            router: Routing algorithm instance. Defaults to `EWRouter`.
+            buffer_dist: Buffer distance to inflate borders / shrink obstacles. Defaults to 0.
+            **kwargs: Additional keyword arguments forwarded to layout-construction helpers.
+
+        Notes:
+            - Changing coordinate inputs (`turbinesC`, `substationsC`, `borderC`, `obstaclesC`)
+              rebuilds the location graph `L` and refreshes its planar embedding.
+            - If both `L` and coordinates are provided, define and document the intended
+              precedence (e.g., coordinates override `L`, or vice versa). Keep it here.
+            - Cables are stored internally as a list of `(capacity, cost)` tuples.
+
+        Examples::
+
+          cables = [(100, 10), (200, 20)]
+          turbines = np.array([[0, 0], [1, 0], [0, 1]])
+          substations = np.array([[10, 0]])
+          wfn = WindFarmNetwork(cables, turbinesC=turbines, substationsC=substations)
+          wfn.optimize()
+          print(wfn.cost(), wfn.length())
+        """
         # Use a default router if none is provided
         if router is None:
             router = EWRouter()
@@ -102,11 +149,11 @@ class WindFarmNetwork:
         self.G = None
 
     def cost(self):
-        """Returns the total cost of the network."""
+        """Return the total cost of the optimized network."""
         return self.G.size(weight='cost')
 
     def length(self):
-        """Returns the total cable length of the network."""
+        """Return the total cable length of the optimized network."""
         return self.G.size(weight='length')
 
     def plot_original_vs_buffered(self, **kwargs):
@@ -187,29 +234,29 @@ class WindFarmNetwork:
         return svgplot(self.G)._repr_svg_()
 
     def plot(self, *args, **kwargs):
-        """Plots the final optimized network."""
+        """Plots the optimized network."""
         return gplot(self.G, *args, **kwargs)
 
     def plot_location(self, **kwargs):
-        """Plots the location (vertices and borders)."""
+        """Plots the original location graph."""
         return gplot(self.L, **kwargs)
 
     def plot_available_links(self, **kwargs):
-        """Plots the available links from planar embedding."""
+        """Plots available links from planar embedding."""
         return gplot(self.A, **kwargs)
 
     def plot_navigation_mesh(self, **kwargs):
-        """Plots the navigation mesh (planar graph and adjacency)."""
+        """Plots navigation mesh (planar graph and adjacency)."""
         return pplot(self.P, self.A, **kwargs)
 
     def plot_selected_links(self, **kwargs):
-        """Plots the currently selected links in cable layout (chosen from available links)."""
+        """Plot tentative link selection."""
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
         return gplot(G_tentative, **kwargs)
 
     def terse_links(self):
-        """Returns a compact representation of the selected links as an array of link targets."""
+        """Return a compact representation of selected links."""
         R, T = (self.S.graph[k] for k in 'RT')
         terse = np.empty(T, dtype=int)
 
@@ -225,7 +272,8 @@ class WindFarmNetwork:
     def update_from_terse_links(
         self, terse_links: np.ndarray, turbinesC=None, substationsC=None
     ) -> None:
-        """Updates the network from terse link representation.
+        """
+        Update the network from terse encoding.
 
         Accepts integers or integer-like floats (e.g., 3.0). Rejects non-integers.
         """
@@ -261,10 +309,11 @@ class WindFarmNetwork:
         return self.G
 
     def get_network(self):
-        """Returns the network as a structured array of edge data."""
+        """Export the optimized network as a structured array."""
         return extract_network_as_array(self.G)
 
     def map_detour_vertex(self):
+        """Map detour vertices back to their original indices."""
         if self.G.graph.get('C') or self.G.graph.get('D'):
             R, T, B = (self.G.graph[k] for k in 'RTB')
             map = dict(
@@ -278,7 +327,7 @@ class WindFarmNetwork:
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """
-        Computes gradients of total cable length or cost with respect to the node positions.
+        Compute length/cost gradients with respect to node positions.
         """
         if gradient_type.lower() not in ['cost', 'length']:
             raise ValueError("gradient_type should be either 'cost' or 'length'")
@@ -332,6 +381,7 @@ class WindFarmNetwork:
         return gradients_wt, gradients_ss
 
     def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=False):
+        """Run the routing algorithm to compute an optimized layout."""
         if router is None:
             router = self.router
         else:
@@ -371,6 +421,7 @@ class WindFarmNetwork:
         return terse_links
 
     def solution_info(self):
+        """Return solver summary (runtime, objective, gap, etc.)."""
         return {
             k: self.G.graph[k]
             for k in ('runtime', 'bound', 'objective', 'relgap', 'termination')
@@ -378,6 +429,8 @@ class WindFarmNetwork:
 
 
 class Router(ABC):
+    """
+    """
     def __init__(self, **kwargs):
         pass
 
