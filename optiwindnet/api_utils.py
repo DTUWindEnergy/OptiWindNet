@@ -1,16 +1,12 @@
 import logging
 import math
-from itertools import pairwise
 from typing import Sequence
-
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.path import Path
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
-
-from .importer import L_from_site
 
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
