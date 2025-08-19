@@ -15,7 +15,6 @@ from .api_utils import (
     is_warmstart_eligible,
     parse_cables_input,
     plot_org_buff,
-    validate_terse_links,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
@@ -450,7 +449,8 @@ class WindFarmNetwork:
             terse[i] = target
 
         return terse
-
+    
+   
     def update_from_terse_links(
         self,
         terse_links: np.ndarray,
@@ -461,7 +461,8 @@ class WindFarmNetwork:
 
         Accepts integers or integer-like floats (e.g., 3.0).
         """
-        validated_terse_links = validate_terse_links(terse_links=terse_links, L=self.L)
+
+        terse_links_ints = np.asarray(terse_links, dtype=np.int64)
 
         # Update coordinates if provided
         if turbinesC is not None:
@@ -471,7 +472,7 @@ class WindFarmNetwork:
             self.substationsC = substationsC
 
         S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
-        for i, j in enumerate(validated_terse_links):
+        for i, j in enumerate(terse_links_ints):
             S.add_edge(i, j)
 
         calcload(S)
