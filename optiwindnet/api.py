@@ -15,7 +15,6 @@ from .api_utils import (
     is_warmstart_eligible,
     parse_cables_input,
     plot_org_buff,
-    terse_links_validation,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver

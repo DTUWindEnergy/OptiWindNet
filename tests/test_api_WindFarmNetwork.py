@@ -109,14 +109,6 @@ def test_cables_capacity_calculation(LG_from_database):
     assert wfn.cables_capacity == 7
 
 
-def test_validate_terse_links(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    assert not wfn.validate_terse_links(np.array([1, 2]))
-    assert not wfn.validate_terse_links(np.array([0.1, 2.5]))
-    assert not wfn.validate_terse_links(np.array([[0, 1], [2, 3]]))
-
-
 def test_invalid_gradient_type_raises(LG_from_database):
     L, _ = LG_from_database('eagle_EWRouter')
     wfn = WindFarmNetwork(cables=7, L=L)
