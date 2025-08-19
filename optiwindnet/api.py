@@ -85,7 +85,7 @@ class WindFarmNetwork:
         """Initialize a wind farm electrical network.
 
         Args:
-          cables: Multiple formats are accepted (capacity is in number or turbines):
+          cables: Multiple formats are accepted (capacity is in number of turbines):
             * Set of cable specifications as: [(capacity, linear_cost), ...].
             * Sequence of maximum capacity per cable type: [capacity_0, capacity_1, ...]
             * Maximum capacity of all available cables: capacity
