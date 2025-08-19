@@ -7,14 +7,19 @@ import networkx as nx
 import numpy as np
 import yaml
 import yaml_include
+from itertools import pairwise
+from shapely.geometry import MultiPolygon, Polygon
+from shapely.validation import explain_validity
 
 from .api_utils import (
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
-    from_coordinates,
     is_warmstart_eligible,
     parse_cables_input,
     plot_org_buff,
+    expand_polygon_safely,
+    shrink_polygon_safely,
+    merge_obs_into_border,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
@@ -167,15 +172,13 @@ class WindFarmNetwork:
                     'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
         elif turbinesC is not None and substationsC is not None:
-            L = from_coordinates(
-                self,
+            L = self.from_coordinates(
                 turbinesC,
                 substationsC,
                 borderC,
                 obstaclesC,
                 name,
                 handle,
-                buffer_dist,
                 **kwargs,
             )
         else:
@@ -284,13 +287,16 @@ class WindFarmNetwork:
         Returns:
           matplotlib Axes instance.
         """
-        return plot_org_buff(
-            self._borderC_original,
-            self._border_bufferedC,
-            self._obstaclesC_original,
-            self._obstacles_bufferedC,
-            **kwargs,
-        )
+        try:
+            return plot_org_buff(
+                self._borderC_original,
+                self._border_bufferedC,
+                self._obstaclesC_original,
+                self._obstacles_bufferedC,
+                **kwargs,
+            )
+        except AttributeError:
+            print('No buffering is perfomred')
 
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
@@ -347,6 +353,62 @@ class WindFarmNetwork:
         )
 
         return cls(L=L, **kwargs)
+
+    def from_coordinates(
+        self,
+        turbinesC,
+        substationsC,
+        borderC,
+        obstaclesC,
+        name,
+        handle,
+        **kwargs,
+    ):
+        """Constructs a site graph from coordinate-based inputs."""
+
+        obstaclesC = obstaclesC or []
+
+        R = substationsC.shape[0]
+        T = turbinesC.shape[0]
+
+        sizes = []
+        if borderC is not None:
+            sizes.append(borderC.shape[0])
+
+        for obs in obstaclesC:  # safe if obstaclesC is None
+            if obs is not None:
+                sizes.append(obs.shape[0])
+
+        border_sizes = np.array(sizes, dtype=int)
+
+        B = border_sizes.sum().item()
+        obstacle_start_idxs = np.cumsum(border_sizes) + T
+
+        border_len = borderC.shape[0] if borderC is not None else 0
+        border_range = np.arange(T, T + border_len)
+
+        obstacle_ranges = [
+            np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)
+        ]
+
+        vertexC = np.vstack(
+            [turbinesC]
+            + ([borderC] if borderC is not None else [])
+            + ([obs for obs in (obstaclesC or []) if obs is not None])
+            + ([substationsC] if substationsC is not None else [])
+        )
+
+        return L_from_site(
+            R=R,
+            T=T,
+            B=B,
+            border=border_range,
+            obstacles=obstacle_ranges,
+            name=name,
+            handle=handle,
+            VertexC=vertexC,
+            **kwargs,
+        )
 
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
@@ -444,6 +506,82 @@ class WindFarmNetwork:
         else:
             map = {}
         return map
+
+    def merge_obstacles_into_border(self):
+        
+        L = merge_obs_into_border(self._L)
+        # Update caches and planar embedding
+        self._L = L
+        self._VertexC = L.graph['VertexC']
+        self._R, self._T = L.graph['R'], L.graph['T']
+        self._refresh_planar()
+
+
+    def buffer_border_obstacles(self, buffer_dist):
+        if buffer_dist > 0:
+            self._borderC_original = borderC
+            self._obstaclesC_original = obstaclesC
+            # border
+            border_polygon = Polygon(borderC)
+            border_polygon = expand_polygon_safely(border_polygon, buffer_dist)
+            borderC = np.array(border_polygon.exterior.coords[:-1])
+
+            # obstacles
+            shrunk_obstaclesC = []
+            shrunk_obstaclesC_including_removed = []
+            for i, obs in enumerate(obstaclesC):
+                obs_poly = Polygon(obs)
+                obs_bufferedC = shrink_polygon_safely(obs_poly, buffer_dist, i)
+
+                if isinstance(obs_bufferedC, list):  # MultiPolygon
+                    shrunk_obstaclesC.extend(obs_bufferedC)
+                    shrunk_obstaclesC_including_removed.extend(obs_bufferedC)
+
+                elif obs_bufferedC is not None:  # Polygon
+                    shrunk_obstaclesC.append(obs_bufferedC)
+                    shrunk_obstaclesC_including_removed.append(obs_bufferedC)
+
+                else:  # None
+                    shrunk_obstaclesC_including_removed.append([])
+
+            # Update obstacles
+            obstaclesC = shrunk_obstaclesC
+
+            self._border_bufferedC = borderC
+            self._obstacles_bufferedC = obstaclesC
+            self._obstacles_bufferedC_incl_removed = shrunk_obstaclesC_including_removed
+
+        elif buffer_dist < 0:
+            raise ValueError('Buffer value must be equal or greater than 0!')
+        else:
+            self._borderC_original = borderC
+            self._obstaclesC_original = obstaclesC
+            self._border_bufferedC = borderC
+            self._obstacles_bufferedC = obstaclesC
+
+    def validate_turbines_within_borders(self):
+        # check_turbine_locations(border, obstacles, turbines):
+        border_path = Path(borderC)
+        # Border path, with tolerance for edge inclusion
+        in_border_neg = border_path.contains_points(turbinesC, radius=-1e-10)
+        in_border_pos = border_path.contains_points(turbinesC, radius=1e-10)
+        in_border = in_border_neg | in_border_pos
+
+        # Check if any turbine is outside the border
+        if not np.all(in_border):
+            outside_idx = np.where(~in_border)[0]
+            raise ValueError(
+                'Turbines at indices %s are outside the border!' % outside_idx
+            )
+
+        for i, obs in enumerate(obstaclesC):
+            obs_path = Path(obs)
+            in_obstacle = obs_path.contains_points(turbinesC, radius=-1e-10)
+            if np.any(in_obstacle):
+                inside_idx = np.where(in_obstacle)[0]
+                raise ValueError(
+                    f'Turbines at indices {inside_idx} are inside the obstacle at index {i}!'
+                )
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """Compute length/cost gradients with respect to node positions."""

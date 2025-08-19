@@ -7,7 +7,6 @@ import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.path import Path
 from shapely.geometry import MultiPolygon, Polygon
-from shapely.validation import explain_validity
 
 from .importer import L_from_site
 
@@ -131,197 +130,6 @@ def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC, **
     ax.legend()
     ax.set_axis_off()
     return ax
-
-
-def from_coordinates(
-    self,
-    turbinesC,
-    substationsC,
-    borderC,
-    obstaclesC,
-    name,
-    handle,
-    buffer_dist,
-    **kwargs,
-):
-    """Constructs a site graph from coordinate-based inputs."""
-
-    border_subtraction_verbose = True
-
-    R = substationsC.shape[0]
-    T = turbinesC.shape[0]
-
-    if borderC is None:
-        if obstaclesC is None:
-            vertexC = np.vstack((turbinesC, substationsC))
-            return L_from_site(
-                R=R, T=T, B=0, name=name, handle=handle, VertexC=vertexC, **kwargs
-            )
-        else:
-            border_sizes = np.array([0] + [obs.shape[0] for obs in obstaclesC])
-            B = border_sizes.sum()
-            obstacle_start_idxs = np.cumsum(border_sizes) + T
-            obstacle_ranges = [
-                np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)
-            ]
-
-            vertexC = np.vstack((turbinesC, *obstaclesC, substationsC))
-
-            return L_from_site(
-                R=R,
-                T=T,
-                B=B,
-                obstacles=obstacle_ranges,
-                name=name,
-                handle=handle,
-                VertexC=vertexC,
-                **kwargs,
-            )
-
-    if obstaclesC is None:
-        obstaclesC = []
-    else:
-        # Start with the original border polygon
-        border_polygon = Polygon(borderC)
-        remaining_obstaclesC = []
-
-        for i, obs in enumerate(obstaclesC):
-            obs_poly = Polygon(obs)
-
-            if not obs_poly.is_valid:
-                warning('Obstacle %d invalid: %s', i, explain_validity(obs_poly))
-                obs_poly = obs_poly.buffer(0)  # Try fixing it
-
-            intersection = border_polygon.boundary.intersection(obs_poly)
-
-            # If the obstacle is completely within the border, keep it
-            if border_polygon.contains(obs_poly) and intersection.length == 0:
-                remaining_obstaclesC.append(obs)
-
-            elif not border_polygon.contains(
-                obs_poly
-            ) and not border_polygon.intersects(obs_poly):
-                warning(
-                    'Obstacle at index %d is completely outside the border and is neglected.',
-                    i,
-                )
-            else:
-                # Subtract this obstacle from the border
-                warning(
-                    'Obstacle at index %d intersects with the exteriour border and is merged into the exterior border.',
-                    i,
-                )
-                new_border_polygon = border_polygon.difference(obs_poly)
-
-                if new_border_polygon.is_empty:
-                    raise ValueError(
-                        'Obstacle subtraction resulted in an empty border — check your geometry.'
-                    )
-
-                if border_subtraction_verbose:
-                    info(
-                        'At least one obstacle intersects/touches the border. The border is redefined to exclude those obstacles.'
-                    )
-                    border_subtraction_verbose = False
-
-                # If the subtraction results in multiple pieces (MultiPolygon), raise error
-                if isinstance(new_border_polygon, MultiPolygon):
-                    raise ValueError(
-                        'Obstacle subtraction resulted in multiple pieces (MultiPolygon) — check your geometry.'
-                    )
-                else:
-                    border_polygon = new_border_polygon
-
-        # Update the border as a NumPy array of exterior coordinates
-        borderC = np.array(border_polygon.exterior.coords[:-1])
-
-        # Update obstacles (only those fully contained are kept)
-        obstaclesC = remaining_obstaclesC
-
-    if buffer_dist > 0:
-        self._borderC_original = borderC
-        self._obstaclesC_original = obstaclesC
-        # border
-        border_polygon = Polygon(borderC)
-        border_polygon = expand_polygon_safely(border_polygon, buffer_dist)
-        borderC = np.array(border_polygon.exterior.coords[:-1])
-
-        # obstacles
-        shrunk_obstaclesC = []
-        shrunk_obstaclesC_including_removed = []
-        for i, obs in enumerate(obstaclesC):
-            obs_poly = Polygon(obs)
-            obs_bufferedC = shrink_polygon_safely(obs_poly, buffer_dist, i)
-
-            if isinstance(obs_bufferedC, list):  # MultiPolygon
-                shrunk_obstaclesC.extend(obs_bufferedC)
-                shrunk_obstaclesC_including_removed.extend(obs_bufferedC)
-
-            elif obs_bufferedC is not None:  # Polygon
-                shrunk_obstaclesC.append(obs_bufferedC)
-                shrunk_obstaclesC_including_removed.append(obs_bufferedC)
-
-            else:  # None
-                shrunk_obstaclesC_including_removed.append([])
-
-        # Update obstacles
-        obstaclesC = shrunk_obstaclesC
-
-        self._border_bufferedC = borderC
-        self._obstacles_bufferedC = obstaclesC
-        self._obstacles_bufferedC_incl_removed = shrunk_obstaclesC_including_removed
-
-    elif buffer_dist < 0:
-        raise ValueError('Buffer value must be equal or greater than 0!')
-    else:
-        self._borderC_original = borderC
-        self._obstaclesC_original = obstaclesC
-        self._border_bufferedC = borderC
-        self._obstacles_bufferedC = obstaclesC
-
-    # check_turbine_locations(border, obstacles, turbines):
-    border_path = Path(borderC)
-    # Border path, with tolerance for edge inclusion
-    in_border_neg = border_path.contains_points(turbinesC, radius=-1e-10)
-    in_border_pos = border_path.contains_points(turbinesC, radius=1e-10)
-    in_border = in_border_neg | in_border_pos
-
-    # Check if any turbine is outside the border
-    if not np.all(in_border):
-        outside_idx = np.where(~in_border)[0]
-        raise ValueError('Turbines at indices %s are outside the border!' % outside_idx)
-
-    for i, obs in enumerate(obstaclesC):
-        obs_path = Path(obs)
-        in_obstacle = obs_path.contains_points(turbinesC, radius=-1e-10)
-        if np.any(in_obstacle):
-            inside_idx = np.where(in_obstacle)[0]
-            raise ValueError(
-                f'Turbines at indices {inside_idx} are inside the obstacle at index {i}!'
-            )
-
-    border_sizes = np.array([borderC.shape[0]] + [obs.shape[0] for obs in obstaclesC])
-    B = border_sizes.sum().item()
-    obstacle_start_idxs = np.cumsum(border_sizes) + T
-
-    border_range = np.arange(T, T + borderC.shape[0])
-    obstacle_ranges = [
-        np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)
-    ]
-
-    vertexC = np.vstack((turbinesC, borderC, *obstaclesC, substationsC))
-
-    return L_from_site(
-        R=R,
-        T=T,
-        B=B,
-        border=border_range,
-        obstacles=obstacle_ranges,
-        name=name,
-        handle=handle,
-        VertexC=vertexC,
-        **kwargs,
-    )
 
 
 def is_warmstart_eligible(
@@ -491,3 +299,126 @@ def extract_network_as_array(G):
         count=G.number_of_edges(),
     )
     return network
+
+
+def merge_obs_into_border(L):
+
+    V = L.graph['VertexC']
+    T, R = L.graph['T'], L.graph['R']
+
+    turbinesC = V[:T]
+    substationsC = V[-R:] if R > 0 else np.empty((0, 2), dtype=float)
+
+    border_idx = L.graph.get('border')
+    obstacles_idx = L.graph.get('obstacles', [])
+
+    # Nothing to do if there's no border or no obstacles
+    if border_idx is None or len(obstacles_idx) == 0:
+        return  # leave L as-is
+
+    borderC = V[border_idx]
+    obstaclesC = [V[idx] for idx in obstacles_idx]
+
+    # --- merge/tidy obstacles vs border (your original logic, with small guards) ---
+    border_subtraction_verbose = True
+
+    # Start with the original border polygon
+    border_polygon = Polygon(borderC)
+    if border_polygon.is_empty:
+        raise ValueError("Border polygon is empty; cannot merge obstacles.")
+
+    remaining_obstaclesC = []
+
+    for i, obs in enumerate(obstaclesC):
+        if obs.size == 0:  # skip empties defensively
+            continue
+
+        obs_poly = Polygon(obs)
+
+        if not obs_poly.is_valid:
+            warning('Obstacle %d invalid: %s', i, explain_validity(obs_poly))
+            obs_poly = obs_poly.buffer(0)  # Try fixing it
+
+        # Degenerate after fix?
+        if obs_poly.is_empty:
+            warning('Obstacle %d became empty after fix; skipping.', i)
+            continue
+
+        intersection = border_polygon.boundary.intersection(obs_poly)
+
+        # If the obstacle is completely within the border, keep it
+        if border_polygon.contains(obs_poly) and getattr(intersection, "length", 0) == 0:
+            remaining_obstaclesC.append(obs)
+
+        # If completely outside -> drop with a warning
+        elif (not border_polygon.contains(obs_poly)) and (not border_polygon.intersects(obs_poly)):
+            warning(
+                'Obstacle at index %d is completely outside the border and is neglected.',
+                i,
+            )
+        else:
+            # Subtract this obstacle from the border
+            warning(
+                'Obstacle at index %d intersects with the exteriour border and is merged into the exterior border.',
+                i,
+            )
+            new_border_polygon = border_polygon.difference(obs_poly)
+
+            if new_border_polygon.is_empty:
+                raise ValueError(
+                    'Obstacle subtraction resulted in an empty border — check your geometry.'
+                )
+
+            if border_subtraction_verbose:
+                info(
+                    'At least one obstacle intersects/touches the border. The border is redefined to exclude those obstacles.'
+                )
+                border_subtraction_verbose = False
+
+            # If the subtraction results in multiple pieces (MultiPolygon), raise error
+            if isinstance(new_border_polygon, MultiPolygon):
+                raise ValueError(
+                    'Obstacle subtraction resulted in multiple pieces (MultiPolygon) — check your geometry.'
+                )
+            else:
+                border_polygon = new_border_polygon
+
+    # Update the border as a NumPy array of exterior coordinates
+    new_borderC = np.array(border_polygon.exterior.coords[:-1])
+    # Update obstacles (only those fully contained are kept)
+    new_obstaclesC = remaining_obstaclesC
+
+    # --- Rebuild VertexC and indices IN PLACE on L ---------------------------
+    pieces = [turbinesC]
+    border_idx_new = None
+    cursor = T
+
+    if new_borderC.size > 0:
+        pieces.append(new_borderC)
+        border_len = new_borderC.shape[0]
+        border_idx_new = np.arange(cursor, cursor + border_len, dtype=int)
+        cursor += border_len
+
+    obstacle_ranges_new = []
+    for obs in new_obstaclesC:
+        n = obs.shape[0]
+        if n == 0:
+            continue
+        pieces.append(obs)
+        idx = np.arange(cursor, cursor + n, dtype=int)
+        obstacle_ranges_new.append(idx)
+        cursor += n
+
+    if R > 0:
+        pieces.append(substationsC)
+
+    new_V = np.vstack(pieces) if pieces else np.empty((0, 2), dtype=float)
+
+    # Update graph attributes
+    L.graph['VertexC']   = new_V
+    L.graph['border']    = border_idx_new
+    L.graph['obstacles'] = obstacle_ranges_new
+    L.graph['B']         = (new_borderC.shape[0] if new_borderC.size else 0) + sum(o.shape[0] for o in new_obstaclesC)
+
+    return L
+
