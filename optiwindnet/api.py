@@ -14,7 +14,9 @@ from .api_utils import (
     is_warmstart_eligible,
     parse_cables_input,
     plot_org_buff,
-    validate_terse_links,
+    _merge_obstacles_into_border,
+    _buffer_geometries,
+    _validate_turbines_within_area,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
@@ -422,20 +424,30 @@ class WindFarmNetwork:
         **kwargs,
         ):
         """Constructs a site graph from coordinate-based inputs."""
-        from matplotlib.path import Path
-        from shapely.geometry import MultiPolygon, Polygon
-        from shapely.validation import explain_validity
         from itertools import pairwise
 
 
         R = substationsC.shape[0]
         T = turbinesC.shape[0]
 
+        obstaclesC = obstaclesC or []
+
+        # # Merge/clean geometry: subtract touching/intersecting obstacles from border
+        # borderC, obstaclesC = _merge_obstacles_into_border(borderC, obstaclesC)
+
+        # # Buffer geometries (expansion of border, shrinking of obstacles) and cache
+        # borderC, obstaclesC = _buffer_geometries(
+        #     borderC, obstaclesC, buffer_dist, self,
+        # )
+
+        # # Validate turbine locations
+        # _validate_turbines_within_area(turbinesC, borderC, obstaclesC)
+
         sizes = []
         if borderC is not None:
             sizes.append(borderC.shape[0])
 
-        for obs in obstaclesC or []:   # safe if obstaclesC is None
+        for obs in obstaclesC:   # safe if obstaclesC is None
             if obs is not None:
                 sizes.append(obs.shape[0])
 
