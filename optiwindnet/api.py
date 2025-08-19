@@ -111,7 +111,7 @@ class WindFarmNetwork:
         name: str = '',
         handle: str = '',
         L: nx.Graph | None = None,
-        router: Router = None,
+        router: Router | None = None,
         buffer_dist: float = 0.0,
         verbose: bool = False,
         **kwargs,
