@@ -449,8 +449,7 @@ class WindFarmNetwork:
             terse[i] = target
 
         return terse
-    
-   
+
     def update_from_terse_links(
         self,
         terse_links: np.ndarray,
@@ -672,7 +671,7 @@ class HGSRouter(Router):
         feeder_limit: int | None = None,
         max_retries: int = 10,
         balanced: bool = False,
-        seed: int = 0,
+        seed: int | None = None,
         verbose: bool = False,
         **kwargs,
     ) -> None:
