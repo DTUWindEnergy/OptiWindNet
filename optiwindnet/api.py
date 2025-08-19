@@ -364,13 +364,7 @@ class WindFarmNetwork:
 
         return terse
     
-    def validate_terse_links(
-        self,    
-        terse_links: np.ndarray
-        ):
-        """Check whether terse_links is a valid mapping for the Location graph."""
-        return terse_links_validation(terse_links=terse_links, L=self.L, verbose=True) # should be self.verbose
-
+   
     def update_from_terse_links(
         self,
         terse_links: np.ndarray,
