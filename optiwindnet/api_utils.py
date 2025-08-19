@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.path import Path
 from shapely.geometry import MultiPolygon, Polygon
+from shapely.validation import explain_validity
 
 from .importer import L_from_site
 
@@ -421,4 +422,89 @@ def merge_obs_into_border(L):
     L.graph['B']         = (new_borderC.shape[0] if new_borderC.size else 0) + sum(o.shape[0] for o in new_obstaclesC)
 
     return L
+
+def buffer_border_obs(L, buffer_dist):
+    V = L.graph["VertexC"]
+    T, R = L.graph["T"], L.graph["R"]
+
+    # Extract current pieces
+    turbinesC    = V[:T]
+    substationsC = V[-R:] if R > 0 else np.empty((0, 2), dtype=float)
+    border_idx   = L.graph.get("border")
+    obstacles_idx = L.graph.get("obstacles", [])
+
+    borderC    = V[border_idx] if border_idx is not None else None
+    obstaclesC = [V[idx] for idx in obstacles_idx]
+
+    pre_buffer = {
+        "borderC": None if borderC is None else borderC.copy(),
+        "obstaclesC": [o.copy() for o in obstaclesC],
+    }
+
+    if buffer_dist > 0:
+
+        # Border (guard for None/empty)
+        if borderC is not None and getattr(borderC, "size", 0) > 0:
+            border_polygon = Polygon(borderC)
+            border_polygon = expand_polygon_safely(border_polygon, buffer_dist)
+            borderC = np.array(border_polygon.exterior.coords[:-1])
+        else:
+            borderC = None  # keep as "no border"
+
+        # Obstacles
+        shrunk_obstaclesC = []
+        shrunk_obstaclesC_including_removed = []
+        for i, obs in enumerate(obstaclesC):
+            if getattr(obs, "size", 0) == 0:
+                shrunk_obstaclesC_including_removed.append([])
+                continue
+            obs_poly = Polygon(obs)
+            obs_bufferedC = shrink_polygon_safely(obs_poly, buffer_dist, i)
+
+            if isinstance(obs_bufferedC, list):     # MultiPolygon -> list of arrays
+                shrunk_obstaclesC.extend(obs_bufferedC)
+                shrunk_obstaclesC_including_removed.extend(obs_bufferedC)
+            elif obs_bufferedC is not None:         # Single polygon
+                shrunk_obstaclesC.append(obs_bufferedC)
+                shrunk_obstaclesC_including_removed.append(obs_bufferedC)
+            else:                                   # Removed
+                shrunk_obstaclesC_including_removed.append([])
+
+        obstaclesC = shrunk_obstaclesC
+
+    elif buffer_dist < 0:
+        raise ValueError('Buffer value must be equal or greater than 0!')
+
+    # ----------------- Update L (rebuild VertexC and indices) -----------------
+    pieces = [turbinesC]
+    cursor = T
+    border_idx_new = None
+
+    if borderC is not None and getattr(borderC, "size", 0) > 0:
+        pieces.append(borderC)
+        blen = borderC.shape[0]
+        border_idx_new = np.arange(cursor, cursor + blen, dtype=int)
+        cursor += blen
+
+    obstacle_ranges_new = []
+    for obs in obstaclesC:
+        if getattr(obs, "size", 0) == 0:
+            continue
+        n = obs.shape[0]
+        pieces.append(obs)
+        obstacle_ranges_new.append(np.arange(cursor, cursor + n, dtype=int))
+        cursor += n
+
+    if R > 0:
+        pieces.append(substationsC)
+
+    new_V = np.vstack(pieces) if pieces else np.empty((0, 2), dtype=float)
+
+    L.graph["VertexC"]   = new_V
+    L.graph["border"]    = border_idx_new
+    L.graph["obstacles"] = obstacle_ranges_new
+    L.graph["B"]         = (0 if border_idx_new is None else len(border_idx_new)) + sum(len(idx) for idx in obstacle_ranges_new)
+
+    return L, pre_buffer
+
 

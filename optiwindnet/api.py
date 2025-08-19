@@ -17,9 +17,8 @@ from .api_utils import (
     is_warmstart_eligible,
     parse_cables_input,
     plot_org_buff,
-    expand_polygon_safely,
-    shrink_polygon_safely,
     merge_obs_into_border,
+    buffer_border_obs,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
@@ -287,12 +286,17 @@ class WindFarmNetwork:
         Returns:
           matplotlib Axes instance.
         """
+        L = self._L
+        borderC = L.graph["VertexC"][L.graph["border"]] if "border" in L.graph else None
+        obstaclesC = [L.graph["VertexC"][idx] for idx in L.graph.get("obstacles", [])]
+
+        
         try:
             return plot_org_buff(
-                self._borderC_original,
-                self._border_bufferedC,
-                self._obstaclesC_original,
-                self._obstacles_bufferedC,
+                self._pre_buffer_border_obs['borderC'],
+                borderC,
+                self._pre_buffer_border_obs['obstaclesC'],
+                obstaclesC,
                 **kwargs,
             )
         except AttributeError:
@@ -510,7 +514,7 @@ class WindFarmNetwork:
     def merge_obstacles_into_border(self):
         
         L = merge_obs_into_border(self._L)
-        # Update caches and planar embedding
+        # Update
         self._L = L
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], L.graph['T']
@@ -518,46 +522,15 @@ class WindFarmNetwork:
 
 
     def buffer_border_obstacles(self, buffer_dist):
-        if buffer_dist > 0:
-            self._borderC_original = borderC
-            self._obstaclesC_original = obstaclesC
-            # border
-            border_polygon = Polygon(borderC)
-            border_polygon = expand_polygon_safely(border_polygon, buffer_dist)
-            borderC = np.array(border_polygon.exterior.coords[:-1])
-
-            # obstacles
-            shrunk_obstaclesC = []
-            shrunk_obstaclesC_including_removed = []
-            for i, obs in enumerate(obstaclesC):
-                obs_poly = Polygon(obs)
-                obs_bufferedC = shrink_polygon_safely(obs_poly, buffer_dist, i)
-
-                if isinstance(obs_bufferedC, list):  # MultiPolygon
-                    shrunk_obstaclesC.extend(obs_bufferedC)
-                    shrunk_obstaclesC_including_removed.extend(obs_bufferedC)
-
-                elif obs_bufferedC is not None:  # Polygon
-                    shrunk_obstaclesC.append(obs_bufferedC)
-                    shrunk_obstaclesC_including_removed.append(obs_bufferedC)
-
-                else:  # None
-                    shrunk_obstaclesC_including_removed.append([])
-
-            # Update obstacles
-            obstaclesC = shrunk_obstaclesC
-
-            self._border_bufferedC = borderC
-            self._obstacles_bufferedC = obstaclesC
-            self._obstacles_bufferedC_incl_removed = shrunk_obstaclesC_including_removed
-
-        elif buffer_dist < 0:
-            raise ValueError('Buffer value must be equal or greater than 0!')
-        else:
-            self._borderC_original = borderC
-            self._obstaclesC_original = obstaclesC
-            self._border_bufferedC = borderC
-            self._obstacles_bufferedC = obstaclesC
+        L = self._L
+        L, pre_buffer_border_obs = buffer_border_obs(L, buffer_dist=buffer_dist)
+        
+        # update
+        self._L = L
+        self._VertexC = L.graph['VertexC']
+        self._R, self._T = L.graph['R'], L.graph['T']
+        self._refresh_planar()
+        self._pre_buffer_border_obs = pre_buffer_border_obs
 
     def validate_turbines_within_borders(self):
         # check_turbine_locations(border, obstacles, turbines):
