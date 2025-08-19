@@ -40,6 +40,39 @@ logger = logging.getLogger(__name__)
 error, warning, info = logger.error, logger.warning, logger.info
 
 
+class Router(ABC):
+    """Abstract base class for routing algorithms in OptiWindNet.
+
+    Each Router implementation must define a `route` method.
+    """
+
+    @abstractmethod
+    def route(
+        self,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        cables: list[tuple[int, float]],
+        cables_capacity: int,
+        verbose: bool,
+        **kwargs,
+    ) -> tuple[nx.Graph, nx.Graph]:
+        """Run the routing optimization.
+
+        Args:
+          P : Navigation mesh for the location.
+          A : Graph of available links.
+          cables: set of cable specifications as [(capacity, linear_cost), ...].
+          cables_capacity: highest cable capacity in cables.
+          verbose : Whether to print progress/logging info.
+          **kwargs : Additional router-specific parameters.
+
+        Returns:
+          S : Solution topology (selected links).
+          G : Optimized network graph with routes and cable types.
+        """
+        pass
+
+
 class WindFarmNetwork:
     """Wind farm electrical network.
 
@@ -78,8 +111,9 @@ class WindFarmNetwork:
         name: str = '',
         handle: str = '',
         L: nx.Graph | None = None,
-        router=None,
+        router: Router = None,
         buffer_dist: float = 0.0,
+        verbose: bool = False,
         **kwargs,
     ):
         """Initialize a wind farm electrical network.
@@ -130,6 +164,8 @@ class WindFarmNetwork:
         self._substationsC = substationsC
         self._borderC = borderC
         self._obstaclesC = obstaclesC
+
+        self.verbose = verbose
 
         # decide source of L
         if L is not None:
@@ -527,6 +563,8 @@ class WindFarmNetwork:
         else:
             self.router = router
 
+        verbose = verbose or self.verbose
+
         # If new coordinates are provided, update them
         if turbinesC is not None:
             self.turbinesC = turbinesC
@@ -561,39 +599,6 @@ class WindFarmNetwork:
             k: self.G.graph[k]
             for k in ('runtime', 'bound', 'objective', 'relgap', 'termination')
         }
-
-
-class Router(ABC):
-    """Abstract base class for routing algorithms in OptiWindNet.
-
-    Each Router implementation must define a `route` method.
-    """
-
-    @abstractmethod
-    def route(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        cables: list[tuple[int, float]],
-        cables_capacity: int,
-        verbose: bool,
-        **kwargs,
-    ) -> tuple[nx.Graph, nx.Graph]:
-        """Run the routing optimization.
-
-        Args:
-          P : Navigation mesh for the location.
-          A : Graph of available links.
-          cables: set of cable specifications as [(capacity, linear_cost), ...].
-          cables_capacity: highest cable capacity in cables.
-          verbose : Whether to print progress/logging info.
-          **kwargs : Additional router-specific parameters.
-
-        Returns:
-          S : Solution topology (selected links).
-          G : Optimized network graph with routes and cable types.
-        """
-        pass
 
 
 class EWRouter(Router):
