@@ -3,6 +3,7 @@
 
 import math
 from multiprocessing import Pool
+import random
 from typing import Sequence
 
 import networkx as nx
@@ -21,7 +22,7 @@ def hgs_cvrp(
     capacity: float,
     time_limit: float,
     vehicles: int | None = None,
-    seed: int = 0,
+    seed: int | None = None,
     keep_log: bool = False,
 ) -> nx.Graph:
     """Solves the OCVRP using HGS-CVRP with links from `A`
@@ -67,7 +68,7 @@ def hgs_cvrp(
     solver_options = dict(
         timeLimit=time_limit,  # seconds
         # nbIter=2000,  # max iterations without improvement (20,000)
-        seed=seed,
+        seed=seed if seed is not None else random.getrandbits(63),
     )
     coordinates = np.c_[VertexC[-R:].T, VertexC[:T].T]
     # data preparation
@@ -151,7 +152,7 @@ def iterative_hgs_cvrp(
     capacity: float,
     time_limit: float,
     vehicles: int | None = None,
-    seed: int = 0,
+    seed: int | None = None,
     max_retries: int = 10,
     keep_log: bool = False,
 ) -> nx.Graph:
@@ -262,7 +263,7 @@ def hgs_multiroot(
     capacity: int,
     time_limit: float,
     balanced: bool = False,
-    seed: int = 0,
+    seed: int | None = None,
     keep_log: bool = False,
 ) -> nx.Graph:
     R, T = (A.graph[k] for k in 'RT')
@@ -278,7 +279,7 @@ def hgs_multiroot(
     solver_options = dict(
         timeLimit=time_limit,  # seconds
         # nbIter=2000,  # max iterations without improvement (20,000)
-        seed=seed,
+        seed=seed if seed is not None else random.getrandbits(63),
     )
 
     # data preparation

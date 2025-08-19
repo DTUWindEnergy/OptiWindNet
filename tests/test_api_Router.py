@@ -18,16 +18,24 @@ from .helpers import assert_graph_equal
         ('eagle_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime'}),
         ('taylor_EWRouter', None, {'runtime'}),
         ('taylor_EWRouter_straight', EWRouter(feeder_route='straight'), {'runtime'}),
-        ('eagle_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime'}),
         (
-            'eagle_HGSRouter_feeder_limit',
-            HGSRouter(time_limit=2, feeder_limit=0),
+            'eagle_HGSRouter',
+            HGSRouter(time_limit=2, seed=0),
             {'solution_time', 'runtime'},
         ),
-        ('taylor_HGSRouter', HGSRouter(time_limit=2), {'solution_time', 'runtime'}),
+        (
+            'eagle_HGSRouter_feeder_limit',
+            HGSRouter(time_limit=2, feeder_limit=0, seed=0),
+            {'solution_time', 'runtime'},
+        ),
+        (
+            'taylor_HGSRouter',
+            HGSRouter(time_limit=2, seed=0),
+            {'solution_time', 'runtime'},
+        ),
         (
             'taylor_HGSRouter_feeder_limit',
-            HGSRouter(time_limit=2, feeder_limit=0),
+            HGSRouter(time_limit=2, feeder_limit=0, seed=0),
             {'solution_time', 'runtime'},
         ),
         (
@@ -74,7 +82,7 @@ def test_router_variants(LG_from_database, label, router, ignored_keys):
                 'max_retries': 10,
                 'feeder_limit': None,
                 'balanced': False,
-                'seed': 0,
+                'seed': None,
                 'verbose': False,
             },
         ),

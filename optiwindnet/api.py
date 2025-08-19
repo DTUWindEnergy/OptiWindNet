@@ -534,7 +534,8 @@ class WindFarmNetwork:
 
         Accepts integers or integer-like floats (e.g., 3.0).
         """
-        validated_terse_links = validate_terse_links(terse_links=terse_links, L=self.L)
+
+        terse_links_ints = np.asarray(terse_links, dtype=np.int64)
 
         # Update coordinates if provided
         if turbinesC is not None:
@@ -544,7 +545,7 @@ class WindFarmNetwork:
             self.substationsC = substationsC
 
         S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
-        for i, j in enumerate(validated_terse_links):
+        for i, j in enumerate(terse_links_ints):
             S.add_edge(i, j)
 
         calcload(S)
@@ -744,7 +745,7 @@ class HGSRouter(Router):
         feeder_limit: int | None = None,
         max_retries: int = 10,
         balanced: bool = False,
-        seed: int = 0,
+        seed: int | None = None,
         verbose: bool = False,
         **kwargs,
     ) -> None:
