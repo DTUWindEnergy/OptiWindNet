@@ -320,10 +320,9 @@ def merge_obs_into_border(L):
     borderC = V[border_idx]
     obstaclesC = [V[idx] for idx in obstacles_idx]
 
-    # --- merge/tidy obstacles vs border (your original logic, with small guards) ---
     border_subtraction_verbose = True
 
-    # Start with the original border polygon
+    #
     border_polygon = Polygon(borderC)
     if border_polygon.is_empty:
         raise ValueError('Border polygon is empty; cannot merge obstacles.')
@@ -331,16 +330,15 @@ def merge_obs_into_border(L):
     remaining_obstaclesC = []
 
     for i, obs in enumerate(obstaclesC):
-        if obs.size == 0:  # skip empties defensively
+        if obs.size == 0:
             continue
 
         obs_poly = Polygon(obs)
 
         if not obs_poly.is_valid:
             warning('Obstacle %d invalid: %s', i, explain_validity(obs_poly))
-            obs_poly = obs_poly.buffer(0)  # Try fixing it
+            obs_poly = obs_poly.buffer(0)
 
-        # Degenerate after fix?
         if obs_poly.is_empty:
             warning('Obstacle %d became empty after fix; skipping.', i)
             continue
@@ -391,7 +389,7 @@ def merge_obs_into_border(L):
 
     # Update the border as a NumPy array of exterior coordinates
     new_borderC = np.array(border_polygon.exterior.coords[:-1])
-    # Update obstacles (only those fully contained are kept)
+    # Update obstacles
     new_obstaclesC = remaining_obstaclesC
 
     # --- Rebuild VertexC and indices IN PLACE on L ---------------------------
@@ -450,32 +448,26 @@ def buffer_border_obs(L, buffer_dist):
     }
 
     if buffer_dist > 0:
-        # Border (guard for None/empty)
+        # Border
         if borderC is not None and getattr(borderC, 'size', 0) > 0:
             border_polygon = Polygon(borderC)
             border_polygon = expand_polygon_safely(border_polygon, buffer_dist)
             borderC = np.array(border_polygon.exterior.coords[:-1])
         else:
-            borderC = None  # keep as "no border"
+            borderC = None
 
         # Obstacles
         shrunk_obstaclesC = []
-        shrunk_obstaclesC_including_removed = []
         for i, obs in enumerate(obstaclesC):
             if getattr(obs, 'size', 0) == 0:
-                shrunk_obstaclesC_including_removed.append([])
                 continue
             obs_poly = Polygon(obs)
             obs_bufferedC = shrink_polygon_safely(obs_poly, buffer_dist, i)
 
             if isinstance(obs_bufferedC, list):  # MultiPolygon -> list of arrays
                 shrunk_obstaclesC.extend(obs_bufferedC)
-                shrunk_obstaclesC_including_removed.extend(obs_bufferedC)
             elif obs_bufferedC is not None:  # Single polygon
                 shrunk_obstaclesC.append(obs_bufferedC)
-                shrunk_obstaclesC_including_removed.append(obs_bufferedC)
-            else:  # Removed
-                shrunk_obstaclesC_including_removed.append([])
 
         obstaclesC = shrunk_obstaclesC
 
@@ -527,8 +519,6 @@ def _is_nonempty_xy(arr):
 
 
 def assert_inside_border(points, borderC, label):
-    import numpy as np
-    from matplotlib.path import Path
 
     if not _is_nonempty_xy(points) or not _is_nonempty_xy(borderC):
         return
