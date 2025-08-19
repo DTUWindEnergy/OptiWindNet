@@ -380,7 +380,7 @@ class WindFarmNetwork:
         if borderC is not None:
             sizes.append(borderC.shape[0])
 
-        for obs in obstaclesC:  # safe if obstaclesC is None
+        for obs in obstaclesC:
             if obs is not None:
                 sizes.append(obs.shape[0])
 
@@ -392,10 +392,12 @@ class WindFarmNetwork:
         border_len = borderC.shape[0] if borderC is not None else 0
         border_range = np.arange(T, T + border_len)
 
-        obstacle_ranges = [
-            np.arange(start, end) for start, end in pairwise(obstacle_start_idxs)
-        ]
+        # Obstacle ranges: start after the border block (or right after turbines if no border)
+        obs_lens = [obs.shape[0] for obs in obstaclesC if obs is not None]
+        obs_ranges = T + border_len + np.cumsum([0] + obs_lens)
+        obstacle_ranges = [np.arange(start, end, dtype=int) for start, end in pairwise(obs_ranges)]
 
+        print(obstacle_ranges)
         vertexC = np.vstack(
             [turbinesC]
             + ([borderC] if borderC is not None else [])
