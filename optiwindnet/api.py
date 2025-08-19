@@ -14,9 +14,9 @@ from .api_utils import (
     is_warmstart_eligible,
     parse_cables_input,
     plot_org_buff,
-    _merge_obstacles_into_border,
-    _buffer_geometries,
-    _validate_turbines_within_area,
+    merge_obstacles_into_border,
+    buffer_geometries,
+    validate_turbines_within_area,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
@@ -194,16 +194,7 @@ class WindFarmNetwork:
                 'Coordinate changed but cannot rebuild L until both turbinesC and substationsC are set.'
             )
             return
-        self._L = self.from_coordinates(
-            self._turbinesC,
-            self._substationsC,
-            self._borderC,
-            self._obstaclesC,
-            self.name,
-            self.handle,
-            self.buffer_dist,
-            **self._coord_kwargs,
-        )
+        self._L = self.from_coordinates()
         self._is_stale_PA = True
         self._is_stale_SG = True
 
@@ -412,20 +403,18 @@ class WindFarmNetwork:
         return cls(L=L, **kwargs)
     
     
-    def from_coordinates(
-        self,
-        turbinesC,
-        substationsC,
-        borderC,
-        obstaclesC,
-        name,
-        handle,
-        buffer_dist,
-        **kwargs,
-        ):
+    def from_coordinates(self):
         """Constructs a site graph from coordinate-based inputs."""
         from itertools import pairwise
-
+        print(self._substationsC)
+        turbinesC = self._turbinesC
+        substationsC = self._substationsC
+        borderC = self._borderC
+        obstaclesC = self._obstaclesC
+        name = self.name
+        handle = self.handle
+        buffer_dist = self.buffer_dist
+        kwargs = self._coord_kwargs
 
         R = substationsC.shape[0]
         T = turbinesC.shape[0]
@@ -433,15 +422,17 @@ class WindFarmNetwork:
         obstaclesC = obstaclesC or []
 
         # # Merge/clean geometry: subtract touching/intersecting obstacles from border
-        # borderC, obstaclesC = _merge_obstacles_into_border(borderC, obstaclesC)
+        print(borderC)
+        borderC, obstaclesC = merge_obstacles_into_border(self)
+        print(borderC)
 
-        # # Buffer geometries (expansion of border, shrinking of obstacles) and cache
-        # borderC, obstaclesC = _buffer_geometries(
-        #     borderC, obstaclesC, buffer_dist, self,
-        # )
+        # Buffer geometries (expansion of border, shrinking of obstacles) and cache
+        borderC, obstaclesC = buffer_geometries(
+            borderC, obstaclesC, buffer_dist, self,
+        )
 
         # # Validate turbine locations
-        # _validate_turbines_within_area(turbinesC, borderC, obstaclesC)
+        # validate_turbines_within_area(turbinesC, borderC, obstaclesC)
 
         sizes = []
         if borderC is not None:

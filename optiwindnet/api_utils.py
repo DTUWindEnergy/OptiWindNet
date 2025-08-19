@@ -319,15 +319,18 @@ def _stack_vertices_no_border(turbinesC, substationsC, obstaclesC):
     return vertexC, B, obstacle_ranges
 
 
-def _merge_obstacles_into_border(
-    borderC, obstaclesC, *, border_subtraction_verbose=True
-):
+def merge_obstacles_into_border(self):
     """
     Ensure obstacles fully outside are dropped, fully inside are kept,
     and obstacles intersecting/touching the exterior border are subtracted
     from the border (with MultiPolygon check).
     Returns (new_borderC, remaining_obstaclesC).
     """
+
+    borderC = self._borderC
+    obstaclesC = self._obstaclesC
+
+    border_subtraction_verbose=True
     if not obstaclesC:
         return borderC, []
 
@@ -382,11 +385,12 @@ def _merge_obstacles_into_border(
 
         border_polygon = new_border_polygon
 
-    new_borderC = np.array(border_polygon.exterior.coords[:-1])
+    new_borderC = np.array(border_polygon.exterior.coords[:-1]) if borderC is not None else borderC
+    
     return new_borderC, remaining_obstaclesC
 
 
-def _buffer_geometries(
+def buffer_geometries(
     borderC,
     obstaclesC,
     buffer_dist,
@@ -436,10 +440,14 @@ def _buffer_geometries(
     self_obj._border_bufferedC = borderC
     self_obj._obstacles_bufferedC = obstaclesC
     self_obj._obstacles_bufferedC_incl_removed = shrunk_obstaclesC_including_removed
+    self_obj._borderC_original,
+    self_obj._border_bufferedC,
+    self_obj._obstaclesC_original,
+    self_obj._obstacles_bufferedC,
     return borderC, obstaclesC
 
 
-def _validate_turbines_within_area(turbinesC, borderC, obstaclesC):
+def validate_turbines_within_area(turbinesC, borderC, obstaclesC):
     """
     Ensure all turbines are inside the (possibly buffered) border and outside all obstacles.
     Raises ValueError on failure.
