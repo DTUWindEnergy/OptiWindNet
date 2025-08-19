@@ -401,11 +401,11 @@ class WindFarmNetwork:
         )
 
         return cls(L=L, **kwargs)
-    
-    
+
     def from_coordinates(self):
         """Constructs a site graph from coordinate-based inputs."""
         from itertools import pairwise
+
         print(self._substationsC)
         turbinesC = self._turbinesC
         substationsC = self._substationsC
@@ -421,14 +421,17 @@ class WindFarmNetwork:
 
         obstaclesC = obstaclesC or []
 
-        # # Merge/clean geometry: subtract touching/intersecting obstacles from border
+        #
         print(borderC)
         borderC, obstaclesC = merge_obstacles_into_border(self)
         print(borderC)
 
-        # Buffer geometries (expansion of border, shrinking of obstacles) and cache
+        # Buffer geometries (expansion of border, shrinking of obstacles)
         borderC, obstaclesC = buffer_geometries(
-            borderC, obstaclesC, buffer_dist, self,
+            borderC,
+            obstaclesC,
+            buffer_dist,
+            self,
         )
 
         # # Validate turbine locations
@@ -438,7 +441,7 @@ class WindFarmNetwork:
         if borderC is not None:
             sizes.append(borderC.shape[0])
 
-        for obs in obstaclesC:   # safe if obstaclesC is None
+        for obs in obstaclesC:  # safe if obstaclesC is None
             if obs is not None:
                 sizes.append(obs.shape[0])
 
@@ -472,8 +475,6 @@ class WindFarmNetwork:
             VertexC=vertexC,
             **kwargs,
         )
-
-
 
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
