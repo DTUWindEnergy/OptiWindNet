@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from itertools import pairwise
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -7,20 +8,19 @@ import networkx as nx
 import numpy as np
 import yaml
 import yaml_include
-from itertools import pairwise
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
 from .api_utils import (
+    assert_inside_border,
+    assert_outside_obstacles,
+    buffer_border_obs,
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
     is_warmstart_eligible,
+    merge_obs_into_border,
     parse_cables_input,
     plot_org_buff,
-    merge_obs_into_border,
-    buffer_border_obs,
-    assert_inside_border,
-    assert_outside_obstacles,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
@@ -289,10 +289,9 @@ class WindFarmNetwork:
           matplotlib Axes instance.
         """
         L = self._L
-        borderC = L.graph["VertexC"][L.graph["border"]] if "border" in L.graph else None
-        obstaclesC = [L.graph["VertexC"][idx] for idx in L.graph.get("obstacles", [])]
+        borderC = L.graph['VertexC'][L.graph['border']] if 'border' in L.graph else None
+        obstaclesC = [L.graph['VertexC'][idx] for idx in L.graph.get('obstacles', [])]
 
-        
         try:
             return plot_org_buff(
                 self._pre_buffer_border_obs['borderC'],
@@ -514,19 +513,18 @@ class WindFarmNetwork:
         return map
 
     def merge_obstacles_into_border(self):
-        
         L = merge_obs_into_border(self._L)
+
         # Update
         self._L = L
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], L.graph['T']
         self._refresh_planar()
 
-
     def buffer_border_obstacles(self, buffer_dist):
         L = self._L
         L, pre_buffer_border_obs = buffer_border_obs(L, buffer_dist=buffer_dist)
-        
+
         # update
         self._L = L
         self._VertexC = L.graph['VertexC']
@@ -535,22 +533,20 @@ class WindFarmNetwork:
         self._pre_buffer_border_obs = pre_buffer_border_obs
 
     def is_layout_within_bounds(self):
-
         L = self._L
-        V = L.graph["VertexC"]
-        T, R = L.graph["T"], L.graph["R"]
+        V = L.graph['VertexC']
+        T, R = L.graph['T'], L.graph['R']
 
-        # Extract current pieces
-        turbinesC     = V[:T]
-        substationsC  = V[-R:] if R > 0 else np.empty((0, 2), dtype=float)
-        border_idx    = L.graph.get("border")
-        obstacles_idx = L.graph.get("obstacles", [])
-
-        borderC    = V[border_idx] if border_idx is not None else None
+        # Extract coordinates
+        turbinesC = V[:T]
+        substationsC = V[-R:] if R > 0 else np.empty((0, 2), dtype=float)
+        border_idx = L.graph.get('border')
+        obstacles_idx = L.graph.get('obstacles', [])
+        borderC = V[border_idx] if border_idx is not None else None
         obstaclesC = [V[idx] for idx in obstacles_idx]
 
         # Turbines
-        assert_inside_border(turbinesC, borderC,  'Turbines')
+        assert_inside_border(turbinesC, borderC, 'Turbines')
         assert_outside_obstacles(turbinesC, obstaclesC, 'Turbines')
 
         # Substations
@@ -558,7 +554,6 @@ class WindFarmNetwork:
         assert_outside_obstacles(substationsC, obstaclesC, 'Substations')
 
         return True
-
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """Compute length/cost gradients with respect to node positions."""

@@ -2,6 +2,7 @@ import logging
 import math
 from itertools import pairwise
 from typing import Sequence
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
@@ -303,7 +304,6 @@ def extract_network_as_array(G):
 
 
 def merge_obs_into_border(L):
-
     V = L.graph['VertexC']
     T, R = L.graph['T'], L.graph['R']
 
@@ -326,7 +326,7 @@ def merge_obs_into_border(L):
     # Start with the original border polygon
     border_polygon = Polygon(borderC)
     if border_polygon.is_empty:
-        raise ValueError("Border polygon is empty; cannot merge obstacles.")
+        raise ValueError('Border polygon is empty; cannot merge obstacles.')
 
     remaining_obstaclesC = []
 
@@ -348,11 +348,16 @@ def merge_obs_into_border(L):
         intersection = border_polygon.boundary.intersection(obs_poly)
 
         # If the obstacle is completely within the border, keep it
-        if border_polygon.contains(obs_poly) and getattr(intersection, "length", 0) == 0:
+        if (
+            border_polygon.contains(obs_poly)
+            and getattr(intersection, 'length', 0) == 0
+        ):
             remaining_obstaclesC.append(obs)
 
         # If completely outside -> drop with a warning
-        elif (not border_polygon.contains(obs_poly)) and (not border_polygon.intersects(obs_poly)):
+        elif (not border_polygon.contains(obs_poly)) and (
+            not border_polygon.intersects(obs_poly)
+        ):
             warning(
                 'Obstacle at index %d is completely outside the border and is neglected.',
                 i,
@@ -416,35 +421,37 @@ def merge_obs_into_border(L):
     new_V = np.vstack(pieces) if pieces else np.empty((0, 2), dtype=float)
 
     # Update graph attributes
-    L.graph['VertexC']   = new_V
-    L.graph['border']    = border_idx_new
+    L.graph['VertexC'] = new_V
+    L.graph['border'] = border_idx_new
     L.graph['obstacles'] = obstacle_ranges_new
-    L.graph['B']         = (new_borderC.shape[0] if new_borderC.size else 0) + sum(o.shape[0] for o in new_obstaclesC)
+    L.graph['B'] = (new_borderC.shape[0] if new_borderC.size else 0) + sum(
+        o.shape[0] for o in new_obstaclesC
+    )
 
     return L
 
+
 def buffer_border_obs(L, buffer_dist):
-    V = L.graph["VertexC"]
-    T, R = L.graph["T"], L.graph["R"]
+    V = L.graph['VertexC']
+    T, R = L.graph['T'], L.graph['R']
 
     # Extract current pieces
-    turbinesC    = V[:T]
+    turbinesC = V[:T]
     substationsC = V[-R:] if R > 0 else np.empty((0, 2), dtype=float)
-    border_idx   = L.graph.get("border")
-    obstacles_idx = L.graph.get("obstacles", [])
+    border_idx = L.graph.get('border')
+    obstacles_idx = L.graph.get('obstacles', [])
 
-    borderC    = V[border_idx] if border_idx is not None else None
+    borderC = V[border_idx] if border_idx is not None else None
     obstaclesC = [V[idx] for idx in obstacles_idx]
 
     pre_buffer = {
-        "borderC": None if borderC is None else borderC.copy(),
-        "obstaclesC": [o.copy() for o in obstaclesC],
+        'borderC': None if borderC is None else borderC.copy(),
+        'obstaclesC': [o.copy() for o in obstaclesC],
     }
 
     if buffer_dist > 0:
-
         # Border (guard for None/empty)
-        if borderC is not None and getattr(borderC, "size", 0) > 0:
+        if borderC is not None and getattr(borderC, 'size', 0) > 0:
             border_polygon = Polygon(borderC)
             border_polygon = expand_polygon_safely(border_polygon, buffer_dist)
             borderC = np.array(border_polygon.exterior.coords[:-1])
@@ -455,19 +462,19 @@ def buffer_border_obs(L, buffer_dist):
         shrunk_obstaclesC = []
         shrunk_obstaclesC_including_removed = []
         for i, obs in enumerate(obstaclesC):
-            if getattr(obs, "size", 0) == 0:
+            if getattr(obs, 'size', 0) == 0:
                 shrunk_obstaclesC_including_removed.append([])
                 continue
             obs_poly = Polygon(obs)
             obs_bufferedC = shrink_polygon_safely(obs_poly, buffer_dist, i)
 
-            if isinstance(obs_bufferedC, list):     # MultiPolygon -> list of arrays
+            if isinstance(obs_bufferedC, list):  # MultiPolygon -> list of arrays
                 shrunk_obstaclesC.extend(obs_bufferedC)
                 shrunk_obstaclesC_including_removed.extend(obs_bufferedC)
-            elif obs_bufferedC is not None:         # Single polygon
+            elif obs_bufferedC is not None:  # Single polygon
                 shrunk_obstaclesC.append(obs_bufferedC)
                 shrunk_obstaclesC_including_removed.append(obs_bufferedC)
-            else:                                   # Removed
+            else:  # Removed
                 shrunk_obstaclesC_including_removed.append([])
 
         obstaclesC = shrunk_obstaclesC
@@ -480,7 +487,7 @@ def buffer_border_obs(L, buffer_dist):
     cursor = T
     border_idx_new = None
 
-    if borderC is not None and getattr(borderC, "size", 0) > 0:
+    if borderC is not None and getattr(borderC, 'size', 0) > 0:
         pieces.append(borderC)
         blen = borderC.shape[0]
         border_idx_new = np.arange(cursor, cursor + blen, dtype=int)
@@ -488,7 +495,7 @@ def buffer_border_obs(L, buffer_dist):
 
     obstacle_ranges_new = []
     for obs in obstaclesC:
-        if getattr(obs, "size", 0) == 0:
+        if getattr(obs, 'size', 0) == 0:
             continue
         n = obs.shape[0]
         pieces.append(obs)
@@ -500,29 +507,39 @@ def buffer_border_obs(L, buffer_dist):
 
     new_V = np.vstack(pieces) if pieces else np.empty((0, 2), dtype=float)
 
-    L.graph["VertexC"]   = new_V
-    L.graph["border"]    = border_idx_new
-    L.graph["obstacles"] = obstacle_ranges_new
-    L.graph["B"]         = (0 if border_idx_new is None else len(border_idx_new)) + sum(len(idx) for idx in obstacle_ranges_new)
+    L.graph['VertexC'] = new_V
+    L.graph['border'] = border_idx_new
+    L.graph['obstacles'] = obstacle_ranges_new
+    L.graph['B'] = (0 if border_idx_new is None else len(border_idx_new)) + sum(
+        len(idx) for idx in obstacle_ranges_new
+    )
 
     return L, pre_buffer
 
 
 def _is_nonempty_xy(arr):
-    return isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[1] == 2 and arr.shape[0] > 0
+    return (
+        isinstance(arr, np.ndarray)
+        and arr.ndim == 2
+        and arr.shape[1] == 2
+        and arr.shape[0] > 0
+    )
+
 
 def assert_inside_border(points, borderC, label):
     import numpy as np
     from matplotlib.path import Path
+
     if not _is_nonempty_xy(points) or not _is_nonempty_xy(borderC):
         return
     border_path = Path(borderC)
     in_neg = border_path.contains_points(points, radius=-1e-10)
-    in_pos = border_path.contains_points(points, radius= 1e-10)
+    in_pos = border_path.contains_points(points, radius=1e-10)
     inside = in_neg | in_pos
     if not np.all(inside):
         bad = np.where(~inside)[0]
         raise ValueError(f'{label} at indices {bad.tolist()} are outside the border!')
+
 
 def assert_outside_obstacles(points, obstaclesC, label):
     if not _is_nonempty_xy(points):
@@ -534,4 +551,6 @@ def assert_outside_obstacles(points, obstaclesC, label):
         in_obs = obs_path.contains_points(points, radius=-1e-10)
         if np.any(in_obs):
             bad = np.where(in_obs)[0]
-            raise ValueError(f'{label} at indices {bad.tolist()} are inside the obstacle at index {i}!')
+            raise ValueError(
+                f'{label} at indices {bad.tolist()} are inside the obstacle at index {i}!'
+            )
