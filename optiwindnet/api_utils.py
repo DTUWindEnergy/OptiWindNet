@@ -2,7 +2,6 @@ import logging
 import math
 from itertools import pairwise
 from typing import Sequence
-import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
