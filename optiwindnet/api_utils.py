@@ -447,29 +447,36 @@ def buffer_geometries(
     return borderC, obstaclesC
 
 
-def validate_turbines_within_area(turbinesC, borderC, obstaclesC):
+def validate_turbines_within_area(self):
     """
     Ensure all turbines are inside the (possibly buffered) border and outside all obstacles.
     Raises ValueError on failure.
     """
-    border_path = Path(borderC)
-    # include a tiny tolerance around edges
-    in_border_neg = border_path.contains_points(turbinesC, radius=-1e-10)
-    in_border_pos = border_path.contains_points(turbinesC, radius=1e-10)
-    in_border = in_border_neg | in_border_pos
+    turbinesC = self._turbinesC
+    substationsC = self._substationsC
+    borderC = self._borderC
+    obstaclesC = self._obstaclesC
+    if borderC is not None:
+        border_path = Path(borderC)
+        # include a tiny tolerance around edges
+        in_border_neg = border_path.contains_points(turbinesC, radius=-1e-10)
+        in_border_pos = border_path.contains_points(turbinesC, radius=1e-10)
+        in_border = in_border_neg | in_border_pos
 
-    if not np.all(in_border):
-        outside_idx = np.where(~in_border)[0]
-        raise ValueError('Turbines at indices %s are outside the border!' % outside_idx)
+        if not np.all(in_border):
+            outside_idx = np.where(~in_border)[0]
+            raise ValueError('Turbines at indices %s are outside the border!' % outside_idx)
 
-    for i, obs in enumerate(obstaclesC):
-        obs_path = Path(obs)
-        in_obstacle = obs_path.contains_points(turbinesC, radius=-1e-10)
-        if np.any(in_obstacle):
-            inside_idx = np.where(in_obstacle)[0]
-            raise ValueError(
-                f'Turbines at indices {inside_idx} are inside the obstacle at index {i}!'
-            )
+    print(obstaclesC)
+    if obstaclesC is not None:
+        for i, obs in enumerate(obstaclesC):
+            obs_path = Path(obs)
+            in_obstacle = obs_path.contains_points(turbinesC, radius=-1e-10)
+            if np.any(in_obstacle):
+                inside_idx = np.where(in_obstacle)[0]
+                raise ValueError(
+                    f'Turbines at indices {inside_idx} are inside the obstacle at index {i}!'
+                )
 
 
 def _assemble_vertices_and_ranges(turbinesC, borderC, obstaclesC, substationsC):

@@ -432,7 +432,7 @@ class WindFarmNetwork:
         )
 
         # # Validate turbine locations
-        # validate_turbines_within_area(turbinesC, borderC, obstaclesC)
+        validate_turbines_within_area(self)
 
         sizes = []
         if borderC is not None:
