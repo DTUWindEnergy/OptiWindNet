@@ -332,7 +332,6 @@ def test_wfn_all_routers(router):
         substationsC=substationsC,
         router=router,
     )
-    print(wfn.optimize())
     assert np.array_equal(wfn.optimize(), EXPECTED_TERSE)
 
     # case 2: router passed at call-time
