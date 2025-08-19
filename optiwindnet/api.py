@@ -158,65 +158,43 @@ class WindFarmNetwork:
         self.router = router if router is not None else EWRouter()
         self.cables = cables  # computes cables_capacity
 
-        # coordinates
-        self._turbinesC = turbinesC
-        self._substationsC = substationsC
-        self._borderC = borderC
-        self._obstaclesC = obstaclesC
-
         self.verbose = verbose
 
         # decide source of L
         if L is not None:
-            self._L = L
-            self._refresh_planar()
-            if turbinesC is not None and substationsC is not None:
+            if turbinesC is not None or substationsC is not None:
                 warning(
-                    'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates and neglects the provided L.'
+                    'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
         elif turbinesC is not None and substationsC is not None:
-            self._rebuild_L_from_coordinates()
+            L = from_coordinates(
+                self,
+                turbinesC,
+                substationsC,
+                borderC,
+                obstaclesC,
+                name,
+                handle,
+                buffer_dist,
+            )
         else:
             raise TypeError(
                 'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
             )
+        self._L = L
+        self._VertexC = L.graph['VertexC']
+        self._R, self._T = L.graph['R'], L.graph['T']
+        self._refresh_planar()
 
     # -------- helpers --------
     def _refresh_planar(self):
         self._P, self._A = make_planar_embedding(self._L)
         self._is_stale_PA = False
 
-    def _rebuild_L_from_coordinates(self):
-        if self._turbinesC is None or self._substationsC is None:
-            warning(
-                'Coordinate changed but cannot rebuild L until both turbinesC and substationsC are set.'
-            )
-            return
-        self._L = from_coordinates(
-            self,
-            self._turbinesC,
-            self._substationsC,
-            self._borderC,
-            self._obstaclesC,
-            self.name,
-            self.handle,
-            self.buffer_dist,
-            **self._coord_kwargs,
-        )
-        self._is_stale_PA = True
-        self._is_stale_SG = True
-
     # -------- properties --------
-    # L is read/write; writing L refreshes planar, and overrides coord-driven L
     @property
     def L(self):
         return self._L
-
-    @L.setter
-    def L(self, L: nx.Graph):
-        self._L = L
-        self._is_stale_PA = True
-        self._is_stale_SG = True
 
     @property
     def P(self):
@@ -287,47 +265,6 @@ class WindFarmNetwork:
         if not isinstance(dist, (int, float)):
             raise TypeError('buffer_dist must be numeric')
         self._buffer_dist = dist
-
-    # ---- coordinates:
-    @property
-    def turbinesC(self):
-        return self._turbinesC
-
-    @turbinesC.setter
-    def turbinesC(self, value):
-        self._turbinesC = value
-        self._is_stale_PA = True
-        self._is_stale_SG = True
-
-    @property
-    def substationsC(self):
-        return self._substationsC
-
-    @substationsC.setter
-    def substationsC(self, value):
-        self._substationsC = value
-        self._is_stale_PA = True
-        self._is_stale_SG = True
-
-    @property
-    def borderC(self):
-        return self._borderC
-
-    @borderC.setter
-    def borderC(self, value):
-        self._borderC = value
-        self._is_stale_PA = True
-        self._is_stale_SG = True
-
-    @property
-    def obstaclesC(self):
-        return self._obstaclesC
-
-    @obstaclesC.setter
-    def obstaclesC(self, value):
-        self._obstaclesC = value
-        self._is_stale_PA = True
-        self._is_stale_SG = True
 
     def cost(self):
         """Get the total cost of the optimized network."""
@@ -460,17 +397,21 @@ class WindFarmNetwork:
 
         Accepts integers or integer-like floats (e.g., 3.0).
         """
+        T = self._T
+        R = self._R
 
         terse_links_ints = np.asarray(terse_links, dtype=np.int64)
 
         # Update coordinates if provided
         if turbinesC is not None:
-            self.turbinesC = turbinesC
+            self._VertexC[:T] = turbinesC
+            self._is_stale_PA = True
 
         if substationsC is not None:
-            self.substationsC = substationsC
+            self._VertexC[-R:] = substationsC
+            self._is_stale_PA = True
 
-        S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
+        S = nx.Graph(R=R, T=T)
         for i, j in enumerate(terse_links_ints):
             S.add_edge(i, j)
 
@@ -509,19 +450,17 @@ class WindFarmNetwork:
             raise ValueError("gradient_type should be either 'cost' or 'length'")
 
         G = self.G
-        VertexC = G.graph['VertexC']
-        if turbinesC is not None or substationsC is not None:
-            info(
-                'wfn.gradient is not checking for the feasibility of the network with new coordinates!'
-            )
-            VertexC = VertexC.copy()
-            if turbinesC is not None:
-                VertexC[: turbinesC.shape[0], :] = turbinesC
-            if substationsC is not None:
-                VertexC[-substationsC.shape[0] :, :] = substationsC
+        VertexC = G.graph['VertexC'].copy()
+        T = self._T
+        R = self._R
 
-        R = G.graph['R']
-        T = G.graph['T']
+        # Update coordinates if provided
+        if turbinesC is not None:
+            VertexC[:T] = turbinesC
+
+        if substationsC is not None:
+            VertexC[-R:] = substationsC
+
         gradients = np.zeros_like(VertexC)
 
         fnT = G.graph.get('fnT')
@@ -558,6 +497,7 @@ class WindFarmNetwork:
 
     def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=False):
         """Optimize electrical network."""
+        R, T = self._R, self._T
         if router is None:
             router = self.router
         else:
@@ -567,10 +507,12 @@ class WindFarmNetwork:
 
         # If new coordinates are provided, update them
         if turbinesC is not None:
-            self.turbinesC = turbinesC
+            self._VertexC[:T] = turbinesC
+            self._is_stale_PA = True
 
         if substationsC is not None:
-            self.substationsC = substationsC
+            self._VertexC[-R:] = substationsC
+            self._is_stale_PA = True
 
         if not self._is_stale_SG:
             warmstart = dict(
