@@ -176,6 +176,7 @@ class WindFarmNetwork:
                 name,
                 handle,
                 buffer_dist,
+                **kwargs,
             )
         else:
             raise TypeError(
