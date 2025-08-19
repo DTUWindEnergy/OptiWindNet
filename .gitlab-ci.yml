@@ -65,6 +65,7 @@ make_pages:
   image: python:3.12
   tags: [linux]
   pages: true
+  allow_failure: true
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
