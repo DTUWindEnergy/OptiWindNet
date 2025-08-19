@@ -508,3 +508,30 @@ def buffer_border_obs(L, buffer_dist):
     return L, pre_buffer
 
 
+def _is_nonempty_xy(arr):
+    return isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[1] == 2 and arr.shape[0] > 0
+
+def assert_inside_border(points, borderC, label):
+    import numpy as np
+    from matplotlib.path import Path
+    if not _is_nonempty_xy(points) or not _is_nonempty_xy(borderC):
+        return
+    border_path = Path(borderC)
+    in_neg = border_path.contains_points(points, radius=-1e-10)
+    in_pos = border_path.contains_points(points, radius= 1e-10)
+    inside = in_neg | in_pos
+    if not np.all(inside):
+        bad = np.where(~inside)[0]
+        raise ValueError(f'{label} at indices {bad.tolist()} are outside the border!')
+
+def assert_outside_obstacles(points, obstaclesC, label):
+    if not _is_nonempty_xy(points):
+        return
+    for i, obs in enumerate(obstaclesC):
+        if not _is_nonempty_xy(obs):
+            continue
+        obs_path = Path(obs)
+        in_obs = obs_path.contains_points(points, radius=-1e-10)
+        if np.any(in_obs):
+            bad = np.where(in_obs)[0]
+            raise ValueError(f'{label} at indices {bad.tolist()} are inside the obstacle at index {i}!')

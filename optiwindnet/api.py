@@ -19,6 +19,8 @@ from .api_utils import (
     plot_org_buff,
     merge_obs_into_border,
     buffer_border_obs,
+    assert_inside_border,
+    assert_outside_obstacles,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
@@ -532,29 +534,31 @@ class WindFarmNetwork:
         self._refresh_planar()
         self._pre_buffer_border_obs = pre_buffer_border_obs
 
-    def validate_turbines_within_borders(self):
-        # check_turbine_locations(border, obstacles, turbines):
-        border_path = Path(borderC)
-        # Border path, with tolerance for edge inclusion
-        in_border_neg = border_path.contains_points(turbinesC, radius=-1e-10)
-        in_border_pos = border_path.contains_points(turbinesC, radius=1e-10)
-        in_border = in_border_neg | in_border_pos
+    def is_layout_within_bounds(self):
 
-        # Check if any turbine is outside the border
-        if not np.all(in_border):
-            outside_idx = np.where(~in_border)[0]
-            raise ValueError(
-                'Turbines at indices %s are outside the border!' % outside_idx
-            )
+        L = self._L
+        V = L.graph["VertexC"]
+        T, R = L.graph["T"], L.graph["R"]
 
-        for i, obs in enumerate(obstaclesC):
-            obs_path = Path(obs)
-            in_obstacle = obs_path.contains_points(turbinesC, radius=-1e-10)
-            if np.any(in_obstacle):
-                inside_idx = np.where(in_obstacle)[0]
-                raise ValueError(
-                    f'Turbines at indices {inside_idx} are inside the obstacle at index {i}!'
-                )
+        # Extract current pieces
+        turbinesC     = V[:T]
+        substationsC  = V[-R:] if R > 0 else np.empty((0, 2), dtype=float)
+        border_idx    = L.graph.get("border")
+        obstacles_idx = L.graph.get("obstacles", [])
+
+        borderC    = V[border_idx] if border_idx is not None else None
+        obstaclesC = [V[idx] for idx in obstacles_idx]
+
+        # Turbines
+        assert_inside_border(turbinesC, borderC,  'Turbines')
+        assert_outside_obstacles(turbinesC, obstaclesC, 'Turbines')
+
+        # Substations
+        assert_inside_border(substationsC, borderC, 'Substations')
+        assert_outside_obstacles(substationsC, obstaclesC, 'Substations')
+
+        return True
+
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """Compute length/cost gradients with respect to node positions."""
