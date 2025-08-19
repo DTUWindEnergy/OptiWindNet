@@ -10,6 +10,8 @@ from .importer import L_from_site
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
 
+__all__ = ()
+
 
 def expand_polygon_safely(polygon, buffer_dist):
     if not polygon.equals(polygon.convex_hull):
