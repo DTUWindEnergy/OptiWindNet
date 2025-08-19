@@ -43,23 +43,26 @@ error, warning, info = logger.error, logger.warning, logger.info
 class WindFarmNetwork:
     """Wind farm electrical network.
 
-    Models, analyzes, and optimizes the electrical collection system of a wind
-    farm (turbines, substations, borders, obstacles). Provides visualization,
-    cost/length evaluation, and gradient tools. Builds a location graph (`L`)
-    and derives planar/solution/optimized graphs (`P`, `A`, `S`, `G`).
+    Wrapper of most of OptiWindNet's functionality (optimization, visualization,
+    cost/length evaluation, and gradient calculation).
+
+    An instance represents a wind farm location, which initially contains the number
+    and positions of wind turbines and substations, the delimited area and eventual
+    obstacles. A cable network may be provided or a ``Router`` instance may be used
+    to create an optimized network.
 
     Attributes:
-        cables: Cable specification as (capacity, cost).
-        cables_capacity: Maximum cable capacity.
-        L: Location graph (turbines, substations, borders, obstacles).
-        P: Planar embedding of `L` (navigation mesh).
-        A: Adjacency graph of the planar embedding.
-        S: Selected links (solution).
-        G: Optimized network with assigned cables.
-        name: Project name.
-        handle: Project identifier.
-        buffer_dist: Border/obstacle buffer distance.
-        router: Router instance used for optimization.
+      cables: set of cable specifications as [(capacity, linear_cost), ...].
+      cables_capacity: highest cable capacity in cables.
+      L: Location geometry (turbines, substations, borders, obstacles).
+      P: Triangular mesh over `L` (navigation mesh).
+      A: Available links graph (search space).
+      S: Solution topology (selected links).
+      G: Optimized network with cable routes and types.
+      name: Instance name.
+      handle: Short instance identifier.
+      buffer_dist: Border/obstacle buffer distance.
+      router: Router instance used for optimization.
     """
 
     _is_stale_PA: bool = True
@@ -72,34 +75,36 @@ class WindFarmNetwork:
         substationsC: np.ndarray | None = None,
         borderC: np.ndarray | None = None,
         obstaclesC: np.ndarray | None = None,
-        name: str = "",
-        handle: str = "",
+        name: str = '',
+        handle: str = '',
         L: nx.Graph | None = None,
-        router = None,
+        router=None,
         buffer_dist: float = 0.0,
         **kwargs,
     ):
         """Initialize a wind farm electrical network.
 
         Args:
-            cables: Cable specifications as `(capacity, cost)` tuples.
-            turbinesC: Turbine coordinates (x, y).
-            substationsC: Substation coordinates (x, y).
-            borderC: Polygonal border coordinates.
-            obstaclesC: One or more polygons for exclusion zones.
-            name: Human-readable project name. Defaults to "".
-            handle: Short identifier (e.g., for filenames). Defaults to "".
-            L: Pre-constructed location graph. If provided, it normally takes precedence over coordinate inputs.
-            router: Routing algorithm instance. Defaults to `EWRouter`.
-            buffer_dist: Buffer distance to inflate borders / shrink obstacles. Defaults to 0.
-            **kwargs: Additional keyword arguments forwarded to network-construction helpers.
+          cables: Multiple formats are accepted (capacity is in number or turbines):
+            * Set of cable specifications as: [(capacity, linear_cost), ...].
+            * Sequence of maximum capacity per cable type: [capacity_0, capacity_1, ...]
+            * Maximum capacity of all available cables: capacity
+          turbinesC: Turbine coordinates: [(x, y), ...].
+          substationsC: Substation coordinates: [(x, y), ...].
+          borderC: Polygonal border coordinates: [(x, y), ...].
+          obstaclesC: One or more polygons for exclusion zones: [[(x, y), ...], ...].
+          name: Human-readable instance name. Defaults to "".
+          handle: Short instance identifier. Defaults to "".
+          L: Location geometry (takes precedence over coordinate inputs).
+          router: Routing algorithm instance. Defaults to `EWRouter`.
+          buffer_dist: Buffer distance to inflate borders / shrink obstacles. Defaults to 0.
+          **kwargs: Additional keyword arguments forwarded to network-construction helpers.
 
         Notes:
-            * Changing coordinate inputs (`turbinesC`, `substationsC`, `borderC`, `obstaclesC`)
-              rebuilds the location graph `L` and refreshes its planar embedding.
-            * If both `L` and coordinates are provided, define and document the intended
-              precedence (e.g., coordinates override `L`, or vice versa). Keep it here.
-            * Cables are stored internally as a list of `(capacity, cost)` tuples.
+          * If both `L` and coordinates are provided, `L` takes precedence.
+          * Changing coordinate data after creation (`turbinesC`, `substationsC`,
+              `borderC`, `obstaclesC`) rebuilds `L` and refreshes the navigation mesh
+              and available links.
 
         Example::
 
@@ -397,7 +402,7 @@ class WindFarmNetwork:
         return gplot(G_tentative, **kwargs)
 
     def terse_links(self):
-        """Get a compact representation of selected links."""
+        """Get a compact representation of the solution topology."""
         R, T = (self.S.graph[k] for k in 'RT')
         terse = np.empty(T, dtype=int)
 
@@ -418,7 +423,7 @@ class WindFarmNetwork:
     ):
         """Update the network from terse link representation.
 
-        Accepts integers or integer-like floats (e.g., 3.0). Rejects non-integers.
+        Accepts integers or integer-like floats (e.g., 3.0).
         """
         validated_terse_links = validate_terse_links(terse_links=terse_links, L=self.L)
 
@@ -450,7 +455,7 @@ class WindFarmNetwork:
         return extract_network_as_array(self.G)
 
     def map_detour_vertex(self):
-        """Map detour vertices back to their original indices."""
+        """Map detour vertices back to their original coordinate indices."""
         if self.G.graph.get('C') or self.G.graph.get('D'):
             R, T, B = (self.G.graph[k] for k in 'RTB')
             map = dict(
@@ -463,8 +468,7 @@ class WindFarmNetwork:
         return map
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
-        """Compute length/cost gradients with respect to node positions.
-        """
+        """Compute length/cost gradients with respect to node positions."""
         if gradient_type.lower() not in ['cost', 'length']:
             raise ValueError("gradient_type should be either 'cost' or 'length'")
 
@@ -562,11 +566,9 @@ class WindFarmNetwork:
 class Router(ABC):
     """Abstract base class for routing algorithms in OptiWindNet.
 
-    Each Router implementation defines a `route` method that takes a planar embedding (P),
-    available links graph (A), and cable data, and returns:
-      * S: the selected link graph
-      * G: the final network graph with assigned cables
+    Each Router implementation must define a `route` method.
     """
+
     @abstractmethod
     def route(
         self,
@@ -579,17 +581,17 @@ class Router(ABC):
     ) -> tuple[nx.Graph, nx.Graph]:
         """Run the routing optimization.
 
-        Args:    
-          P : Planar embedding of the network graph.
-          A : Graph of available links (edges).
-          cables : list of cables, each as a (capacity, cost) tuple.
-          cables_capacity : Maximum cable capacity.
+        Args:
+          P : Navigation mesh for the location.
+          A : Graph of available links.
+          cables: set of cable specifications as [(capacity, linear_cost), ...].
+          cables_capacity: highest cable capacity in cables.
           verbose : Whether to print progress/logging info.
           **kwargs : Additional router-specific parameters.
 
         Returns:
-          S : Graph of selected links.
-          G : Optimized network graph with assigned cables.
+          S : Solution topology (selected links).
+          G : Optimized network graph with routes and cable types.
         """
         pass
 
@@ -597,23 +599,24 @@ class Router(ABC):
 class EWRouter(Router):
     """A lightweight, ultra-fast router for electrical network optimization.
 
-    * Uses simple heuristics (segmented or straight feeders).
+    * Uses a modified Esau-Williams heuristic (segmented or straight feeders).
     * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
     """
+
     def __init__(
         self,
         maxiter: int = 10_000,
-        feeder_route: str = "segmented",
+        feeder_route: str = 'segmented',
         verbose: bool = False,
         **kwargs,
     ) -> None:
-        """Initialize a Heuristic-based router.
+        """Create a Esau-Williams-based router.
         Args:
-            maxiter: Maximum iterations for EWRouter.
-            feeder_route: Feeder routing mode ("segmented" or "straight").
-            verbose: Enable verbose logging.
+          maxiter: Maximum iterations.
+          feeder_route: Feeder routing mode ("segmented" or "straight").
+          verbose: Enable verbose logging.
         """
-        
+
         super().__init__(**kwargs)
 
         # Call the base class initialization
@@ -646,11 +649,17 @@ class EWRouter(Router):
 
 
 class HGSRouter(Router):
-    """A fast router based on Hybrid Genetic Search (HGS).
+    """A fast router based on Hybrid Genetic Search (HGS-CVRP).
+
+    Uses the method and implementation by Vidal, 2022:
+      Vidal, T. (2022). Hybrid genetic search for the CVRP: Open-source implementation
+      and SWAP* neighborhood. Computers & Operations Research, 140, 105643.
+      https://doi.org/10.1016/j.cor.2021.105643
 
     * Balances solution quality and runtime.
-    * Produces solutions in seconds, suitable for fast but high-quality solutions.
+    * Produces only radial solutions.
     """
+
     def __init__(
         self,
         time_limit: float,
@@ -661,14 +670,14 @@ class HGSRouter(Router):
         verbose: bool = False,
         **kwargs,
     ) -> None:
-        """Initialize an HGS-based router.
+        """Create an HGS-based router.
 
         Args:
             time_limit: Maximum runtime for a single HGS run (in seconds).
             feeder_limit: Maximum number of feeders allowed (ignored if multiple substations).
             max_retries: Maximum number of retries if a feasible solution is not found.
             balanced: Whether to balance turbines/loads across feeders.
-            seed: Random seed for reproducibility.
+            seed: Set the seed of the pseudo-random number generator (reproducibility).
             verbose: Enable verbose logging.
 
         Notes:
@@ -709,7 +718,10 @@ class HGSRouter(Router):
             )
             if verbose and self.feeder_limit:
                 print(
-                    'WARNING: HGSRouter is used for a plant with more than one substation and feeder-limit is neglected (The current implementation of HGSRouter does not support limiting the number of feeders in multi-substation plants.)'
+                    'WARNING: HGSRouter is used for a plant with more than one '
+                    'substation and feeder-limit is neglected (The current '
+                    'implementation of HGSRouter does not support limiting the number '
+                    'of feeders in multi-substation plants.)'
                 )
 
         G_tentative = G_from_S(S, A)
@@ -722,12 +734,13 @@ class HGSRouter(Router):
 
 
 class MILPRouter(Router):
-    """An exact router based on Mixed-Integer Linear Programming (MILP).
+    """An exact router using mathematical programming.
 
-    * Uses optimization solvers (Gurobi, CBC, OR-Tools, CPLEX, Highs, SCIP).
-    * Provides provably optimal or near-optimal networks.
-    * Might take few minutes, but ensures solution quality.
+    * Uses a Mixed-Integer Linear Programming (MILP) model of the problem.
+    * Produces provably optimal or near-optimal networks (with quality metrics).
+    * Requires a longer runtime than heuristics- and meta-heuristics-based routers.
     """
+
     def __init__(
         self,
         solver_name: str,
@@ -738,7 +751,7 @@ class MILPRouter(Router):
         verbose: bool = False,
         **kwargs,
     ) -> None:
-        """Initialize an MILP-based router.
+        """Create a MILP-based router.
         Args:
             solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools", "cplex", "highs", "scip").
             time_limit: Maximum runtime (seconds).
