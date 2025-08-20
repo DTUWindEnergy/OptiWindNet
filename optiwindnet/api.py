@@ -8,6 +8,8 @@ import numpy as np
 import yaml
 import yaml_include
 
+from optiwindnet.MILP._core import OWNSolutionNotFound, OWNWarmupFailed
+
 from .api_utils import (
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
@@ -733,6 +735,7 @@ class MILPRouter(Router):
         verbose=None,
         S_warm=None,
         S_warm_has_detour=False,
+        num_retries: int = 2,
         **kwargs,
     ):
         if verbose is None:
@@ -750,20 +753,55 @@ class MILPRouter(Router):
 
         solver = self.solver
 
-        solver.set_problem(
-            P,
-            A,
-            capacity=cables_capacity,
-            model_options=self.model_options,
-            warmstart=S_warm,
-        )
+        for _ in range(2):
+            try:
+                solver.set_problem(
+                    P,
+                    A,
+                    capacity=cables_capacity,
+                    model_options=self.model_options,
+                    warmstart=S_warm,
+                )
+                break
+            except OWNWarmupFailed:
+                if self.model_options['topology'] == 'branched':
+                    feeder_route = self.model_options['feeder_route']
+                    if feeder_route == 'segmented':
+                        S_warm = EW_presolver(A, capacity=cables_capacity)
+                    elif feeder_route == 'straight':
+                        S_warm = S_from_G(CPEW(A, capacity=cables_capacity))
+                else:
+                    if A.graph['R'] == 1:
+                        S_warm = iterative_hgs_cvrp(
+                            as_normalized(A),
+                            capacity=cables_capacity,
+                            time_limit=min(self.time_limit, 0.2),
+                        )
+                    else:
+                        S = hgs_multiroot(
+                            as_normalized(A),
+                            capacity=cables_capacity,
+                            time_limit=min(self.time_limit, 0.2),
+                        )
 
-        solver.solve(
-            time_limit=self.time_limit,
-            mip_gap=self.mip_gap,
-            options=self.solver_options,
-            verbose=verbose,
-        )
+        else:
+            raise OWNWarmupFailed('Unable to warm-start model.')
+
+        for _ in range(num_retries + 1):
+            try:
+                solver.solve(
+                    time_limit=self.time_limit,
+                    mip_gap=self.mip_gap,
+                    options=self.solver_options,
+                    verbose=verbose,
+                )
+                break
+            except OWNSolutionNotFound:
+                continue
+        else:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution to the MILP model after {num_retries} retries'
+            )
 
         S, G = solver.get_solution()
 
