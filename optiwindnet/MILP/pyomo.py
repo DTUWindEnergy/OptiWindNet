@@ -122,7 +122,9 @@ class SolverPyomo(Solver):
         )
         solver.options.update(applied_options)
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
-        result = solver.solve(model, **self.solve_kwargs, tee=verbose)
+        result = solver.solve(
+            model, **self.solve_kwargs, tee=verbose, load_solutions=False
+        )
         self.result = result
         if self.name != 'scip':
             objective = result['Problem'][0]['Upper bound']
@@ -142,10 +144,18 @@ class SolverPyomo(Solver):
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        if len(self.result.solution) == 0:
+            raise RuntimeError(
+                f'Unable to find a solution. Termination condition: {self.solution_info.termination}'
+            )
+        P, model, model_options = self.P, self.model, self.model_options
+        result = self.result
+        # hack to prevent warning about the solver not reaching the desired mip_gap
+        result.solver.status = pyo.SolverStatus.ok
+        model.solutions.load_from(result)
         if A is None:
             A = self.A
-        P, model_options = self.P, self.model_options
-        S = topology_from_mip_sol(model=self.model)
+        S = topology_from_mip_sol(model=model)
         S.graph['creator'] += self.name
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
@@ -441,7 +451,11 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
     """
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
-        model.link_[(u, v)] = 1
+        try:
+            model.link_[(u, v)] = 1
+        except KeyError:
+            warn(f'warmup_model() failed: model lacks S link ({u, v})')
+            continue
         model.flow_[(u, v)] = S[u][v]['load']
     model.warmed_by = S.graph['creator']
     return model

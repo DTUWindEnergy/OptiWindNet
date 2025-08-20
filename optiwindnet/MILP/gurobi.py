@@ -57,7 +57,9 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         )
         self.solver = solver
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
-        result = solver.solve(model, **self.solve_kwargs, tee=verbose)
+        result = solver.solve(
+            model, **self.solve_kwargs, tee=verbose, load_solutions=False
+        )
         self.result = result
         objective = result['Problem'][0]['Upper bound']
         bound = result['Problem'][0]['Lower bound']
