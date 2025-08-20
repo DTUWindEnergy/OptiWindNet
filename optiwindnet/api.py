@@ -195,6 +195,8 @@ class WindFarmNetwork:
         if self.is_layout_within_bounds():
             self._P, self._A = make_planar_embedding(self._L)
             self._is_stale_PA = False
+        else:
+            raise ValueError('Turbine/substation out of bounds!')
 
     # -------- properties --------
     @property
