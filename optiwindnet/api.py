@@ -1,3 +1,4 @@
+import copy
 import logging
 from abc import ABC, abstractmethod
 from itertools import pairwise
@@ -9,8 +10,6 @@ import yaml
 import yaml_include
 
 from .api_utils import (
-    points_inside_border,
-    points_outside_obstacles,
     buffer_border_obs,
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
@@ -18,8 +17,11 @@ from .api_utils import (
     merge_obs_into_border,
     parse_cables_input,
     plot_org_buff,
+    points_inside_border,
+    points_outside_obstacles,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
+from .geometric import rotate
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
 from .importer import load_repository as load_repository
@@ -287,11 +289,18 @@ class WindFarmNetwork:
           matplotlib Axes instance.
         """
         L = self._L
-        borderC = L.graph['VertexC'][L.graph['border']] if 'border' in L.graph else None
-        obstaclesC = [L.graph['VertexC'][idx] for idx in L.graph.get('obstacles', [])]
+        V = copy.deepcopy(L.graph['VertexC'])
+        landscape_angle = L.graph.get('landscape_angle', False)
+        if landscape_angle:
+            pass # to be added
+            # V = rotate(V, landscape_angle)
+            # self._pre_buffer_border_obs['borderC'] = rotate(self._pre_buffer_border_obs['borderC'], landscape_angle)
+            # self._pre_buffer_border_obs['obstaclesC'] = rotate(self._pre_buffer_border_obs['obstaclesC'], landscape_angle)
+        borderC = V[L.graph['border']] if 'border' in L.graph else None
+        obstaclesC = [V[idx] for idx in L.graph.get('obstacles', [])]
 
         try:
-            return plot_org_buff(
+            plot_org_buff(
                 self._pre_buffer_border_obs['borderC'],
                 borderC,
                 self._pre_buffer_border_obs['obstaclesC'],
