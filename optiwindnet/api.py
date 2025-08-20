@@ -2,18 +2,15 @@ import logging
 from abc import ABC, abstractmethod
 from itertools import pairwise
 from pathlib import Path
-
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import yaml
 import yaml_include
-from shapely.geometry import MultiPolygon, Polygon
-from shapely.validation import explain_validity
 
 from .api_utils import (
-    assert_inside_border,
-    assert_outside_obstacles,
+    points_inside_border,
+    points_outside_obstacles,
     buffer_border_obs,
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
@@ -193,8 +190,9 @@ class WindFarmNetwork:
 
     # -------- helpers --------
     def _refresh_planar(self):
-        self._P, self._A = make_planar_embedding(self._L)
-        self._is_stale_PA = False
+        if self.is_layout_within_bounds():
+            self._P, self._A = make_planar_embedding(self._L)
+            self._is_stale_PA = False
 
     # -------- properties --------
     @property
@@ -387,7 +385,6 @@ class WindFarmNetwork:
         border_sizes = np.array(sizes, dtype=int)
 
         B = border_sizes.sum().item()
-        obstacle_start_idxs = np.cumsum(border_sizes) + T
 
         border_len = borderC.shape[0] if borderC is not None else 0
         border_range = np.arange(T, T + border_len)
@@ -397,7 +394,6 @@ class WindFarmNetwork:
         obs_ranges = T + border_len + np.cumsum([0] + obs_lens)
         obstacle_ranges = [np.arange(start, end, dtype=int) for start, end in pairwise(obs_ranges)]
 
-        print(obstacle_ranges)
         vertexC = np.vstack(
             [turbinesC]
             + ([borderC] if borderC is not None else [])
@@ -416,6 +412,7 @@ class WindFarmNetwork:
             VertexC=vertexC,
             **kwargs,
         )
+
 
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
@@ -548,14 +545,14 @@ class WindFarmNetwork:
         obstaclesC = [V[idx] for idx in obstacles_idx]
 
         # Turbines
-        assert_inside_border(turbinesC, borderC, 'Turbines')
-        assert_outside_obstacles(turbinesC, obstaclesC, 'Turbines')
+        turbine_border = points_inside_border(turbinesC, borderC, 'Turbines')
+        turbine_obs = points_outside_obstacles(turbinesC, obstaclesC, 'Turbines')
 
         # Substations
-        assert_inside_border(substationsC, borderC, 'Substations')
-        assert_outside_obstacles(substationsC, obstaclesC, 'Substations')
+        sub_border = points_inside_border(substationsC, borderC, 'Substations')
+        sub_obs = points_outside_obstacles(substationsC, obstaclesC, 'Substations')
 
-        return True
+        return turbine_border and turbine_obs and sub_border and sub_obs
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """Compute length/cost gradients with respect to node positions."""

@@ -506,23 +506,65 @@ def buffer_border_obs(L, buffer_dist):
         raise ValueError('Buffer value must be equal or greater than 0!')
 
 
-def assert_inside_border(points, borderC, label):
+import numpy as np
+from matplotlib.path import Path
+
+def _ensure_closed(verts: np.ndarray) -> np.ndarray:
+    """Return verts with the first point appended at the end if not already closed."""
+    if verts.shape[0] == 0:
+        return verts
+    if not np.allclose(verts[0], verts[-1]):
+        return np.vstack([verts, verts[0]])
+    return verts
+
+def _validate_points(points: np.ndarray, label: str):
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise ValueError(f"{label} must be an array of shape (N, 2); got {points.shape}.")
+    if np.isnan(points).any():
+        raise ValueError(f"{label} contains NaNs, which is not allowed.")
+
+def points_inside_border(points: np.ndarray, borderC: np.ndarray | None, label: str, *, tol=1e-10) -> bool:
+    """True if all points are inside or on the border polygon."""
+    if points.size == 0:
+        return True
+    _validate_points(points, label)
+    if borderC is None or borderC.size == 0:
+        # No border => vacuously true (or choose False if your logic requires a border)
+        return True
+
+    borderC = np.asarray(borderC, dtype=float)
+    _validate_points(borderC, "Border")
+    borderC = _ensure_closed(borderC)
+
     border_path = Path(borderC)
-    in_neg = border_path.contains_points(points, radius=-1e-10)
-    in_pos = border_path.contains_points(points, radius=1e-10)
-    inside = in_neg | in_pos
-    if not np.all(inside):
-        bad = np.where(~inside)[0]
-        raise ValueError(f'{label} at indices {bad.tolist()} are outside the border!')
+    inside_or_on = border_path.contains_points(points, radius=tol)
+    if not np.all(inside_or_on):
+        bad = np.where(~inside_or_on)[0].tolist()
+        print(f'{label} at indices {bad} are outside the border!')
+        return False
+    return True
 
+def points_outside_obstacles(points: np.ndarray, obstaclesC: list[np.ndarray], label: str, *, tol=1e-10) -> bool:
+    """True if no point lies strictly inside any obstacle (edge counts as inside due to tol)."""
+    if points.size == 0:
+        return True
+    _validate_points(points, label)
 
-def assert_outside_obstacles(points, obstaclesC, label):
+    any_bad = False
+    for i, obs in enumerate(obstaclesC or []):
+        if obs is None or np.asarray(obs).size == 0:
+            continue
+        obs = np.asarray(obs, dtype=float)
+        _validate_points(obs, f"Obstacle {i}")
+        obs = _ensure_closed(obs)
 
-    for i, obs in enumerate(obstaclesC):
         obs_path = Path(obs)
-        in_obs = obs_path.contains_points(points, radius=-1e-10)
+        # Treat points on obstacle boundary as violations: use small +tol
+        in_obs = obs_path.contains_points(points, radius=tol)
         if np.any(in_obs):
-            bad = np.where(in_obs)[0]
-            raise ValueError(
-                f'{label} at indices {bad.tolist()} are inside the obstacle at index {i}!'
-            )
+            bad = np.where(in_obs)[0].tolist()
+            print(f'{label} at indices {bad} are inside/ON the obstacle at index {i}!')
+            any_bad = True
+
+    return not any_bad
+
