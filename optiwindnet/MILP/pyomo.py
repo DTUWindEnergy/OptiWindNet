@@ -441,7 +441,11 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
     """
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
-        model.link_[(u, v)] = 1
+        try:
+            model.link_[(u, v)] = 1
+        except KeyError:
+            warn(f'warmup_model() failed: model lacks S link ({u, v})')
+            continue
         model.flow_[(u, v)] = S[u][v]['load']
     model.warmed_by = S.graph['creator']
     return model
