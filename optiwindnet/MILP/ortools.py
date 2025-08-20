@@ -382,6 +382,9 @@ def warmup_model(
 
     Returns:
       The same model instance that was provided, now with a solution.
+
+    Raises:
+      OWNWarmupFailed: if some link in S is not available in model.
     """
     in_S_not_in_model = S.edges - metadata.link_.keys()
     if in_S_not_in_model:
