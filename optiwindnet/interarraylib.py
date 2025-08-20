@@ -6,6 +6,7 @@ import math
 import pickle
 import sys
 from hashlib import sha256
+from itertools import pairwise
 
 import networkx as nx
 import numpy as np
@@ -36,6 +37,7 @@ __all__ = (
     'as_undetoured',
     'as_hooked_to_nearest',
     'as_hooked_to_head',
+    'as_stratified_vertices',
     'make_remap',
     'scaffolded',
 )
@@ -951,6 +953,47 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
         tentative.append((r, new_hook))
     S.graph['tentative'] = tentative
     return S
+
+
+def as_stratified_vertices(Lʹ: nx.Graph) -> nx.Graph:
+    """Ensure border-vertices are all in the B-range of VertexC.
+
+    Apply this to L when terminal or root coordinates are to be updated by writting to
+    the array elements of VertexC. In order to keep the borders in place, they must not
+    rely on vertices in the terminal or root sections (T-range, R-range). This function
+    creates duplicates of any terminal-vertex or root-vertex used by borders/obstacles.
+
+    Args:
+      L: location geometry to be stratified
+    Returns:
+      New location geometry with stratified vertices
+    """
+    L = Lʹ.copy()
+    R, T = (L.graph[k] for k in 'RT')
+    border = L.graph.get('border', np.array(()))
+    obstacles = L.graph.get('obstacles', [])
+    if any(border < T) or any(any(obstacle < T) for obstacle in obstacles):
+        # is not stratified
+        VertexC = L.graph['VertexC']
+        VertexC = np.vstack(
+            (
+                VertexC[:T],
+                VertexC[border],
+                *(VertexC[obstacle] for obstacle in obstacles),
+                VertexC[-R:],
+            )
+        )
+        border_sizes = np.array(
+            [border.shape[0]] + [obstacle.shape[0] for obstacle in obstacles]
+        )
+        obstacle_idxs = np.cumsum(border_sizes) + T
+        L.graph.update(
+            VertexC=VertexC,
+            B=border_sizes.sum().item(),
+            border=np.arange(T, T + border.shape[0]),
+            obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)],
+        )
+    return L
 
 
 def make_remap(G, refG, H, refH):
