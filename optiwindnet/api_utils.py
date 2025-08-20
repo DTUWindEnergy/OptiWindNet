@@ -317,15 +317,13 @@ def merge_obs_into_border(L):
     borderC = V[border_idx]
     obstaclesC = [V[idx] for idx in obstacles_idx]
 
+    # To print only once even if multiple obstacles are intersecting with border
     border_subtraction_verbose = True
 
     #
     border_polygon = Polygon(borderC)
-    if border_polygon.is_empty:
-        raise ValueError('Border polygon is empty; cannot merge obstacles.')
 
     remaining_obstaclesC = []
-
     for i, obs in enumerate(obstaclesC):
         if obs.size == 0:
             continue
@@ -334,7 +332,6 @@ def merge_obs_into_border(L):
 
         if not obs_poly.is_valid:
             warning('Obstacle %d invalid: %s', i, explain_validity(obs_poly))
-            obs_poly = obs_poly.buffer(0)
 
         if obs_poly.is_empty:
             warning('Obstacle %d became an empty polygon; skipping.', i)
@@ -538,7 +535,7 @@ def points_inside_border(
 
 
 def points_outside_obstacles(
-    points: np.ndarray, obstaclesC: list[np.ndarray], label: str, *, tol=-1e-10
+    points: np.ndarray, obstaclesC: list[np.ndarray], label: str, *, tol=1e-10
 ) -> bool:
     """True if no point lies inside or on obstacles."""
     if points.size == 0:
@@ -552,8 +549,8 @@ def points_outside_obstacles(
         obs = _ensure_closed(obs)
 
         obs_path = Path(obs)
-        # Treat points on obstacle boundary as violations: use small +tol
-        in_obs = obs_path.contains_points(points, radius=tol)
+        # Treat points on obstacle boundary as ok: use small -tol
+        in_obs = obs_path.contains_points(points, radius=-tol)
         if np.any(in_obs):
             bad = np.where(in_obs)[0].tolist()
             print(f'{label} at indices {bad} are inside/ON the obstacle at index {i}!')
