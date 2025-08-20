@@ -1,6 +1,7 @@
 import logging
 import math
 from typing import Sequence
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
@@ -300,7 +301,6 @@ def extract_network_as_array(G):
 
 
 def merge_obs_into_border(L):
-
     V = L.graph['VertexC']
     T, R = L.graph['T'], L.graph['R']
 
@@ -469,7 +469,7 @@ def buffer_border_obs(L, buffer_dist):
 
         obstaclesC = shrunk_obstaclesC
 
-        # --- Update L 
+        # --- Update L
         coordinatesC = [turbinesC]
         cursor = T
         border_idx_new = None
@@ -501,13 +501,10 @@ def buffer_border_obs(L, buffer_dist):
         )
 
         return L, pre_buffer
-    
-    else: # buffer_dist < 0
+
+    else:  # buffer_dist < 0
         raise ValueError('Buffer value must be equal or greater than 0!')
 
-
-import numpy as np
-from matplotlib.path import Path
 
 def _ensure_closed(verts: np.ndarray) -> np.ndarray:
     """Return verts with the first point appended at the end if not already closed."""
@@ -517,23 +514,18 @@ def _ensure_closed(verts: np.ndarray) -> np.ndarray:
         return np.vstack([verts, verts[0]])
     return verts
 
-def _validate_points(points: np.ndarray, label: str):
-    if points.ndim != 2 or points.shape[1] != 2:
-        raise ValueError(f"{label} must be an array of shape (N, 2); got {points.shape}.")
-    if np.isnan(points).any():
-        raise ValueError(f"{label} contains NaNs, which is not allowed.")
 
-def points_inside_border(points: np.ndarray, borderC: np.ndarray | None, label: str, *, tol=1e-10) -> bool:
+def points_inside_border(
+    points: np.ndarray, borderC: np.ndarray | None, label: str, *, tol=1e-10
+) -> bool:
     """True if all points are inside or on the border polygon."""
     if points.size == 0:
         return True
-    _validate_points(points, label)
     if borderC is None or borderC.size == 0:
-        # No border => vacuously true (or choose False if your logic requires a border)
+        # No border => vacuously true
         return True
 
     borderC = np.asarray(borderC, dtype=float)
-    _validate_points(borderC, "Border")
     borderC = _ensure_closed(borderC)
 
     border_path = Path(borderC)
@@ -544,18 +536,19 @@ def points_inside_border(points: np.ndarray, borderC: np.ndarray | None, label: 
         return False
     return True
 
-def points_outside_obstacles(points: np.ndarray, obstaclesC: list[np.ndarray], label: str, *, tol=1e-10) -> bool:
-    """True if no point lies strictly inside any obstacle (edge counts as inside due to tol)."""
+
+def points_outside_obstacles(
+    points: np.ndarray, obstaclesC: list[np.ndarray], label: str, *, tol=-1e-10
+) -> bool:
+    """True if no point lies inside or on obstacles."""
     if points.size == 0:
         return True
-    _validate_points(points, label)
 
     any_bad = False
     for i, obs in enumerate(obstaclesC or []):
         if obs is None or np.asarray(obs).size == 0:
             continue
         obs = np.asarray(obs, dtype=float)
-        _validate_points(obs, f"Obstacle {i}")
         obs = _ensure_closed(obs)
 
         obs_path = Path(obs)
@@ -567,4 +560,3 @@ def points_outside_obstacles(points: np.ndarray, obstaclesC: list[np.ndarray], l
             any_bad = True
 
     return not any_bad
-

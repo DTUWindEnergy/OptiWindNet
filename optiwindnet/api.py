@@ -3,6 +3,7 @@ import logging
 from abc import ABC, abstractmethod
 from itertools import pairwise
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -294,10 +295,8 @@ class WindFarmNetwork:
         V = copy.deepcopy(L.graph['VertexC'])
         landscape_angle = L.graph.get('landscape_angle', False)
         if landscape_angle:
-            pass # to be added
-            # V = rotate(V, landscape_angle)
-            # self._pre_buffer_border_obs['borderC'] = rotate(self._pre_buffer_border_obs['borderC'], landscape_angle)
-            # self._pre_buffer_border_obs['obstaclesC'] = rotate(self._pre_buffer_border_obs['obstaclesC'], landscape_angle)
+            pass  # to be added
+
         borderC = V[L.graph['border']] if 'border' in L.graph else None
         obstaclesC = [V[idx] for idx in L.graph.get('obstacles', [])]
 
@@ -403,7 +402,9 @@ class WindFarmNetwork:
         # Obstacle ranges: start after the border block (or right after turbines if no border)
         obs_lens = [obs.shape[0] for obs in obstaclesC if obs is not None]
         obs_ranges = T + border_len + np.cumsum([0] + obs_lens)
-        obstacle_ranges = [np.arange(start, end, dtype=int) for start, end in pairwise(obs_ranges)]
+        obstacle_ranges = [
+            np.arange(start, end, dtype=int) for start, end in pairwise(obs_ranges)
+        ]
 
         vertexC = np.vstack(
             [turbinesC]
@@ -423,7 +424,6 @@ class WindFarmNetwork:
             VertexC=vertexC,
             **kwargs,
         )
-
 
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
