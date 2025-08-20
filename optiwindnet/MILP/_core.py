@@ -31,6 +31,14 @@ def _identifier_from_class_name(c: type) -> str:
     return s[0].lower() + ''.join('_' + c.lower() if c.isupper() else c for c in s[1:])
 
 
+class OWNWarmupFailed(Exception):
+    pass
+
+
+class OWNSolutionNotFound(Exception):
+    pass
+
+
 class Topology(StrEnum):
     "Set the topology of subtrees in the solution."
 

@@ -19,6 +19,8 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
+    OWNSolutionNotFound,
+    OWNWarmupFailed,
     SolutionInfo,
     Solver,
     Topology,
@@ -125,6 +127,11 @@ class SolverPyomo(Solver):
         result = solver.solve(
             model, **self.solve_kwargs, tee=verbose, load_solutions=False
         )
+        termination = result['Solver'][0]['Termination condition'].name
+        if len(result.solution) == 0:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+            )
         self.result = result
         if self.name != 'scip':
             objective = result['Problem'][0]['Upper bound']
@@ -137,17 +144,13 @@ class SolverPyomo(Solver):
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,
-            termination=result['Solver'][0]['Termination condition'].name,
+            termination=termination,
         )
         self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        if len(self.result.solution) == 0:
-            raise RuntimeError(
-                f'Unable to find a solution. Termination condition: {self.solution_info.termination}'
-            )
         P, model, model_options = self.P, self.model, self.model_options
         result = self.result
         # hack to prevent warning about the solver not reaching the desired mip_gap
@@ -448,14 +451,18 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
 
     Returns:
       The same model instance that was provided, now with a solution.
+
+    Raises:
+      OWNWarmupFailed: if some link in S is not available in model.
     """
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
         try:
             model.link_[(u, v)] = 1
         except KeyError:
-            warn(f'warmup_model() failed: model lacks S link ({u, v})')
-            continue
+            raise OWNWarmupFailed(
+                'warmup_model() failed: model lacks S link ({u, v})'
+            ) from None
         model.flow_[(u, v)] = S[u][v]['load']
     model.warmed_by = S.graph['creator']
     return model
