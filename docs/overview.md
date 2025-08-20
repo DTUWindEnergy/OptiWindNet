@@ -1,34 +1,24 @@
-# Example Notebooks Overview
+# APIs Overview
 
-OptiWindNet’s example notebooks demonstrate wind farm cable layout optimization in two main categories:
+OptiWindNet’s documentation is based on two series of example Jupyter notebooks, each with a specific focus:
 
 * 📦 **Network/Router API**: high-level, user-friendly interface (recommended for most users)
-* 🛠️ **Low-Level API**: advanced, fine-grained control for customization and research
+* 🛠️ **Advanced API**: low-level, fine-grained control for performance, customization and research
 
+The notebooks from the two sections show similar tasks performed with each API. Learning only **one of them is enough** to start using *OptiWindNet*.
 
-## 📦 Network/Router API Examples
+## 📦 Network/Router API
 
-These notebooks demonstrate how to use the *OptiWindNet*'s **high-level API** via the `WindFarmNetwork` and `Router` classes. This approach is:
+The [**Network/Router API**](high_level_api) (high level) makes the main functionality of *OptiWindNet* available through two classes: `WindFarmNetwork` and `Router`. This approach enables quick experimentation and includes some guardrails for beginners.
 
-* Recommended for most users
-* Simple to use
-* Suitable for integration with tools like TopFarm
-* Focused on productivity and ease of interaction
+* Simple to use, more forgiving on mistakes;
+* Gentler learning curve;
+* Focused on productivity and ease of interaction.
 
-Users only need to provide input data and call a few intuitive methods to perform routing and access results.
+## 🛠️ Advanced API
 
-The notebooks demonstrating the high-level API of *OptiWindNet* have filenames starting with a letter.
+The [**Advanced API**](low_level_api) (low level) offers fine-grained control of all data structures and functions of *OptiWindNet*. 
 
-> ✅ Use these if you want fast prototyping or plan to integrate `OptiWindNet` into a larger workflow.
-
-## 🛠️ Low-Level API Examples
-
-These notebooks show how to use *OptiWindNet* by directly importing its internal modules and functions. This approach:
-
-* Exposes more customization and internal logic
-* Requires calling several intermediate steps (e.g., preprocessing, initial tree generation, optimization, result processing)
-* Is useful for **advanced users**, researchers, or developers who want fine control or want to extend the code
-
-The notebooks demonstrating **low-level API** of *OptiWindNet* are those with filenames starting with a number.
-
-> 🔍 Use these if you're exploring the algorithm, debugging, or building on top of the library internals.
+* Allows picking and choosing exactly what is needed from *OptiWindNet*;
+* May perform faster by avoiding unecessary checks and offering more tuning options.
+* The API to use for extending *OptiWindNet* with custom algorithms, models, objective functions or constraints.

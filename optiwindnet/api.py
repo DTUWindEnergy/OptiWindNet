@@ -478,7 +478,7 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
-        S = nx.Graph(R=R, T=T)
+        S = nx.Graph(R=R, T=T, creator='from_terse_links')
         for i, j in enumerate(terse_links_ints):
             S.add_edge(i, j)
 
