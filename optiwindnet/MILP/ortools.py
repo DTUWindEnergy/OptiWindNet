@@ -386,12 +386,13 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
+    R, T = metadata.R, metadata.T
     in_S_not_in_model = S.edges - metadata.link_.keys()
+    in_S_not_in_model -= {(v, u) for u, v in metadata.linkset[-R * T :]}
     if in_S_not_in_model:
         raise OWNWarmupFailed(
             f'warmup_model() failed: model lacks S links ({in_S_not_in_model})'
         )
-    R, T = metadata.R, metadata.T
     model.ClearHints()
     for u, v in metadata.linkset[: (len(metadata.linkset) - R * T) // 2]:
         edgeD = S.edges.get((u, v))
