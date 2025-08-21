@@ -121,7 +121,7 @@ class WindFarmNetwork:
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
         borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
-        obstacles: Sequence[np.ndarray] = [],
+        obstacleC_: Sequence[np.ndarray] = [],
         name: str = '',
         handle: str = '',
         L: nx.Graph | None = None,
@@ -185,7 +185,7 @@ class WindFarmNetwork:
         elif turbinesC is not None and substationsC is not None:
             T = turbinesC.shape[0]
             border_sizes = np.array(
-                [borderC.shape[0]] + [obs.shape[0] for obs in obstacles], dtype=int
+                [borderC.shape[0]] + [obs.shape[0] for obs in obstacleC_], dtype=int
             )
 
             L = L_from_site(
@@ -198,7 +198,7 @@ class WindFarmNetwork:
                 ],
                 name=name,
                 handle=handle,
-                VertexC=np.vstack((turbinesC, borderC, *obstacles, substationsC)),
+                VertexC=np.vstack((turbinesC, borderC, *obstacleC_, substationsC)),
                 **kwargs,
             )
         else:
