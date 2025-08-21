@@ -461,7 +461,7 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
             model.link_[(u, v)] = 1
         except KeyError:
             raise OWNWarmupFailed(
-                'warmup_model() failed: model lacks S link ({u, v})'
+                f'warmup_model() failed: model lacks S link ({u, v})'
             ) from None
         model.flow_[(u, v)] = S[u][v]['load']
     model.warmed_by = S.graph['creator']
