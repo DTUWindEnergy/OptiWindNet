@@ -6,6 +6,8 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
+    OWNWarmupFailed,
+    OWNSolutionNotFound,
     SolutionInfo,
     Solver,
     Topology,
@@ -18,6 +20,8 @@ __all__ = (
     'FeederLimit',
     'ModelOptions',
     'ModelMetadata',
+    'OWNWarmupFailed',
+    'OWNSolutionNotFound',
     'SolutionInfo',
     'solver_factory',
 )

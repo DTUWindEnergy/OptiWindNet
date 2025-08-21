@@ -11,8 +11,6 @@ import numpy as np
 import yaml
 import yaml_include
 
-from optiwindnet.MILP._core import OWNSolutionNotFound, OWNWarmupFailed
-
 from .api_utils import (
     buffer_border_obs,
     enable_ortools_logging_if_jupyter,
@@ -37,7 +35,7 @@ from .interarraylib import (
     calcload,
 )
 from .mesh import make_planar_embedding
-from .MILP import ModelOptions, solver_factory
+from .MILP import ModelOptions, solver_factory, OWNSolutionNotFound, OWNWarmupFailed
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot
