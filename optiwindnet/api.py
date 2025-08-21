@@ -28,7 +28,14 @@ from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
 from .importer import load_repository as load_repository
-from .interarraylib import G_from_S, S_from_G, as_normalized, assign_cables, calcload
+from .interarraylib import (
+    G_from_S,
+    S_from_G,
+    as_normalized,
+    as_stratified_vertices,
+    assign_cables,
+    calcload,
+)
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, solver_factory
 from .pathfinding import PathFinder
@@ -174,21 +181,30 @@ class WindFarmNetwork:
                 warning(
                     'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
+            self._L = as_stratified_vertices(L)
         elif turbinesC is not None and substationsC is not None:
-            L = self.from_coordinates(
-                turbinesC,
-                substationsC,
-                borderC,
-                obstacles,
-                name,
-                handle,
+            T = turbinesC.shape[0]
+            border_sizes = np.array(
+                [borderC.shape[0]] + [obs.shape[0] for obs in obstacles], dtype=int
+            )
+
+            self._L = L_from_site(
+                R=substationsC.shape[0],
+                T=T,
+                B=border_sizes.sum().item(),
+                border=np.arange(T, T + borderC.shape[0]),
+                obstacles=[
+                    np.arange(a, b) for a, b in pairwise(T + np.cumsum(border_sizes))
+                ],
+                name=name,
+                handle=handle,
+                VertexC=np.vstack((turbinesC, borderC, *obstacles, substationsC)),
                 **kwargs,
             )
         else:
             raise TypeError(
                 'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
             )
-        self._L = L
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], L.graph['T']
         self._refresh_planar()
@@ -358,38 +374,6 @@ class WindFarmNetwork:
 
         return cls(L=L, **kwargs)
 
-    def from_coordinates(
-        self,
-        turbinesC,
-        substationsC,
-        borderC,
-        obstacles,
-        name,
-        handle,
-        **kwargs,
-    ):
-        """Constructs a site graph from coordinate-based inputs."""
-
-        R = substationsC.shape[0]
-        T = turbinesC.shape[0]
-        border_sizes = np.array(
-            [borderC.shape[0]] + [obs.shape[0] for obs in obstacles], dtype=int
-        )
-
-        return L_from_site(
-            R=R,
-            T=T,
-            B=border_sizes.sum().item(),
-            border=np.arange(T, T + borderC.shape[0]),
-            obstacles=[
-                np.arange(a, b) for a, b in pairwise(T + np.cumsum(border_sizes))
-            ],
-            name=name,
-            handle=handle,
-            VertexC=np.vstack((turbinesC, borderC, *obstacles, substationsC)),
-            **kwargs,
-        )
-
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
         return svgplot(self.G)._repr_svg_()
@@ -509,8 +493,8 @@ class WindFarmNetwork:
 
     def is_layout_within_bounds(self):
         L = self._L
-        V = L.graph['VertexC']
-        T, R = L.graph['T'], L.graph['R']
+        V = self._VertexC
+        R, T = self._R, self._T
 
         # Extract coordinates
         turbinesC = V[:T]
