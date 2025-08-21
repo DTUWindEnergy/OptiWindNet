@@ -1,6 +1,9 @@
+import copy
 import logging
 from abc import ABC, abstractmethod
+from itertools import pairwise
 from pathlib import Path
+from typing import Sequence
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -11,18 +14,28 @@ import yaml_include
 from optiwindnet.MILP._core import OWNSolutionNotFound, OWNWarmupFailed
 
 from .api_utils import (
+    buffer_border_obs,
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
-    from_coordinates,
     is_warmstart_eligible,
+    merge_obs_into_border,
     parse_cables_input,
     plot_org_buff,
+    points_inside_border,
+    points_outside_obstacles,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
 from .importer import load_repository as load_repository
-from .interarraylib import G_from_S, S_from_G, as_normalized, assign_cables, calcload
+from .interarraylib import (
+    G_from_S,
+    S_from_G,
+    as_normalized,
+    as_stratified_vertices,
+    assign_cables,
+    calcload,
+)
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, solver_factory
 from .pathfinding import PathFinder
@@ -107,8 +120,8 @@ class WindFarmNetwork:
         cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
-        borderC: np.ndarray | None = None,
-        obstaclesC: np.ndarray | None = None,
+        borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
+        obstacleC_: Sequence[np.ndarray] = [],
         name: str = '',
         handle: str = '',
         L: nx.Graph | None = None,
@@ -127,7 +140,7 @@ class WindFarmNetwork:
           turbinesC: Turbine coordinates: [(x, y), ...].
           substationsC: Substation coordinates: [(x, y), ...].
           borderC: Polygonal border coordinates: [(x, y), ...].
-          obstaclesC: One or more polygons for exclusion zones: [[(x, y), ...], ...].
+          obstacles: One or more polygons for exclusion zones: [[(x, y), ...], ...].
           name: Human-readable instance name. Defaults to "".
           handle: Short instance identifier. Defaults to "".
           L: Location geometry (takes precedence over coordinate inputs).
@@ -168,16 +181,24 @@ class WindFarmNetwork:
                 warning(
                     'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
+            L = as_stratified_vertices(L)
         elif turbinesC is not None and substationsC is not None:
-            L = from_coordinates(
-                self,
-                turbinesC,
-                substationsC,
-                borderC,
-                obstaclesC,
-                name,
-                handle,
-                buffer_dist,
+            T = turbinesC.shape[0]
+            border_sizes = np.array(
+                [borderC.shape[0]] + [obs.shape[0] for obs in obstacleC_], dtype=int
+            )
+
+            L = L_from_site(
+                R=substationsC.shape[0],
+                T=T,
+                B=border_sizes.sum().item(),
+                border=np.arange(T, T + borderC.shape[0]),
+                obstacles=[
+                    np.arange(a, b) for a, b in pairwise(T + np.cumsum(border_sizes))
+                ],
+                name=name,
+                handle=handle,
+                VertexC=np.vstack((turbinesC, borderC, *obstacleC_, substationsC)),
                 **kwargs,
             )
         else:
@@ -191,8 +212,11 @@ class WindFarmNetwork:
 
     # -------- helpers --------
     def _refresh_planar(self):
-        self._P, self._A = make_planar_embedding(self._L)
-        self._is_stale_PA = False
+        if self.is_layout_within_bounds():
+            self._P, self._A = make_planar_embedding(self._L)
+            self._is_stale_PA = False
+        else:
+            raise ValueError('Turbine/substation out of bounds!')
 
     # -------- properties --------
     @property
@@ -286,38 +310,39 @@ class WindFarmNetwork:
         Returns:
           matplotlib Axes instance.
         """
-        return plot_org_buff(
-            self._borderC_original,
-            self._border_bufferedC,
-            self._obstaclesC_original,
-            self._obstacles_bufferedC,
-            **kwargs,
-        )
+        L = self._L
+        V = copy.deepcopy(L.graph['VertexC'])
+        landscape_angle = L.graph.get('landscape_angle', False)
+        if landscape_angle:
+            pass  # to be added
+
+        borderC = V[L.graph['border']] if 'border' in L.graph else None
+        obstaclesC = [V[idx] for idx in L.graph.get('obstacles', [])]
+
+        try:
+            plot_org_buff(
+                self._pre_buffer_border_obs['borderC'],
+                borderC,
+                self._pre_buffer_border_obs['obstaclesC'],
+                obstaclesC,
+                **kwargs,
+            )
+        except AttributeError:
+            print('No buffering is perfomred')
 
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
         """Create a WindFarmNetwork instance from a YAML file."""
-        if not isinstance(filepath, str):
-            raise TypeError('Filepath must be a string')
-
-        L = L_from_yaml(filepath)
-        return cls(L=L, **kwargs)
+        return cls(L=L_from_yaml(filepath), **kwargs)
 
     @classmethod
-    def from_pbf(cls, filepath: str, **kwargs):
-        """Create a WindFarmNetwork instance from a PBF file."""
-        if not isinstance(filepath, str):
-            error('Filepath must be a string')
-
-        L = L_from_pbf(filepath)
-        return cls(L=L, **kwargs)
+    def from_pbf(cls, filepath: Path | str, **kwargs):
+        """Create a WindFarmNetwork instance from a .OSM.PBF file."""
+        return cls(L=L_from_pbf(filepath), **kwargs)
 
     @classmethod
-    def from_windIO(cls, filepath: str, **kwargs):
+    def from_windIO(cls, filepath: Path | str, **kwargs):
         """Create a WindFarmNetwork instance from WindIO yaml file."""
-        if not isinstance(filepath, str):
-            raise TypeError('Filepath must be a string')
-
         fpath = Path(filepath)
 
         yaml.add_constructor('!include', yaml_include.Constructor(base_dir='data'))
@@ -446,6 +471,49 @@ class WindFarmNetwork:
         else:
             map = {}
         return map
+
+    def merge_obstacles_into_border(self):
+        L = merge_obs_into_border(self._L)
+
+        # Update
+        self._L = L
+        self._VertexC = L.graph['VertexC']
+        self._R, self._T = L.graph['R'], L.graph['T']
+        self._refresh_planar()
+
+    def buffer_border_obstacles(self, buffer_dist):
+        L = self._L
+        L, pre_buffer_border_obs = buffer_border_obs(L, buffer_dist=buffer_dist)
+
+        # update
+        self._L = L
+        self._VertexC = L.graph['VertexC']
+        self._R, self._T = L.graph['R'], L.graph['T']
+        self._refresh_planar()
+        self._pre_buffer_border_obs = pre_buffer_border_obs
+
+    def is_layout_within_bounds(self):
+        L = self._L
+        V = self._VertexC
+        R, T = self._R, self._T
+
+        # Extract coordinates
+        turbinesC = V[:T]
+        substationsC = V[-R:] if R > 0 else np.empty((0, 2), dtype=float)
+        border_idx = L.graph.get('border')
+        obstacles_idx = L.graph.get('obstacles', [])
+        borderC = V[border_idx] if border_idx is not None else None
+        obstaclesC = [V[idx] for idx in obstacles_idx]
+
+        # Turbines
+        turbine_border = points_inside_border(turbinesC, borderC, 'Turbines')
+        turbine_obs = points_outside_obstacles(turbinesC, obstaclesC, 'Turbines')
+
+        # Substations
+        sub_border = points_inside_border(substationsC, borderC, 'Substations')
+        sub_obs = points_outside_obstacles(substationsC, obstaclesC, 'Substations')
+
+        return turbine_border and turbine_obs and sub_border and sub_obs
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """Compute length/cost gradients with respect to node positions."""
