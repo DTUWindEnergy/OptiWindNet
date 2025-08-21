@@ -181,14 +181,14 @@ class WindFarmNetwork:
                 warning(
                     'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
-            self._L = as_stratified_vertices(L)
+            L = as_stratified_vertices(L)
         elif turbinesC is not None and substationsC is not None:
             T = turbinesC.shape[0]
             border_sizes = np.array(
                 [borderC.shape[0]] + [obs.shape[0] for obs in obstacles], dtype=int
             )
 
-            self._L = L_from_site(
+            L = L_from_site(
                 R=substationsC.shape[0],
                 T=T,
                 B=border_sizes.sum().item(),
@@ -205,6 +205,7 @@ class WindFarmNetwork:
             raise TypeError(
                 'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
             )
+        self._L = L
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], L.graph['T']
         self._refresh_planar()
