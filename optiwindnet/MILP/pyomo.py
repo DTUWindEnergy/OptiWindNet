@@ -10,6 +10,7 @@ from typing import Any
 
 import networkx as nx
 import pyomo.environ as pyo
+from pyomo.util.infeasible import find_infeasible_constraints
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
@@ -464,6 +465,11 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
                 f'warmup_model() failed: model lacks S link ({u, v})'
             ) from None
         model.flow_[(u, v)] = S[u][v]['load']
+    # check if solution violates any constraints:
+    # checking the bounds seem redundant, but the way to do it would be:
+    # next(find_infeasible_bounds(model), False)
+    if next(find_infeasible_constraints(model), False):
+        raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     model.warmed_by = S.graph['creator']
     return model
 
