@@ -5,7 +5,6 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
-from matplotlib.path import Path
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
@@ -312,7 +311,7 @@ def merge_obs_into_border(L):
 
     # Do nothing if there's no border or no obstacles
     if border_idx is None or len(obstacles_idx) == 0:
-        return  # leave L as-is
+        return L
 
     borderC = V[border_idx]
     obstaclesC = [V[idx] for idx in obstacles_idx]
@@ -510,50 +509,3 @@ def _ensure_closed(verts: np.ndarray) -> np.ndarray:
     if not np.allclose(verts[0], verts[-1]):
         return np.vstack([verts, verts[0]])
     return verts
-
-
-def points_inside_border(
-    points: np.ndarray, borderC: np.ndarray | None, label: str, *, tol=1e-10
-) -> bool:
-    """True if all points are inside or on the border polygon."""
-    if points.size == 0:
-        return True
-    if borderC is None or borderC.size == 0:
-        # No border => vacuously true
-        return True
-
-    borderC = np.asarray(borderC, dtype=float)
-    borderC = _ensure_closed(borderC)
-
-    border_path = Path(borderC)
-    inside_or_on = border_path.contains_points(points, radius=tol)
-    if not np.all(inside_or_on):
-        bad = np.where(~inside_or_on)[0].tolist()
-        print(f'{label} at indices {bad} are outside the border!')
-        return False
-    return True
-
-
-def points_outside_obstacles(
-    points: np.ndarray, obstaclesC: list[np.ndarray], label: str, *, tol=1e-10
-) -> bool:
-    """True if no point lies inside or on obstacles."""
-    if points.size == 0:
-        return True
-
-    any_bad = False
-    for i, obs in enumerate(obstaclesC or []):
-        if obs is None or np.asarray(obs).size == 0:
-            continue
-        obs = np.asarray(obs, dtype=float)
-        obs = _ensure_closed(obs)
-
-        obs_path = Path(obs)
-        # Treat points on obstacle boundary as ok: use small -tol
-        in_obs = obs_path.contains_points(points, radius=-tol)
-        if np.any(in_obs):
-            bad = np.where(in_obs)[0].tolist()
-            print(f'{label} at indices {bad} are inside/ON the obstacle at index {i}!')
-            any_bad = True
-
-    return not any_bad

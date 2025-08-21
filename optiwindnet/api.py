@@ -1,4 +1,3 @@
-import copy
 import logging
 from abc import ABC, abstractmethod
 from itertools import pairwise
@@ -8,6 +7,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+import shapely as shp
 import yaml
 import yaml_include
 
@@ -19,8 +19,6 @@ from .api_utils import (
     merge_obs_into_border,
     parse_cables_input,
     plot_org_buff,
-    points_inside_border,
-    points_outside_obstacles,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
@@ -112,6 +110,7 @@ class WindFarmNetwork:
 
     _is_stale_PA: bool = True
     _is_stale_SG: bool = True
+    _is_stale_polygon: bool = True
 
     def __init__(
         self,
@@ -124,7 +123,6 @@ class WindFarmNetwork:
         handle: str = '',
         L: nx.Graph | None = None,
         router: Router | None = None,
-        buffer_dist: float = 0.0,
         verbose: bool = False,
         **kwargs,
     ):
@@ -167,7 +165,6 @@ class WindFarmNetwork:
         # simple fields via setters (for validation/normalization)
         self.name = name
         self.handle = handle
-        self.buffer_dist = buffer_dist
         self.router = router if router is not None else EWRouter()
         self.cables = cables  # computes cables_capacity
 
@@ -180,20 +177,20 @@ class WindFarmNetwork:
                     'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
             L = as_stratified_vertices(L)
+            T = L.graph['T']
         elif turbinesC is not None and substationsC is not None:
             T = turbinesC.shape[0]
             border_sizes = np.array(
-                [borderC.shape[0]] + [obs.shape[0] for obs in obstacleC_], dtype=int
+                [borderC.shape[0]] + [obs.shape[0] for obs in obstacleC_], dtype=np.int_
             )
+            obstacle_slicelims = tuple(pairwise(T + np.cumsum(border_sizes)))
 
             L = L_from_site(
                 R=substationsC.shape[0],
                 T=T,
                 B=border_sizes.sum().item(),
                 border=np.arange(T, T + borderC.shape[0]),
-                obstacles=[
-                    np.arange(a, b) for a, b in pairwise(T + np.cumsum(border_sizes))
-                ],
+                obstacles=[np.arange(a, b) for a, b in obstacle_slicelims],
                 name=name,
                 handle=handle,
                 VertexC=np.vstack((turbinesC, borderC, *obstacleC_, substationsC)),
@@ -205,16 +202,29 @@ class WindFarmNetwork:
             )
         self._L = L
         self._VertexC = L.graph['VertexC']
-        self._R, self._T = L.graph['R'], L.graph['T']
-        self._refresh_planar()
+        self._R, self._T = L.graph['R'], T
 
     # -------- helpers --------
     def _refresh_planar(self):
-        if self.is_layout_within_bounds():
-            self._P, self._A = make_planar_embedding(self._L)
-            self._is_stale_PA = False
-        else:
-            raise ValueError('Turbine/substation out of bounds!')
+        polygon = self.polygon
+        if polygon is not None:
+            # check if any of the new turbine coordinates lie outside the polygon
+            if isinstance(polygon, shp.Polygon):
+                out_of_bounds = shp.MultiPoint(self._VertexC[: self._T]) - self.polygon
+            else:
+                # polygon is a Multipolygon of the obstacles
+                out_of_bounds = polygon & shp.MultiPoint(self._VertexC[: self._T])
+                for obstacle in polygon.geoms:
+                    if out_of_bounds.is_empty:
+                        break
+                    # remove from out_of_bounds the points lying on the border
+                    out_of_bounds -= obstacle.exterior
+            if not out_of_bounds.is_empty:
+                # TODO: if relevant, get coordinates of turbines from out_of_bounds
+                #  print(list(out_of_bounds.geoms))
+                raise ValueError('Turbine out of bounds!')
+        self._P, self._A = make_planar_embedding(self._L)
+        self._is_stale_PA = False
 
     # -------- properties --------
     @property
@@ -222,31 +232,58 @@ class WindFarmNetwork:
         return self._L
 
     @property
-    def P(self):
+    def polygon(self) -> shp.Polygon | None:
+        if self._is_stale_polygon:
+            L = self._L
+            T = L.graph['T']
+            border_sizes = np.array(
+                #  [len(L.graph['border'])] + [len(obs) for obs in L.graph['obstacles']],
+                [len(L.graph.get('border', []))]
+                + [len(obs) for obs in L.graph.get('obstacles', [])],
+                dtype=np.int_,
+            )
+            obstacle_slicelims = tuple(pairwise(T + np.cumsum(border_sizes)))
+            if border_sizes[0] > 0:
+                self._polygon = shp.Polygon(
+                    shell=self._VertexC[T : T + border_sizes[0]],
+                    holes=[self._VertexC[a:b] for a, b in obstacle_slicelims],
+                )
+            elif border_sizes.shape[0] > 1:
+                self._polygon = shp.MultiPolygon(
+                    [self._VertexC[a:b] for a, b in obstacle_slicelims]
+                )
+            else:
+                return None
+            shp.prepare(self._polygon)
+            self._is_stale_polygon = False
+        return self._polygon
+
+    @property
+    def P(self) -> nx.PlanarEmbedding:
         if self._is_stale_PA:
             self._refresh_planar()
         return self._P
 
     @property
-    def A(self):
+    def A(self) -> nx.Graph:
         if self._is_stale_PA:
             self._refresh_planar()
         return self._A
 
     @property
-    def S(self):
+    def S(self) -> nx.Graph | None:
         if self._is_stale_SG:
             return None
         return self._S
 
     @property
-    def G(self):
+    def G(self) -> nx.Graph | None:
         if self._is_stale_SG:
             return None
         return self._G
 
     @property
-    def cables(self):
+    def cables(self) -> list[tuple[int, float]]:
         return self._cables
 
     @cables.setter
@@ -258,44 +295,22 @@ class WindFarmNetwork:
             assign_cables(self._G, cables)
 
     @property
-    def router(self):
+    def router(self) -> Router:
         return self._router
 
     @router.setter
-    def router(self, router):
+    def router(self, router: Router):
         self._router = router if router is not None else EWRouter()
 
     @property
-    def name(self):
-        return self._name
-
-    @name.setter
-    def name(self, name):
-        self._name = str(name)
-
-    @property
-    def handle(self):
-        return self._handle
-
-    @handle.setter
-    def handle(self, handle):
-        self._handle = str(handle)
-
-    @property
-    def buffer_dist(self):
+    def buffer_dist(self) -> float:
         return self._buffer_dist
 
-    @buffer_dist.setter
-    def buffer_dist(self, dist):
-        if not isinstance(dist, (int, float)):
-            raise TypeError('buffer_dist must be numeric')
-        self._buffer_dist = dist
-
-    def cost(self):
+    def cost(self) -> float:
         """Get the total cost of the optimized network."""
         return self.G.size(weight='cost')
 
-    def length(self):
+    def length(self) -> float:
         """Get the total cable length of the optimized network."""
         return self.G.size(weight='length')
 
@@ -309,24 +324,24 @@ class WindFarmNetwork:
           matplotlib Axes instance.
         """
         L = self._L
-        V = copy.deepcopy(L.graph['VertexC'])
+        VertexC = self._VertexC
         landscape_angle = L.graph.get('landscape_angle', False)
         if landscape_angle:
             pass  # to be added
 
-        borderC = V[L.graph['border']] if 'border' in L.graph else None
-        obstaclesC = [V[idx] for idx in L.graph.get('obstacles', [])]
+        borderC = VertexC[L.graph.get('border', [])]
+        obstacleC_ = [VertexC[obs] for obs in L.graph.get('obstacles', [])]
 
         try:
             plot_org_buff(
                 self._pre_buffer_border_obs['borderC'],
                 borderC,
                 self._pre_buffer_border_obs['obstaclesC'],
-                obstaclesC,
+                obstacleC_,
                 **kwargs,
             )
         except AttributeError:
-            print('No buffering is perfomred')
+            print('No buffering is performed')
 
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
@@ -383,7 +398,7 @@ class WindFarmNetwork:
 
     def plot_location(self, **kwargs):
         """Plot the original location graph."""
-        return gplot(self.L, **kwargs)
+        return gplot(self._L, **kwargs)
 
     def plot_available_links(self, **kwargs):
         """Plot available links from planar embedding."""
@@ -472,46 +487,19 @@ class WindFarmNetwork:
 
     def merge_obstacles_into_border(self):
         L = merge_obs_into_border(self._L)
-
-        # Update
         self._L = L
         self._VertexC = L.graph['VertexC']
-        self._R, self._T = L.graph['R'], L.graph['T']
-        self._refresh_planar()
+        self._is_stale_polygon = True
+        self._is_stale_PA = True
 
-    def buffer_border_obstacles(self, buffer_dist):
-        L = self._L
-        L, pre_buffer_border_obs = buffer_border_obs(L, buffer_dist=buffer_dist)
-
-        # update
+    def add_buffer(self, buffer_dist):
+        L, self._pre_buffer_border_obs = buffer_border_obs(
+            self._L, buffer_dist=buffer_dist
+        )
         self._L = L
         self._VertexC = L.graph['VertexC']
-        self._R, self._T = L.graph['R'], L.graph['T']
-        self._refresh_planar()
-        self._pre_buffer_border_obs = pre_buffer_border_obs
-
-    def is_layout_within_bounds(self):
-        L = self._L
-        V = self._VertexC
-        R, T = self._R, self._T
-
-        # Extract coordinates
-        turbinesC = V[:T]
-        substationsC = V[-R:] if R > 0 else np.empty((0, 2), dtype=float)
-        border_idx = L.graph.get('border')
-        obstacles_idx = L.graph.get('obstacles', [])
-        borderC = V[border_idx] if border_idx is not None else None
-        obstaclesC = [V[idx] for idx in obstacles_idx]
-
-        # Turbines
-        turbine_border = points_inside_border(turbinesC, borderC, 'Turbines')
-        turbine_obs = points_outside_obstacles(turbinesC, obstaclesC, 'Turbines')
-
-        # Substations
-        sub_border = points_inside_border(substationsC, borderC, 'Substations')
-        sub_obs = points_outside_obstacles(substationsC, obstaclesC, 'Substations')
-
-        return turbine_border and turbine_obs and sub_border and sub_obs
+        self._is_stale_polygon = True
+        self._is_stale_PA = True
 
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
         """Compute length/cost gradients with respect to node positions."""
