@@ -125,14 +125,14 @@ def test_optimize_updates_graphs(LG_from_database):
     assert len(terse) > 0
 
 
-def test_from_yaml_invalid_path_type():
-    with pytest.raises(TypeError, match='Filepath must be a string'):
-        WindFarmNetwork.from_yaml(123)
+def test_from_yaml_invalid_path():
+    with pytest.raises(Exception):
+        WindFarmNetwork.from_yaml(r'not>a*path')
 
 
-def test_from_pbf_invalid_path_type():
+def test_from_pbf_invalid_path():
     with pytest.raises(Exception):  # TypeError or custom error
-        WindFarmNetwork.from_pbf(123)
+        WindFarmNetwork.from_pbf(r'not>a*path')
 
 
 def test_terse_links_output_shape(LG_from_database):

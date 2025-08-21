@@ -3,6 +3,7 @@ import logging
 from abc import ABC, abstractmethod
 from itertools import pairwise
 from pathlib import Path
+from typing import Sequence
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -24,7 +25,6 @@ from .api_utils import (
     points_outside_obstacles,
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
-from .geometric import rotate
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
 from .importer import load_repository as load_repository
@@ -113,8 +113,8 @@ class WindFarmNetwork:
         cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
-        borderC: np.ndarray | None = None,
-        obstaclesC: np.ndarray | None = None,
+        borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
+        obstacles: Sequence[np.ndarray] = [],
         name: str = '',
         handle: str = '',
         L: nx.Graph | None = None,
@@ -133,7 +133,7 @@ class WindFarmNetwork:
           turbinesC: Turbine coordinates: [(x, y), ...].
           substationsC: Substation coordinates: [(x, y), ...].
           borderC: Polygonal border coordinates: [(x, y), ...].
-          obstaclesC: One or more polygons for exclusion zones: [[(x, y), ...], ...].
+          obstacles: One or more polygons for exclusion zones: [[(x, y), ...], ...].
           name: Human-readable instance name. Defaults to "".
           handle: Short instance identifier. Defaults to "".
           L: Location geometry (takes precedence over coordinate inputs).
@@ -179,7 +179,7 @@ class WindFarmNetwork:
                 turbinesC,
                 substationsC,
                 borderC,
-                obstaclesC,
+                obstacles,
                 name,
                 handle,
                 **kwargs,
@@ -316,27 +316,16 @@ class WindFarmNetwork:
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
         """Create a WindFarmNetwork instance from a YAML file."""
-        if not isinstance(filepath, str):
-            raise TypeError('Filepath must be a string')
-
-        L = L_from_yaml(filepath)
-        return cls(L=L, **kwargs)
+        return cls(L=L_from_yaml(filepath), **kwargs)
 
     @classmethod
-    def from_pbf(cls, filepath: str, **kwargs):
-        """Create a WindFarmNetwork instance from a PBF file."""
-        if not isinstance(filepath, str):
-            error('Filepath must be a string')
-
-        L = L_from_pbf(filepath)
-        return cls(L=L, **kwargs)
+    def from_pbf(cls, filepath: Path | str, **kwargs):
+        """Create a WindFarmNetwork instance from a .OSM.PBF file."""
+        return cls(L=L_from_pbf(filepath), **kwargs)
 
     @classmethod
-    def from_windIO(cls, filepath: str, **kwargs):
+    def from_windIO(cls, filepath: Path | str, **kwargs):
         """Create a WindFarmNetwork instance from WindIO yaml file."""
-        if not isinstance(filepath, str):
-            raise TypeError('Filepath must be a string')
-
         fpath = Path(filepath)
 
         yaml.add_constructor('!include', yaml_include.Constructor(base_dir='data'))
@@ -374,56 +363,30 @@ class WindFarmNetwork:
         turbinesC,
         substationsC,
         borderC,
-        obstaclesC,
+        obstacles,
         name,
         handle,
         **kwargs,
     ):
         """Constructs a site graph from coordinate-based inputs."""
 
-        obstaclesC = obstaclesC or []
-
         R = substationsC.shape[0]
         T = turbinesC.shape[0]
-
-        sizes = []
-        if borderC is not None:
-            sizes.append(borderC.shape[0])
-
-        for obs in obstaclesC:
-            if obs is not None:
-                sizes.append(obs.shape[0])
-
-        border_sizes = np.array(sizes, dtype=int)
-
-        B = border_sizes.sum().item()
-
-        border_len = borderC.shape[0] if borderC is not None else 0
-        border_range = np.arange(T, T + border_len)
-
-        # Obstacle ranges: start after the border block (or right after turbines if no border)
-        obs_lens = [obs.shape[0] for obs in obstaclesC if obs is not None]
-        obs_ranges = T + border_len + np.cumsum([0] + obs_lens)
-        obstacle_ranges = [
-            np.arange(start, end, dtype=int) for start, end in pairwise(obs_ranges)
-        ]
-
-        vertexC = np.vstack(
-            [turbinesC]
-            + ([borderC] if borderC is not None else [])
-            + ([obs for obs in (obstaclesC or []) if obs is not None])
-            + ([substationsC] if substationsC is not None else [])
+        border_sizes = np.array(
+            [borderC.shape[0]] + [obs.shape[0] for obs in obstacles], dtype=int
         )
 
         return L_from_site(
             R=R,
             T=T,
-            B=B,
-            border=border_range,
-            obstacles=obstacle_ranges,
+            B=border_sizes.sum().item(),
+            border=np.arange(T, T + borderC.shape[0]),
+            obstacles=[
+                np.arange(a, b) for a, b in pairwise(T + np.cumsum(border_sizes))
+            ],
             name=name,
             handle=handle,
-            VertexC=vertexC,
+            VertexC=np.vstack((turbinesC, borderC, *obstacles, substationsC)),
             **kwargs,
         )
 
