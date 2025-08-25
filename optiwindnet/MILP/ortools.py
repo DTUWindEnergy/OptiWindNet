@@ -17,6 +17,8 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
+    OWNSolutionNotFound,
+    OWNWarmupFailed,
     PoolHandler,
     SolutionInfo,
     Solver,
@@ -87,7 +89,7 @@ class SolverORTools(Solver, PoolHandler):
 
     def solve(
         self,
-        time_limit: int,
+        time_limit: float,
         mip_gap: float,
         options: dict[str, Any] = {},
         verbose: bool = False,
@@ -111,10 +113,15 @@ class SolverORTools(Solver, PoolHandler):
         solver.parameters.log_search_progress = verbose
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
         _ = solver.solve(model, storer)
+        num_solutions = len(storer.solutions)
+        if num_solutions == 0:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution. Solver {self.name} terminated with: {solver.status_name()}'
+            )
         storer.solutions.reverse()
         self.solution_pool = storer.solutions
         _, self._value_map = storer.solutions[0]
-        self.num_solutions = len(storer.solutions)
+        self.num_solutions = num_solutions
         bound = solver.best_objective_bound
         objective = solver.objective_value
         solution_info = SolutionInfo(
@@ -375,8 +382,17 @@ def warmup_model(
 
     Returns:
       The same model instance that was provided, now with a solution.
+
+    Raises:
+      OWNWarmupFailed: if some link in S is not available in model.
     """
     R, T = metadata.R, metadata.T
+    in_S_not_in_model = S.edges - metadata.link_.keys()
+    in_S_not_in_model -= {(v, u) for u, v in metadata.linkset[-R * T :]}
+    if in_S_not_in_model:
+        raise OWNWarmupFailed(
+            f'warmup_model() failed: model lacks S links ({in_S_not_in_model})'
+        )
     model.ClearHints()
     for u, v in metadata.linkset[: (len(metadata.linkset) - R * T) // 2]:
         edgeD = S.edges.get((u, v))

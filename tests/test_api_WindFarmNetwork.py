@@ -8,10 +8,7 @@ from .helpers import assert_graph_equal
 
 
 def test_wfn_fails_without_coordinates_or_L():
-    with pytest.raises(
-        ValueError,
-        match='Both turbinesC and substationsC must be provided! Or alternatively L should be given.',
-    ):
+    with pytest.raises(TypeError):
         WindFarmNetwork(cables=7)
 
 
@@ -30,7 +27,7 @@ def test_wfn_warns_when_L_and_coordinates_given(
         )
 
     assert any(
-        'OptiWindNet prioritizes coordinates over L' in message
+        'OptiWindNet prioritizes L over coordinates' in message
         for message in caplog.messages
     )
 
@@ -112,27 +109,6 @@ def test_cables_capacity_calculation(LG_from_database):
     assert wfn.cables_capacity == 7
 
 
-def test_update_from_terse_links_length_error(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    with pytest.raises(ValueError, match='Length of terse_links must be equal to T'):
-        wfn.update_from_terse_links(np.array([1, 2]))
-
-
-def test_update_from_terse_links_invalid_type(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    with pytest.raises(TypeError, match='terse_links must contain only integer values'):
-        wfn.update_from_terse_links(np.array([0.1, 2.5]))
-
-
-def test_update_from_terse_links_invalid_shape(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    with pytest.raises(ValueError, match='1D array'):
-        wfn.update_from_terse_links(np.array([[0, 1], [2, 3]]))
-
-
 def test_invalid_gradient_type_raises(LG_from_database):
     L, _ = LG_from_database('eagle_EWRouter')
     wfn = WindFarmNetwork(cables=7, L=L)
@@ -149,14 +125,14 @@ def test_optimize_updates_graphs(LG_from_database):
     assert len(terse) > 0
 
 
-def test_from_yaml_invalid_path_type():
-    with pytest.raises(TypeError, match='Filepath must be a string'):
-        WindFarmNetwork.from_yaml(123)
+def test_from_yaml_invalid_path():
+    with pytest.raises(Exception):
+        WindFarmNetwork.from_yaml(r'not>a*path')
 
 
-def test_from_pbf_invalid_path_type():
+def test_from_pbf_invalid_path():
     with pytest.raises(Exception):  # TypeError or custom error
-        WindFarmNetwork.from_pbf(123)
+        WindFarmNetwork.from_pbf(r'not>a*path')
 
 
 def test_terse_links_output_shape(LG_from_database):

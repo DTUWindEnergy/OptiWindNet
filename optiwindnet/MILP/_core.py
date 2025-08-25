@@ -31,6 +31,14 @@ def _identifier_from_class_name(c: type) -> str:
     return s[0].lower() + ''.join('_' + c.lower() if c.isupper() else c for c in s[1:])
 
 
+class OWNWarmupFailed(Exception):
+    pass
+
+
+class OWNSolutionNotFound(Exception):
+    pass
+
+
 class Topology(StrEnum):
     "Set the topology of subtrees in the solution."
 
@@ -176,7 +184,7 @@ class Solver(abc.ABC):
     @abc.abstractmethod
     def solve(
         self,
-        time_limit: int,
+        time_limit: float,
         mip_gap: float,
         options: dict[str, Any] = {},
         verbose: bool = False,
@@ -196,7 +204,7 @@ class Solver(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_solution(self, A: nx.Graph | None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         """Output solution topology A and routeset G.
 
         Args:

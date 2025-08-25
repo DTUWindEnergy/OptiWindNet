@@ -1,4 +1,10 @@
-# Theoretical background
+# Theory
+
+A full analysis of *OptiWindNet*'s methodology can be found in the open-access paper:
+- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis,
+_Flexible cable routing framework for wind farm collection system optimization_,
+European Journal of Operational Research,
+2025, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
 
 ## Formulation
 
@@ -23,6 +29,7 @@ Neither of the classic formulations consider route crossings, which is the main 
 ## Solution methods
 
 * heuristics based on extensions to the Esau-Williams heuristic for the CMSTP;
-* meta-heuristic based on hybrid genetic search (`implemented elsewhere <https://github.com/vidalt/HGS-CVRP>`_ by Thibaut Vidal, described in `his paper <https://doi.org/10.1016/j.cor.2021.105643>`_);
+* meta-heuristic based on hybrid genetic search ([HGS-CVRP](https://github.com/vidalt/HGS-CVRP) by Thibaut Vidal, described in [his paper](https://doi.org/10.1016/j.cor.2021.105643));
 * mathematical optimization using mixed-integer linear programming (MILP) models (using a branch-and-cut solver such as Google's OR-Tools, Coin-OR Branch-and-Cut (CBC), IBM's CPLEX, Gurobi, HiGHS, SCIP).
+
 

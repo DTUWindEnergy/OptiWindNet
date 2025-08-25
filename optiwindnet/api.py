@@ -1,32 +1,42 @@
 import logging
 from abc import ABC, abstractmethod
+from itertools import pairwise
 from pathlib import Path
+from typing import Sequence
 
-import networkx as nx
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
+import shapely as shp
 import yaml
 import yaml_include
 
+from .api_utils import (
+    buffer_border_obs,
+    enable_ortools_logging_if_jupyter,
+    extract_network_as_array,
+    is_warmstart_eligible,
+    merge_obs_into_border,
+    parse_cables_input,
+    plot_org_buff,
+)
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml
 from .importer import load_repository as load_repository
-from .interarraylib import assign_cables, G_from_S, S_from_G, as_normalized, calcload
+from .interarraylib import (
+    G_from_S,
+    S_from_G,
+    as_normalized,
+    as_stratified_vertices,
+    assign_cables,
+    calcload,
+)
 from .mesh import make_planar_embedding
-from .MILP import ModelOptions, solver_factory
+from .MILP import ModelOptions, solver_factory, OWNSolutionNotFound, OWNWarmupFailed
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot
-from .api_utils import (
-    validate_terse_links,
-    is_warmstart_eligible,
-    enable_ortools_logging_if_jupyter,
-    extract_network_as_array,
-    from_coordinates,
-    parse_cables_input,
-    plot_org_buff,
-)
 
 ###################
 # OptiWindNet API #
@@ -40,109 +50,312 @@ logger = logging.getLogger(__name__)
 error, warning, info = logger.error, logger.warning, logger.info
 
 
+class Router(ABC):
+    """Abstract base class for routing algorithms in OptiWindNet.
+
+    Each Router implementation must define a `route` method.
+    """
+
+    @abstractmethod
+    def route(
+        self,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        cables: list[tuple[int, float]],
+        cables_capacity: int,
+        verbose: bool,
+        **kwargs,
+    ) -> tuple[nx.Graph, nx.Graph]:
+        """Run the routing optimization.
+
+        Args:
+          P : Navigation mesh for the location.
+          A : Graph of available links.
+          cables: set of cable specifications as [(capacity, linear_cost), ...].
+          cables_capacity: highest cable capacity in cables.
+          verbose : Whether to print progress/logging info.
+          **kwargs : Additional router-specific parameters.
+
+        Returns:
+          S : Solution topology (selected links).
+          G : Optimized network graph with routes and cable types.
+        """
+        pass
+
+
 class WindFarmNetwork:
+    """Wind farm electrical network.
+
+    Wrapper of most of OptiWindNet's functionality (optimization, visualization,
+    cost/length evaluation, and gradient calculation).
+
+    An instance represents a wind farm location, which initially contains the number
+    and positions of wind turbines and substations, the delimited area and eventual
+    obstacles. A cable network may be provided or a ``Router`` instance may be used
+    to create an optimized network.
+
+    Attributes:
+      cables: set of cable specifications as [(capacity, linear_cost), ...].
+      cables_capacity: highest cable capacity in cables.
+      L: Location geometry (turbines, substations, borders, obstacles).
+      P: Triangular mesh over `L` (navigation mesh).
+      A: Available links graph (search space).
+      S: Solution topology (selected links).
+      G: Optimized network with cable routes and types.
+      name: Instance name.
+      handle: Short instance identifier.
+      buffer_dist: Border/obstacle buffer distance.
+      router: Router instance used for optimization.
     """
-    Represents a wind farm electrical network, capable of processing
-    layout data from different formats and computing network properties.
-    """
+
+    _is_stale_PA: bool = True
+    _is_stale_SG: bool = True
+    _is_stale_polygon: bool = True
 
     def __init__(
         self,
-        cables,
-        turbinesC=None,
-        substationsC=None,
-        borderC=None,
-        obstaclesC=None,
-        name='',
-        handle='',
-        L=None,
-        router=None,
-        buffer_dist=0,
+        cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
+        turbinesC: np.ndarray | None = None,
+        substationsC: np.ndarray | None = None,
+        borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
+        obstacleC_: Sequence[np.ndarray] = [],
+        name: str = '',
+        handle: str = '',
+        L: nx.Graph | None = None,
+        router: Router | None = None,
+        verbose: bool = False,
         **kwargs,
     ):
-        # Use a default router if none is provided
-        if router is None:
-            router = EWRouter()
-        self.router = router
+        """Initialize a wind farm electrical network.
 
-        # Construct layout from coordinates if not directly provided
-        if turbinesC is not None and substationsC is not None:
-            if L is not None:
+        Args:
+          cables: Multiple formats are accepted (capacity is in number of turbines):
+            * Set of cable specifications as: [(capacity, linear_cost), ...].
+            * Sequence of maximum capacity per cable type: [capacity_0, capacity_1, ...]
+            * Maximum capacity of all available cables: capacity
+          turbinesC: Turbine coordinates: [(x, y), ...].
+          substationsC: Substation coordinates: [(x, y), ...].
+          borderC: Polygonal border coordinates: [(x, y), ...].
+          obstacles: One or more polygons for exclusion zones: [[(x, y), ...], ...].
+          name: Human-readable instance name. Defaults to "".
+          handle: Short instance identifier. Defaults to "".
+          L: Location geometry (takes precedence over coordinate inputs).
+          router: Routing algorithm instance. Defaults to `EWRouter`.
+          buffer_dist: Buffer distance to inflate borders / shrink obstacles. Defaults to 0.
+          **kwargs: Additional keyword arguments forwarded to network-construction helpers.
+
+        Notes:
+          * If both `L` and coordinates are provided, `L` takes precedence.
+          * Changing coordinate data after creation (`turbinesC`, `substationsC`,
+              `borderC`, `obstaclesC`) rebuilds `L` and refreshes the navigation mesh
+              and available links.
+
+        Example::
+
+          cables = [(3, 100.0), (5, 150.0)]
+          turbines = np.array([[0, 0], [1, 0], [0, 1]])
+          substations = np.array([[10, 0]])
+          wfn = WindFarmNetwork(cables=cables, turbinesC=turbines, substationsC=substations)
+          wfn.optimize()
+          print(wfn.cost(), wfn.length())
+        """
+        # keep coord-related kwargs so rebuilds are consistent
+        self._coord_kwargs = dict(kwargs)
+
+        # simple fields via setters (for validation/normalization)
+        self.name = name
+        self.handle = handle
+        self.router = router if router is not None else EWRouter()
+        self.cables = cables  # computes cables_capacity
+
+        self.verbose = verbose
+
+        # decide source of L
+        if L is not None:
+            if turbinesC is not None or substationsC is not None:
                 warning(
-                    'Both coordinates and L are given, OptiWindNet prioritizes coordinates over L and neglects the provided L.'
+                    'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
-            L = from_coordinates(
-                self,
-                turbinesC,
-                substationsC,
-                borderC,
-                obstaclesC,
-                name,
-                handle,
-                buffer_dist,
+            L = as_stratified_vertices(L)
+            T = L.graph['T']
+        elif turbinesC is not None and substationsC is not None:
+            T = turbinesC.shape[0]
+            border_sizes = np.array(
+                [borderC.shape[0]] + [obs.shape[0] for obs in obstacleC_], dtype=np.int_
+            )
+            obstacle_slicelims = tuple(pairwise(T + np.cumsum(border_sizes)))
+
+            L = L_from_site(
+                R=substationsC.shape[0],
+                T=T,
+                B=border_sizes.sum().item(),
+                border=np.arange(T, T + borderC.shape[0]),
+                obstacles=[np.arange(a, b) for a, b in obstacle_slicelims],
+                name=name,
+                handle=handle,
+                VertexC=np.vstack((turbinesC, borderC, *obstacleC_, substationsC)),
                 **kwargs,
             )
-        elif L is None:
-            raise ValueError(
-                'Both turbinesC and substationsC must be provided! Or alternatively L should be given.'
+        else:
+            raise TypeError(
+                'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
             )
+        self._L = L
+        self._VertexC = L.graph['VertexC']
+        self._R, self._T = L.graph['R'], T
 
-        # Parse and validate cables input; convert to list of (capacity, cost) tuples
-        self.cables = parse_cables_input(cables)
+    # -------- helpers --------
+    def _refresh_planar(self):
+        polygon = self.polygon
+        if polygon is not None:
+            # check if any of the new turbine coordinates lie outside the polygon
+            if isinstance(polygon, shp.Polygon):
+                out_of_bounds = shp.MultiPoint(self._VertexC[: self._T]) - self.polygon
+            else:
+                # polygon is a Multipolygon of the obstacles
+                out_of_bounds = polygon & shp.MultiPoint(self._VertexC[: self._T])
+                for obstacle in polygon.geoms:
+                    if out_of_bounds.is_empty:
+                        break
+                    # remove from out_of_bounds the points lying on the border
+                    out_of_bounds -= obstacle.exterior
+            if not out_of_bounds.is_empty:
+                # TODO: if relevant, get coordinates of turbines from out_of_bounds
+                #  print(list(out_of_bounds.geoms))
+                raise ValueError('Turbine out of bounds!')
+        self._P, self._A = make_planar_embedding(self._L)
+        self._is_stale_PA = False
 
-        self.cables_capacity = max(c[0] for c in self.cables)
+    # -------- properties --------
+    @property
+    def L(self):
+        return self._L
 
-        self.L = L  # Location graph
+    @property
+    def polygon(self) -> shp.Polygon | None:
+        if self._is_stale_polygon:
+            L = self._L
+            T = L.graph['T']
+            border_sizes = np.array(
+                #  [len(L.graph['border'])] + [len(obs) for obs in L.graph['obstacles']],
+                [len(L.graph.get('border', []))]
+                + [len(obs) for obs in L.graph.get('obstacles', [])],
+                dtype=np.int_,
+            )
+            obstacle_slicelims = tuple(pairwise(T + np.cumsum(border_sizes)))
+            if border_sizes[0] > 0:
+                self._polygon = shp.Polygon(
+                    shell=self._VertexC[T : T + border_sizes[0]],
+                    holes=[self._VertexC[a:b] for a, b in obstacle_slicelims],
+                )
+            elif border_sizes.shape[0] > 1:
+                self._polygon = shp.MultiPolygon(
+                    [self._VertexC[a:b] for a, b in obstacle_slicelims]
+                )
+            else:
+                return None
+            shp.prepare(self._polygon)
+            self._is_stale_polygon = False
+        return self._polygon
 
-        # Create planar embedding from L
-        self.P, self.A = make_planar_embedding(L)
+    @property
+    def P(self) -> nx.PlanarEmbedding:
+        if self._is_stale_PA:
+            self._refresh_planar()
+        return self._P
 
-        # Initialize graph objects for S and G (to be filled later)
-        self.S = None
-        self.G = None
+    @property
+    def A(self) -> nx.Graph:
+        if self._is_stale_PA:
+            self._refresh_planar()
+        return self._A
 
-    def cost(self):
-        """Returns the total cost of the network."""
+    @property
+    def S(self) -> nx.Graph | None:
+        if self._is_stale_SG:
+            return None
+        return self._S
+
+    @property
+    def G(self) -> nx.Graph | None:
+        if self._is_stale_SG:
+            return None
+        return self._G
+
+    @property
+    def cables(self) -> list[tuple[int, float]]:
+        return self._cables
+
+    @cables.setter
+    def cables(self, cables):
+        parsed = parse_cables_input(cables)
+        self._cables = parsed
+        self.cables_capacity = max(parsed)[0]
+        if not self._is_stale_SG:
+            assign_cables(self._G, cables)
+
+    @property
+    def router(self) -> Router:
+        return self._router
+
+    @router.setter
+    def router(self, router: Router):
+        self._router = router if router is not None else EWRouter()
+
+    @property
+    def buffer_dist(self) -> float:
+        return self._buffer_dist
+
+    def cost(self) -> float:
+        """Get the total cost of the optimized network."""
         return self.G.size(weight='cost')
 
-    def length(self):
-        """Returns the total cable length of the network."""
+    def length(self) -> float:
+        """Get the total cable length of the optimized network."""
         return self.G.size(weight='length')
 
-    def plot_original_vs_buffered(self):
-        """Plot original and buffered borders and obstacles on a single plot."""
-        # get coordinates
-        borderC = self._borderC_original
-        border_bufferedC = self._border_bufferedC
-        obstaclesC = self._obstaclesC_original
-        obstacles_bufferedC = self._obstacles_bufferedC
+    def plot_original_vs_buffered(self, **kwargs):
+        """Plot original and buffered borders and obstacles on a single plot.
 
-        plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC)
+        Args:
+          **kwargs: passed to matplotlib's pyplot.figure()
+
+        Returns:
+          matplotlib Axes instance.
+        """
+        L = self._L
+        VertexC = self._VertexC
+        landscape_angle = L.graph.get('landscape_angle', False)
+        if landscape_angle:
+            pass  # to be added
+
+        borderC = VertexC[L.graph.get('border', [])]
+        obstacleC_ = [VertexC[obs] for obs in L.graph.get('obstacles', [])]
+
+        try:
+            plot_org_buff(
+                self._pre_buffer_border_obs['borderC'],
+                borderC,
+                self._pre_buffer_border_obs['obstaclesC'],
+                obstacleC_,
+                **kwargs,
+            )
+        except AttributeError:
+            print('No buffering is performed')
 
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from a YAML file."""
-        if not isinstance(filepath, str):
-            raise TypeError('Filepath must be a string')
-
-        L = L_from_yaml(filepath)
-        return cls(L=L, **kwargs)
+        """Create a WindFarmNetwork instance from a YAML file."""
+        return cls(L=L_from_yaml(filepath), **kwargs)
 
     @classmethod
-    def from_pbf(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from a PBF file."""
-        if not isinstance(filepath, str):
-            error('Filepath must be a string')
-
-        L = L_from_pbf(filepath)
-        return cls(L=L, **kwargs)
+    def from_pbf(cls, filepath: Path | str, **kwargs):
+        """Create a WindFarmNetwork instance from a .OSM.PBF file."""
+        return cls(L=L_from_pbf(filepath), **kwargs)
 
     @classmethod
-    def from_windIO(cls, filepath: str, **kwargs):
-        """Creates a WindFarmNetwork instance from WindIO yaml file."""
-        if not isinstance(filepath, str):
-            raise TypeError('Filepath must be a string')
-
+    def from_windIO(cls, filepath: Path | str, **kwargs):
+        """Create a WindFarmNetwork instance from WindIO yaml file."""
         fpath = Path(filepath)
 
         yaml.add_constructor('!include', yaml_include.Constructor(base_dir='data'))
@@ -180,29 +393,29 @@ class WindFarmNetwork:
         return svgplot(self.G)._repr_svg_()
 
     def plot(self, *args, **kwargs):
-        """Plots the final optimized network."""
+        """Plot the optimized network."""
         return gplot(self.G, *args, **kwargs)
 
     def plot_location(self, **kwargs):
-        """Plots the location (vertices and borders)."""
-        return gplot(self.L, **kwargs)
+        """Plot the original location graph."""
+        return gplot(self._L, **kwargs)
 
     def plot_available_links(self, **kwargs):
-        """Plots the available links from planar embedding."""
+        """Plot available links from planar embedding."""
         return gplot(self.A, **kwargs)
 
     def plot_navigation_mesh(self, **kwargs):
-        """Plots the navigation mesh (planar graph and adjacency)."""
+        """Plot navigation mesh (planar graph and adjacency)."""
         return pplot(self.P, self.A, **kwargs)
 
     def plot_selected_links(self, **kwargs):
-        """Plots the currently selected links in cable layout (chosen from available links)."""
+        """Plot tentative link selection."""
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
         return gplot(G_tentative, **kwargs)
 
     def terse_links(self):
-        """Returns a compact representation of the selected links as an array of link targets."""
+        """Get a compact representation of the solution topology."""
         R, T = (self.S.graph[k] for k in 'RT')
         terse = np.empty(T, dtype=int)
 
@@ -216,48 +429,51 @@ class WindFarmNetwork:
         return terse
 
     def update_from_terse_links(
-        self, terse_links: np.ndarray, turbinesC=None, substationsC=None
-    ) -> None:
+        self,
+        terse_links: np.ndarray,
+        turbinesC: np.ndarray | None = None,
+        substationsC: np.ndarray | None = None,
+    ):
+        """Update the network from terse link representation.
+
+        Accepts integers or integer-like floats (e.g., 3.0).
         """
-        Updates the network from terse link representation.
-        Accepts integers or integer-like floats (e.g., 3.0). Rejects non-integers.
-        """
-        validated_terse_links = validate_terse_links(terse_links=terse_links, L=self.L)
+        T = self._T
+        R = self._R
+
+        terse_links_ints = np.asarray(terse_links, dtype=np.int64)
 
         # Update coordinates if provided
         if turbinesC is not None:
-            self.L.graph['VertexC'][: turbinesC.shape[0], :] = turbinesC
+            self._VertexC[:T] = turbinesC
+            self._is_stale_PA = True
 
         if substationsC is not None:
-            self.L.graph['VertexC'][-substationsC.shape[0] :, :] = substationsC
+            self._VertexC[-R:] = substationsC
+            self._is_stale_PA = True
 
-        if turbinesC is not None or substationsC is not None:
-            self.P, self.A = make_planar_embedding(self.L)
+        S = nx.Graph(R=R, T=T, creator='from_terse_links')
+        for i, j in enumerate(terse_links_ints):
+            S.add_edge(i, j)
 
-        # Rebuild the selected edge set (links)
-        if self.S is None:
-            self.S = nx.Graph(R=self.L.graph['R'], T=self.L.graph['T'])
-        else:
-            self.S.clear_edges()
+        calcload(S)
 
-        for i, j in enumerate(validated_terse_links):
-            self.S.add_edge(i, j)
+        G_tentative = G_from_S(S, self.A)
 
-        calcload(self.S)
+        self._S = S
+        self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
 
-        G_tentative = G_from_S(self.S, self.A)
+        assign_cables(self._G, self.cables)
+        self._is_stale_SG = False
 
-        self.G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
-
-        assign_cables(self.G, self.cables)
-
-        return self.G
+        return
 
     def get_network(self):
-        """Returns the network as a structured array of edge data."""
+        """Export the optimized network as a structured array."""
         return extract_network_as_array(self.G)
 
     def map_detour_vertex(self):
+        """Map detour vertices back to their original coordinate indices."""
         if self.G.graph.get('C') or self.G.graph.get('D'):
             R, T, B = (self.G.graph[k] for k in 'RTB')
             map = dict(
@@ -269,27 +485,39 @@ class WindFarmNetwork:
             map = {}
         return map
 
+    def merge_obstacles_into_border(self):
+        L = merge_obs_into_border(self._L)
+        self._L = L
+        self._VertexC = L.graph['VertexC']
+        self._is_stale_polygon = True
+        self._is_stale_PA = True
+
+    def add_buffer(self, buffer_dist):
+        L, self._pre_buffer_border_obs = buffer_border_obs(
+            self._L, buffer_dist=buffer_dist
+        )
+        self._L = L
+        self._VertexC = L.graph['VertexC']
+        self._is_stale_polygon = True
+        self._is_stale_PA = True
+
     def gradient(self, turbinesC=None, substationsC=None, gradient_type='length'):
-        """
-        Computes gradients of total cable length or cost with respect to the node positions.
-        """
+        """Compute length/cost gradients with respect to node positions."""
         if gradient_type.lower() not in ['cost', 'length']:
             raise ValueError("gradient_type should be either 'cost' or 'length'")
 
         G = self.G
-        VertexC = G.graph['VertexC']
-        if turbinesC is not None or substationsC is not None:
-            info(
-                'wfn.gradient is not checking for the feasibility of the layout with new coordinates!'
-            )
-            VertexC = VertexC.copy()
-            if turbinesC is not None:
-                VertexC[: turbinesC.shape[0], :] = turbinesC
-            if substationsC is not None:
-                VertexC[-substationsC.shape[0] :, :] = substationsC
+        VertexC = G.graph['VertexC'].copy()
+        T = self._T
+        R = self._R
 
-        R = G.graph['R']
-        T = G.graph['T']
+        # Update coordinates if provided
+        if turbinesC is not None:
+            VertexC[:T] = turbinesC
+
+        if substationsC is not None:
+            VertexC[-R:] = substationsC
+
         gradients = np.zeros_like(VertexC)
 
         fnT = G.graph.get('fnT')
@@ -324,97 +552,75 @@ class WindFarmNetwork:
 
         return gradients_wt, gradients_ss
 
-    def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=None):
+    def optimize(self, turbinesC=None, substationsC=None, router=None, verbose=False):
+        """Optimize electrical network."""
+        R, T = self._R, self._T
         if router is None:
             router = self.router
         else:
             self.router = router
 
+        verbose = verbose or self.verbose
+
         # If new coordinates are provided, update them
         if turbinesC is not None:
-            self.L.graph['VertexC'][: turbinesC.shape[0], :] = turbinesC
+            self._VertexC[:T] = turbinesC
+            self._is_stale_PA = True
 
         if substationsC is not None:
-            self.L.graph['VertexC'][-substationsC.shape[0] :, :] = substationsC
+            self._VertexC[-R:] = substationsC
+            self._is_stale_PA = True
 
-        if turbinesC is not None or substationsC is not None:
-            self.P, self.A = make_planar_embedding(self.L)
+        if not self._is_stale_SG:
+            warmstart = dict(
+                S_warm=self._S,
+                S_warm_has_detour=self._G.graph.get('D', 0) > 0,
+            )
+        else:
+            warmstart = {}
 
-        D = (
-            self.G.graph['D']
-            if hasattr(self, 'G') and self.G is not None and 'D' in self.G.graph
-            else 0
-        )
-        S_warm_has_detour = D > 0
-
-        S, G = router(
-            L=self.L,
-            A=self.A,
+        self._S, self._G = router.route(
             P=self.P,
-            S_warm=self.S,
-            S_warm_has_detour=S_warm_has_detour,
+            A=self.A,
             cables=self.cables,
             cables_capacity=self.cables_capacity,
             verbose=verbose,
+            **warmstart,
         )
-        self.S = S
-        self.G = G
+        self._is_stale_SG = False
 
         terse_links = self.terse_links()
         return terse_links
 
-
-class Router(ABC):
-    def __init__(self, **kwargs):
-        pass
-
-    @abstractmethod
-    def optimize(
-        self,
-        L=None,
-        A=None,
-        P=None,
-        cables=None,
-        cables_capacity=None,
-        S_warm=None,
-        S_warm_has_detour=False,
-        verbose=False,
-        **kwargs,
-    ):
-        pass
-
-    def __call__(
-        self,
-        L=None,
-        A=None,
-        P=None,
-        cables=None,
-        cables_capacity=None,
-        S_warm=None,
-        S_warm_has_detour=False,
-        verbose=False,
-    ):
-        """Make the instance callable, calling optimize() internally."""
-        return self.optimize(
-            L=L,
-            A=A,
-            P=P,
-            cables=cables,
-            cables_capacity=cables_capacity,
-            S_warm=S_warm,
-            S_warm_has_detour=S_warm_has_detour,
-            verbose=verbose,
-        )
+    def solution_info(self):
+        """Get solver summary (runtime, objective, gap, etc.)."""
+        return {
+            k: self.G.graph[k]
+            for k in ('runtime', 'bound', 'objective', 'relgap', 'termination')
+        }
 
 
 class EWRouter(Router):
+    """A lightweight, ultra-fast router for electrical network optimization.
+
+    * Uses a modified Esau-Williams heuristic (segmented or straight feeders).
+    * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
+    """
+
     def __init__(
         self,
-        maxiter=10000,
-        feeder_route='segmented',
-        verbose=False,
+        maxiter: int = 10_000,
+        feeder_route: str = 'segmented',
+        verbose: bool = False,
         **kwargs,
-    ):
+    ) -> None:
+        """Create a Esau-Williams-based router.
+        Args:
+          maxiter: Maximum iterations.
+          feeder_route: Feeder routing mode ("segmented" or "straight").
+          verbose: Enable verbose logging.
+        """
+
         super().__init__(**kwargs)
 
         # Call the base class initialization
@@ -422,7 +628,7 @@ class EWRouter(Router):
         self.maxiter = maxiter
         self.feeder_route = feeder_route
 
-    def optimize(self, L, A, P, cables, cables_capacity, verbose=None, **kwargs):
+    def route(self, P, A, cables, cables_capacity, verbose=None, **kwargs):
         if verbose is None:
             verbose = self.verbose
 
@@ -430,7 +636,7 @@ class EWRouter(Router):
         if self.feeder_route == 'segmented':
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
         elif self.feeder_route == 'straight':
-            G_cpew = CPEW(L, capacity=cables_capacity, maxiter=self.maxiter)
+            G_cpew = CPEW(A, capacity=cables_capacity, maxiter=self.maxiter)
             S = S_from_G(G_cpew)
         else:
             raise ValueError(
@@ -447,16 +653,40 @@ class EWRouter(Router):
 
 
 class HGSRouter(Router):
+    """A fast router based on Hybrid Genetic Search (HGS-CVRP).
+
+    Uses the method and implementation by Vidal, 2022:
+      Vidal, T. (2022). Hybrid genetic search for the CVRP: Open-source implementation
+      and SWAP* neighborhood. Computers & Operations Research, 140, 105643.
+      https://doi.org/10.1016/j.cor.2021.105643
+
+    * Balances solution quality and runtime.
+    * Produces only radial solutions.
+    """
+
     def __init__(
         self,
-        time_limit,
+        time_limit: float,
         feeder_limit: int | None = None,
-        max_retries=10,
-        balanced=False,
-        seed: int = 0,
-        verbose=False,
+        max_retries: int = 10,
+        balanced: bool = False,
+        seed: int | None = None,
+        verbose: bool = False,
         **kwargs,
-    ):
+    ) -> None:
+        """Create an HGS-based router.
+
+        Args:
+            time_limit: Maximum runtime for a single HGS run (in seconds).
+            feeder_limit: Maximum number of feeders allowed (ignored if multiple substations).
+            max_retries: Maximum number of retries if a feasible solution is not found.
+            balanced: Whether to balance turbines/loads across feeders.
+            seed: Set the seed of the pseudo-random number generator (reproducibility).
+            verbose: Enable verbose logging.
+
+        Notes:
+            * The total runtime may reach up to `max_retries * time_limit` in the worst case.
+        """
         # Call the base class initialization
         super().__init__(**kwargs)
         self.time_limit = time_limit
@@ -466,9 +696,7 @@ class HGSRouter(Router):
         self.balanced = balanced
         self.seed = seed
 
-    def optimize(
-        self, A, P, cables, cables_capacity, S_warm=None, verbose=None, **kwargs
-    ):
+    def route(self, P, A, cables, cables_capacity, verbose=None, **kwargs):
         # If verbose argument is None, use the value of self.verbose
         if verbose is None:
             verbose = self.verbose
@@ -494,7 +722,10 @@ class HGSRouter(Router):
             )
             if verbose and self.feeder_limit:
                 print(
-                    'WARNING: HGSRouter is used for a plant with more than one substation and feeder-limit is neglected (The current implementation of HGSRouter does not support limiting the number of feeders in multi-substation plants.)'
+                    'WARNING: HGSRouter is used for a plant with more than one '
+                    'substation and feeder-limit is neglected (The current '
+                    'implementation of HGSRouter does not support limiting the number '
+                    'of feeders in multi-substation plants.)'
                 )
 
         G_tentative = G_from_S(S, A)
@@ -507,16 +738,32 @@ class HGSRouter(Router):
 
 
 class MILPRouter(Router):
+    """An exact router using mathematical programming.
+
+    * Uses a Mixed-Integer Linear Programming (MILP) model of the problem.
+    * Produces provably optimal or near-optimal networks (with quality metrics).
+    * Requires a longer runtime than heuristics- and meta-heuristics-based routers.
+    """
+
     def __init__(
         self,
-        solver_name,
-        time_limit,
-        mip_gap,
-        solver_options=None,
-        model_options=None,
-        verbose=False,
+        solver_name: str,
+        time_limit: float,
+        mip_gap: float,
+        solver_options: dict | None = None,
+        model_options: ModelOptions | None = None,
+        verbose: bool = False,
         **kwargs,
-    ):
+    ) -> None:
+        """Create a MILP-based router.
+        Args:
+            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools", "cplex", "highs", "scip").
+            time_limit: Maximum runtime (seconds).
+            mip_gap: Relative MIP optimality gap tolerance.
+            solver_options: Extra solver-specific options.
+            model_options: Options for the MILP model.
+            verbose: Enable verbose logging.
+        """
         super().__init__(**kwargs)
         self.time_limit = time_limit
         self.mip_gap = mip_gap
@@ -533,15 +780,16 @@ class MILPRouter(Router):
         if verbose and solver_name == 'ortools':
             enable_ortools_logging_if_jupyter(self.solver)
 
-    def optimize(
+    def route(
         self,
         P,
         A,
         cables,
         cables_capacity,
+        verbose=None,
         S_warm=None,
         S_warm_has_detour=False,
-        verbose=None,
+        num_retries: int = 2,
         **kwargs,
     ):
         if verbose is None:
@@ -559,24 +807,57 @@ class MILPRouter(Router):
 
         solver = self.solver
 
-        solver.set_problem(
-            P,
-            A,
-            capacity=cables_capacity,
-            model_options=self.model_options,
-            warmstart=S_warm,
-        )
+        for _ in range(2):
+            try:
+                solver.set_problem(
+                    P,
+                    A,
+                    capacity=cables_capacity,
+                    model_options=self.model_options,
+                    warmstart=S_warm,
+                )
+                break
+            except OWNWarmupFailed:
+                if self.model_options['topology'] == 'branched':
+                    feeder_route = self.model_options['feeder_route']
+                    if feeder_route == 'segmented':
+                        S_warm = EW_presolver(A, capacity=cables_capacity)
+                    elif feeder_route == 'straight':
+                        S_warm = S_from_G(CPEW(A, capacity=cables_capacity))
+                else:
+                    if A.graph['R'] == 1:
+                        S_warm = iterative_hgs_cvrp(
+                            as_normalized(A),
+                            capacity=cables_capacity,
+                            time_limit=min(self.time_limit, 0.2),
+                        )
+                    else:
+                        S = hgs_multiroot(
+                            as_normalized(A),
+                            capacity=cables_capacity,
+                            time_limit=min(self.time_limit, 0.2),
+                        )
 
-        solution_info = solver.solve(
-            time_limit=self.time_limit,
-            mip_gap=self.mip_gap,
-            options=self.solver_options,
-            verbose=verbose,
-        )
+        else:
+            raise OWNWarmupFailed('Unable to warm-start model.')
+
+        for _ in range(num_retries + 1):
+            try:
+                solver.solve(
+                    time_limit=self.time_limit,
+                    mip_gap=self.mip_gap,
+                    options=self.solver_options,
+                    verbose=verbose,
+                )
+                break
+            except OWNSolutionNotFound:
+                continue
+        else:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution to the MILP model after {num_retries} retries'
+            )
 
         S, G = solver.get_solution()
-
-        G.SolutionInfo = solution_info
 
         assign_cables(G, cables)
 

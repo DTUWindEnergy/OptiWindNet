@@ -10,6 +10,7 @@ from typing import Any
 
 import networkx as nx
 import pyomo.environ as pyo
+from pyomo.util.infeasible import find_infeasible_constraints
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
@@ -19,6 +20,8 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
+    OWNSolutionNotFound,
+    OWNWarmupFailed,
     SolutionInfo,
     Solver,
     Topology,
@@ -105,7 +108,7 @@ class SolverPyomo(Solver):
 
     def solve(
         self,
-        time_limit: int,
+        time_limit: float,
         mip_gap: float,
         options: dict[str, Any] = {},
         verbose: bool = False,
@@ -122,7 +125,14 @@ class SolverPyomo(Solver):
         )
         solver.options.update(applied_options)
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
-        result = solver.solve(model, **self.solve_kwargs, tee=verbose)
+        result = solver.solve(
+            model, **self.solve_kwargs, tee=verbose, load_solutions=False
+        )
+        termination = result['Solver'][0]['Termination condition'].name
+        if len(result.solution) == 0:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+            )
         self.result = result
         if self.name != 'scip':
             objective = result['Problem'][0]['Upper bound']
@@ -135,17 +145,21 @@ class SolverPyomo(Solver):
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,
-            termination=result['Solver'][0]['Termination condition'].name,
+            termination=termination,
         )
         self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        P, model, model_options = self.P, self.model, self.model_options
+        result = self.result
+        # hack to prevent warning about the solver not reaching the desired mip_gap
+        result.solver.status = pyo.SolverStatus.ok
+        model.solutions.load_from(result)
         if A is None:
             A = self.A
-        P, model_options = self.P, self.model_options
-        S = topology_from_mip_sol(model=self.model)
+        S = topology_from_mip_sol(model=model)
         S.graph['creator'] += self.name
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
@@ -438,11 +452,24 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
 
     Returns:
       The same model instance that was provided, now with a solution.
+
+    Raises:
+      OWNWarmupFailed: if some link in S is not available in model.
     """
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
-        model.link_[(u, v)] = 1
+        try:
+            model.link_[(u, v)] = 1
+        except KeyError:
+            raise OWNWarmupFailed(
+                f'warmup_model() failed: model lacks S link ({u, v})'
+            ) from None
         model.flow_[(u, v)] = S[u][v]['load']
+    # check if solution violates any constraints:
+    # checking the bounds seem redundant, but the way to do it would be:
+    # next(find_infeasible_bounds(model), False)
+    if next(find_infeasible_constraints(model), False):
+        raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     model.warmed_by = S.graph['creator']
     return model
 
