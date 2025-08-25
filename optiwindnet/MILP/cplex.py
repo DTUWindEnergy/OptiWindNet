@@ -33,7 +33,7 @@ class SolverCplex(SolverPyomo, PoolHandler):
 
     def solve(
         self,
-        time_limit: int,
+        time_limit: float,
         mip_gap: float,
         options: dict[str, Any] = {},
         verbose: bool = False,

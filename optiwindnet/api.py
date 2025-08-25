@@ -748,7 +748,7 @@ class MILPRouter(Router):
     def __init__(
         self,
         solver_name: str,
-        time_limit: int,
+        time_limit: float,
         mip_gap: float,
         solver_options: dict | None = None,
         model_options: ModelOptions | None = None,
