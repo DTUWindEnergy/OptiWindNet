@@ -296,7 +296,7 @@ class WindFarmNetwork:
         self._cables = parsed
         self.cables_capacity = max(parsed)[0]
         if not self._is_stale_SG:
-            assign_cables(self._G, cables)
+            assign_cables(self._G, parsed)
 
     @property
     def router(self) -> Router:
@@ -388,7 +388,7 @@ class WindFarmNetwork:
                 {'border': np.arange(T, T + borderC.shape[0])}
                 if (borderC is not None and borderC.shape[0] >= 3)
                 else {}
-                ),
+            ),
             name=' '.join(name_tokens),
             handle=f'{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}',
             **kwargs,
@@ -637,7 +637,6 @@ class EWRouter(Router):
         self.feeder_route = feeder_route
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        
         verbose = verbose or self.verbose
 
         # optimizing
@@ -705,7 +704,6 @@ class HGSRouter(Router):
         self.seed = seed
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        
         verbose = verbose or self.verbose
 
         # optimizing
