@@ -188,8 +188,12 @@ class WindFarmNetwork:
             L = L_from_site(
                 R=substationsC.shape[0],
                 T=T,
-                B=border_sizes.sum().item(),
-                border=np.arange(T, T + borderC.shape[0]),
+                B=border_sizes.sum().item(),             
+                **(
+                    {'border': np.arange(T, T + borderC.shape[0])}
+                    if (borderC is not None and borderC.shape[0] >= 3)
+                    else {}
+                ),
                 obstacles=[np.arange(a, b) for a, b in obstacle_slicelims],
                 name=name,
                 handle=handle,
@@ -380,7 +384,11 @@ class WindFarmNetwork:
             R=R,
             T=T,
             VertexC=np.vstack((terminalC, borderC, rootC)),
-            border=np.arange(T, T + borderC.shape[0]),
+            **(
+                {'border': np.arange(T, T + borderC.shape[0])}
+                if (borderC is not None and borderC.shape[0] >= 3)
+                else {}
+            ),
             name=' '.join(name_tokens),
             handle=f'{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}',
             **kwargs,
@@ -390,7 +398,7 @@ class WindFarmNetwork:
 
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
-        return svgplot(self.G)._repr_svg_()
+        return svgplot(self.L if self._is_stale_SG else self.G)._repr_svg_()
 
     def plot(self, *args, **kwargs):
         """Plot the optimized network."""
@@ -398,7 +406,7 @@ class WindFarmNetwork:
 
     def plot_location(self, **kwargs):
         """Plot the original location graph."""
-        return gplot(self._L, **kwargs)
+        return gplot(self.L, **kwargs)
 
     def plot_available_links(self, **kwargs):
         """Plot available links from planar embedding."""
