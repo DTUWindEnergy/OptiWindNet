@@ -636,9 +636,9 @@ class EWRouter(Router):
         self.maxiter = maxiter
         self.feeder_route = feeder_route
 
-    def route(self, P, A, cables, cables_capacity, verbose=None, **kwargs):
-        if verbose is None:
-            verbose = self.verbose
+    def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
+        
+        verbose = verbose or self.verbose
 
         # optimizing
         if self.feeder_route == 'segmented':
@@ -704,10 +704,9 @@ class HGSRouter(Router):
         self.balanced = balanced
         self.seed = seed
 
-    def route(self, P, A, cables, cables_capacity, verbose=None, **kwargs):
-        # If verbose argument is None, use the value of self.verbose
-        if verbose is None:
-            verbose = self.verbose
+    def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
+        
+        verbose = verbose or self.verbose
 
         # optimizing
         R = A.graph['R']
@@ -794,14 +793,13 @@ class MILPRouter(Router):
         A,
         cables,
         cables_capacity,
-        verbose=None,
+        verbose=False,
         S_warm=None,
         S_warm_has_detour=False,
         num_retries: int = 2,
         **kwargs,
     ):
-        if verbose is None:
-            verbose = self.verbose
+        verbose = verbose or self.verbose
 
         is_warmstart_eligible(
             S_warm=S_warm,
