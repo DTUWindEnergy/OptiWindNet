@@ -74,7 +74,14 @@ def assign_cables(G: nx.Graph, cables: list[tuple[int, float]], currency: str = 
     capacity = max(cables)[0]
     if G.graph['max_load'] > capacity:
         raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
-    kind = [i for i, cap in enumerate(cables) for _ in range(cap[0])]
+    k = 0
+    kind = [0]
+    cap_prev = cables[0][0]
+    for cap in range(2, capacity + 1):
+        if cap > cap_prev:
+            k += 1
+            cap_prev = cables[k][0]
+        kind.append(k)
     cost = [cables[k][1] for k in kind]
     has_cost = sum(cost) > 0
     for _, _, data in G.edges(data=True):
