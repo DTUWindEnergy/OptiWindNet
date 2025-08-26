@@ -390,7 +390,7 @@ class WindFarmNetwork:
 
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
-        return svgplot(self.G)._repr_svg_()
+        return svgplot(self.G)._repr_svg_() if self.G is not None else svgplot(self.L)._repr_svg_()
 
     def plot(self, *args, **kwargs):
         """Plot the optimized network."""
