@@ -688,7 +688,6 @@ class PathFinder:
         J = nx.Graph()
         J.add_nodes_from(self.G.nodes)
         self._apply_all_best_paths(J)
-        self._apply_all_best_paths(J)
         K = self.G.copy()
         K.graph['overlay'] = J
         if 'capacity' in K.graph:
