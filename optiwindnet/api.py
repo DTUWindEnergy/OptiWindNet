@@ -540,11 +540,9 @@ class WindFarmNetwork:
         vec /= norm[:, None]
 
         if gradient_type.lower() == 'cost':
+            cost_ = [cost for _, cost in G.graph['cables']]
             cable_costs = np.fromiter(
-                (
-                    G.graph['cables'][cable][1]
-                    for *_, cable in G.edges(data='cable')
-                ),
+                (cost_[cable] for *_, cable in G.edges(data='cable')),
                 dtype=np.float64,
                 count=G.number_of_edges(),
             )
