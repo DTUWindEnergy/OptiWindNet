@@ -542,7 +542,7 @@ class WindFarmNetwork:
         if gradient_type.lower() == 'cost':
             cable_costs = np.fromiter(
                 (
-                    G.graph['cables'][cable]['cost']
+                    G.graph['cables'][cable][1]
                     for *_, cable in G.edges(data='cable')
                 ),
                 dtype=np.float64,
