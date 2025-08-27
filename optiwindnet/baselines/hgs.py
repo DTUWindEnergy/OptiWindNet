@@ -330,10 +330,13 @@ def hgs_multiroot(
     if keep_log:
         S.graph['method_log'] = log_
     subtree_id_start = 0
+    max_load = 0
     for r, (routes, indices) in enumerate(zip(routes_, indices_), start=-R):
         branches = (indices[route] for route in routes)
         for subtree_id, branch in enumerate(branches, start=subtree_id_start):
-            loads = range(len(branch), 0, -1)
+            branch_load = len(branch)
+            max_load = max(max_load, branch_load)
+            loads = range(branch_load, 0, -1)
             S.add_nodes_from(
                 ((n, {'load': load}) for n, load in zip(branch, loads)),
                 subtree=subtree_id,
@@ -353,6 +356,7 @@ def hgs_multiroot(
     assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
         'ERROR: root node load does not match T.'
     )
+    S.graph['max_load'] = max_load
     return S
 
 
