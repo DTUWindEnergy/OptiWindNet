@@ -288,8 +288,8 @@ def test_from_yaml(LG_from_database):
     [
         EWRouter(),
         EWRouter(feeder_route='straight'),
-        HGSRouter(time_limit=1),
-        HGSRouter(time_limit=1, feeder_limit=1, max_retries=5, balanced=True),
+        HGSRouter(time_limit=1, seed=0),
+        HGSRouter(time_limit=1, feeder_limit=1, max_retries=5, balanced=True, seed=0),
         MILPRouter(solver_name='ortools', time_limit=2, mip_gap=0.005),
         MILPRouter(solver_name='cbc', time_limit=2, mip_gap=0.005),
         MILPRouter(solver_name='cplex', time_limit=2, mip_gap=0.005),

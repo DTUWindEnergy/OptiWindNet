@@ -286,6 +286,26 @@ def extract_network_as_array(G):
             ('cost', float),
         ]
     )
+    schema = [ (...), ... ]
+    if 'has_cost' in G.graph:
+        network_array_type = np.dtype(
+            [
+                ('src', int),
+                ('tgt', int),
+                ('length', float),
+                ('load', float),
+                ('cable', int),
+                ('cost', float),
+            ])
+    else:
+        network_array_type = np.dtype(
+            [
+                ('src', int),
+                ('tgt', int),
+                ('length', float),
+                ('load', float),
+                ('cable', int),
+            ])
 
     def iter_edges(G, keys):
         for s, t, edgeD in G.edges(data=True):
