@@ -170,6 +170,7 @@ class Solver(abc.ABC):
         A: nx.Graph,
         capacity: int,
         model_options: ModelOptions,
+        warmstart: nx.Graph | None = None,
     ):
         """Define the problem geometry, available edges and tree properties
 
@@ -178,6 +179,7 @@ class Solver(abc.ABC):
           A: available edges for the location
           capacity: maximum number of terminals in a subtree
           model_options: tree properties - see ModelOptions.help()
+          warmstart: initial feasible solution to pass to solver
         """
         pass
 
