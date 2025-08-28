@@ -407,7 +407,7 @@ class WindFarmNetwork:
         return gplot(self.G, *args, **kwargs)
 
     def plot_location(self, **kwargs):
-        """Plot the original location graph."""
+        """Plot the original location geometry."""
         return gplot(self.L, **kwargs)
 
     def plot_available_links(self, **kwargs):
