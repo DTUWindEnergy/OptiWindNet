@@ -69,6 +69,7 @@ autoapi_options = [
     'special-members',
     'imported-members',
 ]
+autoapi_python_class_content = 'both'
 #  autoapi_add_toctree_entry = False
 
 # The suffix(es) of source filenames.
