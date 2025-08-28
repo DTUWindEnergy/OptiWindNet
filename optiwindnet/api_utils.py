@@ -180,12 +180,16 @@ def is_warmstart_eligible(
 
     # Detour constraint
     if S_warm_has_detour and model_options.get('feeder_route') == 'straight':
-        reasons.append('detours present but feeder_route is set to "straight"')
+        reasons.append(
+            'segmented feeders are incompatible with model option: feeder_route="straight"'
+        )
 
     # Topology constraint
     branched_nodes = [n for n in S_warm.nodes if n >= 0 and S_warm.degree[n] > 2]
     if branched_nodes and model_options.get('topology') == 'radial':
-        reasons.append('branched structure not allowed under "radial" topology')
+        reasons.append(
+            'branched network incompatible with model option: topology="radial"'
+        )
 
     # Output
     if reasons and verbose_warmstart:
