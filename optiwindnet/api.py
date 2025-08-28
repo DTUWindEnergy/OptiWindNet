@@ -39,9 +39,9 @@ from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot
 
-###################
-# OptiWindNet API #
-###################
+##################################
+# OptiWindNet Network/Router API #
+##################################
 
 # Keep text editable (not converted to paths) in SVG output
 plt.rcParams['svg.fonttype'] = 'none'
