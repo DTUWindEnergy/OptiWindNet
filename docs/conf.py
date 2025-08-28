@@ -211,7 +211,12 @@ html_theme = 'furo'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-#  html_static_path = ['_static']
+html_static_path = ['_static']
+html_theme_options = {
+    'light_logo': 'OptiWindNet_boxed.svg',
+    'dark_logo': 'OptiWindNet.svg',
+}
+html_title = f'version {release}'
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.

@@ -1,3 +1,10 @@
+<p></p>
+
+```{image} _static/OptiWindNet.svg
+:alt: OptiWindNet
+:width: 40%
+:align: center
+```
 # OptiWindNet Documentation
 **OptiWindNet = Optimize Windfarm Network**\
 (distributed under the [MIT License](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/blob/main/LICENSE))
