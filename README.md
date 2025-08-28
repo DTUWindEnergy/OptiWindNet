@@ -6,7 +6,7 @@
 [![DOI](https://zenodo.org/badge/164115313.svg)](https://zenodo.org/badge/latestdoi/164115313)
 -->
 
-![OptiWindNet](docs/_static/OptiWindNet.svg){width=60%}
+![OptiWindNet](docs/_static/OptiWindNet.svg)
 
 OptiWindNet
 ===========
