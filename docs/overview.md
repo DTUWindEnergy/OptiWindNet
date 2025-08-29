@@ -1,4 +1,4 @@
-# APIs Overview
+# Network/Router vs Advanced API
 
 OptiWindNet’s documentation is based on two series of example Jupyter notebooks, each with a specific focus:
 
