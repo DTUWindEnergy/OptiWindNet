@@ -809,15 +809,17 @@ class MILPRouter(Router):
     ):
         verbose = verbose or self.verbose
 
-        is_warmstart_eligible(
-            S_warm=S_warm,
-            cables_capacity=cables_capacity,
-            model_options=self.model_options,
-            S_warm_has_detour=S_warm_has_detour,
-            solver_name=self.solver_name,
-            logger=logging.getLogger(__name__),
-            verbose=verbose,
-        )
+        if self.solver_name == 'ortools':
+            # pyomo-based solvers already do a thorough feasibility check on warmstarts
+            is_warmstart_eligible(
+                S_warm=S_warm,
+                cables_capacity=cables_capacity,
+                model_options=self.model_options,
+                S_warm_has_detour=S_warm_has_detour,
+                solver_name=self.solver_name,
+                logger=logging.getLogger(__name__),
+                verbose=verbose,
+            )
 
         solver = self.solver
 
