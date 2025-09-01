@@ -13,6 +13,7 @@ import networkx as nx
 import numpy as np
 import shapely as shp
 import utm
+import windIO
 import yaml
 
 from .interarraylib import L_from_site
@@ -424,6 +425,47 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     if plant_name is not None:
         L.graph['OSM_name'] = plant_name
 
+    return L
+
+
+def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
+    """Import wind farm data from a windIO .yaml file.
+
+    Args:
+      filepath: path to windIO `.yaml` file to read.
+      handle: Short moniker for the site.
+
+    Returns:
+      Unconnected location geometry L.
+    """
+    if isinstance(filepath, str):
+        filepath = Path(filepath)
+    name = filepath.stem
+    system = windIO.load_yaml(filepath)
+    coords = system['wind_farm']['layouts']['initial_layout']['coordinates']
+    terminalC = np.c_[coords['x'], coords['y']]
+    coords = system['wind_farm']['electrical_substations']['coordinates']
+    rootC = np.c_[coords['x'], coords['y']]
+    coords = system['site']['boundaries']['polygons'][0]
+    borderC = np.c_[coords['x'], coords['y']]
+
+    T = terminalC.shape[0]
+    R = rootC.shape[0]
+    if handle is None:
+        handle = make_handle(name)
+
+    L = L_from_site(
+        R=R,
+        T=T,
+        VertexC=np.vstack((terminalC, borderC, rootC)),
+        **(
+            {'border': np.arange(T, T + borderC.shape[0])}
+            if (borderC is not None and borderC.shape[0] >= 3)
+            else {}
+        ),
+        name=name,
+        handle=handle,
+    )
     return L
 
 
