@@ -157,7 +157,7 @@ nbsphinx_prolog = r"""
             <a href="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/{{ docname }}">
             <img alt="Edit on Gitlab" src="https://img.shields.io/badge/Edit%20on-Gitlab-blue?style=flat&logo=gitlab" style="vertical-align:text-bottom">
             </a>
-            <a href="https://mybinder.org/v2/git/https%3A%2F%2Fgitlab.windenergy.dtu.dk%2FTOPFARM%2FOptiWindNet.git/main?labpath={{ docname }}" target="_blank">
+            <a href="https://mybinder.org/v2/gh/DTUWindEnergy/OptiWindNet/mybinder?urlpath={{ docname }}" target="_blank">
             <img alt="Launch with Binder" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom">
             </a>
 
