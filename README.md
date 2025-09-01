@@ -6,17 +6,24 @@
 [![DOI](https://zenodo.org/badge/164115313.svg)](https://zenodo.org/badge/latestdoi/164115313)
 -->
 
+![OptiWindNet](docs/_static/OptiWindNet.svg)
+
 OptiWindNet
 ===========
 
 Tool for designing and optimizing the electrical cable network of offshore wind farms.
 
-Documentation: [https://optiwindnet.readthedocs.io](https://optiwindnet.readthedocs.io)
-- [Quickstart](https://optiwindnet.readthedocs.io/stable/notebooks/quickstart_high.html)
-- [Download the Jupyter notebooks](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks) used in the documentation.
-- [Report an issue](https://github.com/DTUWindEnergy/OptiWindNet/issues) (mirror of OptiWindNet on GitHub)
-- [API Reference](https://optiwindnet.readthedocs.io/stable/autoapi/index.html)
-- [How to Cite](https://optiwindnet.readthedocs.io/stable/index.html#how-to-cite)
+
+|Documentation:<br>[optiwindnet.readthedocs.io][docs]||
+|:--|:-:|
+|<ul><li>[Quickstart][quick]</li><li>[Download the Jupyter notebooks][down] used in the documentation.</li><li>[Report an issue][issue] (at GitHub mirror)</li><li>[API Reference][api]</li><li>[How to Cite][cite]</li></ul>|![FancyWindFarm](docs/_static/OptiWindNet_windfarm.svg)|
+
+[docs]: https://optiwindnet.readthedocs.io
+[quick]: https://optiwindnet.readthedocs.io/stable/notebooks/quickstart_high.html
+[down]: https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks
+[issue]: https://github.com/DTUWindEnergy/OptiWindNet/issues
+[api]: https://optiwindnet.readthedocs.io/stable/autoapi/index.html
+[cite]: https://optiwindnet.readthedocs.io/stable/index.html#how-to-cite
 
 Installation
 ------------

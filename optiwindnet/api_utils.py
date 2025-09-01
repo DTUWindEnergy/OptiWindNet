@@ -180,12 +180,16 @@ def is_warmstart_eligible(
 
     # Detour constraint
     if S_warm_has_detour and model_options.get('feeder_route') == 'straight':
-        reasons.append('detours present but feeder_route is set to "straight"')
+        reasons.append(
+            'segmented feeders are incompatible with model option: feeder_route="straight"'
+        )
 
     # Topology constraint
     branched_nodes = [n for n in S_warm.nodes if n >= 0 and S_warm.degree[n] > 2]
     if branched_nodes and model_options.get('topology') == 'radial':
-        reasons.append('branched structure not allowed under "radial" topology')
+        reasons.append(
+            'branched network incompatible with model option: topology="radial"'
+        )
 
     # Output
     if reasons and verbose_warmstart:
@@ -262,7 +266,7 @@ def compute_edge_gradients(G, gradient_type='length'):
 
     if gradient_type.lower() == 'cost':
         cable_costs = np.fromiter(
-            (G.graph['cables'][cable]['cost'] for *_, cable in G.edges(data='cable')),
+            (G.graph['cables'][cable][1] for *_, cable in G.edges(data='cable')),
             dtype=np.float64,
             count=G.number_of_edges(),
         )
@@ -275,27 +279,23 @@ def compute_edge_gradients(G, gradient_type='length'):
 
 
 def extract_network_as_array(G):
-    network_array_type = np.dtype(
-        [
-            ('src', int),
-            ('tgt', int),
-            ('length', float),
-            ('load', float),
-            ('reverse', bool),
-            ('cable', int),
-            ('cost', float),
-        ]
-    )
+    keys = ['src', 'tgt', 'length', 'load', 'cable']
+    types = [int, int, float, float, int]
+    if 'has_cost' in G.graph:
+        keys.append('cost')
+        types.append(float)
 
-    def iter_edges(G, keys):
+    def iter_edges():
         for s, t, edgeD in G.edges(data=True):
-            yield s, t, *(edgeD[key] for key in keys)
+            s, t = (s, t) if ((s < t) == edgeD['reverse']) else (t, s)
+            yield s, t, *(edgeD[key] for key in keys[2:])
 
     network = np.fromiter(
-        iter_edges(G, network_array_type.names[2:]),
-        dtype=network_array_type,
+        iter_edges(),
+        dtype=list(zip(keys, types)),
         count=G.number_of_edges(),
     )
+
     return network
 
 

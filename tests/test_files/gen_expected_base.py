@@ -72,7 +72,7 @@ if __name__ == '__main__':
     calcload(G)
     expected['G_calcload'] = copy.deepcopy(G)
 
-    cables_assign = [(3, 100), (5, 150), (7, 200)]
+    cables_assign = [(3, 1500.00), (5, 1800.0), (7, 2000.0)]
     assign_cables(G, cables_assign)
     expected['cables'] = cables_assign
     expected['G_assign_cables'] = copy.deepcopy(G)
@@ -124,9 +124,9 @@ if __name__ == '__main__':
     routers = {
         'EWRouter': {'router': None, 'cables': 7},
         'EWRouter_straight': {'router': EWRouter(feeder_route='straight'), 'cables': 7},
-        'HGSRouter': {'router': HGSRouter(time_limit=2), 'cables': 7},
+        'HGSRouter': {'router': HGSRouter(time_limit=2, seed=0), 'cables': 7,},
         'HGSRouter_feeder_limit': {
-            'router': HGSRouter(time_limit=2, feeder_limit=0),
+            'router': HGSRouter(time_limit=2, feeder_limit=0, seed=0),
             'cables': 7,
         },
         'MILPRouter': {

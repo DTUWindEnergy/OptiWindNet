@@ -13,9 +13,10 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 from importlib.metadata import version as get_version
+
 release: str = get_version('optiwindnet')
 # for example take major/minor
-version: str = ".".join(release.split('.')[:2])
+version: str = '.'.join(release.split('.')[:2])
 
 # -- Project information -----------------------------------------------------
 
@@ -61,7 +62,14 @@ extensions = [
 # Auto API conf.:
 autoapi_dirs = ['../optiwindnet']
 #  autoapi_options = [ 'members', 'undoc-members', 'private-members', 'show-inheritance', 'show-module-summary', 'special-members', 'imported-members', ]
-autoapi_options = [ 'members', 'undoc-members', 'show-inheritance', 'special-members', 'imported-members', ]
+autoapi_options = [
+    'members',
+    'undoc-members',
+    'show-inheritance',
+    'special-members',
+    'imported-members',
+]
+autoapi_python_class_content = 'both'
 #  autoapi_add_toctree_entry = False
 
 # The suffix(es) of source filenames.
@@ -89,12 +97,12 @@ exclude_patterns = [
     # ipynb checkpoints
     'notebooks/.ipynb_checkpoints/*.ipynb',
     'notebooks/figure_notebooks/*.ipynb',
-    'build/*'
+    'build/*',
 ]
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = "default"
-pygments_dark_style = "monokai"
+pygments_style = 'default'
+pygments_dark_style = 'monokai'
 
 
 autosummary_generate = True
@@ -107,13 +115,13 @@ napolean_use_rtype = False
 nbsphinx_execute = 'never'
 
 # Use this kernel instead of the one stored in the notebook metadata:
-#nbsphinx_kernel_name = 'python3'
+# nbsphinx_kernel_name = 'python3'
 
 # List of arguments to be passed to the kernel that executes the notebooks:
 # nbsphinx_execute_arguments = []
 
 # If True, the build process is continued even if an exception occurs:
-#nbsphinx_allow_errors = True
+# nbsphinx_allow_errors = True
 
 
 # Controls when a cell will time out (defaults to 30; use -1 for no timeout):
@@ -123,10 +131,10 @@ nbsphinx_timeout = 180
 nbsphinx_codecell_lexer = 'python3'
 
 # Width of input/output prompts used in CSS:
-#nbsphinx_prompt_width = '8ex'
+# nbsphinx_prompt_width = '8ex'
 
 # If window is narrower than this, input/output prompts are on separate lines:
-#nbsphinx_responsive_width = '700px'
+# nbsphinx_responsive_width = '700px'
 
 # This is processed by Jinja2 and inserted before each notebook
 
@@ -135,14 +143,23 @@ nbsphinx_prolog = r"""
 
 
 .. only:: html
+    
+    .. raw:: html
 
-    .. role:: raw-html(raw)
-        :format: html
+        <style>
+        .stderr { background: transparent !important; border: dashed red; }
+        </style>
 
     .. nbinfo::
 
-        :raw-html:`<a href="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/{{ docname }}"><img alt="Edit on Gitlab" src="https://img.shields.io/badge/Edit%20on-Gitlab-blue?style=flat&logo=gitlab" style="vertical-align:text-bottom"></a>
-        <a href="https://mybinder.org/v2/git/https%3A%2F%2Fgitlab.windenergy.dtu.dk%2FTOPFARM%2FOptiWindNet.git/main?labpath={{ docname }}" target="_blank"><img alt="Launch with Binder" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom"></a>`
+        .. raw:: html
+
+            <a href="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/{{ docname }}">
+            <img alt="Edit on Gitlab" src="https://img.shields.io/badge/Edit%20on-Gitlab-blue?style=flat&logo=gitlab" style="vertical-align:text-bottom">
+            </a>
+            <a href="https://mybinder.org/v2/git/https%3A%2F%2Fgitlab.windenergy.dtu.dk%2FTOPFARM%2FOptiWindNet.git/main?labpath={{ docname }}" target="_blank">
+            <img alt="Launch with Binder" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom">
+            </a>
 
 """
 
@@ -151,28 +168,25 @@ nbsphinx_prolog = r"""
 # """
 
 # Input prompt for code cells. "%s" is replaced by the execution count.
-#nbsphinx_input_prompt = 'In [%s]:'
+# nbsphinx_input_prompt = 'In [%s]:'
 
 # Output prompt for code cells. "%s" is replaced by the execution count.
-#nbsphinx_output_prompt = 'Out[%s]:'
+# nbsphinx_output_prompt = 'Out[%s]:'
 
 # Specify conversion functions for custom notebook formats:
-#import jupytext
+# import jupytext
 # nbsphinx_custom_formats = {
 #    '.Rmd': lambda s: jupytext.reads(s, '.Rmd'),
 # }
 
 # Link or path to require.js, set to empty string to disable
-#nbsphinx_requirejs_path = ''
+# nbsphinx_requirejs_path = ''
 
 # Options for loading require.js
-#nbsphinx_requirejs_options = {'async': 'async'}
+# nbsphinx_requirejs_options = {'async': 'async'}
 
 mathjax3_config = {
-    'tex': {
-        'tags': {'autoNumber': 'ams',
-                 'useLabelIds': True}
-    },
+    'tex': {'tags': {'autoNumber': 'ams', 'useLabelIds': True}},
 }
 
 # Additional files needed for generating LaTeX/PDF output:
@@ -189,15 +203,20 @@ html_theme = 'furo'
 # further.  For a list of options available for each theme, see the
 # documentation.
 #  html_theme_options = {
-    # TOC options
-    # 'navigation_depth': 2,  # only show 2 levels on left sidebar
-    #  'collapse_navigation': False,  # don't allow sidebar to collapse
+# TOC options
+# 'navigation_depth': 2,  # only show 2 levels on left sidebar
+#  'collapse_navigation': False,  # don't allow sidebar to collapse
 #  }
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-#  html_static_path = ['_static']
+html_static_path = ['_static']
+html_theme_options = {
+    'light_logo': 'OptiWindNet_boxed.svg',
+    'dark_logo': 'OptiWindNet.svg',
+}
+html_title = f'version {release}'
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
@@ -222,15 +241,12 @@ latex_elements = {
     # The paper size ('letterpaper' or 'a4paper').
     #
     # 'papersize': 'letterpaper',
-
     # The font size ('10pt', '11pt' or '12pt').
     #
     # 'pointsize': '10pt',
-
     # Additional stuff for the LaTeX preamble.
     #
     # 'preamble': '',
-
     # Latex figure (float) alignment
     #
     # 'figure_align': 'htbp',
@@ -240,8 +256,13 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'OptiWindNet.tex', 'OptiWindNet Documentation',
-     'DTU Wind Energy', 'manual'),
+    (
+        master_doc,
+        'OptiWindNet.tex',
+        'OptiWindNet Documentation',
+        'DTU Wind Energy',
+        'manual',
+    ),
 ]
 
 
@@ -249,10 +270,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
-    (master_doc, 'optiwindnet', 'OptiWindNet Documentation',
-     [author], 1)
-]
+man_pages = [(master_doc, 'optiwindnet', 'OptiWindNet Documentation', [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------------
@@ -261,9 +279,15 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'OptiWindNet', 'OptiWindNet Documentation',
-     author, 'OptiWindNet', 'One line description of project.',
-     'Miscellaneous'),
+    (
+        master_doc,
+        'OptiWindNet',
+        'OptiWindNet Documentation',
+        author,
+        'OptiWindNet',
+        'One line description of project.',
+        'Miscellaneous',
+    ),
 ]
 
 
@@ -287,13 +311,15 @@ epub_exclude_files = ['search.html']
 
 # -- Extension configuration -------------------------------------------------
 
+
 def skip_empty_all_submodules(app, what, name, obj, skip, options):
     # Only consider modules
-    if what == "module":
+    if what == 'module':
         if obj.all is not None and len(obj.all) == 0:
             # __all__ is empty -> do not document this module
             return True
     return None  # Use default behavior otherwise
 
+
 def setup(app):
-    app.connect("autoapi-skip-member", skip_empty_all_submodules)
+    app.connect('autoapi-skip-member', skip_empty_all_submodules)

@@ -6,7 +6,7 @@ import math
 import pickle
 import sys
 from hashlib import sha256
-from itertools import pairwise
+from itertools import pairwise, chain
 
 import networkx as nx
 import numpy as np
@@ -71,26 +71,21 @@ def assign_cables(G: nx.Graph, cables: list[tuple[int, float]], currency: str = 
         cable entry must be a tuple)
       currency: symbol representing the unit of the cost
     """
-
-    Nc = len(cables)
-    dt = np.dtype([('capacity', int), ('cost', float)])
-    cable_ = np.fromiter(cables, dtype=dt, count=Nc)
-    capacity_ = cable_['capacity']
-    capacity = 1
-
-    for u, v, data in G.edges(data=True):
-        i = capacity_.searchsorted(data['load']).item()
-        if i >= len(capacity_):
-            error(
-                f'Load for edge ⟨{u, v}⟩: {data["load"]} '
-                f'exceeds maximum cable capacity {capacity_[-1]}.'
-            )
-        data['cable'] = i
-        data['cost'] = data['length'] * cable_['cost'][i].item()
-        if data['load'] > capacity:
-            capacity = data['load']
-    G.graph['cables'] = cable_
-    G.graph['currency'] = currency
+    capacity = max(cables)[0]
+    if G.graph['max_load'] > capacity:
+        raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
+    run_len_ = (b[0] - a[0] for a, b in pairwise(chain(((0,),), cables)))
+    kind = [k for k, run_len in enumerate(run_len_) for _ in range(run_len)]
+    cost = [cables[k][1] for k in kind]
+    has_cost = sum(cost) > 0
+    for _, _, data in G.edges(data=True):
+        k = data['load'] - 1
+        data['cable'] = kind[k]
+        if has_cost:
+            data['cost'] = data['length'] * cost[k]
+    G.graph['cables'] = cables
+    if has_cost:
+        G.graph['currency'] = currency
     if 'capacity' not in G.graph:
         G.graph['capacity'] = capacity
 

@@ -32,6 +32,7 @@ dependencies:
   - svg.py >=1.6.0
   - typing-extensions >=4.12  # from ortools
   - utm >=0.7.0
+  - pip
   - pip:
       - condeltri >=0.0.2
       - esy.osm.pbf >=0.1.1
