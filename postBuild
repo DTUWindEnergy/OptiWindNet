@@ -1,2 +1,2 @@
 conda install --channel conda-forge scip coin-or-cbc
-pip install cplex gurobipy highspy optiwindnet
+pip install gurobipy highspy optiwindnet
