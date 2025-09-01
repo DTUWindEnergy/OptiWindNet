@@ -2,7 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 from collections.abc import Sequence
-from itertools import chain, product, repeat
+from itertools import chain, product
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -259,9 +259,9 @@ def gplot(
         G,
         pos,
         ax=ax,
-        font_color=dict(
-            zip(range(-R, T), chain(repeat(c.root_edge, R), repeat('k', T)))
-        ),
+        font_color={
+            n: (c.root_edge if n < 0 else 'k') for n in label_options['labels'].keys()
+        },
         **label_options,
     )
     for artist in arts.values():
