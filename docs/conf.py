@@ -139,7 +139,8 @@ nbsphinx_codecell_lexer = 'python3'
 # This is processed by Jinja2 and inserted before each notebook
 
 nbsphinx_prolog = r"""
-{% set docname = 'docs/' + env.doc2path(env.docname, base=None) | string() %}
+{% set doc_path = 'docs/' + env.doc2path(env.docname, base=None) | string | replace("\\", "/") %}
+{% set doc_path_quoted = 'doc/tree/' + doc_path | urlencode %}
 
 
 .. only:: html
@@ -154,10 +155,10 @@ nbsphinx_prolog = r"""
 
         .. raw:: html
 
-            <a href="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/{{ docname }}">
+            <a href="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/{{ doc_path }}">
             <img alt="Edit on Gitlab" src="https://img.shields.io/badge/Edit%20on-Gitlab-blue?style=flat&logo=gitlab" style="vertical-align:text-bottom">
             </a>
-            <a href="https://mybinder.org/v2/gh/DTUWindEnergy/OptiWindNet/mybinder?urlpath={{ docname }}" target="_blank">
+            <a href="https://mybinder.org/v2/gh/DTUWindEnergy/OptiWindNet/mybinder?urlpath={{ doc_path_quoted }}" target="_blank">
             <img alt="Launch with Binder" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom">
             </a>
 
