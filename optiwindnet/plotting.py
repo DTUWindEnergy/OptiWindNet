@@ -2,7 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 from collections.abc import Sequence
-from itertools import chain, product
+from itertools import chain, product, repeat
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -255,7 +255,15 @@ def gplot(
         )
     else:
         label_options = dict(labels={})
-    arts = nx.draw_networkx_labels(G, pos, ax=ax, **label_options)
+    arts = nx.draw_networkx_labels(
+        G,
+        pos,
+        ax=ax,
+        font_color=dict(
+            zip(range(-R, T), chain(repeat(c.root_edge, R), repeat('k', T)))
+        ),
+        **label_options,
+    )
     for artist in arts.values():
         artist.set_clip_on(False)
 
