@@ -5,7 +5,6 @@ import logging
 import time
 from collections import defaultdict
 from enum import IntEnum
-from pathlib import Path
 from typing import Callable, Self
 
 import networkx as nx
@@ -73,14 +72,6 @@ class AppraiserFactory:
         self.model.load_state_dict(model_data['state'])
         self.name = model_data['name']
 
-    @classmethod
-    def from_file(cls, model_path: str | Path):
-        # load pytorch model
-        path = Path(model_path)
-        self.model = modelbuilders.model_from_file(model_path)
-        stem = path.stem
-        self.name = stem[:-4] if stem.endswith('.pkl') else stem
-
     def get_appraiser(
         self,
         A: nx.Graph,
@@ -93,7 +84,12 @@ class AppraiserFactory:
     ) -> Callable:
         model = self.model
         # problem features
-        capacity_12 = capacity / 12.0
+        capacity_onehot = {
+            4: (1, 0, 0, 0),
+            5: (0, 1, 0, 0),
+            6: (0, 0, 1, 0),
+            7: (0, 0, 0, 1),
+        }[capacity]
         T = A.graph['T']
         d2roots = A.graph['d2roots'][:T]
         log_rel_root_dist_ = np.log(d2roots / A.graph['inter_terminal_clearance_safe'])
@@ -104,7 +100,7 @@ class AppraiserFactory:
             # - indirect_neighbors: only if there is change in the target's (min_extent, feas_links_cat, feas_unions_cat)
 
             #  't_is_subroot', stable
-            #  't_load_12', stable
+            #  't_rel_load', stable
             #  't_span', stable
             #  't_log_rel_extent', ? depends...
             #  't_log_rel_root_dist', stable
@@ -113,9 +109,10 @@ class AppraiserFactory:
             #  features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
             #  ['s_is_subroot',
             #  't_is_subroot',
-            #  'capacity_12',
-            #  's_load_12',
-            #  't_load_12',
+            #  'is_full',
+            #  'rel_capacity',
+            #  's_rel_load',
+            #  't_rel_load',
             #  's_span',
             #  't_span',
             #  's_log_rel_extent',
@@ -128,7 +125,8 @@ class AppraiserFactory:
             #  's_feas_links_cat_0..4',
             #  't_feas_links_cat_0..4',
             #  's_feas_unions_cat_0..5',
-            #  't_feas_unions_cat_0..5']
+            #  't_feas_unions_cat_0..5',
+            #  'capacity_4..7']
             #  partial_features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
             features_list = []
             for (
@@ -151,13 +149,16 @@ class AppraiserFactory:
                 s_span_lo, s_span_hi = subtree_span_[sr_s][t_root]
                 t_span_lo, t_span_hi = subtree_span_[sr_t][t_root]
                 union_lo, union_hi = union_span
+                union_load = s_load + t_load
                 features_list.append(
                     (
                         s_is_subroot,
                         t_is_subroot,
-                        capacity_12,
-                        s_load / 12,  # s_load_12
-                        t_load / 12,  # t_load_12
+                        union_load == capacity,  # is_union_full,
+                        # DUPLICATE FEATURE (v5 training had this, so it must be here)
+                        union_load / capacity,  # rel_capacity
+                        s_load / capacity,  # s_rel_load
+                        t_load / capacity,  # t_rel_load
                         angle_ccw(s_span_lo, s_root, s_span_hi),
                         angle_ccw(t_span_lo, t_root, t_span_hi),
                         np.log(extent / extent_min_[sr_s]),  # s_rel_extent
@@ -165,7 +166,8 @@ class AppraiserFactory:
                         log_rel_root_dist_[sr_s, t_root],
                         log_rel_root_dist_[sr_t, t_root],
                         angle_ccw(union_lo, t_root, union_hi),
-                        (s_load + t_load) / capacity,  # union_rel_load
+                        # DUPLICATE FEATURE (v5 training had this, so it must be here)
+                        union_load / capacity,  # union_rel_load
                         cos_uv_ur,
                         *LinkCount.onehot(
                             cat_feas_links_[sr_s]
@@ -179,6 +181,7 @@ class AppraiserFactory:
                         *UnionCount.onehot(
                             cat_feas_unions_[sr_t]
                         ),  # t_num_feas_unions_cat
+                        *capacity_onehot,
                     )
                 )
 
@@ -514,7 +517,7 @@ def data_driven_hybrid(
             )
             for r in roots
         ]
-        debug(f'<angle_span> //%s//', union_span_[root])
+        debug('<angle_span> //%s//', union_span_[root])
 
         # edge addition starts here
         debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
