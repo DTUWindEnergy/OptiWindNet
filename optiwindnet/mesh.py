@@ -1606,7 +1606,6 @@ def planar_flipped_by_routeset(
         diags = diagonals.copy()
     else:
         diags = ()
-    debug('differences between G and P:')
     # get G's edges in terms of node range -R : T + B
     edges_G = {
         ((u, v) if u < v else (v, u))
@@ -1617,26 +1616,27 @@ def planar_flipped_by_routeset(
     stack = list(edges_G - edges_P)
     # gates to the bottom of the stack
     stack.sort()
+    debug('differences between G and P: %s', stack)
     triangle_ids_to_remove = []
     triangles_to_add = []
+    unflippables = set()
     while stack:
         u, v = stack.pop()
         if u < 0 and (u, v) not in diags:
             continue
-        debug('%d–%d', u, v)
+        debug('in G, not in P: %d–%d', u, v)
         intersection = set(planar[u]) & set(planar[v])
         if len(intersection) < 2:
             debug('share %d neighbors.', len(intersection))
             continue
-        diagonal_found = False
         for s, t in combinations(intersection, 2):
             s, t = (s, t) if s < t else (t, s)
             if (s, t) in edges_P and is_triangle_pair_a_convex_quadrilateral(
                 *VertexC[[s, t, u, v]]
             ):
-                diagonal_found = True
                 break
-        if not diagonal_found:
+        else:
+            # diagonal not found
             if u >= 0:
                 # only warn if the non-planar is not a gate
                 warn('Failed to find flippable for non-planar %d–%d', u, v)
@@ -1660,13 +1660,23 @@ def planar_flipped_by_routeset(
         #  if (s, t) not in planar:
         #      print(f'{F[s]}–{F[t]} is not in planar')
         #      continue
+        if (s, t) in unflippables:
+            warn(
+                'Navigation mesh inconsistency: edge %d-%d is unflippable due to a previous flip nearby',
+                s,
+                t,
+            )
+            continue
         debug('flipping %d–%d to %d–%d', s, t, u, v)
-        P.remove_edge(s, t)
+        wx_ = tuple(
+            (w, x) if w < x else (x, w) for w, x in ((u, s), (s, v), (v, t), (t, u))
+        )
+        unflippables.update(wx_)
         if diags:
             # diagonal (u_, v_) is added to P -> forbid diagonals that cross it
-            for w, y in ((u, s), (s, v), (v, t), (t, u)):
-                wy = (w, y) if w < y else (y, w)
-                diags.inv.pop(wy, None)
+            for wx in wx_:
+                diags.inv.pop(wx, None)
+        P.remove_edge(s, t)
         P.add_half_edge(u, v, cw=s)
         P.add_half_edge(v, u, cw=t)
         # store triangle removals and additions
