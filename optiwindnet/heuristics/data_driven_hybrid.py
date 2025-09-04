@@ -21,7 +21,7 @@ lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
-__version = 'DDHv3'
+__version = 'DDHv5'
 
 
 class LinkCount(IntEnum):
