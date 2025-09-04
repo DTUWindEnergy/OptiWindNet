@@ -11,7 +11,7 @@ from itertools import pairwise, chain
 import networkx as nx
 import numpy as np
 
-from .geometric import rotate
+from .geometric import CoordPair, rotate
 
 _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
@@ -706,7 +706,7 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
 
 
 def as_normalized(
-    Aʹ: nx.Graph, *, offset: float | None = None, scale: float | None = None
+    Aʹ: nx.Graph, *, offset: CoordPair | None = None, scale: float | None = None
 ) -> nx.Graph:
     """Make a shallow copy of an instance and shift and scale its geometry.
 
@@ -718,8 +718,8 @@ def as_normalized(
     Args:
         Aʹ: (or Gʹ) any instance that has inherited 'scale' from an
             edgeset `Aʹ`.
-        offset: override graph's 'norm_offset'
-        scale: override graph's 'norm_scale'
+        offset: coordinates (2,) offset to override graph's 'norm_offset'
+        scale: multiplicative scaling factor to override graph's 'norm_scale'
 
     Returns:
         A copy of the instance with changed coordinates and linear metrics.
@@ -727,8 +727,12 @@ def as_normalized(
     A = Aʹ.copy()
     if offset is None:
         offset = Aʹ.graph['norm_offset']
+    else:
+        A.graph['norm_offset'] = offset
     if scale is None:
         scale = Aʹ.graph['norm_scale']
+    else:
+        A.graph['norm_scale'] = scale
     A.graph['is_normalized'] = True
     for _, _, eData in A.edges(data=True):
         eData['length'] *= scale
