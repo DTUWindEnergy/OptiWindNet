@@ -155,8 +155,6 @@ class AppraiserFactory:
                         s_is_subroot,
                         t_is_subroot,
                         union_load == capacity,  # is_union_full,
-                        # DUPLICATE FEATURE (v5 training had this, so it must be here)
-                        union_load / capacity,  # rel_capacity
                         s_load / capacity,  # s_rel_load
                         t_load / capacity,  # t_rel_load
                         angle_ccw(s_span_lo, s_root, s_span_hi),
@@ -166,7 +164,6 @@ class AppraiserFactory:
                         log_rel_root_dist_[sr_s, t_root],
                         log_rel_root_dist_[sr_t, t_root],
                         angle_ccw(union_lo, t_root, union_hi),
-                        # DUPLICATE FEATURE (v5 training had this, so it must be here)
                         union_load / capacity,  # union_rel_load
                         cos_uv_ur,
                         *LinkCount.onehot(
@@ -198,7 +195,7 @@ def data_driven_hybrid(
     capacity: int,
     appraiser_factory: AppraiserFactory,
     maxiter=10000,
-    threshold: float = -1.0,
+    threshold: float = 0.0,
 ) -> nx.Graph:
     """Hybrid machine-learning and Esau-Williams heuristic for C-MST
 
@@ -478,19 +475,28 @@ def data_driven_hybrid(
                 i, j = j, j + num_appraisals
                 top_link_[sr_u] = max(zip(appraisals[i:j].tolist(), links_to_upd[i:j]))
 
+        best_sr = (-float('inf'), -1, -1)
         for tier_id, prio_tier in enumerate(prio_tier_):
             if prio_tier:
                 # get the best-appraised link from the highest-priority non-empty tier
                 appraisal, uv_uniq, sr_dropped = max(
                     (*top_link_[sr], sr) for sr in prio_tier
                 )
-                #  if appraisal < threshold:
-                #      continue
-                prio_tier.remove(sr_dropped)
+                if appraisal < threshold:
+                    best_sr = max(best_sr, (appraisal, sr_dropped, tier_id))
+                    continue
                 break
         else:
-            # finished
-            break
+            if best_sr[1] == -1:
+                # finished
+                break
+            else:
+                #  print('@', end='')
+                appraisal, sr_dropped, tier_id = best_sr
+                prio_tier = prio_tier_[tier_id]
+                uv_uniq = top_link_[sr_dropped][1]
+        #  print(tier_id, appraisal, best_sr[1] == -1)
+        prio_tier.remove(sr_dropped)
         #  debug('heap top loop-top: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
 
         # TODO: reassess this hack
