@@ -5,7 +5,9 @@ import networkx as nx
 import numpy as np
 from scipy.spatial import ConvexHull
 
-__all__ = ()
+from .geometric import CoordPairs
+
+__all__ = ('L_from_synthetic', 'equidistant')
 
 
 def toyfarm():
@@ -56,36 +58,64 @@ def toyfarm():
     return G
 
 
-def synthfarm2graph(RootC, NodeC, BoundaryC=None, name='', handle='synthetic'):
-    T = NodeC.shape[0]
+def L_from_synthetic(
+    RootC: CoordPairs,
+    TerminalC: CoordPairs,
+    BorderC: CoordPairs | None = None,
+    name: str = '',
+    handle: str = 'synthetic',
+) -> nx.Graph:
+    """Special version of L_from_site() for the synthetic location geometry generator.
+
+    Example::
+      def make_tess(radius=5600, spacing=1000):
+        NodeC = equidistant(radius, center='centroid', spacing=spacing)
+        RootC = np.array((0.0, 0.0))
+        return L_from_synthetic(RootC, NodeC, name='SynthTess', handle='tess')
+    """
+    T = TerminalC.shape[0]
     R = RootC.shape[0]
 
     # build data structures
-    VertexC = np.vstack((NodeC, RootC))
-    if BoundaryC is None:
+    if BorderC is None:
+        VertexC = np.vstack((TerminalC, RootC))
         hull = ConvexHull(VertexC)
         for v in hull.vertices:
             # hack to avoid error in .mesh.make_planar_embedding()
             vC = VertexC[v]
             VertexC[v] += 1e-6 * vC
-        BoundaryC = VertexC[hull.vertices]
+        border = hull.vertices
+        B = 0
+    else:
+        VertexC = np.vstack((TerminalC, BorderC, RootC))
+        border = np.arange(T, T + len(BorderC))
+        B = BorderC.shape[0]
 
     # create networkx graph
-    G = nx.Graph(
-        R=R, T=T, VertexC=VertexC, boundary=BoundaryC, name=name, handle=handle
+    L = nx.Graph(
+        R=R, T=T, B=B, VertexC=VertexC, border=border, name=name, handle=handle
     )
-    G.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
-    G.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
-    return G
+    L.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
+    L.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
+    return L
 
 
-def equidistant(R, center='centroid', spacing=1):
+def equidistant(
+    radius: float, center: str = 'centroid', spacing: float = 1.0
+) -> CoordPairs:
+    """Create coordinates for the vertices of a regular triangular tiling.
+
+    Args:
+      radius: of the circular area to cover
+      center: one of {'centroid', 'vertex'}
+        centroid: The coordinate origin is in the centroid of the central triangle.
+        vertex: The coordinate origin a vertex of the tiling.
+      spacing: the triangle's side
+
+    Returns:
+      Array of coordinates of the tiling's vertices.
     """
-    Returns an array of coordinates for the vertices of a regular triangular
-    tiling (spacing sets the triangle's side) within radius R.
-    The coordinate origin is in the centroid of the central triangle.
-    """
-    lim = (R / spacing) ** 2
+    lim = (radius / spacing) ** 2
     h = np.sqrt(3) / 2
 
     if center == 'centroid':
@@ -180,6 +210,5 @@ def equidistant(R, center='centroid', spacing=1):
             )
         ]
     else:
-        print('Unknown option for <center>:', center)
-        return None
+        raise ValueError('Unknown option for <center>:', center)
     return spacing * output
