@@ -209,6 +209,7 @@ def data_driven_hybrid(
     appraiser_factory: AppraiserFactory,
     maxiter=10000,
     threshold: float = 0.0,
+    high_blockage_cutoff: float = 3.0,
 ) -> nx.Graph:
     """Hybrid machine-learning and Esau-Williams heuristic for C-MST
 
@@ -246,15 +247,21 @@ def data_driven_hybrid(
     assign_root(A)
     # removing root nodes from A to speedup union searches
     A.remove_nodes_from(roots)
+    add_link_blockage(A)
 
     # remove links that have negative savings both ways from the start
     unfeas_links = []
-    for u, v, extent in A.edges(data='length'):
+    for u, v, edgeD in A.edges(data=True):
+        extent = edgeD['length']
+        root = A.nodes[v]['root']
         if (
             extent > d2roots[u, A.nodes[u]['root']]
             and extent > d2roots[v, A.nodes[v]['root']]
         ):
             # negative savings -> useless link
+            unfeas_links.append((u, v))
+        # TODO: handle multiple roots properly
+        elif edgeD['num_blocked'][root] / capacity > high_blockage_cutoff:
             unfeas_links.append((u, v))
     debug('links removed in pre-processing: %s', unfeas_links)
     A.remove_edges_from(unfeas_links)
@@ -271,7 +278,6 @@ def data_driven_hybrid(
             ext = edgeD['length']
             cos[r] = (ext**2 + d2s + 2 * ds * dt - 3 * d2t) / (2 * ext * (ds + dt))
             edgeD['cos'] = cos
-    add_link_blockage(A)
     angle_, angle_rank_ = A.graph['angle_'], A.graph['angle_rank_']
     union_limits, angle_ccw = angle_oracles_factory(angle_, angle_rank_)
     is_delaunay_ = {}
@@ -641,7 +647,6 @@ def data_driven_hybrid(
             purge_log=purge_log,
             appraisal_log=appraisal_log,
             stale_log=stale_log,
-            iterations=i,
         ),
     )
     return S
