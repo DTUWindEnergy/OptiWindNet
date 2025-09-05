@@ -45,6 +45,7 @@ __all__ = (
     'rotating_calipers',
     'area_from_polygon_vertices',
     'add_link_blockage',
+    'add_link_cosines',
 )
 
 NULL = np.iinfo(int).min
@@ -1175,3 +1176,23 @@ def add_link_blockage(A: nx.Graph):
             ]
         else:
             edgeD['num_blocked'] = [0]
+
+
+def add_link_cosines(A: nx.Graph):
+    R = A.graph['R']
+    VertexC = A.graph['VertexC']
+    for u, v, edgeD in A.edges(data=True):
+        # TODO: implement this more efficiently
+        if u < 0 or v < 0:
+            # skip feeders
+            continue
+        cos_ = [None] * R
+        edgeD['cos_'] = cos_
+        uC, vC = VertexC[(u, v),]
+        vec_uv = vC - uC
+        len_uv = np.hypot(*vec_uv).item()
+        mC = 0.5 * (uC + vC)
+        for r in range(-R, 0):
+            vec_rm = mC - VertexC[r]
+            len_rm = np.hypot(*vec_rm).item()
+            cos_[r] = abs(np.dot(vec_uv, vec_rm).item() / len_rm / len_uv)
