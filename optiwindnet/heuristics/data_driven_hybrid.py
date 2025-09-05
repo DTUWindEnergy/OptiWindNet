@@ -15,10 +15,11 @@ from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
 from ..geometric import (
-    add_link_blockage,
+    add_link_cosines,
     angle_oracles_factory,
     assign_root,
     minimum_spanning_forest,
+    angle_helpers,
 )
 from ..interarraylib import as_normalized, calcload
 
@@ -26,7 +27,45 @@ lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
-__version = 'DDHv6'
+__version = 'DDHv7'
+
+
+def add_link_blocked_set(A: nx.Graph):
+    """Experimental. Add edge attribute 'blocked' as a set()
+
+    Changes A in place. Assesses the terminals whose line-of-sight
+    to the root is intersected by the edge.
+
+    Only implemented for single-root sites.
+    """
+    VertexC = A.graph['VertexC']
+    angle_, angle_rank_ = angle_helpers(
+        A, include_borders=False
+    )  # pass L to avoid supertriangle
+    A.graph['angle_'] = angle_
+    A.graph['angle_rank_'] = angle_rank_
+    for u, v, edgeD in A.edges(data=True):
+        uR, vR = angle_rank_[[u, v], 0].tolist()
+        uv_angle = (angle_[v] - angle_[u]).item()
+        if uv_angle < 0:
+            uR, vR = vR, uR
+        if abs(uv_angle) <= np.pi:
+            inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
+        else:
+            inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
+        if len(inside_wedge) > 0:
+            vec = VertexC[v] - VertexC[u]
+            wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
+            cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
+            # TODO: handle multiple roots
+            root_vec = VertexC[-1] - VertexC[u]
+            is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
+            # ¡assuming a single root!
+            edgeD['blocked'] = [
+                set(inside_wedge[(cross <= 0) if is_root_sign_pos else (cross >= 0)])
+            ]
+        else:
+            edgeD['blocked'] = [set()]
 
 
 class LinkCount(IntEnum):
@@ -209,7 +248,9 @@ def data_driven_hybrid(
     appraiser_factory: AppraiserFactory,
     maxiter=10000,
     threshold: float = 0.0,
-    high_blockage_cutoff: float = 3.0,
+    blockage_link_cos_lim: float = 0.85,  # 30°
+    blockage_link_feeder_lim: float = 2.0,
+    blockage_subtree_feeder_lim: float = 2.5,
 ) -> nx.Graph:
     """Hybrid machine-learning and Esau-Williams heuristic for C-MST
 
@@ -227,12 +268,13 @@ def data_driven_hybrid(
     _T = range(T)
     diagonals = Aʹ.graph['diagonals']
     d2rootsʹ = Aʹ.graph['d2roots']
-    d2rootsRank = rankdata(d2rootsʹ, method='dense').reshape(d2rootsʹ.shape)
+    d2roots_rank_ = rankdata(d2rootsʹ, method='dense').reshape(d2rootsʹ.shape)
 
     # calculate the reference extent
     MSF = minimum_spanning_forest(Aʹ)
     # normalize all distances by the average edge extent of the MST forest
     A = as_normalized(Aʹ, scale=T / MSF.size(weight='length'))
+    A.graph['d2roots_rank_'] = d2roots_rank_
 
     # calculate the ratio (second moment of area)/(s.m.a of homogeneous circle)
     # use unit area for the moment; only wrt the first root (the hard-coded 0)
@@ -247,9 +289,11 @@ def data_driven_hybrid(
     assign_root(A)
     # removing root nodes from A to speedup union searches
     A.remove_nodes_from(roots)
-    add_link_blockage(A)
+    add_link_blocked_set(A)
+    add_link_cosines(A)
 
     # remove links that have negative savings both ways from the start
+    max_blockable_by_link = blockage_link_feeder_lim * capacity
     unfeas_links = []
     for u, v, edgeD in A.edges(data=True):
         extent = edgeD['length']
@@ -261,23 +305,14 @@ def data_driven_hybrid(
             # negative savings -> useless link
             unfeas_links.append((u, v))
         # TODO: handle multiple roots properly
-        elif edgeD['num_blocked'][root] / capacity > high_blockage_cutoff:
+        elif (
+            len(edgeD['blocked'][root]) > max_blockable_by_link
+            and edgeD['cos'][root] < blockage_link_cos_lim
+        ):
             unfeas_links.append((u, v))
     debug('links removed in pre-processing: %s', unfeas_links)
     A.remove_edges_from(unfeas_links)
     # BEGIN: time-saving pre-calculations
-    d2roots_sqr = np.square(d2roots)
-    for u, v, edgeD in A.edges(data=True):
-        # TODO: implement this more efficiently
-        cos = [None] * R
-        for r in roots:
-            uv = (u, v) if d2rootsRank[v, r] <= d2rootsRank[u, r] else (v, u)
-            # the cos formula assumes feeder(s) > feeder(t)
-            ds, dt = d2roots[uv, r].tolist()
-            d2s, d2t = d2roots_sqr[uv, r].tolist()
-            ext = edgeD['length']
-            cos[r] = (ext**2 + d2s + 2 * ds * dt - 3 * d2t) / (2 * ext * (ds + dt))
-            edgeD['cos'] = cos
     angle_, angle_rank_ = A.graph['angle_'], A.graph['angle_rank_']
     union_limits, angle_ccw = angle_oracles_factory(angle_, angle_rank_)
     is_delaunay_ = {}
@@ -299,10 +334,13 @@ def data_driven_hybrid(
     # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
 
-    # mappings from components (identified by their subroots)
+    # mappings from components (indexed by their subroots)
     # <subtree_span_>: pairs (most_CW, most_CCW) of extreme nodes of each
-    #                  subtree, indexed by subroot
+    #                  subtree
     subtree_span_ = [[(t, t) for _ in roots] for t in _T]
+    # <subtree_blocked_>: sets of blocked terminals from other components
+    subtree_blocked_ = [set() for _ in _T]
+    max_blockable = blockage_subtree_feeder_lim * capacity
 
     # other structures
     # <pq>: queue prioritized by lowest negative appraisal
@@ -374,13 +412,20 @@ def data_driven_hybrid(
                     if u < v:
                         unfeas_links.append(uv_uniq)
                     continue
-                elif load_other > load_left:
+                elif (
+                    load_other > load_left
+                    or len(
+                        subtree_blocked_[subroot].difference(subtree_[sr_v])
+                        | subtree_blocked_[sr_v].difference(subtree_[subroot])
+                    )
+                    > max_blockable
+                ):
                     link_caused_staleness.add(sr_v)
                     unfeas_links.append(uv_uniq)
                     continue
-                elif (d2rootsRank[subroot, root] > d2rootsRank[sr_v, root_v]) or (
+                elif (d2roots_rank_[subroot, root] > d2roots_rank_[sr_v, root_v]) or (
                     (u > v)
-                    and (d2rootsRank[subroot, root] == d2rootsRank[sr_v, root_v])
+                    and (d2roots_rank_[subroot, root] == d2roots_rank_[sr_v, root_v])
                 ):
                     # uv links subtree with longer feeder to shorter: proper
                     # check if using uv reduces total length
@@ -411,10 +456,11 @@ def data_driven_hybrid(
                             is_delaunay_[uv_uniq],
                             extent,
                             uvD['cos'][root_v],
-                            uvD['num_blocked'][root_v],
+                            len(uvD['blocked'][root_v]),
                             union_span,
                         )
                     )
+                # next two lines ensure that incoming links are counted
                 num_feas_links += 1
                 feas_unions.add(sr_v)
                 extent_min = min(extent_min, extent)
@@ -565,6 +611,11 @@ def data_driven_hybrid(
         is_feederless_[sr_dropped] = False
         # update the component's angle span
         subtree_span_[sr_kept] = union_span_
+        # update the component's blocked set
+        # TODO: handle multiple roots
+        subtree_blocked_[sr_kept].update(
+            A[u][v]['blocked'][root].difference(subtree_[sr_kept], subtree_[sr_dropped])
+        )
         # update terminal->subroot mapping for sr_dropped's terminals
         for t in subtree_[sr_dropped]:
             subroot_[t] = sr_kept
