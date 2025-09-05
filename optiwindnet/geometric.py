@@ -615,7 +615,9 @@ def perimeter(VertexC, vertices_ordered):
     )
 
 
-def angle_helpers(L: nx.Graph) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
+def angle_helpers(
+    L: nx.Graph, include_borders: bool = True
+) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
     """Create auxiliary arrays of node attributes based on polar coordinates.
 
     Args:
@@ -627,10 +629,11 @@ def angle_helpers(L: nx.Graph) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
 
     T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
     B = L.graph.get('B', 0)
-    NodeC = VertexC[: T + B]
+    M = (T + B) if include_borders else T
+    NodeC = VertexC[:M]
     RootC = VertexC[-R:]
 
-    angles = np.empty((T + B, R), dtype=float)
+    angles = np.empty((M, R), dtype=float)
     for n, nodeC in enumerate(NodeC):
         x, y = (nodeC - RootC).T
         angles[n] = np.arctan2(y, x)
@@ -1133,3 +1136,37 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     return 0.5 * abs(
         X[-1] * Y[0] - Y[-1] * X[0] + np.dot(X[:-1], Y[1:]) - np.dot(Y[:-1], X[1:])
     )
+
+
+def add_edge_blockage(A: nx.Graph):
+    """Experimental. Add edge attribute 'num_blocked'.
+
+    Changes A in place. Assesses the number of terminals whose line-of-sight
+    to the root is intersected by the edge.
+
+    Only implemented for single-root sites.
+    """
+    VertexC = A.graph['VertexC']
+    angle_, angle_rank_ = angle_helpers(
+        A, include_borders=False
+    )  # pass L to avoid supertriangle
+    A.graph['angle_'] = angle_
+    A.graph['angle_rank_'] = angle_rank_
+    for u, v, edgeD in A.edges(data=True):
+        uR, vR = angle_rank_[[u, v], 0].tolist()
+        uv_angle = (angle_[v] - angle_[u]).item()
+        if uv_angle < 0:
+            uR, vR = vR, uR
+        if abs(uv_angle) <= np.pi:
+            inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
+        else:
+            inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
+        vec = VertexC[v] - VertexC[u]
+        wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
+        cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
+        # ¡assuming a single root!
+        root_vec = VertexC[-1] - VertexC[u]
+        is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
+        # ¡assuming a single root!
+        # edgeD['num_blocked'] = [sum((cross <= 0) if is_root_sign_pos else (cross >= 0)).item()]
+        edgeD['num_blocked'] = [sum((cross <= 0) if is_root_sign_pos else (cross >= 0))]
