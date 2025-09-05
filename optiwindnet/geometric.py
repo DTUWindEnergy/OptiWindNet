@@ -44,6 +44,7 @@ __all__ = (
     'rotation_checkers_factory',
     'rotating_calipers',
     'area_from_polygon_vertices',
+    'add_link_blockage',
 )
 
 NULL = np.iinfo(int).min
@@ -216,9 +217,9 @@ def angle(aC, pivotC, bC):
 
 
 def angle_oracles_factory(
-    angles: NDArray[np.float64], anglesRank: NDArray[np.int_]
+    angle_: NDArray[np.float64], angle_rank_: NDArray[np.int_]
 ) -> tuple[
-    Callable[[int, int, int, int, int, int, int], tuple[float, float]],
+    Callable[[int, int, int, int, int, int, int], tuple[int, int]],
     Callable[[int, int, int], float],
 ]:
     """Make functions to answer queries about relative angles.
@@ -226,8 +227,8 @@ def angle_oracles_factory(
     Inputs are the outputs of `angle_helpers()`.
 
     Args:
-      angles: (T, R)-array of angles wrt root (+-pi)
-      anglesRank: (T, R)-array of the relative placement of angles
+      angle_: (T, R)-array of angles wrt root (+-pi)
+      angle_rank_: (T, R)-array of the relative placement of angles
 
     Returns:
       union_limits() and angle_ccw()
@@ -242,7 +243,7 @@ def angle_oracles_factory(
     def union_limits(
         root: int, u: int, LO: int, HI: int, v: int, lo: int, hi: int
     ) -> tuple[int, int]:
-        LOR, HIR, loR, hiR = anglesRank[(LO, HI, lo, hi), root]
+        LOR, HIR, loR, hiR = angle_rank_[(LO, HI, lo, hi), root]
         lo_within = is_within(loR, LOR, HIR)
         hi_within = is_within(hiR, LOR, HIR)
         if lo_within and hi_within:
@@ -275,8 +276,8 @@ def angle_oracles_factory(
         """
         if a == b:
             return 0.0
-        aR, bR = anglesRank[(a, b), pivot]
-        aA, bA = angles[(a, b), pivot]
+        aR, bR = angle_rank_[(a, b), pivot]
+        aA, bA = angle_[(a, b), pivot]
         a_to_bA = (bA - aA).item()
         return a_to_bA if aR <= bR else (2 * math.pi + a_to_bA)
 
@@ -1138,7 +1139,7 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     )
 
 
-def add_edge_blockage(A: nx.Graph):
+def add_link_blockage(A: nx.Graph):
     """Experimental. Add edge attribute 'num_blocked'.
 
     Changes A in place. Assesses the number of terminals whose line-of-sight
@@ -1161,12 +1162,16 @@ def add_edge_blockage(A: nx.Graph):
             inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
         else:
             inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
-        vec = VertexC[v] - VertexC[u]
-        wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
-        cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
-        # ¡assuming a single root!
-        root_vec = VertexC[-1] - VertexC[u]
-        is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
-        # ¡assuming a single root!
-        # edgeD['num_blocked'] = [sum((cross <= 0) if is_root_sign_pos else (cross >= 0)).item()]
-        edgeD['num_blocked'] = [sum((cross <= 0) if is_root_sign_pos else (cross >= 0))]
+        if len(inside_wedge) > 0:
+            vec = VertexC[v] - VertexC[u]
+            wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
+            cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
+            # ¡assuming a single root!
+            root_vec = VertexC[-1] - VertexC[u]
+            is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
+            # ¡assuming a single root!
+            edgeD['num_blocked'] = [
+                sum((cross <= 0) if is_root_sign_pos else (cross >= 0)).item()
+            ]
+        else:
+            edgeD['num_blocked'] = [0]
