@@ -14,14 +14,19 @@ from mlhelpers import modelbuilders
 from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
-from ..geometric import angle_helpers, angle_oracles_factory, assign_root
+from ..geometric import (
+    add_link_blockage,
+    angle_oracles_factory,
+    assign_root,
+    minimum_spanning_forest,
+)
 from ..interarraylib import as_normalized, calcload
 
 lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
-__version = 'DDHv5'
+__version = 'DDHv6'
 
 
 class LinkCount(IntEnum):
@@ -76,7 +81,7 @@ class AppraiserFactory:
         self,
         A: nx.Graph,
         capacity: int,
-        subtree_span_: list[tuple[int, int]],
+        subtree_span_: list[list[tuple[int, int]]],
         cat_feas_links_: list[int],
         cat_feas_unions_: list[int],
         extent_min_: list[float],
@@ -92,7 +97,7 @@ class AppraiserFactory:
         }[capacity]
         T = A.graph['T']
         d2roots = A.graph['d2roots'][:T]
-        log_rel_root_dist_ = np.log(d2roots / A.graph['inter_terminal_clearance_safe'])
+        rel_moment = A.graph['rel_moment']
 
         def appraise(partial_features_):
             # rules for making an appraisal stale:
@@ -108,20 +113,23 @@ class AppraiserFactory:
             #  't_feas_unions_cat_0..5', needs checking
             #  features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
             #  ['s_is_subroot',
-            #  't_is_subroot',
-            #  'is_full',
-            #  'rel_capacity',
-            #  's_rel_load',
-            #  't_rel_load',
-            #  's_span',
-            #  't_span',
-            #  's_log_rel_extent',
-            #  't_log_rel_extent',
-            #  's_log_rel_root_dist',
-            #  't_log_rel_root_dist',
-            #  'union_span',
-            #  'union_rel_load',
-            #  'cos',
+            #   't_is_subroot',
+            #   'is_union_full',
+            #   'is_delaunay',
+            #   'rel_moment',
+            #   's_rel_load',
+            #   't_rel_load',
+            #   's_span',
+            #   't_span',
+            #   's_extent_min',
+            #   't_extent_min',
+            #   's_subroot_d2root',
+            #   't_subroot_d2root',
+            #   'union_span',
+            #   'union_rel_load',
+            #   'extent',
+            #   'cos',
+            #   'blocked_subtree_equiv',
             #  's_feas_links_cat_0..4',
             #  't_feas_links_cat_0..4',
             #  's_feas_unions_cat_0..5',
@@ -136,36 +144,40 @@ class AppraiserFactory:
                 t_is_subroot,
                 s_load,
                 t_load,
+                is_delaunay,
                 extent,
                 cos_uv_ur,
+                num_blocked,
                 union_span,
             ) in partial_features_:
                 s_root = A.nodes[sr_s]['root']
                 t_root = A.nodes[sr_t]['root']
                 # as of 2025-06: Angle span calculation is not implemented when
                 #   uniting components connected to different roots.
-                # TODO: subtree_span should be indexed by subroot and root;
-                #       the relevant span is wrt the target's root
                 s_span_lo, s_span_hi = subtree_span_[sr_s][t_root]
                 t_span_lo, t_span_hi = subtree_span_[sr_t][t_root]
                 union_lo, union_hi = union_span
                 union_load = s_load + t_load
                 features_list.append(
                     (
-                        s_is_subroot,
-                        t_is_subroot,
+                        s_is_subroot,  # s_is_subroot,
+                        t_is_subroot,  # t_is_subroot,
                         union_load == capacity,  # is_union_full,
+                        is_delaunay,  # is_delaunay
+                        rel_moment,  # rel_moment
                         s_load / capacity,  # s_rel_load
                         t_load / capacity,  # t_rel_load
-                        angle_ccw(s_span_lo, s_root, s_span_hi),
-                        angle_ccw(t_span_lo, t_root, t_span_hi),
-                        np.log(extent / extent_min_[sr_s]),  # s_rel_extent
-                        np.log(extent / extent_min_[sr_t]),  # t_rel_extent
-                        log_rel_root_dist_[sr_s, t_root],
-                        log_rel_root_dist_[sr_t, t_root],
-                        angle_ccw(union_lo, t_root, union_hi),
+                        angle_ccw(s_span_lo, s_root, s_span_hi),  # s_span
+                        angle_ccw(t_span_lo, t_root, t_span_hi),  # t_span
+                        extent_min_[sr_s],  # s_extent_min
+                        extent_min_[sr_t],  # t_extent_min
+                        d2roots[sr_s, t_root].item(),  # s_subroot_d2root
+                        d2roots[sr_t, t_root].item(),  # t_subroot_d2root
+                        angle_ccw(union_lo, t_root, union_hi),  # union_span
                         union_load / capacity,  # union_rel_load
-                        cos_uv_ur,
+                        extent,  # extent
+                        cos_uv_ur,  # cos
+                        num_blocked / capacity,  # blocked_subtree_equiv
                         *LinkCount.onehot(
                             cat_feas_links_[sr_s]
                         ),  # s_num_feas_links_cat
@@ -182,6 +194,7 @@ class AppraiserFactory:
                     )
                 )
 
+            #  print(features_list[-1])
             features = torch.tensor(features_list, dtype=torch.float32)
             with torch.no_grad():
                 appraisals = model(features)
@@ -214,9 +227,19 @@ def data_driven_hybrid(
     diagonals = Aʹ.graph['diagonals']
     d2rootsʹ = Aʹ.graph['d2roots']
     d2rootsRank = rankdata(d2rootsʹ, method='dense').reshape(d2rootsʹ.shape)
-    closest_root = np.argmin(d2rootsʹ, axis=1)
-    scale = np.median(d2rootsʹ[:, closest_root])
-    A = as_normalized(Aʹ, scale=scale)
+
+    # calculate the reference extent
+    MSF = minimum_spanning_forest(Aʹ)
+    # normalize all distances by the average edge extent of the MST forest
+    A = as_normalized(Aʹ, scale=T / MSF.size(weight='length'))
+
+    # calculate the ratio (second moment of area)/(s.m.a of homogeneous circle)
+    # use unit area for the moment; only wrt the first root (the hard-coded 0)
+    norm_T_d2root = Aʹ.graph['norm_scale'] * Aʹ.graph['d2roots'][:T, 0]
+    # the unit area circle with root at the center and T homogeneously distributed
+    # terminals would have a moment of inertia T/2/π - use it to normalize (range 1..7)
+    A.graph['rel_moment'] = (norm_T_d2root**2).sum().item() * 2 * np.pi / T
+
     d2roots = A.graph['d2roots']
     roots = range(-R, 0)
 
@@ -248,8 +271,13 @@ def data_driven_hybrid(
             ext = edgeD['length']
             cos[r] = (ext**2 + d2s + 2 * ds * dt - 3 * d2t) / (2 * ext * (ds + dt))
             edgeD['cos'] = cos
-    angles, anglesRank = angle_helpers(A)
-    union_limits, angle_ccw = angle_oracles_factory(angles, anglesRank)
+    add_link_blockage(A)
+    angle_, angle_rank_ = A.graph['angle_'], A.graph['angle_rank_']
+    union_limits, angle_ccw = angle_oracles_factory(angle_, angle_rank_)
+    is_delaunay_ = {}
+    for u, v, kind in A.edges(data='kind'):
+        uv_uniq = (u, v) if u < v else (v, u)
+        is_delaunay_[uv_uniq] = kind.endswith('delaunay')
     # END: time-saving pre-calculations
 
     # BEGIN: component accounting
@@ -285,8 +313,8 @@ def data_driven_hybrid(
     # indexed by the cat_feas_unions of the subroots:
     prio_tier_ = tuple(set() for _ in range(len(UnionCount)))
     top_link_ = [None] * T
-    # <i>: iteration counter
-    i = 0
+    # <iteration>: iteration counter
+    iteration = 0
 
     # END: helper data structures
 
@@ -374,8 +402,10 @@ def data_driven_hybrid(
                             (v == sr_v),
                             load_self,
                             load_other,
+                            is_delaunay_[uv_uniq],
                             extent,
                             uvD['cos'][root_v],
+                            uvD['num_blocked'][root_v],
                             union_span,
                         )
                     )
@@ -403,14 +433,14 @@ def data_driven_hybrid(
             A.remove_nodes_from(subtree_[subroot])
             debug('<refresh> subroot <%d> finalized (isolated)', subroot)
             is_feederless_[subroot] = False
-            purge_log[i].append(tuple(subtree_[subroot]))
-            steps_log[i].append((subroot, root))
+            purge_log[iteration].append(tuple(subtree_[subroot]))
+            steps_log[iteration].append((subroot, root))
             stale_subtrees.update(whoneeds_[subroot] - fresh_subtrees)
             return [], []
         # discard useless edges
         if unfeas_links:
             A.remove_edges_from(unfeas_links)
-            purge_log[i].append(tuple(unfeas_links))
+            purge_log[iteration].append(tuple(unfeas_links))
         whoneeds_[subroot] = feas_unions
         cat_feas_unions = UnionCount.encode(len(feas_unions))
         cat_feas_links = LinkCount.encode(num_feas_links)
@@ -439,11 +469,7 @@ def data_driven_hybrid(
     loop = True
     # BEGIN: main loop
     while loop:
-        i += 1
-        if i > maxiter:
-            error('ERROR: maxiter reached (%d)', i)
-            break
-        debug('[%d]', i)
+        debug('[%d]', iteration)
         if stale_subtrees:
             debug(
                 'stale_subtrees (%d): %s',
@@ -468,7 +494,7 @@ def data_driven_hybrid(
         # appraise and enqueue links
         if links_features:
             appraisals = appraise(links_features)
-            appraisal_log[i] = tuple(links_to_upd), appraisals
+            appraisal_log[iteration] = tuple(links_to_upd), appraisals
             j = 0
             for sr_u, num_appraisals in link_groups:
                 # get best-appraised link for each subroot
@@ -501,7 +527,7 @@ def data_driven_hybrid(
 
         # TODO: reassess this hack
         if uv_uniq not in A.edges:
-            stale_log[i] = uv_uniq
+            stale_log[iteration] = uv_uniq
             debug('>>> popped link ⟨%s⟩ is not in A anymore <<<', uv_uniq)
             #  print(f'>>> popped link ⟨{uv_uniq}⟩ is not in A anymore <<<')
             prio_tier_[tier_id].discard(sr_dropped)
@@ -528,7 +554,7 @@ def data_driven_hybrid(
         # edge addition starts here
         debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
         S.add_edge(u, v)
-        steps_log[i].append((u, v))
+        steps_log[iteration].append((u, v))
 
         is_feederless_[sr_dropped] = False
         # update the component's angle span
@@ -546,11 +572,11 @@ def data_driven_hybrid(
             S.add_edge(sr_kept, root)
             debug('subroot <%d> finalized (full load)', sr_kept)
             is_feederless_[sr_kept] = False
-            steps_log[i].append((sr_kept, root))
+            steps_log[iteration].append((sr_kept, root))
             #  prio_tier_[cat_feas_unions_[sr_kept]].remove(sr_kept)
             prio_tier_[cat_feas_unions_[sr_kept]].discard(sr_kept)
             A.remove_nodes_from(subtree)
-            purge_log[i].append(tuple(subtree))
+            purge_log[iteration].append(tuple(subtree))
             for sr in whoneeds_[sr_dropped]:
                 # TODO: rethink why not: whoneeds_[sr].remove(sr_dropped)
                 whoneeds_[sr].discard(sr_dropped)
@@ -560,7 +586,7 @@ def data_driven_hybrid(
                 whoneeds_[sr].discard(sr_kept)
             whoneeds_[sr_kept].clear()
         else:
-            purge_log[i].append(((u, v),))
+            purge_log[iteration].append(((u, v),))
             # this block might be unnecessary if whoneeds is not for dropped dependencies
             # TODO: rethink why not: whoneeds_[sr_dropped].remove(sr_kept)
             whoneeds_[sr_dropped].discard(sr_kept)
@@ -573,7 +599,7 @@ def data_driven_hybrid(
         # remove from A and pq the edges that cross ⟨u, v⟩
         for s, t in edge_crossings(u, v, A, diagonals):
             A.remove_edge(s, t)
-            purge_log[i].append(((s, t),))
+            purge_log[iteration].append(((s, t),))
             stale_subtrees.add(subroot_[s])
             stale_subtrees.add(subroot_[t])
         # in case sr_dropped was marked as stale because of crossings
@@ -585,6 +611,13 @@ def data_driven_hybrid(
         #      debug('heap top loop-end: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
         #  else:
         #      debug('heap EMPTY')
+        iteration += 1
+        if iteration == maxiter:
+            error(
+                'ERROR[data_driven_hybrid]: reached maximum number of iterations (%d)',
+                iteration,
+            )
+            break
     # END: main loop
 
     # add missing feeders (possibly sub-capacity components)
@@ -602,7 +635,7 @@ def data_driven_hybrid(
         runtime=time.perf_counter() - start_time,
         capacity=capacity,
         creator='data_driven_hybrid',
-        iterations=i,
+        iterations=iteration,
         solver_details=dict(
             steps_log=steps_log,
             purge_log=purge_log,
