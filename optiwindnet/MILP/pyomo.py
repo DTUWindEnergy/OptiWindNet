@@ -95,16 +95,15 @@ class SolverPyomo(Solver):
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
-        model, metadata = make_min_length_model(A, capacity, **model_options)
+        model, self.metadata = make_min_length_model(A, capacity, **model_options)
         self.model, self.model_options = model, model_options
         if warmstart is not None and self.solver.warm_start_capable():
-            self.solve_kwargs = {'warmstart': True}
             warmup_model(model, warmstart)
+            self.solve_kwargs = {'warmstart': True}
         else:
             self.solve_kwargs = {}
             if warmstart is not None:
                 warn('Solver <%s> is not capable of warm-starting.', self.name)
-        self.model, self.metadata = model, metadata
 
     def solve(
         self,
