@@ -153,7 +153,6 @@ class AppraiserFactory:
             #  features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
             #  ['s_is_subroot',
             #   't_is_subroot',
-            #   'is_union_full',
             #   'is_delaunay',
             #   'rel_moment',
             #   's_rel_load',
@@ -162,8 +161,8 @@ class AppraiserFactory:
             #   't_span',
             #   's_extent_min',
             #   't_extent_min',
-            #   's_subroot_d2root',
-            #   't_subroot_d2root',
+            #   'radial_gain',
+            #   'saving',
             #   'union_span',
             #   'union_rel_load',
             #   'extent',
@@ -185,7 +184,7 @@ class AppraiserFactory:
                 t_load,
                 is_delaunay,
                 extent,
-                cos_uv_ur,
+                cos,
                 num_blocked,
                 union_span,
             ) in partial_features_:
@@ -201,21 +200,22 @@ class AppraiserFactory:
                     (
                         s_is_subroot,  # s_is_subroot,
                         t_is_subroot,  # t_is_subroot,
-                        union_load == capacity,  # is_union_full,
                         is_delaunay,  # is_delaunay
                         rel_moment,  # rel_moment
                         s_load / capacity,  # s_rel_load
                         t_load / capacity,  # t_rel_load
-                        angle_ccw(s_span_lo, s_root, s_span_hi),  # s_span
+                        angle_ccw(s_span_lo, t_root, s_span_hi),  # s_span
                         angle_ccw(t_span_lo, t_root, t_span_hi),  # t_span
                         extent_min_[sr_s],  # s_extent_min
                         extent_min_[sr_t],  # t_extent_min
-                        d2roots[sr_s, t_root].item(),  # s_subroot_d2root
-                        d2roots[sr_t, t_root].item(),  # t_subroot_d2root
+                        -(
+                            d2roots[sr_s, t_root].item() - d2roots[sr_t, t_root].item()
+                        ),  # INVERTED radial_gain
+                        d2roots[sr_s, s_root].item() - extent,  # saving
                         angle_ccw(union_lo, t_root, union_hi),  # union_span
                         union_load / capacity,  # union_rel_load
                         extent,  # extent
-                        cos_uv_ur,  # cos
+                        cos,  # cos
                         num_blocked / capacity,  # blocked_subtree_equiv
                         *LinkCount.onehot(
                             cat_feas_links_[sr_s]
@@ -307,7 +307,7 @@ def data_driven_hybrid(
         # TODO: handle multiple roots properly
         elif (
             len(edgeD['blocked'][root]) > max_blockable_by_link
-            and edgeD['cos'][root] < blockage_link_cos_lim
+            and edgeD['cos_'][root] < blockage_link_cos_lim
         ):
             unfeas_links.append((u, v))
     debug('links removed in pre-processing: %s', unfeas_links)
@@ -455,7 +455,7 @@ def data_driven_hybrid(
                             load_other,
                             is_delaunay_[uv_uniq],
                             extent,
-                            uvD['cos'][root_v],
+                            uvD['cos_'][root_v],
                             len(uvD['blocked'][root_v]),
                             union_span,
                         )
