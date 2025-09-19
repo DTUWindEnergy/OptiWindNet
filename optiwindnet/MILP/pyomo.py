@@ -404,6 +404,27 @@ def make_min_length_model(
         ),
     )
 
+    # lone longest triangle side constraints
+    forbidden_pairs = []
+
+    for tri in A.graph['triangles']:
+        if any(v >= T or v < 0 for v in tri):
+            # skip triangles incident on supertriangle vertices
+            continue
+        a, b, c = sorted(tri)
+        if b not in A[a] or c not in A[a] or c not in A[b]:
+            continue
+        ab = A[a][b]['length']
+        ac = A[a][c]['length']
+        bc = A[b][c]['length']
+        (_, *longest), (_, *short_x), (_, *short_y) = sorted(
+            ((ab, a, b), (bc, b, c), (ac, a, c))
+        )
+        forbidden_pairs.extend(((longest, short_x), (longest, short_y)))
+    m.cons_lone_longest_triangle_side = pyo.Constraint(
+        forbidden_pairs, rule=lambda m, u, v, s, t: m.link_[u, v] + m.link_[s, t] <= 1
+    )
+
     #############
     # Objective #
     #############
