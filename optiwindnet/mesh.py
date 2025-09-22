@@ -1384,6 +1384,7 @@ def make_planar_embedding(
         planar=P_A,
         diagonals=diagonals,
         d2roots=d2roots,
+        triangles=triangles,
         corner_to_A_edges=corner_to_A_edges,
         # TODO: make these 2 attribute names consistent across the code
         hull=convex_hull_A,
