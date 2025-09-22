@@ -1092,3 +1092,39 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
         # hack to prevent `gplot()` from showing infobox
         del scaff.graph['capacity']
     return scaff
+
+
+def branched_S_from_radial(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
+    S = Sʹ.copy()
+    # Delaunay triangles iterator
+    iter_delaunay = ((a, b, c) for a, b, c in A.graph['triangles'] if a >= 0)
+    # diagonal triangles iterator
+    iter_diagonals = (
+        ((u, v, s), (u, v, t))
+        for (u, v), (s, t) in A.graph['diagonals'].items()
+        if u >= 0 and s >= 0
+    )
+    for a, b, c in chain(iter_delaunay, chain.from_iterable(iter_diagonals)):
+        ab = A[a][b]['length']
+        ac = A[a][c]['length']
+        bc = A[b][c]['length']
+        (_, *short_x), (_, *short_y), (_, *longest) = sorted(
+            ((ab, a, b), (bc, b, c), (ac, a, c))
+        )
+        if S.has_edge(*longest):
+            x_in_S, y_in_S = S.has_edge(*short_x), S.has_edge(*short_y)
+            if x_in_S or y_in_S:
+                # there is a sub-optimal pair of links
+                active, inactive = (short_x, short_y) if x_in_S else (short_y, short_x)
+                to_branch, to_leaf = active if active[1] in longest else active[::-1]
+                pivot = inactive[0] if inactive[1] == to_branch else inactive[1]
+                reverse = (S[pivot][to_leaf]['reverse'] == pivot < to_leaf) == (
+                    pivot < to_branch
+                )
+                S.edges[active]['load'] = A.nodes[to_leaf].get('load', 1)
+                S.edges[active]['reverse'] = not S.edges[active]['reverse']
+                S.add_edge(
+                    pivot, to_branch, load=S.edges[longest]['load'], reverse=reverse
+                )
+                S.remove_edge(pivot, to_leaf)
+    return S

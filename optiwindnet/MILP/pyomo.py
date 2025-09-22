@@ -406,43 +406,32 @@ def make_min_length_model(
 
     # lone longest triangle side constraints
     if 'lone' in A.graph:
+        # Delaunay triangles iterator
+        iter_delaunay = ((a, b, c) for a, b, c in A.graph['triangles'] if a >= 0)
+        # diagonal triangles iterator
+        iter_diagonals = (
+            ((u, v, s), (u, v, t))
+            for (u, v), (s, t) in A.graph['diagonals'].items()
+            if u >= 0 and s >= 0
+        )
         triangle_sides_sorted = []
-        # collect Delaunay triangles
-        for a, b, c in A.graph['triangles']:
-            if a < 0:
-                # skip triangles incident on roots
-                continue
+        for a, b, c in chain(iter_delaunay, chain.from_iterable(iter_diagonals)):
             ab = A[a][b]['length']
             ac = A[a][c]['length']
             bc = A[b][c]['length']
             (_, *short_x), (_, *short_y), (_, *longest) = sorted(
                 ((ab, a, b), (bc, b, c), (ac, a, c))
             )
-            #  triangle_sides_sorted.extend(((longest, short_x), (longest, short_y)))
             triangle_sides_sorted.append((longest, short_x, short_y))
-        # collect diagonal-formed triangles
-        diagonals = A.graph['diagonals']
-        for (u, v), (s, t) in diagonals.items():
-            if u < 0 or s < 0:
-                # skip triangles incident on roots
-                continue
-            for a, b, c in ((u, v, s), (u, v, t)):
-                ab = A[a][b]['length']
-                ac = A[a][c]['length']
-                bc = A[b][c]['length']
-                (_, *short_x), (_, *short_y), (_, *longest) = sorted(
-                    ((ab, a, b), (bc, b, c), (ac, a, c))
-                )
-                triangle_sides_sorted.append((longest, short_x, short_y))
         m.cons_lone_longest_triangle_side = pyo.Constraint(
             triangle_sides_sorted,
             rule=(
-                lambda m, u, v, s, t, w, x: 2 * m.link_[u, v]
+                lambda m, u, v, s, t, w, y: 2 * m.link_[u, v]
                 + 2 * m.link_[v, u]
                 + m.link_[s, t]
                 + m.link_[t, s]
-                + m.link_[w, x]
-                + m.link_[x, w]
+                + m.link_[w, y]
+                + m.link_[y, w]
                 <= 2
             ),
         )

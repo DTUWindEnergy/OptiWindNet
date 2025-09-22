@@ -335,6 +335,33 @@ def make_min_length_model(
         # only one out-edge per terminal
         m.add(sum(link_[t, n] for n in chain(A_nodes.neighbors(t), _R)) == 1)
 
+    # lone longest triangle side constraints
+    if 'lone' in A.graph:
+        # Delaunay triangles iterator
+        iter_delaunay = ((a, b, c) for a, b, c in A.graph['triangles'] if a >= 0)
+        # diagonal triangles iterator
+        iter_diagonals = (
+            ((u, v, s), (u, v, t))
+            for (u, v), (s, t) in A.graph['diagonals'].items()
+            if u >= 0 and s >= 0
+        )
+        for a, b, c in chain(iter_delaunay, chain.from_iterable(iter_diagonals)):
+            ab = A[a][b]['length']
+            ac = A[a][c]['length']
+            bc = A[b][c]['length']
+            (_, s, t), (_, w, y), (_, u, v) = sorted(
+                ((ab, a, b), (bc, b, c), (ac, a, c))
+            )
+            m.add(
+                2 * link_[u, v]
+                + 2 * link_[v, u]
+                + link_[s, t]
+                + link_[t, s]
+                + link_[w, y]
+                + link_[y, w]
+                <= 2
+            )
+
     #############
     # Objective #
     #############
