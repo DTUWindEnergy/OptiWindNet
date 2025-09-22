@@ -715,7 +715,10 @@ def make_planar_embedding(
     )
     mesh.insert_vertices(V2d_nodes)
 
-    P_A_halfedge_pack, P_A_edges, _ = _planar_from_cdt_triangles(mesh, vertex_from_iCDT)
+    P_A_halfedge_pack, P_A_edges, triangles_A = _planar_from_cdt_triangles(
+        mesh, vertex_from_iCDT, get_triangles=True
+    )
+    triangles_A = set(triangles_A)
     P_A = _P_from_halfedge_pack(P_A_halfedge_pack)
     P_A_edges.difference_update((u, v) for v in supertriangle for u in P_A[v])
 
@@ -729,6 +732,7 @@ def make_planar_embedding(
         # Circles pivot in cw order -> hull becomes ccw order.
         source, target = tee(P_A.neighbors_cw_order(pivot))
         for u, v in zip(source, chain(target, (next(target),))):
+            triangles_A.discard(tuple(sorted([u, v, pivot])))
             if u != begin and u != end and v != end:
                 convex_hull_A.append(u)
     debug('convex_hull_A: %s', convex_hull_A)
@@ -752,6 +756,7 @@ def make_planar_embedding(
             and triangle_AR(*VertexS[[u, v, n]]) > max_tri_AR
         ):
             P_A.remove_edge(u, v)
+            triangles_A.remove(tuple(sorted((u, v, n))))
             queue.extend(((n, v), (u, n)))
             uv = (u, v) if u < v else (v, u)
             P_A_edges.remove(uv)
@@ -1384,7 +1389,7 @@ def make_planar_embedding(
         planar=P_A,
         diagonals=diagonals,
         d2roots=d2roots,
-        triangles=triangles,
+        triangles=triangles_A,
         corner_to_A_edges=corner_to_A_edges,
         # TODO: make these 2 attribute names consistent across the code
         hull=convex_hull_A,

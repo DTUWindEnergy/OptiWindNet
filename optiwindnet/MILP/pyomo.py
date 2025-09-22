@@ -405,25 +405,47 @@ def make_min_length_model(
     )
 
     # lone longest triangle side constraints
-    forbidden_pairs = []
-
-    for tri in A.graph['triangles']:
-        if any(v >= T or v < 0 for v in tri):
-            # skip triangles incident on supertriangle vertices
-            continue
-        a, b, c = sorted(tri)
-        if b not in A[a] or c not in A[a] or c not in A[b]:
-            continue
-        ab = A[a][b]['length']
-        ac = A[a][c]['length']
-        bc = A[b][c]['length']
-        (_, *longest), (_, *short_x), (_, *short_y) = sorted(
-            ((ab, a, b), (bc, b, c), (ac, a, c))
+    if 'lone' in A.graph:
+        triangle_sides_sorted = []
+        # collect Delaunay triangles
+        for a, b, c in A.graph['triangles']:
+            if a < 0:
+                # skip triangles incident on roots
+                continue
+            ab = A[a][b]['length']
+            ac = A[a][c]['length']
+            bc = A[b][c]['length']
+            (_, *short_x), (_, *short_y), (_, *longest) = sorted(
+                ((ab, a, b), (bc, b, c), (ac, a, c))
+            )
+            #  triangle_sides_sorted.extend(((longest, short_x), (longest, short_y)))
+            triangle_sides_sorted.append((longest, short_x, short_y))
+        # collect diagonal-formed triangles
+        diagonals = A.graph['diagonals']
+        for (u, v), (s, t) in diagonals.items():
+            if u < 0 or s < 0:
+                # skip triangles incident on roots
+                continue
+            for a, b, c in ((u, v, s), (u, v, t)):
+                ab = A[a][b]['length']
+                ac = A[a][c]['length']
+                bc = A[b][c]['length']
+                (_, *short_x), (_, *short_y), (_, *longest) = sorted(
+                    ((ab, a, b), (bc, b, c), (ac, a, c))
+                )
+                triangle_sides_sorted.append((longest, short_x, short_y))
+        m.cons_lone_longest_triangle_side = pyo.Constraint(
+            triangle_sides_sorted,
+            rule=(
+                lambda m, u, v, s, t, w, x: 2 * m.link_[u, v]
+                + 2 * m.link_[v, u]
+                + m.link_[s, t]
+                + m.link_[t, s]
+                + m.link_[w, x]
+                + m.link_[x, w]
+                <= 2
+            ),
         )
-        forbidden_pairs.extend(((longest, short_x), (longest, short_y)))
-    m.cons_lone_longest_triangle_side = pyo.Constraint(
-        forbidden_pairs, rule=lambda m, u, v, s, t: m.link_[u, v] + m.link_[s, t] <= 1
-    )
 
     #############
     # Objective #
