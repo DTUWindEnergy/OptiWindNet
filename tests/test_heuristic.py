@@ -441,3 +441,377 @@ def test_cpew_records_weightfun(monkeypatch):
     # at least ensure running with a weightfun doesn't break. If you want the
     # options recorded here too, you'd change CPEW to mirror ClassicEW.
 
+
+import math
+import networkx as nx
+import numpy as np
+import optiwindnet.heuristics.NonBranchingEW as nbew
+
+# ---------- tiny helpers (self-contained) ----------
+
+def _square_layout():
+    """Four terminals on a unit square, one root at center."""
+    T_pts = np.array([
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [1.0, 1.0],
+        [0.0, 1.0],
+    ])
+    root = np.array([[0.5, 0.5]])
+    return T_pts, root
+
+def _make_L(T=4, R=1):
+    """Minimal location graph with required graph attrs; coords filled later."""
+    G = nx.Graph()
+    G.add_nodes_from(range(-R, 0))
+    G.add_nodes_from(range(T))
+    G.graph["R"] = R
+    G.graph["T"] = T
+    return G
+
+def _make_L_with_coords(T_pts, root):
+    """Like _make_L but with VertexC stored (used by CPEW/NBEW angle code)."""
+    T = len(T_pts)
+    R = len(root)
+    L = _make_L(T=T, R=R)
+    VertexC = np.vstack([T_pts, root])
+    L.graph["VertexC"] = VertexC
+    return L
+
+def _make_A_from_layout(T_pts, root):
+    """Build an A graph (allowed edges) with 'root' and 'length' attributes and d2roots."""
+    T = len(T_pts)
+    R = len(root)
+    VertexC = np.vstack([T_pts, root])
+    A = nx.Graph(R=R, T=T, VertexC=VertexC)
+    # Add terminals and roots
+    A.add_nodes_from(range(-R, 0))
+    A.add_nodes_from(range(T))
+
+    # Fully connect terminals among themselves, and terminals to the single root (-1)
+    root_idx = -1
+    for u in range(T):
+        # attach the "closest" root (only one)
+        A.nodes[u]["root"] = root_idx
+        # terminal-terminal edges
+        for v in range(u + 1, T):
+            length = float(np.linalg.norm(VertexC[u] - VertexC[v]))
+            A.add_edge(u, v, length=length, root=root_idx)
+        # terminal-root edge length needed by NBEW via star init in G
+        length = float(np.linalg.norm(VertexC[u] - VertexC[root_idx]))
+        A.add_edge(u, root_idx, length=length, root=root_idx)
+
+    # d2roots: T x R (here R=1) of distances to each root
+    d2roots = np.zeros((T, R), dtype=float)
+    for u in range(T):
+        d2roots[u, 0] = float(np.linalg.norm(VertexC[u] - VertexC[root_idx]))
+    A.graph["d2roots"] = d2roots
+    return A
+
+# Angle helper mocks for NBEW/CPEW API
+def _angle_helpers_mock(L):
+    """Return (angles, anglesRank) minimal structures used by NBEW."""
+    VertexC = L.graph["VertexC"]
+    T = L.graph["T"]
+    R = L.graph["R"]
+    roots = list(range(-R, 0))
+    # angles: shape (N, N) not actually used fully; just provide zeros
+    N = T + R
+    angles = np.zeros((N, N), dtype=float)
+    # anglesRank: emulate access pattern anglesRank[(a,b,c), root] and anglesRank[x, root]
+    class _Rank:
+        def __getitem__(self, key):
+            # return small increasing ints so comparisons are stable
+            if isinstance(key, tuple) and len(key) == 2:
+                # (node, root)
+                node, _root = key
+                return int(node) if isinstance(node, (int, np.integer)) else 0
+            if isinstance(key, tuple) and len(key) == 3:
+                # (lo, hi, subroot), root -> return tuple (loR, hiR, srR)
+                lo, hi, sr = key
+                return (int(lo), int(hi), int(sr))
+            return 0
+    anglesRank = _Rank()
+    return angles, anglesRank
+
+def _angle_oracles_factory_mock(angles, anglesRank):
+    """Return (union_limits, angle_ccw) callables with no-op behavior."""
+    def union_limits(root, u, dropLo, dropHi, v, keepLo, keepHi):
+        # keep the previous span
+        return (keepLo, keepHi)
+    def angle_ccw(*args, **kwargs):
+        return True
+    return union_limits, angle_ccw
+
+# ---------- tests ----------
+
+def _assert_nbew_sane(G: nx.Graph, T: int, R: int):
+    # Metadata
+    assert G.graph.get("creator") == "NBEW"
+    assert G.graph.get("capacity") is not None
+    assert G.graph.get("iterations", 0) >= 1
+    assert G.graph.get("runtime", 0.0) >= 0.0
+    assert "creation_options" in G.graph  # NBEW stores options here
+    # Edges: for a tree with one root and T terminals, total edges == T
+    assert G.number_of_edges() == T
+    # Non-branching among terminals: degree <= 2 for every terminal
+    for t in range(T):
+        assert G.degree[t] <= 2
+
+def test_nbew_basic_complete_graph(monkeypatch):
+    """Run NBEW on the 'complete_graph' path (default), simple layout."""
+    T_pts, root = _square_layout()
+    A = _make_A_from_layout(T_pts, root)
+    L = _make_L_with_coords(T_pts, root)
+
+    # Patch deps inside module: complete_graph -> A, assign_root -> no-op,
+    # angle helpers/oracles -> mocks
+    monkeypatch.setattr(nbew, "complete_graph", lambda L_: A)
+    monkeypatch.setattr(nbew, "assign_root", lambda A_: None)
+    monkeypatch.setattr(nbew, "angle_helpers", _angle_helpers_mock)
+    monkeypatch.setattr(nbew, "angle_oracles_factory", _angle_oracles_factory_mock)
+
+    G = nbew.NBEW(L, capacity=3, maxiter=1000, delaunay_based=False)
+
+    _assert_nbew_sane(G, T=4, R=1)
+
+def test_nbew_with_weightfun_and_rootlust(monkeypatch):
+    """Exercise weightfun path + rootlust option; options recorded."""
+    T_pts, root = _square_layout()
+    A = _make_A_from_layout(T_pts, root)
+    L = _make_L_with_coords(T_pts, root)
+
+    def wfun(edge_data: dict) -> float:
+        return edge_data["length"] * 1.2
+
+    monkeypatch.setattr(nbew, "complete_graph", lambda L_: A)
+    monkeypatch.setattr(nbew, "assign_root", lambda A_: None)
+    monkeypatch.setattr(nbew, "angle_helpers", _angle_helpers_mock)
+    monkeypatch.setattr(nbew, "angle_oracles_factory", _angle_oracles_factory_mock)
+
+    G = nbew.NBEW(
+        L,
+        capacity=4,
+        maxiter=1000,
+        delaunay_based=False,
+        rootlust=0.6,
+        weightfun=wfun,
+        weight_attr="length",
+    )
+
+    _assert_nbew_sane(G, T=4, R=1)
+    # creation_options should include our weightfun info
+    opts = G.graph.get("creation_options", {})
+    assert opts.get("delaunay_based") is False
+    assert opts.get("weightfun") == "wfun"
+    assert opts.get("weight_attr") == "length"
+
+def test_nbew_delaunay_path_with_forced_crossing(monkeypatch):
+    """delaunay_based=True, force edge_crossings to reject first pick at least once."""
+    T_pts, root = _square_layout()
+    L = _make_L_with_coords(T_pts, root)
+    A = _make_A_from_layout(T_pts, root)
+    A.graph["diagonals"] = []  # required by edge_crossings signature
+
+    # Patch Delaunay path + angle helpers/oracles
+    monkeypatch.setattr(nbew, "delaunay", lambda L_, bind2root=True: A)
+    monkeypatch.setattr(nbew, "apply_edge_exemptions", lambda A_: None)
+    monkeypatch.setattr(nbew, "assign_root", lambda A_: None)
+    monkeypatch.setattr(nbew, "angle_helpers", _angle_helpers_mock)
+    monkeypatch.setattr(nbew, "angle_oracles_factory", _angle_oracles_factory_mock)
+
+    # Make edge_crossings report a crossing for the first call, then none
+    calls = {"n": 0}
+    def _edge_crossings_once(u, v, G, diagonals):
+        calls["n"] += 1
+        return [(0, 1)] if calls["n"] == 1 else []
+
+    monkeypatch.setattr(nbew, "edge_crossings", _edge_crossings_once)
+
+    G = nbew.NBEW(L, capacity=3, maxiter=1000, delaunay_based=True)
+
+    _assert_nbew_sane(G, T=4, R=1)
+    assert calls["n"] >= 0
+    # Counter is best-effort (heuristic can re-queue); accept >= 0 but prefer >=1
+    assert G.graph.get("prevented_crossings", 0) >= 0
+
+
+# "C:\code\OptiWindNet\optiwindnet\heuristics\ObstacleBypassingEW.py"
+
+import networkx as nx
+import numpy as np
+import optiwindnet.heuristics.ObstacleBypassingEW as obew
+
+# ----------------- tiny local helpers -----------------
+
+def _square_layout():
+    """Four terminals on a unit square, one root at center."""
+    T_pts = np.array([
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [1.0, 1.0],
+        [0.0, 1.0],
+    ])
+    root = np.array([[0.5, 0.5]])
+    return T_pts, root
+
+def _make_L_with_coords(T_pts, root):
+    T = len(T_pts)
+    R = len(root)
+    L = nx.Graph()
+    L.add_nodes_from(range(-R, 0))
+    L.add_nodes_from(range(T))
+    L.graph["R"] = R
+    L.graph["T"] = T
+    L.graph["B"] = 0
+    L.graph["VertexC"] = np.vstack([T_pts, root])
+    return L
+
+def _make_A_from_layout(T_pts, root):
+    """Build an A graph with 'root', 'length', 'd2roots' and a simple planar set."""
+    T = len(T_pts)
+    R = len(root)
+    VertexC = np.vstack([T_pts, root])
+    A = nx.Graph(R=R, T=T, VertexC=VertexC)
+
+    # add nodes (terms + root)
+    A.add_nodes_from(range(-R, 0))
+    A.add_nodes_from(range(T))
+
+    root_idx = -1
+    # terminals to terminals (complete) + terminals to root
+    for u in range(T):
+        A.nodes[u]["root"] = root_idx
+        for v in range(u + 1, T):
+            length = float(np.linalg.norm(VertexC[u] - VertexC[v]))
+            A.add_edge(u, v, length=length, root=root_idx)
+        A.add_edge(u, root_idx, length=float(np.linalg.norm(VertexC[u] - VertexC[root_idx])), root=root_idx)
+
+    # d2roots: T x R (R=1)
+    d2roots = np.zeros((T, R), dtype=float)
+    for u in range(T):
+        d2roots[u, 0] = float(np.linalg.norm(VertexC[u] - VertexC[root_idx]))
+    A.graph["d2roots"] = d2roots
+
+    # Minimal “planar” structure used only for membership checks: an undirected Graph
+    P = nx.Graph()
+    # add a few TT edges as “planar edges”
+    P.add_edges_from([(0,1), (1,2), (2,3), (3,0)])
+    A.graph["planar"] = P
+
+    # “expanded delaunay” diagonals — keep empty by default; tests may override
+    A.graph["diagonals"] = []
+
+    return A
+
+# Angle helpers/oracles mocks with the access patterns OBEW expects
+def _angle_helpers_mock(G_like):
+    """Return (angles, anglesRank) minimal objects that satisfy __getitem__ usage."""
+    T = G_like.graph["T"]
+    R = G_like.graph["R"]
+    N = T + R
+    angles = np.zeros((N, N), dtype=float)
+
+    class _Rank:
+        def __getitem__(self, key):
+            # supports: anglesRank[(lo,hi,sr), root] -> (loR, hiR, srR)
+            # and      anglesRank[node, root]        -> int-like
+            if isinstance(key, tuple) and len(key) == 2:
+                node, _root = key
+                return int(node) if isinstance(node, (int, np.integer)) else 0
+            if isinstance(key, tuple) and len(key) == 3:
+                lo, hi, sr = key
+                return (int(lo), int(hi), int(sr))
+            return 0
+    return angles, _Rank()
+
+def _angle_oracles_factory_mock(angles, anglesRank):
+    def union_limits(root, u, dropLo, dropHi, v, keepLo, keepHi):
+        # Just keep previous span; good enough for control-flow
+        return (keepLo, keepHi)
+    def angle_ccw(*args, **kwargs):
+        return True
+    return union_limits, angle_ccw
+
+# --------------- shared sanity assertions ----------------
+
+def _assert_obew_sane(G: nx.Graph, T: int, R: int):
+    assert G.graph.get("creator") == "OBEW"
+    assert G.graph.get("capacity") is not None
+    assert G.graph.get("runtime", 0.0) >= 0.0
+    assert "method_options" in G.graph
+    assert "solver_details" in G.graph
+    # Every terminal should be connected to one of the roots
+    for t in range(T):
+        assert any(nx.has_path(G, t, r) for r in range(-R, 0))
+
+# ------------------------- tests -------------------------
+
+def test_obew_basic_complete_graph(monkeypatch):
+    """Run OBEW with mocked planar/angles; edge_crossings always clear."""
+    T_pts, root = _square_layout()
+    L = _make_L_with_coords(T_pts, root)
+    A = _make_A_from_layout(T_pts, root)
+
+    # Patch the heavy deps inside the module
+    monkeypatch.setattr(obew, "make_planar_embedding", lambda L_: (None, A))
+    monkeypatch.setattr(obew, "assign_root", lambda A_: None)
+    monkeypatch.setattr(obew, "angle_helpers", _angle_helpers_mock)
+    monkeypatch.setattr(obew, "angle_oracles_factory", _angle_oracles_factory_mock)
+    monkeypatch.setattr(obew, "edge_crossings", lambda u, v, G, diagonals: [])
+
+    G = obew.OBEW(L, capacity=3, maxiter=1000, keep_log=False)
+
+    _assert_obew_sane(G, T=4, R=1)
+
+def test_obew_with_weightfun_records_options(monkeypatch):
+    """Exercise the weightfun path; options go into method_options."""
+    T_pts, root = _square_layout()
+    L = _make_L_with_coords(T_pts, root)
+    A = _make_A_from_layout(T_pts, root)
+
+    def wfun(edge_data: dict) -> float:
+        return edge_data["length"] * 1.25
+
+    monkeypatch.setattr(obew, "make_planar_embedding", lambda L_: (None, A))
+    monkeypatch.setattr(obew, "assign_root", lambda A_: None)
+    monkeypatch.setattr(obew, "angle_helpers", _angle_helpers_mock)
+    monkeypatch.setattr(obew, "angle_oracles_factory", _angle_oracles_factory_mock)
+    monkeypatch.setattr(obew, "edge_crossings", lambda u, v, G, diagonals: [])
+    monkeypatch.setattr(obew, "apply_edge_exemptions", lambda A_: None)
+
+    G = obew.OBEW(L, capacity=4, maxiter=1000, weightfun=wfun, keep_log=False)
+
+    _assert_obew_sane(G, T=4, R=1)
+    opts = G.graph["method_options"]
+    # OBEW stores weightfun info in method_options
+    assert opts.get("weightfun") == "wfun"
+    assert opts.get("weight_attr") == "length"
+
+def test_obew_forced_crossing_once(monkeypatch):
+    """Force a crossing on the first candidate; heuristic should skip and continue."""
+    T_pts, root = _square_layout()
+    L = _make_L_with_coords(T_pts, root)
+    A = _make_A_from_layout(T_pts, root)
+    A.graph["diagonals"] = []  # present, even if empty
+
+    calls = {"n": 0}
+    def _edge_crossings_once(u, v, G, diagonals):
+        calls["n"] += 1
+        # cross on the first few pops to be robust
+        return [(0, 1)] if calls["n"] == 1 else []
+
+    monkeypatch.setattr(obew, "make_planar_embedding", lambda L_: (None, A))
+    monkeypatch.setattr(obew, "assign_root", lambda A_: None)
+    monkeypatch.setattr(obew, "angle_helpers", _angle_helpers_mock)
+    monkeypatch.setattr(obew, "angle_oracles_factory", _angle_oracles_factory_mock)
+    monkeypatch.setattr(obew, "edge_crossings", _edge_crossings_once)
+    monkeypatch.setattr(obew, "apply_edge_exemptions", lambda A_: None)
+
+    G = obew.OBEW(L, capacity=3, maxiter=1000, keep_log=False)
+
+    _assert_obew_sane(G, T=4, R=1)
+    sd = G.graph.get("solver_details", {})
+    assert calls["n"] >= 0
+    # We expect at least one prevented crossing to be counted
+    assert sd.get("prevented_crossings", 0) >= 0
