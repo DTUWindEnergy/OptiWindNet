@@ -90,7 +90,19 @@ def assign_cables(G: nx.Graph, cables: list[tuple[int, float]], currency: str = 
         G.graph['capacity'] = capacity
 
 
-def describe_G(G):
+def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
+    """Create a 3-4 line summary of G's properties.
+
+    significant_digits applies only to total length and is enforced only when the
+    integer part has fewer significant digits than significant_digits
+
+    Args:
+      G: route set instance
+      significant_digits: minimum number of significant digits used for total length
+    Returns:
+      Text lines: capacity and T, excess feeders and feeders per root, total length,
+        total cost.
+    """
     R = G.graph['R']
     T = G.graph['T']
     capacity = G.graph['capacity']
@@ -104,7 +116,8 @@ def describe_G(G):
     length = G.size(weight='length')
     if length > 0:
         intdigits = int(np.floor(np.log10(length))) + 1
-        desc.append(f'Σλ = {round(length, max(0, 5 - intdigits))} m')
+        fracdigits = max(0, significant_digits - intdigits)
+        desc.append(f'Σλ = {{:.{fracdigits}f}} m'.format(round(length, fracdigits)))
     if 'currency' in G.graph:
         desc.append(f'{G.size(weight="cost"):.0f} {G.graph["currency"]}')
     return desc

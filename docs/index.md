@@ -38,7 +38,7 @@ The tool is distributed as an open-source Python package that is suitable for us
 
 ## How to Cite
 
-A peer-reviewed cientific article explaining the OptiWindNet framework and benchmarking it against state-of-the art methods is available (open-access) at:
+A peer-reviewed scientific article explaining the OptiWindNet framework and benchmarking it against state-of-the art methods is available (open-access) at:
 - Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis,
 _Flexible cable routing framework for wind farm collection system optimization_,
 European Journal of Operational Research,

@@ -83,9 +83,9 @@ class SolverORTools(Solver, PoolHandler):
         self.P, self.A, self.capacity = P, A, capacity
         self.model_options = model_options
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
+        self.model, self.metadata = model, metadata
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
-        self.model, self.metadata = model, metadata
 
     def solve(
         self,

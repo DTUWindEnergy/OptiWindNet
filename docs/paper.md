@@ -1,6 +1,6 @@
 # Paper
 
-The methodology implemented in *OptiWindNet* is described in the peer-reviewed cientific article:
+The methodology implemented in *OptiWindNet* is described in the peer-reviewed scientific article:
 - Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis,
 _Flexible cable routing framework for wind farm collection system optimization_,
 European Journal of Operational Research,
