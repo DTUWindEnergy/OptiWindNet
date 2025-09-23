@@ -338,13 +338,13 @@ def hgs_multiroot(
             max_load = max(max_load, branch_load)
             loads = range(branch_load, 0, -1)
             S.add_nodes_from(
-                ((n, {'load': load}) for n, load in zip(branch, loads)),
+                ((n, {'load': load}) for n, load in zip(branch.tolist(), loads)),
                 subtree=subtree_id,
             )
             branch_roll = np.empty_like(branch)
             branch_roll[1:] = branch[:-1]
             branch_roll[0] = r
-            reverses = tuple(u < v for u, v in zip(branch, branch_roll))
+            reverses = tuple(bool(u < v) for u, v in zip(branch, branch_roll))
             edgeD = (
                 {'load': load, 'reverse': reverse}
                 for load, reverse in zip(loads, reverses)

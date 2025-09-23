@@ -57,6 +57,8 @@ class Router(ABC):
     Each Router implementation must define a `route` method.
     """
 
+    _summary_attrs: tuple[str, ...]
+
     @abstractmethod
     def route(
         self,
@@ -611,11 +613,20 @@ class WindFarmNetwork:
         return terse_links
 
     def solution_info(self):
-        """Get solver summary (runtime, objective, gap, etc.)."""
-        return {
-            k: self.G.graph[k]
-            for k in ('runtime', 'bound', 'objective', 'relgap', 'termination')
+        """Get model and solver information of the latest solution (runtime, objective, gap, etc.)."""
+        info = {
+            'router': self.router.__class__.__name__,
+            'capacity': self.cables_capacity,
         }
+        info.update(
+            {
+                k: v
+                for k, v in self.G.graph['method_options'].items()
+                if not k.startswith('fun')
+            }
+        )
+        info.update({k: self.G.graph[k] for k in self.router._summary_attrs})
+        return info
 
 
 class EWRouter(Router):
@@ -624,6 +635,8 @@ class EWRouter(Router):
     * Uses a modified Esau-Williams heuristic (segmented or straight feeders).
     * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
     """
+
+    _summary_attrs = ('iterations',)
 
     def __init__(
         self,
@@ -680,6 +693,8 @@ class HGSRouter(Router):
     * Balances solution quality and runtime.
     * Produces only radial solutions.
     """
+
+    _summary_attrs = ('runtime',)
 
     def __init__(
         self,
@@ -759,6 +774,8 @@ class MILPRouter(Router):
     * Produces provably optimal or near-optimal networks (with quality metrics).
     * Requires a longer runtime than heuristics- and meta-heuristics-based routers.
     """
+
+    _summary_attrs = ('runtime', 'bound', 'objective', 'relgap', 'termination')
 
     def __init__(
         self,

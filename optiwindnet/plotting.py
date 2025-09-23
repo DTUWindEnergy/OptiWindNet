@@ -255,7 +255,15 @@ def gplot(
         )
     else:
         label_options = dict(labels={})
-    arts = nx.draw_networkx_labels(G, pos, ax=ax, **label_options)
+    arts = nx.draw_networkx_labels(
+        G,
+        pos,
+        ax=ax,
+        font_color={
+            n: (c.root_edge if n < 0 else 'k') for n in label_options['labels'].keys()
+        },
+        **label_options,
+    )
     for artist in arts.values():
         artist.set_clip_on(False)
 
