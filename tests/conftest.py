@@ -1,7 +1,15 @@
+import os
+os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+
+
+import numba  # make sure the runtime flag is also set
+numba.config.DISABLE_JIT = True
+
 import pytest
 import numpy as np
 import dill
 from optiwindnet.interarraylib import L_from_G
+
 
 # ========== Core Fixtures ==========
 
