@@ -242,10 +242,10 @@ def angle_helpers(
         _, angle_rank__[:, r], counts = np.unique(
             angle__[:, r], return_inverse=True, return_counts=True
         )
-        for i in np.flatnonzero(counts > 1).tolist():
-            dups_from_root_rank__[r][i] = set(
-                np.flatnonzero(angle_rank__[:, r] == i).tolist()
-            )
+        for i in np.flatnonzero(counts > 1):
+            dups_from_root_rank__[r][i.item()] = np.flatnonzero(
+                angle_rank__[:, r] == i
+            ).tolist()
     return angle__, angle_rank__, dups_from_root_rank__
 
 
