@@ -7,6 +7,7 @@ from collections import defaultdict
 from enum import IntEnum
 from typing import Callable, Self
 
+from bitarray import bitarray
 import networkx as nx
 import numpy as np
 import torch
@@ -27,45 +28,52 @@ lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
-__version = 'DDHv7'
+__version = 'DDHv8'
 
 
 def add_link_blocked_set(A: nx.Graph):
-    """Experimental. Add edge attribute 'blocked' as a set()
+    """Experimental. Add attributes 'blocked' to edges and nodes.
 
-    Changes A in place. Assesses the terminals whose line-of-sight
-    to the root is intersected by the edge.
+    Edges' 'blocked__' are R-long list of bitarray masks, while nodes' 'blocked__' are tuples of node ids.
 
-    Only implemented for single-root sites.
+    Changes `A` in place. `A` should have no feeder edges.
+
+    Assesses the terminals whose line-of-sight to the root is intersected by the edge.
     """
     VertexC = A.graph['VertexC']
-    angle_, angle_rank_ = angle_helpers(
+    R, T = A.graph['R'], A.graph['T']
+    #  d2rootsRank = rankdata(A.graph['d2roots'], method='dense', axis=0)
+    angle__, angle_rank__, dups_from_root_rank__ = angle_helpers(
         A, include_borders=False
-    )  # pass L to avoid supertriangle
-    A.graph['angle_'] = angle_
-    A.graph['angle_rank_'] = angle_rank_
+    )
+    A.graph['angle__'] = angle__
+    A.graph['angle_rank__'] = angle_rank__
+    A.graph['dups_from_root_rank__'] = dups_from_root_rank__
     for u, v, edgeD in A.edges(data=True):
-        uR, vR = angle_rank_[[u, v], 0].tolist()
-        uv_angle = (angle_[v] - angle_[u]).item()
-        if uv_angle < 0:
-            uR, vR = vR, uR
-        if abs(uv_angle) <= np.pi:
-            inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
-        else:
-            inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
-        if len(inside_wedge) > 0:
-            vec = VertexC[v] - VertexC[u]
-            wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
-            cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
-            # TODO: handle multiple roots
-            root_vec = VertexC[-1] - VertexC[u]
-            is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
-            # ¡assuming a single root!
-            edgeD['blocked'] = [
-                set(inside_wedge[(cross <= 0) if is_root_sign_pos else (cross >= 0)])
-            ]
-        else:
-            edgeD['blocked'] = [set()]
+        blocked__ = []
+        for angle_, angle_rank_, rootC in zip(angle__.T, angle_rank__.T, VertexC[-R:]):
+            blocked_ = bitarray(T)
+            uR, vR = angle_rank_[[u, v]].tolist()
+            uv_angle = (angle_[v] - angle_[u]).item()
+            if uv_angle < 0:
+                uR, vR = vR, uR
+            if abs(uv_angle) <= np.pi:
+                inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
+            else:
+                inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
+            if len(inside_wedge) > 0:
+                vec = VertexC[v] - VertexC[u]
+                wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
+                cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
+                root_vec = rootC - VertexC[u]
+                is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
+                blocked_[
+                    inside_wedge[
+                        (cross <= 0) if is_root_sign_pos else (cross >= 0)
+                    ].tolist()
+                ] = 1
+            blocked__.append(blocked_)
+        edgeD['blocked__'] = blocked__
 
 
 class LinkCount(IntEnum):
