@@ -76,8 +76,8 @@ def CPEW(
     assign_root(A)
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
-    angles, anglesRank = angle_helpers(L)
-    union_limits, angle_ccw = angle_oracles_factory(angles, anglesRank)
+    angle__, angle_rank__, _ = angle_helpers(L)
+    union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
 
     if weightfun is not None:
         options['weightfun'] = weightfun.__name__
@@ -139,10 +139,10 @@ def CPEW(
 
     def is_crossing_feeder(root, subroot, u, v, touch_is_cross=False):
         less = np.less_equal if touch_is_cross else np.less
-        uvA = angles[v, root] - angles[u, root]
+        uvA = angle__[v, root] - angle__[u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
         lo, hi = (v, u) if swaped else (u, v)
-        loR, hiR, srR = anglesRank[(lo, hi, subroot), root]
+        loR, hiR, srR = angle_rank__[(lo, hi, subroot), root]
         W = loR > hiR  # wraps +-pi
         supL = less(loR, srR)  # angle(low) <= angle(probe)
         infH = less(srR, hiR)  # angle(probe) <= angle(high)
@@ -476,14 +476,14 @@ def CPEW(
         debug('<angle_span> //%s:%s//', F[unionLo], F[unionHi])
 
         # check which feeders are within the union's angle span
-        lR, hR = anglesRank[(unionLo, unionHi), root]
+        lR, hR = angle_rank__[(unionLo, unionHi), root]
         anglesWrap = lR > hR
         abort = False
         # the more conservative check would be using sr_v instead of
         # sr_u in the line below (but then the filter needs changing)
         distanceThreshold = d2rootsRank[sr_u, root]
         for subroot in [g for g in G[root] if d2rootsRank[g, root] > distanceThreshold]:
-            sr_rank = anglesRank[subroot, root]
+            sr_rank = angle_rank__[subroot, root]
             if (
                 not anglesWrap
                 and (lR < sr_rank < hR)
