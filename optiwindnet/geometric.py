@@ -4,7 +4,7 @@
 import math
 import operator
 from collections import defaultdict
-from itertools import combinations, pairwise, product
+from itertools import combinations, pairwise, product, chain
 from math import isclose
 from typing import Callable, Literal, NewType
 
@@ -616,7 +616,9 @@ def perimeter(VertexC, vertices_ordered):
     )
 
 
-def angle_helpers(L: nx.Graph) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
+def angle_helpers(
+    L: nx.Graph, include_borders: bool = True
+) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
     """Create auxiliary arrays of node attributes based on polar coordinates.
 
     Args:
@@ -628,14 +630,9 @@ def angle_helpers(L: nx.Graph) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
 
     T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
     B = L.graph.get('B', 0)
-    NodeC = VertexC[: T + B]
-    RootC = VertexC[-R:]
-
-    angles = np.empty((T + B, R), dtype=float)
-    for n, nodeC in enumerate(NodeC):
-        x, y = (nodeC - RootC).T
-        angles[n] = np.arctan2(y, x)
-
+    NodeC = VertexC[: (T + B) if include_borders else T]
+    Vec = NodeC[:, None, :] - VertexC[-R:]
+    angles = np.arctan2(Vec[..., 1], Vec[..., 0])
     anglesRank = rankdata(angles, method='dense', axis=0)
     return angles, anglesRank
 
@@ -1137,20 +1134,33 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
 
 
 def add_link_cosines(A: nx.Graph):
+    """Add cosine of the angle wrt each root to all links of A as attribute '_cos'.
+
+    Changes A in-place. The cosine is of the acute angle between the link line and the
+    line that contains the mid-point of the link and the root (for each root).
+    """
     R = A.graph['R']
     VertexC = A.graph['VertexC']
-    for u, v, edgeD in A.edges(data=True):
-        # TODO: implement this more efficiently
-        if u < 0 or v < 0:
-            # skip feeders
-            continue
-        cos_ = [None] * R
-        edgeD['cos_'] = cos_
-        uC, vC = VertexC[(u, v),]
-        vec_uv = vC - uC
-        len_uv = np.hypot(*vec_uv).item()
-        mC = 0.5 * (uC + vC)
-        for r in range(-R, 0):
-            vec_rm = mC - VertexC[r]
-            len_rm = np.hypot(*vec_rm).item()
-            cos_[r] = abs(np.dot(vec_uv, vec_rm).item() / len_rm / len_uv)
+    RootC = VertexC[-R:]
+
+    edge_ = np.fromiter(
+        chain.from_iterable(A.edges()),
+        dtype=int,
+        count=2 * A.number_of_edges(),
+    ).reshape((-1, 2))
+    edgeC = VertexC[edge_]
+    uC = edgeC[:, 0, :]
+    vC = edgeC[:, 1, :]
+    edge_vec_ = vC - uC
+    edge_len_ = np.hypot(*edge_vec_.T)
+    mid_edge_ = 0.5 * (uC + vC)
+    mid_vec_ = mid_edge_[:, None, :] - RootC
+    mid_len_ = np.hypot(mid_vec_[..., 0], mid_vec_[..., 1])
+    cos__ = abs(np.vecdot(edge_vec_[:, None, :], mid_vec_)) / (
+        edge_len_[:, None] * mid_len_
+    )
+    nx.set_edge_attributes(
+        A,
+        {(edge[0], edge[1]): cos_.tolist() for edge, cos_ in zip(edge_, cos__)},
+        name='cos_',
+    )
