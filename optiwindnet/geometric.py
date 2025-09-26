@@ -4,7 +4,7 @@
 import math
 import operator
 from collections import defaultdict
-from itertools import combinations, pairwise, product
+from itertools import combinations, pairwise, product, chain
 from math import isclose
 from typing import Callable, Literal, NewType
 
@@ -16,7 +16,6 @@ from numpy.typing import NDArray
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
 from scipy.spatial.distance import cdist
-from scipy.stats import rankdata
 
 from .utils import F, NodeStr
 
@@ -28,6 +27,7 @@ __all__ = (
     'rotate',
     'angle_numpy',
     'angle',
+    'angle_helpers',
     'angle_oracles_factory',
     'find_edges_bbox_overlaps',
     'is_crossing_numpy',
@@ -36,7 +36,6 @@ __all__ = (
     'is_bunch_split_by_corner',
     'is_triangle_pair_a_convex_quadrilateral',
     'perimeter',
-    'angle_helpers',
     'assign_root',
     'get_crossings_map',
     'complete_graph',
@@ -44,6 +43,7 @@ __all__ = (
     'rotation_checkers_factory',
     'rotating_calipers',
     'area_from_polygon_vertices',
+    'add_link_cosines',
 )
 
 NULL = np.iinfo(int).min
@@ -215,10 +215,43 @@ def angle(aC, pivotC, bC):
     return ang
 
 
+def angle_helpers(
+    L: nx.Graph, include_borders: bool = True
+) -> tuple[NDArray[np.float64], NDArray[np.int_], list[dict[int, int]]]:
+    """Create auxiliary arrays of node attributes based on polar coordinates.
+
+    The ranks of the angles and calculated per root and start from 0. The duplicates
+    mapping is a list of dicts and is indexed first by the root.
+
+    Args:
+        L: location (also works with A or G)
+
+    Returns:
+        Tuple of (angle__, angle_rank__, dups_from_root_rank__)
+    """
+
+    T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
+    B = L.graph.get('B', 0)
+    NodeC = VertexC[: (T + B) if include_borders else T]
+    Vec = NodeC[:, None, :] - VertexC[-R:]
+    angle__ = np.arctan2(Vec[..., 1], Vec[..., 0])
+    angle_rank__ = np.empty_like(angle__, dtype=np.int_)
+    dups_from_root_rank__ = [{} for _ in range(-R, 0)]
+    for r in range(-R, 0):
+        _, angle_rank__[:, r], counts = np.unique(
+            angle__[:, r], return_inverse=True, return_counts=True
+        )
+        for i in np.flatnonzero(counts > 1):
+            dups_from_root_rank__[r][i.item()] = np.flatnonzero(
+                angle_rank__[:, r] == i
+            ).tolist()
+    return angle__, angle_rank__, dups_from_root_rank__
+
+
 def angle_oracles_factory(
-    angles: NDArray[np.float64], anglesRank: NDArray[np.int_]
+    angle__: NDArray[np.float64], angle_rank__: NDArray[np.int_]
 ) -> tuple[
-    Callable[[int, int, int, int, int, int, int], tuple[float, float]],
+    Callable[[int, int, int, int, int, int, int], tuple[int, int]],
     Callable[[int, int, int], float],
 ]:
     """Make functions to answer queries about relative angles.
@@ -226,8 +259,8 @@ def angle_oracles_factory(
     Inputs are the outputs of `angle_helpers()`.
 
     Args:
-      angles: (T, R)-array of angles wrt root (+-pi)
-      anglesRank: (T, R)-array of the relative placement of angles
+      angle__: (T, R)-array of angles wrt root (+-pi)
+      angle_rank__: (T, R)-array of the relative placement of angles
 
     Returns:
       union_limits() and angle_ccw()
@@ -242,7 +275,7 @@ def angle_oracles_factory(
     def union_limits(
         root: int, u: int, LO: int, HI: int, v: int, lo: int, hi: int
     ) -> tuple[int, int]:
-        LOR, HIR, loR, hiR = anglesRank[(LO, HI, lo, hi), root]
+        LOR, HIR, loR, hiR = angle_rank__[(LO, HI, lo, hi), root]
         lo_within = is_within(loR, LOR, HIR)
         hi_within = is_within(hiR, LOR, HIR)
         if lo_within and hi_within:
@@ -275,8 +308,8 @@ def angle_oracles_factory(
         """
         if a == b:
             return 0.0
-        aR, bR = anglesRank[(a, b), pivot]
-        aA, bA = angles[(a, b), pivot]
+        aR, bR = angle_rank__[(a, b), pivot]
+        aA, bA = angle__[(a, b), pivot]
         a_to_bA = (bA - aA).item()
         return a_to_bA if aR <= bR else (2 * math.pi + a_to_bA)
 
@@ -556,7 +589,7 @@ def apply_edge_exemptions(G, allow_edge_deletion=True):
     # roots = range(T, T + R)
     roots = range(-R, 0)
     triangles = G.graph['triangles']
-    angles = G.graph['angles']
+    angle__ = G.graph['angle__']
 
     # set hull edges as exempted
     for edge in E_hull:
@@ -586,9 +619,7 @@ def apply_edge_exemptions(G, allow_edge_deletion=True):
         if (frozenset((u, v)) in E_hull_exp) or (u in roots) or (v in roots):
             angdiff = zeros
         else:
-            # angdiff = (angles[:, u] - angles[:, v]) % (2*np.pi)
-            # angdiff = abs(angles[:, u] - angles[:, v])
-            angdiff = abs(angles[u] - angles[v])
+            angdiff = abs(angle__[u] - angle__[v])
         arc = np.empty((R,), dtype=float)
         for i in range(R):  # TODO: vectorize this loop
             arc[i] = angdiff[i] if angdiff[i] < np.pi else 2 * np.pi - angdiff[i]
@@ -613,30 +644,6 @@ def perimeter(VertexC, vertices_ordered):
     return np.hypot(*vec.T).sum() + np.hypot(
         *(VertexC[vertices_ordered[-1]] - VertexC[vertices_ordered[0]])
     )
-
-
-def angle_helpers(L: nx.Graph) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
-    """Create auxiliary arrays of node attributes based on polar coordinates.
-
-    Args:
-        L: location (also works with A or G)
-
-    Returns:
-        Tuple of (angles, anglesRank)
-    """
-
-    T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
-    B = L.graph.get('B', 0)
-    NodeC = VertexC[: T + B]
-    RootC = VertexC[-R:]
-
-    angles = np.empty((T + B, R), dtype=float)
-    for n, nodeC in enumerate(NodeC):
-        x, y = (nodeC - RootC).T
-        angles[n] = np.arctan2(y, x)
-
-    anglesRank = rankdata(angles, method='dense', axis=0)
-    return angles, anglesRank
 
 
 def assign_root(A: nx.Graph) -> None:
@@ -1132,4 +1139,37 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     # Shoelace formula for area (https://stackoverflow.com/a/30408825/287217).
     return 0.5 * abs(
         X[-1] * Y[0] - Y[-1] * X[0] + np.dot(X[:-1], Y[1:]) - np.dot(Y[:-1], X[1:])
+    )
+
+
+def add_link_cosines(A: nx.Graph):
+    """Add cosine of the angle wrt each root to all links of A as attribute '_cos'.
+
+    Changes A in-place. The cosine is of the acute angle between the link line and the
+    line that contains the mid-point of the link and the root (for each root).
+    """
+    R = A.graph['R']
+    VertexC = A.graph['VertexC']
+    RootC = VertexC[-R:]
+
+    edge_ = np.fromiter(
+        chain.from_iterable(A.edges()),
+        dtype=int,
+        count=2 * A.number_of_edges(),
+    ).reshape((-1, 2))
+    edgeC = VertexC[edge_]
+    uC = edgeC[:, 0, :]
+    vC = edgeC[:, 1, :]
+    edge_vec_ = vC - uC
+    edge_len_ = np.hypot(*edge_vec_.T)
+    mid_edge_ = 0.5 * (uC + vC)
+    mid_vec_ = mid_edge_[:, None, :] - RootC
+    mid_len_ = np.hypot(mid_vec_[..., 0], mid_vec_[..., 1])
+    cos__ = abs(np.vecdot(edge_vec_[:, None, :], mid_vec_)) / (
+        edge_len_[:, None] * mid_len_
+    )
+    nx.set_edge_attributes(
+        A,
+        {(edge[0], edge[1]): cos_.tolist() for edge, cos_ in zip(edge_, cos__)},
+        name='cos_',
     )
