@@ -31,7 +31,6 @@ ROUTERS = {
     "EWRouter_straight_cap1":      {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 1},
     "EWRouter_straight_cap4":      {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 4},
     "EWRouter_straight_cap10":     {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 10},
-
     "HGSRouter_cap1":              {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 1},
     "HGSRouter_cap3":              {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 3},
     "HGSRouter_cap10":             {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 10},

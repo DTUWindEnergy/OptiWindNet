@@ -48,6 +48,7 @@ if __name__ == '__main__':
         'DTU_2ss_40wt': 'tests/test_files/DTU_tests_2ss_40wt.osm.pbf',
         'DTU_4ss_40wt': 'tests/test_files/DTU_tests_4ss_40wt.osm.pbf',
         'DTU_1ss_100wt': 'tests/test_files/DTU_tests_1ss_100wt.osm.pbf',
+        'DTU_1ss_300wt': 'tests/test_files/DTU_tests_1ss_300wt.osm.pbf',
     }
 
     routers_2 = {

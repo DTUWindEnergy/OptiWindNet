@@ -970,3 +970,171 @@ def test__ensure_closed_noop_if_already_closed():
     closed = U._ensure_closed(coords)
     # already closed -> unchanged
     assert np.array_equal(closed, coords)
+
+
+import numpy as np
+import networkx as nx
+import pytest
+
+from optiwindnet.api import WindFarmNetwork, HGSRouter
+import optiwindnet.baselines.hgs as hgs_mod
+import optiwindnet.repair as R
+
+
+# ---------- Helpers to fabricate HGS solver output via monkeypatch ----------
+
+def _fake_do_hgs_two_branches(*args, **kwargs):
+    """
+    Return two routes (1-based turbine ids, no depot in the lists), which
+    hgs_cvrp will turn into two non-branching subtrees:
+        route 1 → [0,1,2,3]
+        route 2 → [4,5,6,7]
+    """
+    routes = [[1, 2, 3, 4], [5, 6, 7, 8]]
+    runtime = 0.01
+    solution_time = 0.01
+    cost = 0.0
+    log = None
+    algo_params = {"seed": 0}
+    return routes, runtime, solution_time, cost, log, algo_params
+
+
+def _fake_do_hgs_single_branch(*args, **kwargs):
+    """
+    One single long path: all turbines are in one subtree.
+    """
+    routes = [[1, 2, 3, 4, 5, 6, 7, 8]]
+    runtime = 0.01
+    solution_time = 0.01
+    cost = 0.0
+    log = None
+    algo_params = {"seed": 0}
+    return routes, runtime, solution_time, cost, log, algo_params
+
+
+# ---------- Base WindFarmNetwork builder (R==1 so HGS->repair is used) ----------
+
+def _make_wfn(T=8):
+    # place T turbines roughly on a grid and one substation
+    xs = np.linspace(0.0, 7.0, T)
+    turbinesC = np.c_[xs, np.zeros_like(xs)]
+    substationsC = np.array([[10.0, 0.0]])
+    return WindFarmNetwork(cables=3, turbinesC=turbinesC, substationsC=substationsC)
+
+
+# ---------- Tests ----------
+
+def test_repair_via_api_no_crossings(monkeypatch):
+    """
+    Smoke path: repair sees no crossings -> returns immediately.
+    """
+    monkeypatch.setattr(hgs_mod, "do_hgs", _fake_do_hgs_two_branches)
+    # No crossings reported
+    monkeypatch.setattr(R, "list_edge_crossings", lambda S_T, A: [])
+
+    wfn = _make_wfn()
+    router = HGSRouter(time_limit=0.05, seed=0)
+    terse = wfn.optimize(router=router)
+
+    assert terse.shape[0] == wfn.S.graph['T']
+    # Nothing marked as repaired
+    assert 'repaired' not in wfn.S.graph
+
+
+def test_repair_via_api_unrepairable_all_deg_gt1(monkeypatch):
+    """
+    Crossing between internal edges (all four endpoints degree>1) →
+    recorded as outstanding, no repair applied.
+    """
+    monkeypatch.setattr(hgs_mod, "do_hgs", _fake_do_hgs_two_branches)
+
+    # Choose internal edges (1,2) from first path and (5,6) from second path
+    def fake_xings(S_T, A):
+        return [((1, 2), (5, 6))]
+    monkeypatch.setattr(R, "list_edge_crossings", fake_xings)
+
+    wfn = _make_wfn()
+    router = HGSRouter(time_limit=0.05, seed=0)
+    wfn.optimize(router=router)
+
+    # outstanding crossings were tracked inside the S used to build G
+    out = wfn.S.graph.get('outstanding_crossings', [])
+    assert out and (tuple(sorted((1,2))), tuple(sorted((5,6)))) in out
+
+
+def test_repair_via_api_unrepairable_same_subtree(monkeypatch):
+    """
+    Crossing edges within the same subtree → non-repairable.
+    """
+    monkeypatch.setattr(hgs_mod, "do_hgs", _fake_do_hgs_single_branch)
+
+    # Crossing chosen from within the single path
+    def fake_xings(S_T, A):
+        return [((1, 2), (3, 4))]
+    monkeypatch.setattr(R, "list_edge_crossings", fake_xings)
+
+    wfn = _make_wfn()
+    router = HGSRouter(time_limit=0.05, seed=0)
+    wfn.optimize(router=router)
+
+    assert wfn.S.graph.get('num_crossings', 0) == 1
+
+
+def test_repair_via_api_successful_repair(monkeypatch):
+    """
+    Force a deterministic feasible repair by patching the choice/quantify helpers.
+    Ensures _apply_choice runs and marks S.graph['repaired'].
+    """
+    monkeypatch.setattr(hgs_mod, "do_hgs", _fake_do_hgs_two_branches)
+
+    # Crossing between leaf edges (easier to produce src/dst swap candidates)
+    monkeypatch.setattr(R, "list_edge_crossings", lambda S_T, A: [((0, 1), (4, 5))])
+
+    # Make find-choices return one simple plan: remove (0,1), add (0,4)
+    def fake_find(A, swapS, src_path, dst_path):
+        gateD, swapD, freeS = dst_path[0], dst_path[0], src_path[-1]
+        return [(gateD, swapD, freeS, [(0, 1)], [(0, 4)])]
+    monkeypatch.setattr(R, "_find_fix_choices_path", fake_find)
+
+    # Score it trivially; provide empty gate edits; zero "cost"
+    monkeypatch.setattr(
+        R,
+        "_quantify_choices",
+        lambda S,A,swapS,src,dst,choices: [(0.0, (choices[0][3], choices[0][4], [], []))]
+    )
+
+    # Let apply_choice recompute loads as usual (no patch). Run optimize:
+    wfn = _make_wfn()
+    router = HGSRouter(time_limit=0.05, seed=0)
+    wfn.optimize(router=router)
+
+    # The S used inside HGS got "repaired"
+    assert wfn.S.graph.get('repaired') == 'repair_routeset_path'
+    # Our added edge should exist in S (note: G is built later; we check S)
+    assert wfn.S.has_edge(0, 4)
+
+
+def test_repair_via_api_early_exit_on_detours(monkeypatch):
+    """
+    If S graph has 'C' or 'D', repair_routeset_path must return S unchanged.
+    We force hgs_cvrp to return such an S by post-processing the S it builds.
+    """
+    # Use normal do_hgs and then patch the top-level repair call to run as-is
+    monkeypatch.setattr(hgs_mod, "do_hgs", _fake_do_hgs_two_branches)
+
+    # Wrap original function to tag the S with 'C' just before repair runs.
+    original_repair = R.repair_routeset_path
+
+    def tagging_repair(S, A):
+        S.graph['C'] = 1  # mark as having detours/gates
+        return original_repair(S, A)
+
+    monkeypatch.setattr(R, "repair_routeset_path", tagging_repair)
+
+    # list_edge_crossings would normally be consulted, but early-exit prevents it.
+    wfn = _make_wfn()
+    router = HGSRouter(time_limit=0.05, seed=0)
+    wfn.optimize(router=router)
+
+    # Early-exit: returned S is unchanged (no 'repaired' tag)
+    assert 'repaired' not in wfn.S.graph
