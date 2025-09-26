@@ -39,9 +39,9 @@ ROUTERS = {
     "EWRouter_straight_cap1": {"router": EWRouter(feeder_route="straight"), "cables": 1},
     "EWRouter_straight_cap4": {"router": EWRouter(feeder_route="straight"), "cables": 4},
     "EWRouter_straight_cap10": {"router": EWRouter(feeder_route="straight"), "cables": 10},
-    "HGSRouter_cap1": {"router": HGSRouter(time_limit=2, seed=0), "cables": 1},
-    "HGSRouter_cap3": {"router": HGSRouter(time_limit=2, seed=0), "cables": 3},
-    "HGSRouter_cap10": {"router": HGSRouter(time_limit=2, seed=0), "cables": 10},
+    "HGSRouter_cap1": {"router": HGSRouter(time_limit=0.5, seed=0), "cables": 1},
+    "HGSRouter_cap3": {"router": HGSRouter(time_limit=0.5, seed=0), "cables": 3},
+    "HGSRouter_cap10": {"router": HGSRouter(time_limit=0.5, seed=0), "cables": 10},
     "HGSRouter_feeder_limit_cap1": {
         "router": HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
         "cables": 1,
@@ -79,6 +79,21 @@ ROUTERS = {
     "EWRouter_straight_cap7": {"router": EWRouter(feeder_route="straight"), "cables": 7},
     "EWRouter_straight_cap15": {"router": EWRouter(feeder_route="straight"), "cables": 15},
     "EWRouter_straight_cap100": {"router": EWRouter(feeder_route="straight"), "cables": 100},
+    'HGSRouter_cap5': {'router': HGSRouter(time_limit=0.5, seed=0), 'cables': 5},
+    # 'HGSRouter_cap10': {'router': HGSRouter(time_limit=0.5, seed=0), 'cables': 10},
+    # 'HGSRouter_cap100': {'router': HGSRouter(time_limit=0.5, seed=0), 'cables': 100},
+    # 'HGSRouter_feeder_limit_cap7': {
+    #     'router': HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
+    #     'cables': 7,
+    # },
+    # 'HGSRouter_feeder_limit_cap15': {
+    #     'router': HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
+    #     'cables': 15,
+    # },
+    # 'HGSRouter_feeder_limit_cap100': {
+    #     'router': HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
+    #     'cables': 100,
+    # },
 }
 
 
@@ -95,11 +110,7 @@ def _split_key(key: str):
     raise KeyError(f"Unrecognized router suffix in key: {key!r}")
 
 
-import numpy as np
-
 # ========== Graph Assertion Helpers ==========
-
-
 
 @pytest.mark.parametrize("key", sorted([
     # Load keys from dill once at import-time; if file is missing, pytest will show a clear error.
