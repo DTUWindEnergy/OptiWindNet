@@ -14,112 +14,80 @@ from .helpers import assert_graph_equal
 
 
 # -------------------------------
-# Test data & router definitions
+# Paths
 # -------------------------------
 HERE = Path(__file__).parent
 EXPECTED_PATH = HERE / "test_files" / "expected_DTU_letters.dill"
 
-# Mirror the site name -> file path mapping used to generate the dill
-SITES = {
-    # sites_1
-    "DTU_1ss_10wt": HERE / "test_files" / "DTU_tests_1ss_10wt.osm.pbf",
-    # sites_2
-    "DTU_1ss_40wt": HERE / "test_files" / "DTU_tests_1ss_40wt.osm.pbf",
-    "DTU_2ss_40wt": HERE / "test_files" / "DTU_tests_2ss_40wt.osm.pbf",
-    "DTU_4ss_40wt": HERE / "test_files" / "DTU_tests_4ss_40wt.osm.pbf",
-    "DTU_1ss_100wt": HERE / "test_files" / "DTU_tests_1ss_100wt.osm.pbf",
-}
 
-# Mirror the router configs used when saving expected values
+# -------------------------------
+# Router definitions (factories!)
+# -------------------------------
 ROUTERS = {
     # routers_1
-    "EWRouter_cap1": {"router": None, "cables": 1},
-    "EWRouter_cap3": {"router": None, "cables": 3},
-    "EWRouter_cap10": {"router": None, "cables": 10},
-    "EWRouter_straight_cap1": {"router": EWRouter(feeder_route="straight"), "cables": 1},
-    "EWRouter_straight_cap4": {"router": EWRouter(feeder_route="straight"), "cables": 4},
-    "EWRouter_straight_cap10": {"router": EWRouter(feeder_route="straight"), "cables": 10},
-    "HGSRouter_cap1": {"router": HGSRouter(time_limit=0.5, seed=0), "cables": 1},
-    "HGSRouter_cap3": {"router": HGSRouter(time_limit=0.5, seed=0), "cables": 3},
-    "HGSRouter_cap10": {"router": HGSRouter(time_limit=0.5, seed=0), "cables": 10},
-    "HGSRouter_feeder_limit_cap1": {
-        "router": HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
-        "cables": 1,
-    },
-    "HGSRouter_feeder_limit_cap4": {
-        "router": HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
-        "cables": 4,
-    },
-    "HGSRouter_feeder_limit_cap10": {
-        "router": HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
-        "cables": 10,
-    },
+    "EWRouter_cap1":               {"router_factory": lambda: None,                              "cables": 1},
+    "EWRouter_cap3":               {"router_factory": lambda: None,                              "cables": 3},
+    "EWRouter_cap10":              {"router_factory": lambda: None,                              "cables": 10},
+    "EWRouter_straight_cap1":      {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 1},
+    "EWRouter_straight_cap4":      {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 4},
+    "EWRouter_straight_cap10":     {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 10},
+
+    "HGSRouter_cap1":              {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 1},
+    "HGSRouter_cap3":              {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 3},
+    "HGSRouter_cap10":             {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 10},
+    "HGSRouter_feeder_limit_cap1": {"router_factory": lambda: HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),         "cables": 1},
+    "HGSRouter_feeder_limit_cap4": {"router_factory": lambda: HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),         "cables": 4},
+    "HGSRouter_feeder_limit_cap10": {"router_factory": lambda: HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),        "cables": 10},
+
     "MILPRouter_cap10": {
-        "router": MILPRouter(solver_name="ortools", time_limit=5, mip_gap=0.001),
+        "router_factory": lambda: MILPRouter(solver_name="ortools", time_limit=5, mip_gap=0.001),
         "cables": 10,
     },
     "MILPRouter_cap10_modeloptions": {
-        "router": MILPRouter(
-            solver_name="ortools",
-            time_limit=5,
-            mip_gap=0.001,
-            model_options=ModelOptions(
-                topology="radial",
-                feeder_limit="minimum",
-                feeder_route="straight",
-            ),
+        "router_factory": lambda: MILPRouter(
+            solver_name="ortools", time_limit=5, mip_gap=0.001,
+            model_options=ModelOptions(topology="radial", feeder_limit="minimum", feeder_route="straight"),
         ),
         "cables": 10,
     },
 
     # routers_2
-    "EWRouter_cap5": {"router": None, "cables": 5},
-    "EWRouter_cap10": {"router": None, "cables": 10},
-    "EWRouter_cap100": {"router": None, "cables": 100},
-    "EWRouter_straight_cap7": {"router": EWRouter(feeder_route="straight"), "cables": 7},
-    "EWRouter_straight_cap15": {"router": EWRouter(feeder_route="straight"), "cables": 15},
-    "EWRouter_straight_cap100": {"router": EWRouter(feeder_route="straight"), "cables": 100},
-    'HGSRouter_cap5': {'router': HGSRouter(time_limit=0.5, seed=0), 'cables': 5},
-    # 'HGSRouter_cap10': {'router': HGSRouter(time_limit=0.5, seed=0), 'cables': 10},
-    # 'HGSRouter_cap100': {'router': HGSRouter(time_limit=0.5, seed=0), 'cables': 100},
-    # 'HGSRouter_feeder_limit_cap7': {
-    #     'router': HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
-    #     'cables': 7,
-    # },
-    # 'HGSRouter_feeder_limit_cap15': {
-    #     'router': HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
-    #     'cables': 15,
-    # },
-    # 'HGSRouter_feeder_limit_cap100': {
-    #     'router': HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),
-    #     'cables': 100,
-    # },
+    "EWRouter_cap5":               {"router_factory": lambda: None,                              "cables": 5},
+    "EWRouter_cap10":              {"router_factory": lambda: None,                              "cables": 10},
+    "EWRouter_cap100":             {"router_factory": lambda: None,                              "cables": 100},
+    "EWRouter_straight_cap7":      {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 7},
+    "EWRouter_straight_cap15":     {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 15},
+    "EWRouter_straight_cap100":    {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 100},
+    "HGSRouter_cap5":              {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0), "cables": 5},
 }
 
 
 def _split_key(key: str):
     """
-    Given keys formed as f'{site_name}_{router_name}', recover site_name/router_name
-    by matching the router_name suffix from ROUTERS.
+    Keys are f'{site_name}_{router_name}'. The router name starts with EWRouter/HGSRouter/MILPRouter.
     """
-    for rname in ROUTERS:
-        suffix = f"_{rname}"
-        if key.endswith(suffix):
-            site = key[: -len(suffix)]
-            return site, rname
+    for prefix in ("EWRouter", "HGSRouter", "MILPRouter"):
+        idx = key.find(f"_{prefix}")
+        if idx != -1:
+            return key[:idx], key[idx + 1 :]
     raise KeyError(f"Unrecognized router suffix in key: {key!r}")
 
 
-# ========== Graph Assertion Helpers ==========
+def _pbf_path_from_site(site_name: str) -> Path:
+    """
+    'DTU_1ss_10wt' -> tests/test_files/DTU_tests_1ss_10wt.osm.pbf
+    """
+    assert site_name.startswith("DTU_"), f"Unexpected site_name: {site_name!r}"
+    rest = site_name[len("DTU_"):]
+    return HERE / "test_files" / f"DTU_tests_{rest}.osm.pbf"
 
-@pytest.mark.parametrize("key", sorted([
-    # Load keys from dill once at import-time; if file is missing, pytest will show a clear error.
-    *(
-        dill.load(open(EXPECTED_PATH, "rb"))["RouterGraphs"].keys()
-        if EXPECTED_PATH.exists()
-        else []
-    )
-]))
+
+# ========== Graph tests ==========
+
+@pytest.mark.parametrize(
+    "key",
+    sorted(list(dill.load(open(EXPECTED_PATH, "rb"))["RouterGraphs"].keys())) if EXPECTED_PATH.exists() else [],
+)
 def test_expected_router_graphs_match(key):
     if not EXPECTED_PATH.exists():
         pytest.skip(f"Expected file not found: {EXPECTED_PATH}")
@@ -131,11 +99,10 @@ def test_expected_router_graphs_match(key):
 
     site_name, router_name = _split_key(key)
 
-    # Resolve inputs
-    try:
-        pbf_path = SITES[site_name]
-    except KeyError as e:
-        pytest.fail(f"Unknown site_name {site_name!r} (from key {key!r}). Update SITES mapping.")
+    # Resolve inputs from key
+    pbf_path = _pbf_path_from_site(site_name)
+    if not pbf_path.exists():
+        pytest.fail(f"PBF not found: {pbf_path} (from key {key!r})")
 
     try:
         router_cfg = ROUTERS[router_name]
@@ -143,12 +110,16 @@ def test_expected_router_graphs_match(key):
         pytest.fail(f"Unknown router_name {router_name!r} (from key {key!r}). Update ROUTERS mapping.")
 
     cables = router_cfg["cables"]
-    router = router_cfg["router"]
+    router = router_cfg["router_factory"]()  # fresh instance per test
+
+    # Skip MILP case if OR-Tools isn't installed
+    if isinstance(router, MILPRouter):
+        pytest.importorskip("ortools", reason="MILPRouter requires OR-Tools")
 
     # Build & optimize
     wfn = WindFarmNetwork.from_pbf(filepath=str(pbf_path), cables=cables)
     wfn.optimize(router=router)
 
-    # Compare graphs; customize ignored keys if you need to
-    ignored_keys = {'solution_time', 'runtime', 'pool_count'}
+    # Compare graphs; ignore volatile graph-level keys
+    ignored_keys = {"solution_time", "runtime", "pool_count"} #, "method_options"}
     assert_graph_equal(wfn.G, expected_G, ignored_graph_keys=ignored_keys)

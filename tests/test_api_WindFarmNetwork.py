@@ -311,7 +311,6 @@ def test_wfn_all_routers(router):
         substationsC=substationsC,
         router=router,
     )
-    print(wfn.optimize())
     assert np.array_equal(wfn.optimize(), EXPECTED_TERSE)
 
     # case 2: router passed at call-time
@@ -321,3 +320,197 @@ def test_wfn_all_routers(router):
         substationsC=substationsC,
     )
     assert np.array_equal(wfn.optimize(router=router), EXPECTED_TERSE)
+
+
+# tests/test_api_extra.py
+import io
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from optiwindnet.api import EWRouter, WindFarmNetwork
+
+# ---------- Guards & simple properties ----------
+
+def test_S_and_G_raise_before_optimize(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    with pytest.raises(RuntimeError, match="Call the `optimize"):
+        _ = wfn.S
+    with pytest.raises(RuntimeError, match="Call the `optimize"):
+        _ = wfn.G
+
+def test_buffer_dist_property_and_router_default(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    assert isinstance(wfn.router, EWRouter)
+    # default buffer distance
+    assert isinstance(wfn.buffer_dist, float)
+
+# ---------- Planar refresh & polygon OOB ----------
+
+def test_polygon_out_of_bounds_raises():
+    # A tiny triangular border; put one turbine well outside
+    turbinesC = np.array([[0.0, 0.0], [0.1, 0.0], [10.0, 10.0]])  # third is OOB
+    substationsC = np.array([[0.0, 0.1]])
+    borderC = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.8]])
+    wfn = WindFarmNetwork(cables=2, turbinesC=turbinesC, substationsC=substationsC, borderC=borderC)
+    # Accessing P triggers _refresh_planar() and then OOB check
+    with pytest.raises(ValueError, match="Turbine out of bounds"):
+        _ = wfn.P
+
+# ---------- Buffering, merging & plotting helpers ----------
+
+def test_plot_original_vs_buffered_without_prior_buffer_prints_message(LG_from_database, capsys):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    # No buffer applied yet -> triggers the "No buffering is performed" branch
+    _ = wfn.plot_original_vs_buffered()
+    captured = capsys.readouterr()
+    assert "No buffering is performed" in captured.out
+
+def test_add_buffer_then_plot_original_vs_buffered_returns_axes(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    wfn.add_buffer(5.0)  # apply buffer so pre_buffer structures exist
+    ax = wfn.plot_original_vs_buffered()
+    # Matplotlib Axes object or None if headless — typically not None
+    assert ax is not None
+
+def test_merge_obstacles_into_border_idempotent(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    # Should not raise; updates L and flags so P recomputes fine:
+    wfn.merge_obstacles_into_border()
+    _ = wfn.P  # force recomputation to ensure internal flags are OK
+
+# ---------- Plot wrappers ----------
+
+def test_plot_helpers_run(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    wfn.optimize()
+    # Smoke tests for plotting wrappers
+    wfn.plot()                 # G
+    wfn.plot_location()        # L
+    wfn.plot_available_links() # A
+    wfn.plot_navigation_mesh() # P + A
+
+# ---------- Cables setter after optimize (assign_cables path) ----------
+
+def test_cables_setter_assigns_after_optimize(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=[(7, 100.0)], L=L)
+    wfn.optimize()
+    old_cost = wfn.cost()
+    # Change cable prices -> should reassign and change cost scale
+    wfn.cables = [(7, 200.0)]
+    new_cost = wfn.cost()
+    assert new_cost == pytest.approx(old_cost * 2.0, rel=1e-3)
+
+# ---------- Optimize warmstart path & solution_info ----------
+
+def test_optimize_second_time_uses_warmstart_and_solution_info(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    terse1 = wfn.optimize(verbose=True)
+    terse2 = wfn.optimize(verbose=True)  # triggers warmstart branch
+    assert terse1.shape == terse2.shape
+    info = wfn.solution_info()
+    # minimal expected keys
+    assert 'router' in info and 'capacity' in info
+    assert isinstance(info['capacity'], int)
+
+# ---------- Gradient cost branch & zero-length guard ----------
+
+def test_gradient_cost_branch_returns_shapes(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=[(7, 123.0)], L=L)
+    wfn.optimize()
+    g_wt, g_ss = wfn.gradient(gradient_type='cost')  # different code path vs 'length'
+    assert g_wt.shape[0] == wfn.S.graph['T']
+    assert g_ss.shape[0] == wfn.S.graph['R']
+
+# ---------- update_from_terse_links: float ints accepted ----------
+
+def test_update_from_terse_links_accepts_float_ints(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    wfn.optimize()
+    terse = wfn.terse_links().astype(float)  # ints as floats
+    wfn.update_from_terse_links(terse)
+    # Should rebuild G and produce a finite length
+    assert np.isfinite(wfn.length())
+
+# ---------- _repr_svg_ produces an SVG string ----------
+
+def test_repr_svg_returns_string(LG_from_database):
+    L, _ = LG_from_database('eagle_EWRouter')
+    wfn = WindFarmNetwork(cables=7, L=L)
+    # Before optimize: shows L; after optimize: shows G
+    svg1 = wfn._repr_svg_()
+    assert isinstance(svg1, str) and svg1.strip().startswith("<svg")
+    wfn.optimize()
+    svg2 = wfn._repr_svg_()
+    assert isinstance(svg2, str) and svg2.strip().startswith("<svg")
+
+# ---------- from_windIO (temp file with minimal schema) ----------
+
+def test_from_windIO_minimal_yaml(tmp_path):
+    yml = tmp_path / "proj_2025_case.yaml"  # <- three tokens for handle-building
+    yml.write_text(
+        """
+wind_farm:
+  layouts:
+    initial_layout:
+      coordinates:
+        x: [0.0, 1.0]
+        y: [0.0, 0.0]
+  electrical_substations:
+    coordinates:
+      x: [2.0]
+      y: [0.0]
+site:
+  boundaries:
+    polygons:
+      - {x: [ -1.0,  3.0,  3.0, -1.0],
+         y: [ -1.0, -1.0,  1.0,  1.0]}
+        """
+    )
+    wfn = WindFarmNetwork.from_windIO(str(yml), cables=2)
+    assert wfn.L.graph['T'] == 2
+    assert wfn.L.graph['R'] == 1
+    wfn.optimize()
+    assert wfn.G.number_of_edges() > 0
+
+
+def test_refresh_planar_multipolygon_obstacles_oob_and_border_point(monkeypatch):
+    import shapely as shp
+    import numpy as np
+    from optiwindnet.api import WindFarmNetwork
+
+    # 3 turbines: inside obstacle, on the obstacle border, and clearly outside
+    turbinesC = np.array([
+        [0.0, 0.0],   # inside square -> should remain in out_of_bounds
+        [1.0, 0.0],   # on square edge -> should be removed by obstacle.exterior subtraction
+        [3.0, 3.0],   # outside
+    ])
+    substationsC = np.array([[5.0, 5.0]])
+    # No border, no obstacles -> we'll inject polygon ourselves
+    wfn = WindFarmNetwork(cables=2, turbinesC=turbinesC, substationsC=substationsC)
+
+    # Build a proper MultiPolygon made from real shapely.Polygon geometries
+    square = shp.Polygon([(-1,-1), (1,-1), (1,1), (-1,1)])
+    tri    = shp.Polygon([(10,10), (11,10), (10.5,11)])  # irrelevant second geom
+    multi  = shp.MultiPolygon([square, tri])
+
+    # Inject it and mark as fresh so WindFarmNetwork.polygon returns this object
+    wfn._polygon = multi
+    wfn._is_stale_polygon = False
+
+    # Accessing P triggers _refresh_planar(); with one point inside, after removing border
+    # points, out_of_bounds is still non-empty -> raises ValueError
+    with pytest.raises(ValueError, match="Turbine out of bounds"):
+        _ = wfn.P
