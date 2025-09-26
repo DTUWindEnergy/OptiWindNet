@@ -10,6 +10,8 @@ omit =
 	optiwindnet/synthetic.py
 	optiwindnet/baselines/lkh.py
 	optiwindnet/interface.py
+	optiwindnet/heuristics/ObstacleBypassingEW.py
+	optiwindnet/heuristics/NonBranchingEW.py
     tests/**
 
 [report]
