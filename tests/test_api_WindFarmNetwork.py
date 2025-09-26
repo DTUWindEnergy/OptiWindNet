@@ -514,3 +514,459 @@ def test_refresh_planar_multipolygon_obstacles_oob_and_border_point(monkeypatch)
     # points, out_of_bounds is still non-empty -> raises ValueError
     with pytest.raises(ValueError, match="Turbine out of bounds"):
         _ = wfn.P
+
+
+# tests/test_api_utils.py
+import logging
+import numpy as np
+import networkx as nx
+import pytest
+from shapely.geometry import Polygon
+
+from optiwindnet import api_utils as U
+
+
+# ---------------------------
+# expand_polygon_safely
+# ---------------------------
+
+def test_expand_polygon_safely_warns_for_nonconvex_large_buffer(caplog):
+    # Concave "C" shape
+    poly = Polygon([(0,0),(4,0),(4,1),(1,1),(1,3),(4,3),(4,4),(0,4)])
+    # Ensure non-convex
+    assert not poly.equals(poly.convex_hull)
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        out = U.expand_polygon_safely(poly, buffer_dist=1.0)  # deliberately big
+    assert isinstance(out, Polygon)
+    assert any("non-convex and buffering may introduce unexpected changes" in m for m in caplog.messages)
+
+
+# ---------------------------
+# shrink_polygon_safely
+# ---------------------------
+
+def test_shrink_polygon_safely_returns_array_normal():
+    poly = Polygon([(0,0),(4,0),(4,4),(0,4)])
+    arr = U.shrink_polygon_safely(poly, shrink_dist=0.2, indx=0)
+    assert isinstance(arr, np.ndarray)
+    assert arr.shape[1] == 2
+
+def test_shrink_polygon_safely_becomes_empty_warns(caplog):
+    poly = Polygon([(0,0),(1,0),(1,1),(0,1)])
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        res = U.shrink_polygon_safely(poly, shrink_dist=10.0, indx=3)
+    assert res is None
+    assert any("completely removed the obstacle" in m for m in caplog.messages)
+
+def test_shrink_polygon_safely_splits_to_multipolygon(caplog):
+    # "Dumbbell" → two squares connected by narrow corridor
+    big = Polygon([(0,0),(8,0),(8,4),(0,4)])
+    hole = Polygon([(3,-1),(5,-1),(5,5),(3,5)])  # remove middle band to get two lobes
+    shape = big.difference(hole)
+    # Shrink a little so the corridor fully disappears, leaving two parts
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        res = U.shrink_polygon_safely(shape, shrink_dist=0.1, indx=1)
+    # Returns list of arrays for MultiPolygon
+    assert isinstance(res, list) and len(res) >= 2
+    assert any("split the obstacle" in m for m in caplog.messages)
+
+
+# ---------------------------
+# enable_ortools_logging_if_jupyter
+# ---------------------------
+
+def test_enable_ortools_logging_if_jupyter_sets_callback(monkeypatch):
+    # Create a class literally named ZMQInteractiveShell so __class__.__name__ matches
+    ZMQInteractiveShell = type("ZMQInteractiveShell", (), {})
+    def fake_get_ipython():
+        return ZMQInteractiveShell()
+
+    # api_utils.enable_ortools_logging_if_jupyter looks up get_ipython() in its own module
+    monkeypatch.setattr(U, "get_ipython", fake_get_ipython, raising=False)
+
+    class DummyInner:
+        def __init__(self): self.log_callback = None
+    class DummySolver:
+        def __init__(self): self.solver = DummyInner()
+
+    s = DummySolver()
+    U.enable_ortools_logging_if_jupyter(s)
+    assert s.solver.log_callback is print
+
+
+
+# ---------------------------
+# is_warmstart_eligible
+# ---------------------------
+
+def _make_S_warm(R=1, T=5, branched=False, feeders=0):
+    S = nx.Graph(R=R, T=T)
+    # substation nodes: -R..-1 ; turbine nodes: 0..T-1
+    for r in range(-R, 0):
+        S.add_node(r)
+    for t in range(T):
+        S.add_node(t)
+    # connect feeders turbines to substation -1
+    for t in range(feeders):
+        S.add_edge(-1, t)
+    if branched:
+        # make turbine 0 branched: degree > 2
+        S.add_edge(0, 1)
+        S.add_edge(0, 2)
+        S.add_edge(0, 3)
+    return S
+
+def test_warmstart_ineligible_due_to_feeder_limit(capfd):
+    S = _make_S_warm(R=1, T=5, feeders=4)  # degree(-1)=4
+    model_options = {"feeder_limit":"minimum", "topology":"radial", "feeder_route":"segmented"}
+    ok = U.is_warmstart_eligible(
+        S_warm=S, cables_capacity=2, model_options=model_options,
+        S_warm_has_detour=False, solver_name="ortools",
+        logger=logging.getLogger(U.__name__), verbose=True
+    )
+    assert ok is False
+    out = capfd.readouterr().out
+    assert "exceeds feeder limit" in out
+
+def test_warmstart_ineligible_detour_with_straight_route(capfd):
+    S = _make_S_warm(R=1, T=4, feeders=1)
+    model_options = {"feeder_limit":"unlimited", "topology":"radial", "feeder_route":"straight"}
+    ok = U.is_warmstart_eligible(
+        S_warm=S, cables_capacity=10, model_options=model_options,
+        S_warm_has_detour=True, solver_name="ortools",
+        logger=logging.getLogger(U.__name__), verbose=True
+    )
+    assert ok is False
+    out = capfd.readouterr().out
+    assert "incompatible with model option: feeder_route" in out
+
+def test_warmstart_ineligible_branched_for_radial(capfd):
+    S = _make_S_warm(R=1, T=5, feeders=1, branched=True)
+    model_options = {"feeder_limit":"unlimited", "topology":"radial", "feeder_route":"segmented"}
+    ok = U.is_warmstart_eligible(
+        S_warm=S, cables_capacity=10, model_options=model_options,
+        S_warm_has_detour=False, solver_name="ortools",
+        logger=logging.getLogger(U.__name__), verbose=True
+    )
+    assert ok is False
+    out = capfd.readouterr().out
+    assert "branched network incompatible" in out
+
+def test_warmstart_eligible_true_non_scip(capfd):
+    S = _make_S_warm(R=1, T=3, feeders=1)
+    model_options = {"feeder_limit":"unlimited", "topology":"radial", "feeder_route":"segmented"}
+    ok = U.is_warmstart_eligible(
+        S_warm=S, cables_capacity=10, model_options=model_options,
+        S_warm_has_detour=False, solver_name="ortools",
+        logger=logging.getLogger(U.__name__), verbose=True
+    )
+    assert ok is True
+
+def test_warmstart_eligible_false_for_scip(capfd):
+    S = _make_S_warm(R=1, T=3, feeders=1)
+    model_options = {"feeder_limit":"unlimited", "topology":"radial", "feeder_route":"segmented"}
+    ok = U.is_warmstart_eligible(
+        S_warm=S, cables_capacity=10, model_options=model_options,
+        S_warm_has_detour=False, solver_name="scip",
+        logger=logging.getLogger(U.__name__), verbose=True
+    )
+    assert ok is False
+
+
+# ---------------------------
+# extract_network_as_array
+# ---------------------------
+
+def test_extract_network_as_array_includes_cost_when_present():
+    G = nx.Graph()
+    G.add_nodes_from([0,1])
+    # reverse True means (s<t)==reverse holds, so src=s
+    G.add_edge(0, 1, reverse=True, length=10.0, load=1.5, cable=2, cost=77.0)
+    G.graph['has_cost'] = True
+    G.graph['cables'] = [(1, 0.0), (2, 123.0)]
+    arr = U.extract_network_as_array(G)
+    assert arr.dtype.names == ('src','tgt','length','load','cable','cost')
+    assert arr['cost'][0] == pytest.approx(77.0)
+
+
+# ---------------------------
+# merge_obs_into_border
+# ---------------------------
+
+def _make_L(border, obstacles, T=0, R=0):
+    V_parts = []
+    idx_cursor = 0
+    border_idx = None
+    obstacle_idxs = []
+
+    # turbines (empty)
+    V_parts.append(np.zeros((T,2)))
+    idx_cursor += T
+
+    if border is not None:
+        border_idx = np.arange(idx_cursor, idx_cursor + len(border), dtype=int)
+        V_parts.append(np.asarray(border))
+        idx_cursor += len(border)
+
+    for obs in obstacles:
+        obs = np.asarray(obs)
+        ids = np.arange(idx_cursor, idx_cursor + len(obs), dtype=int)
+        obstacle_idxs.append(ids)
+        V_parts.append(obs)
+        idx_cursor += len(obs)
+
+    # substations (empty)
+    V_parts.append(np.zeros((R,2)))
+
+    V = np.vstack([p for p in V_parts if len(p)>0]) if any(len(p)>0 for p in V_parts) else np.zeros((0,2))
+    L = nx.Graph()
+    L.graph['VertexC'] = V
+    L.graph['T'] = T
+    L.graph['R'] = R
+    L.graph['border'] = border_idx
+    L.graph['obstacles'] = obstacle_idxs
+    L.graph['B'] = (len(border) if border is not None else 0) + sum(len(o) for o in obstacles)
+    return L
+
+def test_merge_obstacles_outside_is_dropped(caplog):
+    border = [(-10,-10),(10,-10),(10,10),(-10,10)]
+    obstacle = [(100,100),(101,100),(101,101),(100,101)]  # far away
+    L = _make_L(border, [obstacle])
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        L2 = U.merge_obs_into_border(L)
+    # keeps same border, obstacle removed
+    assert L2.graph['border'] is not None and len(L2.graph['obstacles']) == 0
+    assert any("completely outside the border" in m for m in caplog.messages)
+
+def test_merge_obstacles_intersection_multipolygon_raises():
+    border = [(-10,-10),(10,-10),(10,10),(-10,10)]
+    # vertical bar crossing the whole border → border minus obs becomes two pieces
+    obstacle = [(-1,-11),(1,-11),(1,11),(-1,11)]
+    L = _make_L(border, [obstacle])
+    with pytest.raises(ValueError, match="multiple pieces"):
+        U.merge_obs_into_border(L)
+
+def test_merge_obstacles_intersection_empty_border_raises():
+    border = [(-10,-10),(10,-10),(10,10),(-10,10)]
+    obstacle = border[:]  # identical -> subtraction empty
+    L = _make_L(border, [obstacle])
+    with pytest.raises(ValueError, match="empty border"):
+        U.merge_obs_into_border(L)
+
+def test_merge_obstacles_inside_kept():
+    border = [(-10,-10),(10,-10),(10,10),(-10,10)]
+    obstacle = [(-1,-1),(1,-1),(1,1),(-1,1)]  # strictly inside
+    L = _make_L(border, [obstacle])
+    L2 = U.merge_obs_into_border(L)
+    # Obstacle remains
+    assert len(L2.graph['obstacles']) == 1
+
+
+# ---------------------------
+# buffer_border_obs
+# ---------------------------
+
+def test_buffer_border_obs_negative_raises(LG_from_database):
+    # grab a real L for structure; content doesn't matter here
+    L, _ = LG_from_database('eagle_EWRouter')
+    with pytest.raises(ValueError, match="must be equal or greater than 0"):
+        U.buffer_border_obs(L, buffer_dist=-1.0)
+
+
+import logging
+import numpy as np
+import networkx as nx
+import pytest
+from shapely.geometry import Polygon, LinearRing
+
+from optiwindnet import api_utils as U
+
+
+# ---------- expand_polygon_safely: convex (no warning) ----------
+def test_expand_polygon_safely_convex_no_warning(caplog):
+    poly = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])  # convex square
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        out = U.expand_polygon_safely(poly, buffer_dist=0.25)
+    assert out.area > poly.area
+    # no concavity warning should be emitted
+    assert not any("non-convex and buffering may introduce" in m for m in caplog.messages)
+
+
+# ---------- is_warmstart_eligible: extra feeder-limit modes ----------
+def _S_warm(R=1, T=6, feeders=0, branched=False):
+    S = nx.Graph(R=R, T=T)
+    for r in range(-R, 0):
+        S.add_node(r)
+    for t in range(T):
+        S.add_node(t)
+    # Connect 'feeders' turbines to single substation -1
+    for t in range(feeders):
+        S.add_edge(-1, t)
+    if branched:
+        S.add_edge(0, 1)
+        S.add_edge(0, 2)
+        S.add_edge(0, 3)  # deg > 2 at 0
+    return S
+
+@pytest.mark.parametrize("mode,plus", [
+    ("specified", 2),     # explicit limit
+    ("min_plus1", 1),
+    ("min_plus2", 2),
+    ("min_plus3", 3),
+])
+def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
+    # T=6, capacity=2 -> minimum feeders = ceil(6/2)=3
+    # make feeders = (minimum + plus) + 1  -> strictly greater than the limit
+    feeders = 3 + plus + 1
+    S = _S_warm(R=1, T=6, feeders=feeders)
+    model_options = {
+        "feeder_limit": mode,
+        "max_feeders": 4,
+        "topology": "radial",
+        "feeder_route": "segmented",
+    }
+    ok = U.is_warmstart_eligible(
+        S_warm=S, cables_capacity=2, model_options=model_options,
+        S_warm_has_detour=False, solver_name="ortools",
+        logger=logging.getLogger(U.__name__), verbose=True
+    )
+    assert ok is False
+    out = capfd.readouterr().out
+    assert "exceeds feeder limit" in out
+
+
+def test_warmstart_feeder_limit_specified_allows(capfd):
+    # under specified limit -> eligible
+    S = _S_warm(R=1, T=6, feeders=2)
+    model_options = {"feeder_limit": "specified", "max_feeders": 3, "topology": "radial", "feeder_route": "segmented"}
+    ok = U.is_warmstart_eligible(
+        S_warm=S, cables_capacity=2, model_options=model_options,
+        S_warm_has_detour=False, solver_name="ortools",
+        logger=logging.getLogger(U.__name__), verbose=True
+    )
+    assert ok is True
+
+
+# ---------- parse_cables_input with numpy arrays ----------
+def test_parse_cables_input_numpy_ints_and_pairs():
+    out1 = U.parse_cables_input(np.array([5, 7]))
+    assert out1 == [(5, 0.0), (7, 0.0)]
+    arr = np.array([(3, 10.0), (6, 20.0)], dtype=object)  # preserve tuple shapes
+    out2 = U.parse_cables_input(arr)
+    assert out2 == [(3, 10.0), (6, 20.0)]
+
+
+# ---------- merge_obs_into_border: invalid obstacle & single info ----------
+def _L(border, obstacles, T=0, R=0):
+    V_parts = [np.zeros((T, 2))]
+    cursor = T
+    border_idx = None
+    obs_idxs = []
+
+    if border is not None:
+        b = np.asarray(border, float)
+        V_parts.append(b)
+        border_idx = np.arange(cursor, cursor + len(b), dtype=int)
+        cursor += len(b)
+
+    for obs in obstacles:
+        o = np.asarray(obs, float)
+        V_parts.append(o)
+        obs_idxs.append(np.arange(cursor, cursor + len(o), dtype=int))
+        cursor += len(o)
+
+    V_parts.append(np.zeros((R, 2)))
+    V = np.vstack([p for p in V_parts if len(p) > 0]) if any(len(p) > 0 for p in V_parts) else np.zeros((0, 2))
+
+    L = nx.Graph()
+    L.graph['VertexC'] = V
+    L.graph['T'] = T
+    L.graph['R'] = R
+    L.graph['border'] = border_idx
+    L.graph['obstacles'] = obs_idxs
+    L.graph['B'] = (0 if border_idx is None else len(border_idx)) + sum(len(i) for i in obs_idxs)
+    return L
+
+def test_merge_obstacles_invalid_polygon_warns(caplog):
+    # Self-crossing "bow" polygon is invalid
+    border = [(-5, -5), (5, -5), (5, 5), (-5, 5)]
+    invalid = [(0, 0), (2, 2), (-2, 2), (2, -2)]  # self-crossing order
+    L = _L(border, [invalid])
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        L2 = U.merge_obs_into_border(L)
+    # Should warn about invalid obstacle; result remains usable
+    assert any("invalid" in m.lower() for m in caplog.messages)
+    assert L2.graph['border'] is not None
+
+def test_merge_obstacles_info_prints_once_when_multiple_intersections(caplog):
+    # Two obstacles both intersect border; info should print only once
+    border = [(-10, -10), (10, -10), (10, 10), (-10, 10)]
+    obs1   = [(-10, -1), (0, -1), (0, 1), (-10, 1)]  # touches/overlaps at left edge
+    obs2   = [(9, -2), (12, -2), (12, 2), (9, 2)]    # overlaps right edge
+    L = _L(border, [obs1, obs2])
+
+    with caplog.at_level(logging.INFO, logger=U.__name__):
+        L2 = U.merge_obs_into_border(L)
+
+    # Border updated, obstacles possibly removed/kept
+    assert L2.graph['border'] is not None
+    # Only one info message printed for multiple intersections
+    infos = [m for m in caplog.messages if "intersects/touches the border" in m]
+    assert len(infos) == 1
+
+
+# ---------- buffer_border_obs: no border + obstacles ----------
+def test_buffer_border_obs_with_border_positive_shrinks_obstacles(LG_from_database):
+    # Start from a real L to keep structure stable
+    L, _ = LG_from_database('eagle_EWRouter')
+    V = L.graph['VertexC'].copy()
+    T, R = L.graph['T'], L.graph['R']
+
+    # Minimal valid border (tiny triangle) just to satisfy pre_buffer & stacking
+    tri_border = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]], float)
+
+    # One square obstacle to be shrunk
+    obstacle = np.array([[0.0, 0.0], [50.0, 0.0], [50.0, 50.0], [0.0, 50.0]], float)
+
+    # Rebuild VertexC: turbines, border, obstacle, substations
+    coords = [V[:T], tri_border, obstacle, V[-R:]]
+    new_V = np.vstack(coords)
+    L.graph['VertexC'] = new_V
+
+    # Indices
+    cursor = T
+    border_idx = np.arange(cursor, cursor + len(tri_border), dtype=int)
+    cursor += len(tri_border)
+    obstacle_idx = np.arange(cursor, cursor + len(obstacle), dtype=int)
+
+    L.graph['border'] = border_idx
+    L.graph['obstacles'] = [obstacle_idx]
+    L.graph['B'] = len(tri_border) + len(obstacle)
+
+    # Buffer > 0 → obstacles shrink; ensure function returns a rebuilt L and pre_buffer
+    L2, pre = U.buffer_border_obs(L, buffer_dist=5.0)
+
+    assert isinstance(pre, dict) and 'obstaclesC' in pre and 'borderC' in pre
+    # Still has same T and R, and obstacles exist (but shrunk)
+    assert L2.graph['VertexC'][:T].shape == (T, 2)
+    assert L2.graph['VertexC'][-R:].shape == (R, 2)
+    assert isinstance(L2.graph['obstacles'], list)
+    # Obstacle got smaller in total points length or coordinates moved inward
+    # (We just sanity-check that at least one obstacle remains)
+    assert len(L2.graph['obstacles']) >= 1
+
+
+
+
+# ---------- _ensure_closed ----------
+def test__ensure_closed_adds_repeat_point():
+    ring = np.array([[0.0, 0.0], [1, 0], [1, 1]])
+    closed = U._ensure_closed(ring)
+    assert np.allclose(closed[0], closed[-1])
+
+def test__ensure_closed_noop_if_already_closed():
+    ring = LinearRing([(0, 0), (1, 0), (1, 1)])
+    coords = np.array(ring.coords[:], float)
+    closed = U._ensure_closed(coords)
+    # already closed -> unchanged
+    assert np.array_equal(closed, coords)
