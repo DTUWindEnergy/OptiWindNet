@@ -1,124 +1,161 @@
-import pytest
+# tests/test_with_DTU_letters.py
+"""
+Replay-and-verify tests for DTU letters.
+
+This test file reads a single dill blob produced by the generator script
+(scripts/generate_expected_dtu_letters.py). The blob contains:
+  - "Sites":         {site_name: pbf_path}
+  - "Routers":       {router_name: {"class": ..., "params": {...}, "cables": int}}
+  - "Cases":         [{"key": "<site>_<router>", "site": site_name, "router": router_name}, ...]
+  - "RouterGraphs":  {key: expected_networkx_graph}
+  - "Meta":          environment info (informational)
+
+For each case, we rebuild the WindFarmNetwork with the stored site/cables,
+recreate the router from its spec (incl. ModelOptions for MILPRouter), run
+the optimization, and assert the produced graph equals the stored one.
+"""
+
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Dict, Any
+
 import dill
+import pytest
 
-from optiwindnet.api import (
-    EWRouter,
-    HGSRouter,
-    MILPRouter,
-    WindFarmNetwork,
-    ModelOptions,
-)
+from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
+from optiwindnet.MILP import ModelOptions
 
+# Uses your existing helper assertion (make sure assertion rewriting is enabled for it).
+# In tests/conftest.py, consider:
+#     import pytest
+#     pytest.register_assert_rewrite("tests.helpers")
 from .helpers import assert_graph_equal
 
 
-# -------------------------------
+# ---------------------------------------------------------------------
 # Paths
-# -------------------------------
+# ---------------------------------------------------------------------
 HERE = Path(__file__).parent
 EXPECTED_PATH = HERE / "test_files" / "expected_DTU_letters.dill"
 
 
-# -------------------------------
-# Router definitions (factories!)
-# -------------------------------
-ROUTERS = {
-    # routers_1
-    "EWRouter_cap1":               {"router_factory": lambda: None,                              "cables": 1},
-    "EWRouter_cap3":               {"router_factory": lambda: None,                              "cables": 3},
-    "EWRouter_cap10":              {"router_factory": lambda: None,                              "cables": 10},
-    "EWRouter_straight_cap1":      {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 1},
-    "EWRouter_straight_cap4":      {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 4},
-    "EWRouter_straight_cap10":     {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 10},
-    "HGSRouter_cap1":              {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 1},
-    "HGSRouter_cap3":              {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 3},
-    "HGSRouter_cap10":             {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0),                         "cables": 10},
-    "HGSRouter_feeder_limit_cap1": {"router_factory": lambda: HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),         "cables": 1},
-    "HGSRouter_feeder_limit_cap4": {"router_factory": lambda: HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),         "cables": 4},
-    "HGSRouter_feeder_limit_cap10": {"router_factory": lambda: HGSRouter(time_limit=0.5, feeder_limit=0, seed=0),        "cables": 10},
-
-    "MILPRouter_cap10": {
-        "router_factory": lambda: MILPRouter(solver_name="ortools", time_limit=5, mip_gap=0.001),
-        "cables": 10,
-    },
-    "MILPRouter_cap10_modeloptions": {
-        "router_factory": lambda: MILPRouter(
-            solver_name="ortools", time_limit=5, mip_gap=0.001,
-            model_options=ModelOptions(topology="radial", feeder_limit="minimum", feeder_route="straight"),
-        ),
-        "cables": 10,
-    },
-
-    # routers_2
-    "EWRouter_cap5":               {"router_factory": lambda: None,                              "cables": 5},
-    "EWRouter_cap10":              {"router_factory": lambda: None,                              "cables": 10},
-    "EWRouter_cap100":             {"router_factory": lambda: None,                              "cables": 100},
-    "EWRouter_straight_cap7":      {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 7},
-    "EWRouter_straight_cap15":     {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 15},
-    "EWRouter_straight_cap100":    {"router_factory": lambda: EWRouter(feeder_route="straight"), "cables": 100},
-    "HGSRouter_cap5":              {"router_factory": lambda: HGSRouter(time_limit=0.5, seed=0), "cables": 5},
-}
+# ---------------------------------------------------------------------
+# Router (re)construction helpers
+# ---------------------------------------------------------------------
+def _make_model_options_from_spec(spec: Dict[str, Any]) -> ModelOptions:
+    """Convert a plain dict into a ModelOptions instance."""
+    return ModelOptions(**spec)
 
 
-def _split_key(key: str):
+def _make_router_from_spec(spec: Dict[str, Any]):
     """
-    Keys are f'{site_name}_{router_name}'. The router name starts with EWRouter/HGSRouter/MILPRouter.
+    Instantiate a router from a spec dict:
+      {"class": "EWRouter"|"HGSRouter"|"MILPRouter"|None, "params": {...}, "cables": int}
     """
-    for prefix in ("EWRouter", "HGSRouter", "MILPRouter"):
-        idx = key.find(f"_{prefix}")
-        if idx != -1:
-            return key[:idx], key[idx + 1 :]
-    raise KeyError(f"Unrecognized router suffix in key: {key!r}")
+    clsname = spec.get("class")
+    params = dict(spec.get("params", {}))
+
+    # Expand nested ModelOptions if present for MILPRouter
+    if clsname == "MILPRouter" and isinstance(params.get("model_options"), dict):
+        params["model_options"] = _make_model_options_from_spec(params["model_options"])
+
+    if clsname is None:
+        # Interpret as "no router" → WindFarmNetwork default behavior
+        return None
+    if clsname == "EWRouter":
+        return EWRouter(**params)
+    if clsname == "HGSRouter":
+        return HGSRouter(**params)
+    if clsname == "MILPRouter":
+        return MILPRouter(**params)
+
+    raise ValueError(f"Unknown router class {clsname!r}")
 
 
-def _pbf_path_from_site(site_name: str) -> Path:
-    """
-    'DTU_1ss_10wt' -> tests/test_files/DTU_tests_1ss_10wt.osm.pbf
-    """
-    assert site_name.startswith("DTU_"), f"Unexpected site_name: {site_name!r}"
-    rest = site_name[len("DTU_"):]
-    return HERE / "test_files" / f"DTU_tests_{rest}.osm.pbf"
-
-
-# ========== Graph tests ==========
-
-@pytest.mark.parametrize(
-    "key",
-    sorted(list(dill.load(open(EXPECTED_PATH, "rb"))["RouterGraphs"].keys())) if EXPECTED_PATH.exists() else [],
-)
-def test_expected_router_graphs_match(key):
+# ---------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------
+def _load_expected_blob():
+    """Load the dill blob or return None if missing/unreadable."""
     if not EXPECTED_PATH.exists():
+        return None
+    with EXPECTED_PATH.open("rb") as f:
+        return dill.load(f)
+
+
+# ---------------------------------------------------------------------
+# Pytest collection hook: build the param list from the dill blob
+# ---------------------------------------------------------------------
+def pytest_generate_tests(metafunc):
+    if "key" not in metafunc.fixturenames:
+        return
+
+    blob = _load_expected_blob()
+    if blob is None:
+        # No cases collected if the file is missing; pytest will report 0 tests.
+        metafunc.parametrize("key", [])
+        return
+
+    stored = blob.get("Cases", [])
+    graphs = blob.get("RouterGraphs", {})
+    sites = blob.get("Sites", {})
+    routers = blob.get("Routers", {})
+
+    keys = [
+        c["key"]
+        for c in stored
+        if c.get("key") in graphs and c.get("site") in sites and c.get("router") in routers
+    ]
+
+    metafunc.parametrize("key", sorted(keys))
+
+
+# ---------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------
+@pytest.fixture(scope="session")
+def expected_blob():
+    blob = _load_expected_blob()
+    if blob is None:
         pytest.skip(f"Expected file not found: {EXPECTED_PATH}")
+    return blob
 
-    with open(EXPECTED_PATH, "rb") as f:
-        expected = dill.load(f)
 
-    expected_G = expected["RouterGraphs"][key]
+# ---------------------------------------------------------------------
+# The test
+# ---------------------------------------------------------------------
+def test_expected_router_graphs_match(expected_blob, key):
+    graphs = expected_blob["RouterGraphs"]
+    sites = expected_blob["Sites"]
+    routers = expected_blob["Routers"]
 
-    site_name, router_name = _split_key(key)
-
-    # Resolve inputs from key
-    pbf_path = _pbf_path_from_site(site_name)
-    if not pbf_path.exists():
-        pytest.fail(f"PBF not found: {pbf_path} (from key {key!r})")
-
+    # Find metadata for this key
     try:
-        router_cfg = ROUTERS[router_name]
-    except KeyError:
-        pytest.fail(f"Unknown router_name {router_name!r} (from key {key!r}). Update ROUTERS mapping.")
+        case_meta = next(c for c in expected_blob["Cases"] if c["key"] == key)
+    except StopIteration:
+        pytest.fail(f"Case metadata not found for key {key!r}")
 
-    cables = router_cfg["cables"]
-    router = router_cfg["router_factory"]()  # fresh instance per test
+    site_name = case_meta["site"]
+    router_name = case_meta["router"]
+    expected_G = graphs[key]
 
-    # Skip MILP case if OR-Tools isn't installed
-    if isinstance(router, MILPRouter):
+    # Resolve inputs from stored metadata
+    pbf_path = Path(sites[site_name])
+    assert pbf_path.exists(), f"PBF not found: {pbf_path} (from key {key!r})"
+
+    router_spec = routers[router_name]
+    cables = int(router_spec["cables"])
+    router = _make_router_from_spec(router_spec)
+
+    # Skip MILP if OR-Tools isn't available in the test environment
+    if router_spec.get("class") == "MILPRouter":
         pytest.importorskip("ortools", reason="MILPRouter requires OR-Tools")
 
     # Build & optimize
     wfn = WindFarmNetwork.from_pbf(filepath=str(pbf_path), cables=cables)
     wfn.optimize(router=router)
 
-    # Compare graphs; ignore volatile graph-level keys
-    ignored_keys = {"solution_time", "runtime", "pool_count"} #, "method_options"}
-    assert_graph_equal(wfn.G, expected_G, ignored_graph_keys=ignored_keys)
+    # Compare graphs; ignore volatile per-run keys
+    ignored_keys = {"solution_time", "runtime", "pool_count"}
+    assert_graph_equal(wfn.G, expected_G, ignored_graph_keys=ignored_keys, verbose=False)
