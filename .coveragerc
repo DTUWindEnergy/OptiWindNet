@@ -12,6 +12,7 @@ omit =
 	optiwindnet/interface.py
 	optiwindnet/heuristics/ObstacleBypassingEW.py
 	optiwindnet/heuristics/NonBranchingEW.py
+	optiwindnet/heuristics/ClassicEsauWilliams.py
     tests/**
 
 [report]
