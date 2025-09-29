@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-import io
+from itertools import chain
 import math
 import os
 import re
@@ -12,10 +12,8 @@ from pathlib import Path
 
 import networkx as nx
 import numpy as np
-from scipy.spatial.distance import cdist
 
 from ..interarraylib import fun_fingerprint
-from .utils import length_matrix_single_depot_from_G
 
 
 # TODO: Deprecate that. Unable to make LKH work in ACVRP with EDGE_FILE
@@ -89,41 +87,52 @@ def lkh_acvrp(
     edge_fname = 'edge_file.txt'
     # the subtracted value below is to avoid overflow when penalties are added
     w_clip = np.iinfo(np.int32).max / precision - 1000
-    d2roots = A.graph.get('d2roots')
-    if d2roots is None:
-        d2roots = cdist(VertexC[:-R], VertexC[-R:])
-        A.graph['d2roots'] = d2roots
-    weights, w_max = length_matrix_single_depot_from_G(A, scale=scale)
-    assert w_max <= w_clip, 'ERROR: weight values outside int32 range.'
-    weights = weights.clip(max=w_clip).round().astype(np.int32)
-    if w_max > w_clip:
-        print('WARNING: at least one edge weight has been clipped.')
-    #  weights = np.ones((T + R, T + R), dtype=int)
-    with io.StringIO() as str_io:
-        np.savetxt(str_io, weights, fmt='%d')
-        edge_weights = str_io.getvalue()[:-1]
+    #  d2roots = A.graph.get('d2roots')
+    #  if d2roots is None:
+    #      d2roots = cdist(VertexC[:-R], VertexC[-R:])
+    #      A.graph['d2roots'] = d2roots
+    #  weights, w_max = length_matrix_single_depot_from_G(A, scale=scale)
+    #  assert w_max <= w_clip, 'ERROR: weight values outside int32 range.'
+    #  weights = weights.clip(max=w_clip).round().astype(np.int32)
+    #  if w_max > w_clip:
+    #      print('WARNING: at least one edge weight has been clipped.')
+    #  #  weights = np.ones((T + R, T + R), dtype=int)
+    #  with io.StringIO() as str_io:
+    #      np.savetxt(str_io, weights, fmt='%d')
+    #      edge_weights = str_io.getvalue()[:-1]
 
+    L = np.full((T + R, T + R), w_clip, dtype=np.int32)
+    for u, v, length in A.edges(data='length'):
+        #  L[u + 1, v + 1] = L[v + 1, u + 1] = length * scale
+        L[u, v] = L[v, u] = round(length * scale)
+    L[:-1, -1] = np.round(A.graph['d2roots'][:T, -1] * scale)
+    tri_weights = []
+    for i, row in enumerate(L[:-1]):
+        tri_weights.append(' '.join(str(d) for d in row[i + 1 :]))
+    edge_weights = '\n'.join(tri_weights)
     #  print(edge_weights)
     output_fname = 'solution.out'
     specs = dict(
         NAME=A.graph.get('name', 'unnamed'),
-        TYPE='ACVRP',  # maybe try asymmetric TSP: 'ATSP',
+        TYPE='OVRP',
+        #  TYPE='ACVRP',  # maybe try asymmetric TSP: 'ATSP',
         # TYPE='ATSP',  # maybe try asymmetric capacitaded VRP: 'ACVRP',
         DIMENSION=T + R,  # CVRP number of nodes and depots
         # DIMENSION=T,  # TSP: number of nodes
         # For CAPACITY to be enforced, a DEMAND section is required.
         # If the problem has unitary demand, use MTSP_MAX_SIZE instead.
-        # CAPACITY=capacity,
+        CAPACITY=capacity,
         # This expression for limiting DISTANCE was empiricaly obtained.
         # Using the aspect ratio of the shape of the area could improve it.
         DISTANCE=scale * 16.0 / (math.log(T) + 0.1),  # maximum route length
         EDGE_WEIGHT_TYPE='EXPLICIT',
-        EDGE_WEIGHT_FORMAT='FULL_MATRIX',
+        EDGE_WEIGHT_FORMAT='UPPER_ROW',
     )
     data = dict(
-        # DEMAND_SECTION='\n'.join(f'{i} 1' for i in range(T)) + f'\n{T} 0',
-        DEPOT_SECTION='1\n-1',
         EDGE_WEIGHT_SECTION=edge_weights,
+        DEMAND_SECTION='\n'.join(
+            chain((f'{i + 1} 1' for i in range(T)), (f'{T + R} 0',))
+        ),
     )
 
     if False and A is not None:
@@ -176,6 +185,7 @@ def lkh_acvrp(
         min_route_size = 0
     params = dict(
         SPECIAL=None,  # None -> output only the key
+        DEPOT=f'{T + R}',
         SEED=seed if seed is not None else 0,  # 0 means pick a random seed
         PRECISION=precision,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
         TOTAL_TIME_LIMIT=time_limit,
@@ -220,7 +230,7 @@ def lkh_acvrp(
                 penalty, minimum = next(f_sol).split(':')[-1][:-1].split('_')
                 next(f_sol)  # discard second line
                 branches = [
-                    [int(node) - 2 for node in line.split(' ')[1:-5]] for line in f_sol
+                    [int(node) - 1 for node in line.split(' ')[1:-5]] for line in f_sol
                 ]
         else:
             penalty = 0
