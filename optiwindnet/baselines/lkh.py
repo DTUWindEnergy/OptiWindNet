@@ -58,7 +58,7 @@ def lkh_acvrp(
     vehicles: int | None = None,
     runs: int = 50,
     per_run_limit: float = 15.0,
-    precision: float = 1000.0,
+    precision: int = 1000,
     seed: int | None = None,
 ) -> nx.Graph:
     """
@@ -86,7 +86,8 @@ def lkh_acvrp(
     params_fname = 'params.txt'
     edge_fname = 'edge_file.txt'
     # the subtracted value below is to avoid overflow when penalties are added
-    w_clip = np.iinfo(np.int32).max / precision - 1000
+    #  w_clip = (np.iinfo(np.int32).max // precision) - 1000
+    w_clip = np.iinfo(np.int32).max // (2 * precision)
     #  d2roots = A.graph.get('d2roots')
     #  if d2roots is None:
     #      d2roots = cdist(VertexC[:-R], VertexC[-R:])
