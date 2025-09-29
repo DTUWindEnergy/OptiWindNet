@@ -56,38 +56,47 @@ def lkh_acvrp(
     *,
     capacity: int,
     time_limit: int,
-    scale: float = 1e4,
+    scale: float = 1e5,
     vehicles: int | None = None,
     runs: int = 50,
     per_run_limit: float = 15.0,
+    precision: float = 1000.0,
+    seed: int | None = None,
 ) -> nx.Graph:
     """
     Lin-Kernighan-Helsgaun via LKH-3 binary.
     Asymmetric Capacitated Vehicle Routing Problem.
 
-    Arguments:
-        `A`: graph with allowed edges (if it has 0 edges, use complete graph)
-        `capacity`: maximum vehicle capacity
-        `time_limit`: [s] solver run time limit
-        `scale`: factor to scale lengths (should be < 1e6)
-        `vehicles`: number of vehicles (if None, use the minimum feasible)
-        `runs`: consult LKH manual
-        `per_run_limit`: consult LKH manual
+    A must be normalized - use as_normalized() before calling this.
+
+    Args:
+      A: graph with allowed edges (if it has 0 edges, use complete graph)
+      capacity: maximum vehicle capacity
+      time_limit: [s] solver run time limit
+      scale: factor to scale lengths (should be < 1e6)
+      vehicles: number of vehicles (if None, use the minimum feasible)
+      runs: consult LKH manual
+      per_run_limit: consult LKH manual
+      precision: consult LKH manual
+      seed: for the pseudo-random number generator (if None: random seed)
+    Returns:
+      Solution S
     """
-    R, T, B, VertexC = (A.graph.get(k) for k in ('R', 'T', 'B', 'VertexC'))
+    R, T, VertexC = (A.graph[k] for k in ('R', 'T', 'VertexC'))
     assert R == 1, 'LKH allows only 1 depot'
     problem_fname = 'problem.txt'
     params_fname = 'params.txt'
     edge_fname = 'edge_file.txt'
-    w_saturation = np.iinfo(np.int32).max / 1000
+    # the subtracted value below is to avoid overflow when penalties are added
+    w_clip = np.iinfo(np.int32).max / precision - 1000
     d2roots = A.graph.get('d2roots')
     if d2roots is None:
         d2roots = cdist(VertexC[:-R], VertexC[-R:])
         A.graph['d2roots'] = d2roots
     weights, w_max = length_matrix_single_depot_from_G(A, scale=scale)
-    assert w_max <= w_saturation, 'ERROR: weight values outside int32 range.'
-    weights = weights.clip(max=w_saturation).round().astype(np.int32)
-    if w_max > w_saturation:
+    assert w_max <= w_clip, 'ERROR: weight values outside int32 range.'
+    weights = weights.clip(max=w_clip).round().astype(np.int32)
+    if w_max > w_clip:
         print('WARNING: at least one edge weight has been clipped.')
     #  weights = np.ones((T + R, T + R), dtype=int)
     with io.StringIO() as str_io:
@@ -102,7 +111,12 @@ def lkh_acvrp(
         # TYPE='ATSP',  # maybe try asymmetric capacitaded VRP: 'ACVRP',
         DIMENSION=T + R,  # CVRP number of nodes and depots
         # DIMENSION=T,  # TSP: number of nodes
-        CAPACITY=capacity,
+        # For CAPACITY to be enforced, a DEMAND section is required.
+        # If the problem has unitary demand, use MTSP_MAX_SIZE instead.
+        # CAPACITY=capacity,
+        # This expression for limiting DISTANCE was empiricaly obtained.
+        # Using the aspect ratio of the shape of the area could improve it.
+        DISTANCE=scale * 16.0 / (math.log(T) + 0.1),  # maximum route length
         EDGE_WEIGHT_TYPE='EXPLICIT',
         EDGE_WEIGHT_FORMAT='FULL_MATRIX',
     )
@@ -162,8 +176,8 @@ def lkh_acvrp(
         min_route_size = 0
     params = dict(
         SPECIAL=None,  # None -> output only the key
-        #  PRECISION=1000,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
-        PRECISION=100,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
+        SEED=seed if seed is not None else 0,  # 0 means pick a random seed
+        PRECISION=precision,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
         TOTAL_TIME_LIMIT=time_limit,
         TIME_LIMIT=per_run_limit,
         RUNS=runs,  # default: 10
