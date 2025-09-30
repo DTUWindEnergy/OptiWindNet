@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 from itertools import chain
+import logging
 import math
 import os
 import re
@@ -12,60 +13,36 @@ from pathlib import Path
 
 import networkx as nx
 import numpy as np
+from scipy.spatial.distance import pdist, squareform
 
 from ..interarraylib import fun_fingerprint
+from ..repair import repair_routeset_path
+
+_lggr = logging.getLogger(__name__)
+debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
-# TODO: Deprecate that. Unable to make LKH work in ACVRP with EDGE_FILE
-#       It seems like EDGE_FILE is for candidate edges of the transformed
-#       (symmetric) problem (i.e., LKH expects a higher node count)
-def make_edge_listing(A: nx.Graph, scale: float) -> str:
-    """
-    LKH's EDGE_FILE param (follows Concorde format)
-    node numbering starts from 0
-    every node number will be incremented by 1 when loaded by LKH
-    """
-    R = A.graph['R']
-    T = A.graph['T']
-    V = R + T
-    A_nodes = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    return '\n'.join(
-        (
-            # first line is <number_of_nodes> <number_of_edges>
-            f'{V} {2 * A_nodes.number_of_edges() + 2 * T}',
-            # edges not including the depot (symmetric)
-            '\n'.join(
-                '{s} {t} {cost:.0f}\n{t} {s} {cost:.0f}'.format(
-                    s=u + 1, t=v + 1, cost=scale * d
-                )
-                for u, v, d in A_nodes.edges(data='length')
-            ),
-            # depot connects to all nodes, but asymmetrically (zero-cost return)
-            '\n'.join(
-                f'{1} {n} {scale * d:.0f}\n{n} 1 0'
-                for n, d in enumerate(A.graph['d2roots'][:, 0], start=1)
-            ),
-        )
-    )
-
-
-def lkh_acvrp(
+def lkh(
     A: nx.Graph,
     *,
     capacity: int,
-    time_limit: int,
+    time_limit: float,
     scale: float = 1e5,
     vehicles: int | None = None,
     runs: int = 50,
     per_run_limit: float = 15.0,
     precision: int = 1000,
+    complete: bool = False,
+    keep_log: bool = False,
     seed: int | None = None,
 ) -> nx.Graph:
     """
     Lin-Kernighan-Helsgaun via LKH-3 binary.
-    Asymmetric Capacitated Vehicle Routing Problem.
+    Open Capacitated Vehicle Routing Problem.
 
     A must be normalized - use as_normalized() before calling this.
+
+    http://akira.ruc.dk/~keld/research/LKH-3/
 
     Args:
       A: graph with allowed edges (if it has 0 edges, use complete graph)
@@ -74,104 +51,70 @@ def lkh_acvrp(
       scale: factor to scale lengths (should be < 1e6)
       vehicles: number of vehicles (if None, use the minimum feasible)
       runs: consult LKH manual
-      per_run_limit: consult LKH manual
+      per_run_limit: [s] consult LKH manual
       precision: consult LKH manual
+      complete: make the full graph over A available (links not in A assumed direct)
+      keep_log: save the LKH text output to graph attr 'method_log'
       seed: for the pseudo-random number generator (if None: random seed)
     Returns:
-      Solution S
+      Solution topology S
     """
-    R, T, VertexC = (A.graph[k] for k in ('R', 'T', 'VertexC'))
+    # Notes for tinkering with this wrapper:
+    # LKH offers the option to define the available edges set from a sparse graph:
+    # EDGE_DATA_SECTION, along with EDGE_DATA_FORMAT={ADJ_LIST, EDGE_LIST}. This is
+    # very hard to use with TYPE set to ACVRP or OVRP. It seems like LKH expects the
+    # edges to be defined wrt the transformed problem, but no reference is available
+    # as to how that transformation is carried out (and the C code lacks comments).
+    #
+    # An option to define the candidate set of edges is alternatively available through
+    # EDGE_FILE. Besides applying to the transformed problem, it follows the Concorde
+    # format, which has indices starting at 0.
+
+    R, T = A.graph['R'], A.graph['T']
     assert R == 1, 'LKH allows only 1 depot'
+    # problem dimension
+    N = R + T
     problem_fname = 'problem.txt'
     params_fname = 'params.txt'
-    edge_fname = 'edge_file.txt'
-    # the subtracted value below is to avoid overflow when penalties are added
-    #  w_clip = (np.iinfo(np.int32).max // precision) - 1000
-    w_clip = np.iinfo(np.int32).max // (2 * precision)
-    #  d2roots = A.graph.get('d2roots')
-    #  if d2roots is None:
-    #      d2roots = cdist(VertexC[:-R], VertexC[-R:])
-    #      A.graph['d2roots'] = d2roots
-    #  weights, w_max = length_matrix_single_depot_from_G(A, scale=scale)
-    #  assert w_max <= w_clip, 'ERROR: weight values outside int32 range.'
-    #  weights = weights.clip(max=w_clip).round().astype(np.int32)
-    #  if w_max > w_clip:
-    #      print('WARNING: at least one edge weight has been clipped.')
-    #  #  weights = np.ones((T + R, T + R), dtype=int)
-    #  with io.StringIO() as str_io:
-    #      np.savetxt(str_io, weights, fmt='%d')
-    #      edge_weights = str_io.getvalue()[:-1]
 
-    L = np.full((T + R, T + R), w_clip, dtype=np.int32)
+    # this is the same expression that LKH uses to define the big-M value
+    w_clip = np.iinfo(np.int32).max // (2 * precision)
+
+    # build weight matrix (only the upper triangle is passed)
+    if complete:
+        # Note: this is pure Euclidian 2D distance, neglecting contours
+        VertexC = A.graph['VertexC']
+        VertexCmod = np.vstack((VertexC[:T], VertexC[-R:]))
+        L = squareform(np.round(pdist(VertexCmod) * scale).astype(np.int32))
+    else:
+        L = np.full((N, N), w_clip, dtype=np.int32)
+    # this overwrites the direct distances (if using the complete graph)
     for u, v, length in A.edges(data='length'):
-        #  L[u + 1, v + 1] = L[v + 1, u + 1] = length * scale
         L[u, v] = L[v, u] = round(length * scale)
     L[:-1, -1] = np.round(A.graph['d2roots'][:T, -1] * scale)
-    tri_weights = []
-    for i, row in enumerate(L[:-1]):
-        tri_weights.append(' '.join(str(d) for d in row[i + 1 :]))
-    edge_weights = '\n'.join(tri_weights)
-    #  print(edge_weights)
+    edge_weights = '\n'.join(
+        ' '.join(str(d) for d in row[i + 1 :]) for i, row in enumerate(L[:-1])
+    )
+
     output_fname = 'solution.out'
     specs = dict(
         NAME=A.graph.get('name', 'unnamed'),
         TYPE='OVRP',
-        #  TYPE='ACVRP',  # maybe try asymmetric TSP: 'ATSP',
-        # TYPE='ATSP',  # maybe try asymmetric capacitaded VRP: 'ACVRP',
-        DIMENSION=T + R,  # CVRP number of nodes and depots
-        # DIMENSION=T,  # TSP: number of nodes
+        DIMENSION=N,  # CVRP number of nodes and depots
         # For CAPACITY to be enforced, a DEMAND section is required.
-        # If the problem has unitary demand, use MTSP_MAX_SIZE instead.
+        # MTSP_MAX_SIZE should work for unitary demand, but did not.
         CAPACITY=capacity,
         # This expression for limiting DISTANCE was empiricaly obtained.
-        # Using the aspect ratio of the shape of the area could improve it.
+        # It could be improved by replacing T with the aspect ratio of the border shape
         DISTANCE=scale * 16.0 / (math.log(T) + 0.1),  # maximum route length
         EDGE_WEIGHT_TYPE='EXPLICIT',
         EDGE_WEIGHT_FORMAT='UPPER_ROW',
     )
     data = dict(
         EDGE_WEIGHT_SECTION=edge_weights,
-        DEMAND_SECTION='\n'.join(
-            chain((f'{i + 1} 1' for i in range(T)), (f'{T + R} 0',))
-        ),
+        DEMAND_SECTION='\n'.join(chain((f'{i + 1} 1' for i in range(T)), (f'{N} 0',))),
     )
 
-    if False and A is not None:
-        # TODO: Deprecate this. Passing edges always makes LKH fail.
-        specs['EDGE_DATA_FORMAT'] = 'ADJ_LIST'
-        A_nodes = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-        data['EDGE_DATA_SECTION'] = '\n'.join(
-            (
-                # depot has out-edges to all nodes
-                f'1 {" ".join(str(n) for n in range(2, T + 2))} -1',
-                # all nodes have out-edges to depot
-                '\n'.join(
-                    f'{n + 2} 1 {" ".join(str(a + 2) for a in adj)} -1'
-                    for n, adj in A_nodes.adjacency()
-                ),
-                '-1',
-            )
-        )
-    if False and A is not None:
-        # TODO: Deprecate this. Passing edges always makes LKH fail.
-        specs['EDGE_DATA_FORMAT'] = 'EDGE_LIST'
-        data['EDGE_DATA_SECTION'] = '\n'.join(
-            (
-                '\n'.join(
-                    f'{u + 2} {v + 2}\n{v + 2} {u + 2}'
-                    for u, v in A.edges
-                    if u >= 0 and v >= 0
-                ),
-                '\n'.join(f'{n} 1\n1 {n}' for n in range(2, T + 2)),
-                '-1\n',
-            )
-        )
-    if False and A is not None:
-        # TODO: Deprecate this. EDGE_FILE is for the transformed problem.
-        edge_str = make_edge_listing(A, scale)
-
-    spec_str = '\n'.join(f'{k}: {v}' for k, v in specs.items())
-    data_str = '\n'.join(f'{k}\n{v}' for k, v in data.items()) + '\nEOF'
     vehicles_min = math.ceil(T / capacity)
     if (vehicles is None) or (vehicles <= vehicles_min):
         # set to minimum feasible vehicle number
@@ -184,10 +127,12 @@ def lkh_acvrp(
         min_route_size = (T % capacity) or capacity
     else:
         min_route_size = 0
+    if seed is None:
+        seed = 0
     params = dict(
         SPECIAL=None,  # None -> output only the key
-        DEPOT=f'{T + R}',
-        SEED=seed if seed is not None else 0,  # 0 means pick a random seed
+        DEPOT=N,
+        SEED=seed,  # 0 means pick a random seed
         PRECISION=precision,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
         TOTAL_TIME_LIMIT=time_limit,
         TIME_LIMIT=per_run_limit,
@@ -209,16 +154,22 @@ def lkh_acvrp(
         #  PATCHING_A=
         #  PATCHING_C=
     )
+
+    # run LKH
     with tempfile.TemporaryDirectory() as tmpdir:
         problem_fpath = os.path.join(tmpdir, problem_fname)
+        Path(problem_fpath).write_text(
+            '\n'.join(
+                chain(
+                    (f'{k}: {v}' for k, v in specs.items()),
+                    (f'{k}\n{v}' for k, v in data.items()),
+                    ('EOF',),
+                )
+            )
+        )
         params['PROBLEM_FILE'] = problem_fpath
         params_fpath = os.path.join(tmpdir, params_fname)
         params['MTSP_SOLUTION_FILE'] = os.path.join(tmpdir, output_fname)
-        if False and A is not None:
-            edge_fpath = os.path.join(tmpdir, edge_fname)
-            params['EDGE_FILE'] = edge_fpath
-            Path(edge_fpath).write_text(edge_str)
-        Path(problem_fpath).write_text('\n'.join((spec_str, data_str)))
         Path(params_fpath).write_text(
             '\n'.join((f'{k} = {v}' if v is not None else k) for k, v in params.items())
         )
@@ -237,41 +188,48 @@ def lkh_acvrp(
             penalty = 0
             minimum = 'inf'
             branches = []
+
+    # create a topology graph S from the results
     log = result.stdout.decode('utf8')
     S = nx.Graph(
-        creator='baselines.lkh',
         T=T,
         R=R,
-        has_loads=True,
         capacity=capacity,
+        has_loads=True,
         objective=float(minimum) / scale,
+        creator='baselines.lkh',
+        runtime=elapsed_time,
+        solution_time=_solution_time(log, minimum),
         method_options=dict(
             solver_name='LKH-3',
-            complete=A.number_of_edges() == 0,
-            scale=scale,
-            type=specs['TYPE'],
             time_limit=time_limit,
+            scale=scale,
             runs=runs,
             per_run_limit=per_run_limit,
-            fun_fingerprint=fun_fingerprint(),
+            complete=complete,
+            fun_fingerprint=_lkh_fun_fingerprint,
         ),
-        runtime=elapsed_time,
-        solver_log=log,
-        solution_time=_solution_time(log, minimum),
-        penalty=int(penalty),
-        #  solver_details=dict(
-        #  )
+        solver_details=dict(
+            penalty=int(penalty),
+            vehicles=vehicles,
+            seed=seed,
+        ),
     )
+    solver_details = S.graph['solver_details']
+    if keep_log:
+        S.graph['method_log'] = log
+    if vehicles is not None:
+        solver_details.update(vehicles=vehicles)
+
     if not penalty or result.stderr:
-        print('===stdout===', result.stdout.decode('utf8'), sep='\n')
-        print('===stderr===', result.stderr.decode('utf8'), sep='\n')
+        info('===stdout===\n%s', result.stdout.decode('utf8'))
+        error('===stderr===\n%s', result.stderr.decode('utf8'))
     else:
-        #  tail = result.stdout[result.stdout.rfind(b'Successes/'):].decode('ascii')
         tail = result.stdout[result.stdout.rfind(b'Successes/') :].decode()
         entries = iter(tail.splitlines())
         # Decision to drop avg. stats: unreliable, possibly due to time_limit
         next(entries)  # skip sucesses line
-        S.graph['cost_extrema'] = tuple(
+        solver_details['cost_extrema'] = tuple(
             float(v)
             for v in re.match(
                 r'Cost\.min = (-?\d+), Cost\.avg = -?\d+\.?\d*,'
@@ -280,7 +238,7 @@ def lkh_acvrp(
             ).groups()
         )
         next(entries)  # skip gap line
-        S.graph['penalty_extrema'] = tuple(
+        solver_details['penalty_extrema'] = tuple(
             float(v)
             for v in re.match(
                 r'Penalty\.min = (\d+), Penalty\.avg = \d+\.?\d*,'
@@ -288,7 +246,7 @@ def lkh_acvrp(
                 next(entries),
             ).groups()
         )
-        S.graph['trials_extrema'] = tuple(
+        solver_details['trials_extrema'] = tuple(
             float(v)
             for v in re.match(
                 r'Trials\.min = (\d+), Trials\.avg = \d+\.?\d*,'
@@ -296,7 +254,7 @@ def lkh_acvrp(
                 next(entries),
             ).groups()
         )
-        S.graph['runtime_extrema'] = tuple(
+        solver_details['runtime_extrema'] = tuple(
             float(v)
             for v in re.match(
                 r'Time\.min = (\d+\.?\d*) sec., Time\.avg = \d+\.?\d* sec.,'
@@ -321,6 +279,9 @@ def lkh_acvrp(
     return S
 
 
+_lkh_fun_fingerprint = fun_fingerprint(lkh)
+
+
 def _solution_time(log, objective) -> float:
     sol_repr = f'{objective}'
     time = 0.0
@@ -328,10 +289,78 @@ def _solution_time(log, objective) -> float:
         if not line or line[0] == '*':
             continue
         if line[:4] == 'Run ':
+            # sum up the times of each Run, until the Run that found the objective
             # example: Run 4: Cost = 84_129583, Time = 2.87 sec.
             cost_, time_ = line.split(': ')[1].split(', ')
             # example time_: Time = 2.87 sec.
             time += float(time_.split(' = ')[1].split(' ')[0])
-            # example cost_: Cost = 84_8724588,
+            # example cost_: Cost = 84_8724588
             if cost_.split('_')[1] == sol_repr:
-                return time
+                # this was the Run that found the objective: finished
+                break
+    return time
+
+
+def iterative_lkh(
+    A: nx.Graph,
+    *,
+    capacity: int,
+    time_limit: float,
+    vehicles: int | None = None,
+    seed: int | None = None,
+    max_retries: int = 10,
+    keep_log: bool = False,
+) -> nx.Graph:
+    """Iterate until crossing-free solution is found (`lkh()` wrapper).
+
+    Each time a solution with a crossing is produced, one of the offending
+    edges is removed from `A` and the solver is called again. In the same
+    way as `lkh()`, it is recommended to pass a normalized `A`.
+
+    Args:
+      *: see `lkh()`
+      max_retries: maximum number of retries to fix unrepairable crossings
+
+    Returns:
+      Solution topology S
+    """
+
+    P_A = A.graph['planar']
+    diagonals = A.graph['diagonals']
+    crossings = []
+    for i in range(max_retries + 1):
+        for uv, st in crossings:
+            if i == 1:
+                # just copy once, on the first re-run (not to change the given A)
+                A = A.copy()
+                P_A = P_A.copy()
+                diagonals = diagonals.copy()
+                A.graph['planar'] = P_A
+                A.graph['diagonals'] = diagonals
+            # remove the longest edge that takes part in crossing
+            w, x = uv if A.edges[uv]['length'] > A.edges[st]['length'] else st
+            wx = (w, x) if w < x else (x, w)
+            if wx in diagonals:
+                del diagonals[wx]
+            A.remove_edge(w, x)
+        # solve
+        S = lkh(
+            A,
+            capacity=capacity,
+            time_limit=time_limit,
+            vehicles=vehicles,
+            seed=seed,
+            keep_log=keep_log,
+        )
+        # repair
+        S = repair_routeset_path(S, A)
+        # TODO: accumulate solution_time throughout the iterations
+        #       (makes sense to add a new field)
+        crossings = S.graph.get('outstanding_crossings', [])
+        if not crossings:
+            break
+    if i > 0:
+        S.graph['retries'] = i
+        if crossings:
+            warn('Solution contains crossings (max_retries reached)')
+    return S
