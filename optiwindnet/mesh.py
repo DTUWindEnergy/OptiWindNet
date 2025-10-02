@@ -789,56 +789,45 @@ def make_planar_embedding(
     # G) Build the hull-concave.
     # ##########################
     debug('PART G')
-    # prevent edges that cross the boudaries from going into PlanarEmbedding
-    # an exception is made for edges that include a root node
-    hull_concave = []
-    if len(border) > 0:
+    if concavities:
         hull_prunned_poly = shp.Polygon(shell=VertexS[hull_prunned])
         shp.prepare(hull_prunned_poly)
         shp.prepare(border_poly)
-        pushed = 0
         if not border_poly.covers(hull_prunned_poly):
-            hull_stack = hull_prunned[0:1] + hull_prunned[::-1]
-            u, v = hull_prunned[-1], hull_stack.pop()
-            while hull_stack:
+            hull_concave = []
+            i = 2
+            u, v = hull_prunned[:i]
+            end = u
+            for _ in range(P_A.number_of_edges()):
                 edge_line = shp.LineString(VertexS[[u, v]])
-                if not border_poly.covers(edge_line):
-                    t = P_A[u][v]['ccw']
-                    #  print(f'[{pushed}]', F[u], F[v], f'⟨{F[t]}⟩', [F[n] for n in hull_stack[::-1]])
-                    if t == u:
-                        # degenerate case 1
-                        hull_concave.append(v)
-                        t, v, u = v, u, t
-                        continue
-                    pushed += 1
-                    hull_stack.append(v)
-                    if pushed and not any(n in A[t] for n in hull_stack[-pushed:]):
-                        # TODO: figure out how to avoid repeated outlier nodes
-                        warn(
-                            'unable to include in hull_concave: %s',
-                            hull_stack[-pushed:],
-                        )
-                        hull_outliers = A.graph.get('hull_outliers')
-                        if hull_outliers is not None:
-                            hull_outliers.extend(hull_stack[-pushed:])
-                        else:
-                            A.graph['hull_outliers'] = hull_stack[-pushed:]
-                        del hull_stack[-pushed:]
-                        pushed = 0
-                        while hull_stack:
-                            v = hull_stack.pop()
-                            if v not in hull_concave:
-                                break
-                        continue
-                    v = t
-                else:
-                    #  print(f'[{pushed}]', F[u], F[v], [F[n] for n in hull_stack[::-1]])
+                if border_poly.covers(edge_line):
                     hull_concave.append(v)
-                    u = v
-                    if pushed:
-                        pushed -= 1
-                    v = hull_stack.pop()
-    if not hull_concave:
+                    if v == end:
+                        # TODO: make this test more robust
+                        if len(hull_concave) < len(hull_prunned):
+                            # this likely means an islanded subgraph was found
+                            debug('islanded hull_concave', hull_concave)
+                            hull_concave.clear()
+                            u, v = v, hull_prunned[i]
+                            end = u
+                            i += 1
+                            continue
+                        break
+                    u, v = v, P_A[v][u]['ccw']
+                    continue
+                else:
+                    v = P_A[u][v]['ccw']
+                    if not hull_concave and v == hull_prunned[i - 1]:
+                        # not able to start with this ⟨u, v⟩ link
+                        debug('failed start', u, v)
+                        u, v = v, hull_prunned[i]
+                        end = u
+                        i += 1
+            else:
+                warn('Too many iterations building hull_concave: %s', hull_concave)
+        else:
+            hull_concave = hull_prunned
+    else:
         hull_concave = hull_prunned
     debug('hull_concave: %s', hull_concave)
 
