@@ -44,7 +44,6 @@ dependencies = [
     "py >=1.11.0",
     "Pyomo >=6.9",
     "PyYAML >=6.0.2",
-    "pyyaml-include >=2.1",
     "scipy >=1.15.2",
     "shapely >=2.0.7",
     "svg.py >=1.6.0",
