@@ -67,44 +67,6 @@ def build_L(VertexC, *, R=1, border=(), obstacles_xy=None, name="unit"):
     return L
 
 
-def _square_embedding_with_diag_map():
-    """Small synthetic embedding to exercise _deprecated_planar_flipped_by_routeset."""
-    P = nx.PlanarEmbedding()
-    for n in range(4):
-        P.add_node(n)
-
-    # Outer cycle 0-1-2-3-0
-    P.add_half_edge(0, 1)
-    P.add_half_edge(1, 0)
-    P.add_half_edge(1, 2, ccw=0)
-    P.add_half_edge(2, 1)
-    P.add_half_edge(2, 3, ccw=1)
-    P.add_half_edge(3, 2)
-    P.add_half_edge(3, 0, ccw=2)
-    P.add_half_edge(0, 3, ccw=1)
-
-    A = nx.Graph()
-    A.add_nodes_from(range(4))
-    A.add_edge(1, 2)  # Delaunay parent for diag (0,3)
-    A.graph["planar"] = P
-    A.graph["diagonals"] = bidict({(0, 3): (1, 2)})
-
-    G = nx.Graph()
-    G.add_nodes_from(range(4))
-    G.add_edge(0, 3)  # force the diagonal
-
-    return P, A, G
-
-
-# ----------------------- one test per source function -----------------------
-
-def test__index_numpy_equivalent():
-    arr = np.array([10, 20, 30, 20], dtype=int)
-    assert _index(arr, np.int_(20)) == 1
-    assert _index(arr, np.int_(30)) == 2
-    # not found returns 0
-    assert _index(arr, np.int_(999)) == 0
-
 
 def test_make_planar_embedding_all_paths(caplog):
     """
@@ -301,7 +263,7 @@ def test_planar_flipped_by_routeset_all():
     assert (u, v) in P2.edges or (v, u) in P2.edges
 
 
-def test__edges_and_hull_from_cdt_all():
+def test_edges_and_hull_from_cdt_all():
     mesh = cdt.Triangulation(
         cdt.VertexInsertionOrder.AUTO,
         cdt.IntersectingConstraintEdges.NOT_ALLOWED,
@@ -318,17 +280,3 @@ def test__edges_and_hull_from_cdt_all():
     assert isinstance(hull, list) and hull
     assert all(isinstance(n, (int, np.integer)) for n in hull)
     assert all(n >= 3 for n in hull)  # avoid supertriangle ids
-
-
-def test__deprecated_planar_flipped_by_routeset_all():
-    P, A, G = _square_embedding_with_diag_map()
-
-    # plain flip
-    P2 = _deprecated_planar_flipped_by_routeset(G, A=A, planar=P)
-    assert (0,3) in P2.edges or (3,0) in P2.edges
-
-    # with recorded path to remove along the way
-    P3, A3, G3 = _square_embedding_with_diag_map()
-    A3[1][2]["path"] = [3, 1]
-    P4 = _deprecated_planar_flipped_by_routeset(G3, A=A3, planar=P3)
-    assert (0,3) in P4.edges or (3,0) in P4.edges

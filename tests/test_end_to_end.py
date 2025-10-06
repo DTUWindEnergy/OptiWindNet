@@ -1,43 +1,41 @@
 # tests/test_with_DTU_letters.py
 """
-Replay-and-verify tests for DTU letters.
+Replay-and-verify tests using repository-backed sites.
 
-This test file reads a single dill blob produced by the generator script
-(scripts/generate_expected_dtu_letters.py). The blob contains:
-  - "Sites":         {site_name: pbf_path}
+This test reads a dill blob produced by scripts/generate_expected_end_to_end.py.
+Blob structure (new format):
+  - "Sites":         (site_name, ...)                  # tuple/list of site names
   - "Routers":       {router_name: {"class": ..., "params": {...}, "cables": int}}
   - "Cases":         [{"key": "<site>_<router>", "site": site_name, "router": router_name}, ...]
   - "RouterGraphs":  {key: expected_networkx_graph}
   - "Meta":          environment info (informational)
 
-For each case, we rebuild the WindFarmNetwork with the stored site/cables,
-recreate the router from its spec (incl. ModelOptions for MILPRouter), run
-the optimization, and assert the produced graph equals the stored one.
+For each case, we rebuild the WindFarmNetwork with the repository site
+(load_repository(); getattr(locations, site_name)), recreate the router from
+its spec (incl. ModelOptions for MILPRouter), run the optimization, and
+assert the produced graph equals the stored one.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Sequence
 
 import dill
 import pytest
 
 from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
 from optiwindnet.MILP import ModelOptions
+from optiwindnet.importer import load_repository
 
-# Uses your existing helper assertion (make sure assertion rewriting is enabled for it).
-# In tests/conftest.py, consider:
-#     import pytest
-#     pytest.register_assert_rewrite("tests.helpers")
+# Uses your existing helper assertion
 from .helpers import assert_graph_equal
-
 
 # ---------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------
 HERE = Path(__file__).parent
-EXPECTED_PATH = HERE / "test_files" / "expected_DTU_letters.dill"
+EXPECTED_PATH = HERE / "test_files" / "expected_end_to_end.dill"
 
 
 # ---------------------------------------------------------------------
@@ -61,7 +59,6 @@ def _make_router_from_spec(spec: Dict[str, Any]):
         params["model_options"] = _make_model_options_from_spec(params["model_options"])
 
     if clsname is None:
-        # Interpret as "no router" → WindFarmNetwork default behavior
         return None
     if clsname == "EWRouter":
         return EWRouter(**params)
@@ -93,19 +90,20 @@ def pytest_generate_tests(metafunc):
 
     blob = _load_expected_blob()
     if blob is None:
-        # No cases collected if the file is missing; pytest will report 0 tests.
         metafunc.parametrize("key", [])
         return
 
     stored = blob.get("Cases", [])
     graphs = blob.get("RouterGraphs", {})
-    sites = blob.get("Sites", {})
+    sites: Sequence[str] = tuple(blob.get("Sites", ()))  # sequence of names
     routers = blob.get("Routers", {})
 
     keys = [
         c["key"]
         for c in stored
-        if c.get("key") in graphs and c.get("site") in sites and c.get("router") in routers
+        if c.get("key") in graphs
+        and c.get("site") in sites
+        and c.get("router") in routers
     ]
 
     metafunc.parametrize("key", sorted(keys))
@@ -127,7 +125,7 @@ def expected_blob():
 # ---------------------------------------------------------------------
 def test_expected_router_graphs_match(expected_blob, key):
     graphs = expected_blob["RouterGraphs"]
-    sites = expected_blob["Sites"]
+    sites: Sequence[str] = tuple(expected_blob["Sites"])  # names only
     routers = expected_blob["Routers"]
 
     # Find metadata for this key
@@ -140,10 +138,9 @@ def test_expected_router_graphs_match(expected_blob, key):
     router_name = case_meta["router"]
     expected_G = graphs[key]
 
-    # Resolve inputs from stored metadata
-    pbf_path = Path(sites[site_name])
-    assert pbf_path.exists(), f"PBF not found: {pbf_path} (from key {key!r})"
+    assert site_name in sites, f"Site {site_name!r} not listed in blob Sites"
 
+    # Build router
     router_spec = routers[router_name]
     cables = int(router_spec["cables"])
     router = _make_router_from_spec(router_spec)
@@ -152,9 +149,14 @@ def test_expected_router_graphs_match(expected_blob, key):
     if router_spec.get("class") == "MILPRouter":
         pytest.importorskip("ortools", reason="MILPRouter requires OR-Tools")
 
-    # Build & optimize
-    wfn = WindFarmNetwork.from_pbf(filepath=str(pbf_path), cables=cables)
-    wfn.optimize(router=router)
+    # Load site from repository by name and optimize
+    locations = load_repository(path=r'tests\test_files\sites')              # assumed valid per generator contract
+    L = getattr(locations, site_name)          # no validation
+    wfn = WindFarmNetwork(L=L, cables=cables)
+    if router is None:
+        wfn.optimize()
+    else:
+        wfn.optimize(router=router)
 
     # Compare graphs; ignore volatile per-run keys
     ignored_keys = {"solution_time", "runtime", "pool_count"}

@@ -20,7 +20,7 @@ if __name__ == '__main__':
     # ===============================
     # Remove previous expected file
     # ===============================
-    file_path = 'tests/test_files/expected_advance.dill'
+    file_path = 'tests/test_files/expected_unittests.dill'
     try:
         os.remove(file_path)
         print(f'🗑️ Removed file: {file_path}')
@@ -32,8 +32,8 @@ if __name__ == '__main__':
     # ===============================
     # Load repository
     # ===============================
-    locations = load_repository()
-    L = locations.eagle
+    locations = load_repository(path=r'tests\test_files\sites')
+    L = locations.albatros
 
     # ===============================
     # Initialize expected dict
@@ -72,7 +72,7 @@ if __name__ == '__main__':
     calcload(G)
     expected['G_calcload'] = copy.deepcopy(G)
 
-    cables_assign = [(3, 100), (5, 150), (7, 200)]
+    cables_assign = [(3, 1500.00), (5, 1800.0), (7, 2000.0)]
     assign_cables(G, cables_assign)
     expected['cables'] = cables_assign
     expected['G_assign_cables'] = copy.deepcopy(G)
@@ -117,16 +117,16 @@ if __name__ == '__main__':
     # Extra Graphs via Routers
     # -------------------------------
     sites = {
-        'eagle': locations.eagle,
+        'eagle': locations.albatros,
         'taylor': locations.taylor_2023,
     }
 
     routers = {
         'EWRouter': {'router': None, 'cables': 7},
         'EWRouter_straight': {'router': EWRouter(feeder_route='straight'), 'cables': 7},
-        'HGSRouter': {'router': HGSRouter(time_limit=2), 'cables': 7},
+        'HGSRouter': {'router': HGSRouter(time_limit=2, seed=0), 'cables': 7,},
         'HGSRouter_feeder_limit': {
-            'router': HGSRouter(time_limit=2, feeder_limit=0),
+            'router': HGSRouter(time_limit=2, feeder_limit=0, seed=0),
             'cables': 7,
         },
         'MILPRouter': {

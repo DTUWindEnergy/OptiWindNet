@@ -18,13 +18,13 @@ from .helpers import assert_graph_equal
 @pytest.fixture
 def expected():
     """Loads all expected values from the dill file for single test use."""
-    with open("tests/test_files/expected_base.dill", "rb") as f:
+    with open("tests/test_files/expected_unittests.dill", "rb") as f:
         return dill.load(f)
 
 @pytest.fixture(scope="module")
 def db():
     """Module-scoped database fixture for shared access across tests."""
-    with open("tests/test_files/expected_base.dill", "rb") as f:
+    with open("tests/test_files/expected_unittests.dill", "rb") as f:
         data = dill.load(f)
     yield data["RouterGraphs"]
 
