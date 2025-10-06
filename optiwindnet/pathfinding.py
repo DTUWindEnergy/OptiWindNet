@@ -640,7 +640,7 @@ class PathFinder:
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
         _, adv_id, advancer = heapq.heappop(prioqueue)
         iter = 0
-        while len(prioqueue) > 0 and iter < iterations_limit:
+        while iter < iterations_limit:
             iter += 1
             debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
             try:
@@ -648,6 +648,8 @@ class PathFinder:
                 d_ref, portal, is_promising = next(advancer)
             except StopIteration:
                 # advancer decided to stop, get a new one
+                if not prioqueue:
+                    break
                 _, adv_id, advancer = heapq.heappop(prioqueue)
             else:
                 if is_promising or num_traversals[portal] < traversals_limit:
@@ -657,6 +659,8 @@ class PathFinder:
                     )
                 else:
                     # forget advancer and get a new one
+                    if not prioqueue:
+                        break
                     _, adv_id, advancer = heapq.heappop(prioqueue)
 
         if iter == iterations_limit:
