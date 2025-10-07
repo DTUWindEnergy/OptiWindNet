@@ -2,7 +2,7 @@ if __name__ == '__main__':
     import os
     import copy
     import dill
-
+    from pathlib import Path
     from optiwindnet.importer import load_repository
     from optiwindnet.interarraylib import (
         assign_cables,
@@ -20,7 +20,7 @@ if __name__ == '__main__':
     # ===============================
     # Remove previous expected file
     # ===============================
-    file_path = 'tests/test_files/expected_unittests.dill'
+    file_path = (Path(__file__).parent / "test_files" / "expected_unittests.dill").resolve()
     try:
         os.remove(file_path)
         print(f'🗑️ Removed file: {file_path}')
@@ -32,7 +32,8 @@ if __name__ == '__main__':
     # ===============================
     # Load repository
     # ===============================
-    locations = load_repository(path=r'tests\test_files\sites')
+    data_dir = (Path(__file__).parent / "test_files" / "sites").resolve()
+    locations = load_repository(path=str(data_dir))
     L = locations.albatros
 
     # ===============================

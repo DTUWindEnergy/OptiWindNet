@@ -582,8 +582,6 @@ def test_ensure_closed_noop_if_already_closed():
 # MILP/HGS warmstart & control-flow (monkeypatched stubs)
 # ==========================================================
 
-
-
 def test_milprouter_route_warmstart_branched_segmented_and_retries(monkeypatch):
     from optiwindnet import api as api_mod
 

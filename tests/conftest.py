@@ -4,7 +4,7 @@ os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
 
 import numba  # make sure the runtime flag is also set
 numba.config.DISABLE_JIT = True
-
+from pathlib import Path
 import pytest
 import numpy as np
 import dill
@@ -14,17 +14,17 @@ from .helpers import assert_graph_equal
 
 
 # ========== Core Fixtures ==========
-
+DATA_FILE = (Path(__file__).parent / "test_files" / "expected_unittests.dill").resolve()
 @pytest.fixture
 def expected():
     """Loads all expected values from the dill file for single test use."""
-    with open("tests/test_files/expected_unittests.dill", "rb") as f:
+    with open(DATA_FILE, "rb") as f:
         return dill.load(f)
 
 @pytest.fixture(scope="module")
 def db():
     """Module-scoped database fixture for shared access across tests."""
-    with open("tests/test_files/expected_unittests.dill", "rb") as f:
+    with open(DATA_FILE, "rb") as f:
         data = dill.load(f)
     yield data["RouterGraphs"]
 

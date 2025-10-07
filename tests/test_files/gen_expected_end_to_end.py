@@ -247,7 +247,8 @@ def generate_expected(output_path: Path) -> None:
     router_graphs: Dict[str, Any] = {}
 
     # load once; assume success and membership
-    locations = load_repository(path=r'tests\test_files\sites')
+    data_dir = (Path(__file__).parent / "test_files" / "sites").resolve()
+    locations = load_repository(path=str(data_dir))
 
     def run_batch(
         batch_sites: Sequence[str], batch_routers: Dict[str, Dict[str, Any]], label: str

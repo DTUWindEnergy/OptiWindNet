@@ -150,7 +150,8 @@ def test_expected_router_graphs_match(expected_blob, key):
         pytest.importorskip("ortools", reason="MILPRouter requires OR-Tools")
 
     # Load site from repository by name and optimize
-    locations = load_repository(path=r'tests\test_files\sites')              # assumed valid per generator contract
+    data_dir = (Path(__file__).parent / "test_files" / "sites").resolve()
+    locations = load_repository(path=str(data_dir))            # assumed valid per generator contract
     L = getattr(locations, site_name)          # no validation
     wfn = WindFarmNetwork(L=L, cables=cables)
     if router is None:
