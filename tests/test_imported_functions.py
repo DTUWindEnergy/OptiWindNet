@@ -120,8 +120,8 @@ def test_l_from_site(expected):
         T=T_test,
         B=6,
         VertexC=vertexC_test,
-        name='Baltic Eagle',
-        handle='eagle',
+        name='Albatros',
+        handle='albatros',
     )
     assert_graph_equal(
         L_test, L_expected, ignored_graph_keys={'border', 'OSM_name', 'landscape_angle'}

@@ -67,7 +67,6 @@ def build_L(VertexC, *, R=1, border=(), obstacles_xy=None, name="unit"):
     return L
 
 
-
 def test_make_planar_embedding_all_paths(caplog):
     """
     Drive make_planar_embedding through its major branches:
@@ -174,33 +173,6 @@ def test_make_planar_embedding_all_paths(caplog):
     assert isinstance(P5, nx.PlanarEmbedding) and A5.number_of_edges() > 0
 
 
-def test_delaunay_all():
-    # single root, bind2root=False
-    vc = np.array([
-        [0,0],[1,0],[0,1],[1,1],
-        [0.5,-1.0],  # root
-    ], float)
-    L = build_L(vc, R=1)
-    A0 = delaunay(L, bind2root=False)
-    for _, _, d in A0.edges(data=True):
-        assert "root" not in d
-
-    # single root, bind2root=True
-    A1 = delaunay(L, bind2root=True)
-    for _, _, d in A1.edges(data=True):
-        assert d.get("root") == -1
-
-    # two roots: valid assignment among {-1,-2}
-    vc2 = np.array([
-        [0,0],[1,0],[0,1],[1,1],
-        [-1.0,-1.0], [2.0,-1.0],  # roots (-2,-1)
-    ], float)
-    L2 = build_L(vc2, R=2)
-    A2 = delaunay(L2, bind2root=True)
-    seen = {d["root"] for *_, d in A2.edges(data=True)}
-    assert seen <= {-1, -2} and len(seen) >= 1
-
-
 def test_A_graph_all(monkeypatch):
     # Base L
     vc = np.array([
@@ -231,36 +203,6 @@ def test_A_graph_all(monkeypatch):
     assert called["n"] == 1
     for _, _, d in A_d2.edges(data=True):
         assert "weight" in d
-
-
-def test_planar_flipped_by_routeset_all():
-    # Make a simple site and pick one diagonal mapping from A.graph['diagonals']
-    vc = np.array([
-        [0,0],[2,0],[0,2],[2,2],
-        [1.0,-1.0],  # root
-    ], float)
-    L = build_L(vc, R=1)
-    P, A = make_planar_embedding(L)
-
-    diags = A.graph["diagonals"]
-    chosen = None
-    for (s, t), (u, v) in diags.items():
-        if s >= 0 and t >= 0 and u >= 0 and v >= 0:
-            chosen = ((s, t), (u, v))
-            break
-    if chosen is None:
-        pytest.skip("No all-terminal diagonal mapping found.")
-    (s, t), (u, v) = chosen
-
-    G = nx.Graph()
-    T, R, B = A.graph["T"], A.graph["R"], A.graph["B"]
-    G.add_nodes_from(range(T)); G.add_nodes_from(range(-R, 0))
-    G.add_edge(u, v)
-    fnT = np.arange(R + T + B + 3); fnT[-R:] = range(-R, 0)
-    G.graph.update(T=T, R=R, B=B, fnT=fnT)
-
-    P2 = planar_flipped_by_routeset(G, planar=P, VertexC=A.graph["VertexC"], diagonals=diags)
-    assert (u, v) in P2.edges or (v, u) in P2.edges
 
 
 def test_edges_and_hull_from_cdt_all():

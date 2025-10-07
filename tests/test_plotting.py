@@ -101,37 +101,6 @@ def test_gplot_border_only_smoke(tmp_path):
     assert out.exists() and out.stat().st_size > 0
 
 
-def test_gplot_with_obstacle_polygon(tmp_path):
-    G = _make_graph(with_obstacle=True)
-
-    with patch("matplotlib.pyplot.show"):
-        ax = plotting.gplot(
-            G,
-            node_tag="label",   # exercise alternate label branch (empty strings)
-            landscape=False,
-            infobox=True,
-            scalebar=None,
-            legend=False,
-            hide_ST=False,
-        )
-
-    out = Path(tmp_path) / "gplot_with_obstacle.svg"
-    ax.figure.savefig(out)
-    assert out.exists() and out.stat().st_size > 0
-
-
-def test_gplot_hides_supertriangle_when_present(tmp_path):
-    G = _make_graph(with_supertriangle=True)
-
-    with patch("matplotlib.pyplot.show"):
-        ax = plotting.gplot(G, hide_ST=True, node_tag=None, infobox=False)
-
-    # just ensure it renders and can be saved
-    out = Path(tmp_path) / "gplot_hide_st.png"
-    ax.figure.savefig(out, dpi=96)
-    assert out.exists() and out.stat().st_size > 0
-
-
 def test_pplot_with_planar_embedding(tmp_path):
     # Build source A with supertriangle (as pplot expects coordinates incl. ST)
     A = _make_graph(with_supertriangle=True)

@@ -117,7 +117,7 @@ if __name__ == '__main__':
     # Extra Graphs via Routers
     # -------------------------------
     sites = {
-        'eagle': locations.albatros,
+        'albatros': locations.albatros,
         'taylor': locations.taylor_2023,
     }
 

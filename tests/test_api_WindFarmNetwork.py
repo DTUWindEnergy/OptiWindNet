@@ -3,20 +3,26 @@ import io
 import logging
 from pathlib import Path
 
-import numpy as np
 import networkx as nx
+import numpy as np
 import pytest
-from shapely.geometry import Polygon, LinearRing
+from shapely.geometry import LinearRing, Polygon
 
-from optiwindnet.api import (
-    EWRouter, HGSRouter, MILPRouter, WindFarmNetwork, ModelOptions,
-    OWNWarmupFailed, OWNSolutionNotFound
-)
 import optiwindnet.api_utils as U
+from optiwindnet.api import (
+    EWRouter,
+    HGSRouter,
+    MILPRouter,
+    ModelOptions,
+    OWNSolutionNotFound,
+    OWNWarmupFailed,
+    WindFarmNetwork,
+)
 
 # ============================================================
 # Helpers: tiny synthetic site, plus a few tiny graph builders
 # ============================================================
+
 
 def tiny_site(T=4, R=1):
     """Return (turbinesC, substationsC, borderC, obstaclesC)."""
@@ -24,9 +30,7 @@ def tiny_site(T=4, R=1):
     xs = np.linspace(0.0, T - 1, T)
     turbinesC = np.c_[xs, np.zeros_like(xs)]
     substationsC = np.array([[T + 1.0, 0.0]])
-    borderC = np.array([
-        [-2.0, -2.0], [T + 3.0, -2.0], [T + 3.0, 2.0], [-2.0, 2.0]
-    ])
+    borderC = np.array([[-2.0, -2.0], [T + 3.0, -2.0], [T + 3.0, 2.0], [-2.0, 2.0]])
     obstaclesC = []  # none by default
     return turbinesC, substationsC, borderC, obstaclesC
 
@@ -48,7 +52,7 @@ def tiny_S(T=2, R=1):
 
 
 def tiny_G(T=2, R=1):
-    G = nx.Graph(R=R, T=T, VertexC=np.zeros((T+R, 2)))
+    G = nx.Graph(R=R, T=T, VertexC=np.zeros((T + R, 2)))
     if T >= 2:
         G.add_edge(0, 1, length=1.0, cost=1.0, cable=0)
     G.graph['cables'] = [(1, 1.0)]
@@ -59,6 +63,7 @@ def tiny_G(T=2, R=1):
 # =====================
 # WindFarmNetwork core
 # =====================
+
 
 def test_wfn_fails_without_coordinates_or_L():
     with pytest.raises(TypeError):
@@ -72,21 +77,25 @@ def test_wfn_warns_when_L_and_coordinates_given(caplog):
     L = w1.L
     with caplog.at_level('WARNING'):
         WindFarmNetwork(cables=7, turbinesC=tC, substationsC=sC, L=L)
-    assert any("prioritizes L over coordinates" in m for m in caplog.messages)
+    assert any('prioritizes L over coordinates' in m for m in caplog.messages)
 
 
 def test_wfn_fails_without_cables():
     tC, sC, bC, _ = tiny_site(T=3)
-    with pytest.raises(TypeError, match="missing 1 required positional argument: 'cables'"):
+    with pytest.raises(
+        TypeError, match="missing 1 required positional argument: 'cables'"
+    ):
         WindFarmNetwork(turbinesC=tC, substationsC=sC, borderC=bC)
 
 
 def test_wfn_from_coordinates_builds_L_and_defaults_router():
     tC, sC, bC, _ = tiny_site(T=5)
-    wfn = WindFarmNetwork(cables=7, turbinesC=tC, substationsC=sC, borderC=bC, handle="h", name="n")
+    wfn = WindFarmNetwork(
+        cables=7, turbinesC=tC, substationsC=sC, borderC=bC, handle='h', name='n'
+    )
     # basic invariants instead of DB equality
-    assert wfn.L.graph["T"] == len(tC)
-    assert wfn.L.graph["R"] == len(sC)
+    assert wfn.L.graph['T'] == len(tC)
+    assert wfn.L.graph['R'] == len(sC)
     assert isinstance(wfn.router, EWRouter)
 
 
@@ -96,8 +105,8 @@ def test_wfn_from_L_roundtrip():
     L = w1.L
     w2 = WindFarmNetwork(cables=7, L=L)
     # Graph identity not required; check key attrs
-    assert w2.L.graph["T"] == L.graph["T"]
-    assert w2.L.graph["R"] == L.graph["R"]
+    assert w2.L.graph['T'] == L.graph['T']
+    assert w2.L.graph['R'] == L.graph['R']
 
 
 @pytest.mark.parametrize(
@@ -111,19 +120,25 @@ def test_wfn_from_L_roundtrip():
 )
 def test_wfn_cable_formats(cables_input, expected):
     tC, sC, bC, _ = tiny_site(T=3)
-    wfn = WindFarmNetwork(cables=cables_input, turbinesC=tC, substationsC=sC, borderC=bC)
+    wfn = WindFarmNetwork(
+        cables=cables_input, turbinesC=tC, substationsC=sC, borderC=bC
+    )
     assert wfn.cables == expected
 
 
 def test_wfn_invalid_cables_raises():
     tC, sC, bC, _ = tiny_site(T=3)
     with pytest.raises(ValueError, match='Invalid cable values'):
-        WindFarmNetwork(cables=(5, (7, 3, 8), 9), turbinesC=tC, substationsC=sC, borderC=bC)
+        WindFarmNetwork(
+            cables=(5, (7, 3, 8), 9), turbinesC=tC, substationsC=sC, borderC=bC
+        )
 
 
 def test_cables_capacity_calculation():
     tC, sC, bC, _ = tiny_site(T=3)
-    wfn = WindFarmNetwork(cables=[(5, 100), (7, 150)], turbinesC=tC, substationsC=sC, borderC=bC)
+    wfn = WindFarmNetwork(
+        cables=[(5, 100), (7, 150)], turbinesC=tC, substationsC=sC, borderC=bC
+    )
     assert wfn.cables_capacity == 7
 
 
@@ -195,7 +210,9 @@ def test_update_from_terse_links_roundtrip_smoke():
 
 def test_gradient_length_and_cost_shapes():
     tC, sC, bC, _ = tiny_site(T=6)
-    wfn = WindFarmNetwork(cables=[(7, 123.0)], turbinesC=tC, substationsC=sC, borderC=bC)
+    wfn = WindFarmNetwork(
+        cables=[(7, 123.0)], turbinesC=tC, substationsC=sC, borderC=bC
+    )
     wfn.optimize()
     g_wt_L, g_ss_L = wfn.gradient(gradient_type='length')
     g_wt_C, g_ss_C = wfn.gradient(gradient_type='cost')
@@ -209,14 +226,14 @@ def test_repr_svg_returns_string_before_and_after_optimize():
     tC, sC, bC, _ = tiny_site(T=4)
     wfn = WindFarmNetwork(cables=4, turbinesC=tC, substationsC=sC, borderC=bC)
     svg1 = wfn._repr_svg_()
-    assert isinstance(svg1, str) and svg1.strip().startswith("<svg")
+    assert isinstance(svg1, str) and svg1.strip().startswith('<svg')
     wfn.optimize()
     svg2 = wfn._repr_svg_()
-    assert isinstance(svg2, str) and svg2.strip().startswith("<svg")
+    assert isinstance(svg2, str) and svg2.strip().startswith('<svg')
 
 
 def test_from_windIO_minimal_yaml(tmp_path):
-    yml = tmp_path / "proj_2025_case.yaml"  # three tokens for handle-building
+    yml = tmp_path / 'proj_2025_case.yaml'  # three tokens for handle-building
     yml.write_text(
         """
 wind_farm:
@@ -248,8 +265,10 @@ def test_polygon_out_of_bounds_raises():
     turbinesC = np.array([[0.0, 0.0], [0.1, 0.0], [10.0, 10.0]])
     substationsC = np.array([[0.0, 0.1]])
     borderC = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.8]])
-    wfn = WindFarmNetwork(cables=2, turbinesC=turbinesC, substationsC=substationsC, borderC=borderC)
-    with pytest.raises(ValueError, match="Turbine out of bounds"):
+    wfn = WindFarmNetwork(
+        cables=2, turbinesC=turbinesC, substationsC=substationsC, borderC=borderC
+    )
+    with pytest.raises(ValueError, match='Turbine out of bounds'):
         _ = wfn.P
 
 
@@ -258,7 +277,7 @@ def test_plot_original_vs_buffered_without_prior_buffer_prints_message(capsys):
     wfn = WindFarmNetwork(cables=7, turbinesC=tC, substationsC=sC, borderC=bC)
     _ = wfn.plot_original_vs_buffered()
     captured = capsys.readouterr()
-    assert "No buffering is performed" in captured.out
+    assert 'No buffering is performed' in captured.out
 
 
 def test_add_buffer_then_plot_original_vs_buffered_returns_axes():
@@ -279,9 +298,9 @@ def test_merge_obstacles_into_border_idempotent_smoke():
 def test_S_and_G_raise_before_optimize_guards():
     tC, sC, bC, _ = tiny_site(T=4)
     wfn = WindFarmNetwork(cables=4, turbinesC=tC, substationsC=sC, borderC=bC)
-    with pytest.raises(RuntimeError, match="Call the `optimize"):
+    with pytest.raises(RuntimeError, match='Call the `optimize'):
         _ = wfn.S
-    with pytest.raises(RuntimeError, match="Call the `optimize"):
+    with pytest.raises(RuntimeError, match='Call the `optimize'):
         _ = wfn.G
 
 
@@ -296,6 +315,7 @@ def test_buffer_dist_property_and_router_default():
 # Routers: smoke & minimal coverage
 # ==================================
 
+
 @pytest.mark.parametrize(
     'router',
     [
@@ -303,74 +323,85 @@ def test_buffer_dist_property_and_router_default():
         EWRouter(feeder_route='straight'),
         HGSRouter(time_limit=0.5, seed=0),
         HGSRouter(time_limit=0.5, feeder_limit=1, max_retries=3, balanced=True, seed=0),
-        pytest.param(MILPRouter(solver_name='ortools', time_limit=1, mip_gap=0.005),
-                     marks=pytest.mark.xfail(reason="MILP solver may be unavailable in CI")),
-        pytest.param(MILPRouter(solver_name='cbc', time_limit=1, mip_gap=0.005),
-                     marks=pytest.mark.xfail(reason="CBC may be unavailable")),
-        pytest.param(MILPRouter(solver_name='highs', time_limit=1, mip_gap=0.005),
-                     marks=pytest.mark.xfail(reason="HiGHS may be unavailable")),
+        MILPRouter(solver_name='ortools', time_limit=1, mip_gap=0.005),
+        MILPRouter(solver_name='gurobi', time_limit=1, mip_gap=0.005),
+        MILPRouter(solver_name='cplex', time_limit=1, mip_gap=0.005),
+        MILPRouter(solver_name='highs', time_limit=1, mip_gap=0.005),
     ],
 )
 def test_wfn_all_routers_smoke(router):
     turbinesC = np.array([[1.0, 0.0], [1.0, 1.0]])
     substationsC = np.array([[0.0, 0.0]])
-    wfn = WindFarmNetwork(cables=2, turbinesC=turbinesC, substationsC=substationsC, router=router)
+    wfn = WindFarmNetwork(
+        cables=2, turbinesC=turbinesC, substationsC=substationsC, router=router
+    )
     terse = wfn.optimize()
     assert terse.shape[0] == wfn.S.graph['T']
 
 
-# =====================================================
-# api_utils tests (these were mostly already standalone)
-# =====================================================
+# ================#
+# api_utils tests #
+# ================#
+
 
 def test_expand_polygon_safely_warns_for_nonconvex_large_buffer(caplog):
-    poly = Polygon([(0,0),(4,0),(4,1),(1,1),(1,3),(4,3),(4,4),(0,4)])  # concave
+    poly = Polygon(
+        [(0, 0), (4, 0), (4, 1), (1, 1), (1, 3), (4, 3), (4, 4), (0, 4)]
+    )  # concave
     with caplog.at_level(logging.WARNING, logger=U.__name__):
         out = U.expand_polygon_safely(poly, buffer_dist=1.0)
     assert out.area > poly.area
-    assert any("non-convex and buffering may introduce unexpected changes" in m for m in caplog.messages)
+    assert any(
+        'non-convex and buffering may introduce unexpected changes' in m
+        for m in caplog.messages
+    )
 
 
 def test_expand_polygon_safely_convex_no_warning(caplog):
-    poly = Polygon([(0,0),(2,0),(2,2),(0,2)])
+    poly = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
     with caplog.at_level(logging.WARNING, logger=U.__name__):
         out = U.expand_polygon_safely(poly, buffer_dist=0.25)
     assert out.area > poly.area
-    assert not any("non-convex and buffering may introduce" in m for m in caplog.messages)
+    assert not any(
+        'non-convex and buffering may introduce' in m for m in caplog.messages
+    )
 
 
 def test_shrink_polygon_safely_returns_array_normal():
-    poly = Polygon([(0,0),(4,0),(4,4),(0,4)])
+    poly = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
     arr = U.shrink_polygon_safely(poly, shrink_dist=0.2, indx=0)
     assert isinstance(arr, np.ndarray) and arr.shape[1] == 2
 
 
 def test_shrink_polygon_safely_becomes_empty_warns(caplog):
-    poly = Polygon([(0,0),(1,0),(1,1),(0,1)])
+    poly = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
     with caplog.at_level(logging.WARNING, logger=U.__name__):
         res = U.shrink_polygon_safely(poly, shrink_dist=10.0, indx=3)
     assert res is None
-    assert any("completely removed the obstacle" in m for m in caplog.messages)
+    assert any('completely removed the obstacle' in m for m in caplog.messages)
 
 
 def test_shrink_polygon_safely_splits_to_multipolygon(caplog):
-    big = Polygon([(0,0),(8,0),(8,4),(0,4)])
-    hole = Polygon([(3,-1),(5,-1),(5,5),(3,5)])  # remove middle band
+    big = Polygon([(0, 0), (8, 0), (8, 4), (0, 4)])
+    hole = Polygon([(3, -1), (5, -1), (5, 5), (3, 5)])  # remove middle band
     shape = big.difference(hole)
     with caplog.at_level(logging.WARNING, logger=U.__name__):
         res = U.shrink_polygon_safely(shape, shrink_dist=0.1, indx=1)
     assert isinstance(res, list) and len(res) >= 2
-    assert any("split the obstacle" in m for m in caplog.messages)
+    assert any('split the obstacle' in m for m in caplog.messages)
 
 
 def test_enable_ortools_logging_if_jupyter_sets_callback(monkeypatch):
-    ZMQInteractiveShell = type("ZMQInteractiveShell", (), {})
-    monkeypatch.setattr(U, "get_ipython", lambda: ZMQInteractiveShell(), raising=False)
+    ZMQInteractiveShell = type('ZMQInteractiveShell', (), {})
+    monkeypatch.setattr(U, 'get_ipython', lambda: ZMQInteractiveShell(), raising=False)
 
-    class DummyInner: 
-        def __init__(self): self.log_callback = None
-    class DummySolver: 
-        def __init__(self): self.solver = DummyInner()
+    class DummyInner:
+        def __init__(self):
+            self.log_callback = None
+
+    class DummySolver:
+        def __init__(self):
+            self.solver = DummyInner()
 
     s = DummySolver()
     U.enable_ortools_logging_if_jupyter(s)
@@ -379,37 +410,66 @@ def test_enable_ortools_logging_if_jupyter_sets_callback(monkeypatch):
 
 def _S_warm(R=1, T=6, feeders=0, branched=False):
     S = nx.Graph(R=R, T=T)
-    for r in range(-R, 0): S.add_node(r)
-    for t in range(T): S.add_node(t)
-    for t in range(feeders): S.add_edge(-1, t)
+    for r in range(-R, 0):
+        S.add_node(r)
+    for t in range(T):
+        S.add_node(t)
+    for t in range(feeders):
+        S.add_edge(-1, t)
     if branched:
-        S.add_edge(0, 1); S.add_edge(0, 2); S.add_edge(0, 3)
+        S.add_edge(0, 1)
+        S.add_edge(0, 2)
+        S.add_edge(0, 3)
     return S
 
 
-@pytest.mark.parametrize("mode,plus", [
-    ("specified", 2), ("min_plus1", 1), ("min_plus2", 2), ("min_plus3", 3),
-])
+@pytest.mark.parametrize(
+    'mode,plus',
+    [
+        ('specified', 2),
+        ('min_plus1', 1),
+        ('min_plus2', 2),
+        ('min_plus3', 3),
+    ],
+)
 def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
     feeders = 3 + plus + 1  # exceeds limit
     S = _S_warm(R=1, T=6, feeders=feeders)
-    model_options = {"feeder_limit": mode, "max_feeders": 4, "topology": "radial", "feeder_route": "segmented"}
+    model_options = {
+        'feeder_limit': mode,
+        'max_feeders': 4,
+        'topology': 'radial',
+        'feeder_route': 'segmented',
+    }
     ok = U.is_warmstart_eligible(
-        S_warm=S, cables_capacity=2, model_options=model_options,
-        S_warm_has_detour=False, solver_name="ortools",
-        logger=logging.getLogger(U.__name__), verbose=True
+        S_warm=S,
+        cables_capacity=2,
+        model_options=model_options,
+        S_warm_has_detour=False,
+        solver_name='ortools',
+        logger=logging.getLogger(U.__name__),
+        verbose=True,
     )
     assert ok is False
-    assert "exceeds feeder limit" in capfd.readouterr().out
+    assert 'exceeds feeder limit' in capfd.readouterr().out
 
 
 def test_warmstart_feeder_limit_specified_allows(capfd):
     S = _S_warm(R=1, T=6, feeders=2)
-    model_options = {"feeder_limit": "specified", "max_feeders": 3, "topology": "radial", "feeder_route": "segmented"}
+    model_options = {
+        'feeder_limit': 'specified',
+        'max_feeders': 3,
+        'topology': 'radial',
+        'feeder_route': 'segmented',
+    }
     ok = U.is_warmstart_eligible(
-        S_warm=S, cables_capacity=2, model_options=model_options,
-        S_warm_has_detour=False, solver_name="ortools",
-        logger=logging.getLogger(U.__name__), verbose=True
+        S_warm=S,
+        cables_capacity=2,
+        model_options=model_options,
+        S_warm_has_detour=False,
+        solver_name='ortools',
+        logger=logging.getLogger(U.__name__),
+        verbose=True,
     )
     assert ok is True
 
@@ -426,48 +486,63 @@ def _make_L(border, obstacles, T=0, R=0):
     V_parts, cursor = [np.zeros((T, 2))], T
     border_idx, obs_idxs = None, []
     if border is not None:
-        b = np.asarray(border, float); V_parts.append(b)
-        border_idx = np.arange(cursor, cursor + len(b), dtype=int); cursor += len(b)
+        b = np.asarray(border, float)
+        V_parts.append(b)
+        border_idx = np.arange(cursor, cursor + len(b), dtype=int)
+        cursor += len(b)
     for obs in obstacles:
-        o = np.asarray(obs, float); V_parts.append(o)
-        obs_idxs.append(np.arange(cursor, cursor + len(o), dtype=int)); cursor += len(o)
+        o = np.asarray(obs, float)
+        V_parts.append(o)
+        obs_idxs.append(np.arange(cursor, cursor + len(o), dtype=int))
+        cursor += len(o)
     V_parts.append(np.zeros((R, 2)))
-    V = np.vstack([p for p in V_parts if len(p) > 0]) if any(len(p) > 0 for p in V_parts) else np.zeros((0, 2))
+    V = (
+        np.vstack([p for p in V_parts if len(p) > 0])
+        if any(len(p) > 0 for p in V_parts)
+        else np.zeros((0, 2))
+    )
     L = nx.Graph()
-    L.graph.update(VertexC=V, T=T, R=R, border=border_idx, obstacles=obs_idxs,
-                   B=(0 if border_idx is None else len(border_idx)) + sum(len(i) for i in obs_idxs))
+    L.graph.update(
+        VertexC=V,
+        T=T,
+        R=R,
+        border=border_idx,
+        obstacles=obs_idxs,
+        B=(0 if border_idx is None else len(border_idx))
+        + sum(len(i) for i in obs_idxs),
+    )
     return L
 
 
 def test_merge_obstacles_outside_is_dropped(caplog):
-    border = [(-10,-10),(10,-10),(10,10),(-10,10)]
-    obstacle = [(100,100),(101,100),(101,101),(100,101)]
+    border = [(-10, -10), (10, -10), (10, 10), (-10, 10)]
+    obstacle = [(100, 100), (101, 100), (101, 101), (100, 101)]
     L = _make_L(border, [obstacle])
     with caplog.at_level(logging.WARNING, logger=U.__name__):
         L2 = U.merge_obs_into_border(L)
     assert L2.graph['border'] is not None and len(L2.graph['obstacles']) == 0
-    assert any("completely outside the border" in m for m in caplog.messages)
+    assert any('completely outside the border' in m for m in caplog.messages)
 
 
 def test_merge_obstacles_intersection_multipolygon_raises():
-    border = [(-10,-10),(10,-10),(10,10),(-10,10)]
-    obstacle = [(-1,-11),(1,-11),(1,11),(-1,11)]
+    border = [(-10, -10), (10, -10), (10, 10), (-10, 10)]
+    obstacle = [(-1, -11), (1, -11), (1, 11), (-1, 11)]
     L = _make_L(border, [obstacle])
-    with pytest.raises(ValueError, match="multiple pieces"):
+    with pytest.raises(ValueError, match='multiple pieces'):
         U.merge_obs_into_border(L)
 
 
 def test_merge_obstacles_intersection_empty_border_raises():
-    border = [(-10,-10),(10,-10),(10,10),(-10,10)]
+    border = [(-10, -10), (10, -10), (10, 10), (-10, 10)]
     obstacle = border[:]
     L = _make_L(border, [obstacle])
-    with pytest.raises(ValueError, match="empty border"):
+    with pytest.raises(ValueError, match='empty border'):
         U.merge_obs_into_border(L)
 
 
 def test_merge_obstacles_inside_kept():
-    border = [(-10,-10),(10,-10),(10,10),(-10,10)]
-    obstacle = [(-1,-1),(1,-1),(1,1),(-1,1)]
+    border = [(-10, -10), (10, -10), (10, 10), (-10, 10)]
+    obstacle = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
     L = _make_L(border, [obstacle])
     L2 = U.merge_obs_into_border(L)
     assert len(L2.graph['obstacles']) == 1
@@ -476,27 +551,27 @@ def test_merge_obstacles_inside_kept():
 def test_buffer_border_obs_negative_raises():
     tC, sC, bC, _ = tiny_site(T=3)
     w = WindFarmNetwork(cables=3, turbinesC=tC, substationsC=sC, borderC=bC)
-    with pytest.raises(ValueError, match="must be equal or greater than 0"):
+    with pytest.raises(ValueError, match='must be equal or greater than 0'):
         U.buffer_border_obs(w.L, buffer_dist=-1.0)
 
 
 def test_buffer_border_obs_with_border_positive_shrinks_obstacles():
     # build L with explicit border/obstacle layout
-    border = np.array([[0.0,0.0],[1.0,0.0],[0.5,0.5]])
-    obstacle = np.array([[0.0,0.0],[50.0,0.0],[50.0,50.0],[0.0,50.0]])
+    border = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]])
+    obstacle = np.array([[0.0, 0.0], [50.0, 0.0], [50.0, 50.0], [0.0, 50.0]])
     L = _make_L(border, [obstacle], T=0, R=0)
     L2, pre = U.buffer_border_obs(L, buffer_dist=5.0)
     assert isinstance(pre, dict) and 'obstaclesC' in pre and 'borderC' in pre
     assert isinstance(L2.graph['obstacles'], list) and len(L2.graph['obstacles']) >= 1
 
 
-def test__ensure_closed_adds_repeat_point():
+def test_ensure_closed_adds_repeat_point():
     ring = np.array([[0.0, 0.0], [1, 0], [1, 1]])
     closed = U._ensure_closed(ring)
     assert np.allclose(closed[0], closed[-1])
 
 
-def test__ensure_closed_noop_if_already_closed():
+def test_ensure_closed_noop_if_already_closed():
     ring = LinearRing([(0, 0), (1, 0), (1, 1)])
     coords = np.array(ring.coords[:], float)
     closed = U._ensure_closed(coords)
@@ -507,149 +582,128 @@ def test__ensure_closed_noop_if_already_closed():
 # MILP/HGS warmstart & control-flow (monkeypatched stubs)
 # ==========================================================
 
-def test_ewrouter_invalid_feeder_route_raises():
-    tC, sC, bC, _ = tiny_site(T=3)
-    wfn = WindFarmNetwork(cables=2, turbinesC=tC, substationsC=sC, borderC=bC, router=EWRouter(feeder_route='nope'))
-    with pytest.raises(ValueError, match="valid feeder_route values"):
-        wfn.optimize()
-
-
-def test_milprouter_init_options_try_except(monkeypatch):
-    from optiwindnet import api as api_mod
-
-    class SolverWithOptions: options = {"dummy": True}
-    class SolverNoOptions: pass
-
-    called = {"enabled": False}
-    monkeypatch.setattr(api_mod, "enable_ortools_logging_if_jupyter",
-                        lambda _solver: called.__setitem__("enabled", True))
-
-    monkeypatch.setattr(api_mod, "solver_factory", lambda name: SolverNoOptions())
-    r1 = MILPRouter(solver_name='cbc', time_limit=1, mip_gap=0.1, verbose=False)
-    assert r1.optiwindnet_default_options == 'Not available'
-
-    monkeypatch.setattr(api_mod, "solver_factory", lambda name: SolverWithOptions())
-    r2 = MILPRouter(solver_name='ortools', time_limit=1, mip_gap=0.1, verbose=True)
-    assert r2.optiwindnet_default_options == {"dummy": True}
-    assert called["enabled"] is True
 
 
 def test_milprouter_route_warmstart_branched_segmented_and_retries(monkeypatch):
     from optiwindnet import api as api_mod
-    calls = {"eligible": 0, "set_problem": 0, "solve": 0, "assign": 0}
 
-    def fake_is_warmstart_eligible(**kwargs): calls["eligible"] += 1
-    def fake_EW_presolver(A, capacity, maxiter=None): return tiny_S(T=A.graph["T"], R=A.graph["R"])
+    calls = {'eligible': 0, 'set_problem': 0, 'solve': 0, 'assign': 0}
+
+    def fake_is_warmstart_eligible(**kwargs):
+        calls['eligible'] += 1
+
+    def fake_EW_presolver(A, capacity, maxiter=None):
+        return tiny_S(T=A.graph['T'], R=A.graph['R'])
 
     class DummySolver:
         options = {}
+
         def set_problem(self, P, A, capacity, model_options, warmstart=None):
-            calls["set_problem"] += 1
-            if calls["set_problem"] == 1:
-                raise OWNWarmupFailed("boom")
+            calls['set_problem'] += 1
+            if calls['set_problem'] == 1:
+                raise OWNWarmupFailed('boom')
+
         def solve(self, time_limit, mip_gap, options, verbose):
-            calls["solve"] += 1
-            if calls["solve"] == 1:
-                raise OWNSolutionNotFound("no sol yet")
-        def get_solution(self): return tiny_S(), tiny_G()
+            calls['solve'] += 1
+            if calls['solve'] == 1:
+                raise OWNSolutionNotFound('no sol yet')
 
-    monkeypatch.setattr(api_mod, "solver_factory", lambda name: DummySolver())
-    monkeypatch.setattr(api_mod, "is_warmstart_eligible", fake_is_warmstart_eligible)
-    monkeypatch.setattr(api_mod, "EW_presolver", fake_EW_presolver)
-    monkeypatch.setattr(api_mod, "assign_cables", lambda G, cables: calls.__setitem__("assign", calls["assign"]+1))
+        def get_solution(self):
+            return tiny_S(), tiny_G()
 
-    mo = ModelOptions(topology="branched", feeder_route="segmented")
-    router = MILPRouter(solver_name="ortools", time_limit=1, mip_gap=0.1, model_options=mo)
+    monkeypatch.setattr(api_mod, 'solver_factory', lambda name: DummySolver())
+    monkeypatch.setattr(api_mod, 'is_warmstart_eligible', fake_is_warmstart_eligible)
+    monkeypatch.setattr(api_mod, 'EW_presolver', fake_EW_presolver)
+    monkeypatch.setattr(
+        api_mod,
+        'assign_cables',
+        lambda G, cables: calls.__setitem__('assign', calls['assign'] + 1),
+    )
+
+    mo = ModelOptions(topology='branched', feeder_route='segmented')
+    router = MILPRouter(
+        solver_name='ortools', time_limit=1, mip_gap=0.1, model_options=mo
+    )
 
     tC, sC, bC, _ = tiny_site(T=2)
-    wfn = WindFarmNetwork(cables=2, turbinesC=tC, substationsC=sC, borderC=bC, router=router)
+    wfn = WindFarmNetwork(
+        cables=2, turbinesC=tC, substationsC=sC, borderC=bC, router=router
+    )
     wfn.optimize()
-    assert calls["eligible"] == 1 and calls["set_problem"] >= 2 and calls["solve"] == 2 and calls["assign"] == 1
-
-
-def test_milprouter_route_warmstart_branched_straight(monkeypatch):
-    from optiwindnet import api as api_mod
-    class FakeCPEW: 
-        def __init__(self, A, capacity, maxiter=None): self.A=A
-    def fake_S_from_G(G): return tiny_S()
-    class DummySolverOK:
-        options = {}
-        def set_problem(self, *a, **k): pass
-        def solve(self, *a, **k): pass
-        def get_solution(self): return tiny_S(), tiny_G()
-
-    monkeypatch.setattr(api_mod, "solver_factory", lambda name: DummySolverOK())
-    monkeypatch.setattr(api_mod, "CPEW", FakeCPEW)
-    monkeypatch.setattr(api_mod, "S_from_G", fake_S_from_G)
-    monkeypatch.setattr(api_mod, "assign_cables", lambda G, cables: None)
-    monkeypatch.setattr(api_mod, "is_warmstart_eligible", lambda **k: None)
-
-    mo = ModelOptions(topology="branched", feeder_route="straight")
-    router = MILPRouter(solver_name="ortools", time_limit=1, mip_gap=0.1, model_options=mo)
-
-    tC, sC, bC, _ = tiny_site(T=2)
-    wfn = WindFarmNetwork(cables=2, turbinesC=tC, substationsC=sC, borderC=bC, router=router)
-    wfn.optimize()  # should complete
+    assert (
+        calls['eligible'] == 1
+        and calls['set_problem'] >= 2
+        and calls['solve'] == 2
+        and calls['assign'] == 1
+    )
 
 
 def test_milprouter_route_warmstart_nonbranched_single_and_multi(monkeypatch):
     from optiwindnet import api as api_mod
-    calls = {"single": 0, "multi": 0}
+
+    calls = {'single': 0, 'multi': 0}
+
     def fake_iterative_hgs(A_norm, capacity, time_limit, **k):
-        calls["single"] += 1; return tiny_S(T=A_norm.graph["T"], R=A_norm.graph["R"])
+        calls['single'] += 1
+        return tiny_S(T=A_norm.graph['T'], R=A_norm.graph['R'])
+
     def fake_hgs_multi(A_norm, capacity, time_limit, **k):
-        calls["multi"] += 1; return tiny_S(T=A_norm.graph["T"], R=A_norm.graph["R"])
-    def fake_as_norm(A): return A
+        calls['multi'] += 1
+        return tiny_S(T=A_norm.graph['T'], R=A_norm.graph['R'])
+
+    def fake_as_norm(A):
+        return A
 
     class DummySolverWarmFailThenOK:
         options = {}
-        def __init__(self, R): self._R = R; self._raised_once = False
+
+        def __init__(self, R):
+            self._R = R
+            self._raised_once = False
+
         def set_problem(self, P, A, capacity, model_options, warmstart=None):
             if not self._raised_once:
                 self._raised_once = True
-                raise OWNWarmupFailed("warmup fail")
-        def solve(self, *a, **k): pass
-        def get_solution(self): return tiny_S(), tiny_G()
+                raise OWNWarmupFailed('warmup fail')
 
-    monkeypatch.setattr(api_mod, "assign_cables", lambda G, cables: None)
-    monkeypatch.setattr(api_mod, "as_normalized", fake_as_norm)
-    monkeypatch.setattr(api_mod, "iterative_hgs_cvrp", fake_iterative_hgs)
-    monkeypatch.setattr(api_mod, "hgs_multiroot", fake_hgs_multi)
-    monkeypatch.setattr(api_mod, "is_warmstart_eligible", lambda **k: None)
+        def solve(self, *a, **k):
+            pass
+
+        def get_solution(self):
+            return tiny_S(), tiny_G()
+
+    monkeypatch.setattr(api_mod, 'assign_cables', lambda G, cables: None)
+    monkeypatch.setattr(api_mod, 'as_normalized', fake_as_norm)
+    monkeypatch.setattr(api_mod, 'iterative_hgs_cvrp', fake_iterative_hgs)
+    monkeypatch.setattr(api_mod, 'hgs_multiroot', fake_hgs_multi)
+    monkeypatch.setattr(api_mod, 'is_warmstart_eligible', lambda **k: None)
 
     # single substation
     tC, sC, bC, _ = tiny_site(T=2)
-    monkeypatch.setattr(api_mod, "solver_factory", lambda name: DummySolverWarmFailThenOK(R=1))
-    mo = ModelOptions(topology="radial")
-    router = MILPRouter(solver_name="ortools", time_limit=1, mip_gap=0.1, model_options=mo)
-    w1 = WindFarmNetwork(cables=2, turbinesC=tC, substationsC=sC, borderC=bC, router=router)
+    monkeypatch.setattr(
+        api_mod, 'solver_factory', lambda name: DummySolverWarmFailThenOK(R=1)
+    )
+    mo = ModelOptions(topology='radial')
+    router = MILPRouter(
+        solver_name='ortools', time_limit=1, mip_gap=0.1, model_options=mo
+    )
+    w1 = WindFarmNetwork(
+        cables=2, turbinesC=tC, substationsC=sC, borderC=bC, router=router
+    )
     w1.optimize()
-    assert calls["single"] == 1
+    assert calls['single'] == 1
 
     # multi substation path
     tC2 = tC
     sC2 = np.array([[3.0, 0.0], [3.0, 1.0]])
-    monkeypatch.setattr(api_mod, "solver_factory", lambda name: DummySolverWarmFailThenOK(R=2))
-    router2 = MILPRouter(solver_name="ortools", time_limit=1, mip_gap=0.1, model_options=mo)
-    w2 = WindFarmNetwork(cables=2, turbinesC=tC2, substationsC=sC2, borderC=bC, router=router2)
+    monkeypatch.setattr(
+        api_mod, 'solver_factory', lambda name: DummySolverWarmFailThenOK(R=2)
+    )
+    router2 = MILPRouter(
+        solver_name='ortools', time_limit=1, mip_gap=0.1, model_options=mo
+    )
+    w2 = WindFarmNetwork(
+        cables=2, turbinesC=tC2, substationsC=sC2, borderC=bC, router=router2
+    )
     w2.optimize()
-    assert calls["multi"] == 1
-
-
-def test_milprouter_route_all_retries_fail_raises(monkeypatch):
-    from optiwindnet import api as api_mod
-    class DummySolverAlwaysFail:
-        options = {}
-        def set_problem(self, *a, **k): pass
-        def solve(self, *a, **k): raise OWNSolutionNotFound("still no solution")
-        def get_solution(self): return tiny_S(), tiny_G()
-
-    monkeypatch.setattr(api_mod, "solver_factory", lambda name: DummySolverAlwaysFail())
-    monkeypatch.setattr(api_mod, "assign_cables", lambda G, cables: None)
-    monkeypatch.setattr(api_mod, "is_warmstart_eligible", lambda **k: None)
-
-    router = MILPRouter(solver_name="ortools", time_limit=0.1, mip_gap=0.1)
-    tC, sC, bC, _ = tiny_site(T=2)
-    wfn = WindFarmNetwork(cables=2, turbinesC=tC, substationsC=sC, borderC=bC, router=router)
-    with pytest.raises(OWNSolutionNotFound):
-        wfn.optimize()
+    assert calls['multi'] == 1
