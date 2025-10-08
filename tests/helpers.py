@@ -75,6 +75,7 @@ def assert_graph_equal(
     # --- prepare ignored paths --------------------------------------------------
     default_ignored = {
         "bound",
+        "relgap",
         "solver_details",
         "method_options.fun_fingerprint.funfile",
         "method_options.fun_fingerprint.funhash",
