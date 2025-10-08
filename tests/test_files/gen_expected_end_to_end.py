@@ -73,29 +73,29 @@ ROUTERS_1: Dict[str, Dict[str, Any]] = {
     # Enable MILP if solver available:
     'MILPRouter_ortools_cap5': r_spec(
         'MILPRouter',
-        {'solver_name': 'ortools', 'time_limit': 10, 'mip_gap': 1e-3},
+        {'solver_name': 'ortools', 'time_limit': 5, 'mip_gap': 1e-3},
         cables=5,
     ),
     'MILPRouter_gurobi_cap4': r_spec(
         'MILPRouter',
-        {'solver_name': 'gurobi', 'time_limit': 10, 'mip_gap': 1e-3},
+        {'solver_name': 'gurobi', 'time_limit': 5, 'mip_gap': 1e-3},
         cables=4,
     ),
     'MILPRouter_highs_cap3': r_spec(
         'MILPRouter',
-        {'solver_name': 'highs', 'time_limit': 10, 'mip_gap': 1e-3},
+        {'solver_name': 'highs', 'time_limit': 5, 'mip_gap': 1e-3},
         cables=3,
     ),
     'MILPRouter_cplex_cap2': r_spec(
         'MILPRouter',
-        {'solver_name': 'cplex', 'time_limit': 10, 'mip_gap': 1e-3},
+        {'solver_name': 'cplex', 'time_limit': 5, 'mip_gap': 1e-3},
         cables=2,
     ),
     'MILPRouter_ortools_cap10_modeloptions': r_spec(
         'MILPRouter',
         {
             'solver_name': 'ortools',
-            'time_limit': 10,
+            'time_limit': 5,
             'mip_gap': 1e-3,
             'model_options': model_options_strict,
         },
@@ -105,7 +105,7 @@ ROUTERS_1: Dict[str, Dict[str, Any]] = {
         'MILPRouter',
         {
             'solver_name': 'gurobi',
-            'time_limit': 10,
+            'time_limit': 5,
             'mip_gap': 1e-3,
             'model_options': model_options_strict,
         },
@@ -115,7 +115,7 @@ ROUTERS_1: Dict[str, Dict[str, Any]] = {
         'MILPRouter',
         {
             'solver_name': 'highs',
-            'time_limit': 10,
+            'time_limit': 5,
             'mip_gap': 1e-3,
             'model_options': model_options_strict,
         },
@@ -125,7 +125,7 @@ ROUTERS_1: Dict[str, Dict[str, Any]] = {
         'MILPRouter',
         {
             'solver_name': 'cplex',
-            'time_limit': 10,
+            'time_limit': 5,
             'mip_gap': 1e-3,
             'model_options': model_options_strict,
         },
