@@ -78,7 +78,7 @@ def assert_graph_equal(
     G1c = _clean_graph_attrs(G1)
     G2c = _clean_graph_attrs(G2)
 
-    ignored = {"method_options.fun_fingerprint.funfile"}
+    ignored = {"method_options.fun_fingerprint.funfile", "method_options.fun_fingerprint.funhash"}
     if ignored_graph_keys:
         ignored |= set(ignored_graph_keys)
 
