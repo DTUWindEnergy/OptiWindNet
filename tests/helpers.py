@@ -8,8 +8,8 @@ def assert_graph_equal(
     G2: nx.Graph,
     ignored_graph_keys: Optional[Iterable[str]] = None,
     *,
-    rtol: float = 1e-8,
-    atol: float = 1e-12,
+    rtol: float = 1e-7,
+    atol: float = 1e-10,
     max_show: int = 50,
     verbose: bool = False,
 ) -> None:

@@ -51,7 +51,7 @@ def generate_expected_values_end_to_end_tests():
     # === Sites as plain names ===
     SITES_1: Sequence[str] = ("example_location",)  # small default
     SITES_2: Sequence[str] = ("hornsea", "london", "taylor_2023", "yi_2019")
-    SITES_3: Sequence[str] = ("dtu_1ss_300wt", "dtu_4ss_300wt",)
+    SITES_3: Sequence[str] = ("example_1ss_300wt", "example_4ss_300wt",)
 
     model_options_strict = {
         "topology": "radial",
@@ -130,9 +130,9 @@ def generate_expected_values_end_to_end_tests():
         return out
 
     def print_header(title: str) -> None:
-        print("\n" + "=" * 90)
+        print("\n" + "=" * 10)
         print(title)
-        print("=" * 90)
+        print("=" * 10)
 
     def environment_meta() -> Dict[str, Any]:
         meta = {
@@ -370,12 +370,12 @@ def generate_expected_values_unit_tests():
 
 
 if __name__ == '__main__': 
-    print("\n" + "=" * 90)
+    print("\n" + "=" * 50)
     print("Starting end_to_end expected values generation...")
     generate_expected_values_end_to_end_tests()
 
     
-    print("\n" + "=" * 90)
+    print("\n" + "=" * 50)
     print("Starting unit test expected values generation...")
     generate_expected_values_unit_tests()
 
