@@ -1,74 +1,36 @@
-# tests/test_api_standalone.py
-import io
 import logging
-from pathlib import Path
-
-import networkx as nx
 import numpy as np
 import pytest
-from shapely.geometry import LinearRing, Polygon
+from shapely.geometry import Polygon
 
 import optiwindnet.api_utils as U
 from optiwindnet.api import (
     EWRouter,
     HGSRouter,
     MILPRouter,
-    ModelOptions,
-    OWNSolutionNotFound,
-    OWNWarmupFailed,
     WindFarmNetwork,
 )
 import optiwindnet.plotting as plotting
-
-# ============================================================
-# Helper: tiny_site returns an optimized WindFarmNetwork (wfn).
-# We removed tiny_A/tiny_S/tiny_G. Tests now use wfn and its L/A/S/G.
-# A small internal helper _components_from_L(L) is used only where
-# previous tests expected (turbinesC, substationsC, borderC, obstaclesC).
-# ============================================================
-
-
-def tiny_site(
-    turbinesC=np.array([[1, 0], [2, 0], [2, 1], [2, 2]]),
-    substationsC=np.array([[0, 0]]),
-    borderC=np.array([[-2.0, -2.0], [3.0, -2.0], [3.0, 2.0], [-2.0, 2.0]]),
-    obstaclesC=[np.array([[-1, -1], [-1, -0.5], [1, -0.5], [1, -1]])],
-):
-    """
-    Build a compact WindFarmNetwork (already optimized) and return it.
-    """
-
-    wfn = WindFarmNetwork(
-        cables=4,
-        turbinesC=turbinesC,
-        substationsC=substationsC,
-        borderC=borderC,
-        obstaclesC=obstaclesC,
-    )
-    # Run a quick optimization so tests can access wfn.S, wfn.G, etc.
-    wfn.optimize()
-    return wfn
+from .helpers import tiny_wfn
 
 
 # =====================
 # WindFarmNetwork core
 # =====================
 
-
 def test_wfn_fails_without_coordinates_or_L():
     with pytest.raises(TypeError):
         WindFarmNetwork(cables=7)
 
 def test_optimize_updates_graphs_smoke():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     terse = wfn.optimize()
     assert wfn.S is not None
     assert wfn.G is not None
     assert terse.shape[0] == wfn.S.graph['T']
 
 def test_wfn_warns_when_L_and_coordinates_given(caplog):
-    # Build an L first via tiny_site
-    w1 = tiny_site()
+    w1 = tiny_wfn()
     L = w1.L
     turbinesC, substationsC = np.array([1, 1]), np.array([0, 0])
 
@@ -79,7 +41,7 @@ def test_wfn_warns_when_L_and_coordinates_given(caplog):
 
 
 def test_wfn_fails_without_cables():
-    w = tiny_site()
+    w = tiny_wfn()
     # when constructing without cables, the API requires 'cables' parameter
     with pytest.raises(
         TypeError, match="missing 1 required positional argument: 'cables'"
@@ -90,7 +52,7 @@ def test_wfn_fails_without_cables():
 
 
 def test_wfn_from_coordinates_builds_L_and_defaults_router():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     # check basic parameters
     assert wfn.L.graph['T'] == 4
     assert wfn.L.graph['R'] == 1
@@ -98,7 +60,7 @@ def test_wfn_from_coordinates_builds_L_and_defaults_router():
 
 
 def test_wfn_from_L_roundtrip():
-    wfn1 = tiny_site()
+    wfn1 = tiny_wfn()
     L = wfn1.L
     wfn2 = WindFarmNetwork(cables=4, L=L)
     wfn2.optimize()
@@ -151,7 +113,7 @@ def test_cables_capacity_calculation():
 
 
 def test_invalid_gradient_type_raises():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     with pytest.raises(ValueError, match='gradient_type should be either'):
         wfn.gradient(gradient_type='bad_type')
 
@@ -168,13 +130,13 @@ def test_from_pbf_invalid_path():
 
 def test_terse_links_output():
     terse_expected = np.array([-1,  0,  1,  2])
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     terse = wfn.terse_links()
     assert terse.shape[0] == wfn.S.graph['T']
     assert np.array_equal(wfn.terse_links(), terse_expected)
 
 def test_update_from_terse_links():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     terse1 = wfn.terse_links()
     terse = np.array([1,  2,  -1,  0])
     wfn.update_from_terse_links(terse)
@@ -184,14 +146,14 @@ def test_update_from_terse_links():
 
 
 def test_map_detour_vertex_empty_if_no_detours_smoke():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     map_detour = wfn.map_detour_vertex()
     assert isinstance(map_detour, dict)
     assert map_detour == {}
 
 
 def test_plots():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     wfn.optimize()
     wfn.plot_available_links()  # smoke: should not raise any error
     wfn.plot_navigation_mesh()
@@ -215,7 +177,7 @@ def test_plots():
 
 
 def test_get_network_returns_array_smoke():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     data = wfn.get_network()
     # basic shape/type checks
     assert isinstance(data, np.ndarray)
@@ -247,7 +209,7 @@ def test_get_network_returns_array_smoke():
 
 
 def test_gradient():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     g_wt_L, g_ss_L = wfn.gradient(gradient_type='length')
     g_wt_C, g_ss_C = wfn.gradient(gradient_type='cost')
     assert g_wt_L.shape[0] == wfn.S.graph['T']
@@ -261,7 +223,7 @@ def test_gradient():
 
 
 def test_repr_svg_returns_string_before_and_after_optimize():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     svg1 = wfn._repr_svg_()
     assert isinstance(svg1, str) and svg1.strip().startswith('<svg')
     wfn.optimize()
@@ -311,21 +273,21 @@ def test_polygon_out_of_bounds_raises():
 
 
 def test_plot_original_vs_buffered_without_prior_buffer_prints_message(capsys):
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     _ = wfn.plot_original_vs_buffered()
     captured = capsys.readouterr()
     assert 'No buffering is performed' in captured.out
 
 
 def test_add_buffer_then_plot_original_vs_buffered_returns_axes():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     wfn.add_buffer(5.0)
     ax = wfn.plot_original_vs_buffered()
     assert ax is not None
 
 
 def test_merge_obstacles_into_border_idempotent_smoke():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     wfn.merge_obstacles_into_border()
     _ = wfn.P  # smoke: recomputation ok
 
@@ -364,7 +326,7 @@ def test_S_and_G_raise_before_optimize():
     ],
 )
 def test_wfn_all_routers_smoke(router):
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     terse = wfn.optimize()
     assert terse.shape[0] == wfn.S.graph['T']
 
@@ -447,7 +409,7 @@ def test_enable_ortools_logging_if_jupyter_sets_callback(monkeypatch):
     ],
 )
 def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
-    S = tiny_site().S
+    S = tiny_wfn().S
     model_options = {
         'feeder_limit': mode,
         'max_feeders': plus,
@@ -468,7 +430,7 @@ def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
 
 
 def test_warmstart_feeder_limit_specified_allows(capfd):
-    S = tiny_site().S
+    S = tiny_wfn().S
     model_options = {
         'feeder_limit': 'specified',
         'max_feeders': 3,
@@ -499,7 +461,7 @@ def test_merge_obstacles_outside_is_dropped(caplog):
     borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
     obstacleC = np.array([[(100, 100), (101, 100), (101, 101), (100, 101)]])
 
-    L = tiny_site(borderC=borderC, obstaclesC=obstacleC).L
+    L = tiny_wfn(borderC=borderC, obstaclesC=obstacleC).L
     assert L.graph['border'] is not None
     assert len(L.graph['obstacles']) == 0
 
@@ -508,32 +470,32 @@ def test_merge_obstacles_intersection_multipolygon_raises():
     borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
     obstacleC = [np.array([[0, -20], [2, -20], [2, 20], [0, 20]])]
     with pytest.raises(ValueError, match='multiple pieces'):
-        tiny_site(borderC=borderC, obstaclesC=obstacleC).L
+        tiny_wfn(borderC=borderC, obstaclesC=obstacleC).L
 
 
 def test_merge_obstacles_intersection_empty_border_raises():
     borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
     obstaclesC = [np.array([(-100, -100), (100, -100), (100, 100), (-100, 100)])]
     with pytest.raises(ValueError, match='empty border'):
-        tiny_site(borderC=borderC, obstaclesC=obstaclesC)
+        tiny_wfn(borderC=borderC, obstaclesC=obstaclesC)
 
 
 def test_merge_obstacles_inside_kept():
     border = [(-10, -10), (10, -10), (10, 10), (-10, 10)]
     obstacle = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
-    L = tiny_site().L
+    L = tiny_wfn().L
     assert len(L.graph['obstacles']) == 1
 
 
 def test_buffer_border_obs_negative_raises():
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     with pytest.raises(ValueError, match='must be equal or greater than 0'):
         U.buffer_border_obs(wfn.L, buffer_dist=-1.0)
 
 
 def test_buffer_border_obs_with_border_positive_shrinks_obstacles():
     # build L with explicit border/obstacle layout
-    wfn = tiny_site()
+    wfn = tiny_wfn()
     assert 'obstacles' in wfn.L.graph and wfn.L.graph['border'] is not None
     wfn.add_buffer(buffer_dist=5.0)
     assert isinstance(wfn.L.graph['obstacles'], list) and len(wfn.L.graph['obstacles']) == 0

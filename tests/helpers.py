@@ -2,6 +2,7 @@ import copy
 from typing import Iterable, Optional
 import numpy as np
 import networkx as nx
+from optiwindnet.api import WindFarmNetwork
 
 def assert_graph_equal(
     G1: nx.Graph,
@@ -131,3 +132,64 @@ def assert_graph_equal(
     for k in sorted(gkeys1):
         if not _eq(G1c.graph[k], G2c.graph[k]):
             raise AssertionError(f"Graph['{k}'] differs: {G1c.graph[k]!r} != {G2c.graph[k]!r}")
+
+
+def tiny_wfn(
+    turbinesC=None,
+    substationsC=None,
+    borderC=None,
+    obstaclesC=None,
+    cables=4,
+    optimize=True,
+):
+    """
+    Build a compact WindFarmNetwork and return it.
+
+    - turbinesC : (N,2) array-like of turbine coordinates (default four turbines).
+    - substationsC : (M,2) array-like of substations (default one at left).
+    - borderC : (B,2) array-like polygon coordinates for border (default rectangle).
+    - obstaclesC : list of (k,2) arrays (rings) or a single 2D array (default one small obstacle).
+    - cables : cables argument passed to WindFarmNetwork (default 4).
+    - optimize : if True, call wfn.optimize() before returning (default False).
+    """
+    # defaults
+    if turbinesC is None:
+        turbinesC = np.array([[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [2.0, 2.0]], float)
+    else:
+        turbinesC = np.asarray(turbinesC, float)
+
+    if substationsC is None:
+        substationsC = np.array([[0.0, 0.0]], float)
+    else:
+        substationsC = np.asarray(substationsC, float)
+        if substationsC.ndim == 1:
+            substationsC = substationsC.reshape(1, 2)
+
+    T = turbinesC.shape[0]
+    if borderC is None:
+        borderC = np.array([[-2.0, -2.0], [T + 1.0, -2.0], [T + 1.0, 2.0], [-2.0, 2.0]], float)
+    else:
+        borderC = np.asarray(borderC, float)
+
+    if obstaclesC is None:
+        obstaclesC = [np.array([[-1.0, -1.0], [-1.0, -0.5], [1.0, -0.5], [1.0, -1.0]], float)]
+    else:
+        # accept a single obstacle array or a list of them
+        if isinstance(obstaclesC, np.ndarray) and obstaclesC.ndim == 2:
+            obstaclesC = [np.asarray(obstaclesC, float)]
+        else:
+            obstaclesC = [np.asarray(o, float) for o in list(obstaclesC)]
+
+    wfn = WindFarmNetwork(
+        cables=cables,
+        turbinesC=turbinesC,
+        substationsC=substationsC,
+        borderC=borderC,
+        obstaclesC=obstaclesC,
+    )
+
+    if optimize:
+        # run solver only when requested by the test to avoid heavy/fragile work
+        wfn.optimize()
+
+    return wfn
