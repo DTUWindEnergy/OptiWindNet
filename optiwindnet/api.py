@@ -724,7 +724,7 @@ class HGSRouter(Router):
 
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A, branched=False).create_detours()
 
         assign_cables(G, cables)
 
