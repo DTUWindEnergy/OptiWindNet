@@ -17,9 +17,70 @@ from scipy.spatial.distance import pdist, squareform
 
 from ..interarraylib import fun_fingerprint
 from ..repair import repair_routeset_path
+from ..geometric import angle_helpers
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
+
+
+def _add_link_blockage(A: nx.Graph):
+    """Experimental. Add edge attribute 'num_blocked'.
+
+    Changes A in place. Assesses the number of terminals whose line-of-sight
+    to the root is intersected by the edge.
+
+    Only implemented for single-root sites.
+    """
+    VertexC = A.graph['VertexC']
+    angle_, angle_rank_, _ = angle_helpers(A, include_borders=False)
+    A.graph['angle_'] = angle_
+    A.graph['angle_rank_'] = angle_rank_
+    for u, v, edgeD in A.edges(data=True):
+        if u < 0 or v < 0:
+            edgeD['num_blocked'] = [0]
+            continue
+        uR, vR = angle_rank_[[u, v], 0].tolist()
+        uv_angle = (angle_[v] - angle_[u]).item()
+        if uv_angle < 0:
+            uR, vR = vR, uR
+        if abs(uv_angle) <= np.pi:
+            inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
+        else:
+            inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
+        if len(inside_wedge) > 0:
+            vec = VertexC[v] - VertexC[u]
+            wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
+            cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
+            # ¡assuming a single root!
+            root_vec = VertexC[-1] - VertexC[u]
+            is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
+            # ¡assuming a single root!
+            edgeD['num_blocked'] = [
+                sum((cross <= 0) if is_root_sign_pos else (cross >= 0)).item()
+            ]
+        else:
+            edgeD['num_blocked'] = [0]
+
+
+#  def prune_bad_links(A: nx.Graph, blockage_link_feeder_lim: float = 3.0):
+def _prune_bad_links(A: nx.Graph, max_blockable_per_link: int):
+    # remove links that have negative savings both ways from the start
+    #  max_blockable_by_link = blockage_link_feeder_lim * capacity
+    d2roots = A.graph['d2roots']
+    unfeas_links = []
+    for u, v, edgeD in A.edges(data=True):
+        extent = edgeD['length']
+        root = A.nodes[v]['root']
+        if (
+            extent > d2roots[u, A.nodes[u]['root']]
+            and extent > d2roots[v, A.nodes[v]['root']]
+        ) or (
+            edgeD['num_blocked'][root] > max_blockable_per_link
+            #  and edgeD['cos_'][root] < blockage_link_cos_lim
+        ):
+            unfeas_links.append((u, v))
+    debug('links removed in pre-processing: %s', unfeas_links)
+    A.remove_edges_from(unfeas_links)
 
 
 def lkh(
@@ -119,7 +180,7 @@ def lkh(
     if (vehicles is None) or (vehicles <= vehicles_min):
         # set to minimum feasible vehicle number
         if vehicles is not None and vehicles < vehicles_min:
-            print(
+            warn(
                 f'Vehicle number ({vehicles}) too low for feasibilty '
                 f'with capacity ({capacity}). Setting to {vehicles_min}.'
             )
@@ -302,29 +363,41 @@ def _solution_time(log, objective) -> float:
 
 
 def iterative_lkh(
-    A: nx.Graph,
+    Aʹ: nx.Graph,
     *,
     capacity: int,
     time_limit: float,
+    scale: float = 1e5,
     vehicles: int | None = None,
+    runs: int = 50,
+    per_run_limit: float = 15.0,
+    precision: int = 1000,
+    complete: bool = False,
+    keep_log: bool = False,
     seed: int | None = None,
     max_retries: int = 10,
-    keep_log: bool = False,
 ) -> nx.Graph:
     """Iterate until crossing-free solution is found (`lkh()` wrapper).
 
-    Each time a solution with a crossing is produced, one of the offending
-    edges is removed from `A` and the solver is called again. In the same
-    way as `lkh()`, it is recommended to pass a normalized `A`.
+    See the docstring of lkh() for details on the LKH-3 meta-heuristic.
+
+    The vehicle-routing solver LKH-3 may produce routes with crossings, this
+    wrapper ensures the output is crossing-free. Each time a solution with a
+    crossing is produced, a repair attempt is made. Failing that, one of the
+    offending edges is removed from `A` and the solver is called again. In the
+    same way as `lkh()`, it is recommended to pass a normalized `A`.
 
     Args:
       *: see `lkh()`
-      max_retries: maximum number of retries to fix unrepairable crossings
+      max_retries: maximum number of additional calls to lkh() to avoid crossings
 
     Returns:
       Solution topology S
     """
-
+    A = Aʹ.copy()
+    nx.set_node_attributes(A, -1, 'root')
+    _add_link_blockage(A)
+    _prune_bad_links(A, math.ceil(2.4 * capacity))
     P_A = A.graph['planar']
     diagonals = A.graph['diagonals']
     crossings = []
@@ -348,9 +421,14 @@ def iterative_lkh(
             A,
             capacity=capacity,
             time_limit=time_limit,
+            scale=scale,
             vehicles=vehicles,
-            seed=seed,
+            runs=runs,
+            per_run_limit=per_run_limit,
+            precision=precision,
+            complete=complete,
             keep_log=keep_log,
+            seed=seed,
         )
         # repair
         S = repair_routeset_path(S, A)
