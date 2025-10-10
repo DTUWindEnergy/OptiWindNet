@@ -459,31 +459,34 @@ def test_parse_cables_input_numpy_ints_and_pairs():
 
 def test_merge_obstacles_outside_is_dropped(caplog):
     borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
-    obstacleC = np.array([[(100, 100), (101, 100), (101, 101), (100, 101)]])
+    obstacleC_ = np.array([[(100, 100), (101, 100), (101, 101), (100, 101)]])
 
-    L = tiny_wfn(borderC=borderC, obstaclesC=obstacleC).L
-    assert L.graph['border'] is not None
-    assert len(L.graph['obstacles']) == 0
+    wfn = tiny_wfn(borderC=borderC, obstacleC_=obstacleC_, optimize=False)
+    wfn.merge_obstacles_into_border()
+    assert wfn.L.graph['border'] is not None
+    assert len(wfn.L.graph['obstacles']) == 0
 
 
 def test_merge_obstacles_intersection_multipolygon_raises():
     borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
-    obstacleC = [np.array([[0, -20], [2, -20], [2, 20], [0, 20]])]
+    obstacleC = [np.array([[-9, -20], [-8, -20], [-8, 20], [-9, 20]])]
     with pytest.raises(ValueError, match='multiple pieces'):
-        tiny_wfn(borderC=borderC, obstaclesC=obstacleC).L
+        wfn = tiny_wfn(borderC=borderC, obstacleC_=obstacleC)
+        wfn.merge_obstacles_into_border()
 
 
 def test_merge_obstacles_intersection_empty_border_raises():
     borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
-    obstaclesC = [np.array([(-100, -100), (100, -100), (100, 100), (-100, 100)])]
-    with pytest.raises(ValueError, match='empty border'):
-        tiny_wfn(borderC=borderC, obstaclesC=obstaclesC)
+    obstacleC_ = [np.array([(-100, -100), (100, -100), (100, 100), (-100, 100)])]
+    with pytest.raises(ValueError, match='Turbine out of bounds'):
+        wfn = tiny_wfn(borderC=borderC, obstacleC_=obstacleC_)
+        wfn.merge_obstacles_into_border()
 
 
 def test_merge_obstacles_inside_kept():
-    border = [(-10, -10), (10, -10), (10, 10), (-10, 10)]
-    obstacle = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
-    L = tiny_wfn().L
+    borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
+    obstacleC_ = [np.array([(-9, -9), (1, -9), (1, -5), (-1, -5)])]
+    L = tiny_wfn(borderC=borderC, obstacleC_=obstacleC_).L
     assert len(L.graph['obstacles']) == 1
 
 

@@ -138,7 +138,7 @@ def tiny_wfn(
     turbinesC=None,
     substationsC=None,
     borderC=None,
-    obstaclesC=None,
+    obstacleC_=None,
     cables=4,
     optimize=True,
 ):
@@ -148,7 +148,7 @@ def tiny_wfn(
     - turbinesC : (N,2) array-like of turbine coordinates (default four turbines).
     - substationsC : (M,2) array-like of substations (default one at left).
     - borderC : (B,2) array-like polygon coordinates for border (default rectangle).
-    - obstaclesC : list of (k,2) arrays (rings) or a single 2D array (default one small obstacle).
+    - obstacleC_ : list of (k,2) arrays (rings) or a single 2D array (default one small obstacle).
     - cables : cables argument passed to WindFarmNetwork (default 4).
     - optimize : if True, call wfn.optimize() before returning (default False).
     """
@@ -171,21 +171,15 @@ def tiny_wfn(
     else:
         borderC = np.asarray(borderC, float)
 
-    if obstaclesC is None:
-        obstaclesC = [np.array([[-1.0, -1.0], [-1.0, -0.5], [1.0, -0.5], [1.0, -1.0]], float)]
-    else:
-        # accept a single obstacle array or a list of them
-        if isinstance(obstaclesC, np.ndarray) and obstaclesC.ndim == 2:
-            obstaclesC = [np.asarray(obstaclesC, float)]
-        else:
-            obstaclesC = [np.asarray(o, float) for o in list(obstaclesC)]
+    if obstacleC_ is None:
+        obstacleC_ = [np.array([[-1.0, -1.0], [-1.0, -0.5], [1.0, -0.5], [1.0, -1.0]], float)]
 
     wfn = WindFarmNetwork(
         cables=cables,
         turbinesC=turbinesC,
         substationsC=substationsC,
         borderC=borderC,
-        obstaclesC=obstaclesC,
+        obstacleC_=obstacleC_,
     )
 
     if optimize:

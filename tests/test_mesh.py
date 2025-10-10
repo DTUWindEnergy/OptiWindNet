@@ -46,11 +46,11 @@ def test_make_planar_embedding_basic():
     substationsC = vc[4:].reshape(1, 2)
 
     # small border and one interior obstacle
-    border = np.array([[-1.0, -1.0], [2.0, -1.0], [2.0, 2.0], [-1.0, 2.0]], float)
-    obstacle_xy = np.array([[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]], float)
+    border = np.array([[-1.0, -1.0], [2.0, -1.0], [2.0, 2.0], [-1.0, 2.0]])
+    obstacleC_ = [np.array([[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]])]
 
-    wfn = tiny_wfn(turbinesC=turbinesC, substationsC=substationsC, borderC=border, obstaclesC=obstacle_xy, optimize=False)
-    P, A = make_planar_embedding(wfn.L)
+    wfn = tiny_wfn(turbinesC=turbinesC, substationsC=substationsC, borderC=border, obstacleC_=obstacleC_, optimize=False)
+    P, A = wfn.P, wfn.A
 
     # Contractually we expect a PlanarEmbedding and an available-edges graph A
     assert isinstance(P, nx.PlanarEmbedding)
