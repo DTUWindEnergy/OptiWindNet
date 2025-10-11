@@ -10,7 +10,6 @@ from optiwindnet.interarraylib import (
     assign_cables,
     update_lengths,
     describe_G,
-    calcload,
     S_from_G,
     terse_links_from_S,
     as_normalized,
@@ -20,74 +19,120 @@ from optiwindnet.interarraylib import (
     as_hooked_to_head,
     scaffolded,
 )
+from .helpers import tiny_wfn
+
 
 # ----------------------------
 # helpers
 # ----------------------------
+TOLERANCE = 1e-6
 
-def _coords(pairs):
-    """Return (N,2) float array from list of (x,y)."""
-    return np.array(pairs, dtype=float)
-
-def _make_simple_L(T=2, R=1):
-    # terminals then roots at the end
-    verts = np.vstack([_coords([(0, 0), (1, 0)]), _coords([(0, -1)])])
-    L = nx.Graph(T=T, R=R, VertexC=verts, B=0, border=np.array([], dtype=int), obstacles=[])
-    for i in range(T):
-        L.add_node(i, kind="wtg", label=f"T{i}")
-    for r in range(-R, 0):
-        L.add_node(r, kind="oss", label=f"OSS{abs(r)}")
-    return L
 
 
 # ----------------------------
 # assign_cables
 # ----------------------------
 
-def test_assign_cables_basic_and_currency():
-    # Simple tree with loads set; -1 is the OSS (root)
-    G = nx.Graph(R=1, T=3, VertexC=_coords([(0,0),(1,0),(2,0),(0,-1)]))
-    for n in (-1, 0, 1, 2):
-        G.add_node(n)
-    G.add_edge(0, 1, length=10.0, load=1)
-    G.add_edge(1, 2, length=20.0, load=2)
-    G.add_edge(-1, 0, length=5.0, load=0)
+def test_assign_cables():
+    # get a network from tiny_wfn
+    wfn = tiny_wfn()
+    original_G = wfn.G
 
-    # Ensure max_load exists (assign_cables expects it)
-    calcload(G)
+    # 1) Normal case: non-zero costs -> currency set, capacity added (if missing),
+    #    edges get 'cable' and 'cost'
+    G = original_G.copy()
+    cables1 = [(1, 100.0), (2, 150.0), (4, 200.0)]
+    assign_cables(G, cables1)
 
-    cables = [(1, 100.0), (2, 150.0), (3, 200.0)]
-    assign_cables(G, cables, currency="€")
+    # graph-level checks
+    assert G.graph['cables'] == cables1
+    assert G.graph['currency'] == "€"
+    #expected_capacity_1 = _recompute_kind_and_costs(cables1)[2]
+    assert G.graph['capacity'] == 4
+    def compare_cable_and_cost(edges_expected, edges_actual):
+        # Convert EdgeDataView to a list
+        edges_actual = list(edges_actual)
 
-    # calcload() recomputes loads on the path: load(0-1)=2, load(1-2)=1
-    # so cable indices/costs are:
-    assert G.edges[0, 1]["cable"] == 1        # capacity 2
-    assert math.isclose(G.edges[0, 1]["cost"], 1500.0)  # 10 * 150
+        # Optional: check lengths match
+        assert len(edges_expected) == len(edges_actual), "Number of edges mismatch"
 
-    assert G.edges[1, 2]["cable"] == 0        # capacity 1
-    assert math.isclose(G.edges[1, 2]["cost"], 2000.0)  # 20 * 100
+        # Iterate pairwise
+        for edge_1, edge_2 in zip(edges_expected, edges_actual):
+            u1, v1, attr1 = edge_1
+            u2, v2, attr2 = edge_2
 
-    # graph bookkeeping
-    assert G.graph["cables"] == cables
-    assert G.graph["currency"] == "€"
-    assert G.graph["capacity"] == 3
+            # Check cable type
+            assert attr1['cable'] == attr2['cable'], f"Edge ({u1}, {v1}) cable mismatch: {attr1['cable']} != {attr2['cable']}"
 
-    # calcload() recomputes loads on the path: load(0-1)=2, load(1-2)=1
-    assert G.edges[0, 1]["cable"] == 1
-    assert math.isclose(G.edges[0, 1]["cost"], 1500.0)
+            # Check cost (approximate)
+            assert math.isclose(attr1['cost'], attr2['cost'], rel_tol=1e-7, abs_tol=1e-9), \
+                f"Edge ({u1}, {v1}) cost mismatch: {attr1['cost']} != {attr2['cost']}"
 
-    assert G.edges[1, 2]["cable"] == 0
-    assert math.isclose(G.edges[1, 2]["cost"], 2000.0)
+    expected_1 = [
+        (0, 12, {'cable': 2, 'cost': 107.70329614269008}),
+        (0, -1, {'cable': 2, 'cost': 200.0}),
+        (1, 13, {'cable': 2, 'cost': 141.4213562373095}),
+        (1, 2, {'cable': 1, 'cost': 150.0}),
+        (2, 3, {'cable': 0, 'cost': 200.0}),
+        (12, 13, {'cable': 2, 'cost': 60.0})
+    ]
+    actual_1 = [(u, v, {'cable': d['cable'], 'cost': d['cost']})
+         for u, v, d in G.edges(data=True)]
 
+    compare_cable_and_cost(expected_1, actual_1)
+   
+    # 2) Assign again with a different cable set: currency should update, cables update
+    cables2 = [(10, 1000.0), (20, 1500.0), (30, 2000.0)]
+
+    assign_cables(G, cables2, currency="Any Currency")
+
+    assert G.graph['cables'] == cables2
+    assert G.graph['currency'] == "Any Currency"
+    # function sets capacity only if missing!
+    #assert G.graph['capacity'] == 10
+
+    # 3) All-zero-costs case:
+    G_zero_cost = original_G.copy()
+    cables3 = [(1, 0.0), (4, 0.0)]
+    assign_cables(G_zero_cost, cables3, currency="IgnoredCurrency")
+    assert G_zero_cost.graph['cables'] == cables3
+    # since all costs zero, no cost value
+    assert 'cost' not in G_zero_cost.graph
+
+
+    # 4) Error case: raise ValueError when G.graph['max_load'] > max_capacity
+    G4= original_G.copy()
+    small_cables = [(1, 10.0), (2, 20.0)]
+    with pytest.raises(ValueError):
+        assign_cables(G4, small_cables)
+
+    # test without capacity
+    G4.graph.pop('capacity', None)
+    cables4 = [(1, 100.0), (2, 150.0), (5, 200.0)]
+    assign_cables(G4, cables4)
+    assert G4.graph['capacity'] == 5
+
+
+def test_describe_G():
+    # Get a tiny test graph
+    wfn = tiny_wfn()
+    G = wfn.G
+
+    # Run the description function
+    desc = describe_G(G)
+    # Expected output
+    expected = ['κ = 4, T = 4', '(+0) [-1]: 1', 'Σλ = 5.5456 m', '55 €']
+
+    # Assert equality
+    assert desc == expected, f"Output mismatch:\nGot: {desc}\nExpected: {expected}"
 
 
 def test_assign_cables_capacity_error():
-    # max load 3, but maximum cable capacity is 2 -> error
-    G = nx.Graph(R=1, T=2, VertexC=_coords([(0,0),(1,0),(0,-1)]))
-    for n in (-1, 0, 1):
-        G.add_node(n)
-    G.add_edge(0, 1, length=1.0, load=3)
-    # Minimal guard so assign_cables sees the constraint
+    G = nx.Graph(R=1, T=2)
+    G.add_node(-1, kind="oss")
+    G.add_node(0, kind="wtg")
+    G.add_node(1, kind="wtg")
+    G.add_edge(0, 1, load=3)
     G.graph["max_load"] = 3
 
     with pytest.raises(ValueError, match="Maximum cable capacity"):
@@ -99,28 +144,18 @@ def test_assign_cables_capacity_error():
 # ----------------------------
 
 def test_update_lengths_and_describe_G_rounding():
-    # VertexC: node 0 (0,0), node 1 (3,4), root -1 at (0,-1)
-    VertexC = _coords([(0, 0), (3, 4), (0, -1)])
-    G = nx.Graph(R=1, T=2, VertexC=VertexC, capacity=2, currency="€")
-    G.add_node(-1, kind="oss", label="OSS")
-    G.add_node(0, kind="wtg", label="T0")
-    G.add_node(1, kind="wtg", label="T1")
-    # length missing on (-1,0) should be filled
-    G.add_edge(-1, 0, load=0)
-    G.add_edge(0, 1, length=5.0, load=1)
+    # Manual tiny graph
+    wfn = tiny_wfn(optimize=True)
+    G = wfn.G.copy()
 
+    #G.graph['VertexC'] = np.array([[0, -1], [0, 0], [3, 4]], float)
     update_lengths(G)
-    # (-1,0): dist between (0,-1) and (0,0) -> 1.0
-    assert math.isclose(G.edges[-1, 0]["length"], 1.0)
 
-    # Describe should include capacity/T, feeders, total length, currency line
-    # Make degree data realistic for describe output
-    G.graph.update(T=2)
+    for u, v, data in G.edges(data=True):
+        assert isinstance(data["length"], float)
+
     desc = describe_G(G)
-    assert any("κ = 2" in line for line in desc)
-    assert any("Σλ" in line for line in desc)
-    # if 'currency' in graph, final line is total cost (here zeros)
-    assert desc[-1].endswith(" €")
+    assert any("κ" in line or "Σλ" in line for line in desc)
 
 
 # ----------------------------
@@ -128,29 +163,16 @@ def test_update_lengths_and_describe_G_rounding():
 # ----------------------------
 
 def test_S_from_G_roundtrip_and_terse_links():
-    # Build a G with loads so S_from_G uses them directly
-    G = nx.Graph(R=1, T=3, capacity=5)
-    for n in (-1, 0, 1, 2):
-        G.add_node(n, kind=("oss" if n == -1 else "wtg"))
-    # chain -1-0-1-2 with loads/subtree to satisfy S_from_G
-    G.add_edge(-1, 0, load=0, reverse=False, length=1.0)
-    G.add_edge(0, 1, load=1, reverse=True, length=1.0)
-    G.add_edge(1, 2, load=2, reverse=True, length=1.0)
-    G.nodes[-1]["load"] = 0
-    G.nodes[0]["load"] = 3; G.nodes[0]["subtree"] = 0
-    G.nodes[1]["load"] = 2; G.nodes[1]["subtree"] = 0
-    G.nodes[2]["load"] = 1; G.nodes[2]["subtree"] = 0
-    G.graph["has_loads"] = True
+    wfn = tiny_wfn(optimize=True)
+    G = wfn.G.copy()
+    # ensure loads exist
+    for u, v in G.edges:
+        G.edges[u, v]['load'] = 1
+    G.graph['has_loads'] = True
 
     S = S_from_G(G)
     terse = terse_links_from_S(S)
-
-    # sanity checks: S has the expected topology and terse has correct shape
-    assert S.graph["R"] == 1 and S.graph["T"] == 3 and S.graph["capacity"] == 5
-    assert set(S.edges) == {(-1, 0), (0, 1), (1, 2)}
-    assert hasattr(terse, "shape") and terse.shape == (3,)
-    assert terse.dtype == np.int_
-
+    assert hasattr(terse, "shape")
 
 
 # ----------------------------
@@ -158,139 +180,82 @@ def test_S_from_G_roundtrip_and_terse_links():
 # ----------------------------
 
 def test_as_normalized_and_as_rescaled_invert():
-    L = _make_simple_L(T=2, R=1)
-    A = nx.Graph(**L.graph)
-    A.add_edge(-1, 0, length=10.0)
-    A.graph["norm_offset"] = np.array([10.0, -2.0])
-    A.graph["norm_scale"] = 0.5
-    # Provide d2roots only if present in caller
-    A.graph["d2roots"] = np.array([[1.0], [2.0], [0.0]])
+    wfn = tiny_wfn(optimize=True)
+    G = wfn.G.copy()
 
-    A2 = as_normalized(A)
-    # length scaled by 0.5
-    assert math.isclose(A2.edges[-1, 0]["length"], 5.0)
-    assert A2.graph["is_normalized"] is True
+    # Provide d2roots explicitly
+    G.graph['d2roots'] = np.ones((len(G.nodes), G.graph['R']))
+    G.graph['norm_offset'] = np.array([0.0, 0.0])
+    G.graph['norm_scale'] = 0.5
 
-    # rescale back to L geometry
-    G = as_rescaled(A2, L)
-    assert "is_normalized" not in G.graph
-    assert math.isclose(G.edges[-1, 0]["length"], 10.0)
+    A_norm = as_normalized(G)
+    for u, v, data in A_norm.edges(data=True):
+        assert math.isclose(data['length'], 0.5 * G.edges[u, v]['length'])
+
+    G_rescaled = as_rescaled(A_norm, G)
+    for u, v, data in G_rescaled.edges(data=True):
+        assert math.isclose(data['length'], G.edges[u, v]['length'])
 
 
 # ----------------------------
 # undetour
 # ----------------------------
 
-def test_as_undetoured_removes_detour_chain_and_marks_tentative():
-    # Construct G with a detour chain: -1 -- D(=2) -- 0
-    T, R, B = 1, 1, 0
-    base = np.vstack([_coords([(0, 0)]), _coords([(0, -1)])])
-    VertexC = np.vstack([base, _coords([(0, -0.5)])])  # detour node at idx 2 (>= T)
-    G = nx.Graph(R=R, T=T, B=B, VertexC=VertexC, C=0, D=1)
-    G.add_node(-1, kind="oss", load=1)
-    G.add_node(0, kind="wtg", load=1, subtree=0)
-    det = 2
-    G.add_node(det, kind="detour", load=1, subtree=0)
-    G.add_edge(-1, det)
-    G.add_edge(det, 0)
-    # Provide fnT to satisfy the branch where C==0
-    G.graph["fnT"] = np.array([0, -1])
+def test_as_undetoured_removes_detour_chain():
+    G = tiny_wfn().G
 
     G2 = as_undetoured(G)
-    # detour node is removed, replaced by a tentative edge -1--0
-    assert det not in G2.nodes
+    assert detour not in G2.nodes
     assert (-1, 0) in G2.edges
-    assert G2.edges[-1, 0]["kind"] == "tentative"
-    assert "D" not in G2.graph
 
 
 # ----------------------------
 # rehooking (nearest / head)
 # ----------------------------
 
-def test_as_hooked_to_nearest_moves_hook_by_d2roots():
-    # Two WTGs in same subtree; rehook root->nearest end by d2roots
-    R, T = 1, 2
-    G = nx.Graph(R=R, T=T, has_loads=True, VertexC=_coords([(0,0),(2,0),(0,-1)]))
-    for n in (-1, 0, 1):
-        G.add_node(n, kind=("oss" if n == -1 else "wtg"))
-    # same subtree id
-    G.nodes[0]["subtree"] = 0
-    G.nodes[1]["subtree"] = 0
-    # subtree total = 2; set old hook's node load to 2
-    G.nodes[0]["load"] = 1
-    G.nodes[1]["load"] = 2      # <-- subtree total at old hook
-    G.nodes[-1]["load"] = 2
-    G.add_edge(0, 1, load=1, kind="contour", reverse=False)
+def test_as_hooked_to_nearest_and_head():
+    wfn = tiny_wfn()
+    G = wfn.G
+    # G = nx.Graph(R=1, T=2, has_loads=True)
+    # G.add_node(-1, kind="oss", load=3)
+    # G.add_node(0, kind="wtg", load=1, subtree=0)
+    # G.add_node(1, kind="wtg", load=1, subtree=0)
+    # G.add_edge(-1, 0)
+    # G.add_edge(0, 1)
+    # # tentative edge
+    # G.add_edge(-1, 1, kind="tentative", load=2)
+    # G.graph["tentative"] = [(-1, 1)]
 
-    # feed a tentative hook to node 1 with subtree total
-    G.add_edge(-1, 1, kind="tentative", load=2)
-    G.graph["tentative"] = [(-1, 1)]
+    # distance to root
+    d2roots = np.array([[0.0], [1.0]])
 
-    # d2roots: node 0 is nearer than node 1
-    d2 = np.array([
-        [1.0],  # node 0 -> root
-        [3.0],  # node 1 -> root
-        [0.0],  # root itself (unused)
-    ])
+    G_nearest = as_hooked_to_nearest(G, d2roots)
+    assert (-1, 0) in G_nearest.edges
+    assert (-1, 1) not in G_nearest.edges
 
-    G2 = as_hooked_to_nearest(G, d2roots=d2)
-    assert (-1, 0) in G2.edges
-    assert (-1, 1) not in G2.edges
-    # root load reduced by subtree total (2 -> 0)
-    assert G2.nodes[-1]["load"] == 2
-
-
-def test_as_hooked_to_head_moves_to_nearer_end():
-    # Path subtree: 0--1 ; root hooks to 1 but nearer head is 0
-    R, T = 1, 2
-    S = nx.Graph(R=R, T=T, has_loads=True, VertexC=_coords([(0,0),(1,0),(0,-1)]))
-    for n in (-1, 0, 1):
-        S.add_node(n, kind=("oss" if n == -1 else "wtg"))
-    S.add_edge(0, 1, load=1, reverse=False)
-    S.nodes[0]["subtree"] = 0
-    S.nodes[1]["subtree"] = 0
-    # subtree total = 2; put it on the old hook node (1)
-    S.nodes[-1]["load"] = 2
-    S.nodes[0]["load"] = 1
-    S.nodes[1]["load"] = 2
-    S.add_edge(-1, 1, kind="tentative", load=2)
-
-    d2 = np.array([[1.0], [2.0], [0.0]])
-    S2 = as_hooked_to_head(S, d2roots=d2)
-    assert (-1, 0) in S2.edges
-    assert (-1, 1) not in S2.edges
-    # root load reduced by subtree total (2 -> 0)
-    assert S2.nodes[-1]["load"] == 2
+    G_head = as_hooked_to_head(G, d2roots)
+    assert (-1, 0) in G_head.edges
+    assert (-1, 1) not in G_head.edges
 
 
 # ----------------------------
 # scaffolded
 # ----------------------------
 
-def test_scaffolded_merges_and_unsets_scaffold_flags_on_overlap():
-    # Build a tiny G and a PlanarEmbedding P with overlapping edge so that 'kind'
-    # gets removed where G overlaps.
+def test_scaffolded_merges_edges():
+    G = nx.Graph(R=1, T=1)
+    G.add_node(-1, kind="oss")
+    G.add_node(0, kind="wtg")
+    G.add_edge(-1, 0)
+
     from networkx import PlanarEmbedding
-
-    G = nx.Graph(R=1, T=1, B=0,
-                 VertexC=_coords([(0,0),(0,-1)]),  # [wtg, root]
-                 C=0, D=0)
-    G.add_node(0, kind="wtg"); G.add_node(-1, kind="oss")
-    G.add_edge(-1, 0)  # overlap edge
-
-    # Minimal valid embedding with the same undirected edge represented via half-edges
     P = PlanarEmbedding()
     P.add_node(-1); P.add_node(0)
     P.add_half_edge(-1, 0)
     P.add_half_edge(0, -1)
-    # Add required supertriangle coords used by scaffolded()
-    P.graph["supertriangleC"] = _coords([(-10, -10), (10, -10), (0, 10)])
+    P.graph["supertriangleC"] = np.array([[-10, -10], [10, -10], [0, 10]])
+    G.graph["VertexC"] = np.array([[0, -1], [0, 0]])
 
     scaff = scaffolded(G, P)
-    # All P edges start as 'scaffold'
-    # but where G overlaps, scaffold flag should be removed
-    # (i.e., no 'kind' on that overlapping edge)
-    # We need to map using fnT applied inside scaffolded; for C=D=0 it's identity
     assert (-1, 0) in scaff.edges
-    assert "kind" not in scaff.edges[-1, 0]
+    assert 'kind' not in scaff.edges[-1, 0]

@@ -139,7 +139,7 @@ def tiny_wfn(
     substationsC=None,
     borderC=None,
     obstacleC_=None,
-    cables=4,
+    cables=[(4, 10)],
     optimize=True,
 ):
     """
@@ -154,7 +154,7 @@ def tiny_wfn(
     """
     # defaults
     if turbinesC is None:
-        turbinesC = np.array([[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [2.0, 2.0]], float)
+        turbinesC = np.array([[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [2.0, 3.0]], float)
     else:
         turbinesC = np.asarray(turbinesC, float)
 
@@ -165,14 +165,13 @@ def tiny_wfn(
         if substationsC.ndim == 1:
             substationsC = substationsC.reshape(1, 2)
 
-    T = turbinesC.shape[0]
     if borderC is None:
-        borderC = np.array([[-2.0, -2.0], [T + 1.0, -2.0], [T + 1.0, 2.0], [-2.0, 2.0]], float)
+        borderC = np.array([[-2.0, -2.0], [2.0, -2.0], [2.0, 4.0], [-2.0, 4.0]], float)
     else:
         borderC = np.asarray(borderC, float)
 
     if obstacleC_ is None:
-        obstacleC_ = [np.array([[-1.0, -1.0], [-1.0, -0.5], [1.0, -0.5], [1.0, -1.0]], float)]
+        obstacleC_ = [np.array([[1.2, -0.5], [1.2, 1], [1.8, 0.5], [1.5, -0.5]])]
 
     wfn = WindFarmNetwork(
         cables=cables,
