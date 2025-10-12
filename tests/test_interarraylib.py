@@ -28,7 +28,7 @@ from optiwindnet.interarraylib import (
     G_from_S,
     S_from_terse_links,
     as_single_root,
-    
+    as_stratified_vertices,
 )
 from .helpers import tiny_wfn, assert_graph_equal
 
@@ -39,10 +39,10 @@ from .helpers import tiny_wfn, assert_graph_equal
 TOLERANCE = 1e-6
 
 
-
 # ----------------------------
 # assign_cables
 # ----------------------------
+
 
 def test_assign_cables():
     # get a network from tiny_wfn
@@ -57,15 +57,16 @@ def test_assign_cables():
 
     # graph-level checks
     assert G.graph['cables'] == cables1
-    assert G.graph['currency'] == "€"
-    #expected_capacity_1 = _recompute_kind_and_costs(cables1)[2]
+    assert G.graph['currency'] == '€'
+    # expected_capacity_1 = _recompute_kind_and_costs(cables1)[2]
     assert G.graph['capacity'] == 4
+
     def compare_cable_and_cost(edges_expected, edges_actual):
         # Convert EdgeDataView to a list
         edges_actual = list(edges_actual)
 
         # Optional: check lengths match
-        assert len(edges_expected) == len(edges_actual), "Number of edges mismatch"
+        assert len(edges_expected) == len(edges_actual), 'Number of edges mismatch'
 
         # Iterate pairwise
         for edge_1, edge_2 in zip(edges_expected, edges_actual):
@@ -73,11 +74,14 @@ def test_assign_cables():
             u2, v2, attr2 = edge_2
 
             # Check cable type
-            assert attr1['cable'] == attr2['cable'], f"Edge ({u1}, {v1}) cable mismatch: {attr1['cable']} != {attr2['cable']}"
+            assert attr1['cable'] == attr2['cable'], (
+                f'Edge ({u1}, {v1}) cable mismatch: {attr1["cable"]} != {attr2["cable"]}'
+            )
 
             # Check cost (approximate)
-            assert math.isclose(attr1['cost'], attr2['cost'], rel_tol=1e-7, abs_tol=1e-9), \
-                f"Edge ({u1}, {v1}) cost mismatch: {attr1['cost']} != {attr2['cost']}"
+            assert math.isclose(
+                attr1['cost'], attr2['cost'], rel_tol=1e-7, abs_tol=1e-9
+            ), f'Edge ({u1}, {v1}) cost mismatch: {attr1["cost"]} != {attr2["cost"]}'
 
     expected_1 = [
         (0, 12, {'cable': 2, 'cost': 107.70329614269008}),
@@ -85,34 +89,35 @@ def test_assign_cables():
         (1, 13, {'cable': 2, 'cost': 141.4213562373095}),
         (1, 2, {'cable': 1, 'cost': 150.0}),
         (2, 3, {'cable': 0, 'cost': 200.0}),
-        (12, 13, {'cable': 2, 'cost': 60.0})
+        (12, 13, {'cable': 2, 'cost': 60.0}),
     ]
-    actual_1 = [(u, v, {'cable': d['cable'], 'cost': d['cost']})
-         for u, v, d in G.edges(data=True)]
+    actual_1 = [
+        (u, v, {'cable': d['cable'], 'cost': d['cost']})
+        for u, v, d in G.edges(data=True)
+    ]
 
     compare_cable_and_cost(expected_1, actual_1)
-   
+
     # 2) Assign again with a different cable set: currency should update, cables update
     cables2 = [(10, 1000.0), (20, 1500.0), (30, 2000.0)]
 
-    assign_cables(G, cables2, currency="Any Currency")
+    assign_cables(G, cables2, currency='Any Currency')
 
     assert G.graph['cables'] == cables2
-    assert G.graph['currency'] == "Any Currency"
+    assert G.graph['currency'] == 'Any Currency'
     # function sets capacity only if missing!
-    #assert G.graph['capacity'] == 10
+    # assert G.graph['capacity'] == 10
 
     # 3) All-zero-costs case:
     G_zero_cost = original_G.copy()
     cables3 = [(1, 0.0), (4, 0.0)]
-    assign_cables(G_zero_cost, cables3, currency="IgnoredCurrency")
+    assign_cables(G_zero_cost, cables3, currency='IgnoredCurrency')
     assert G_zero_cost.graph['cables'] == cables3
     # since all costs zero, no cost value
     assert 'cost' not in G_zero_cost.graph
 
-
     # 4) Error case: raise ValueError when G.graph['max_load'] > max_capacity
-    G4= original_G.copy()
+    G4 = original_G.copy()
     small_cables = [(1, 10.0), (2, 20.0)]
     with pytest.raises(ValueError):
         assign_cables(G4, small_cables)
@@ -135,7 +140,7 @@ def test_describe_G():
     expected = ['κ = 4, T = 4', '(+0) [-1]: 1', 'Σλ = 5.5456 m', '55 €']
 
     # Assert equality
-    assert desc == expected, f"Output mismatch:\nGot: {desc}\nExpected: {expected}"
+    assert desc == expected, f'Output mismatch:\nGot: {desc}\nExpected: {expected}'
 
 
 def test_calcload():
@@ -158,6 +163,7 @@ def test_calcload():
 
     assert G.graph['has_loads'] == True
     assert G.graph['max_load'] == 4
+
 
 def test_site_fingerprint():
     # prepare sample arrays
@@ -198,7 +204,7 @@ def test_L_from_site():
     VertexC = np.zeros((V, 2))  # coordinates don't matter for this test
 
     # 1) Call without 'handle', 'name', or 'B' but with border and obstacles
-    border = np.array([0, 1])           # two border indices
+    border = np.array([0, 1])  # two border indices
     obstacles = [np.array([2]), np.array([3])]  # obstacles contribute 1 + 1 = 2
     # Expected B = 2 + 2 = 4
     L = L_from_site(VertexC=VertexC, T=T, R=R, border=border, obstacles=obstacles)
@@ -223,7 +229,9 @@ def test_L_from_site():
     assert len(L.nodes) == T + R
 
     # 2) Call with explicit handle, name and B to cover the other branches
-    L2 = L_from_site(VertexC=VertexC, T=T, R=R, handle='custom', name='CustomSite', B=99)
+    L2 = L_from_site(
+        VertexC=VertexC, T=T, R=R, handle='custom', name='CustomSite', B=99
+    )
 
     # Provided values should be preserved (no defaults applied / B not recomputed)
     assert L2.graph['handle'] == 'custom'
@@ -239,8 +247,7 @@ def test_L_from_site():
 
 
 def test_G_from_S():
-    """
-    """
+    """ """
     wfn = tiny_wfn()
     A = wfn.A
     S = wfn.S
@@ -260,7 +267,7 @@ def test_G_from_S():
     assert G.graph['num_diagonals'] == 0
 
     # cover other branches
-    
+
     A[0][2]['shortcuts'] = [9]
 
     A[2][-1]['shortcuts'] = [9]
@@ -289,7 +296,6 @@ def test_G_from_S():
             A_copy[s][t]['shortcuts'] = [999]
         else:
             A_copy[s][t]['shortcuts'] = A_copy[s][t]['midpath'].copy()
-
 
         # Run G_from_S
         G = G_from_S(S_copy, A_copy)
@@ -324,6 +330,7 @@ def test_G_from_S():
         actual_kind = G[s][t]['kind'] if (s, t) in G.edges() else G[t][s]['kind']
         assert actual_kind == expected_kind
 
+
 def test_L_from_G():
     # Copy G to avoid modifying original
     G = tiny_wfn().G
@@ -335,8 +342,8 @@ def test_L_from_G():
     T = G.graph['T']
 
     # Check number of nodes
-    assert all(n in L.nodes() for n in range(T)), "WTG nodes missing"
-    assert all(r in L.nodes() for r in range(-R, 0)), "OSS nodes missing"
+    assert all(n in L.nodes() for n in range(T)), 'WTG nodes missing'
+    assert all(r in L.nodes() for r in range(-R, 0)), 'OSS nodes missing'
 
     # Check node attributes
     for n in range(T):
@@ -350,17 +357,18 @@ def test_L_from_G():
     assert L.number_of_edges() == 0
     assert L.graph['VertexC'].shape[0] == len(G.graph['VertexC'])
 
-    
     G.graph['stunts_primes'] = [100, 101]  # new dummy nodes to simulate stunts/primes
     L_stunts = L_from_G(G)
     assert L_stunts.number_of_edges() == 0
     # Check VertexC adjusted for stunts_primes
-    assert L_stunts.graph['VertexC'].shape[0] == len(G.graph['VertexC']) - len(G.graph['stunts_primes'])
+    assert L_stunts.graph['VertexC'].shape[0] == len(G.graph['VertexC']) - len(
+        G.graph['stunts_primes']
+    )
 
 
 def test_S_from_terse_links():
     terse_links = np.array([-1, 0, 1, 2])
-    
+
     def check_S(S, expected_capacity=None):
         # Check number of nodes
         assert len(S.nodes()) == len(terse_links) + 1  # +1 for root node
@@ -390,6 +398,7 @@ def test_S_from_terse_links():
     S2 = S_from_terse_links(terse_links, capacity=5)
     check_S(S2, expected_capacity=5)
 
+
 def test_terse_links_from_S():
     S = tiny_wfn().S
     # Original terse_links
@@ -399,9 +408,10 @@ def test_terse_links_from_S():
     actual_terse = terse_links_from_S(S)
 
     # Check that recovered array matches original
-    assert np.array_equal(actual_terse, expected_terse), \
-        f"terse_links {actual_terse} != expected_terse_links {expected_terse}"
-    
+    assert np.array_equal(actual_terse, expected_terse), (
+        f'terse_links {actual_terse} != expected_terse_links {expected_terse}'
+    )
+
 
 def test_as_single_root():
     # single root L
@@ -413,9 +423,20 @@ def test_as_single_root():
 
     # L with 3 roots
     T, R = 4, 3
-    VertexC = np.array([[0, 0], [1, 0], [2, 0], [3, 0],   # WTGs 0-3
-                        [0, 1], [1, 1], [2, 1]])           # Roots -3, -2, -1
-    L_prime = nx.Graph(T=T, R=R, VertexC=VertexC.copy(), name='Site', handle='site_handle')
+    VertexC = np.array(
+        [
+            [0, 0],
+            [1, 0],
+            [2, 0],
+            [3, 0],  # WTGs 0-3
+            [0, 1],
+            [1, 1],
+            [2, 1],
+        ]
+    )  # Roots -3, -2, -1
+    L_prime = nx.Graph(
+        T=T, R=R, VertexC=VertexC.copy(), name='Site', handle='site_handle'
+    )
     L_prime.add_nodes_from(range(T), kind='wtg')
     L_prime.add_nodes_from(range(-R, 0), kind='oss')
 
@@ -441,21 +462,24 @@ def test_as_single_root():
     assert all(L.nodes[n]['kind'] == 'wtg' for n in range(T))
 
 
-
 def test_as_normalized_cases():
     A = tiny_wfn().A
     original_vertexC = A.graph['VertexC'].copy()
     original_d2roots = A.graph['d2roots'].copy()
     original_lengths = [edata['length'] for _, _, edata in A.edges(data=True)]
-    
+
     offset = np.array([1.0, 2.0])
     scale = 2.0
 
     # Case 1: both offset and scale
     A_norm = as_normalized(A, offset=offset, scale=scale)
-    np.testing.assert_allclose(A_norm.graph['VertexC'], scale * (original_vertexC - offset))
+    np.testing.assert_allclose(
+        A_norm.graph['VertexC'], scale * (original_vertexC - offset)
+    )
     np.testing.assert_allclose(A_norm.graph['d2roots'], scale * original_d2roots)
-    for (_, _, edata_norm), original_length in zip(A_norm.edges(data=True), original_lengths):
+    for (_, _, edata_norm), original_length in zip(
+        A_norm.edges(data=True), original_lengths
+    ):
         np.testing.assert_allclose(edata_norm['length'], original_length * scale)
     assert A_norm.graph['is_normalized'] is True
 
@@ -471,7 +495,6 @@ def test_as_normalized_cases():
 
     # Ensure original graph unchanged
     np.testing.assert_allclose(A.graph['VertexC'], original_vertexC)
-
 
 
 def test_as_rescaled():
@@ -490,8 +513,12 @@ def test_as_rescaled():
     np.testing.assert_allclose(G_rescaled.graph['VertexC'], L.graph['VertexC'])
 
     # Edge lengths should be scaled down by 1/norm_scale
-    for (_, _, edata_res), original_length in zip(G_rescaled.edges(data=True), original_lengths):
-        np.testing.assert_allclose(edata_res['length'], original_length / G.graph['norm_scale'])
+    for (_, _, edata_res), original_length in zip(
+        G_rescaled.edges(data=True), original_lengths
+    ):
+        np.testing.assert_allclose(
+            edata_res['length'], original_length / G.graph['norm_scale']
+        )
 
     # d2roots should be copied from L
     np.testing.assert_allclose(G_rescaled.graph['d2roots'], L.graph['d2roots'])
@@ -499,7 +526,9 @@ def test_as_rescaled():
     # is_normalized removed, denormalization factor set
     assert 'is_normalized' not in G_rescaled.graph
     assert 'denormalization' in G_rescaled.graph
-    np.testing.assert_allclose(G_rescaled.graph['denormalization'], 1 / G.graph['norm_scale'])
+    np.testing.assert_allclose(
+        G_rescaled.graph['denormalization'], 1 / G.graph['norm_scale']
+    )
 
     # --- Case 2: G not normalized ---
     G2 = G.copy()
@@ -525,135 +554,179 @@ def test_as_rescaled():
     # d2roots should be removed if present in G
     assert 'd2roots' not in G3_rescaled.graph
 
-# def test_assign_cables_capacity_error():
-#     G = nx.Graph(R=1, T=2)
-#     G.add_node(-1, kind="oss")
-#     G.add_node(0, kind="wtg")
-#     G.add_node(1, kind="wtg")
-#     G.add_edge(0, 1, load=3)
-#     G.graph["max_load"] = 3
 
-#     with pytest.raises(ValueError, match="Maximum cable capacity"):
-#         assign_cables(G, [(1, 0.0), (2, 0.0)])
+def test_as_undetoured_branches():
+    wfn = tiny_wfn()
+    baseG = wfn.G
+
+    T = baseG.graph['T']
+    R = baseG.graph['R']
+    B = baseG.graph.get('B', 0)
+
+    # -----------------------
+    # Case A: D == 0
+    # -----------------------
+    G0 = baseG.copy()
+    G0.graph['D'] = 0  # explicitly mark no detours
+    out0 = as_undetoured(G0)
+    # Should return a copy with same nodes and D still present
+    assert set(out0.nodes()) == set(G0.nodes())
+    assert out0.graph.get('D') == 0
+
+    # -----------------------
+    # Case B: D > 0 and C == 0
+    # Add a single detour chain root(-1) - d1 - wtg_target (3)
+    # -----------------------
+    G1 = baseG.copy()
+    # pick a detour node index high enough not to clash with existing nodes
+    max_node = max(n for n in G1.nodes() if isinstance(n, int))
+    d1 = max_node + 1
+    target_wtg = 3  # exists in your provided G
+    # add detour node and connect root -> detour -> target_wtg
+    G1.add_node(d1)
+    G1.add_edge(-1, d1)
+    G1.add_edge(d1, target_wtg)
+    # ensure VertexC long enough for new node index
+    Vlen_needed = d1 + 1 + R
+    if 'VertexC' not in G1.graph or G1.graph['VertexC'].shape[0] < Vlen_needed:
+        old_vc = G1.graph.get('VertexC', np.zeros((0, 2)))
+        vc = np.vstack(
+            (old_vc, np.arange(old_vc.shape[0], Vlen_needed)[:, None] * [1.0, 0.5])
+        )
+        G1.graph['VertexC'] = vc
+    # mark loads on relevant nodes (target_wtg should have a load already but ensure)
+    G1.nodes[d1]['load'] = 0
+    # mark as detoured, no contours (C==0)
+    G1.graph['D'] = 1
+    G1.graph['C'] = 0
+    # ensure fnT exists so function will try to delete it
+    G1.graph['fnT'] = np.arange(T + B + G1.graph['C'] + R)
+
+    out1 = as_undetoured(G1)
+
+    # detour node removed
+    assert d1 not in out1.nodes(), 'detour node should be removed'
+
+    # tentative edge root -> final wtg exists
+    assert out1.has_edge(-1, target_wtg), (
+        'expected tentative edge from root to target wtg'
+    )
+    e01 = out1[-1][target_wtg]
+    assert e01['kind'] == 'tentative'
+    assert 'tentative' in out1.graph and isinstance(out1.graph['tentative'], list)
+
+    # D removed and fnT deleted (C==0)
+    assert 'D' not in out1.graph
+    assert 'fnT' not in out1.graph
+
+    # -----------------------
+    # Case C: D > 0 and C > 0
+    # Add a longer detour chain root(-1) - d2 - d3 - wtg_target (2)
+    # -----------------------
+    G2 = baseG.copy()
+    max_node2 = max(n for n in G2.nodes() if isinstance(n, int))
+    d2 = max_node2 + 1
+    d3 = max_node2 + 2
+    target_wtg2 = 2  # exists in your provided G
+    G2.add_nodes_from([d2, d3])
+    G2.add_edge(-1, d2)
+    G2.add_edge(d2, d3)
+    G2.add_edge(d3, target_wtg2)
+
+    # ensure VertexC long enough
+    Vlen_needed2 = d3 + 1 + R
+    if G2.graph.get('VertexC', np.zeros((0, 2))).shape[0] < Vlen_needed2:
+        old_vc = G2.graph.get('VertexC', np.zeros((0, 2)))
+        vc = np.vstack(
+            (old_vc, np.arange(old_vc.shape[0], Vlen_needed2)[:, None] * [1.0, 0.5])
+        )
+        G2.graph['VertexC'] = vc
+
+    # mark loads for new nodes
+    G2.nodes[d2]['load'] = 0
+    G2.nodes[d3]['load'] = 0
+
+    # mark as detoured and with C>0
+    G2.graph['D'] = 1
+    G2.graph['C'] = 2
+    # Provide a sensible fnT so slicing/hs tack is valid: length >= T + B + C + R
+    fnT_len = T + B + G2.graph['C'] + R
+    G2.graph['fnT'] = np.arange(fnT_len)
+
+    out2 = as_undetoured(G2)
+
+    # detour nodes removed
+    assert d2 not in out2.nodes() and d3 not in out2.nodes()
+
+    # tentative edge created from root to target_wtg2
+    assert out2.has_edge(-1, target_wtg2)
+    e2 = out2[-1][target_wtg2]
+    assert e2['kind'] == 'tentative'
+    assert 'tentative' in out2.graph
+
+    # D removed
+    assert 'D' not in out2.graph
+
+    # fnT should exist and be updated (shorter or equal)
+    assert 'fnT' in out2.graph
+    assert out2.graph['fnT'].size <= fnT_len
+
+    # final sanity: out2 is a Graph
+    assert isinstance(out2, nx.Graph)
 
 
-# # ----------------------------
-# # update_lengths + describe_G
-# # ----------------------------
+def test_as_stratified_vertices():
+    wfn = tiny_wfn()
+    L0 = wfn.L.copy()
 
-# def test_update_lengths_and_describe_G_rounding():
-#     # Manual tiny graph
-#     wfn = tiny_wfn(optimize=True)
-#     G = wfn.G.copy()
+    L1 = as_stratified_vertices(L0)
+    assert_graph_equal(L0, L1)
 
-#     #G.graph['VertexC'] = np.array([[0, -1], [0, 0], [3, 4]], float)
-#     update_lengths(G)
-
-#     for u, v, data in G.edges(data=True):
-#         assert isinstance(data["length"], float)
-
-#     desc = describe_G(G)
-#     assert any("κ" in line or "Σλ" in line for line in desc)
-
-
-# # ----------------------------
-# # S_from_G + terse_links
-# # ----------------------------
-
-# def test_S_from_G_roundtrip_and_terse_links():
-#     wfn = tiny_wfn(optimize=True)
-#     G = wfn.G.copy()
-#     # ensure loads exist
-#     for u, v in G.edges:
-#         G.edges[u, v]['load'] = 1
-#     G.graph['has_loads'] = True
-
-#     S = S_from_G(G)
-#     terse = terse_links_from_S(S)
-#     assert hasattr(terse, "shape")
+    L0.graph['border'] = np.array([0, 5, 6, 7])
+    expected_VertexC = np.array(
+        [
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [2.0, 1.0],
+            [2.0, 3.0],
+            [1.0, 0.0],
+            [2.0, -2.0],
+            [2.0, 4.0],
+            [-2.0, 4.0],
+            [1.2, -0.5],
+            [1.2, 1.0],
+            [1.8, 0.5],
+            [1.5, -0.5],
+            [0.0, 0.0],
+        ]
+    )
+    L2 = as_stratified_vertices(L0)
+    assert np.array_equal(L2.graph['VertexC'], expected_VertexC)
+    # assert_graph_equal(L2, L1)
 
 
-# # ----------------------------
-# # normalize/rescale
-# # ----------------------------
+def test_scaffolded():
+    wfn = tiny_wfn()
+    G = wfn.G.copy()
+    P = wfn.P.copy()
+    scaff = scaffolded(G, P)
 
-# def test_as_normalized_and_as_rescaled_invert():
-#     wfn = tiny_wfn(optimize=True)
-#     G = wfn.G.copy()
+    # Check that returned graph is undirected
+    assert not scaff.is_directed()
 
-#     # Provide d2roots explicitly
-#     G.graph['d2roots'] = np.ones((len(G.nodes), G.graph['R']))
-#     G.graph['norm_offset'] = np.array([0.0, 0.0])
-#     G.graph['norm_scale'] = 0.5
+    # All nodes from G should be in scaff
+    for n in G.nodes():
+        assert n in scaff.nodes()
+        for k, v in G.nodes[n].items():
+            assert scaff.nodes[n][k] == v
 
-#     A_norm = as_normalized(G)
-#     for u, v, data in A_norm.edges(data=True):
-#         assert math.isclose(data['length'], 0.5 * G.edges[u, v]['length'])
+    # fnT should exist and match expected length
+    assert 'fnT' in scaff.graph
+    assert len(scaff.graph['fnT']) == 15
 
-#     G_rescaled = as_rescaled(A_norm, G)
-#     for u, v, data in G_rescaled.edges(data=True):
-#         assert math.isclose(data['length'], G.edges[u, v]['length'])
+    # VertexC should contain G's VertexC plus P's supertriangle
+    R = G.graph.get('R', 0)
+    supertriangleC = P.graph['supertriangleC']
+    VertexC_expected = np.vstack((G.graph['VertexC'][:-R], supertriangleC, G.graph['VertexC'][-R:]))
+    assert np.allclose(scaff.graph['VertexC'], VertexC_expected)
 
-
-# # ----------------------------
-# # undetour
-# # ----------------------------
-
-# def test_as_undetoured_removes_detour_chain():
-#     G = tiny_wfn().G
-
-#     G2 = as_undetoured(G)
-#     assert detour not in G2.nodes
-#     assert (-1, 0) in G2.edges
-
-
-# # ----------------------------
-# # rehooking (nearest / head)
-# # ----------------------------
-
-# def test_as_hooked_to_nearest_and_head():
-#     wfn = tiny_wfn()
-#     G = wfn.G
-#     # G = nx.Graph(R=1, T=2, has_loads=True)
-#     # G.add_node(-1, kind="oss", load=3)
-#     # G.add_node(0, kind="wtg", load=1, subtree=0)
-#     # G.add_node(1, kind="wtg", load=1, subtree=0)
-#     # G.add_edge(-1, 0)
-#     # G.add_edge(0, 1)
-#     # # tentative edge
-#     # G.add_edge(-1, 1, kind="tentative", load=2)
-#     # G.graph["tentative"] = [(-1, 1)]
-
-#     # distance to root
-#     d2roots = np.array([[0.0], [1.0]])
-
-#     G_nearest = as_hooked_to_nearest(G, d2roots)
-#     assert (-1, 0) in G_nearest.edges
-#     assert (-1, 1) not in G_nearest.edges
-
-#     G_head = as_hooked_to_head(G, d2roots)
-#     assert (-1, 0) in G_head.edges
-#     assert (-1, 1) not in G_head.edges
-
-
-# # ----------------------------
-# # scaffolded
-# # ----------------------------
-
-# def test_scaffolded_merges_edges():
-#     G = nx.Graph(R=1, T=1)
-#     G.add_node(-1, kind="oss")
-#     G.add_node(0, kind="wtg")
-#     G.add_edge(-1, 0)
-
-#     from networkx import PlanarEmbedding
-#     P = PlanarEmbedding()
-#     P.add_node(-1); P.add_node(0)
-#     P.add_half_edge(-1, 0)
-#     P.add_half_edge(0, -1)
-#     P.graph["supertriangleC"] = np.array([[-10, -10], [10, -10], [0, 10]])
-#     G.graph["VertexC"] = np.array([[0, -1], [0, 0]])
-
-#     scaff = scaffolded(G, P)
-#     assert (-1, 0) in scaff.edges
-#     assert 'kind' not in scaff.edges[-1, 0]

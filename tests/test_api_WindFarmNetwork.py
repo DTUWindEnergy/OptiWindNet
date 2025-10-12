@@ -11,6 +11,7 @@ from optiwindnet.api import (
     WindFarmNetwork,
 )
 import optiwindnet.plotting as plotting
+from optiwindnet.MILP import solver_factory, pyomo, cplex, gurobi, ortools
 from .helpers import tiny_wfn
 
 
@@ -346,6 +347,25 @@ def test_S_and_G_raise_before_optimize():
 # ==================================
 # Routers: smoke & minimal coverage
 # ==================================
+solver_mapping = {
+    "ortools": ortools.SolverORTools,
+    "cplex": cplex.SolverCplex,
+    "gurobi": gurobi.SolverGurobi,
+    "cbc": pyomo.SolverPyomo,
+    "scip": pyomo.SolverPyomo,
+    "highs": pyomo.SolverPyomo,
+}
+
+@pytest.mark.parametrize("solver_name", list(solver_mapping.keys()) + ["unknown_solver"])
+def test_solver_factory_returns_expected_solver(solver_name):
+    if solver_name == "unknown_solver":
+        with pytest.raises(ValueError):
+            solver_factory(solver_name)
+    else:
+        s = solver_factory(solver_name)
+        assert s is not None
+        expected_class = solver_mapping[solver_name]
+        assert isinstance(s, expected_class)
 
 
 @pytest.mark.parametrize(
