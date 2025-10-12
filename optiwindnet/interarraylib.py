@@ -264,40 +264,40 @@ def fun_fingerprint(fun=None) -> dict[str, bytes | str]:
     )
 
 
-def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
+def L_from_site(
+    *,
+    VertexC: np.ndarray,
+    T: int,
+    R: int,
+    B: int = 0,
+    border: np.ndarray | None = None,
+    obstacles: list[np.ndarray] | None = None,
+    name: str = '',
+    handle: str = 'L_from_site',
+    landscape_angle: float | None = None,
+) -> nx.Graph:
     """Create L from a location's attributes.
 
     Args:
-      VertexC: numpy.ndarray (V, 2) with x, y pos. of wtg + oss (total V)
+      VertexC: numpy.ndarray (V, 2) with all (x, y) coordinates (V = R + T + B)
       T: int number of wtg
       R: int number of oss
-      **kwargs: Additional relevant arguments, for example:
-        * name: str site name
-        * handle: str site identifier
-        * B: int number of border and obstacle zones' vertices
-        * border: array (B,) of VertexC indices that define the border (ccw)
-        * obstacles: sequence of numpy.ndarray of VertexC indices
+      B: number of border and obstacle zones' vertices
+      border: array (B,) of VertexC indices that define the border (ccw)
+      obstacles: sequence of numpy.ndarray of VertexC indices
+      name: site name
+      handle: site identifier
 
     Returns:
-      Graph containing N = R + T nodes and no edges. All keyword arguments are
-        made available as graph attributes.
+      Graph containing N = R + T nodes and no edges (all args become graph attributes).
     """
-    if 'handle' not in kwargs:
-        kwargs['handle'] = 'L_from_site'
-    if 'name' not in kwargs:
-        kwargs['name'] = kwargs['handle']
-    if 'B' not in kwargs:
-        B = 0
-        border = kwargs.get('border')
-        if border is not None:
-            B += border.shape[0]
-        obstacles = kwargs.get('obstacles')
-        if obstacles is not None:
-            for obstacle in obstacles:
-                B += obstacle.shape[0]
-        kwargs['B'] = B
-    L = nx.Graph(T=T, R=R, VertexC=VertexC, **kwargs)
-
+    L = nx.Graph(T=T, R=R, B=B, VertexC=VertexC, name=name, handle=handle)
+    if border is not None:
+        L.graph['border'] = border
+    if obstacles is not None:
+        L.graph['obstacles'] = obstacles
+    if landscape_angle is not None:
+        L.graph['landscape_angle'] = landscape_angle
     L.add_nodes_from(range(T), kind='wtg')
     L.add_nodes_from(range(-R, 0), kind='oss')
     return L

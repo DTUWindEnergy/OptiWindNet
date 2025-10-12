@@ -140,7 +140,12 @@ class SolverPyomo(Solver):
             objective = result['Solver'][0]['Primal bound']
             bound = result['Solver'][0]['Dual bound']
         solution_info = SolutionInfo(
-            runtime=result['Solver'][0]['Wallclock time'],
+            # HiGHS is using Pyomo's v2 API, with a different way of reporting runtime
+            runtime=(
+                result['Timing info']['wall_time']
+                if self.name == 'highs'
+                else result['Solver'][0]['Wallclock time']
+            ),
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,

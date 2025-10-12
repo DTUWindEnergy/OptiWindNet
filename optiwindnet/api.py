@@ -113,7 +113,6 @@ class WindFarmNetwork:
         L: nx.Graph | None = None,
         router: Router | None = None,
         verbose: bool = False,
-        **kwargs,
     ):
         """Initialize a wind farm electrical network.
 
@@ -131,7 +130,6 @@ class WindFarmNetwork:
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to `EWRouter`.
           buffer_dist: Buffer distance to dilate borders / erode obstacles. Defaults to 0.
-          **kwargs: Additional keyword arguments forwarded to network-construction helpers.
 
         Notes:
           * If both `L` and coordinates are provided, `L` takes precedence.
@@ -148,9 +146,6 @@ class WindFarmNetwork:
           wfn.optimize()
           print(wfn.cost(), wfn.length())
         """
-        # keep coord-related kwargs so rebuilds are consistent
-        self._coord_kwargs = dict(kwargs)
-
         # simple fields via setters (for validation/normalization)
         self.name = name
         'Instance name.'
@@ -190,7 +185,6 @@ class WindFarmNetwork:
                 name=name,
                 handle=handle,
                 VertexC=np.vstack((turbinesC, borderC, *obstacleC_, substationsC)),
-                **kwargs,
             )
         else:
             raise TypeError(
@@ -724,7 +718,7 @@ class HGSRouter(Router):
 
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A, branched=False).create_detours()
 
         assign_cables(G, cables)
 
