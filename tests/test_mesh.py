@@ -1,5 +1,15 @@
-# tests/test_mesh_consolidated.py
+# imports
 import os
+
+import numpy as np
+import networkx as nx
+import condeltri as cdt
+
+from optiwindnet.mesh import (
+    _edges_and_hull_from_cdt,
+    A_graph,
+)
+from .helpers import tiny_wfn
 
 # disable Numba JIT for CI/test determinism if available
 os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
@@ -10,66 +20,26 @@ try:
 except Exception:
     pass
 
-import numpy as np
-import networkx as nx
-import condeltri as cdt
-
-from optiwindnet.mesh import (
-    make_planar_embedding,
-    _edges_and_hull_from_cdt,
-    A_graph,
-)
-from .helpers import tiny_wfn
-
-
 # ----------------------- tests -----------------------
 
 
 def test_make_planar_embedding_basic():
-    """
-    Minimal smoke test for make_planar_embedding:
-    - create a tiny wfn (non-optimized) and run make_planar_embedding on wfn.L,
-    - check returned types and a couple of essential attributes.
-    """
-    # tiny layout: 4 terminals + 1 root (root appended after terminals)
-    vc = np.array(
-        [
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 1.0],
-            [0.5, -1.0],  # root
-        ],
-        float,
-    )
-    turbinesC = vc[:4]
-    substationsC = vc[4:].reshape(1, 2)
 
-    # small border and one interior obstacle
-    border = np.array([[-1.0, -1.0], [2.0, -1.0], [2.0, 2.0], [-1.0, 2.0]])
-    obstacleC_ = [np.array([[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]])]
+    wfn = tiny_wfn()
 
-    wfn = tiny_wfn(turbinesC=turbinesC, substationsC=substationsC, borderC=border, obstacleC_=obstacleC_, optimize=False)
-    P, A = wfn.P, wfn.A
-
-    # Contractually we expect a PlanarEmbedding and an available-edges graph A
+    P = wfn.P
+    A = wfn.A
     assert isinstance(P, nx.PlanarEmbedding)
     assert isinstance(A, nx.Graph)
     assert A.number_of_nodes() > 0
     assert A.number_of_edges() > 0
 
-    # Basic keys that downstream code expects
+    # check basic keys in A
     for key in ("T", "R", "B", "VertexC", "hull"):
         assert key in A.graph
 
 
 def test_A_graph_all(monkeypatch):
-    """
-    Compact verification of A_graph behaviour:
-      - Delaunay-based path: edges with positive 'length' and no 'weight' when weightfun is None
-      - Complete-graph path: weightfun values stored under given attr (e.g. 'cost')
-      - Delaunay with weightfun: mesh exemption hook invoked once and 'weight' present
-    """
     # use the tiny default wfn (no optimize)
     wfn = tiny_wfn(optimize=False)
     L = wfn.L

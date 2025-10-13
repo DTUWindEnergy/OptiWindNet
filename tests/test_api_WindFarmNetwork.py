@@ -351,8 +351,6 @@ solver_mapping = {
     "ortools": ortools.SolverORTools,
     "cplex": cplex.SolverCplex,
     "gurobi": gurobi.SolverGurobi,
-    "cbc": pyomo.SolverPyomo,
-    "scip": pyomo.SolverPyomo,
     "highs": pyomo.SolverPyomo,
 }
 
