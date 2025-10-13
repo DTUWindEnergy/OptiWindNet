@@ -21,10 +21,7 @@ except Exception:
     pass
 
 # ----------------------- tests -----------------------
-
-
 def test_make_planar_embedding_basic():
-
     wfn = tiny_wfn()
 
     P = wfn.P
@@ -74,10 +71,6 @@ def test_A_graph_all(monkeypatch):
 
 
 def test_edges_and_hull_from_cdt_all():
-    """
-    Smoke test for _edges_and_hull_from_cdt: create a small CDT, extract edges and hull,
-    and assert non-empty integer hull ids.
-    """
     mesh = cdt.Triangulation(
         cdt.VertexInsertionOrder.AUTO,
         cdt.IntersectingConstraintEdges.NOT_ALLOWED,

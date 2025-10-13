@@ -351,7 +351,7 @@ solver_mapping = {
     "ortools": ortools.SolverORTools,
     "cplex": cplex.SolverCplex,
     "gurobi": gurobi.SolverGurobi,
-    "highs": pyomo.SolverPyomo,
+    "highs": pyomo.SolverPyomoAppsi,
 }
 
 @pytest.mark.parametrize("solver_name", list(solver_mapping.keys()) + ["unknown_solver"])
