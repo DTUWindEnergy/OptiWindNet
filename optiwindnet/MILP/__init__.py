@@ -52,14 +52,14 @@ def solver_factory(solver_name: str) -> Solver:
             from .gurobi import SolverGurobi
 
             return SolverGurobi()
-        case 'cbc' | 'scip' | 'highs':
+        case 'cbc' | 'scip':
             from .pyomo import SolverPyomo
 
             return SolverPyomo(solver_name)
-        #  case 'highs':
-        #      # Pyomo's appsi solvers
-        #      from .pyomo import SolverPyomo
-        #
-        #      return SolverPyomo(solver_name, prefix='appsi_')
+        case 'highs':
+            from .pyomo import SolverPyomoAppsi
+            from pyomo.contrib.appsi.solvers.highs import Highs
+
+            return SolverPyomoAppsi(solver_name, Highs)
         case _:
             raise ValueError(f'Unsupported solver: {solver_name}')
