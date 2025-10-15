@@ -19,9 +19,9 @@ from .interarraylib import L_from_site
 from .utils import make_handle
 
 _lggr = logging.getLogger(__name__)
-info = _lggr.info
+info, warn = _lggr.info, _lggr.warning
 
-__all__ = ('L_from_yaml', 'L_from_pbf', 'load_repository')
+__all__ = ('L_from_yaml', 'L_from_pbf', 'L_from_windIO', 'load_repository')
 
 
 _coord_sep = r',\s*|;\s*|\s{1,}|,|;'
@@ -424,6 +424,73 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     if plant_name is not None:
         L.graph['OSM_name'] = plant_name
 
+    return L
+
+
+def _yaml_include_constructor(loader, node):
+    filename = node.value
+    with open(filename, 'r') as f:
+        return yaml.load(f, Loader=type(loader))
+
+
+class IncludeLoader(yaml.SafeLoader):
+    def __init__(self, stream):
+        # Store the directory of the currently loaded YAML file
+        self._parent = Path(stream.name).parent
+        super().__init__(stream)
+        self.add_constructor('!include', IncludeLoader.include)
+
+    def include(self, node):
+        # Construct the full path of the file to include, relative to parent YAML
+        include_path = Path(self.construct_scalar(node))
+        if include_path.suffix not in ('.yml', '.yaml'):
+            warn('Ignoring YAML "!include" directive to unsupported file type (%s)', include_path)
+            return {}
+        if not include_path.is_absolute():
+            include_path = self._parent / include_path
+        with open(include_path, 'r') as f:
+            # When processing includes, use IncludeLoader to maintain correct directory context
+            return yaml.load(f, IncludeLoader)
+
+
+def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
+    """Import wind farm data from a windIO .yaml file.
+
+    Args:
+      filepath: path to windIO `.yaml` file to read.
+      handle: Short moniker for the site.
+
+    Returns:
+      Unconnected location geometry L.
+    """
+    if isinstance(filepath, str):
+        filepath = Path(filepath)
+    name = filepath.stem
+    system = yaml.load(filepath.open(), IncludeLoader)
+    coords = system['wind_farm']['layouts']['initial_layout']['coordinates']
+    terminalC = np.c_[coords['x'], coords['y']]
+    coords = system['wind_farm']['electrical_substations']['coordinates']
+    rootC = np.c_[coords['x'], coords['y']]
+    coords = system['site']['boundaries']['polygons'][0]
+    borderC = np.c_[coords['x'], coords['y']]
+
+    T = terminalC.shape[0]
+    R = rootC.shape[0]
+    if handle is None:
+        handle = make_handle(name)
+
+    L = L_from_site(
+        R=R,
+        T=T,
+        VertexC=np.vstack((terminalC, borderC, rootC)),
+        **(
+            {'border': np.arange(T, T + borderC.shape[0])}
+            if (borderC is not None and borderC.shape[0] >= 3)
+            else {}
+        ),
+        name=name,
+        handle=handle,
+    )
     return L
 
 

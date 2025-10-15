@@ -44,7 +44,7 @@ _optkey = dict(
     cplex=_common_options('mipgap', 'timelimit'),
     gurobi=_common_options('mipgap', 'timelimit'),
     cbc=_common_options('ratioGap', 'seconds'),
-    highs=_common_options('mip_rel_gap', 'time_limit'),
+    highs=_common_options('mip_gap', 'time_limit'),
     scip=_common_options('limits/gap', 'limits/time'),
 )
 # usage: _optname[solver_name].mipgap
@@ -140,7 +140,12 @@ class SolverPyomo(Solver):
             objective = result['Solver'][0]['Primal bound']
             bound = result['Solver'][0]['Dual bound']
         solution_info = SolutionInfo(
-            runtime=result['Solver'][0]['Wallclock time'],
+            # HiGHS is using Pyomo's v2 API, with a different way of reporting runtime
+            runtime=(
+                result['Timing info']['wall_time']
+                if self.name == 'highs'
+                else result['Solver'][0]['Wallclock time']
+            ),
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,
@@ -156,6 +161,98 @@ class SolverPyomo(Solver):
         # hack to prevent warning about the solver not reaching the desired mip_gap
         result.solver.status = pyo.SolverStatus.ok
         model.solutions.load_from(result)
+        if A is None:
+            A = self.A
+        S = topology_from_mip_sol(model=model)
+        S.graph['creator'] += self.name
+        S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
+        G = PathFinder(
+            G_from_S(S, A),
+            P,
+            A,
+            branched=model_options['topology'] is Topology.BRANCHED,
+        ).create_detours()
+        G.graph.update(self._make_graph_attributes())
+        return S, G
+
+    def topology_from_mip_sol(self):
+        return topology_from_mip_sol(model=self.model)
+
+
+class SolverPyomoAppsi(Solver):
+    """As of Pyomo v3.9.4, a new solver inverface (v3) is being introduced. HiGHS is the
+    only solver using v3 at that point."""
+
+    def __init__(self, name, solver_cls, **kwargs) -> None:
+        self.name = name
+        self.options = _default_options[name]
+        self.solver = solver_cls(**kwargs)
+
+    def set_problem(
+        self,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        capacity: int,
+        model_options: ModelOptions,
+        warmstart: nx.Graph | None = None,
+    ):
+        self.P, self.A, self.capacity = P, A, capacity
+        model, self.metadata = make_min_length_model(A, capacity, **model_options)
+        self.model, self.model_options = model, model_options
+        if warmstart is not None and self.solver.warm_start_capable():
+            warmup_model(model, warmstart)
+            self.solver.config.warmstart = True
+        else:
+            if warmstart is not None:
+                warn('Solver <%s> is not capable of warm-starting.', self.name)
+
+    def solve(
+        self,
+        time_limit: float,
+        mip_gap: float,
+        options: dict[str, Any] = {},
+        verbose: bool = False,
+    ) -> SolutionInfo:
+        try:
+            solver, name, model = self.solver, self.name, self.model
+        except AttributeError as exc:
+            exc.args += ('.set_problem() must be called before .solve()',)
+            raise
+        applied_options = (
+            self.options
+            | options
+            | {_optkey[name].time_limit: time_limit, _optkey[name].mip_gap: mip_gap}
+        )
+        for k, v in applied_options.items():
+            solver.config[k] = v
+        solver.config.load_solution = False
+        solver.config.stream_solver = verbose
+        info('>>> %s solver options <<<\n%s\n', self.name, solver.config)
+        result = solver.solve(model)
+        self.result = result
+        objective = result.best_feasible_objective
+        termination = result.termination_condition.name
+        if objective is None:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+            )
+        bound = result.best_objective_bound
+        solution_info = SolutionInfo(
+            runtime=result.wallclock_time,
+            bound=bound,
+            objective=objective,
+            relgap=1.0 - bound / objective,
+            termination=termination,
+        )
+        self.solution_info, self.applied_options = solution_info, applied_options
+        info('>>> Solution <<<\n%s\n', solution_info)
+        return solution_info
+
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        P, model, model_options = self.P, self.model, self.model_options
+        result = self.result
+        result.solution_loader.load_vars()
+        #  model.solutions.load_from(result)
         if A is None:
             A = self.A
         S = topology_from_mip_sol(model=model)

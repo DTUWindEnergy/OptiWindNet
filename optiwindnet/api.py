@@ -9,8 +9,6 @@ from matplotlib.axes import Axes
 import networkx as nx
 import numpy as np
 import shapely as shp
-import yaml
-import yaml_include
 
 from .api_utils import (
     buffer_border_obs,
@@ -23,7 +21,7 @@ from .api_utils import (
 )
 from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
 from .heuristics import CPEW, EW_presolver
-from .importer import L_from_pbf, L_from_site, L_from_yaml
+from .importer import L_from_pbf, L_from_site, L_from_yaml, L_from_windIO
 from .importer import load_repository as load_repository
 from .interarraylib import (
     G_from_S,
@@ -115,7 +113,6 @@ class WindFarmNetwork:
         L: nx.Graph | None = None,
         router: Router | None = None,
         verbose: bool = False,
-        **kwargs,
     ):
         """Initialize a wind farm electrical network.
 
@@ -133,7 +130,6 @@ class WindFarmNetwork:
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to `EWRouter`.
           buffer_dist: Buffer distance to dilate borders / erode obstacles. Defaults to 0.
-          **kwargs: Additional keyword arguments forwarded to network-construction helpers.
 
         Notes:
           * If both `L` and coordinates are provided, `L` takes precedence.
@@ -150,9 +146,6 @@ class WindFarmNetwork:
           wfn.optimize()
           print(wfn.cost(), wfn.length())
         """
-        # keep coord-related kwargs so rebuilds are consistent
-        self._coord_kwargs = dict(kwargs)
-
         # simple fields via setters (for validation/normalization)
         self.name = name
         'Instance name.'
@@ -192,7 +185,6 @@ class WindFarmNetwork:
                 name=name,
                 handle=handle,
                 VertexC=np.vstack((turbinesC, borderC, *obstacleC_, substationsC)),
-                **kwargs,
             )
         else:
             raise TypeError(
@@ -364,41 +356,7 @@ class WindFarmNetwork:
     @classmethod
     def from_windIO(cls, filepath: Path | str, **kwargs):
         """Create a WindFarmNetwork instance from WindIO yaml file."""
-        fpath = Path(filepath)
-
-        yaml.add_constructor('!include', yaml_include.Constructor(base_dir='data'))
-
-        with open(fpath, 'r') as f:
-            system = yaml.full_load(f)
-
-        # Parse coordinate data
-        coords = system['wind_farm']['layouts']['initial_layout']['coordinates']
-        terminalC = np.c_[coords['x'], coords['y']]
-        coords = system['wind_farm']['electrical_substations']['coordinates']
-        rootC = np.c_[coords['x'], coords['y']]
-        coords = system['site']['boundaries']['polygons'][0]
-        borderC = np.c_[coords['x'], coords['y']]
-
-        T = terminalC.shape[0]
-        R = rootC.shape[0]
-        name_tokens = fpath.stem.split('_')
-
-        # Construct L
-        L = L_from_site(
-            R=R,
-            T=T,
-            VertexC=np.vstack((terminalC, borderC, rootC)),
-            **(
-                {'border': np.arange(T, T + borderC.shape[0])}
-                if (borderC is not None and borderC.shape[0] >= 3)
-                else {}
-            ),
-            name=' '.join(name_tokens),
-            handle=f'{name_tokens[0].lower()}_{name_tokens[1][:4].lower()}_{name_tokens[2][:3].lower()}',
-            **kwargs,
-        )
-
-        return cls(L=L, **kwargs)
+        return cls(L=L_from_windIO(filepath), **kwargs)
 
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
@@ -760,7 +718,7 @@ class HGSRouter(Router):
 
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A, branched=False).create_detours()
 
         assign_cables(G, cables)
 
