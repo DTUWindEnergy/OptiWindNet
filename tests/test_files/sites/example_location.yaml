@@ -1,0 +1,52 @@
+
+# coordinate format can be "planar" or "latlon"
+#   - for "latlon" examples, see `optiwindnet/data/*.yaml`
+#   - this field is optional, default is "latlon"
+#   - coordinates are converted to floats, so floats may be used as well
+COORDINATE_FORMAT: planar
+
+# extents define a polygon:
+#   - do not repeat the initial vertex at the end
+#   - line breaks are optional
+EXTENTS: [
+  [1951, 200],
+  [1951, 1383],
+  [386, 1383],
+  [650, 708],
+  [624, 678],
+  [4, 1036],
+  [4, 3],
+  [1152, 3],
+  [917, 819],
+  [957, 854]
+]
+
+# obstacles is optional and must be a list of polygons (even if 1 obstacle)
+OBSTACLES: [
+  [  # first obstacle
+    [1540, 920],
+    [1600, 940],
+    [1600, 1150],
+    [1400, 1200],
+  ],
+  # [second obstacle]
+]
+
+SUBSTATIONS: [
+  [696, 1063],
+]
+
+TURBINES: [
+  [1940, 279],
+  [1920, 703],
+  [1475, 696],
+  [1839, 1250],
+  [1277, 1296],
+  [442, 1359],
+  [737, 435],
+  [1060, 26],
+  [522, 176],
+  [87, 35],
+  [184, 417],
+  [71, 878],
+]
