@@ -6,6 +6,7 @@ import math
 from multiprocessing import Pool
 import random
 from typing import Sequence
+from collections import defaultdict
 
 import networkx as nx
 import numpy as np
@@ -180,25 +181,9 @@ def iterative_hgs_cvrp(
     Returns:
       Solution topology S
     """
-
-    P_A = A.graph['planar']
     diagonals = A.graph['diagonals']
-    crossings = []
-    for i in range(max_retries + 1):
-        for uv, st in crossings:
-            if i == 1:
-                # just copy once, on the first re-run (not to change the given A)
-                A = A.copy()
-                P_A = P_A.copy()
-                diagonals = diagonals.copy()
-                A.graph['planar'] = P_A
-                A.graph['diagonals'] = diagonals
-            # remove the longest edge that takes part in crossing
-            w, x = uv if A.edges[uv]['length'] > A.edges[st]['length'] else st
-            wx = (w, x) if w < x else (x, w)
-            if wx in diagonals:
-                del diagonals[wx]
-            A.remove_edge(w, x)
+    i = 0
+    while True:
         # solve
         S = hgs_cvrp(
             A,
@@ -214,8 +199,44 @@ def iterative_hgs_cvrp(
         # TODO: accumulate solution_time throughout the iterations
         #       (makes sense to add a new field)
         crossings = S.graph.get('outstanding_crossings', [])
-        if not crossings:
+        if not crossings or i == max_retries:
             break
+        i += 1
+        # prepare A for retry
+        if i == 1:
+            # just copy once, on the first retry (not to change the given A)
+            A = A.copy()
+            diagonals = diagonals.copy()
+            A.graph['diagonals'] = diagonals
+        crossing_counterparts = defaultdict(list)
+        for uv, st in crossings:
+            # enabling the identification of a link crossing multiple links
+            crossing_counterparts[uv].append(st)
+            crossing_counterparts[st].append(uv)
+        # sorting allows for removing first the links that have the most crossings
+        for uv in sorted(
+            crossing_counterparts,
+            key=lambda k: len(crossing_counterparts[k]),
+            reverse=True,
+        ):
+            counterparts = crossing_counterparts[uv]
+            if counterparts:
+                # when uv crosses a single link st and st is the longest, uv becomes st
+                if (
+                    len(counterparts) == 1
+                    and A.edges[counterparts[0]]['length'] > A.edges[uv]['length']
+                ):
+                    st = counterparts[0]
+                    counterparts = crossing_counterparts[st]
+                    # st is after uv in the sorted list -> remove uv from its counterparts
+                    counterparts.remove(uv)
+                    uv = st
+                # remove uv from the counterparts list of uv's counterparts
+                for st in counterparts:
+                    crossing_counterparts[st].remove(uv)
+                if uv in diagonals:
+                    del diagonals[uv]
+                A.remove_edge(*uv)
     if i > 0:
         S.graph['retries'] = i
         if crossings:
