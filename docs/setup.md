@@ -4,7 +4,7 @@
 
 *OptiWindNet* has been tested on Windows 10/11 and on Linux systems, but should run on MacOSX as well.
 
-A recent Python version (3.10+) is required to run *OptiWindNet*, and the use of a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
+Python version 3.11 or 3.12 is required to run *OptiWindNet*. The dependency *pony* is not compatible with Python 3.13+, which only prevents the use of databases. Running *OptiWindNet* within a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
 
 * [Python](https://www.python.org/downloads/), which provides: `venv` virtual environment creator and `pip` package manager;
 * or [Miniforge](https://conda-forge.org/download/), which provides: `conda` environment and package manager.
