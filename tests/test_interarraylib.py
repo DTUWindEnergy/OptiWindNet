@@ -26,6 +26,9 @@ from optiwindnet.interarraylib import (
     terse_links_from_S,
     update_lengths,
     pathdist,
+    count_diagonals,
+    as_hooked_to_head,
+    as_hooked_to_nearest,
 )
 
 from .helpers import assert_graph_equal, tiny_wfn
@@ -50,6 +53,18 @@ def test_assign_cables():
     assert G.graph['cables'] == cables1
     assert G.graph['currency'] == '€'
     assert G.graph['capacity'] == 4
+
+    wfn2 = tiny_wfn(cables=1)
+    G2 = wfn2.G
+
+    # 1) check defaults
+    cables2 = [(1, 0)]
+    assign_cables(G2, cables2)
+
+    # graph-level checks
+    assert G2.graph['cables'] == cables2
+    #assert G2.graph['currency'] == '€'
+    assert G2.graph['capacity'] == 1
 
     def compare_cable_and_cost(edges_expected, edges_actual):
         # Convert EdgeDataView to a list
@@ -687,3 +702,16 @@ def test_update_lengths():
         assert actual_length == pytest.approx(expected), (
             f'Edge {(u, v)} length {actual_length} != expected {expected}'
         )
+
+
+def test_count_diagonals():
+    wfn = tiny_wfn()
+    diagonals = count_diagonals(wfn.S, wfn.A)
+    assert diagonals == 0
+    
+    
+def test_as_hooked_to_head():
+    pass
+    
+def test_as_hooked_to_nearest():
+    pass
