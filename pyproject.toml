@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-    "setuptools>=60",
-    "setuptools-scm>=8.0"]
+    "setuptools>=80",
+    "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -92,7 +92,7 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["optiwindnet", "optiwindnet/**/*"]
+include = ["optiwindnet*"]
 # exclude = []
 
 [tool.setuptools.package-data]
