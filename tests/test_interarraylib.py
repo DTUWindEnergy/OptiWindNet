@@ -711,7 +711,24 @@ def test_count_diagonals():
     
     
 def test_as_hooked_to_head():
-    pass
+    wfn1 = tiny_wfn()
+    G1 = as_hooked_to_head(wfn1.S, wfn1.A.graph['d2roots'])
+    expected = [(-1, 0)]
+    assert G1.graph['tentative'] == expected
+
+    wfn2 = tiny_wfn(cables=1)
+    G2 = as_hooked_to_head(wfn2.S, wfn2.A.graph['d2roots'])
+    expected = [(-1, 0), (-1, 1), (-1, 2), (-1, 3)]
+    assert G2.graph['tentative'] == expected
+    
     
 def test_as_hooked_to_nearest():
-    pass
+    wfn1 = tiny_wfn()
+    G1 = as_hooked_to_nearest(wfn1.S, wfn1.A.graph['d2roots'])
+    expected = [(-1, 0)]
+    assert G1.graph['tentative'] == expected
+    
+    wfn2 = tiny_wfn(cables=1)
+    G2 = as_hooked_to_nearest(wfn2.S, wfn2.A.graph['d2roots'])
+    expected = [(-1, 0), (-1, 1), (-1, 2), (-1, 3)]
+    assert G2.graph['tentative'] == expected
