@@ -1,3 +1,11 @@
+# v0.1.2
+
+[Commit history since v0.1.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.1...v0.1.2)
+
+Minor version bump to enable conda-forge recipe to work.
+
+- include tests in source distribution (sdist tarball)
+- update docs to state Python 3.11 and 3.12 are recommended
 
 # v0.1.1
 
