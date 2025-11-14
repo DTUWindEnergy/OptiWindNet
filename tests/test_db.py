@@ -49,6 +49,7 @@ def test_open_database(tmp_path):
 
 def test_L_from_nodeset(tmp_path):
     dbfile = tmp_path / 'db_test.sqlite'
+    
     # open and create db if not there
     db = open_database(dbfile, create_db=True)
 

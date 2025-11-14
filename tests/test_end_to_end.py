@@ -26,7 +26,6 @@ GEN_END2END_SCRIPT = paths.GEN_END2END_SCRIPT
 #
 
 
-
 def pytest_generate_tests(metafunc):
     # Keep existing dynamic parametrization but use the expected_end_to_end fixture path
     if "key" not in metafunc.fixturenames:

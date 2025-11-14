@@ -25,7 +25,6 @@ from optiwindnet.interarraylib import (
     site_fingerprint,
     terse_links_from_S,
     update_lengths,
-    pathdist,
     count_diagonals,
     as_hooked_to_head,
     as_hooked_to_nearest,
