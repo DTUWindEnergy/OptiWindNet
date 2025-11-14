@@ -136,16 +136,13 @@ class SolverPyomo(Solver):
         if self.name != 'scip':
             objective = result['Problem'][0]['Upper bound']
             bound = result['Problem'][0]['Lower bound']
+            runtime = result['Solver'][0]['Wallclock time']
         else:
             objective = result['Solver'][0]['Primal bound']
             bound = result['Solver'][0]['Dual bound']
+            runtime = result['Solver'][0]['Time']
         solution_info = SolutionInfo(
-            # HiGHS is using Pyomo's v2 API, with a different way of reporting runtime
-            runtime=(
-                result['Timing info']['wall_time']
-                if self.name == 'highs'
-                else result['Solver'][0]['Wallclock time']
-            ),
+            runtime=runtime,
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,
