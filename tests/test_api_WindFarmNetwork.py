@@ -174,6 +174,10 @@ def test_plots():
     )
 
     assert hasattr(ax, 'figure')
+    
+    with pytest.raises(AttributeError):
+        plotting.compare([wfn.plot(), ax])
+
     plotting.compare([wfn.G, wfn.G])
 
 
