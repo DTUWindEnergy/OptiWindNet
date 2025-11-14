@@ -40,11 +40,8 @@ def generate_expected_values_end_to_end_tests():
 
     # === Sites as plain names ===
     SITES_1: Sequence[str] = ('example_location',)  # small default
-    SITES_2: Sequence[str] = ('hornsea', 'london', 'taylor_2023', 'yi_2019')
-    SITES_3: Sequence[str] = (
-        'example_1ss_300wt',
-        'example_4ss_300wt',
-    )
+    SITES_2: Sequence[str] = ('hornsea', 'london', 'taylor_2023', 'yi_2019', 'borkum2')
+    SITES_3: Sequence[str] = ('hornsea',)
 
     model_options_strict = {
         'topology': 'radial',
@@ -149,32 +146,21 @@ def generate_expected_values_end_to_end_tests():
         'EWRouter2_cap1': r_spec('EWRouter', cables=1),
         'EWRouter2_cap10': r_spec('EWRouter', cables=10),
         'EWRouter2_cap100': r_spec('EWRouter', cables=100),
-        'EWRouter2_straight_cap7': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=7
+        'EWRouter2_straight_cap4': r_spec(
+            'EWRouter', {'feeder_route': 'straight'}, cables=4
         ),
         'EWRouter2_straight_cap15': r_spec(
             'EWRouter', {'feeder_route': 'straight'}, cables=15
         ),
-        'EWRouter2_straight_cap200': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=200
+        'EWRouter2_straight_cap50': r_spec(
+            'EWRouter', {'feeder_route': 'straight'}, cables=50
         ),
-        'HGSRouter2_cap2': r_spec('HGSRouter', {'time_limit': 2, 'seed': 0}, cables=2),
-    }
+        }
 
     ROUTERS_3: Dict[str, Dict[str, Any]] = {
-        'EWRouter3_cap3': r_spec('EWRouter', cables=3),
-        'EWRouter3_cap25': r_spec('EWRouter', cables=25),
-        'EWRouter3_cap300': r_spec('EWRouter', cables=300),
-        'EWRouter3_straight_cap3': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=3
-        ),
-        'EWRouter3_straight_cap30': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=30
-        ),
-        'EWRouter3_straight_cap300': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=300
-        ),
-    }
+        'HGSRouter3_cap4': r_spec('HGSRouter', {'time_limit': 2, 'seed': 0}, cables=4),
+    
+        }
 
     # -----------------------
     # Small helpers

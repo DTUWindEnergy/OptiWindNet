@@ -5,8 +5,10 @@ from typing import Dict, Any, Sequence
 
 import pytest
 import dill
-from optiwindnet.api import WindFarmNetwork
+from optiwindnet.api import WindFarmNetwork, EWRouter, MILPRouter
+from .helpers import tiny_wfn
 from optiwindnet.MILP import ModelOptions
+from optiwindnet.importer import load_repository
 from .helpers import assert_graph_equal
 from . import paths
 
@@ -16,20 +18,12 @@ TEST_FILES_DIR = paths.TEST_FILES_DIR
 SITES_DIR = paths.SITES_DIR
 GEN_UNITS_SCRIPT = paths.GEN_UNITS_SCRIPT
 GEN_END2END_SCRIPT = paths.GEN_END2END_SCRIPT
+
 # Note: use fixtures provided by tests/conftest.py:
 # - expected_end_to_end (session-scoped)
 # - router_factory (factory to build routers)
 # - locations (repository-backed sites)
 #
-# This removes duplicated loader/constructor code.
-
-def _make_model_options_from_spec(spec: Dict[str, Any]) -> ModelOptions:
-    return ModelOptions(**spec)
-
-
-def _make_router_from_spec_via_factory(spec: Dict[str, Any], router_factory):
-    # router_factory already expands ModelOptions as needed; use it.
-    return router_factory(spec)
 
 
 def pytest_generate_tests(metafunc):
@@ -75,7 +69,7 @@ def expected_blob(expected_end_to_end):
 
 def test_expected_router_graphs_match(expected_blob, key, router_factory, locations):
     graphs = expected_blob["RouterGraphs"]
-    sites: Sequence[str] = tuple(expected_blob["Sites"])
+    #sites: Sequence[str] = tuple(expected_blob["Sites"])
     routers = expected_blob["Routers"]
 
     case_meta = next(c for c in expected_blob["Cases"] if c["key"] == key)
@@ -101,9 +95,39 @@ def test_expected_router_graphs_match(expected_blob, key, router_factory, locati
     else:
         wfn.optimize(router=router)
 
-    if site_name == 'example_1ss_300wt' or site_name == 'example_4ss_300wt':
-        ignored_keys = {"solution_time", "runtime", "pool_count", "norm_scale"}
-    else:
-        ignored_keys = {"solution_time", "runtime", "pool_count"}
-
+    ignored_keys = {"solution_time", "runtime", "pool_count"}
     assert_graph_equal(wfn.G, expected_G, ignored_graph_keys=ignored_keys, verbose=False)
+
+
+def test_ortools_with_warmstart():
+    wfn = tiny_wfn()
+    wfn.optimize(router=EWRouter())
+    router_ortools = MILPRouter(solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True)
+    terse_links = wfn.optimize(router=router_ortools)
+    expected = [-1,  0,  1,  2]
+    assert list(terse_links) == expected
+    
+    # defected warmstart
+    wfn.G.add_edge(-1, 11)
+    router_ortools = MILPRouter(solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True)
+    terse_links = wfn.optimize(router=router_ortools)
+    expected = [-1,  0,  1,  2]
+    assert list(terse_links) == expected
+
+    # --- with detours
+    wfn = tiny_wfn(cables=1)
+    wfn.optimize(router=EWRouter())
+    router_ortools = MILPRouter(solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True)
+    terse_links = wfn.optimize(router=router_ortools)
+    expected = [-1,  -1, -1, -1]
+    assert list(terse_links) == expected
+
+    # defected warmstart
+    wfn.G.add_edge(0, 12)
+    wfn.G.add_edge(12, 13)
+    wfn.G.remove_edge(0, -1)
+    router_ortools = MILPRouter(solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True)
+    terse_links = wfn.optimize(router=router_ortools)
+    expected = [-1,  -1, -1, -1]
+    assert list(terse_links) == expected
+    

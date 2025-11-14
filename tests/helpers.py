@@ -141,6 +141,7 @@ def tiny_wfn(
     obstacleC_=None,
     cables=[(4, 10)],
     optimize=True,
+    router=None,
 ):
     """
     Build a compact WindFarmNetwork and return it.
@@ -179,10 +180,15 @@ def tiny_wfn(
         substationsC=substationsC,
         borderC=borderC,
         obstacleC_=obstacleC_,
+        name="tiny_wfn",
+        handle="tiny",
     )
 
     if optimize:
         # run solver only when requested by the test to avoid heavy/fragile work
-        wfn.optimize()
+        if router:
+            wfn.optimize(router=router)
+        else:
+            wfn.optimize()
 
     return wfn
