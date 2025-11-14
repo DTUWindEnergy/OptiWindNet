@@ -33,7 +33,7 @@ def P_A_toy():
     ['solver_name', 'is_available'],
     [
         ('ortools', lambda: is_package_installed('ortools')),
-        ('gurobi', lambda: is_package_installed('gurobi')),
+        ('gurobi', lambda: is_package_installed('gurobipy')),
         ('cplex', lambda: is_package_installed('cplex')),
         ('scip', lambda: shutil.which('scip')),
         ('cbc', lambda: shutil.which('cbc')),
