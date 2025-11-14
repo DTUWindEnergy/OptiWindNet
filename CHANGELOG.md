@@ -1,3 +1,14 @@
+# v0.1.3
+
+[Commit history since v0.1.2](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.2...v0.1.3)
+
+Another minor version bump to enable conda-forge recipe to work.
+
+- improve tests coverage
+- restructure tests to skip unavailable MILP solvers
+- make db.modelv2 handle only schema definition
+- get correct runtime for MILP solver SCIP
+
 # v0.1.2
 
 [Commit history since v0.1.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.1...v0.1.2)
