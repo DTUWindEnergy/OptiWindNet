@@ -22,7 +22,7 @@ _terse_toy_farm_5 = np.array([2, -1, 1, 2, -1, -1, 3, 4, -1, 5, 8, 8])
 _CAPACITY = 5
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def P_A_toy():
     L = toyfarm()
     P, A = make_planar_embedding(L)
