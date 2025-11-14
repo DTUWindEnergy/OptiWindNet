@@ -7,11 +7,9 @@ import optiwindnet.api_utils as U
 from optiwindnet.api import (
     EWRouter,
     HGSRouter,
-    MILPRouter,
     WindFarmNetwork,
 )
 import optiwindnet.plotting as plotting
-from optiwindnet.MILP import solver_factory, pyomo, cplex, gurobi, ortools
 from .helpers import tiny_wfn
 
 
@@ -19,9 +17,11 @@ from .helpers import tiny_wfn
 # WindFarmNetwork core
 # =====================
 
+
 def test_wfn_fails_without_coordinates_or_L():
     with pytest.raises(TypeError):
         WindFarmNetwork(cables=7)
+
 
 def test_optimize_updates_graphs_smoke():
     wfn = tiny_wfn()
@@ -29,6 +29,7 @@ def test_optimize_updates_graphs_smoke():
     assert wfn.S is not None
     assert wfn.G is not None
     assert terse.shape[0] == wfn.S.graph['T']
+
 
 def test_wfn_warns_when_L_and_coordinates_given(caplog):
     w1 = tiny_wfn()
@@ -130,20 +131,21 @@ def test_from_pbf_invalid_path():
 
 
 def test_terse_links_output():
-    terse_expected = np.array([-1,  0,  1,  2])
+    terse_expected = np.array([-1, 0, 1, 2])
     wfn = tiny_wfn()
     terse = wfn.terse_links()
     assert terse.shape[0] == wfn.S.graph['T']
     assert np.array_equal(wfn.terse_links(), terse_expected)
 
+
 def test_update_from_terse_links():
     wfn = tiny_wfn()
     terse1 = wfn.terse_links()
-    terse = np.array([1,  2,  -1,  0])
+    terse = np.array([1, 2, -1, 0])
     wfn.update_from_terse_links(terse)
     terse2 = wfn.terse_links()
-    assert np.array_equal(terse1, np.array([-1,  0,  1,  2]))
-    assert np.array_equal(terse2, np.array([1,  2,  -1,  0]))
+    assert np.array_equal(terse1, np.array([-1, 0, 1, 2]))
+    assert np.array_equal(terse2, np.array([1, 2, -1, 0]))
 
 
 def test_map_detour_vertex_empty_if_no_detours_smoke():
@@ -174,7 +176,7 @@ def test_plots():
     )
 
     assert hasattr(ax, 'figure')
-    
+
     with pytest.raises(AttributeError):
         plotting.compare([wfn.plot(), ax])
 
@@ -189,41 +191,43 @@ def test_get_network_returns_array_smoke():
     assert data.ndim == 1  # structured 1-D array (rows)
 
     # expected structured dtype and field names
-    expected_fields = ("src", "tgt", "length", "load", "cable")
+    expected_fields = ('src', 'tgt', 'length', 'load', 'cable')
     assert tuple(data.dtype.names) == expected_fields
 
     # element types
-    assert np.issubdtype(data["src"].dtype, np.integer)
-    assert np.issubdtype(data["tgt"].dtype, np.integer)
-    assert np.issubdtype(data["length"].dtype, np.floating)
-    assert np.issubdtype(data["load"].dtype, np.floating)
-    assert np.issubdtype(data["cable"].dtype, np.integer)
+    assert np.issubdtype(data['src'].dtype, np.integer)
+    assert np.issubdtype(data['tgt'].dtype, np.integer)
+    assert np.issubdtype(data['length'].dtype, np.floating)
+    assert np.issubdtype(data['load'].dtype, np.floating)
+    assert np.issubdtype(data['cable'].dtype, np.integer)
 
     # value range sanity checks
-    assert np.all(data["length"] >= 0.0)      # non-negative lengths
-    assert np.all(data["load"] >= 0.0)        # loads shouldn't be negative
+    assert np.all(data['length'] >= 0.0)  # non-negative lengths
+    assert np.all(data['load'] >= 0.0)  # loads shouldn't be negative
     # cable indices must be valid indices into wfn.cables
-    n_cables = len(wfn.cables) if hasattr(wfn, "cables") else 0
-    assert np.all((data["cable"] >= 0) & (data["cable"] < max(1, n_cables)))
+    n_cables = len(wfn.cables) if hasattr(wfn, 'cables') else 0
+    assert np.all((data['cable'] >= 0) & (data['cable'] < max(1, n_cables)))
 
     # consistency with graph edges: every (src,tgt) should exist in wfn.G (undirected)
     edges_in_G = set(tuple(sorted(e)) for e in wfn.G.edges())
     for row in data:
-        pair = tuple(sorted((int(row["src"]), int(row["tgt"]))))
-        assert pair in edges_in_G, f"row {(row['src'], row['tgt'])} not present in wfn.G"
+        pair = tuple(sorted((int(row['src']), int(row['tgt']))))
+        assert pair in edges_in_G, (
+            f'row {(row["src"], row["tgt"])} not present in wfn.G'
+        )
 
 
 def test_gradient():
     # build an optimized tiny network so wfn.S exists and gradients are meaningful
     wfn = tiny_wfn(optimize=True)
 
-    g_wt_L, g_ss_L = wfn.gradient(gradient_type="length")
-    g_wt_C, g_ss_C = wfn.gradient(gradient_type="cost")
+    g_wt_L, g_ss_L = wfn.gradient(gradient_type='length')
+    g_wt_C, g_ss_C = wfn.gradient(gradient_type='cost')
 
-    assert g_wt_L.shape[0] == wfn.S.graph["T"]
-    assert g_wt_C.shape[0] == wfn.S.graph["T"]
-    assert g_ss_L.shape[0] == wfn.S.graph["R"]
-    assert g_ss_C.shape[0] == wfn.S.graph["R"]
+    assert g_wt_L.shape[0] == wfn.S.graph['T']
+    assert g_wt_C.shape[0] == wfn.S.graph['T']
+    assert g_ss_L.shape[0] == wfn.S.graph['R']
+    assert g_ss_C.shape[0] == wfn.S.graph['R']
 
     # expected (reference) arrays from previous golden values
     exp_wt_L = np.array(
@@ -348,28 +352,6 @@ def test_S_and_G_raise_before_optimize():
         _ = wfn.G
 
 
-# ==================================
-# Routers: smoke & minimal coverage
-# ==================================
-solver_mapping = {
-    "ortools": ortools.SolverORTools,
-    "cplex": cplex.SolverCplex,
-    "gurobi": gurobi.SolverGurobi,
-    "highs": pyomo.SolverPyomoAppsi,
-}
-
-@pytest.mark.parametrize("solver_name", list(solver_mapping.keys()) + ["unknown_solver"])
-def test_solver_factory_returns_expected_solver(solver_name):
-    if solver_name == "unknown_solver":
-        with pytest.raises(ValueError):
-            solver_factory(solver_name)
-    else:
-        s = solver_factory(solver_name)
-        assert s is not None
-        expected_class = solver_mapping[solver_name]
-        assert isinstance(s, expected_class)
-
-
 @pytest.mark.parametrize(
     'router',
     [
@@ -377,21 +359,18 @@ def test_solver_factory_returns_expected_solver(solver_name):
         EWRouter(feeder_route='straight'),
         HGSRouter(time_limit=0.5, seed=0),
         HGSRouter(time_limit=0.5, feeder_limit=1, max_retries=3, balanced=True, seed=0),
-        MILPRouter(solver_name='ortools', time_limit=1, mip_gap=0.005),
-        MILPRouter(solver_name='gurobi', time_limit=1, mip_gap=0.005),
-        MILPRouter(solver_name='cplex', time_limit=1, mip_gap=0.005),
-        MILPRouter(solver_name='highs', time_limit=1, mip_gap=0.005),
     ],
 )
-def test_wfn_all_routers_smoke(router):
+def test_wfn_inexact_routers_smoke(router):
     wfn = tiny_wfn()
-    terse = wfn.optimize()
+    terse = wfn.optimize(router=router)
     assert terse.shape[0] == wfn.S.graph['T']
 
 
 # ================#
 # api_utils tests #
 # ================#
+
 
 def test_expand_polygon_safely_warns_for_nonconvex_large_buffer(caplog):
     poly = Polygon(
@@ -559,4 +538,7 @@ def test_buffer_border_obs_with_border_positive_shrinks_obstacles():
     wfn = tiny_wfn()
     assert 'obstacles' in wfn.L.graph and wfn.L.graph['border'] is not None
     wfn.add_buffer(buffer_dist=5.0)
-    assert isinstance(wfn.L.graph['obstacles'], list) and len(wfn.L.graph['obstacles']) == 0
+    assert (
+        isinstance(wfn.L.graph['obstacles'], list)
+        and len(wfn.L.graph['obstacles']) == 0
+    )
