@@ -1,20 +1,13 @@
 import pytest
 import numpy as np
 import shutil
-import importlib.metadata
 
 from optiwindnet.synthetic import toyfarm
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import solver_factory, ModelOptions
 from optiwindnet.interarraylib import terse_links_from_S
 
-
-def is_package_installed(package_name):
-    try:
-        importlib.metadata.version(package_name)
-        return True
-    except importlib.metadata.PackageNotFoundError:
-        return False
+from .helpers import is_package_installed
 
 
 # topology in terse links for toy_farm at capacity=5

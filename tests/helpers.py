@@ -1,8 +1,18 @@
 import copy
+import importlib.metadata
 from typing import Iterable, Optional
 import numpy as np
 import networkx as nx
 from optiwindnet.api import WindFarmNetwork
+
+
+def is_package_installed(package_name):
+    try:
+        importlib.metadata.version(package_name)
+        return True
+    except importlib.metadata.PackageNotFoundError:
+        return False
+
 
 def assert_graph_equal(
     G1: nx.Graph,
@@ -22,11 +32,12 @@ def assert_graph_equal(
       or top-level keys like "runtime". Dotted paths are removed from both graphs
       before comparison.
     """
+
     # --- helpers ----------------------------------------------------------------
     def _pop_nested(d: dict, path: str) -> None:
         """Remove a nested key described by a dotted path from dict d (in-place)."""
         cur = d
-        parts = path.split(".")
+        parts = path.split('.')
         for p in parts[:-1]:
             cur = cur.get(p)
             if not isinstance(cur, dict):
@@ -45,7 +56,11 @@ def assert_graph_equal(
 
     def _preview(seq):
         s = sorted(seq)
-        return s if verbose or len(s) <= max_show else s[:max_show] + [f"...(+{len(s)-max_show} more)"]
+        return (
+            s
+            if verbose or len(s) <= max_show
+            else s[:max_show] + [f'...(+{len(s) - max_show} more)']
+        )
 
     def _eq(a, b) -> bool:
         """Tolerant equality for scalars, arrays, lists, dicts."""
@@ -56,7 +71,7 @@ def assert_graph_equal(
             return all(_eq(a[k], b[k]) for k in a.keys())
         # numpy arrays
         if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
-            if a.dtype.kind == "f" or b.dtype.kind == "f":
+            if a.dtype.kind == 'f' or b.dtype.kind == 'f':
                 return np.allclose(a, b, rtol=rtol, atol=atol, equal_nan=True)
             return np.array_equal(a, b)
         # sequences
@@ -68,18 +83,22 @@ def assert_graph_equal(
         if isinstance(a, (float, np.floating)) and isinstance(b, (float, np.floating)):
             return np.isclose(float(a), float(b), rtol=rtol, atol=atol, equal_nan=True)
         # ints (exclude bools)
-        if (isinstance(a, (int, np.integer)) and not isinstance(a, (bool, np.bool_)) and
-            isinstance(b, (int, np.integer)) and not isinstance(b, (bool, np.bool_))):
+        if (
+            isinstance(a, (int, np.integer))
+            and not isinstance(a, (bool, np.bool_))
+            and isinstance(b, (int, np.integer))
+            and not isinstance(b, (bool, np.bool_))
+        ):
             return int(a) == int(b)
         return a == b
 
     # --- prepare ignored paths --------------------------------------------------
     default_ignored = {
-        "bound",
-        "relgap",
-        "solver_details",
-        "method_options.fun_fingerprint.funfile",
-        "method_options.fun_fingerprint.funhash",
+        'bound',
+        'relgap',
+        'solver_details',
+        'method_options.fun_fingerprint.funfile',
+        'method_options.fun_fingerprint.funhash',
     }
     ignored_all = set(default_ignored)
     if ignored_graph_keys:
@@ -94,8 +113,8 @@ def assert_graph_equal(
     if nodes1 != nodes2:
         only1, only2 = nodes1 - nodes2, nodes2 - nodes1
         msg = (
-            f"Node sets differ.\nOnly in G1 ({len(only1)}): {_preview(only1)}\n"
-            f"Only in G2 ({len(only2)}): {_preview(only2)}"
+            f'Node sets differ.\nOnly in G1 ({len(only1)}): {_preview(only1)}\n'
+            f'Only in G2 ({len(only2)}): {_preview(only2)}'
         )
         raise AssertionError(msg)
 
@@ -104,34 +123,42 @@ def assert_graph_equal(
     if e1 != e2:
         only1, only2 = e1 - e2, e2 - e1
         msg = (
-            f"Edge sets differ.\nOnly in G1 ({len(only1)}): {_preview(only1)}\n"
-            f"Only in G2 ({len(only2)}): {_preview(only2)}"
+            f'Edge sets differ.\nOnly in G1 ({len(only1)}): {_preview(only1)}\n'
+            f'Only in G2 ({len(only2)}): {_preview(only2)}'
         )
         raise AssertionError(msg)
 
     # --- compare node attributes -------------------------------------------------
     for n in sorted(G1c.nodes):
-        a1 = dict(G1c.nodes[n]); a1.pop("label", None)
-        a2 = dict(G2c.nodes[n]); a2.pop("label", None)
+        a1 = dict(G1c.nodes[n])
+        a1.pop('label', None)
+        a2 = dict(G2c.nodes[n])
+        a2.pop('label', None)
         if a1.keys() != a2.keys():
             diff = sorted(a1.keys() ^ a2.keys())
-            raise AssertionError(f"Node {n} attribute keys differ: {diff}")
+            raise AssertionError(f'Node {n} attribute keys differ: {diff}')
         for k in a1:
             if not _eq(a1[k], a2[k]):
-                raise AssertionError(f"Node {n} attribute '{k}' differs: {a1[k]!r} != {a2[k]!r}")
+                raise AssertionError(
+                    f"Node {n} attribute '{k}' differs: {a1[k]!r} != {a2[k]!r}"
+                )
 
     # --- compare graph-level attributes ----------------------------------------
     # After removing nested fields above, also ignore the top-level keys referenced
     # by any dotted ignore paths (e.g. "method_options" if present in ignored_all)
-    ignore_top = {p.split(".", 1)[0] for p in ignored_all}
+    ignore_top = {p.split('.', 1)[0] for p in ignored_all}
     gkeys1 = set(G1c.graph.keys()) - ignore_top
     gkeys2 = set(G2c.graph.keys()) - ignore_top
     if gkeys1 != gkeys2:
         diff = sorted(gkeys1 ^ gkeys2)
-        raise AssertionError(f"Graph keys differ (ignoring {sorted(ignore_top)}): {diff}")
+        raise AssertionError(
+            f'Graph keys differ (ignoring {sorted(ignore_top)}): {diff}'
+        )
     for k in sorted(gkeys1):
         if not _eq(G1c.graph[k], G2c.graph[k]):
-            raise AssertionError(f"Graph['{k}'] differs: {G1c.graph[k]!r} != {G2c.graph[k]!r}")
+            raise AssertionError(
+                f"Graph['{k}'] differs: {G1c.graph[k]!r} != {G2c.graph[k]!r}"
+            )
 
 
 def tiny_wfn(
@@ -180,8 +207,8 @@ def tiny_wfn(
         substationsC=substationsC,
         borderC=borderC,
         obstacleC_=obstacleC_,
-        name="tiny_wfn",
-        handle="tiny",
+        name='tiny_wfn',
+        handle='tiny',
     )
 
     if optimize:
