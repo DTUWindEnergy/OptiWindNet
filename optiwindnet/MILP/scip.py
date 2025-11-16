@@ -26,7 +26,7 @@ from ._core import (
     investigate_pool,
 )
 
-__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+__all__ = ('make_min_length_model', 'warmup_model')
 
 _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info
@@ -58,6 +58,10 @@ class SolverSCIP(Solver, PoolHandler):
         self.model_options = model_options
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
         self.model, self.metadata = model, metadata
+        # work-around for SCIP: use round() to coerce link_ value (should be binary)
+        #   values for link_ variables are floats and may be slightly off of 0
+        self._link_val = staticmethod(lambda var: round(model.getVal(var)))
+        self._flow_val = model.getVal
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
 
@@ -131,10 +135,7 @@ class SolverSCIP(Solver, PoolHandler):
         return objective_value
 
     def topology_from_mip_pool(self) -> nx.Graph:
-        return topology_from_mip_sol(metadata=self.metadata, model=self.model)
-
-    def topology_from_mip_sol(self):
-        return topology_from_mip_sol(metadata=self.metadata, model=self.model)
+        return self.topology_from_mip_sol()
 
 
 def make_min_length_model(
@@ -384,54 +385,3 @@ def warmup_model(
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     metadata.warmed_by = S.graph['creator']
     return model
-
-
-def topology_from_mip_sol(
-    *, metadata: ModelMetadata, model: Model, **kwargs
-) -> nx.Graph:
-    """Create a topology graph from the PySCIPOpt solution to the MILP model.
-
-    Args:
-      metadata: attributes of the solved model
-      model: PySCIPOpt model instance
-      kwargs: not used (signature compatibility)
-    Returns:
-      Graph topology `S` from the solution.
-    """
-    # in ortools, the solution is in the solver instance not in the model
-    S = nx.Graph(R=metadata.R, T=metadata.T)
-    # Get active links and if flow is reversed (i.e. from small to big)
-    rev_from_link = {
-        (u, v): u < v
-        for (u, v), var in metadata.link_.items()
-        if model.getVal(var)
-    }
-    S.add_weighted_edges_from(
-        ((u, v, model.getVal(metadata.flow_[u, v])) for (u, v) in rev_from_link.keys()),
-        weight='load',
-    )
-    # set the 'reverse' edge attribute
-    nx.set_edge_attributes(S, rev_from_link, name='reverse')
-    # propagate loads from edges to nodes
-    subtree = -1
-    max_load = 0
-    for r in range(-metadata.R, 0):
-        for u, v in nx.edge_dfs(S, r):
-            S.nodes[v]['load'] = S[u][v]['load']
-            if u == r:
-                subtree += 1
-            S.nodes[v]['subtree'] = subtree
-        rootload = 0
-        for nbr in S.neighbors(r):
-            subtree_load = S.nodes[nbr]['load']
-            max_load = max(max_load, subtree_load)
-            rootload += subtree_load
-        S.nodes[r]['load'] = rootload
-    S.graph.update(
-        capacity=metadata.capacity,
-        max_load=max_load,
-        has_loads=True,
-        creator='MILP.' + __name__,
-        solver_details={},
-    )
-    return S
