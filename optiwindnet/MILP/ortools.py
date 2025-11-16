@@ -26,7 +26,7 @@ from ._core import (
     investigate_pool,
 )
 
-__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+__all__ = ('make_min_length_model', 'warmup_model')
 
 _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info

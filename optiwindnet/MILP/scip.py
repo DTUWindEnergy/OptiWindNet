@@ -93,19 +93,14 @@ class SolverSCIP(Solver, PoolHandler):
                 f'Unable to find a solution. Solver {self.name} terminated with: {model.getStatus()}'
             )
         bound = model.getDualbound()
-        print('bound', bound)
         objective = model.getObjVal()
-        print('\n>>>> getSols <<<<<\n', [model.getSolObjVal(sol) for sol in model.getSols()], '\n')
-        solutions = sorted(((model.getSolObjVal(sol), sol) for sol in model.getSols()))
-        #  for i, (obj, sol) in enumerate(solutions):
-        #      print('solution', i, obj)
-        self.solution_pool = solutions
+        self.solution_pool = [(model.getSolObjVal(sol), sol) for sol in model.getSols()]
         self.num_solutions = num_solutions
-        print('internal gap', model.getGap())
         solution_info = SolutionInfo(
             runtime=model.getSolvingTime(),
             bound=bound,
             objective=objective,
+            # SCIP offers model.getGap(), but its denominator is the bound
             relgap=1.0 - bound / objective,
             termination=model.getStatus(),
         )
