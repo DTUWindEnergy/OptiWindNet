@@ -33,17 +33,11 @@ error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 
 class SolverSCIP(Solver, PoolHandler):
-    """OR-Tools CpSolver wrapper.
-
-    This class wraps and changes the behavior of CpSolver in order to save all
-    solutions found to a pool. Meant to be used with `investigate_pool()`.
-    """
 
     name: str = 'scip'
     solution_pool: list[tuple[float, dict]]
 
     def __init__(self):
-        # set default options for ortools
         self.options = {}
 
     def set_problem(
@@ -72,8 +66,7 @@ class SolverSCIP(Solver, PoolHandler):
         options: dict[str, Any] = {},
         verbose: bool = False,
     ) -> SolutionInfo:
-        """Wrapper for Model.solveConcurrent().
-        """
+        """Wrapper for Model.solveConcurrent()."""
         try:
             model = self.model
         except AttributeError as exc:
