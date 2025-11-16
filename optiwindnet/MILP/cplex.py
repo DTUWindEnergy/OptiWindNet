@@ -9,7 +9,7 @@ import pyomo.environ as pyo
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from ._core import FeederRoute, PoolHandler, SolutionInfo, Topology, investigate_pool
+from ._core import FeederRoute, PoolHandler, SolutionInfo, Topology
 from .pyomo import SolverPyomo
 
 __all__ = ()
@@ -30,6 +30,12 @@ class SolverCplex(SolverPyomo, PoolHandler):
 
     def __init__(self) -> None:
         self.solver = pyo.SolverFactory('cplex', solver_io='python')
+
+    def _link_val(self, var: Any) -> int:
+        return self._value_map[var.name]
+
+    def _flow_val(self, var: Any) -> int:
+        return round(self._value_map[var.name])
 
     def solve(
         self,
@@ -64,7 +70,7 @@ class SolverCplex(SolverPyomo, PoolHandler):
                 branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
-            S, G = investigate_pool(P, A, self)
+            S, G = self.investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
         return S, G
 
@@ -75,9 +81,5 @@ class SolverCplex(SolverPyomo, PoolHandler):
         return objective
 
     def topology_from_mip_pool(self) -> nx.Graph:
-        solver, vars = self.solver, self.vars
-        vals = solver._solver_model.solution.pool.get_values(self.soln)
-        for pyomo_var, val in zip(vars, vals):
-            if solver._referenced_variables[pyomo_var] > 0:
-                pyomo_var.set_value(val, skip_validation=True)
+        self._value_map = {var.name: val for var, val in zip(self.vars, self.solver._solver_model.solution.pool.get_values(self.soln))}
         return self.topology_from_mip_sol()

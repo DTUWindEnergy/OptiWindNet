@@ -75,13 +75,17 @@ _default_options = dict(
 
 
 class SolverPyomo(Solver):
-    _link_val = staticmethod(attrgetter('value'))
-    _flow_val = staticmethod(lambda var: round(var.value))
 
     def __init__(self, name, prefix='', suffix='', **kwargs) -> None:
         self.name = name
         self.options = _default_options[name]
         self.solver = pyo.SolverFactory(prefix + name + suffix, **kwargs)
+
+    def _link_val(self, var: Any) -> int:
+        return var.value
+
+    def _flow_val(self, var: Any) -> int:
+        return round(var.value)
 
     def set_problem(
         self,
@@ -172,15 +176,19 @@ class SolverPyomo(Solver):
 class SolverPyomoAppsi(Solver):
     """As of Pyomo v3.9.4, a new solver inverface (v3) is being introduced. HiGHS is the
     only solver using v3 at that point."""
-    # work-around for HiGHS: use round() to coerce link_ value (should be binary)
-    #   values for link_ variables are floats and may be slightly off of 0
-    _link_val = staticmethod(lambda var: round(var.value))
-    _flow_val = staticmethod(lambda var: round(var.value))
 
     def __init__(self, name, solver_cls, **kwargs) -> None:
         self.name = name
         self.options = _default_options[name]
         self.solver = solver_cls(**kwargs)
+
+    def _link_val(self, var: Any) -> int:
+        # work-around for HiGHS: use round() to coerce link_ value (should be binary)
+        #   values for link_ variables are floats and may be slightly off of 0
+        return round(var.value)
+
+    def _flow_val(self, var: Any) -> int:
+        return round(var.value)
 
     def set_problem(
         self,

@@ -23,7 +23,6 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
-    investigate_pool,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -40,6 +39,14 @@ class SolverSCIP(Solver, PoolHandler):
     def __init__(self):
         self.options = {}
 
+    def _link_val(self, var: Any) -> int:
+        # work-around for SCIP: use round() to coerce link_ value (should be binary)
+        #   values for link_ variables are floats and may be slightly off of 0
+        return round(self._value_map[var])
+
+    def _flow_val(self, var: Any) -> int:
+        return self._value_map[var]
+
     def set_problem(
         self,
         P: nx.PlanarEmbedding,
@@ -52,10 +59,6 @@ class SolverSCIP(Solver, PoolHandler):
         self.model_options = model_options
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
         self.model, self.metadata = model, metadata
-        # work-around for SCIP: use round() to coerce link_ value (should be binary)
-        #   values for link_ variables are floats and may be slightly off of 0
-        self._link_val = staticmethod(lambda var: round(model.getVal(var)))
-        self._flow_val = model.getVal
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
 
@@ -114,7 +117,7 @@ class SolverSCIP(Solver, PoolHandler):
                 branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
-            S, G = investigate_pool(P, A, self)
+            S, G = self.investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
         return S, G
 

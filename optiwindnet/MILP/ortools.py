@@ -23,7 +23,6 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
-    investigate_pool,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -66,14 +65,17 @@ class SolverORTools(Solver, PoolHandler):
     name: str = 'ortools'
     solution_pool: list[tuple[float, dict]]
     solver: cp_model.CpSolver
-    _link_val = lambda self, var: self._value_map[var.index]
-    _flow_val = lambda self, var: self._value_map[var.index]
-
 
     def __init__(self):
         self.solver = cp_model.CpSolver()
         # set default options for ortools
         self.options = {}
+
+    def _link_val(self, var: Any) -> int:
+        return self._value_map[var.index]
+
+    def _flow_val(self, var: Any) -> int:
+        return self._value_map[var.index]
 
     def set_problem(
         self,
@@ -151,7 +153,7 @@ class SolverORTools(Solver, PoolHandler):
                 branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
-            S, G = investigate_pool(P, A, self)
+            S, G = self.investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
         G.graph['solver_details'].update(strategy=self.solver.solution_info())
         return S, G

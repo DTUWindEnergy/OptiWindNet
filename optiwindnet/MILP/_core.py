@@ -156,8 +156,16 @@ class Solver(abc.ABC):
     options: dict[str, Any]
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
-    _link_val: Callable[[Any], int | bool]
-    _flow_val: Callable[[Any], int]
+
+    @abc.abstractmethod
+    def _link_val(self, var: Any) -> int | bool:
+        "Get the value of a link variable from the current solution."
+        pass
+
+    @abc.abstractmethod
+    def _flow_val(self, var: Any) -> int:
+        "Get the value of a flow variable from the current solution."
+        pass
 
     @abc.abstractmethod
     def set_problem(
@@ -234,16 +242,16 @@ class Solver(abc.ABC):
         Returns:
           Graph topology `S` from the solution.
         """
-        metadata, link_val, flow_val = self.metadata, self._link_val, self._flow_val
+        metadata = self.metadata
         S = nx.Graph(R=metadata.R, T=metadata.T)
         # Get active links and if flow is reversed (i.e. from small to big)
         rev_from_link = {
             (u, v): u < v
             for (u, v), var in metadata.link_.items()
-            if link_val(var)
+            if self._link_val(var)
         }
         S.add_weighted_edges_from(
-            ((u, v, flow_val(metadata.flow_[u, v])) for (u, v) in rev_from_link.keys()),
+            ((u, v, self._flow_val(metadata.flow_[u, v])) for (u, v) in rev_from_link.keys()),
             weight='load',
         )
         # set the 'reverse' edge attribute
@@ -288,31 +296,28 @@ class PoolHandler(abc.ABC):
         "Build topology from the pool solution at the last requested position"
         pass
 
-
-def investigate_pool(
-    P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
-) -> tuple[nx.Graph, nx.Graph]:
-    """Go through the solver's solutions checking which has the shortest length
-    after applying the detours with PathFinder."""
-    Λ = float('inf')
-    branched = pool.model_options['topology'] is Topology.BRANCHED
-    num_solutions = pool.num_solutions
-    info(f'Solution pool has {num_solutions} solutions.')
-    for i in range(num_solutions):
-        λ = pool.objective_at(i)
-        if λ > Λ:
-            info(f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length")
-            break
-        Sʹ = pool.topology_from_mip_pool()
-        Gʹ = PathFinder(
-            G_from_S(Sʹ, A), planar=P, A=A, branched=branched
-        ).create_detours()
-        Λʹ = Gʹ.size(weight='length')
-        if Λʹ < Λ:
-            S, G, Λ = Sʹ, Gʹ, Λʹ
-            G.graph['pool_entry'] = i, λ
-            info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
-        else:
-            info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')
-    G.graph['pool_count'] = num_solutions
-    return S, G
+    def investigate_pool(self, P: nx.PlanarEmbedding, A: nx.Graph) -> tuple[nx.Graph, nx.Graph]:
+        """Go through the solver's solutions checking which has the shortest length
+        after applying the detours with PathFinder."""
+        Λ = float('inf')
+        branched = self.model_options['topology'] is Topology.BRANCHED
+        num_solutions = self.num_solutions
+        info(f'Solution pool has {num_solutions} solutions.')
+        for i in range(num_solutions):
+            λ = self.objective_at(i)
+            if λ > Λ:
+                info(f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length")
+                break
+            Sʹ = self.topology_from_mip_pool()
+            Gʹ = PathFinder(
+                G_from_S(Sʹ, A), planar=P, A=A, branched=branched
+            ).create_detours()
+            Λʹ = Gʹ.size(weight='length')
+            if Λʹ < Λ:
+                S, G, Λ = Sʹ, Gʹ, Λʹ
+                G.graph['pool_entry'] = i, λ
+                info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
+            else:
+                info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')
+        G.graph['pool_count'] = num_solutions
+        return S, G
