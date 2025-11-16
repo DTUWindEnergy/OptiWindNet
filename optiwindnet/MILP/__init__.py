@@ -52,10 +52,14 @@ def solver_factory(solver_name: str) -> Solver:
             from .gurobi import SolverGurobi
 
             return SolverGurobi()
-        case 'cbc' | 'scip':
+        case 'cbc':
             from .pyomo import SolverPyomo
 
             return SolverPyomo(solver_name)
+        case 'scip':
+            from .scip import SolverSCIP
+
+            return SolverSCIP()
         case 'highs':
             from .pyomo import SolverPyomoAppsi
             from pyomo.contrib.appsi.solvers.highs import Highs

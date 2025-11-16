@@ -63,6 +63,7 @@ solvers = [
   "cplex",
   "gurobipy",
   "highspy",
+  "pyscipopt",
 ]
 test  = [ "dill", # for loading dill data
           "coverage",

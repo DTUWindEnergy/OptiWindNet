@@ -32,12 +32,6 @@ __all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
 _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
-# NOTE: SCIP has solution pool which can be accessed with PySCIPOpt: getSols()
-# TODO: move scip to scip.py and implement:
-#       - class SolverSCIP(SolverPyomo, PoolHandler)
-#       - SCIP-specific make_min_length_model, warmup_model, topology_from_mip_sol
-#       - warmup_model: model.createSol(), model.setSolVal(), model.addSol()
-
 # solver option name mapping (pyomo should have taken care of this)
 _common_options = namedtuple('common_options', 'mip_gap time_limit')
 _optkey = dict(
@@ -45,7 +39,6 @@ _optkey = dict(
     gurobi=_common_options('mipgap', 'timelimit'),
     cbc=_common_options('ratioGap', 'seconds'),
     highs=_common_options('mip_gap', 'time_limit'),
-    scip=_common_options('limits/gap', 'limits/time'),
 )
 # usage: _optname[solver_name].mipgap
 
