@@ -18,7 +18,7 @@ from ._core import (
     Topology,
     investigate_pool,
 )
-from .pyomo import SolverPyomo, topology_from_mip_sol
+from .pyomo import SolverPyomo
 
 __all__ = ()
 
@@ -95,7 +95,6 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
                 S = self.topology_from_mip_pool()
-                S.graph['creator'] += '.' + self.name
                 G = PathFinder(
                     G_from_S(S, A),
                     P,
@@ -121,4 +120,4 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         solver = self.solver
         for omovar, gurvar in solver._pyomo_var_to_solver_var_map.items():
             omovar.set_value(round(gurvar.Xn), skip_validation=True)
-        return topology_from_mip_sol(model=self.model)
+        return self.topology_from_mip_sol()

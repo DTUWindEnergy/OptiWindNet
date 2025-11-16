@@ -66,6 +66,9 @@ class SolverORTools(Solver, PoolHandler):
     name: str = 'ortools'
     solution_pool: list[tuple[float, dict]]
     solver: cp_model.CpSolver
+    _link_val = lambda self, var: self._value_map[var.index]
+    _flow_val = lambda self, var: self._value_map[var.index]
+
 
     def __init__(self):
         self.solver = cp_model.CpSolver()
@@ -153,21 +156,12 @@ class SolverORTools(Solver, PoolHandler):
         G.graph['solver_details'].update(strategy=self.solver.solution_info())
         return S, G
 
-    def boolean_value(self, literal: cp_model.IntVar) -> bool:
-        return self._value_map[literal.index]
-
-    def value(self, literal: cp_model.IntVar) -> int:
-        return self._value_map[literal.index]
-
     def objective_at(self, index: int) -> float:
         objective_value, self._value_map = self.solution_pool[index]
         return objective_value
 
     def topology_from_mip_pool(self) -> nx.Graph:
-        return topology_from_mip_sol(metadata=self.metadata, solver=self)
-
-    def topology_from_mip_sol(self):
-        return topology_from_mip_sol(metadata=self.metadata, solver=self)
+        return self.topology_from_mip_sol()
 
 
 def make_min_length_model(
@@ -413,54 +407,3 @@ def warmup_model(
         model.add_hint(metadata.flow_[t, r], 0 if edgeD is None else edgeD['load'])
     metadata.warmed_by = S.graph['creator']
     return model
-
-
-def topology_from_mip_sol(
-    *, metadata: ModelMetadata, solver: SolverORTools | cp_model.CpSolver, **kwargs
-) -> nx.Graph:
-    """Create a topology graph from the OR-tools solution to the MILP model.
-
-    Args:
-      metadata: attributes of the solved model
-      solver: solver instance that solved the model
-      kwargs: not used (signature compatibility)
-    Returns:
-      Graph topology `S` from the solution.
-    """
-    # in ortools, the solution is in the solver instance not in the model
-    S = nx.Graph(R=metadata.R, T=metadata.T)
-    # Get active links and if flow is reversed (i.e. from small to big)
-    rev_from_link = {
-        (u, v): u < v
-        for (u, v), use in metadata.link_.items()
-        if solver.boolean_value(use)
-    }
-    S.add_weighted_edges_from(
-        ((u, v, solver.value(metadata.flow_[u, v])) for (u, v) in rev_from_link.keys()),
-        weight='load',
-    )
-    # set the 'reverse' edge attribute
-    nx.set_edge_attributes(S, rev_from_link, name='reverse')
-    # propagate loads from edges to nodes
-    subtree = -1
-    max_load = 0
-    for r in range(-metadata.R, 0):
-        for u, v in nx.edge_dfs(S, r):
-            S.nodes[v]['load'] = S[u][v]['load']
-            if u == r:
-                subtree += 1
-            S.nodes[v]['subtree'] = subtree
-        rootload = 0
-        for nbr in S.neighbors(r):
-            subtree_load = S.nodes[nbr]['load']
-            max_load = max(max_load, subtree_load)
-            rootload += subtree_load
-        S.nodes[r]['load'] = rootload
-    S.graph.update(
-        capacity=metadata.capacity,
-        max_load=max_load,
-        has_loads=True,
-        creator='MILP.' + __name__,
-        solver_details={},
-    )
-    return S

@@ -13,7 +13,7 @@ except ImportError:
 
     from backports.strenum import StrEnum
 from itertools import chain
-from typing import Any, Mapping
+from typing import Any, Mapping, Callable
 
 import networkx as nx
 from makefun import with_signature
@@ -162,6 +162,8 @@ class Solver(abc.ABC):
     options: dict[str, Any]
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
+    _link_val: Callable[[Any], int | bool]
+    _flow_val: Callable[[Any], int]
 
     @abc.abstractmethod
     def set_problem(
@@ -232,6 +234,50 @@ class Solver(abc.ABC):
             attr['warmstart'] = metadata.warmed_by
         return attr
 
+    def topology_from_mip_sol(self):
+        """Create a topology graph from the solution to the MILP model.
+
+        Returns:
+          Graph topology `S` from the solution.
+        """
+        metadata, link_val, flow_val = self.metadata, self._link_val, self._flow_val
+        S = nx.Graph(R=metadata.R, T=metadata.T)
+        # Get active links and if flow is reversed (i.e. from small to big)
+        rev_from_link = {
+            (u, v): u < v
+            for (u, v), var in metadata.link_.items()
+            if link_val(var)
+        }
+        S.add_weighted_edges_from(
+            ((u, v, flow_val(metadata.flow_[u, v])) for (u, v) in rev_from_link.keys()),
+            weight='load',
+        )
+        # set the 'reverse' edge attribute
+        nx.set_edge_attributes(S, rev_from_link, name='reverse')
+        # propagate loads from edges to nodes
+        subtree = -1
+        max_load = 0
+        for r in range(-metadata.R, 0):
+            for u, v in nx.edge_dfs(S, r):
+                S.nodes[v]['load'] = S[u][v]['load']
+                if u == r:
+                    subtree += 1
+                S.nodes[v]['subtree'] = subtree
+            rootload = 0
+            for nbr in S.neighbors(r):
+                subtree_load = S.nodes[nbr]['load']
+                max_load = max(max_load, subtree_load)
+                rootload += subtree_load
+            S.nodes[r]['load'] = rootload
+        S.graph.update(
+            capacity=metadata.capacity,
+            max_load=max_load,
+            has_loads=True,
+            creator='MILP.' + self.name,
+            solver_details={},
+        )
+        return S
+
 
 class PoolHandler(abc.ABC):
     name: str
@@ -264,7 +310,6 @@ def investigate_pool(
             info(f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length")
             break
         Sʹ = pool.topology_from_mip_pool()
-        Sʹ.graph['creator'] += '.' + pool.name
         Gʹ = PathFinder(
             G_from_S(Sʹ, A), planar=P, A=A, branched=branched
         ).create_detours()

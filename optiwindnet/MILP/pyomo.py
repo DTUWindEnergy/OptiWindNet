@@ -6,6 +6,7 @@ import math
 import os
 from collections import namedtuple
 from itertools import chain
+from operator import attrgetter
 from typing import Any
 
 import networkx as nx
@@ -74,6 +75,9 @@ _default_options = dict(
 
 
 class SolverPyomo(Solver):
+    _link_val = staticmethod(attrgetter('value'))
+    _flow_val = staticmethod(lambda var: round(var.value))
+
     def __init__(self, name, prefix='', suffix='', **kwargs) -> None:
         self.name = name
         self.options = _default_options[name]
@@ -153,8 +157,7 @@ class SolverPyomo(Solver):
         model.solutions.load_from(result)
         if A is None:
             A = self.A
-        S = topology_from_mip_sol(model=model)
-        S.graph['creator'] += self.name
+        S = self.topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
@@ -165,13 +168,14 @@ class SolverPyomo(Solver):
         G.graph.update(self._make_graph_attributes())
         return S, G
 
-    def topology_from_mip_sol(self):
-        return topology_from_mip_sol(model=self.model)
-
 
 class SolverPyomoAppsi(Solver):
     """As of Pyomo v3.9.4, a new solver inverface (v3) is being introduced. HiGHS is the
     only solver using v3 at that point."""
+    # work-around for HiGHS: use round() to coerce link_ value (should be binary)
+    #   values for link_ variables are floats and may be slightly off of 0
+    _link_val = staticmethod(lambda var: round(var.value))
+    _flow_val = staticmethod(lambda var: round(var.value))
 
     def __init__(self, name, solver_cls, **kwargs) -> None:
         self.name = name
@@ -239,14 +243,13 @@ class SolverPyomoAppsi(Solver):
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        P, model, model_options = self.P, self.model, self.model_options
+        P, model_options = self.P, self.model_options
         result = self.result
         result.solution_loader.load_vars()
         #  model.solutions.load_from(result)
         if A is None:
             A = self.A
-        S = topology_from_mip_sol(model=model)
-        S.graph['creator'] += self.name
+        S = self.topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
@@ -256,9 +259,6 @@ class SolverPyomoAppsi(Solver):
         ).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
-
-    def topology_from_mip_sol(self):
-        return topology_from_mip_sol(model=self.model)
 
 
 def make_min_length_model(
@@ -558,49 +558,3 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     model.warmed_by = S.graph['creator']
     return model
-
-
-def topology_from_mip_sol(*, model: pyo.ConcreteModel, **kwargs) -> nx.Graph:
-    """Create a topology graph from the solution to the Pyomo MILP model.
-
-    Args:
-      model: pyomo model instance
-      kwargs: not used (signature compatibility)
-    Returns:
-      Graph topology `S` from the solution.
-    """
-    # in pyomo, the solution is in the model instance not in the solver
-    S = nx.Graph(R=len(model.R), T=len(model.T))
-    # Get active links and if flow is reversed (i.e. from small to big)
-    rev_from_link = {
-        (u, v): u < v for (u, v), use in model.link_.items() if use.value > 0.5
-    }
-    S.add_weighted_edges_from(
-        ((u, v, round(model.flow_[u, v].value)) for (u, v) in rev_from_link.keys()),
-        weight='load',
-    )
-    # set the 'reverse' edge attribute
-    nx.set_edge_attributes(S, rev_from_link, name='reverse')
-    # propagate loads from edges to nodes
-    subtree = -1
-    max_load = 0
-    for r in range(model.R.first(), 0):
-        for u, v in nx.edge_dfs(S, r):
-            S.nodes[v]['load'] = S[u][v]['load']
-            if u == r:
-                subtree += 1
-            S.nodes[v]['subtree'] = subtree
-        rootload = 0
-        for nbr in S.neighbors(r):
-            subtree_load = S.nodes[nbr]['load']
-            max_load = max(max_load, subtree_load)
-            rootload += subtree_load
-        S.nodes[r]['load'] = rootload
-    S.graph.update(
-        capacity=model.k.value,
-        max_load=max_load,
-        has_loads=True,
-        creator='MILP.' + __name__,
-        solver_details={},
-    )
-    return S

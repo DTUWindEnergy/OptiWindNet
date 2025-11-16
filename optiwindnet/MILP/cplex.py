@@ -10,7 +10,7 @@ import pyomo.environ as pyo
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 from ._core import FeederRoute, PoolHandler, SolutionInfo, Topology, investigate_pool
-from .pyomo import SolverPyomo, topology_from_mip_sol
+from .pyomo import SolverPyomo
 
 __all__ = ()
 
@@ -57,7 +57,6 @@ class SolverCplex(SolverPyomo, PoolHandler):
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
             S = self.topology_from_mip_pool()
-            S.graph['creator'] += '.' + self.name
             G = PathFinder(
                 G_from_S(S, A),
                 P,
@@ -81,4 +80,4 @@ class SolverCplex(SolverPyomo, PoolHandler):
         for pyomo_var, val in zip(vars, vals):
             if solver._referenced_variables[pyomo_var] > 0:
                 pyomo_var.set_value(val, skip_validation=True)
-        return topology_from_mip_sol(model=self.model)
+        return self.topology_from_mip_sol()
