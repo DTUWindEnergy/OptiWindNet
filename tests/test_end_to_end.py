@@ -80,15 +80,19 @@ def test_expected_router_graphs_match(expected_blob, key, router_factory, locati
     cables = int(router_spec['cables'])
 
     if router_spec['class'] == 'MILPRouter':
+        package_from_solver_name = {
+            'ortools': 'ortools',
+            'cplex': 'cplex',
+            'gurobi': 'gurobipy',
+            'highs': 'highspy',
+            'scip': 'pyscipopt',
+        }
         solver_name = router_spec['params']['solver_name']
         # Skip if the solver is not available in the test environment
-        if solver_name in ('ortools', 'cplex'):
-            if not is_package_installed(solver_name):
+        if solver_name in package_from_solver_name:
+            if not is_package_installed(package_from_solver_name[solver_name]):
                 pytest.skip(f'{solver_name} not available')
-        elif solver_name == 'gurobi':
-            if not is_package_installed('gurobipy'):
-                pytest.skip(f'{solver_name} not available')
-        elif solver_name in ('cbc', 'scip'):
+        elif solver_name in ('cbc'):
             if not shutil.which(solver_name):
                 pytest.skip(f'{solver_name} not available')
 

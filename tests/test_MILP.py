@@ -28,7 +28,8 @@ def P_A_toy():
         ('ortools', lambda: is_package_installed('ortools')),
         ('gurobi', lambda: is_package_installed('gurobipy')),
         ('cplex', lambda: is_package_installed('cplex')),
-        ('scip', lambda: shutil.which('scip')),
+        ('highs', lambda: is_package_installed('highspy')),
+        ('scip', lambda: is_package_installed('pyscipopt')),
         ('cbc', lambda: shutil.which('cbc')),
     ],
 )
