@@ -52,6 +52,12 @@ For packages that are installable with both `pip` and `conda`, **enter only one*
 
 Solvers perform a search accross the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Mar/2025, only `gurobi`, `cplex` and `cbc` have this multi-threaded search capability. The `ortools` solver also benefits from multi-core systems by launching a portfolio of algorithms in parallel, with some information exchange among them.
 
+For installing all pip-available solvers:
+
+    pip install optiwindnet[solvers]
+
+See below for specific instructions for each solver.
+
 ### Gurobi
 
 [Gurobi](https://www.gurobi.com/academia/academic-program-and-licenses/) is proprietary software (academic license available). The trial version can only handle very small problems:
@@ -64,6 +70,7 @@ Solvers perform a search accross the branch-and-bound tree. This process can be 
 [IBM ILOG CPLEX](https://www.ibm.com/products/ilog-cplex-optimization-studio) is proprietary software (academic license available). The Community Edition version can only handle very small problems:
 
     pip install cplex
+    conda install -c IBMDecisionOptimization cplex
 
 ### HiGHS
 
@@ -76,7 +83,8 @@ Solvers perform a search accross the branch-and-bound tree. This process can be 
 
 [SCIP](https://www.scipopt.org/) is open source software:
 
-    conda install scip
+    pip install pyscipopt
+    conda install pyscipopt
 
 ### CBC
 
