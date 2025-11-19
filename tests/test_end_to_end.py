@@ -5,9 +5,10 @@ from typing import Sequence
 import shutil
 import pytest
 import dill
+from importlib.util import find_spec
 from optiwindnet.api import WindFarmNetwork, EWRouter, MILPRouter
 from .helpers import tiny_wfn
-from .helpers import assert_graph_equal, is_package_installed
+from .helpers import assert_graph_equal
 from . import paths
 
 UNITTESTS_DILL = paths.UNITTESTS_DILL
@@ -90,7 +91,7 @@ def test_expected_router_graphs_match(expected_blob, key, router_factory, locati
         solver_name = router_spec['params']['solver_name']
         # Skip if the solver is not available in the test environment
         if solver_name in package_from_solver_name:
-            if not is_package_installed(package_from_solver_name[solver_name]):
+            if not find_spec(package_from_solver_name[solver_name]):
                 pytest.skip(f'{solver_name} not available')
         elif solver_name in ('cbc'):
             if not shutil.which(solver_name):
@@ -109,7 +110,7 @@ def test_expected_router_graphs_match(expected_blob, key, router_factory, locati
     )
 
 
-@pytest.mark.skipif(not is_package_installed('ortools'), reason='ortools not available')
+@pytest.mark.skipif(not find_spec('ortools'), reason='ortools not available')
 def test_ortools_with_warmstart():
     wfn = tiny_wfn()
     wfn.optimize(router=EWRouter())

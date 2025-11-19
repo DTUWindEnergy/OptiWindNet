@@ -1,13 +1,12 @@
 import pytest
 import numpy as np
 import shutil
+from importlib.util import find_spec
 
 from optiwindnet.synthetic import toyfarm
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import solver_factory, ModelOptions
 from optiwindnet.interarraylib import terse_links_from_S
-
-from .helpers import is_package_installed
 
 
 # topology in terse links for toy_farm at capacity=5
@@ -25,11 +24,11 @@ def P_A_toy():
 @pytest.mark.parametrize(
     ['solver_name', 'is_available'],
     [
-        ('ortools', lambda: is_package_installed('ortools')),
-        ('gurobi', lambda: is_package_installed('gurobipy')),
-        ('cplex', lambda: is_package_installed('cplex')),
-        ('highs', lambda: is_package_installed('highspy')),
-        ('scip', lambda: is_package_installed('pyscipopt')),
+        ('ortools', lambda: find_spec('ortools')),
+        ('gurobi', lambda: find_spec('gurobipy')),
+        ('cplex', lambda: find_spec('cplex')),
+        ('highs', lambda: find_spec('highspy')),
+        ('scip', lambda: find_spec('pyscipopt')),
         ('cbc', lambda: shutil.which('cbc')),
     ],
 )

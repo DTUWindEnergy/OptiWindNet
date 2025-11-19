@@ -1,17 +1,8 @@
 import copy
-import importlib.metadata
 from typing import Iterable, Optional
 import numpy as np
 import networkx as nx
 from optiwindnet.api import WindFarmNetwork
-
-
-def is_package_installed(package_name):
-    try:
-        importlib.metadata.version(package_name)
-        return True
-    except importlib.metadata.PackageNotFoundError:
-        return False
 
 
 def assert_graph_equal(
