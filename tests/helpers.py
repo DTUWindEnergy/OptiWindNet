@@ -1,8 +1,46 @@
 import copy
-from typing import Iterable, Optional
+from pathlib import Path
+from typing import Iterable, Any, Dict, Optional
+import dill
 import numpy as np
 import networkx as nx
 from optiwindnet.api import WindFarmNetwork
+from optiwindnet.api import EWRouter, HGSRouter, MILPRouter
+from optiwindnet.MILP import ModelOptions
+
+
+def load_dill(path: Path) -> Any:
+    """Load a dill file; raise FileNotFoundError with regeneration hint if missing."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f'Missing expected test data file: {path}\n\n'
+            'To (re)generate this file run the appropriate generator script, e.g.:\n'
+            'update_expected_values.py\n'
+            'Or run pytest with --regen-expected to attempt regeneration automatically '
+            '(only if you really want that behavior).'
+        )
+    with path.open('rb') as fh:
+        return dill.load(fh)
+
+
+def router_factory(spec: Optional[Dict[str, Any]]):
+    """Create an instantiated router from a spec dict (same semantics as your generators)."""
+    if spec is None:
+        return None
+    clsname = spec.get('class')
+    params = dict(spec.get('params', {}))
+    # Expand ModelOptions dict when present
+    if clsname == 'MILPRouter' and isinstance(params.get('model_options'), dict):
+        params['model_options'] = ModelOptions(**params['model_options'])
+    if clsname is None:
+        return None
+    if clsname == 'EWRouter':
+        return EWRouter(**params)
+    if clsname == 'HGSRouter':
+        return HGSRouter(**params)
+    if clsname == 'MILPRouter':
+        return MILPRouter(**params)
+    raise ValueError(f'Unknown router class: {clsname!r}')
 
 
 def assert_graph_equal(

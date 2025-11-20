@@ -1,7 +1,5 @@
 import pytest
 import numpy as np
-import shutil
-from importlib.util import find_spec
 
 from optiwindnet.synthetic import toyfarm
 from optiwindnet.mesh import make_planar_embedding
@@ -22,20 +20,15 @@ def P_A_toy():
 
 
 @pytest.mark.parametrize(
-    ['solver_name', 'is_available'],
-    [
-        ('ortools', lambda: find_spec('ortools')),
-        ('gurobi', lambda: find_spec('gurobipy')),
-        ('cplex', lambda: find_spec('cplex')),
-        ('highs', lambda: find_spec('highspy')),
-        ('scip', lambda: find_spec('pyscipopt')),
-        ('cbc', lambda: shutil.which('cbc')),
-    ],
+    'solver_name',
+    ['ortools', 'gurobi', 'cplex', 'highs', 'scip', 'cbc'],
 )
-def test_MILP_solvers(P_A_toy, solver_name, is_available):
-    if not is_available():
+def test_MILP_solvers(P_A_toy, solver_name):
+    try:
+        solver = solver_factory(solver_name)
+    except (FileNotFoundError, ModuleNotFoundError):
         pytest.skip(f'{solver_name} not available')
-    solver = solver_factory(solver_name)
+
     solver.set_problem(
         *P_A_toy,
         capacity=_CAPACITY,

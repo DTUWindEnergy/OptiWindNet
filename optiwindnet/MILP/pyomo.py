@@ -6,7 +6,6 @@ import math
 import os
 from collections import namedtuple
 from itertools import chain
-from operator import attrgetter
 from typing import Any
 
 import networkx as nx
@@ -75,7 +74,6 @@ _default_options = dict(
 
 
 class SolverPyomo(Solver):
-
     def __init__(self, name, prefix='', suffix='', **kwargs) -> None:
         self.name = name
         self.options = _default_options[name]

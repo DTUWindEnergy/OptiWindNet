@@ -2,24 +2,50 @@
 Generate expected graphs for specified sites-routers.
 """
 
-import gc
 import platform
 import sys
-from datetime import datetime
-from pathlib import Path
+from importlib import metadata, util
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 import dill
-
-from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
+from optiwindnet.api import WindFarmNetwork
 from optiwindnet.importer import load_repository
-from optiwindnet.MILP import ModelOptions
 
-# import paths used for testing
-HERE = Path(__file__).resolve()
-TOP_LEVEL = HERE.parent.parent
-sys.path.insert(0, str(TOP_LEVEL))
 import paths
+from helpers import router_factory
+
+# -----------------------
+# Small helpers
+# -----------------------
+
+
+def merge_router_specs(
+    *spec_maps: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for m in spec_maps:
+        out.update(m)
+    return out
+
+
+def print_header(title: str) -> None:
+    print('\n' + '=' * 10)
+    print(title)
+    print('=' * 10)
+
+
+def environment_meta() -> Dict[str, Any]:
+    meta = {
+        'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'platform': platform.platform(),
+        'python': sys.version.split()[0],
+        'package_versions': {},
+    }
+    for name in ('networkx', 'numpy', 'ortools', 'pyomo', 'gurobipy', 'pyscipopt'):
+        if util.find_spec(name):
+            meta['package_versions'][name] = metadata.version(name)
+    return meta
 
 
 def generate_expected_values_end_to_end_tests():
@@ -27,8 +53,6 @@ def generate_expected_values_end_to_end_tests():
     Generate the end-to-end expected dill file.
     """
     SITES_DIR = paths.SITES_DIR
-    DEFAULT_OUTPUT = paths.END_TO_END_DILL
-    output_path = DEFAULT_OUTPUT
 
     # -----------------------
     # Local helpers / specs
@@ -155,67 +179,11 @@ def generate_expected_values_end_to_end_tests():
         'EWRouter2_straight_cap50': r_spec(
             'EWRouter', {'feeder_route': 'straight'}, cables=50
         ),
-        }
+    }
 
     ROUTERS_3: Dict[str, Dict[str, Any]] = {
         'HGSRouter3_cap4': r_spec('HGSRouter', {'time_limit': 2, 'seed': 0}, cables=4),
-    
-        }
-
-    # -----------------------
-    # Small helpers
-    # -----------------------
-    def make_model_options_from_spec(spec: Dict[str, Any]) -> ModelOptions:
-        return ModelOptions(**spec)
-
-    def make_router_from_spec(spec: Optional[Dict[str, Any]]):
-        if spec is None:
-            return None
-        clsname = spec['class']
-        params = dict(spec.get('params', {}))
-        if clsname == 'MILPRouter' and isinstance(params.get('model_options'), dict):
-            params['model_options'] = make_model_options_from_spec(
-                params['model_options']
-            )
-        if clsname is None:
-            return None
-        if clsname == 'EWRouter':
-            return EWRouter(**params)
-        if clsname == 'HGSRouter':
-            return HGSRouter(**params)
-        if clsname == 'MILPRouter':
-            return MILPRouter(**params)
-        raise ValueError(f'Unknown router class: {clsname!r}')
-
-    def merge_router_specs(
-        *spec_maps: Dict[str, Dict[str, Any]],
-    ) -> Dict[str, Dict[str, Any]]:
-        out: Dict[str, Dict[str, Any]] = {}
-        for m in spec_maps:
-            out.update(m)
-        return out
-
-    def print_header(title: str) -> None:
-        print('\n' + '=' * 10)
-        print(title)
-        print('=' * 10)
-
-    def environment_meta() -> Dict[str, Any]:
-        meta = {
-            'generated_at_utc': datetime.utcnow().isoformat(timespec='seconds') + 'Z',
-            'platform': platform.platform(),
-            'python': sys.version.split()[0],
-            'executable': sys.executable,
-        }
-        for name in ('networkx', 'numpy', 'ortools', 'pyomo', 'gurobipy'):
-            try:
-                mod = __import__(name)
-                ver = getattr(mod, '__version__', None)
-                if ver:
-                    meta.setdefault('package_versions', {})[name] = ver
-            except Exception:
-                pass
-        return meta
+    }
 
     # -----------------------
     # Prepare plan and output
@@ -227,12 +195,6 @@ def generate_expected_values_end_to_end_tests():
     router_graphs: Dict[str, Any] = {}
 
     print_header('Generating expected graphs')
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        output_path.unlink(missing_ok=True)
-        print(f'Removed (if existed): {output_path}')
-    except Exception as e:
-        print(f'Error removing old file: {e}')
 
     # -----------------------
     # Load repository (sites)
@@ -248,16 +210,14 @@ def generate_expected_values_end_to_end_tests():
         if not batch_sites or not batch_routers:
             return
         print_header(
-            f'Running {label} ({len(batch_sites)} sites x {len(batch_routers)} routers)'
+            f'Running {label} ({len(batch_sites)} locations x {len(batch_routers)} routers)'
         )
         for si, site_name in enumerate(batch_sites, 1):
-            L = getattr(
-                locations, site_name
-            )  # no validation (matches generator contract)
+            L = getattr(locations, site_name)
             for ri, (router_name, spec) in enumerate(batch_routers.items(), 1):
                 key = f'{site_name}_{router_name}'
-                cases.append({'key': key, 'site': site_name, 'router': router_name})
-                router = make_router_from_spec(spec)
+                cases.append({'key': key, 'location': site_name, 'router': router_name})
+                router = router_factory(spec)
                 cables = int(spec['cables'])
                 print(
                     f'[{si}/{len(batch_sites)}] [{ri}/{len(batch_routers)}]: {key} (cables={cables})'
@@ -271,7 +231,6 @@ def generate_expected_values_end_to_end_tests():
 
                 router_graphs[key] = wfn.G.copy()
                 del wfn, router
-                gc.collect()
 
     run_plan = [
         ('sites_1 x routers_1', S1, R1),
@@ -282,22 +241,30 @@ def generate_expected_values_end_to_end_tests():
         run_batch(s, r, label)
 
     expected = {
-        'Sites': tuple(sites_union),
+        'Locations': tuple(sites_union),
         'Routers': routers_union,
         'Cases': cases,
-        'RouterGraphs': router_graphs,
+        'Graphs': router_graphs,
         'Meta': environment_meta(),
     }
 
-    with output_path.open('wb') as f:
-        dill.dump(expected, f, protocol=dill.HIGHEST_PROTOCOL)
-
     print_header('Completed')
-    print(f'Saved expected values to: {output_path}')
-    print(f'Cases stored: {len(cases)}; Graphs stored: {len(router_graphs)}')
+    print(f'Cases generated: {len(cases)}; Number of graphs: {len(router_graphs)}')
+    return expected
 
 
 if __name__ == '__main__':
-    print('\n' + '=' * 50)
-    print('Starting end_to_end expected values generation...')
-    generate_expected_values_end_to_end_tests()
+    print_header('Generating end_to_end expected values...')
+
+    expected = generate_expected_values_end_to_end_tests()
+    output_path = paths.END_TO_END_DILL
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        output_path.unlink(missing_ok=True)
+        print(f'Removed (if existed): {output_path}')
+    except Exception as e:
+        print(f'Error removing old file: {e}')
+    with output_path.open('wb') as f:
+        dill.dump(expected, f, protocol=dill.HIGHEST_PROTOCOL)
+
+    print_header(f'Saved expected values to: {output_path}')

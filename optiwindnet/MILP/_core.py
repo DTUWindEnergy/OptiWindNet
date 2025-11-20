@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 
 from enum import StrEnum, auto
 from itertools import chain
-from typing import Any, Mapping, Callable
+from typing import Any, Mapping
 
 import networkx as nx
 from makefun import with_signature
@@ -251,7 +251,10 @@ class Solver(abc.ABC):
             if self._link_val(var)
         }
         S.add_weighted_edges_from(
-            ((u, v, self._flow_val(metadata.flow_[u, v])) for (u, v) in rev_from_link.keys()),
+            (
+                (u, v, self._flow_val(metadata.flow_[u, v]))
+                for (u, v) in rev_from_link.keys()
+            ),
             weight='load',
         )
         # set the 'reverse' edge attribute
@@ -296,7 +299,9 @@ class PoolHandler(abc.ABC):
         "Build topology from the pool solution at the last requested position"
         pass
 
-    def investigate_pool(self, P: nx.PlanarEmbedding, A: nx.Graph) -> tuple[nx.Graph, nx.Graph]:
+    def investigate_pool(
+        self, P: nx.PlanarEmbedding, A: nx.Graph
+    ) -> tuple[nx.Graph, nx.Graph]:
         """Go through the solver's solutions checking which has the shortest length
         after applying the detours with PathFinder."""
         Λ = float('inf')
@@ -306,7 +311,9 @@ class PoolHandler(abc.ABC):
         for i in range(num_solutions):
             λ = self.objective_at(i)
             if λ > Λ:
-                info(f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length")
+                info(
+                    f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length"
+                )
                 break
             Sʹ = self.topology_from_mip_pool()
             Gʹ = PathFinder(
