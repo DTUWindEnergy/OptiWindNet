@@ -11,7 +11,7 @@ from .interarraylib import calcload
 __all__ = ('repair_routeset_path',)
 
 _lggr = logging.getLogger(__name__)
-warn = _lggr.warning
+info, warn = _lggr.info, _lggr.warning
 
 
 def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
@@ -311,22 +311,26 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
                 # examine the two triangles ⟨s, t⟩ belongs to
                 for a, b, c in ((s, t, u), (t, s, v)):
                     # this is for diagonals crossing diagonals (4 checks)
-                    d = P[c][b]['ccw']
-                    diag_da = (a, d) if a < d else (d, a)
-                    if (
-                        d == P[b][c]['cw']
-                        and (diag_da in S.edges or diag_da in edges_add)
-                        and diag_da not in edges_del
-                    ):
-                        return False
-                    e = P[a][c]['ccw']
-                    diag_eb = (e, b) if e < b else (b, e)
-                    if (
-                        e == P[c][a]['cw']
-                        and (diag_eb in S.edges or diag_eb in edges_add)
-                        and diag_eb not in edges_del
-                    ):
-                        return False
+                    cbD = P[c].get(b)
+                    if cbD is not None:
+                        d = cbD['ccw']
+                        diag_da = (a, d) if a < d else (d, a)
+                        if (
+                            d == P[b][c]['cw']
+                            and (diag_da in S.edges or diag_da in edges_add)
+                            and diag_da not in edges_del
+                        ):
+                            return False
+                    acD = P[a].get(c)
+                    if acD is not None:
+                        e = acD['ccw']
+                        diag_eb = (e, b) if e < b else (b, e)
+                        if (
+                            e == P[c][a]['cw']
+                            and (diag_eb in S.edges or diag_eb in edges_add)
+                            and diag_eb not in edges_del
+                        ):
+                            return False
         return True
 
     outstanding_crossings = []
@@ -387,7 +391,7 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
                 _quantify_choices(S, A, swapS, src_path, dst_path, choices)
             )
         if not quant_choices:
-            warn('Unrepairable: no suitable node swap found.')
+            info('Repair unsuccessful: crossing marked for removal on HGS rerun.')
             outstanding_crossings.append((uv, st))
             continue
         quant_choices.sort()

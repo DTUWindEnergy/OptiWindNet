@@ -15,20 +15,19 @@ from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from .geometric import rotate
 from .interarraylib import describe_G
 from .themes import Colors
-from .utils import F
 
 __all__ = ('gplot', 'pplot')
 
 FONTSIZE_LABEL = 5
 FONTSIZE_LOAD = 7
-FONTSIZE_ROOT_LABEL = 6
+FONTSIZE_ROOT_LABEL = 4
 FONTSIZE_INFO_BOX = 12
 FONTSIZE_LEGEND_STRIP = 6
 NODESIZE = 35
-NODESIZE_LABELED = 75
-NODESIZE_LABELED_ROOT = 32
+NODESIZE_LABELED = 135
+NODESIZE_LABELED_ROOT = 92
 NODESIZE_DETOUR = 90
-NODESIZE_LABELED_DETOUR = 155
+NODESIZE_LABELED_DETOUR = 215
 
 
 def _is_ccw(X, Y):
@@ -41,14 +40,15 @@ def _is_ccw(X, Y):
 def gplot(
     G: nx.Graph,
     ax: Axes | None = None,
-    node_tag: str | None = None,
+    node_tag: str | bool | None = None,
     landscape: bool = True,
     infobox: bool = True,
     scalebar: tuple[float, str] | None = None,
     hide_ST: bool = True,
     legend: bool = False,
     min_dpi: int = 192,
-    dark=None,
+    dark: bool | None = None,
+    tag_border: bool = False,
     **kwargs,
 ) -> Axes:
     """Plot site and routeset contained in G.
@@ -58,23 +58,24 @@ def gplot(
     Extra arguments given to gplot() will be forwarded to Figure().
 
     Args:
-        ax: Axes instance to plot into. If `None`, opens a new figure.
-        node_tag: text label inside each node `None`, 'load' or 'label' (or
-            any of the nodes' attributes).
-        landscape: True -> rotate the plot by G's attribute 'landscape_angle'.
-        infobox: Draw text box with summary of G's main properties: capacity,
-            number of turbines, number of feeders, total cable length.
-        scalebar: (span_in_data_units, label) add a small bar to indicate the
-            plotted features' scale (lower right corner).
-        hide_ST: If coordinates include a Delaunay supertriangle, adjust the
-            viewport to fit only the actual vertices (i.e. no ST vertices).
-        legend: Add description of linestyles and node shapes.
-        min_dpi: Minimum dots per inch to use. matplotlib's default is used if
-            it is greater than this value.
-        **kwargs: passed on to matplotlib's Figure()
+      ax: Axes instance to plot into. If `None`, opens a new figure.
+      node_tag: text tag inside each node (e.g. 'load', 'label' or any of
+        the nodes' attributes). If `True`, tags the nodes with their numbers.
+      tag_border: if True, all border and obstacle vertices get a number tag.
+      landscape: True -> rotate the plot by G's attribute 'landscape_angle'.
+      infobox: Draw text box with summary of G's main properties: capacity,
+        number of turbines, number of feeders, total cable length.
+      scalebar: (span_in_data_units, label) add a small bar to indicate the
+        plotted features' scale (lower right corner).
+      hide_ST: If coordinates include a Delaunay supertriangle, adjust the
+        viewport to fit only the actual vertices (i.e. no ST vertices).
+      legend: Add description of linestyles and node shapes.
+      min_dpi: Minimum dots per inch to use. matplotlib's default is used if
+        it is greater than this value.
+      **kwargs: passed on to matplotlib's Figure()
 
     Returns:
-        Axes instance containing the plot.
+      Axes instance containing the plot.
     """
     c = Colors(dark)
 
@@ -107,13 +108,13 @@ def gplot(
         ax.set(**kw_axes)
     ax.set_axis_off()
     # draw farm border
+    border_opt = dict(
+        facecolor=c.border_face,
+        linestyle='dashed',
+        edgecolor=c.kind2color['border'],
+        linewidth=0.7,
+    )
     if border is not None:
-        border_opt = dict(
-            facecolor=c.border_face,
-            linestyle='dashed',
-            edgecolor=c.kind2color['border'],
-            linewidth=0.7,
-        )
         borderC = VertexC[border]
 
         if obstacles is None:
@@ -143,6 +144,10 @@ def gplot(
             path = Path(points, codes)
             patch = PathPatch(path, **border_opt)
             ax.add_patch(patch)
+    elif obstacles is not None:
+        # draw only obstacles
+        for obstacle in obstacles:
+            ax.fill(*VertexC[obstacle].T, **border_opt)
 
     # setup
     roots = range(-R, 0)
@@ -153,7 +158,6 @@ def gplot(
         detour = range(T + B + C, T + B + C + D)
         pos |= dict(zip(detour, VertexC[fnT[detour]]))
         pos |= dict(zip(contour, VertexC[fnT[contour]]))
-    RootL = {r: G.nodes[r].get('label', F[r]) for r in roots[::-1]}
 
     # default value for subtree (i.e. color for unconnected nodes)
     # is the last color of the tab20 colormap (i.e. 19)
@@ -223,38 +227,45 @@ def gplot(
         arts.set_clip_on(False)
 
     # draw labels
-    font_size = dict(load=FONTSIZE_LOAD, label=FONTSIZE_LABEL, tag=FONTSIZE_ROOT_LABEL)
-    if node_tag is not None:
-        if node_tag == 'load' and 'has_loads' not in G.graph:
-            node_tag = 'label'
-        labels = nx.get_node_attributes(G, node_tag)
-        for root in roots:
-            if root in labels:
-                labels.pop(root)
-        if D:
-            for det in chain(contour, detour):
-                if det in labels:
-                    labels.pop(det)
-        for n in range(T):
-            if n not in labels:
-                labels[n] = F[n]
-        arts = nx.draw_networkx_labels(
-            G, pos, ax=ax, labels=labels, font_size=font_size[node_tag]
+    if 'has_loads' in G.graph and node_tag == 'load':
+        label_options = dict(
+            labels={n: G.nodes[n].get('load', '-') for n in range(-R, T)},
+            font_size=(
+                {t: FONTSIZE_LOAD for t in range(T)}
+                | {r: FONTSIZE_LABEL for r in range(-R, 0)}
+            ),
         )
-        for artist in arts.values():
-            artist.set_clip_on(False)
-    # root nodes' labels
-    if node_tag is not None:
-        arts = nx.draw_networkx_labels(
-            G,
-            pos,
-            ax=ax,
-            labels=RootL,
-            font_size=FONTSIZE_ROOT_LABEL,
-            font_color=c.bg_color,
+    elif isinstance(node_tag, str):
+        # 'label' or some other node attr from node_tag
+        label_options = dict(
+            labels={n: G.nodes[n].get(node_tag, '') for n in range(-R, T)},
+            font_size=(
+                {t: FONTSIZE_LABEL for t in range(T)}
+                | {r: FONTSIZE_ROOT_LABEL for r in range(-R, 0)}
+            ),
         )
-        for artist in arts.values():
-            artist.set_clip_on(False)
+    elif node_tag is True:
+        # use the node number as label
+        label_options = dict(
+            labels={n: str(n) for n in range(-R, T)},
+            font_size=(
+                {t: FONTSIZE_LABEL for t in range(T)}
+                | {r: FONTSIZE_LOAD for r in range(-R, 0)}
+            ),
+        )
+    else:
+        label_options = dict(labels={})
+    arts = nx.draw_networkx_labels(
+        G,
+        pos,
+        ax=ax,
+        font_color={
+            n: (c.root_edge if n < 0 else 'k') for n in label_options['labels'].keys()
+        },
+        **label_options,
+    )
+    for artist in arts.values():
+        artist.set_clip_on(False)
 
     if scalebar is not None:
         bar = AnchoredSizeBar(ax.transData, *scalebar, 'lower right', frameon=False)
@@ -290,6 +301,12 @@ def gplot(
         )
         if info_art is not None:
             ax.add_artist(info_art)
+    if tag_border:
+        border_ = border if border is not None else []
+        obstacles_ = obstacles if obstacles is not None else [()]
+        print(VertexC.shape)
+        for b in chain(border_, *(obstacles_)):
+            ax.text(*VertexC[b], str(b), color=c.fg_color, size=FONTSIZE_ROOT_LABEL)
     if hide_ST and VertexC.shape[0] > R + T + B:
         # coordinates include the supertriangle, adjust view limits to hide it
         nonStC = np.r_[VertexC[: T + B], VertexC[-R:]]

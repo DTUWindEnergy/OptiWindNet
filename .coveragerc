@@ -1,0 +1,21 @@
+[run]
+branch = True
+source = optiwindnet
+omit =
+    optiwindnet/db/modelv0.py
+	optiwindnet/db/modelv1.py
+	optiwindnet/db/storagev0.py
+	optiwindnet/db/storagev1.py
+	optiwindnet/weighting.py
+	optiwindnet/synthetic.py
+	optiwindnet/baselines/lkh.py
+	optiwindnet/interface.py
+	optiwindnet/heuristics/ObstacleBypassingEW.py
+	optiwindnet/heuristics/NonBranchingEW.py
+	optiwindnet/heuristics/ClassicEsauWilliams.py
+    tests/**
+
+[report]
+show_missing = True
+skip_covered = True
+fail_under = 70

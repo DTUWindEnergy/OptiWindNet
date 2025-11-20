@@ -4,6 +4,7 @@
 import base64
 import io
 import json
+import os
 from collections.abc import Sequence
 from functools import partial
 from hashlib import sha256
@@ -15,8 +16,9 @@ import networkx as nx
 import numpy as np
 from pony import orm
 
+from .modelv2 import define_entities
 from ..interarraylib import calcload
-from ..utils import F, make_handle
+from ..utils import make_handle
 
 __all__ = ()
 
@@ -91,7 +93,26 @@ _misc_not = {
 }
 
 
-def L_from_nodeset(nodeset: object) -> nx.Graph:
+def open_database(filepath: str, create_db: bool = False) -> orm.Database:
+    """Opens the sqlite database v2 file specified in `filepath`.
+
+    Args:
+      filepath: path to database file
+      create_db: True -> create a new file if it does not exist
+
+    Returns:
+      Database object (Pony ORM)
+    """
+    db = orm.Database()
+    define_entities(db)
+    db.bind(
+        'sqlite', os.path.abspath(os.path.expanduser(filepath)), create_db=create_db
+    )
+    db.generate_mapping(create_tables=True)
+    return db
+
+
+def L_from_nodeset(nodeset: object, handle: str | None = None) -> nx.Graph:
     """Translate a NodeSet database entry to a location graph.
 
     Args:
@@ -106,21 +127,20 @@ def L_from_nodeset(nodeset: object) -> nx.Graph:
     B = nodeset.B
     border = np.array(nodeset.constraint_vertices[: nodeset.constraint_groups[0]])
     name = nodeset.name
+    name = name if name[0] != '!' else name[1 : name.index('!', 1)]
+    if handle is None:
+        handle = make_handle(name)
     L = nx.Graph(
         R=R,
         T=T,
         B=B,
         name=name,
-        handle=(
-            (name if name[0] != '!' else name[1 : name.index('!', 1)])
-            .strip()
-            .lower()
-            .replace(' ', '_')
-        ),
-        border=border,
+        handle=handle,
         VertexC=np.lib.format.read_array(io.BytesIO(nodeset.VertexC)),
         landscape_angle=nodeset.landscape_angle,
     )
+    if len(border) > 0:
+        L.graph['border'] = border
     if len(nodeset.constraint_groups) > 1:
         obstacle_idx = np.cumsum(np.array(nodeset.constraint_groups))
         L.graph.update(
@@ -129,8 +149,8 @@ def L_from_nodeset(nodeset: object) -> nx.Graph:
                 for a, b in pairwise(obstacle_idx)
             ]
         )
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
+    L.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
     return L
 
 
@@ -227,9 +247,6 @@ def packnodes(G: nx.Graph) -> PackType:
 
 def packmethod(method_options: dict) -> PackType:
     options = method_options.copy()
-    gates_limit = options.get('gates_limit')
-    if isinstance(gates_limit, int):
-        options['gates_limit'] = 'given'
     ffprint = options.pop('fun_fingerprint')
     solver_name = options.pop('solver_name')
     optionsstr = json.dumps(options)
@@ -382,6 +399,8 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
         stuntC_npy_io = io.BytesIO()
         np.lib.format.write_array(stuntC_npy_io, stuntC, version=(3, 0))
         packed_G['stuntC'] = stuntC_npy_io.getvalue()
+    if C + D > 0:
+        packed_G['clone2prime'] = G.graph['fnT'][-C - D - R : -R].tolist()
     concatenate_tuples = partial(sum, start=())
     pack_if_given = (  # key, function to prepare data
         ('detextra', None),

@@ -192,11 +192,11 @@ def gateXing_iter(
     R, T, VertexC = (G.graph[k] for k in ('R', 'T', 'VertexC'))
     fnT = G.graph.get('fnT')
     roots = range(-R, 0)
-    anglesRank = G.graph.get('anglesRank', None)
-    if anglesRank is None:
-        angles, anglesRank = angle_helpers(G)
+    angle_rank__ = G.graph.get('angle_rank__', None)
+    if angle_rank__ is None:
+        angle__, angle_rank__, _ = angle_helpers(G)
     else:
-        angles = G.graph['angles']
+        angle__ = G.graph['angle__']
     # TODO: There is a corner case here: for multiple roots, the gates are not
     #       being checked between different roots. Unlikely but possible case.
     # iterable of non-gate edges:
@@ -219,14 +219,14 @@ def gateXing_iter(
         uC = VertexC[u]
         vC = VertexC[v]
         for root, iGate in zip(roots, IGate):
-            ang = angles[:, root]
-            rank = anglesRank[:, root]
+            angle_ = angle__[:, root]
+            rank_ = angle_rank__[:, root]
             rootC = VertexC[root]
-            uvA = ang[v] - ang[u]
+            uvA = angle_[v] - angle_[u]
             swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
             lo, hi = (v, u) if swaped else (u, v)
-            loR, hiR = rank[lo], rank[hi]
-            pR_ = rank[iGate]
+            loR, hiR = rank_[lo], rank_[hi]
+            pR_ = rank_[iGate]
             W = loR > hiR  # wraps +-pi
             supL = less(loR, pR_)  # angle(low) <= angle(probe)
             infH = less(pR_, hiR)  # angle(probe) <= angle(high)
@@ -255,13 +255,12 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
 
     Example::
 
-      from optiwindnet.utils import F
       Xings = validate_routeset(G)
         for u, v, s, t in Xings:
           if u != v:
-            print(f'{F[u]}–{F[v]} crosses {F[s]}–{F[t]}')
+            print(f'{u}–{v} crosses {s}–{t}')
           else:
-            print(f'detour @ {F[u]} splits {F[s]}–{F[v]}–{F[t]}')
+            print(f'detour @ {u} splits {s}–{v}–{t}')
 
     """
     R, T, B = (G.graph[k] for k in 'RTB')

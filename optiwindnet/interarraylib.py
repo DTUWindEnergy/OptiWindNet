@@ -1,18 +1,23 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import logging
 import math
 import pickle
 import sys
 from hashlib import sha256
+from itertools import pairwise, chain
 
 import networkx as nx
 import numpy as np
 
-from .geometric import rotate
-from .utils import F
+from .geometric import CoordPair, rotate
+
+_lggr = logging.getLogger(__name__)
+debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 
 __all__ = (
+    'assign_cables',
     'describe_G',
     'pathdist',
     'count_diagonals',
@@ -32,6 +37,7 @@ __all__ = (
     'as_undetoured',
     'as_hooked_to_nearest',
     'as_hooked_to_head',
+    'as_stratified_vertices',
     'make_remap',
     'scaffolded',
 )
@@ -51,24 +57,70 @@ _essential_graph_attrs = (
 )
 
 
-def describe_G(G):
+def assign_cables(G: nx.Graph, cables: list[tuple[int, float]], currency: str = '€'):
+    """Assign a cable type to each edge of `G` and update attribute 'cost'.
+
+    Each edge is assigned the cheapest cable type that can carry its load. The
+    edge attribute 'cable' is the index in `cables` of the type chosen.
+
+    Changes `G` in place.
+
+    Args:
+      G: networkx graph with edges having a 'load' attribute (use calcload(G))
+      cables: [(«capacity», «cost»), ...] in increasing capacity order (each
+        cable entry must be a tuple)
+      currency: symbol representing the unit of the cost
+    """
+    capacity = max(cables)[0]
+    if G.graph['max_load'] > capacity:
+        raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
+    run_len_ = (b[0] - a[0] for a, b in pairwise(chain(((0,),), cables)))
+    kind = [k for k, run_len in enumerate(run_len_) for _ in range(run_len)]
+    cost = [cables[k][1] for k in kind]
+    has_cost = sum(cost) > 0
+    for _, _, data in G.edges(data=True):
+        k = data['load'] - 1
+        data['cable'] = kind[k]
+        if has_cost:
+            data['cost'] = data['length'] * cost[k]
+    G.graph['cables'] = cables
+    if has_cost:
+        G.graph['currency'] = currency
+    if 'capacity' not in G.graph:
+        G.graph['capacity'] = capacity
+
+
+def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
+    """Create a 3-4 line summary of G's properties.
+
+    significant_digits applies only to total length and is enforced only when the
+    integer part has fewer significant digits than significant_digits
+
+    Args:
+      G: route set instance
+      significant_digits: minimum number of significant digits used for total length
+    Returns:
+      Text lines: capacity and T, excess feeders and feeders per root, total length,
+        total cost.
+    """
     R = G.graph['R']
     T = G.graph['T']
     capacity = G.graph['capacity']
     roots = range(1, R + 1)
-    RootL = {-r: G.nodes[-r].get('label', F[-r]) for r in roots}
-    info = []
-    info.append(f'κ = {capacity}, T = {T}')
+    RootL = {-r: G.nodes[-r].get('label', f'[{-r}]') for r in roots}
+    desc = []
+    desc.append(f'κ = {capacity}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
     excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(T / capacity)
-    info.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
+    desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
     length = G.size(weight='length')
     if length > 0:
         intdigits = int(np.floor(np.log10(length))) + 1
-        info.append(f'Σλ = {round(length, max(0, 5 - intdigits))} m')
-    if 'has_costs' in G.graph:
-        info.append('{:.0f} €'.format(G.size(weight='cost')))
-    return info
+        fracdigits = max(0, significant_digits - intdigits)
+        desc.append(f'Σλ = {{:.{fracdigits}f}} m'.format(round(length, fracdigits)))
+    if 'currency' in G.graph:
+        desc.append(f'{G.size(weight="cost"):.0f} {G.graph["currency"]}')
+    return desc
 
 
 def update_lengths(G):
@@ -212,38 +264,42 @@ def fun_fingerprint(fun=None) -> dict[str, bytes | str]:
     )
 
 
-def L_from_site(*, VertexC: np.ndarray, T: int, R: int, **kwargs) -> nx.Graph:
+def L_from_site(
+    *,
+    VertexC: np.ndarray,
+    T: int,
+    R: int,
+    B: int = 0,
+    border: np.ndarray | None = None,
+    obstacles: list[np.ndarray] | None = None,
+    name: str = '',
+    handle: str = 'L_from_site',
+    landscape_angle: float | None = None,
+) -> nx.Graph:
     """Create L from a location's attributes.
 
     Args:
-      VertexC: numpy.ndarray (V, 2) with x, y pos. of wtg + oss (total V)
+      VertexC: numpy.ndarray (V, 2) with all (x, y) coordinates (V = R + T + B)
       T: int number of wtg
       R: int number of oss
-      **kwargs: Additional relevant arguments, for example:
-        * name: str site name
-        * handle: str site identifier
-        * B: int number of border and obstacle zones' vertices
-        * border: array (B,) of VertexC indices that define the border (ccw)
-        * obstacles: sequence of numpy.ndarray of VertexC indices
+      B: number of border and obstacle zones' vertices
+      border: array (B,) of VertexC indices that define the border (ccw)
+      obstacles: sequence of numpy.ndarray of VertexC indices
+      name: site name
+      handle: site identifier
 
     Returns:
-      Graph containing N = R + T nodes and no edges. All keyword arguments are
-        made available as graph attributes.
+      Graph containing N = R + T nodes and no edges (all args become graph attributes).
     """
-    if 'handle' not in kwargs:
-        kwargs['handle'] = 'L_from_site'
-    if 'name' not in kwargs:
-        kwargs['name'] = kwargs['handle']
-    if 'B' not in kwargs:
-        border = kwargs.get('border')
-        if border is not None:
-            kwargs['B'] = border.shape[0]
-        else:
-            kwargs['B'] = 0
-    L = nx.Graph(T=T, R=R, VertexC=VertexC, **kwargs)
-
-    L.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    L = nx.Graph(T=T, R=R, B=B, VertexC=VertexC, name=name, handle=handle)
+    if border is not None:
+        L.graph['border'] = border
+    if obstacles is not None:
+        L.graph['obstacles'] = obstacles
+    if landscape_angle is not None:
+        L.graph['landscape_angle'] = landscape_angle
+    L.add_nodes_from(range(T), kind='wtg')
+    L.add_nodes_from(range(-R, 0), kind='oss')
     return L
 
 
@@ -259,12 +315,31 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     VertexC, d2roots, diagonals = (
         A.graph[k] for k in ('VertexC', 'd2roots', 'diagonals')
     )
-    G = nx.create_empty_copy(A)
-    for k in ('capacity', 'has_loads', 'max_load', 'creator', 'solver_details'):
-        value = S.graph.get(k)
+    G = nx.create_empty_copy(S)
+    for k in (
+        'B',
+        'border',
+        'obstacles',
+        'name',
+        'handle',
+        'landscape_angle',
+        'norm_scale',
+        'norm_offset',
+        'is_normalized',
+    ):
+        value = A.graph.get(k)
         if value is not None:
             G.graph[k] = value
-    nx.set_node_attributes(G, S.nodes)
+    nx.set_node_attributes(
+        G,
+        {n: label for n, label in A.nodes(data='label') if label is not None},
+        'label',
+    )
+    nx.set_node_attributes(G, 'wtg', 'kind')
+    for r in range(-R, 0):
+        G.nodes[r]['kind'] = 'oss'
+    if 'is_normalized' in A.graph:
+        G.graph['is_normalized'] = True
     # remove supertriangle coordinates from VertexC
     G.graph['VertexC'] = np.vstack((VertexC[: -R - 3], VertexC[-R:]))
     # non_A_edges are the far-reaching gates and ocasionally the result of
@@ -401,7 +476,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         fnT = np.arange(iC + R)
         fnT[T + B : -R] = clone2prime
         fnT[-R:] = range(-R, 0)
-        G.graph.update(fnT=fnT, clone2prime=clone2prime, C=len(clone2prime))
+        G.graph.update(fnT=fnT, C=len(clone2prime))
     # add to G the S edges that are not in A
     rogue = []
     for s, t in non_A_edges:
@@ -453,16 +528,22 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                 # examine the two triangles ⟨s, t⟩ belongs to
                 for a, b, c in ((s, t, u), (t, s, v)):
                     # this is for diagonals crossing diagonals
-                    d = P[c][b]['ccw']
-                    diag_da = (a, d) if a < d else (d, a)
-                    if d == P[b][c]['cw'] and diag_da in G.edges:
-                        crossings = True
-                        break
-                    e = P[a][c]['ccw']
-                    diag_eb = (e, b) if e < b else (b, e)
-                    if e == P[c][a]['cw'] and diag_eb in G.edges:
-                        crossings = True
-                        break
+                    cbD = P[c].get(b)
+                    # was triangle edge removed (constraint Xing)? if yes, no diagonal
+                    if cbD is not None:
+                        d = cbD['ccw']
+                        diag_da = (a, d) if a < d else (d, a)
+                        if d == P[b][c]['cw'] and diag_da in G.edges:
+                            crossings = True
+                            break
+                    acD = P[a].get(c)
+                    # was triangle edge removed (constraint Xing)? if yes, no diagonal
+                    if acD is not None:
+                        e = acD['ccw']
+                        diag_eb = (e, b) if e < b else (b, e)
+                        if e == P[c][a]['cw'] and diag_eb in G.edges:
+                            crossings = True
+                            break
                 if crossings:
                     G[r][n]['kind'] = 'tentative'
                     tentative.append((r, n))
@@ -608,7 +689,7 @@ def terse_links_from_S(S):
     # convert the graph to array representing the tree (edges i->terse[i])
     for u, v, edgeD in S.edges(data=True):
         u, v = (u, v) if u < v else (v, u)
-        i, target = (u, v) if edgeD["reverse"] else (v, u)
+        i, target = (u, v) if edgeD['reverse'] else (v, u)
         terse_links[i] = target
     return terse_links
 
@@ -638,7 +719,7 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
 
 
 def as_normalized(
-    Aʹ: nx.Graph, *, offset: float | None = None, scale: float | None = None
+    Aʹ: nx.Graph, *, offset: CoordPair | None = None, scale: float | None = None
 ) -> nx.Graph:
     """Make a shallow copy of an instance and shift and scale its geometry.
 
@@ -650,8 +731,8 @@ def as_normalized(
     Args:
         Aʹ: (or Gʹ) any instance that has inherited 'scale' from an
             edgeset `Aʹ`.
-        offset: override graph's 'norm_offset'
-        scale: override graph's 'norm_scale'
+        offset: coordinates (2,) offset to override graph's 'norm_offset'
+        scale: multiplicative scaling factor to override graph's 'norm_scale'
 
     Returns:
         A copy of the instance with changed coordinates and linear metrics.
@@ -659,8 +740,12 @@ def as_normalized(
     A = Aʹ.copy()
     if offset is None:
         offset = Aʹ.graph['norm_offset']
+    else:
+        A.graph['norm_offset'] = offset
     if scale is None:
         scale = Aʹ.graph['norm_scale']
+    else:
+        A.graph['norm_scale'] = scale
     A.graph['is_normalized'] = True
     for _, _, eData in A.edges(data=True):
         eData['length'] *= scale
@@ -731,7 +816,7 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
                 load=G.nodes[n]['load'],
                 kind='tentative',
                 reverse=False,
-                length=np.hypot(*(VertexC[n] - VertexC[r]).T),
+                length=np.hypot(*(VertexC[n] - VertexC[r])).item(),
             )
             tentative.append((r, n))
     del G.graph['D']
@@ -880,6 +965,47 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
         tentative.append((r, new_hook))
     S.graph['tentative'] = tentative
     return S
+
+
+def as_stratified_vertices(Lʹ: nx.Graph) -> nx.Graph:
+    """Ensure border-vertices are all in the B-range of VertexC.
+
+    Apply this to L when terminal or root coordinates are to be updated by writting to
+    the array elements of VertexC. In order to keep the borders in place, they must not
+    rely on vertices in the terminal or root sections (T-range, R-range). This function
+    creates duplicates of any terminal-vertex or root-vertex used by borders/obstacles.
+
+    Args:
+      L: location geometry to be stratified
+    Returns:
+      New location geometry with stratified vertices
+    """
+    L = Lʹ.copy()
+    R, T = (L.graph[k] for k in 'RT')
+    border = L.graph.get('border', np.array(()))
+    obstacles = L.graph.get('obstacles', [])
+    if any(border < T) or any(any(obstacle < T) for obstacle in obstacles):
+        # is not stratified
+        VertexC = L.graph['VertexC']
+        VertexC = np.vstack(
+            (
+                VertexC[:T],
+                VertexC[border],
+                *(VertexC[obstacle] for obstacle in obstacles),
+                VertexC[-R:],
+            )
+        )
+        border_sizes = np.array(
+            [border.shape[0]] + [obstacle.shape[0] for obstacle in obstacles]
+        )
+        obstacle_idxs = np.cumsum(border_sizes) + T
+        L.graph.update(
+            VertexC=VertexC,
+            B=border_sizes.sum().item(),
+            border=np.arange(T, T + border.shape[0]),
+            obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)],
+        )
+    return L
 
 
 def make_remap(G, refG, H, refH):

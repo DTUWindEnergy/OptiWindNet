@@ -3,6 +3,7 @@
 
 import logging
 import time
+from typing import Callable
 
 import networkx as nx
 import numpy as np
@@ -18,6 +19,7 @@ from ..geometric import (
     is_crossing,
     is_same_side,
 )
+from ..interarraylib import fun_fingerprint
 from ..mesh import delaunay
 from ..utils import F
 from .priorityqueue import PriorityQueue
@@ -29,35 +31,36 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 def CPEW(
-    G_base,
-    capacity=8,
-    delaunay_based=True,
-    maxiter=10000,
-    weightfun=None,
-    weight_attr='length',
-):
+    L: nx.Graph,
+    capacity: int,
+    delaunay_based: bool = True,
+    maxiter: int = 10000,
+    weightfun: Callable | None = None,
+    weight_attr: str = 'length',
+) -> nx.Graph:
     """Crossing Preventing Esau-Williams heuristic for C-MST
 
     Args:
-      G_base: networkx.Graph
-      c: capacity
+      L: location graph
+      capacity: max number of terminals in a subtree
+      maxiter: fail-safe to avoid locking in an infinite loop
     Returns:
-      G_cmst: networkx.Graph
+      Routeset graph G
     """
 
     start_time = time.perf_counter()
     # grab relevant options to store in the graph later
     options = dict(delaunay_based=delaunay_based)
 
-    R = G_base.graph['R']
-    T = G_base.graph['T']
+    R = L.graph['R']
+    T = L.graph['T']
     _T = range(T)
     roots = range(-R, 0)
-    VertexC = G_base.graph['VertexC']
+    VertexC = L.graph['VertexC']
 
     # BEGIN: prepare auxiliary graph with all allowed edges and metrics
     if delaunay_based:
-        A = delaunay(G_base, bind2root=True)
+        A = delaunay(L, bind2root=True)
         diagonals = A.graph['diagonals']
         # apply weightfun on all delaunay edges
         if weightfun is not None:
@@ -68,13 +71,13 @@ def CPEW(
         # else:
         # apply_edge_exemptions(A)
     else:
-        A = complete_graph(G_base)
+        A = complete_graph(L)
 
     assign_root(A)
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
-    angles, anglesRank = angle_helpers(G_base)
-    union_limits, angle_ccw = angle_oracles_factory(angles, anglesRank)
+    angle__, angle_rank__, _ = angle_helpers(L)
+    union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
 
     if weightfun is not None:
         options['weightfun'] = weightfun.__name__
@@ -87,7 +90,7 @@ def CPEW(
     # END: prepare auxiliary graph with all allowed edges and metrics
 
     # BEGIN: create initial star graph
-    G = nx.create_empty_copy(G_base)
+    G = nx.create_empty_copy(L)
     G.add_weighted_edges_from(
         ((n, r, d2roots[n, r]) for n, r in A.nodes(data='root') if n >= 0),
         weight=weight_attr,
@@ -136,10 +139,10 @@ def CPEW(
 
     def is_crossing_feeder(root, subroot, u, v, touch_is_cross=False):
         less = np.less_equal if touch_is_cross else np.less
-        uvA = angles[v, root] - angles[u, root]
+        uvA = angle__[v, root] - angle__[u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
         lo, hi = (v, u) if swaped else (u, v)
-        loR, hiR, srR = anglesRank[(lo, hi, subroot), root]
+        loR, hiR, srR = angle_rank__[(lo, hi, subroot), root]
         W = loR > hiR  # wraps +-pi
         supL = less(loR, srR)  # angle(low) <= angle(probe)
         infH = less(srR, hiR)  # angle(probe) <= angle(high)
@@ -147,7 +150,7 @@ def CPEW(
             if not is_same_side(*VertexC[[u, v, root, subroot]]):
                 # crossing subroot
                 debug(
-                    '<crossing> discarding «%s–%s»: would cross subroot <%s>',
+                    '<crossing> discarding «%s-%s»: would cross subroot <%s>',
                     F[u],
                     F[v],
                     F[subroot],
@@ -216,7 +219,8 @@ def CPEW(
         nonlocal prevented_crossings
         found = False
         # BEGIN: for loop that picks an edge
-        for weight, tiebreaker, u, v in choices:
+        for choice in choices:
+            weight, tiebreaker, u, v = choice.tolist()
             found = True
             root = A[u][v]['root']
 
@@ -291,7 +295,7 @@ def CPEW(
             pq.add(tradeoff, subroot, (u, v))
             ComponIn[subroot_[v]].add(subroot)
             debug(
-                '<pushed> sr_u <%s>, «%s–%s», tradeoff = %.3f',
+                '<pushed> sr_u <%s>, «%s-%s», tradeoff = %.3f',
                 F[subroot],
                 F[u],
                 F[v],
@@ -331,7 +335,7 @@ def CPEW(
         if (u, v) in A.edges:
             A.remove_edge(u, v)
         else:
-            debug('<<< UNLIKELY <ban_queued_union()> «%s–%s» not in A >>>', F[u], F[v])
+            debug('<<< UNLIKELY <ban_queued_union()> «%s-%s» not in A >>>', F[u], F[v])
         sr_v = subroot_[v]
         # TODO: think about why a discard was needed
         ComponIn[sr_v].discard(sr_u)
@@ -357,7 +361,7 @@ def CPEW(
         if componin != is_reverse:
             # TODO: Why did I expect always False here? It is sometimes True.
             debug(
-                '«%s–%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
+                '«%s-%s», sr_u <%s>, sr_v <%s> componin: %s, is_reverse: %s',
                 F[u],
                 F[v],
                 F[sr_u],
@@ -394,7 +398,6 @@ def CPEW(
             error('maxiter reached (%d)', i)
             break
         debug('[%d]', i)
-        # debug(f'[{i}] bj–bm root: {A.edges[(F.bj, F.bm)]["root"]}')
         if stale_subtrees:
             debug('stale_subtrees: %s', tuple(F[subroot] for subroot in stale_subtrees))
         while stale_subtrees:
@@ -404,7 +407,7 @@ def CPEW(
             # finished
             break
         sr_u, (u, v) = pq.top()
-        debug('<popped> «%s–%s», sr_u: <%s>', F[u], F[v], F[sr_u])
+        debug('<popped> «%s-%s», sr_u: <%s>', F[u], F[v], F[sr_u])
 
         # TODO: main loop should do only
         # - pop from pq
@@ -451,7 +454,7 @@ def CPEW(
 
         if eX:
             debug(
-                '<edge_crossing> discarding «%s–%s»: would cross %s',
+                '<edge_crossing> discarding «%s-%s»: would cross %s',
                 F[u],
                 F[v],
                 tuple((F[s], F[t]) for s, t in eX),
@@ -473,14 +476,14 @@ def CPEW(
         debug('<angle_span> //%s:%s//', F[unionLo], F[unionHi])
 
         # check which feeders are within the union's angle span
-        lR, hR = anglesRank[(unionLo, unionHi), root]
+        lR, hR = angle_rank__[(unionLo, unionHi), root]
         anglesWrap = lR > hR
         abort = False
         # the more conservative check would be using sr_v instead of
         # sr_u in the line below (but then the filter needs changing)
         distanceThreshold = d2rootsRank[sr_u, root]
         for subroot in [g for g in G[root] if d2rootsRank[g, root] > distanceThreshold]:
-            sr_rank = anglesRank[subroot, root]
+            sr_rank = angle_rank__[subroot, root]
             if (
                 not anglesWrap
                 and (lR < sr_rank < hR)
@@ -549,7 +552,7 @@ def CPEW(
             A.nodes[n]['root'] = root
             subroot_[n] = sr_v
             subtree_[n] = subtree
-        debug('<add edge> «%s–%s» subroot <%s>', F[u], F[v], F[sr_v])
+        debug('<add edge> «%s-%s» subroot <%s>', F[u], F[v], F[sr_v])
         if _lggr.isEnabledFor(logging.DEBUG) and pq:
             debug(
                 'heap top: <%s>, «%s» %.3f',
@@ -619,8 +622,9 @@ def CPEW(
     G.graph['prevented_crossings'] = prevented_crossings
     G.graph['capacity'] = capacity
     G.graph['creator'] = 'CPEW'
-    G.graph['edges_fun'] = CPEW
-    G.graph['creation_options'] = options
-    G.graph['runtime_unit'] = 's'
+    G.graph['method_options'] = options | dict(fun_fingerprint=_CPEW_fingerprint)
     G.graph['runtime'] = time.perf_counter() - start_time
     return G
+
+
+_CPEW_fingerprint = fun_fingerprint(CPEW)

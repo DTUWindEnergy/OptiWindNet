@@ -5,7 +5,7 @@ import logging
 import re
 from collections import namedtuple
 from importlib.resources import files
-from itertools import chain, zip_longest
+from itertools import chain
 from pathlib import Path
 
 import esy.osm.pbf
@@ -16,12 +16,12 @@ import utm
 import yaml
 
 from .interarraylib import L_from_site
-from .utils import F, make_handle
+from .utils import make_handle
 
 _lggr = logging.getLogger(__name__)
-info = _lggr.info
+info, warn = _lggr.info, _lggr.warning
 
-__all__ = ('L_from_yaml', 'L_from_pbf', 'load_repository')
+__all__ = ('L_from_yaml', 'L_from_pbf', 'L_from_windIO', 'load_repository')
 
 
 _coord_sep = r',\s*|;\s*|\s{1,}|,|;'
@@ -50,7 +50,7 @@ def _get_entries(entries):
 def _translate_latlonstr(entry_list):
     translated = []
     min = sec = 0.0
-    for tag, lat, lon in _get_entries(entry_list):
+    for label, lat, lon in _get_entries(entry_list):
         latlon = []
         for ll in (lat, lon):
             deg, *tail = ll.split('°')
@@ -73,28 +73,28 @@ def _translate_latlonstr(entry_list):
             else:
                 # entry is a signed fractional degree without hemisphere letter
                 latlon.append(float(deg))
-        translated.append((tag, *utm.from_latlon(*latlon)))
+        translated.append((label, *utm.from_latlon(*latlon)))
     return translated
 
 
 def _parser_latlon(entry_list):
     # separate data into columns
-    tags, eastings, northings, zone_numbers, zone_letters = zip(
+    labels, eastings, northings, zone_numbers, zone_letters = zip(
         *_translate_latlonstr(entry_list)
     )
     # all coordinates must belong to the same UTM zone
     assert all(num == zone_numbers[0] for num in zone_numbers[1:])
     assert all(letter == zone_letters[0] for letter in zone_letters[1:])
-    return np.c_[eastings, northings], (tags if any(tags) else ())
+    return np.c_[eastings, northings], (labels if any(labels) else ())
 
 
 def _parser_planar(entry_list):
-    tags = []
+    labels = []
     coords = []
-    for tag, easting, northing in _get_entries(entry_list):
-        tags.append(tag)
+    for label, easting, northing in _get_entries(entry_list):
+        labels.append(label)
         coords.append((float(easting), float(northing)))
-    return np.array(coords, dtype=float), (tags if any(tags) else ())
+    return np.array(coords, dtype=float), (labels if any(labels) else ())
 
 
 coordinate_parser = dict(
@@ -108,22 +108,22 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     Two options available for COORDINATE_FORMAT: "planar" and "latlon".
 
-    Format "planar" is: [tag] easting northing. Example::
+    Format "planar" is: [label] easting northing. Example::
 
-      TAG 234.2 5212.5
+      LABEL 234.2 5212.5
 
-    Format "latlon" is: [tag] latitude longitude. Example::
+    Format "latlon" is: [label] latitude longitude. Example::
 
-      TAG1 11°22.333'N 44°55.666'E
-      TAG2 11.3563°N 44.8903°E
-      TAG3 11°22'20"N 44°55'40"E
+      LABEL1 11°22.333'N 44°55.666'E
+      LABEL2 11.3563°N 44.8903°E
+      LABEL3 11°22'20"N 44°55'40"E
 
-    The [tag] is optional. Ensure no spaces within a latitude or longitude.
+    The [label] is optional. Ensure no spaces within a latitude or longitude.
 
     The coordinate pair may be separated by "," or ";" and may be enclosed in
     "[]" or "()". Example::
 
-      TAG [234.2, 5212.5]
+      LABEL [234.2, 5212.5]
 
     Args:
       filepath: path to `.yaml` file to read.
@@ -142,9 +142,9 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         handle = make_handle(name)
     # default format is "latlon"
     format = parsed_dict.get('COORDINATE_FORMAT', 'latlon')
-    Border, BorderTag = coordinate_parser[format](parsed_dict['EXTENTS'])
-    Root, RootTag = coordinate_parser[format](parsed_dict['SUBSTATIONS'])
-    Terminal, TerminalTag = coordinate_parser[format](parsed_dict['TURBINES'])
+    Border, BorderLabel = coordinate_parser[format](parsed_dict['EXTENTS'])
+    Root, RootLabel = coordinate_parser[format](parsed_dict['SUBSTATIONS'])
+    Terminal, TerminalLabel = coordinate_parser[format](parsed_dict['TURBINES'])
     T = Terminal.shape[0]
     R = Root.shape[0]
     node_xy = {xy: i for i, xy in enumerate(map(tuple, Terminal))}
@@ -205,14 +205,14 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     )
 
     # populate graph G
-    G.add_nodes_from(
-        (n, {'kind': 'wtg', 'label': (tag if tag else F[n])})
-        for n, tag in zip_longest(range(T), TerminalTag)
-    )
-    G.add_nodes_from(
-        (r, {'kind': 'oss', 'label': (tag if tag else F[r])})
-        for r, tag in zip_longest(range(-R, 0), RootTag)
-    )
+    G.add_nodes_from(range(T), kind='wtg')
+    if TerminalLabel:
+        nx.set_node_attributes(G, {t: TerminalLabel[t] for t in range(T)}, name='label')
+    G.add_nodes_from(range(-R, 0), kind='oss')
+    if RootLabel:
+        nx.set_node_attributes(
+            G, {-R + r: RootLabel[r] for r in range(R)}, name='label'
+        )
     return G
 
 
@@ -236,7 +236,9 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     plant_name = None
     nodes = {}
     substations = []
+    substation_labels = []
     turbines = []
+    turbine_labels = []
     border_raw = None
     obstacles_raw = []
     ways = {}
@@ -245,13 +247,17 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             case esy.osm.pbf.Node():
                 nodes[e.id] = e
                 power_kind = e.tags.get('power')
+                label = e.tags.get('name') or e.tags.get('ref')
                 match power_kind:
                     case 'substation' | 'transformer':
                         substations.append(e.lonlat[::-1])
+                        substation_labels.append(label)
                     case 'generator':
                         turbines.append(e.lonlat[::-1])
+                        turbine_labels.append(label)
                     case _:
                         info('Unhandled power category for Node: %s', power_kind)
+
             case esy.osm.pbf.Way():
                 power_kind = e.tags.get('power')
                 if power_kind is None:
@@ -264,9 +270,11 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                             raise ValueError('Only a single border is supported.')
                         border_raw = [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
                     case 'substation' | 'transformer':
+                        label = e.tags.get('name') or e.tags.get('ref')
                         substations.append(
                             [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
                         )
+                        substation_labels.append(label)
                     case 'generator':
                         info('Generator must be Node, not Way.')
                     case None:
@@ -387,6 +395,11 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         name=name,
         handle=handle,
     )
+    for labels, start in ((substation_labels, -R), (turbine_labels, 0)):
+        if any(labels):
+            for i, label in enumerate(labels, start=start):
+                if label is not None:
+                    L.nodes[i]['label'] = label
     if border is not None:
         L.graph['border'] = np.array(border, dtype=np.int_)
         if obstacles:
@@ -411,6 +424,73 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     if plant_name is not None:
         L.graph['OSM_name'] = plant_name
 
+    return L
+
+
+def _yaml_include_constructor(loader, node):
+    filename = node.value
+    with open(filename, 'r') as f:
+        return yaml.load(f, Loader=type(loader))
+
+
+class IncludeLoader(yaml.SafeLoader):
+    def __init__(self, stream):
+        # Store the directory of the currently loaded YAML file
+        self._parent = Path(stream.name).parent
+        super().__init__(stream)
+        self.add_constructor('!include', IncludeLoader.include)
+
+    def include(self, node):
+        # Construct the full path of the file to include, relative to parent YAML
+        include_path = Path(self.construct_scalar(node))
+        if include_path.suffix not in ('.yml', '.yaml'):
+            warn('Ignoring YAML "!include" directive to unsupported file type (%s)', include_path)
+            return {}
+        if not include_path.is_absolute():
+            include_path = self._parent / include_path
+        with open(include_path, 'r') as f:
+            # When processing includes, use IncludeLoader to maintain correct directory context
+            return yaml.load(f, IncludeLoader)
+
+
+def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
+    """Import wind farm data from a windIO .yaml file.
+
+    Args:
+      filepath: path to windIO `.yaml` file to read.
+      handle: Short moniker for the site.
+
+    Returns:
+      Unconnected location geometry L.
+    """
+    if isinstance(filepath, str):
+        filepath = Path(filepath)
+    name = filepath.stem
+    system = yaml.load(filepath.open(), IncludeLoader)
+    coords = system['wind_farm']['layouts']['initial_layout']['coordinates']
+    terminalC = np.c_[coords['x'], coords['y']]
+    coords = system['wind_farm']['electrical_substations']['coordinates']
+    rootC = np.c_[coords['x'], coords['y']]
+    coords = system['site']['boundaries']['polygons'][0]
+    borderC = np.c_[coords['x'], coords['y']]
+
+    T = terminalC.shape[0]
+    R = rootC.shape[0]
+    if handle is None:
+        handle = make_handle(name)
+
+    L = L_from_site(
+        R=R,
+        T=T,
+        VertexC=np.vstack((terminalC, borderC, rootC)),
+        **(
+            {'border': np.arange(T, T + borderC.shape[0])}
+            if (borderC is not None and borderC.shape[0] >= 3)
+            else {}
+        ),
+        name=name,
+        handle=handle,
+    )
     return L
 
 

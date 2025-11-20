@@ -12,7 +12,6 @@ import numpy as np
 from pony.orm import db_session
 
 from ..interarraylib import calcload
-from ..utils import F
 
 __all__ = ()
 
@@ -50,8 +49,8 @@ def graph_from_edgeset(edgeset):
         iterations=iterations,
     )
 
-    G.add_nodes_from(((n, {'label': F[n], 'kind': 'wtg'}) for n in range(T)))
-    G.add_nodes_from(((r, {'label': F[r], 'kind': 'oss'}) for r in range(-R, 0)))
+    G.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
+    G.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
 
     D = edgeset.D or 0
     if D > 0:

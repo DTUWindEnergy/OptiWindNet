@@ -17,14 +17,15 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
+    OWNSolutionNotFound,
+    OWNWarmupFailed,
     PoolHandler,
     SolutionInfo,
     Solver,
     Topology,
-    investigate_pool,
 )
 
-__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+__all__ = ('make_min_length_model', 'warmup_model')
 
 _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info
@@ -67,6 +68,14 @@ class SolverORTools(Solver, PoolHandler):
 
     def __init__(self):
         self.solver = cp_model.CpSolver()
+        # set default options for ortools
+        self.options = {}
+
+    def _link_val(self, var: Any) -> int:
+        return self._value_map[var.index]
+
+    def _flow_val(self, var: Any) -> int:
+        return self._value_map[var.index]
 
     def set_problem(
         self,
@@ -79,13 +88,13 @@ class SolverORTools(Solver, PoolHandler):
         self.P, self.A, self.capacity = P, A, capacity
         self.model_options = model_options
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
+        self.model, self.metadata = model, metadata
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
-        self.model, self.metadata = model, metadata
 
     def solve(
         self,
-        time_limit: int,
+        time_limit: float,
         mip_gap: float,
         options: dict[str, Any] = {},
         verbose: bool = False,
@@ -101,17 +110,23 @@ class SolverORTools(Solver, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         storer = _SolutionStore(model)
-        for key, val in options.items():
+        applied_options = self.options | options
+        for key, val in applied_options.items():
             setattr(solver.parameters, key, val)
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.relative_gap_limit = mip_gap
         solver.parameters.log_search_progress = verbose
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
         _ = solver.solve(model, storer)
+        num_solutions = len(storer.solutions)
+        if num_solutions == 0:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution. Solver {self.name} terminated with: {solver.status_name()}'
+            )
         storer.solutions.reverse()
         self.solution_pool = storer.solutions
         _, self._value_map = storer.solutions[0]
-        self.num_solutions = len(storer.solutions)
+        self.num_solutions = num_solutions
         bound = solver.best_objective_bound
         objective = solver.objective_value
         solution_info = SolutionInfo(
@@ -121,7 +136,7 @@ class SolverORTools(Solver, PoolHandler):
             relgap=1.0 - bound / objective,
             termination=solver.status_name(),
         )
-        self.solution_info, self.solver_options = solution_info, options
+        self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
@@ -138,26 +153,17 @@ class SolverORTools(Solver, PoolHandler):
                 branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
-            S, G = investigate_pool(P, A, self)
+            S, G = self.investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
         G.graph['solver_details'].update(strategy=self.solver.solution_info())
         return S, G
-
-    def boolean_value(self, literal: cp_model.IntVar) -> bool:
-        return self._value_map[literal.index]
-
-    def value(self, literal: cp_model.IntVar) -> int:
-        return self._value_map[literal.index]
 
     def objective_at(self, index: int) -> float:
         objective_value, self._value_map = self.solution_pool[index]
         return objective_value
 
     def topology_from_mip_pool(self) -> nx.Graph:
-        return topology_from_mip_sol(metadata=self.metadata, solver=self)
-
-    def topology_from_mip_sol(self):
-        return topology_from_mip_sol(metadata=self.metadata, solver=self)
+        return self.topology_from_mip_sol()
 
 
 def make_min_length_model(
@@ -235,8 +241,12 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
-        for (u, v), tr in gateXing_iter(A):
-            m.add_at_most_one(link_[(u, v)], link_[(v, u)], link_[tr])
+        for (u, v), (r, t) in gateXing_iter(A):
+            if u >= 0:
+                m.add_at_most_one(link_[(u, v)], link_[(v, u)], link_[t, r])
+            else:
+                # a feeder crossing another feeder (possible in multi-root instances)
+                m.add_at_most_one(link_[(u, v)], link_[t, r])
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):
@@ -338,10 +348,20 @@ def make_min_length_model(
         max_feeders=max_feeders,
     )
     metadata = ModelMetadata(
-        R, T, k, linkset, link_, flow_, model_options, fun_fingerprint()
+        R,
+        T,
+        k,
+        linkset,
+        link_,
+        flow_,
+        model_options,
+        _make_min_length_model_fingerprint,
     )
 
     return m, metadata
+
+
+_make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
 
 def warmup_model(
@@ -358,8 +378,17 @@ def warmup_model(
 
     Returns:
       The same model instance that was provided, now with a solution.
+
+    Raises:
+      OWNWarmupFailed: if some link in S is not available in model.
     """
     R, T = metadata.R, metadata.T
+    in_S_not_in_model = S.edges - metadata.link_.keys()
+    in_S_not_in_model -= {(v, u) for u, v in metadata.linkset[-R * T :]}
+    if in_S_not_in_model:
+        raise OWNWarmupFailed(
+            f'warmup_model() failed: model lacks S links ({in_S_not_in_model})'
+        )
     model.ClearHints()
     for u, v in metadata.linkset[: (len(metadata.linkset) - R * T) // 2]:
         edgeD = S.edges.get((u, v))
@@ -380,54 +409,3 @@ def warmup_model(
         model.add_hint(metadata.flow_[t, r], 0 if edgeD is None else edgeD['load'])
     metadata.warmed_by = S.graph['creator']
     return model
-
-
-def topology_from_mip_sol(
-    *, metadata: ModelMetadata, solver: SolverORTools | cp_model.CpSolver, **kwargs
-) -> nx.Graph:
-    """Create a topology graph from the OR-tools solution to the MILP model.
-
-    Args:
-      metadata: attributes of the solved model
-      solver: solver instance that solved the model
-      kwargs: not used (signature compatibility)
-    Returns:
-      Graph topology `S` from the solution.
-    """
-    # in ortools, the solution is in the solver instance not in the model
-    S = nx.Graph(R=metadata.R, T=metadata.T)
-    # Get active links and if flow is reversed (i.e. from small to big)
-    rev_from_link = {
-        (u, v): u < v
-        for (u, v), use in metadata.link_.items()
-        if solver.boolean_value(use)
-    }
-    S.add_weighted_edges_from(
-        ((u, v, solver.value(metadata.flow_[u, v])) for (u, v) in rev_from_link.keys()),
-        weight='load',
-    )
-    # set the 'reverse' edge attribute
-    nx.set_edge_attributes(S, rev_from_link, name='reverse')
-    # propagate loads from edges to nodes
-    subtree = -1
-    max_load = 0
-    for r in range(-metadata.R, 0):
-        for u, v in nx.edge_dfs(S, r):
-            S.nodes[v]['load'] = S[u][v]['load']
-            if u == r:
-                subtree += 1
-            S.nodes[v]['subtree'] = subtree
-        rootload = 0
-        for nbr in S.neighbors(r):
-            subtree_load = S.nodes[nbr]['load']
-            max_load = max(max_load, subtree_load)
-            rootload += subtree_load
-        S.nodes[r]['load'] = rootload
-    S.graph.update(
-        capacity=metadata.capacity,
-        max_load=max_load,
-        has_loads=True,
-        creator='MILP.' + __name__,
-        solver_details={},
-    )
-    return S

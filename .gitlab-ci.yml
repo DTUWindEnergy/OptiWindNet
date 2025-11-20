@@ -1,68 +1,94 @@
-image: continuumio/miniconda3
+stages:
+  - base
+  - deploy
 
-# ===== TEST OptiWindNet linux=====
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+
+.test_rules:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - optiwindnet/**/*
+        - tests/**/*
+    - when: manual
+
+# ===== Test OptiWindNet on Linux =====
 test_linux:
-  stage:
-    test
-  script:
-    - python --version
-    - pip install --upgrade pip
-    - pip install .[test]
-    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
-    # - python -m pytest
-  tags:  # runner platform
-    - linux
-
-# ===== TEST OptiWindNet windows=====
-test_windows:
-  stage:
-    test
+  stage: base
+  image: python:3.12
+  tags: [linux]
+  rules:
+    - !reference [.test_rules, rules]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
-  script:
-    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
-    - conda config --add channels defaults
-    - conda env create --file environment.yml
-    - if ($LASTEXITCODE) {conda env update -n optiwindnet_env --file environment.yml}
-    - conda activate optiwindnet_env
-    - python --version
+  before_script:
+    - apt-get update
+    - apt-get install -y coinor-cbc
+    - curl -L -o scip.deb https://www.scipopt.org/download/release/SCIPOptSuite-9.2.3-Linux-debian12.deb
+    - apt-get install -y ./scip.deb
+    - python3 -m venv tests/venv
+    - source tests/venv/bin/activate
     - pip install -e .[test]
-    - python -c "from optiwindnet.interarraylib import G_from_S; from optiwindnet.mesh import make_planar_embedding"
-    # - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
-  tags:
-    - ANMH_old  # Windows runner
+    - python3 --version
+  script:
+    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
 
-# ===== DEPLOY optiwindnet docs=====
+# ===== Test OptiWindNet on Windows =====
+test_windows:
+  stage: base
+  image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
+  tags: [docker-windows]
+  rules:
+    - !reference [.test_rules, rules]
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  before_script:
+    # The next 3 lines install the Miniforge3 conda
+    # - Invoke-WebRequest -UserAgent curl https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe -OutFile Miniforge3-Windows-x86_64.exe
+    # - Start-Process -Wait -FilePath Miniforge3-Windows-x86_64.exe -ArgumentList "/InstallationType=JustMe","/RegisterPython=0","/S","/D=$($env:UserProfile)\condaforge"
+    # - . "$($env:UserProfile)\condaforge\shell\condabin\conda-hook.ps1"
+    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression   
+    - conda config --add channels conda-forge
+    - conda config --set channel_priority strict
+    - conda create --name own_test python=3.12
+    - conda activate own_test
+    # the packages beyond the solvers are dependencies that would be pulled later via pip install
+    - conda install scip coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
+    - pip install -e .[test]
+    - python --version
+  script:
+    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+
+# ===== Update GitLab Pages =====
 make_pages:
+  stage: base
+  image: python:3.12
+  tags: [linux]
   pages: true
-  # rules:
-  #   - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-  #     changes:
-  #       - docs/**/*
-  when: manual
-  stage: deploy
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - docs/**/*
+        - optiwindnet/**/*.py
+      when: manual
   script:
     - apt-get update
     - apt-get -y install make pandoc graphviz
-    - pip install --upgrade pip ipython ipykernel sphinx nbsphinx autoapi sphinx_rtd_theme sphinx-autoapi furo setuptools-scm
-    - ipython kernel install --name "python3" --user
-    - pip install .[test,docs] --upgrade --no-deps
+    - pip install .[docs] --upgrade
     - cd docs; make html
     - cd ../; mv docs/build/html public/
   artifacts:
-    paths:
-      - public
-  tags: 
-    - linux
+    paths: [public]
 
-# ===== DEPLOY publish optiwindnet on pypi=====
+# ===== Publish new version on PyPI =====
 pypi_linux:
+  stage: deploy
+  image: python:3.12
+  tags: [linux]
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+.\d+.\d+/
-  stage:
-    deploy
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   script:
     - pip install --upgrade pip build twine packaging
     - python3 -m build
     - twine upload dist/* -u $TWINE_USERNAME -p $TWINE_PASSWORD
-  tags:
-    - linux

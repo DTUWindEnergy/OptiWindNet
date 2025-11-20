@@ -1,22 +1,29 @@
 [![pipeline status](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/pipeline.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
 [![PyPi](https://img.shields.io/pypi/v/optiwindnet)](https://pypi.org/project/optiwindnet/)
 [![License](https://img.shields.io/pypi/l/optiwindnet)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/blob/main/LICENSE)
-<!---
 [![coverage report](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/coverage.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
+<!---
 [![DOI](https://zenodo.org/badge/164115313.svg)](https://zenodo.org/badge/latestdoi/164115313)
 -->
+
+![OptiWindNet](docs/_static/OptiWindNet.svg)
 
 OptiWindNet
 ===========
 
-Tool for designing and optimizing the electrical cable network (collection system) for offshore wind power plants.
+Tool for designing and optimizing the electrical cable network of offshore wind farms.
 
-Documentation: [https://topfarm.pages.windenergy.dtu.dk/OptiWindNet](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet)
-- [Quickstart](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/Quickstart)
-- [Download the Jupyter notebooks](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks) used in the documentation.
-- [Report an issue](https://github.com/DTUWindEnergy/OptiWindNet/issues) (mirror of OptiWindNet on GitHub)
-- [API Reference](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/autoapi/optiwindnet/index.html)
-- [How to Cite](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/index.html#how-to-cite)
+
+|Documentation:<br>[optiwindnet.readthedocs.io][docs]||
+|:--|:-:|
+|<ul><li>[Quickstart][quick]</li><li>[Download the Jupyter notebooks][down] used in the documentation.</li><li>[Report an issue][issue] (at GitHub mirror)</li><li>[API Reference][api]</li><li>[How to Cite][cite]</li></ul>|![FancyWindFarm](docs/_static/OptiWindNet_windfarm.svg)|
+
+[docs]: https://optiwindnet.readthedocs.io
+[quick]: https://optiwindnet.readthedocs.io/stable/notebooks/quickstart_high.html
+[down]: https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks
+[issue]: https://github.com/DTUWindEnergy/OptiWindNet/issues
+[api]: https://optiwindnet.readthedocs.io/stable/autoapi/index.html
+[cite]: https://optiwindnet.readthedocs.io/stable/index.html#how-to-cite
 
 Installation
 ------------
@@ -24,17 +31,46 @@ Installation
 ```
 pip install optiwindnet
 ```
+or
+```
+conda install optiwindnet
+```
 
-Detailed instructions in [Installation](https://topfarm.pages.windenergy.dtu.dk/OptiWindNet/setup#Installation).
+Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/setup.html#installation).
 
 Requirements
 ------------
 
-Python 3.10+. The use of a Python virtual environment is recommended. OptiWindNet's dependencies will be installed automatically when using `pip install optiwindnet`.
+Python version 3.11 or 3.12 is recommended to run *OptiWindNet*. Python 3.13+ may cause issues with the `optiwindnet.db` module, but all other features work fine. The last version to support Python 3.10 was v0.1.0.
 
-One may pre-install the dependencies in a python environment by using either:
+The use of a Python virtual environment is recommended. OptiWindNet's dependencies (except for MILP solvers, see docs) will be installed automatically when using `pip install optiwindnet` or `conda install optiwindnet`.
+
+One may **optionally** pre-install the dependencies in a python environment by using either:
 - [requirements.txt](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/requirements.txt?ref_type=heads&inline=false): `pip install -r requirements.txt`
 - [environment.yml](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/environment.yml?ref_type=heads&inline=false): `conda env create -f environment.yml` (name: *optiwindnet_env*)
+
+Paper
+-----
+
+The methodology implemented in *OptiWindNet* is described in the peer-reviewed scientific article:
+- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis,
+_Flexible cable routing framework for wind farm collection system optimization_,
+European Journal of Operational Research,
+2025, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
+
+```{code-block} bib
+@article{
+    SOUZADEALENCAR2025,
+    title = {Flexible cable routing framework for wind farm collection system optimization},
+    journal = {European Journal of Operational Research},
+    year = {2025},
+    issn = {0377-2217},
+    doi = {https://doi.org/10.1016/j.ejor.2025.07.069},
+    url = {https://www.sciencedirect.com/science/article/pii/S0377221725005946},
+    author = {Mauricio {Souza de Alencar} and Tuhfe Göçmen and Nicolaos A. Cutululis},
+    keywords = {Combinatorial optimization, Network design, Collection system, Wind farm},
+}
+```
 
 Acknowledgements
 ----------------

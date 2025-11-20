@@ -10,6 +10,7 @@ from typing import Any
 
 import networkx as nx
 import pyomo.environ as pyo
+from pyomo.util.infeasible import find_infeasible_constraints
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
@@ -19,21 +20,17 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
+    OWNSolutionNotFound,
+    OWNWarmupFailed,
     SolutionInfo,
     Solver,
     Topology,
 )
 
-__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+__all__ = ('make_min_length_model', 'warmup_model')
 
 _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info
-
-# NOTE: SCIP has solution pool which can be accessed with PySCIPOpt: getSols()
-# TODO: move scip to scip.py and implement:
-#       - class SolverSCIP(SolverPyomo, PoolHandler)
-#       - SCIP-specific make_min_length_model, warmup_model, topology_from_mip_sol
-#       - warmup_model: model.createSol(), model.setSolVal(), model.addSol()
 
 # solver option name mapping (pyomo should have taken care of this)
 _common_options = namedtuple('common_options', 'mip_gap time_limit')
@@ -41,8 +38,7 @@ _optkey = dict(
     cplex=_common_options('mipgap', 'timelimit'),
     gurobi=_common_options('mipgap', 'timelimit'),
     cbc=_common_options('ratioGap', 'seconds'),
-    highs=_common_options('mip_rel_gap', 'time_limit'),
-    scip=_common_options('limits/gap', 'limits/time'),
+    highs=_common_options('mip_gap', 'time_limit'),
 )
 # usage: _optname[solver_name].mipgap
 
@@ -83,6 +79,12 @@ class SolverPyomo(Solver):
         self.options = _default_options[name]
         self.solver = pyo.SolverFactory(prefix + name + suffix, **kwargs)
 
+    def _link_val(self, var: Any) -> int:
+        return var.value
+
+    def _flow_val(self, var: Any) -> int:
+        return round(var.value)
+
     def set_problem(
         self,
         P: nx.PlanarEmbedding,
@@ -92,20 +94,19 @@ class SolverPyomo(Solver):
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
-        model, metadata = make_min_length_model(A, capacity, **model_options)
+        model, self.metadata = make_min_length_model(A, capacity, **model_options)
         self.model, self.model_options = model, model_options
         if warmstart is not None and self.solver.warm_start_capable():
-            self.solve_kwargs = {'warmstart': True}
             warmup_model(model, warmstart)
+            self.solve_kwargs = {'warmstart': True}
         else:
             self.solve_kwargs = {}
             if warmstart is not None:
-                warn(f'Solver <{self.name}> is not capable of warm-starting.')
-        self.model, self.metadata = model, metadata
+                warn('Solver <%s> is not capable of warm-starting.', self.name)
 
     def solve(
         self,
-        time_limit: int,
+        time_limit: float,
         mip_gap: float,
         options: dict[str, Any] = {},
         verbose: bool = False,
@@ -115,37 +116,51 @@ class SolverPyomo(Solver):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        solver.options.update(
+        applied_options = (
             self.options
             | options
             | {_optkey[name].time_limit: time_limit, _optkey[name].mip_gap: mip_gap}
         )
+        solver.options.update(applied_options)
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
-        result = solver.solve(model, **self.solve_kwargs, tee=verbose)
+        result = solver.solve(
+            model, **self.solve_kwargs, tee=verbose, load_solutions=False
+        )
+        termination = result['Solver'][0]['Termination condition'].name
+        if len(result.solution) == 0:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+            )
         self.result = result
         if self.name != 'scip':
             objective = result['Problem'][0]['Upper bound']
             bound = result['Problem'][0]['Lower bound']
+            runtime = result['Solver'][0]['Wallclock time']
         else:
             objective = result['Solver'][0]['Primal bound']
             bound = result['Solver'][0]['Dual bound']
+            runtime = result['Solver'][0]['Time']
         solution_info = SolutionInfo(
-            runtime=result['Solver'][0]['Wallclock time'],
+            runtime=runtime,
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,
-            termination=result['Solver'][0]['Termination condition'].name,
+            termination=termination,
         )
-        self.solution_info, self.solver_options = solution_info, options
+        self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        P, model, model_options = self.P, self.model, self.model_options
+        result = self.result
+        # hack to prevent warning about the solver not reaching the desired mip_gap
+        result.solver.status = pyo.SolverStatus.ok
+        model.solutions.load_from(result)
         if A is None:
             A = self.A
-        P, model_options = self.P, self.model_options
-        S = topology_from_mip_sol(model=self.model)
-        S.graph['creator'] += self.name
+        S = self.topology_from_mip_sol()
+        S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
             P,
@@ -155,8 +170,101 @@ class SolverPyomo(Solver):
         G.graph.update(self._make_graph_attributes())
         return S, G
 
-    def topology_from_mip_sol(self):
-        return topology_from_mip_sol(model=self.model)
+
+class SolverPyomoAppsi(Solver):
+    """As of Pyomo v3.9.4, a new solver inverface (v3) is being introduced. HiGHS is the
+    only solver using v3 at that point."""
+
+    def __init__(self, name, solver_cls, **kwargs) -> None:
+        self.name = name
+        self.options = _default_options[name]
+        self.solver = solver_cls(**kwargs)
+
+    def _link_val(self, var: Any) -> int:
+        # work-around for HiGHS: use round() to coerce link_ value (should be binary)
+        #   values for link_ variables are floats and may be slightly off of 0
+        return round(var.value)
+
+    def _flow_val(self, var: Any) -> int:
+        return round(var.value)
+
+    def set_problem(
+        self,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        capacity: int,
+        model_options: ModelOptions,
+        warmstart: nx.Graph | None = None,
+    ):
+        self.P, self.A, self.capacity = P, A, capacity
+        model, self.metadata = make_min_length_model(A, capacity, **model_options)
+        self.model, self.model_options = model, model_options
+        if warmstart is not None and self.solver.warm_start_capable():
+            warmup_model(model, warmstart)
+            self.solver.config.warmstart = True
+        else:
+            if warmstart is not None:
+                warn('Solver <%s> is not capable of warm-starting.', self.name)
+
+    def solve(
+        self,
+        time_limit: float,
+        mip_gap: float,
+        options: dict[str, Any] = {},
+        verbose: bool = False,
+    ) -> SolutionInfo:
+        try:
+            solver, name, model = self.solver, self.name, self.model
+        except AttributeError as exc:
+            exc.args += ('.set_problem() must be called before .solve()',)
+            raise
+        applied_options = (
+            self.options
+            | options
+            | {_optkey[name].time_limit: time_limit, _optkey[name].mip_gap: mip_gap}
+        )
+        for k, v in applied_options.items():
+            solver.config[k] = v
+        solver.config.load_solution = False
+        solver.config.stream_solver = verbose
+        info('>>> %s solver options <<<\n%s\n', self.name, solver.config)
+        result = solver.solve(model)
+        self.result = result
+        objective = result.best_feasible_objective
+        termination = result.termination_condition.name
+        if objective is None:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+            )
+        bound = result.best_objective_bound
+        solution_info = SolutionInfo(
+            runtime=result.wallclock_time,
+            bound=bound,
+            objective=objective,
+            relgap=1.0 - bound / objective,
+            termination=termination,
+        )
+        self.solution_info, self.applied_options = solution_info, applied_options
+        info('>>> Solution <<<\n%s\n', solution_info)
+        return solution_info
+
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        P, model_options = self.P, self.model_options
+        result = self.result
+        result.solution_loader.load_vars()
+        #  model.solutions.load_from(result)
+        if A is None:
+            A = self.A
+        S = self.topology_from_mip_sol()
+        S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
+        G = PathFinder(
+            G_from_S(S, A),
+            P,
+            A,
+            branched=model_options['topology'] is Topology.BRANCHED,
+        ).create_detours()
+        G.graph.update(self._make_graph_attributes())
+        return S, G
 
 
 def make_min_length_model(
@@ -247,12 +355,15 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
-        m.cons_feederXedge = pyo.Constraint(
-            gateXing_iter(A),
-            rule=lambda m, u, v, r, n: (
-                m.link_[u, v] + m.link_[v, u] + m.link_[r, n] <= 1
-            ),
-        )
+
+        def feederXedge_rule(m, u, v, r, t):
+            if u >= 0:
+                return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
+            else:
+                # a feeder crossing another feeder (possible in multi-root instances)
+                return m.link_[u, v] + m.link_[t, r] <= 1
+
+        m.cons_feederXedge = pyo.Constraint(gateXing_iter(A), rule=feederXedge_rule)
 
     # edge-edge crossings
     def edgeXedge_rule(m, *vertices):
@@ -406,10 +517,20 @@ def make_min_length_model(
         max_feeders=max_feeders,
     )
     metadata = ModelMetadata(
-        R, T, capacity, m.linkset, m.link_, m.flow_, model_options, fun_fingerprint()
+        R,
+        T,
+        capacity,
+        m.linkset,
+        m.link_,
+        m.flow_,
+        model_options,
+        _make_min_length_model_fingerprint,
     )
 
     return m, metadata
+
+
+_make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
 
 def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
@@ -423,56 +544,23 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
 
     Returns:
       The same model instance that was provided, now with a solution.
+
+    Raises:
+      OWNWarmupFailed: if some link in S is not available in model.
     """
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
-        model.link_[(u, v)] = 1
+        try:
+            model.link_[(u, v)] = 1
+        except KeyError:
+            raise OWNWarmupFailed(
+                f'warmup_model() failed: model lacks S link ({u, v})'
+            ) from None
         model.flow_[(u, v)] = S[u][v]['load']
+    # check if solution violates any constraints:
+    # checking the bounds seem redundant, but the way to do it would be:
+    # next(find_infeasible_bounds(model), False)
+    if next(find_infeasible_constraints(model), False):
+        raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     model.warmed_by = S.graph['creator']
     return model
-
-
-def topology_from_mip_sol(*, model: pyo.ConcreteModel, **kwargs) -> nx.Graph:
-    """Create a topology graph from the solution to the Pyomo MILP model.
-
-    Args:
-      model: pyomo model instance
-      kwargs: not used (signature compatibility)
-    Returns:
-      Graph topology `S` from the solution.
-    """
-    # in pyomo, the solution is in the model instance not in the solver
-    S = nx.Graph(R=len(model.R), T=len(model.T))
-    # Get active links and if flow is reversed (i.e. from small to big)
-    rev_from_link = {
-        (u, v): u < v for (u, v), use in model.link_.items() if use.value > 0.5
-    }
-    S.add_weighted_edges_from(
-        ((u, v, round(model.flow_[u, v].value)) for (u, v) in rev_from_link.keys()),
-        weight='load',
-    )
-    # set the 'reverse' edge attribute
-    nx.set_edge_attributes(S, rev_from_link, name='reverse')
-    # propagate loads from edges to nodes
-    subtree = -1
-    max_load = 0
-    for r in range(model.R.first(), 0):
-        for u, v in nx.edge_dfs(S, r):
-            S.nodes[v]['load'] = S[u][v]['load']
-            if u == r:
-                subtree += 1
-            S.nodes[v]['subtree'] = subtree
-        rootload = 0
-        for nbr in S.neighbors(r):
-            subtree_load = S.nodes[nbr]['load']
-            max_load = max(max_load, subtree_load)
-            rootload += subtree_load
-        S.nodes[r]['load'] = rootload
-    S.graph.update(
-        capacity=model.k.value,
-        max_load=max_load,
-        has_loads=True,
-        creator='MILP.' + __name__,
-        solver_details={},
-    )
-    return S

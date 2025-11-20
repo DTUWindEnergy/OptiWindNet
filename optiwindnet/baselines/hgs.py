@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import logging
 import math
 from multiprocessing import Pool
+import random
 from typing import Sequence
+from collections import defaultdict
 
 import networkx as nx
 import numpy as np
@@ -14,6 +17,9 @@ from ..repair import repair_routeset_path
 from ._core_hgs import do_hgs
 from .utils import length_matrix_single_depot_from_G
 
+_lggr = logging.getLogger(__name__)
+debug, info, warn = _lggr.debug, _lggr.info, _lggr.warning
+
 
 def hgs_cvrp(
     A: nx.Graph,
@@ -21,7 +27,9 @@ def hgs_cvrp(
     capacity: float,
     time_limit: float,
     vehicles: int | None = None,
-    seed: int = 0,
+    seed: int | None = None,
+    keep_log: bool = False,
+    complete: bool = False,
 ) -> nx.Graph:
     """Solves the OCVRP using HGS-CVRP with links from `A`
 
@@ -32,21 +40,22 @@ def hgs_cvrp(
 
     Normalization of input graph is recommended before calling this function.
 
+    https://github.com/vidalt/HGS-CVRP#running-the-algorithm
+
     Args:
         A: graph with allowed edges (if it has 0 edges, use complete graph)
         capacity: maximum vehicle capacity
         time_limit: [s] solver run time limit
-        vehicles: number of vehicles (if None, use the minimum feasible)
+        vehicles: number of vehicles (if None, let HGS-CVRP decide)
 
     Returns:
-        Solution topology.
+        Solution topology S
     """
     R, T, VertexC = (A.graph[k] for k in ('R', 'T', 'VertexC'))
     if R > 1:
         raise ValueError('Use hgs_multiroot() for multiple-depot problems')
 
     # Solver initialization
-    # https://github.com/vidalt/HGS-CVRP/tree/main#running-the-algorithm
     # class AlgorithmParameters:
     #     nbGranular: int = 20  # Granular search parameter, limits the number
     #                           # of moves in the RI local search
@@ -63,6 +72,8 @@ def hgs_cvrp(
     #     timeLimit: float = 0.0  # seconds
     #     useSwapStar: bool = True
 
+    if seed is None:
+        seed = random.getrandbits(63)
     solver_options = dict(
         timeLimit=time_limit,  # seconds
         # nbIter=2000,  # max iterations without improvement (20,000)
@@ -73,7 +84,7 @@ def hgs_cvrp(
     # Distance_matrix may be provided instead of coordinates, or in addition to
     # coordinates. Distance_matrix is used for cost calculation if provided.
     # The additional coordinates will be helpful in speeding up the algorithm.
-    weights, w_max = length_matrix_single_depot_from_G(A, scale=1.0)
+    weights, w_max = length_matrix_single_depot_from_G(A, scale=1.0, complete=complete)
 
     vehicles_min = math.ceil(T / capacity)
     if vehicles is not None:
@@ -100,24 +111,26 @@ def hgs_cvrp(
     S = nx.Graph(
         T=T,
         R=R,
-        handle=A.graph['handle'],
         capacity=capacity,
         has_loads=True,
         objective=cost,
         creator='baselines.hgs',
         runtime=runtime,
-        solver_log=log,
         solution_time=solution_time,
         method_options=dict(
             solver_name='HGS-CVRP',
             feeders_above_min=feeders_above_min,
-            complete=A.number_of_edges() == 0,
-            fun_fingerprint=fun_fingerprint(),
+            complete=complete,
+            fun_fingerprint=_hgs_cvrp_fun_fingerprint,
         )
         | algo_params,
+        solver_details=dict(
+            vehicles=vehicles,
+            seed=seed,
+        ),
     )
-    if vehicles is not None:
-        S.graph['solver_details'] = dict(vehicles=vehicles)
+    if keep_log:
+        S.graph['method_log'] = log
 
     branches = ([n - 1 for n in branch] for branch in routes)
     max_load = 0
@@ -141,14 +154,19 @@ def hgs_cvrp(
     return S
 
 
+_hgs_cvrp_fun_fingerprint = fun_fingerprint(hgs_cvrp)
+
+
 def iterative_hgs_cvrp(
     A: nx.Graph,
     *,
     capacity: float,
     time_limit: float,
     vehicles: int | None = None,
-    seed: int = 0,
-    max_iter: int = 10,
+    seed: int | None = None,
+    max_retries: int = 10,
+    keep_log: bool = False,
+    complete: bool = False,
 ) -> nx.Graph:
     """Iterate until crossing-free solution is found (`hgs_cvrp()` wrapper).
 
@@ -157,53 +175,72 @@ def iterative_hgs_cvrp(
     way as `hgs_cvrp()`, it is recommended to pass a normalized `A`.
 
     Args:
-        *: see `hgs_cvrp()`
-        max_iter: maximum number of `hgs_cvrp()` calls in serie
+      *: see `hgs_cvrp()`
+      max_retries: maximum number of retries to fix unrepairable crossings
 
     Returns:
-        Solution S
+      Solution topology S
     """
-
-    def remove_solve_repair(edge, Aʹ, num_crossings):
-        # TODO: use a filtered subgraph view instead of copying
-        A = Aʹ.copy()
-        A.remove_edge(*edge)
+    diagonals = A.graph['diagonals']
+    i = 0
+    while True:
+        # solve
         S = hgs_cvrp(
-            A, capacity=capacity, time_limit=time_limit, vehicles=vehicles, seed=seed
+            A,
+            capacity=capacity,
+            time_limit=time_limit,
+            vehicles=vehicles,
+            seed=seed,
+            keep_log=keep_log,
+            complete=complete,
         )
+        # repair
         S = repair_routeset_path(S, A)
-        return S, A, (S.graph.get('num_crossings', 0) < num_crossings)
-
-    # solve
-    S = hgs_cvrp(
-        A, capacity=capacity, time_limit=time_limit, vehicles=vehicles, seed=seed
-    )
-    # repair
-    S = repair_routeset_path(S, A)
-    # TODO: accumulate solution_time throughout the iterations
-    #       (makes sense to add a new field)
-    for i in range(max_iter):
+        # TODO: accumulate solution_time throughout the iterations
+        #       (makes sense to add a new field)
         crossings = S.graph.get('outstanding_crossings', [])
-        if not crossings:
+        if not crossings or i == max_retries:
             break
-        # there are still crossings
-        crossing_resolved = False
-        for edge in crossings[0]:
-            # try removing one edge at a time from A
-            S, Aʹ, succeeded = remove_solve_repair(edge, A, len(crossings))
-            if succeeded:
-                # TODO: maybe try comparing the quality between the edge removals
-                A = Aʹ
-                crossing_resolved = True
-                break
-        if not crossing_resolved:
-            print('WARNING: Failed to resolve crossing! Will keep trying.')
-            # use the A with the last edge removed
-            A = Aʹ
+        i += 1
+        # prepare A for retry
+        if i == 1:
+            # just copy once, on the first retry (not to change the given A)
+            A = A.copy()
+            diagonals = diagonals.copy()
+            A.graph['diagonals'] = diagonals
+        crossing_counterparts = defaultdict(list)
+        for uv, st in crossings:
+            # enabling the identification of a link crossing multiple links
+            crossing_counterparts[uv].append(st)
+            crossing_counterparts[st].append(uv)
+        # sorting allows for removing first the links that have the most crossings
+        for uv in sorted(
+            crossing_counterparts,
+            key=lambda k: len(crossing_counterparts[k]),
+            reverse=True,
+        ):
+            counterparts = crossing_counterparts[uv]
+            if counterparts:
+                # when uv crosses a single link st and st is the longest, uv becomes st
+                if (
+                    len(counterparts) == 1
+                    and A.edges[counterparts[0]]['length'] > A.edges[uv]['length']
+                ):
+                    st = counterparts[0]
+                    counterparts = crossing_counterparts[st]
+                    # st is after uv in the sorted list -> remove uv from its counterparts
+                    counterparts.remove(uv)
+                    uv = st
+                # remove uv from the counterparts list of uv's counterparts
+                for st in counterparts:
+                    crossing_counterparts[st].remove(uv)
+                if uv in diagonals:
+                    del diagonals[uv]
+                A.remove_edge(*uv)
     if i > 0:
-        S.graph['hgs_reruns'] = i
-        if i == 9:
-            print('Probably got stuck in an infinite loop')
+        S.graph['retries'] = i
+        if crossings:
+            warn('Solution contains crossings (max_retries reached)')
     return S
 
 
@@ -259,7 +296,8 @@ def hgs_multiroot(
     capacity: int,
     time_limit: float,
     balanced: bool = False,
-    seed: int = 0,
+    seed: int | None = None,
+    keep_log: bool = False,
 ) -> nx.Graph:
     R, T = (A.graph[k] for k in 'RT')
     VertexC = A.graph['VertexC']
@@ -271,11 +309,14 @@ def hgs_multiroot(
     )
 
     # HGS-CVRP parameters
+    if seed is None:
+        seed = random.getrandbits(63)
     solver_options = dict(
         timeLimit=time_limit,  # seconds
         # nbIter=2000,  # max iterations without improvement (20,000)
         seed=seed,
     )
+    vehicles_ = [math.ceil(len(cluster) / capacity) for cluster in cluster_]
 
     # data preparation
     # Distance_matrix may be provided instead of coordinates, or in addition to
@@ -284,7 +325,7 @@ def hgs_multiroot(
     cluster_data = zip(
         W_,  # distance matrix
         [VertexC[indices].T for indices in indices_],  # coordinates
-        [math.ceil(len(cluster) / capacity) for cluster in cluster_],  # vehicles
+        vehicles_,  # vehicles
         [capacity] * R,  # vehicle capacity
         [solver_options] * R,  # to be **passed to `hgs.AlgorithmParameters()`
     )
@@ -295,7 +336,6 @@ def hgs_multiroot(
     results = pool.starmap(do_hgs, cluster_data)
     routes_, runtime_, solution_time_, cost_, log_, algo_params = zip(*results)
 
-    #  print([[[F[i] for i in indices[route]] for route in routes] for routes, indices in zip (routes_, indices_)])
     if balanced:
         # remove the slack nodes from the routes
         for num_slack, routes, cluster in zip(num_slack_, routes_, cluster_):
@@ -312,30 +352,36 @@ def hgs_multiroot(
         objective=sum(cost_),
         creator='baselines.hgs',
         runtime=max(runtime_),
-        solver_log=log_,
         solution_time=solution_time_,
         method_options=dict(
             solver_name='HGS-CVRP',
-            complete=A.number_of_edges() == 0,
-            fun_fingerprint=fun_fingerprint(),
+            complete=False,
+            fun_fingerprint=_hgs_multiroot_fun_fingerprint,
         )
         | algo_params[0],
-        #  solver_details=dict(
-        #  )
+        solver_details=dict(
+            vehicles=vehicles_,
+            seed=seed,
+        ),
     )
+    if keep_log:
+        S.graph['method_log'] = log_
     subtree_id_start = 0
+    max_load = 0
     for r, (routes, indices) in enumerate(zip(routes_, indices_), start=-R):
         branches = (indices[route] for route in routes)
         for subtree_id, branch in enumerate(branches, start=subtree_id_start):
-            loads = range(len(branch), 0, -1)
+            branch_load = len(branch)
+            max_load = max(max_load, branch_load)
+            loads = range(branch_load, 0, -1)
             S.add_nodes_from(
-                ((n, {'load': load}) for n, load in zip(branch, loads)),
+                ((n, {'load': load}) for n, load in zip(branch.tolist(), loads)),
                 subtree=subtree_id,
             )
             branch_roll = np.empty_like(branch)
             branch_roll[1:] = branch[:-1]
             branch_roll[0] = r
-            reverses = tuple(u < v for u, v in zip(branch, branch_roll))
+            reverses = tuple(bool(u < v) for u, v in zip(branch, branch_roll))
             edgeD = (
                 {'load': load, 'reverse': reverse}
                 for load, reverse in zip(loads, reverses)
@@ -347,4 +393,8 @@ def hgs_multiroot(
     assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
         'ERROR: root node load does not match T.'
     )
+    S.graph['max_load'] = max_load
     return S
+
+
+_hgs_multiroot_fun_fingerprint = fun_fingerprint(hgs_multiroot)
