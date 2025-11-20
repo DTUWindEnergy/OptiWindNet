@@ -88,7 +88,7 @@ def OBEW(
     roots = range(-R, 0)
 
     # list of variables indexed by vertex id:
-    #     d2roots, d2rootsRank, angles, anglesRank
+    #     d2roots, d2rootsRank, angle__, angle_rank__
     #     subtree_, VertexC
     # list of variables indexed by subtree id:
     #     CompoIn, CompoLolim, CompoHilim
@@ -110,8 +110,8 @@ def OBEW(
     diagonals = A.graph['diagonals']
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
-    angles, anglesRank = angle_helpers(A)
-    union_limits, angle_ccw = angle_oracles_factory(angles, anglesRank)
+    angle__, angle_rank__, _ = angle_helpers(A)
+    union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
 
     # apply weightfun on all delaunay edges
     if weightfun is not None:
@@ -146,7 +146,7 @@ def OBEW(
     subtree_ = [[t] for t in _T] + (B + Dmax) * [None]
     # TODO: fnT might be better named Pof (Prime of)
     # <fnT>: farm node translation table
-    #        to be used when indexing: VertexC, d2roots, angles, etc
+    #        to be used when indexing: VertexC, d2roots, angle__, etc
     #        fnT[-R..(T+Dmax)] -> -R..T
     fnT = np.arange(T + B + Dmax + R)
     fnT[-R:] = roots
@@ -205,10 +205,10 @@ def OBEW(
         less = np.less_equal if touch_is_cross else np.less
         # get the primes of all nodes
         _subroot, _u, _v = fnT[[subroot, u, v]].tolist()
-        uvA = angles[_v, root] - angles[_u, root]
+        uvA = angle__[_v, root] - angle__[_u, root]
         swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
         lo, hi = (_v, _u) if swaped else (_u, _v)
-        loR, hiR, srR = anglesRank[(lo, hi, _subroot), root]
+        loR, hiR, srR = angle_rank__[(lo, hi, _subroot), root]
         W = loR > hiR  # wraps +-pi
         supL = less(loR, srR)  # angle(low) <= angle(probe)
         infH = less(srR, hiR)  # angle(probe) <= angle(high)
@@ -687,8 +687,8 @@ def OBEW(
             # END barrHack block
 
             # possible check to include: (something like this)
-            # if (anglesRank[corner_, root] >
-            #     anglesRank[ComponHiLim[subroot_[blocked], root]]
+            # if (angle_rank__[corner_, root] >
+            #     angle_rank__[ComponHiLim[subroot_[blocked], root]]
             Awarn(
                 f'barrsplit: {is_barrier_split}, inside: {len(insideI)}, '
                 f'outside: {len(outsideI)}, total: {len(BarrierC)}'

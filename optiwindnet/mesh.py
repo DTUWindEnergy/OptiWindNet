@@ -794,56 +794,45 @@ def make_planar_embedding(
     # G) Build the hull-concave.
     # ##########################
     debug('PART G')
-    # prevent edges that cross the boudaries from going into PlanarEmbedding
-    # an exception is made for edges that include a root node
-    hull_concave = []
-    if len(border) > 0:
+    if concavities:
         hull_prunned_poly = shp.Polygon(shell=VertexS[hull_prunned])
         shp.prepare(hull_prunned_poly)
         shp.prepare(border_poly)
-        pushed = 0
         if not border_poly.covers(hull_prunned_poly):
-            hull_stack = hull_prunned[0:1] + hull_prunned[::-1]
-            u, v = hull_prunned[-1], hull_stack.pop()
-            while hull_stack:
+            hull_concave = []
+            i = 2
+            u, v = hull_prunned[:i]
+            end = u
+            for _ in range(P_A.number_of_edges()):
                 edge_line = shp.LineString(VertexS[[u, v]])
-                if not border_poly.covers(edge_line):
-                    t = P_A[u][v]['ccw']
-                    #  print(f'[{pushed}]', F[u], F[v], f'⟨{F[t]}⟩', [F[n] for n in hull_stack[::-1]])
-                    if t == u:
-                        # degenerate case 1
-                        hull_concave.append(v)
-                        t, v, u = v, u, t
-                        continue
-                    pushed += 1
-                    hull_stack.append(v)
-                    if pushed and not any(n in A[t] for n in hull_stack[-pushed:]):
-                        # TODO: figure out how to avoid repeated outlier nodes
-                        warn(
-                            'unable to include in hull_concave: %s',
-                            hull_stack[-pushed:],
-                        )
-                        hull_outliers = A.graph.get('hull_outliers')
-                        if hull_outliers is not None:
-                            hull_outliers.extend(hull_stack[-pushed:])
-                        else:
-                            A.graph['hull_outliers'] = hull_stack[-pushed:]
-                        del hull_stack[-pushed:]
-                        pushed = 0
-                        while hull_stack:
-                            v = hull_stack.pop()
-                            if v not in hull_concave:
-                                break
-                        continue
-                    v = t
-                else:
-                    #  print(f'[{pushed}]', F[u], F[v], [F[n] for n in hull_stack[::-1]])
+                if border_poly.covers(edge_line):
                     hull_concave.append(v)
-                    u = v
-                    if pushed:
-                        pushed -= 1
-                    v = hull_stack.pop()
-    if not hull_concave:
+                    if v == end:
+                        # TODO: make this test more robust
+                        if len(hull_concave) < len(hull_prunned):
+                            # this likely means an islanded subgraph was found
+                            debug('islanded hull_concave', hull_concave)
+                            hull_concave.clear()
+                            u, v = v, hull_prunned[i]
+                            end = u
+                            i += 1
+                            continue
+                        break
+                    u, v = v, P_A[v][u]['ccw']
+                    continue
+                else:
+                    v = P_A[u][v]['ccw']
+                    if not hull_concave and v == hull_prunned[i - 1]:
+                        # not able to start with this ⟨u, v⟩ link
+                        debug('failed start', u, v)
+                        u, v = v, hull_prunned[i]
+                        end = u
+                        i += 1
+            else:
+                warn('Too many iterations building hull_concave: %s', hull_concave)
+        else:
+            hull_concave = hull_prunned
+    else:
         hull_concave = hull_prunned
     debug('hull_concave: %s', hull_concave)
 
@@ -1112,54 +1101,40 @@ def make_planar_embedding(
         # Check if each vertex at the border is necessary.
         # The vertex is kept if the border angle and the path angle
         # point to the same side. Otherwise, remove the vertex.
-        b_conc_id = vertex2conc_id_map[b]
-        # skip to shortcut if b is in a concavity and is a neighbor of
-        # the supertriangle
-        if b_conc_id < num_holes or all(n not in P[b] for n in supertriangle):
-            debug('s: %d; b: %d; t: %d; b_conc_id: %d', s, b, t, b_conc_id)
-            #  debug([(n, vertex2conc_id_map.get(n)) for n in P.neighbors(b)])
-            nbs = P.neighbors_cw_order(b)
-            skip_test = True
-            for a in nbs:
-                if vertex2conc_id_map.get(a, -1) == b_conc_id:
-                    skip_test = False
-                    break
-            if skip_test:
-                debug('Took the 1st continue.')
-                return False
-            skip_test = True
-            for c in nbs:
-                if vertex2conc_id_map.get(c, -1) == b_conc_id:
-                    if P[b][a]['cw'] == c:
-                        skip_test = False
-                        break
-                    a = c
-            if c == a:
-                # no nb remaining after making a = c, c <- first nb
-                c = next(P.neighbors_cw_order(b))
-                if P[b][a]['cw'] == c:
-                    skip_test = False
-            debug('a: %d; c: %d; s: %d, t: %d; %s', a, c, s, t, skip_test)
-            if skip_test:
-                debug('Took the 2nd continue.')
-                return False
-            elif ccw(a, b, c):
-                ccw_abs = ccw(a, b, s)
-                cw_sbt = cw(s, b, t)
-                cw_cbt = cw(c, b, t)
-                if (
-                    # a close to t, c close to s
-                    (ccw_abs and cw_sbt and cw_cbt)
-                    # a close to s, c close to t
-                    or (
-                        (a == s or not ccw_abs)
-                        and not cw_sbt
-                        and (c == t or not cw_cbt)
-                    )
-                ):
-                    debug('Took the 2nd continue.')
-                    return False
+        # shortable if b is in a concavity and is a neighbor of the supertriangle
+        if vertex2conc_id_map[b] >= num_holes and any(n in P[b] for n in supertriangle):
+            debug('Shortable because it is and end-point of a constraint path.')
             return True
+        debug('s: %d; b: %d; t: %d;', s, b, t)
+        nbs = P.neighbors_cw_order(b)
+        for a in nbs:
+            if ((a, b) if a < b else (b, a)) in constraint_edges:
+                break
+        else:
+            debug('Non-shortable at 1st test.')
+            return False
+        for c in nbs:
+            if ((c, b) if c < b else (b, c)) in constraint_edges:
+                if P[b][c]['cw'] == a:
+                    a, c = c, a
+                break
+        else:
+            debug('Non-shortable at 2nd test.')
+            return False
+        debug('a: %d; c: %d; s: %d, t: %d', a, c, s, t)
+        if ccw(a, b, c):
+            s_opposite_a = s != a and cw(s, b, a)
+            t_opposite_c = t != c and ccw(t, b, c)
+            sbt_cw = cw(s, b, t)
+            if s_opposite_a and t_opposite_c and sbt_cw:
+                debug('Non-shortable at 3rd test.')
+                return False
+            s_opposite_c = s != c and ccw(s, b, c)
+            t_opposite_a = t != a and cw(t, b, a)
+            if s_opposite_c and t_opposite_a and not sbt_cw:
+                debug('Non-shortable at 4th test.')
+                return False
+        return True
 
     corner_to_A_edges = defaultdict(list)
     A_edges_to_revisit = []
@@ -1198,14 +1173,10 @@ def make_planar_embedding(
         edgeD = A[path[0]][path[-1]]
         midpath = path[1:-1].copy() if u < v else path[-2:0:-1].copy()
         i = 0
-        while i <= len(path) - 3:
+        while True:
             s, b, t = path[i : i + 3]
             if is_midpoint_shortable(s, b, t):
                 # PERFORM SHORTCUT
-                # TODO: The entire new path should go for a 2nd pass if it
-                #       changed here. Unlikely to change in the 2nd pass.
-                #       Reason: a shortcut may change the geometry in such
-                #       way as to make additional shortcuts possible.
                 del path[i + 1]
                 length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
                 shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
@@ -1218,8 +1189,14 @@ def make_planar_embedding(
                 else:
                     shortcuts.append(b)
                 debug('(%d) %d %d %d shortcut', i, s, b, t)
+                if len(path) < 3:
+                    break
+                # backtrack one position to re-evaluate the previous bend
+                i = max(0, i - 1)
             else:
                 i += 1
+                if i > len(path) - 3:
+                    break
         edgeD.update(  # midpath-> which P edges the A edge maps to
             # (so that PathFinder works)
             midpath=midpath,

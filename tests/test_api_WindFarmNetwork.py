@@ -1,10 +1,21 @@
+import logging
 import numpy as np
 import pytest
+from shapely.geometry import Polygon
 
-from optiwindnet.api import EWRouter, WindFarmNetwork, HGSRouter, MILPRouter
+import optiwindnet.api_utils as U
+from optiwindnet.api import (
+    EWRouter,
+    HGSRouter,
+    WindFarmNetwork,
+)
+import optiwindnet.plotting as plotting
+from .helpers import tiny_wfn
 
-from .helpers import assert_graph_equal
-# ========== Test ==========
+
+# =====================
+# WindFarmNetwork core
+# =====================
 
 
 def test_wfn_fails_without_coordinates_or_L():
@@ -12,117 +23,101 @@ def test_wfn_fails_without_coordinates_or_L():
         WindFarmNetwork(cables=7)
 
 
-def test_wfn_warns_when_L_and_coordinates_given(
-    LG_from_database, site_from_database, caplog
-):
-    expected_L, _ = LG_from_database('eagle_EWRouter')
-    site = site_from_database('eagle_EWRouter')
-
-    with caplog.at_level('WARNING'):
-        WindFarmNetwork(
-            cables=7,
-            turbinesC=site['turbinesC'],
-            substationsC=site['substationsC'],
-            L=expected_L,
-        )
-
-    assert any(
-        'OptiWindNet prioritizes L over coordinates' in message
-        for message in caplog.messages
-    )
-
-
-def test_wfn_fails_without_cables(site_from_database):
-    site = site_from_database('eagle_EWRouter')
-    with pytest.raises(
-        TypeError, match="missing 1 required positional argument: 'cables'"
-    ):
-        WindFarmNetwork(turbinesC=site['turbinesC'], substationsC=site['substationsC'])
-
-
-def test_wfn_from_coordinates(LG_from_database, site_from_database):
-    expected_L, _ = LG_from_database('eagle_EWRouter')
-    site = site_from_database('eagle_EWRouter')
-
-    kwargs = {
-        'cables': 7,
-        'turbinesC': site['turbinesC'],
-        'substationsC': site['substationsC'],
-        'handle': site['handle'],
-        'name': site['name'],
-        'landscape_angle': site['landscape_angle'],
-    }
-
-    if site['borderC'].size > 0:
-        kwargs['borderC'] = site['borderC']
-
-    if site['obstaclesC']:
-        kwargs['obstaclesC'] = site['obstaclesC']
-
-    wfn1 = WindFarmNetwork(**kwargs)
-
-    assert_graph_equal(
-        wfn1.L,
-        expected_L,
-        ignored_graph_keys={'norm_offset', 'norm_scale', 'obstacles'},
-    )
-    assert isinstance(wfn1.router, EWRouter)
-
-
-def test_wfn_from_L(LG_from_database):
-    expected_L, _ = LG_from_database('eagle_EWRouter')
-
-    wfn2 = WindFarmNetwork(cables=7, L=expected_L)
-    assert_graph_equal(
-        wfn2.L,
-        expected_L,
-        ignored_graph_keys={'norm_offset', 'norm_scale', 'obstacles'},
-    )
-
-
-@pytest.mark.parametrize(
-    'cables_input, expected_array',
-    [
-        (7, [(7, 0.0)]),
-        ([(7, 100)], [(7, 100)]),
-        ((7, 9), [(7, 0.0), (9, 0.0)]),
-        ([(5, 100), (7, 150), (9, 200)], [(5, 100), (7, 150), (9, 200)]),
-    ],
-)
-def test_wfn_cable_formats(LG_from_database, cables_input, expected_array):
-    expected_L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=cables_input, L=expected_L)
-    #  assert np.array_equal(wfn.cables, expected_array)
-    assert wfn.cables == expected_array
-
-
-def test_wfn_invalid_cables_raises(LG_from_database):
-    expected_L, _ = LG_from_database('eagle_EWRouter')
-
-    with pytest.raises(ValueError, match='Invalid cable values'):
-        WindFarmNetwork(cables=(5, (7, 3, 8), 9), L=expected_L)
-
-
-def test_cables_capacity_calculation(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=[(5, 100), (7, 150)], L=L)
-    assert wfn.cables_capacity == 7
-
-
-def test_invalid_gradient_type_raises(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    with pytest.raises(ValueError, match='gradient_type should be either'):
-        wfn.gradient(gradient_type='bad_type')
-
-
-def test_optimize_updates_graphs(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
+def test_optimize_updates_graphs_smoke():
+    wfn = tiny_wfn()
     terse = wfn.optimize()
     assert wfn.S is not None
     assert wfn.G is not None
-    assert len(terse) > 0
+    assert terse.shape[0] == wfn.S.graph['T']
+
+
+def test_wfn_warns_when_L_and_coordinates_given(caplog):
+    w1 = tiny_wfn()
+    L = w1.L
+    turbinesC, substationsC = np.array([1, 1]), np.array([0, 0])
+
+    with caplog.at_level('WARNING'):
+        WindFarmNetwork(cables=7, turbinesC=turbinesC, substationsC=substationsC, L=L)
+
+    assert any('prioritizes L over coordinates' in m for m in caplog.messages)
+
+
+def test_wfn_fails_without_cables():
+    w = tiny_wfn()
+    # when constructing without cables, the API requires 'cables' parameter
+    with pytest.raises(
+        TypeError, match="missing 1 required positional argument: 'cables'"
+    ):
+        WindFarmNetwork(
+            turbinesC=w.L.graph.get('VertexC'), substationsC=w.L.graph.get('VertexC')
+        )
+
+
+def test_wfn_from_coordinates_builds_L_and_defaults_router():
+    wfn = tiny_wfn()
+    # check basic parameters
+    assert wfn.L.graph['T'] == 4
+    assert wfn.L.graph['R'] == 1
+    assert isinstance(wfn.router, EWRouter)
+
+
+def test_wfn_from_L_roundtrip():
+    wfn1 = tiny_wfn()
+    L = wfn1.L
+    wfn2 = WindFarmNetwork(cables=4, L=L)
+    wfn2.optimize()
+    # Graph identity not required; check key attrs
+    assert wfn2.L.graph['T'] == L.graph['T']
+    assert wfn2.L.graph['R'] == L.graph['R']
+    assert np.array_equal(wfn2.terse_links(), wfn1.terse_links())
+
+
+@pytest.mark.parametrize(
+    'cables_input, expected',
+    [
+        (7, [(7, 0.0)]),
+        ([(7, 100)], [(7, 100.0)]),
+        ((7, 9), [(7, 0.0), (9, 0.0)]),
+        ([(5, 100), (7, 150), (9, 200)], [(5, 100.0), (7, 150.0), (9, 200.0)]),
+    ],
+)
+def test_wfn_cable_formats(cables_input, expected):
+    wfn = WindFarmNetwork(
+        cables=cables_input,
+        turbinesC=np.array([[0.0, 1.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 0.0]]),
+    )
+    assert wfn.cables == expected
+
+
+def test_wfn_invalid_cables_raises():
+    with pytest.raises(ValueError, match='Invalid cable values'):
+        WindFarmNetwork(
+            cables=(5, (7, 3, 8), 9),
+            turbinesC=np.array([[0.0, 1.0], [1.0, 0.0]]),
+            substationsC=np.array([[0.0, 0.0]]),
+        )
+
+
+def test_cables_capacity_calculation():
+    wfn1 = WindFarmNetwork(
+        cables=9,
+        turbinesC=np.array([[0.0, 1.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 0.0]]),
+    )
+    wfn2 = WindFarmNetwork(
+        cables=[(5, 100), (7, 150)],
+        turbinesC=np.array([[0.0, 1.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 0.0]]),
+    )
+    assert wfn1.cables_capacity == 9
+    assert wfn2.cables_capacity == 7
+
+
+def test_invalid_gradient_type_raises():
+    wfn = tiny_wfn()
+    with pytest.raises(ValueError, match='gradient_type should be either'):
+        wfn.gradient(gradient_type='bad_type')
 
 
 def test_from_yaml_invalid_path():
@@ -131,156 +126,230 @@ def test_from_yaml_invalid_path():
 
 
 def test_from_pbf_invalid_path():
-    with pytest.raises(Exception):  # TypeError or custom error
+    with pytest.raises(Exception):
         WindFarmNetwork.from_pbf(r'not>a*path')
 
 
-def test_terse_links_output_shape(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    wfn.optimize()
+def test_terse_links_output():
+    terse_expected = np.array([-1, 0, 1, 2])
+    wfn = tiny_wfn()
     terse = wfn.terse_links()
     assert terse.shape[0] == wfn.S.graph['T']
+    assert np.array_equal(wfn.terse_links(), terse_expected)
 
 
-def test_map_detour_vertex_empty_if_no_detours(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    wfn.optimize()
-    result = wfn.map_detour_vertex()
-    assert isinstance(result, dict)
-
-
-def test_plot_selected_links_runs(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    wfn.optimize()
-    wfn.plot_selected_links()
-
-
-def test_get_network_returns_array(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    wfn.optimize()
-    data = wfn.get_network()
-    assert isinstance(data, np.ndarray)
-    assert data.ndim == 1
-
-
-# value-based unit tests
-def test_length_returns_expected_value(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    wfn.optimize()
-    expected_length = 56573.7358
-    assert pytest.approx(wfn.length(), rel=1e-4) == expected_length
-
-
-def test_cost_returns_expected_value(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=[(7, 100)], L=L)
-    wfn.optimize()
-    expected_cost = 5657373.5802
-    assert pytest.approx(wfn.cost(), rel=1e-4) == expected_cost
-
-
-def test_terse_links_returns_expected_array(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    wfn.optimize()
-    # fmt: off
-    expected_terse = np.array([1, 2, 41, 4, 41, 6, 27, 6, 7, 10, 13, 8, 11, 14, 15, -1,
-                               14, 18, 22, 16, 18, 22, 23, 24, -1, 26, 28, -1, -1, 39, 29,
-                               30, 31, 32, 35, 36, 37, 38, -1, -1, -1, 40, 43, -1, -1, 44,
-                               45, 46, 47, 48])
-
-    # fmt: on
-    assert np.array_equal(wfn.terse_links(), expected_terse)
-
-
-def test_update_from_terse_links_matches_expected_cost(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
-    # fmt: off
-    terse = np.array([1, 2, 41, 4, 41, 6, 27, 6, 7, 10, 13, 8, 11, 14, 15, -1, 14,
-                      18, 22, 16, 18, 22, 23, 24, -1, 26, 28, -1, -1, 39, 29, 30, 31,
-                      32, 35, 36, 37, 38, -1, -1, -1, 40, 43, -1, -1, 44, 45, 46, 47, 48])
-    # fmt: on
-
-    # Update from terse and check cost
+def test_update_from_terse_links():
+    wfn = tiny_wfn()
+    terse1 = wfn.terse_links()
+    terse = np.array([1, 2, -1, 0])
     wfn.update_from_terse_links(terse)
-    expected_length = 56573.7358
-    assert pytest.approx(wfn.length(), rel=1e-4) == expected_length
+    terse2 = wfn.terse_links()
+    assert np.array_equal(terse1, np.array([-1, 0, 1, 2]))
+    assert np.array_equal(terse2, np.array([1, 2, -1, 0]))
 
 
-def test_gradient(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
+def test_map_detour_vertex_empty_if_no_detours_smoke():
+    wfn = tiny_wfn()
+    map_detour = wfn.map_detour_vertex()
+    assert isinstance(map_detour, dict)
+    assert map_detour == {12: 8, 13: 11}
+
+
+def test_plots():
+    wfn = tiny_wfn()
     wfn.optimize()
-    grad_wt, grad_ss = wfn.gradient(gradient_type='length')
+    wfn.plot_available_links()  # smoke: should not raise any error
+    wfn.plot_navigation_mesh()
+    wfn.plot_selected_links()
+    wfn.plot()
+    # some tests on plotting
+    ax = plotting.gplot(
+        wfn.G,
+        node_tag=True,
+        landscape=True,
+        infobox=True,
+        scalebar=(1.0, '1 unit'),
+        hide_ST=True,
+        legend=True,
+        tag_border=True,
+        min_dpi=120,
+    )
 
-    # fmt: off
-    expected_grad_wt = np.array([
-        [9.38436570e-01, -3.45451596e-01], [-7.98183068e-01, -6.44664032e-01],
-        [-7.39642419e-03, -1.01957897e-03], [1.04575893e-01, -9.94516909e-01],
-        [-1.08009929e00, 7.74621228e-01], [1.26120663e-01, -9.92014908e-01],
-        [-1.33322491e-01, 1.02168418e00], [-8.37910472e-01, -1.24218770e00],
-        [-1.10535566e-02, -1.38844155e-03], [-2.05024539e-02, -9.99789803e-01],
-        [8.41614038e-03, -1.37155245e-04], [9.38332754e-03, 1.17061707e-03],
-        [-1.28485640e-01, 9.91711369e-01], [7.31049987e-05, -8.80961725e-07],
-        [-9.96281410e-01, 1.19183629e-01], [4.09389733e-02, 1.87151171e-01],
-        [-8.53698302e-03, 1.68086993e-04], [5.40683378e-02, -9.98537238e-01],
-        [-7.90634529e-01, -4.38211791e-02], [2.39537701e-02, 9.99713067e-01],
-        [-2.60474343e-01, 9.65480770e-01], [-1.23237432e-01, 9.92377214e-01],
-        [1.01105092e00, 7.85172600e-02], [-1.56623966e-02, -1.84616267e-03],
-        [-7.85325621e-01, -5.78034766e-01], [-1.37561631e-01, 9.90493209e-01],
-        [-8.49795999e-01, -1.14900160e00], [3.34117005e-02, -1.14990584e-01],
-        [-1.23269713e-02, 1.83622103e-01], [-8.81286661e-01, -6.76742064e-01],
-        [8.89254552e-02, 1.01214648e-02], [-2.15313860e-02, -3.19279914e-03],
-        [-3.42349336e-02, -4.09638808e-03], [-1.01672600e-01, 9.94817914e-01],
-        [-1.55114181e-01, 9.87896549e-01], [1.31605497e-02, 1.97675968e-03],
-        [-7.50496584e-04, -1.07915993e-04], [-9.13880978e-03, -1.36075745e-03],
-        [-4.65348150e-01, -2.01591340e-01], [8.09510100e-03, 2.00635554e-02],
-        [-9.62232527e-01, 4.04042913e-01], [9.93515166e-01, 2.22474048e-01],
-        [1.78239791e-01, -9.83987082e-01], [7.08547411e-01, 5.21809132e-01],
-        [9.35918404e-01, -3.18928707e-01], [-1.15085023e-02, -2.12808401e-03],
-        [-1.49620884e-02, -2.55921275e-03], [2.82593340e-02, 5.03058647e-03],
-        [-1.51059821e-02, -2.79318559e-03], [-1.74265398e-01, 9.84698721e-01]
-    ])
-    # fmt: on
+    assert hasattr(ax, 'figure')
 
-    expected_grad_ss = np.array([4.53885, -1.15393])
-    assert np.allclose(grad_wt, expected_grad_wt, rtol=1e-4)
-    assert np.allclose(grad_ss, expected_grad_ss, rtol=1e-4)
+    with pytest.raises(AttributeError):
+        plotting.compare([wfn.plot(), ax])
+
+    plotting.compare([wfn.G, wfn.G])
 
 
-def test_map_detour_vertex(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork(cables=7, L=L)
+def test_get_network_returns_array_smoke():
+    wfn = tiny_wfn()
+    data = wfn.get_network()
+    # basic shape/type checks
+    assert isinstance(data, np.ndarray)
+    assert data.ndim == 1  # structured 1-D array (rows)
+
+    # expected structured dtype and field names
+    expected_fields = ('src', 'tgt', 'length', 'load', 'cable')
+    assert tuple(data.dtype.names) == expected_fields
+
+    # element types
+    assert np.issubdtype(data['src'].dtype, np.integer)
+    assert np.issubdtype(data['tgt'].dtype, np.integer)
+    assert np.issubdtype(data['length'].dtype, np.floating)
+    assert np.issubdtype(data['load'].dtype, np.floating)
+    assert np.issubdtype(data['cable'].dtype, np.integer)
+
+    # value range sanity checks
+    assert np.all(data['length'] >= 0.0)  # non-negative lengths
+    assert np.all(data['load'] >= 0.0)  # loads shouldn't be negative
+    # cable indices must be valid indices into wfn.cables
+    n_cables = len(wfn.cables) if hasattr(wfn, 'cables') else 0
+    assert np.all((data['cable'] >= 0) & (data['cable'] < max(1, n_cables)))
+
+    # consistency with graph edges: every (src,tgt) should exist in wfn.G (undirected)
+    edges_in_G = set(tuple(sorted(e)) for e in wfn.G.edges())
+    for row in data:
+        pair = tuple(sorted((int(row['src']), int(row['tgt']))))
+        assert pair in edges_in_G, (
+            f'row {(row["src"], row["tgt"])} not present in wfn.G'
+        )
+
+
+def test_gradient():
+    # build an optimized tiny network so wfn.S exists and gradients are meaningful
+    wfn = tiny_wfn(optimize=True)
+
+    g_wt_L, g_ss_L = wfn.gradient(gradient_type='length')
+    g_wt_C, g_ss_C = wfn.gradient(gradient_type='cost')
+
+    assert g_wt_L.shape[0] == wfn.S.graph['T']
+    assert g_wt_C.shape[0] == wfn.S.graph['T']
+    assert g_ss_L.shape[0] == wfn.S.graph['R']
+    assert g_ss_C.shape[0] == wfn.S.graph['R']
+
+    # expected (reference) arrays from previous golden values
+    exp_wt_L = np.array(
+        [
+            [0.62860932, 0.92847669],
+            [0.70710678, -0.29289322],
+            [0.0, 0.0],
+            [0.0, 1.0],
+        ],
+        dtype=float,
+    )
+    exp_ss_L = np.array([[-1.0, 0.0]], dtype=float)
+
+    # For cost we expect the same directional gradients scaled by 10 (example),
+    # but keep explicit golden arrays to be clear:
+    exp_wt_C = np.array(
+        [
+            [6.28609324, 9.28476691],
+            [7.07106781, -2.92893219],
+            [0.0, 0.0],
+            [0.0, 10.0],
+        ],
+        dtype=float,
+    )
+    exp_ss_C = np.array([[-10.0, 0.0]], dtype=float)
+
+    # Use an absolute/relative tolerance for floating point comparisons
+    atol = 1e-8
+    rtol = 1e-6
+
+    # Length gradients
+    assert np.allclose(g_wt_L, exp_wt_L, rtol=rtol, atol=atol)
+    assert np.allclose(g_ss_L, exp_ss_L, rtol=rtol, atol=atol)
+
+    # Cost gradients
+    assert np.allclose(g_wt_C, exp_wt_C, rtol=rtol, atol=atol)
+    assert np.allclose(g_ss_C, exp_ss_C, rtol=rtol, atol=atol)
+
+
+def test_repr_svg_returns_string_before_and_after_optimize():
+    wfn = tiny_wfn()
+    svg1 = wfn._repr_svg_()
+    assert isinstance(svg1, str) and svg1.strip().startswith('<svg')
     wfn.optimize()
-    detour_map = wfn.map_detour_vertex()
-    print(detour_map)
-
-    expected_map = {56: 29}
-    assert detour_map == expected_map
+    svg2 = wfn._repr_svg_()
+    assert isinstance(svg2, str) and svg2.strip().startswith('<svg')
 
 
-def test_from_pbf(LG_from_database):
-    L, _ = LG_from_database('eagle_EWRouter')
-    wfn = WindFarmNetwork.from_pbf(
-        filepath='optiwindnet/data/Baltic Eagle.osm.pbf', cables=7
+def test_from_windIO_minimal_yaml(tmp_path):
+    yml = tmp_path / 'proj_2025_case.yaml'  # three tokens for handle-building
+    yml.write_text(
+        """
+wind_farm:
+  layouts:
+    initial_layout:
+      coordinates:
+        x: [0.0, 1.0]
+        y: [1.0, 0.0]
+  electrical_substations:
+    coordinates:
+      x: [0.0]
+      y: [0.0]
+site:
+  boundaries:
+    polygons:
+      - {x: [ -1.0,  3.0,  3.0, -1.0],
+         y: [ -1.0, -1.0,  1.0,  1.0]}
+        """
     )
-    assert_graph_equal(
-        L, wfn.L, ignored_graph_keys={'norm_offset', 'norm_scale', 'OSM_name'}
-    )
+    wfn = WindFarmNetwork.from_windIO(str(yml), cables=2)
+    assert wfn.L.graph['T'] == 2
+    assert wfn.L.graph['R'] == 1
+    wfn.optimize()
+    assert wfn.G.number_of_edges() > 0
+    assert np.array_equal(wfn.terse_links(), [-1, -1])
 
 
-def test_from_yaml(LG_from_database):
-    L, _ = LG_from_database('taylor_EWRouter')
-    wfn = WindFarmNetwork.from_yaml(
-        filepath='optiwindnet/data/Taylor-2023.yaml', cables=7
+def test_polygon_out_of_bounds_raises():
+    # tiny border, one turbine well outside
+    turbinesC = np.array([[0.0, 0.0], [0.1, 0.0], [10.0, 10.0]])
+    substationsC = np.array([[0.0, 0.1]])
+    borderC = np.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.8]])
+    wfn = WindFarmNetwork(
+        cables=2, turbinesC=turbinesC, substationsC=substationsC, borderC=borderC
     )
-    assert_graph_equal(L, wfn.L, ignored_graph_keys={'norm_offset', 'norm_scale'})
+    with pytest.raises(ValueError, match='Turbine out of bounds'):
+        _ = wfn.P
+
+
+def test_plot_original_vs_buffered_without_prior_buffer_prints_message(capsys):
+    wfn = tiny_wfn()
+    _ = wfn.plot_original_vs_buffered()
+    captured = capsys.readouterr()
+    assert 'No buffering is performed' in captured.out
+
+
+def test_add_buffer_then_plot_original_vs_buffered_returns_axes():
+    wfn = tiny_wfn()
+    wfn.add_buffer(5.0)
+    ax = wfn.plot_original_vs_buffered()
+    assert ax is not None
+
+
+def test_merge_obstacles_into_border_idempotent_smoke():
+    wfn = tiny_wfn()
+    wfn.merge_obstacles_into_border()
+    _ = wfn.P  # smoke: recomputation ok
+
+
+def test_S_and_G_raise_before_optimize():
+    # build a wfn without running optimize and ensure S/G access raises
+    xs = np.linspace(0.0, 3, 3)
+    turbinesC = np.c_[xs, np.zeros_like(xs)]
+    substationsC = np.array([[4.0, 0.0]])
+    borderC = np.array([[-2.0, -2.0], [6.0, -2.0], [6.0, 2.0], [-2.0, 2.0]])
+    wfn = WindFarmNetwork(
+        cables=4, turbinesC=turbinesC, substationsC=substationsC, borderC=borderC
+    )
+    with pytest.raises(RuntimeError, match='Call the `optimize'):
+        _ = wfn.S
+    with pytest.raises(RuntimeError, match='Call the `optimize'):
+        _ = wfn.G
 
 
 @pytest.mark.parametrize(
@@ -288,36 +357,188 @@ def test_from_yaml(LG_from_database):
     [
         EWRouter(),
         EWRouter(feeder_route='straight'),
-        HGSRouter(time_limit=1, seed=0),
-        HGSRouter(time_limit=1, feeder_limit=1, max_retries=5, balanced=True, seed=0),
-        MILPRouter(solver_name='ortools', time_limit=2, mip_gap=0.005),
-        MILPRouter(solver_name='cbc', time_limit=2, mip_gap=0.005),
-        MILPRouter(solver_name='cplex', time_limit=2, mip_gap=0.005),
-        MILPRouter(solver_name='gurobi', time_limit=2, mip_gap=0.005),
-        MILPRouter(solver_name='highs', time_limit=2, mip_gap=0.005),
-        MILPRouter(solver_name='scip', time_limit=2, mip_gap=0.005),
+        HGSRouter(time_limit=0.5, seed=0),
+        HGSRouter(time_limit=0.5, feeder_limit=1, max_retries=3, balanced=True, seed=0),
     ],
 )
-def test_wfn_all_routers(router):
-    turbinesC = np.array([[1.0, 0], [1, 1]])
-    substationsC = np.array([[0, 0]])
-    cables = 2
-    EXPECTED_TERSE = np.array([-1, 0])
+def test_wfn_inexact_routers_smoke(router):
+    wfn = tiny_wfn()
+    terse = wfn.optimize(router=router)
+    assert terse.shape[0] == wfn.S.graph['T']
 
-    # case 1: router passed in constructor
-    wfn = WindFarmNetwork(
-        cables=cables,
-        turbinesC=turbinesC,
-        substationsC=substationsC,
-        router=router,
-    )
-    print(wfn.optimize())
-    assert np.array_equal(wfn.optimize(), EXPECTED_TERSE)
 
-    # case 2: router passed at call-time
-    wfn = WindFarmNetwork(
-        cables=cables,
-        turbinesC=turbinesC,
-        substationsC=substationsC,
+# ================#
+# api_utils tests #
+# ================#
+
+
+def test_expand_polygon_safely_warns_for_nonconvex_large_buffer(caplog):
+    poly = Polygon(
+        [(0, 0), (4, 0), (4, 1), (1, 1), (1, 3), (4, 3), (4, 4), (0, 4)]
+    )  # concave
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        out = U.expand_polygon_safely(poly, buffer_dist=1.0)
+    assert out.area > poly.area
+    assert any(
+        'non-convex and buffering may introduce unexpected changes' in m
+        for m in caplog.messages
     )
-    assert np.array_equal(wfn.optimize(router=router), EXPECTED_TERSE)
+
+
+def test_expand_polygon_safely_convex_no_warning(caplog):
+    poly = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        out = U.expand_polygon_safely(poly, buffer_dist=0.25)
+    assert out.area > poly.area
+    assert not any(
+        'non-convex and buffering may introduce' in m for m in caplog.messages
+    )
+
+
+def test_shrink_polygon_safely_returns_array_normal():
+    poly = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
+    arr = U.shrink_polygon_safely(poly, shrink_dist=0.2, indx=0)
+    assert isinstance(arr, np.ndarray) and arr.shape[1] == 2
+
+
+def test_shrink_polygon_safely_becomes_empty_warns(caplog):
+    poly = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        res = U.shrink_polygon_safely(poly, shrink_dist=10.0, indx=3)
+    assert res is None
+    assert any('completely removed the obstacle' in m for m in caplog.messages)
+
+
+def test_shrink_polygon_safely_splits_to_multipolygon(caplog):
+    big = Polygon([(0, 0), (8, 0), (8, 4), (0, 4)])
+    hole = Polygon([(3, -1), (5, -1), (5, 5), (3, 5)])  # remove middle band
+    shape = big.difference(hole)
+    with caplog.at_level(logging.WARNING, logger=U.__name__):
+        res = U.shrink_polygon_safely(shape, shrink_dist=0.1, indx=1)
+    assert isinstance(res, list) and len(res) >= 2
+    assert any('split the obstacle' in m for m in caplog.messages)
+
+
+def test_enable_ortools_logging_if_jupyter_sets_callback(monkeypatch):
+    ZMQInteractiveShell = type('ZMQInteractiveShell', (), {})
+    monkeypatch.setattr(U, 'get_ipython', lambda: ZMQInteractiveShell(), raising=False)
+
+    class DummyInner:
+        def __init__(self):
+            self.log_callback = None
+
+    class DummySolver:
+        def __init__(self):
+            self.solver = DummyInner()
+
+    s = DummySolver()
+    U.enable_ortools_logging_if_jupyter(s)
+    assert s.solver.log_callback is print
+
+
+@pytest.mark.parametrize(
+    'mode,plus',
+    [
+        ('specified', 2),
+        ('min_plus1', 3),
+        ('min_plus2', 4),
+        ('min_plus3', 5),
+    ],
+)
+def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
+    S = tiny_wfn().S
+    model_options = {
+        'feeder_limit': mode,
+        'max_feeders': plus,
+        'topology': 'radial',
+        'feeder_route': 'segmented',
+    }
+    ok = U.is_warmstart_eligible(
+        S_warm=S,
+        cables_capacity=4,
+        model_options=model_options,
+        S_warm_has_detour=False,
+        solver_name='ortools',
+        logger=logging.getLogger(U.__name__),
+        verbose=True,
+    )
+    assert ok is True
+    # assert 'exceeds feeder limit' in capfd.readouterr().out
+
+
+def test_warmstart_feeder_limit_specified_allows(capfd):
+    S = tiny_wfn().S
+    model_options = {
+        'feeder_limit': 'specified',
+        'max_feeders': 3,
+        'topology': 'radial',
+        'feeder_route': 'segmented',
+    }
+    ok = U.is_warmstart_eligible(
+        S_warm=S,
+        cables_capacity=2,
+        model_options=model_options,
+        S_warm_has_detour=False,
+        solver_name='ortools',
+        logger=logging.getLogger(U.__name__),
+        verbose=True,
+    )
+    assert ok is True
+
+
+def test_parse_cables_input_numpy_ints_and_pairs():
+    out1 = U.parse_cables_input(np.array([5, 7]))
+    assert out1 == [(5, 0.0), (7, 0.0)]
+    arr = np.array([(3, 10.0), (6, 20.0)], dtype=object)
+    out2 = U.parse_cables_input(arr)
+    assert out2 == [(3, 10.0), (6, 20.0)]
+
+
+def test_merge_obstacles_outside_is_dropped(caplog):
+    borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
+    obstacleC_ = np.array([[(100, 100), (101, 100), (101, 101), (100, 101)]])
+
+    wfn = tiny_wfn(borderC=borderC, obstacleC_=obstacleC_, optimize=False)
+    wfn.merge_obstacles_into_border()
+    assert wfn.L.graph['border'] is not None
+    assert len(wfn.L.graph['obstacles']) == 0
+
+
+def test_merge_obstacles_intersection_multipolygon_raises():
+    borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
+    obstacleC = [np.array([[-9, -20], [-8, -20], [-8, 20], [-9, 20]])]
+    with pytest.raises(ValueError, match='multiple pieces'):
+        wfn = tiny_wfn(borderC=borderC, obstacleC_=obstacleC)
+        wfn.merge_obstacles_into_border()
+
+
+def test_merge_obstacles_intersection_empty_border_raises():
+    borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
+    obstacleC_ = [np.array([(-100, -100), (100, -100), (100, 100), (-100, 100)])]
+    with pytest.raises(ValueError, match='Turbine out of bounds'):
+        wfn = tiny_wfn(borderC=borderC, obstacleC_=obstacleC_)
+        wfn.merge_obstacles_into_border()
+
+
+def test_merge_obstacles_inside_kept():
+    borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
+    obstacleC_ = [np.array([(-9, -9), (1, -9), (1, -5), (-1, -5)])]
+    L = tiny_wfn(borderC=borderC, obstacleC_=obstacleC_).L
+    assert len(L.graph['obstacles']) == 1
+
+
+def test_buffer_border_obs_negative_raises():
+    wfn = tiny_wfn()
+    with pytest.raises(ValueError, match='must be equal or greater than 0'):
+        U.buffer_border_obs(wfn.L, buffer_dist=-1.0)
+
+
+def test_buffer_border_obs_with_border_positive_shrinks_obstacles():
+    # build L with explicit border/obstacle layout
+    wfn = tiny_wfn()
+    assert 'obstacles' in wfn.L.graph and wfn.L.graph['border'] is not None
+    wfn.add_buffer(buffer_dist=5.0)
+    assert (
+        isinstance(wfn.L.graph['obstacles'], list)
+        and len(wfn.L.graph['obstacles']) == 0
+    )

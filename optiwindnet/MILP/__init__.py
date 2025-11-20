@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import shutil
+from importlib.util import find_spec
+
 from ._core import (
     FeederLimit,
     FeederRoute,
@@ -41,25 +44,58 @@ def solver_factory(solver_name: str) -> Solver:
     """
     match solver_name:
         case 'ortools':
-            from .ortools import SolverORTools
+            if find_spec('ortools'):
+                from .ortools import SolverORTools
 
-            return SolverORTools()
+                return SolverORTools()
+            raise ModuleNotFoundError(
+                "Package 'ortools' not found. Try 'pip install ortools'."
+            )
         case 'cplex':
-            from .cplex import SolverCplex
+            if find_spec('cplex'):
+                from .cplex import SolverCplex
 
-            return SolverCplex()
+                return SolverCplex()
+            raise ModuleNotFoundError(
+                "Package 'cplex' not found. Try 'pip install cplex' or "
+                "'conda install -c IBMDecisionOptimization cplex'."
+            )
         case 'gurobi':
-            from .gurobi import SolverGurobi
+            if find_spec('gurobipy'):
+                from .gurobi import SolverGurobi
 
-            return SolverGurobi()
-        case 'cbc' | 'scip':
-            from .pyomo import SolverPyomo
+                return SolverGurobi()
+            raise ModuleNotFoundError(
+                "Package 'gurobipy' not found. Try 'pip install gurobipy' or "
+                "'conda install -c Gurobi gurobi'."
+            )
+        case 'cbc':
+            if shutil.which('cbc'):
+                from .pyomo import SolverPyomo
 
-            return SolverPyomo(solver_name)
+                return SolverPyomo(solver_name)
+            raise FileNotFoundError(
+                "Executable 'cbc' not found. Ensure the system PATH includes the "
+                "path to 'cbc' or try 'conda install -c conda-forge coin-or-cbc'."
+            )
+        case 'scip':
+            if find_spec('pyscipopt'):
+                from .scip import SolverSCIP
+
+                return SolverSCIP()
+            raise ModuleNotFoundError(
+                "Package 'pyscipopt' not found. Try 'pip install pyscipopt' or "
+                "'conda install -c conda-forge pyscipopt'."
+            )
         case 'highs':
-            # Pyomo's appsi solvers
-            from .pyomo import SolverPyomo
+            if find_spec('highspy'):
+                from .pyomo import SolverPyomoAppsi
+                from pyomo.contrib.appsi.solvers.highs import Highs
 
-            return SolverPyomo(solver_name, prefix='appsi_')
+                return SolverPyomoAppsi(solver_name, Highs)
+            raise ModuleNotFoundError(
+                "Package 'highspy' not found. Try 'pip install highspy' or "
+                "'conda install -c conda-forge highspy'."
+            )
         case _:
             raise ValueError(f'Unsupported solver: {solver_name}')

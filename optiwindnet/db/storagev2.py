@@ -4,6 +4,7 @@
 import base64
 import io
 import json
+import os
 from collections.abc import Sequence
 from functools import partial
 from hashlib import sha256
@@ -15,6 +16,7 @@ import networkx as nx
 import numpy as np
 from pony import orm
 
+from .modelv2 import define_entities
 from ..interarraylib import calcload
 from ..utils import make_handle
 
@@ -89,6 +91,25 @@ _misc_not = {
     'inter_terminal_clearance_safe',
     'stunts_primes',
 }
+
+
+def open_database(filepath: str, create_db: bool = False) -> orm.Database:
+    """Opens the sqlite database v2 file specified in `filepath`.
+
+    Args:
+      filepath: path to database file
+      create_db: True -> create a new file if it does not exist
+
+    Returns:
+      Database object (Pony ORM)
+    """
+    db = orm.Database()
+    define_entities(db)
+    db.bind(
+        'sqlite', os.path.abspath(os.path.expanduser(filepath)), create_db=create_db
+    )
+    db.generate_mapping(create_tables=True)
+    return db
 
 
 def L_from_nodeset(nodeset: object, handle: str | None = None) -> nx.Graph:
