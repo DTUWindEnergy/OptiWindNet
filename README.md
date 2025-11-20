@@ -31,15 +31,21 @@ Installation
 ```
 pip install optiwindnet
 ```
+or
+```
+conda install optiwindnet
+```
 
 Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/setup.html#installation).
 
 Requirements
 ------------
 
-Python 3.10+. The use of a Python virtual environment is recommended. OptiWindNet's dependencies will be installed automatically when using `pip install optiwindnet`.
+Python version 3.11 or 3.12 is recommended to run *OptiWindNet*. Python 3.13+ may cause issues with the `optiwindnet.db` module, but all other features work fine. The last version to support Python 3.10 was v0.1.0.
 
-One may pre-install the dependencies in a python environment by using either:
+The use of a Python virtual environment is recommended. OptiWindNet's dependencies (except for MILP solvers, see docs) will be installed automatically when using `pip install optiwindnet` or `conda install optiwindnet`.
+
+One may **optionally** pre-install the dependencies in a python environment by using either:
 - [requirements.txt](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/requirements.txt?ref_type=heads&inline=false): `pip install -r requirements.txt`
 - [environment.yml](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/environment.yml?ref_type=heads&inline=false): `conda env create -f environment.yml` (name: *optiwindnet_env*)
 

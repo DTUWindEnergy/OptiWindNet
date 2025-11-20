@@ -1,2 +1,3 @@
 exclude postBuild location_template.yaml requirements.txt environment.yml .gitlab-ci.yml MANIFEST.in
 prune docs
+recursive-include tests *

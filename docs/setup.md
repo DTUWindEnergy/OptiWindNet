@@ -4,7 +4,9 @@
 
 *OptiWindNet* has been tested on Windows 10/11 and on Linux systems, but should run on MacOSX as well.
 
-A recent Python version (3.10+) is required to run *OptiWindNet*, and the use of a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
+Python version 3.11 or 3.12 is recommended to run *OptiWindNet*. Python 3.13+ may cause issues with the `optiwindnet.db` module, but all other features work fine. The last version to support Python 3.10 was v0.1.0.
+
+Running *OptiWindNet* within a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
 
 * [Python](https://www.python.org/downloads/), which provides: `venv` virtual environment creator and `pip` package manager;
 * or [Miniforge](https://conda-forge.org/download/), which provides: `conda` environment and package manager.
@@ -36,11 +38,8 @@ And finally:
 
 ### If using `conda`
 
-Download <a href="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/environment.yml?ref_type=heads&inline=false">environment.yml</a>, then run:
-
-    conda env create -f environment.yml
+    conda create --name optiwindnet_env python=3.12 optiwindnet 
     conda activate optiwindnet_env
-    pip install optiwindnet
 
 ## Optional - Solvers
 
@@ -52,6 +51,12 @@ The commands suggested here assume that the Python environment for *OptiWindNet*
 For packages that are installable with both `pip` and `conda`, **enter only one** of the commands.
 
 Solvers perform a search accross the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Mar/2025, only `gurobi`, `cplex` and `cbc` have this multi-threaded search capability. The `ortools` solver also benefits from multi-core systems by launching a portfolio of algorithms in parallel, with some information exchange among them.
+
+For installing all pip-available solvers:
+
+    pip install optiwindnet[solvers]
+
+See below for specific instructions for each solver.
 
 ### Gurobi
 
@@ -65,6 +70,7 @@ Solvers perform a search accross the branch-and-bound tree. This process can be 
 [IBM ILOG CPLEX](https://www.ibm.com/products/ilog-cplex-optimization-studio) is proprietary software (academic license available). The Community Edition version can only handle very small problems:
 
     pip install cplex
+    conda install -c IBMDecisionOptimization cplex
 
 ### HiGHS
 
@@ -77,7 +83,8 @@ Solvers perform a search accross the branch-and-bound tree. This process can be 
 
 [SCIP](https://www.scipopt.org/) is open source software:
 
-    conda install scip
+    pip install pyscipopt
+    conda install pyscipopt
 
 ### CBC
 

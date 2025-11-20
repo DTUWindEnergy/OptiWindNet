@@ -27,16 +27,10 @@ from ._core import (
     Topology,
 )
 
-__all__ = ('make_min_length_model', 'warmup_model', 'topology_from_mip_sol')
+__all__ = ('make_min_length_model', 'warmup_model')
 
 _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info
-
-# NOTE: SCIP has solution pool which can be accessed with PySCIPOpt: getSols()
-# TODO: move scip to scip.py and implement:
-#       - class SolverSCIP(SolverPyomo, PoolHandler)
-#       - SCIP-specific make_min_length_model, warmup_model, topology_from_mip_sol
-#       - warmup_model: model.createSol(), model.setSolVal(), model.addSol()
 
 # solver option name mapping (pyomo should have taken care of this)
 _common_options = namedtuple('common_options', 'mip_gap time_limit')
@@ -45,7 +39,6 @@ _optkey = dict(
     gurobi=_common_options('mipgap', 'timelimit'),
     cbc=_common_options('ratioGap', 'seconds'),
     highs=_common_options('mip_gap', 'time_limit'),
-    scip=_common_options('limits/gap', 'limits/time'),
 )
 # usage: _optname[solver_name].mipgap
 
@@ -85,6 +78,12 @@ class SolverPyomo(Solver):
         self.name = name
         self.options = _default_options[name]
         self.solver = pyo.SolverFactory(prefix + name + suffix, **kwargs)
+
+    def _link_val(self, var: Any) -> int:
+        return var.value
+
+    def _flow_val(self, var: Any) -> int:
+        return round(var.value)
 
     def set_problem(
         self,
@@ -136,16 +135,13 @@ class SolverPyomo(Solver):
         if self.name != 'scip':
             objective = result['Problem'][0]['Upper bound']
             bound = result['Problem'][0]['Lower bound']
+            runtime = result['Solver'][0]['Wallclock time']
         else:
             objective = result['Solver'][0]['Primal bound']
             bound = result['Solver'][0]['Dual bound']
+            runtime = result['Solver'][0]['Time']
         solution_info = SolutionInfo(
-            # HiGHS is using Pyomo's v2 API, with a different way of reporting runtime
-            runtime=(
-                result['Timing info']['wall_time']
-                if self.name == 'highs'
-                else result['Solver'][0]['Wallclock time']
-            ),
+            runtime=runtime,
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,
@@ -163,8 +159,7 @@ class SolverPyomo(Solver):
         model.solutions.load_from(result)
         if A is None:
             A = self.A
-        S = topology_from_mip_sol(model=model)
-        S.graph['creator'] += self.name
+        S = self.topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
@@ -175,9 +170,6 @@ class SolverPyomo(Solver):
         G.graph.update(self._make_graph_attributes())
         return S, G
 
-    def topology_from_mip_sol(self):
-        return topology_from_mip_sol(model=self.model)
-
 
 class SolverPyomoAppsi(Solver):
     """As of Pyomo v3.9.4, a new solver inverface (v3) is being introduced. HiGHS is the
@@ -187,6 +179,14 @@ class SolverPyomoAppsi(Solver):
         self.name = name
         self.options = _default_options[name]
         self.solver = solver_cls(**kwargs)
+
+    def _link_val(self, var: Any) -> int:
+        # work-around for HiGHS: use round() to coerce link_ value (should be binary)
+        #   values for link_ variables are floats and may be slightly off of 0
+        return round(var.value)
+
+    def _flow_val(self, var: Any) -> int:
+        return round(var.value)
 
     def set_problem(
         self,
@@ -249,14 +249,13 @@ class SolverPyomoAppsi(Solver):
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        P, model, model_options = self.P, self.model, self.model_options
+        P, model_options = self.P, self.model_options
         result = self.result
         result.solution_loader.load_vars()
         #  model.solutions.load_from(result)
         if A is None:
             A = self.A
-        S = topology_from_mip_sol(model=model)
-        S.graph['creator'] += self.name
+        S = self.topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
@@ -266,9 +265,6 @@ class SolverPyomoAppsi(Solver):
         ).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
-
-    def topology_from_mip_sol(self):
-        return topology_from_mip_sol(model=self.model)
 
 
 def make_min_length_model(
@@ -568,49 +564,3 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     model.warmed_by = S.graph['creator']
     return model
-
-
-def topology_from_mip_sol(*, model: pyo.ConcreteModel, **kwargs) -> nx.Graph:
-    """Create a topology graph from the solution to the Pyomo MILP model.
-
-    Args:
-      model: pyomo model instance
-      kwargs: not used (signature compatibility)
-    Returns:
-      Graph topology `S` from the solution.
-    """
-    # in pyomo, the solution is in the model instance not in the solver
-    S = nx.Graph(R=len(model.R), T=len(model.T))
-    # Get active links and if flow is reversed (i.e. from small to big)
-    rev_from_link = {
-        (u, v): u < v for (u, v), use in model.link_.items() if use.value > 0.5
-    }
-    S.add_weighted_edges_from(
-        ((u, v, round(model.flow_[u, v].value)) for (u, v) in rev_from_link.keys()),
-        weight='load',
-    )
-    # set the 'reverse' edge attribute
-    nx.set_edge_attributes(S, rev_from_link, name='reverse')
-    # propagate loads from edges to nodes
-    subtree = -1
-    max_load = 0
-    for r in range(model.R.first(), 0):
-        for u, v in nx.edge_dfs(S, r):
-            S.nodes[v]['load'] = S[u][v]['load']
-            if u == r:
-                subtree += 1
-            S.nodes[v]['subtree'] = subtree
-        rootload = 0
-        for nbr in S.neighbors(r):
-            subtree_load = S.nodes[nbr]['load']
-            max_load = max(max_load, subtree_load)
-            rootload += subtree_load
-        S.nodes[r]['load'] = rootload
-    S.graph.update(
-        capacity=model.k.value,
-        max_load=max_load,
-        has_loads=True,
-        creator='MILP.' + __name__,
-        solver_details={},
-    )
-    return S

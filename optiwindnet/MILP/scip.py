@@ -7,7 +7,7 @@ from itertools import chain
 from typing import Any
 
 import networkx as nx
-from ortools.sat.python import cp_model
+from pyscipopt import Model
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
@@ -31,51 +31,21 @@ _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 
-class _SolutionStore(cp_model.CpSolverSolutionCallback):
-    """Ad hoc implementation of a callback that stores solutions to a pool."""
+class SolverSCIP(Solver, PoolHandler):
 
-    solutions: list[tuple[float, dict]]
-
-    def __init__(self, model: cp_model.CpModel):
-        super().__init__()
-        self.solutions = []
-        int_lits = []
-        bool_lits = []
-        for var in model._CpModel__var_list._VariableList__var_list:
-            if var.is_boolean:
-                bool_lits.append(var)
-            elif var.is_integer():
-                int_lits.append(var)
-        self.bool_lits = bool_lits
-        self.int_lits = int_lits
-
-    def on_solution_callback(self):
-        solution = {var.index: self.boolean_value(var) for var in self.bool_lits}
-        solution |= {var.index: self.value(var) for var in self.int_lits}
-        self.solutions.append((self.objective_value, solution))
-
-
-class SolverORTools(Solver, PoolHandler):
-    """OR-Tools CpSolver wrapper.
-
-    This class wraps and changes the behavior of CpSolver in order to save all
-    solutions found to a pool. Meant to be used with `investigate_pool()`.
-    """
-
-    name: str = 'ortools'
+    name: str = 'scip'
     solution_pool: list[tuple[float, dict]]
-    solver: cp_model.CpSolver
 
     def __init__(self):
-        self.solver = cp_model.CpSolver()
-        # set default options for ortools
         self.options = {}
 
     def _link_val(self, var: Any) -> int:
-        return self._value_map[var.index]
+        # work-around for SCIP: use round() to coerce link_ value (should be binary)
+        #   values for link_ variables are floats and may be slightly off of 0
+        return round(self._value_map[var])
 
     def _flow_val(self, var: Any) -> int:
-        return self._value_map[var.index]
+        return self._value_map[var]
 
     def set_problem(
         self,
@@ -99,42 +69,36 @@ class SolverORTools(Solver, PoolHandler):
         options: dict[str, Any] = {},
         verbose: bool = False,
     ) -> SolutionInfo:
-        """Wrapper for CpSolver.solve() that saves all solutions.
-
-        This method uses a custom CpSolverSolutionCallback to fill a solution
-        pool stored in the attribute self.solutions.
-        """
+        """Wrapper for Model.solveConcurrent()."""
         try:
-            model, solver = self.model, self.solver
+            model = self.model
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        storer = _SolutionStore(model)
         applied_options = self.options | options
-        for key, val in applied_options.items():
-            setattr(solver.parameters, key, val)
-        solver.parameters.max_time_in_seconds = time_limit
-        solver.parameters.relative_gap_limit = mip_gap
-        solver.parameters.log_search_progress = verbose
-        info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
-        _ = solver.solve(model, storer)
-        num_solutions = len(storer.solutions)
+        model.setParams(applied_options)
+        model.setParam('limits/time', time_limit)
+        model.setParam('limits/gap', mip_gap)
+        if not verbose:
+            model.setParam('display/verblevel', 1)  # 1: warnings; 0: no output
+        info('>>> SCIP parameters <<<\n%s\n', model.getParams())
+        model.solveConcurrent()
+        num_solutions = model.getNSols()
         if num_solutions == 0:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {solver.status_name()}'
+                f'Unable to find a solution. Solver {self.name} terminated with: {model.getStatus()}'
             )
-        storer.solutions.reverse()
-        self.solution_pool = storer.solutions
-        _, self._value_map = storer.solutions[0]
+        bound = model.getDualbound()
+        objective = model.getObjVal()
+        self.solution_pool = [(model.getSolObjVal(sol), sol) for sol in model.getSols()]
         self.num_solutions = num_solutions
-        bound = solver.best_objective_bound
-        objective = solver.objective_value
         solution_info = SolutionInfo(
-            runtime=solver.wall_time,
+            runtime=model.getSolvingTime(),
             bound=bound,
             objective=objective,
+            # SCIP offers model.getGap(), but its denominator is the bound
             relgap=1.0 - bound / objective,
-            termination=solver.status_name(),
+            termination=model.getStatus(),
         )
         self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
@@ -155,7 +119,6 @@ class SolverORTools(Solver, PoolHandler):
         else:
             S, G = self.investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
-        G.graph['solver_details'].update(strategy=self.solver.solution_info())
         return S, G
 
     def objective_at(self, index: int) -> float:
@@ -175,10 +138,10 @@ def make_min_length_model(
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
     balanced: bool = False,
     max_feeders: int = 0,
-) -> tuple[cp_model.CpModel, ModelMetadata]:
+) -> tuple[Model, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
-    Build OR-tools CP-SAT model for the collector system length minimization.
+    Build SCIP model for the collector system length minimization.
 
     Args:
       A: graph with the available edges to choose from
@@ -209,7 +172,7 @@ def make_min_length_model(
     linkset = E + Eʹ + stars
 
     # Create model
-    m = cp_model.CpModel()
+    m = Model()
 
     ##############
     # Parameters #
@@ -224,47 +187,46 @@ def make_min_length_model(
     # Variables #
     #############
 
-    link_ = {e: m.new_bool_var(f'link_{e}') for e in linkset}
-    flow_ = {e: m.new_int_var(0, k - 1, f'flow_{e}') for e in chain(E, Eʹ)}
-    flow_ |= {e: m.new_int_var(0, k, f'flow_{e}') for e in stars}
+    link_ = {e: m.addVar(f'link_{e}', 'B') for e in linkset}
+    flow_ = {e: m.addVar(f'flow_{e}', 'I', lb=0, ub=k - 1, ) for e in chain(E, Eʹ)}
+    flow_ |= {e: m.addVar(f'flow_{e}', lb=0, ub=k) for e in stars}
 
     ###############
     # Constraints #
     ###############
 
     # total number of edges must be equal to number of terminal nodes
-    m.add(sum(link_.values()) == T)
+    m.addCons(sum(link_.values()) == T, name='num_links_eq_T')
 
     # enforce a single directed edge between each node pair
     for u, v in E:
-        m.add_at_most_one(link_[(u, v)], link_[(v, u)])
+        m.addConsSOS1((link_[(u, v)], link_[(v, u)]), name='single_dir_link')
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
         for (u, v), (r, t) in gateXing_iter(A):
             if u >= 0:
-                m.add_at_most_one(link_[(u, v)], link_[(v, u)], link_[t, r])
+                m.addConsSOS1((link_[(u, v)], link_[(v, u)], link_[t, r]), name=f'feeder_link_cross({u}~{v})({t}~{r})')
             else:
                 # a feeder crossing another feeder (possible in multi-root instances)
-                m.add_at_most_one(link_[(u, v)], link_[t, r])
+                m.addConsSOS1((link_[(u, v)], link_[t, r]), name=f'feeder_feeder_cross({u}~{v})({t}~{r})')
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):
-        m.add_at_most_one(sum(((link_[u, v], link_[v, u]) for u, v in Xing), ()))
+        m.addConsSOS1(sum(((link_[u, v], link_[v, u]) for u, v in Xing), ()), name=f'link_link_cross{Xing}')
 
     # bind flow to link activation
     for t, n in linkset:
-        m.add(flow_[t, n] == 0).only_enforce_if(link_[t, n].Not())
-        #  m.add(flow_[t, n] <= link_[t, n]*(k if n < 0 else (k - 1)))
-        m.add(flow_[t, n] > 0).only_enforce_if(link_[t, n])
-        #  m.add(flow_[t, n] >= link_[t, n])
+        m.addCons(flow_[t, n] <= link_[t, n]*(k if n < 0 else (k - 1)), name=f'flow_ub_({t}~{n})')
+        m.addCons(flow_[t, n] >= link_[t, n], name=f'flow_lb_({t}~{n})')
 
     # flow conservation with possibly non-unitary node power
     for t in _T:
-        m.add(
+        m.addCons(
             sum((flow_[t, n] - flow_[n, t]) for n in A_nodes.neighbors(t))
             + sum(flow_[t, r] for r in _R)
-            == A.nodes[t].get('power', 1)
+            == A.nodes[t].get('power', 1),
+            name='flow_conserv_{t}',
         )
 
     # feeder limits
@@ -273,7 +235,7 @@ def make_min_length_model(
     is_equal_not_bounded = False
     if feeder_limit is FeederLimit.UNLIMITED:
         # valid inequality: number of gates is at least the minimum
-        m.add(all_feeder_vars_sum >= min_feeders)
+        m.addCons(all_feeder_vars_sum >= min_feeders, name='feeders_limit_lb')
         if balanced:
             warn(
                 'Model option <balanced = True> is incompatible with <feeder_limit'
@@ -296,9 +258,10 @@ def make_min_length_model(
         else:
             raise NotImplementedError('Unknown value:', feeder_limit)
         if is_equal_not_bounded:
-            m.add(all_feeder_vars_sum == min_feeders)
+            m.addCons(all_feeder_vars_sum == min_feeders, name='feeders_limit_eq')
         else:
-            m.add_linear_constraint(all_feeder_vars_sum, min_feeders, max_feeders)
+            m.addCons(all_feeder_vars_sum >= min_feeders, name='feeders_limit_lb')
+            m.addCons(all_feeder_vars_sum <= max_feeders, name='feeders_limit_ub')
         # enforce balanced subtrees (subtree loads differ at most by one unit)
         if balanced:
             if not is_equal_not_bounded:
@@ -311,31 +274,32 @@ def make_min_length_model(
                 feeder_min_load = T // min_feeders
                 if feeder_min_load < capacity:
                     for t, r in stars:
-                        m.add(flow_[t, r] >= link_[t, r] * feeder_min_load)
+                        m.addCons(flow_[t, r] >= link_[t, r] * feeder_min_load, name=f'balanced({t}~{r})')
 
     # radial or branched topology
     if topology is Topology.RADIAL:
         for t in _T:
-            m.add(sum(link_[n, t] for n in A_nodes.neighbors(t)) <= 1)
+            m.addConsSOS1(sum(link_[n, t] for n in A_nodes.neighbors(t)), name=f'radial_{t}')
 
     # assert all nodes are connected to some root
-    m.add(sum(flow_[t, r] for r in _R for t in _T) == W)
+    m.addCons(sum(flow_[t, r] for r in _R for t in _T) == W, name='total_power_sank')
 
     # valid inequalities
     for t in _T:
         # incoming flow limit
-        m.add(
+        m.addCons(
             sum(flow_[n, t] for n in A_nodes.neighbors(t))
-            <= k - A.nodes[t].get('power', 1)
+            <= k - A.nodes[t].get('power', 1),
+            name=f'inflow_limit_{t}'
         )
         # only one out-edge per terminal
-        m.add(sum(link_[t, n] for n in chain(A_nodes.neighbors(t), _R)) == 1)
+        m.addCons(sum(link_[t, n] for n in chain(A_nodes.neighbors(t), _R)) == 1, name=f'single_out_link_{t}')
 
     #############
     # Objective #
     #############
 
-    m.minimize(cp_model.LinearExpr.WeightedSum(tuple(link_.values()), weight_))
+    m.setObjective(sum(w*x for w, x in zip(weight_, link_.values())), sense='minimize')
 
     ##################
     # Store metadata #
@@ -365,14 +329,14 @@ _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
 
 def warmup_model(
-    model: cp_model.CpModel, metadata: ModelMetadata, S: nx.Graph
-) -> cp_model.CpModel:
+    model: Model, metadata: ModelMetadata, S: nx.Graph
+) -> Model:
     """Set initial solution into `model`.
 
     Changes `model` in-place.
 
     Args:
-      model: CP-SAT model to apply the solution to.
+      model: SCIP model to apply the solution to.
       metadata: indices to the model's variables.
       S: solution topology
 
@@ -389,23 +353,26 @@ def warmup_model(
         raise OWNWarmupFailed(
             f'warmup_model() failed: model lacks S links ({in_S_not_in_model})'
         )
-    model.ClearHints()
+    sol = model.createSol()
     for u, v in metadata.linkset[: (len(metadata.linkset) - R * T) // 2]:
         edgeD = S.edges.get((u, v))
         if edgeD is None:
-            model.add_hint(metadata.link_[u, v], False)
-            model.add_hint(metadata.flow_[u, v], 0)
-            model.add_hint(metadata.link_[v, u], False)
-            model.add_hint(metadata.flow_[v, u], 0)
+            model.setSolVal(sol, metadata.link_[u, v], 0)
+            model.setSolVal(sol, metadata.flow_[u, v], 0)
+            model.setSolVal(sol, metadata.link_[v, u], 0)
+            model.setSolVal(sol, metadata.flow_[v, u], 0)
         else:
             u, v = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
-            model.add_hint(metadata.link_[u, v], True)
-            model.add_hint(metadata.flow_[u, v], edgeD['load'])
-            model.add_hint(metadata.link_[v, u], False)
-            model.add_hint(metadata.flow_[v, u], 0)
+            model.setSolVal(sol, metadata.link_[u, v], 1)
+            model.setSolVal(sol, metadata.flow_[u, v], edgeD['load'])
+            model.setSolVal(sol, metadata.link_[v, u], 0)
+            model.setSolVal(sol, metadata.flow_[v, u], 0)
     for t, r in metadata.linkset[-R * T :]:
         edgeD = S.edges.get((t, r))
-        model.add_hint(metadata.link_[t, r], edgeD is not None)
-        model.add_hint(metadata.flow_[t, r], 0 if edgeD is None else edgeD['load'])
+        model.setSolVal(sol, metadata.link_[t, r], 0 if edgeD is None else 1)
+        model.setSolVal(sol, metadata.flow_[t, r], 0 if edgeD is None else edgeD['load'])
+    accepted = model.addSol(sol)
+    if not accepted:
+        raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     metadata.warmed_by = S.graph['creator']
     return model

@@ -5,13 +5,7 @@ import abc
 import logging
 from dataclasses import asdict, dataclass
 
-try:
-    from enum import StrEnum, auto
-except ImportError:
-    # workaround for python < 3.11
-    from enum import auto
-
-    from backports.strenum import StrEnum
+from enum import StrEnum, auto
 from itertools import chain
 from typing import Any, Mapping
 
@@ -164,6 +158,16 @@ class Solver(abc.ABC):
     applied_options: dict[str, Any]
 
     @abc.abstractmethod
+    def _link_val(self, var: Any) -> int | bool:
+        "Get the value of a link variable from the current solution."
+        pass
+
+    @abc.abstractmethod
+    def _flow_val(self, var: Any) -> int:
+        "Get the value of a flow variable from the current solution."
+        pass
+
+    @abc.abstractmethod
     def set_problem(
         self,
         P: nx.PlanarEmbedding,
@@ -232,6 +236,53 @@ class Solver(abc.ABC):
             attr['warmstart'] = metadata.warmed_by
         return attr
 
+    def topology_from_mip_sol(self):
+        """Create a topology graph from the solution to the MILP model.
+
+        Returns:
+          Graph topology `S` from the solution.
+        """
+        metadata = self.metadata
+        S = nx.Graph(R=metadata.R, T=metadata.T)
+        # Get active links and if flow is reversed (i.e. from small to big)
+        rev_from_link = {
+            (u, v): u < v
+            for (u, v), var in metadata.link_.items()
+            if self._link_val(var)
+        }
+        S.add_weighted_edges_from(
+            (
+                (u, v, self._flow_val(metadata.flow_[u, v]))
+                for (u, v) in rev_from_link.keys()
+            ),
+            weight='load',
+        )
+        # set the 'reverse' edge attribute
+        nx.set_edge_attributes(S, rev_from_link, name='reverse')
+        # propagate loads from edges to nodes
+        subtree = -1
+        max_load = 0
+        for r in range(-metadata.R, 0):
+            for u, v in nx.edge_dfs(S, r):
+                S.nodes[v]['load'] = S[u][v]['load']
+                if u == r:
+                    subtree += 1
+                S.nodes[v]['subtree'] = subtree
+            rootload = 0
+            for nbr in S.neighbors(r):
+                subtree_load = S.nodes[nbr]['load']
+                max_load = max(max_load, subtree_load)
+                rootload += subtree_load
+            S.nodes[r]['load'] = rootload
+        S.graph.update(
+            capacity=metadata.capacity,
+            max_load=max_load,
+            has_loads=True,
+            creator='MILP.' + self.name,
+            solver_details={},
+        )
+        return S
+
 
 class PoolHandler(abc.ABC):
     name: str
@@ -248,32 +299,32 @@ class PoolHandler(abc.ABC):
         "Build topology from the pool solution at the last requested position"
         pass
 
-
-def investigate_pool(
-    P: nx.PlanarEmbedding, A: nx.Graph, pool: PoolHandler
-) -> tuple[nx.Graph, nx.Graph]:
-    """Go through the solver's solutions checking which has the shortest length
-    after applying the detours with PathFinder."""
-    Λ = float('inf')
-    branched = pool.model_options['topology'] is Topology.BRANCHED
-    num_solutions = pool.num_solutions
-    info(f'Solution pool has {num_solutions} solutions.')
-    for i in range(num_solutions):
-        λ = pool.objective_at(i)
-        if λ > Λ:
-            info(f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length")
-            break
-        Sʹ = pool.topology_from_mip_pool()
-        Sʹ.graph['creator'] += '.' + pool.name
-        Gʹ = PathFinder(
-            G_from_S(Sʹ, A), planar=P, A=A, branched=branched
-        ).create_detours()
-        Λʹ = Gʹ.size(weight='length')
-        if Λʹ < Λ:
-            S, G, Λ = Sʹ, Gʹ, Λʹ
-            G.graph['pool_entry'] = i, λ
-            info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
-        else:
-            info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')
-    G.graph['pool_count'] = num_solutions
-    return S, G
+    def investigate_pool(
+        self, P: nx.PlanarEmbedding, A: nx.Graph
+    ) -> tuple[nx.Graph, nx.Graph]:
+        """Go through the solver's solutions checking which has the shortest length
+        after applying the detours with PathFinder."""
+        Λ = float('inf')
+        branched = self.model_options['topology'] is Topology.BRANCHED
+        num_solutions = self.num_solutions
+        info(f'Solution pool has {num_solutions} solutions.')
+        for i in range(num_solutions):
+            λ = self.objective_at(i)
+            if λ > Λ:
+                info(
+                    f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length"
+                )
+                break
+            Sʹ = self.topology_from_mip_pool()
+            Gʹ = PathFinder(
+                G_from_S(Sʹ, A), planar=P, A=A, branched=branched
+            ).create_detours()
+            Λʹ = Gʹ.size(weight='length')
+            if Λʹ < Λ:
+                S, G, Λ = Sʹ, Gʹ, Λʹ
+                G.graph['pool_entry'] = i, λ
+                info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
+            else:
+                info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')
+        G.graph['pool_count'] = num_solutions
+        return S, G

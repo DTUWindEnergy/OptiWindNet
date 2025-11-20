@@ -244,40 +244,6 @@ def enable_ortools_logging_if_jupyter(solver):
             solver.solver.log_callback = print
 
 
-def compute_edge_gradients(G, gradient_type='length'):
-    if gradient_type.lower() not in ['cost', 'length']:
-        raise ValueError("gradient_type should be either 'cost' or 'length'")
-
-    VertexC = G.graph['VertexC']
-    R = G.graph['R']
-    T = G.graph['T']
-    gradients = np.zeros_like(VertexC)
-
-    fnT = G.graph.get('fnT')
-    if fnT is not None:
-        _u, _v = fnT[np.array(G.edges)].T
-    else:
-        _u, _v = np.array(G.edges).T
-
-    vec = VertexC[_u] - VertexC[_v]
-    norm = np.hypot(*vec.T)
-    norm[norm < 1e-12] = 1.0
-    vec /= norm[:, None]
-
-    if gradient_type.lower() == 'cost':
-        cable_costs = np.fromiter(
-            (G.graph['cables'][cable][1] for *_, cable in G.edges(data='cable')),
-            dtype=np.float64,
-            count=G.number_of_edges(),
-        )
-        vec *= cable_costs[:, None]
-
-    np.add.at(gradients, _u, vec)
-    np.subtract.at(gradients, _v, vec)
-
-    return gradients[:T], gradients[-R:]
-
-
 def extract_network_as_array(G):
     keys = ['src', 'tgt', 'length', 'load', 'cable']
     types = [int, int, float, float, int]
@@ -500,12 +466,3 @@ def buffer_border_obs(L, buffer_dist):
 
     else:  # buffer_dist < 0
         raise ValueError('Buffer value must be equal or greater than 0!')
-
-
-def _ensure_closed(verts: np.ndarray) -> np.ndarray:
-    """Return verts with the first point appended at the end if not already closed."""
-    if verts.shape[0] == 0:
-        return verts
-    if not np.allclose(verts[0], verts[-1]):
-        return np.vstack([verts, verts[0]])
-    return verts

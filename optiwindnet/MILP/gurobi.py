@@ -16,9 +16,8 @@ from ._core import (
     PoolHandler,
     SolutionInfo,
     Topology,
-    investigate_pool,
 )
-from .pyomo import SolverPyomo, topology_from_mip_sol
+from .pyomo import SolverPyomo
 
 __all__ = ()
 
@@ -36,6 +35,12 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     def __init__(self):
         # dummy attribute `solver` to be used by SolverPyomo.set_problem()
         self.solver = SimpleNamespace(warm_start_capable=lambda: True)
+
+    def _link_val(self, var: Any) -> int:
+        return self._value_map[var.name]
+
+    def _flow_val(self, var: Any) -> int:
+        return self._value_map[var.name]
 
     def solve(
         self,
@@ -95,7 +100,6 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
                 S = self.topology_from_mip_pool()
-                S.graph['creator'] += '.' + self.name
                 G = PathFinder(
                     G_from_S(S, A),
                     P,
@@ -103,7 +107,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
                     branched=model_options['topology'] is Topology.BRANCHED,
                 ).create_detours()
             else:
-                S, G = investigate_pool(P, A, self)
+                S, G = self.investigate_pool(P, A)
         except Exception as exc:
             raise exc
         else:
@@ -118,7 +122,8 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         return solver_model.getAttr('PoolObjVal')
 
     def topology_from_mip_pool(self) -> nx.Graph:
-        solver = self.solver
-        for omovar, gurvar in solver._pyomo_var_to_solver_var_map.items():
-            omovar.set_value(round(gurvar.Xn), skip_validation=True)
-        return topology_from_mip_sol(model=self.model)
+        self._value_map = {
+            omovar.name: round(gurvar.Xn)
+            for omovar, gurvar in self.solver._pyomo_var_to_solver_var_map.items()
+        }
+        return self.topology_from_mip_sol()
