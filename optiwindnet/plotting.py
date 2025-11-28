@@ -166,12 +166,17 @@ def gplot(
 
     edges_width = 1.0
     edges_capstyle = 'round'
+
     # draw edges
     for graph, edge_kind in product((G, G.graph.get('overlay')), c.kind2style):
         if graph is None:
             continue
         edges = [(u, v) for u, v, kind in graph.edges.data('kind') if kind == edge_kind]
         if edges:
+            if 'cables' in G.graph:
+                # use variable edge width
+                edges_width = [0.8 + 0.8 * G.edges[uv]['cable'] for uv in edges]
+
             art = nx.draw_networkx_edges(
                 graph,
                 pos,
