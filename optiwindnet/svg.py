@@ -163,16 +163,17 @@ class Drawable:
 
     def add_edges(self):
         fnT, c, VertexS = self.fnT, self.c, self.VertexS
-        edges_with_kind = self.G.edges(data='kind')
-        edge_lines = defaultdict(list)
-        for u, v, edge_kind in edges_with_kind:
-            if edge_kind == 'detour':
+        edge_widths = [
+            (3 + 3 * i) for i, _ in enumerate(self.G.graph.get('cables', (0,)))
+        ]
+        edge_lines_ = [defaultdict(list) for _ in edge_widths]
+        for u, v, edgeD in self.G.edges(data=True):
+            kind = edgeD.get('kind', 'unspecified')
+            if kind == 'detour':
                 # detours are drawn separately as polylines
                 continue
-            if edge_kind is None:
-                edge_kind = 'unspecified'
             u, v = (u, v) if u < v else (v, u)
-            edge_lines[edge_kind].append(
+            edge_lines_[edgeD.get('cable', 0)][kind].append(
                 svg.Line(
                     x1=VertexS[fnT[u], 0],
                     y1=VertexS[fnT[u], 1],
@@ -180,20 +181,40 @@ class Drawable:
                     y2=VertexS[fnT[v], 1],
                 )
             )
-        edgesE = self.edgesE
-        for edge_kind, lines in edge_lines.items():
-            group_attrs = {}
-            if edge_kind in c.kind2dasharray:
-                group_attrs['stroke_dasharray'] = c.kind2dasharray[edge_kind]
-            edgesE.append(
-                svg.G(
-                    id='edges_' + edge_kind,
-                    stroke=c.kind2color[edge_kind],
-                    stroke_width=4,
-                    **group_attrs,
-                    elements=lines,
+        edges_super_group = self.edgesE
+        for cable_type, (stroke_width, edge_lines) in enumerate(
+            zip(edge_widths, edge_lines_)
+        ):
+            if len(edge_widths) > 1:
+                # two grouping levels
+                edgesE = []
+                extra_attrs = {}
+            else:
+                # single grouping level
+                edgesE = edges_super_group
+                extra_attrs = dict(stroke_width=4)
+            for edge_kind, lines in edge_lines.items():
+                group_attrs = {}
+                if edge_kind in c.kind2dasharray:
+                    group_attrs['stroke_dasharray'] = c.kind2dasharray[edge_kind]
+                edgesE.append(
+                    svg.G(
+                        id='edges_' + edge_kind,
+                        stroke=c.kind2color[edge_kind],
+                        **extra_attrs,
+                        **group_attrs,
+                        elements=lines,
+                    )
                 )
-            )
+            if len(edge_widths) > 1:
+                # two grouping levels
+                edges_super_group.append(
+                    svg.G(
+                        id=f'cable_{cable_type}',
+                        stroke_width=stroke_width,
+                        elements=edgesE,
+                    )
+                )
 
     def add_detours(self):
         G, R, T, B = self.G, self.R, self.T, self.B
@@ -212,7 +233,7 @@ class Drawable:
         )
 
         # Detour edges as polylines (to align the dashes among overlapping lines)
-        Points = []
+        points__ = defaultdict(list)
         for r in range(-R, 0):
             detoured = [n for n in G.neighbors(r) if n >= T + B + C]
             for t in detoured:
@@ -226,17 +247,37 @@ class Drawable:
                     if u < T:
                         break
                     s, t = t, u
-                Points.append(' '.join(str(c) for c in VertexS[hops].flat))
-        self.detoursE.extend(
-            (
+                points__[G[s][t].get('cable', None)].append(
+                    ' '.join(str(c) for c in VertexS[hops].flat)
+                )
+        common_attr = dict(
+            stroke=c.kind2color['detour'],
+            stroke_dasharray=[18, 15],
+            fill='none',
+        )
+        if None in points__:
+            detours = [
                 svg.G(
                     id='detours',
-                    stroke=c.kind2color['detour'],
+                    **common_attr,
                     stroke_width=4,
-                    stroke_dasharray=[18, 15],
-                    fill='none',
-                    elements=[svg.Polyline(points=points) for points in Points],
+                    elements=[svg.Polyline(points=points) for points in points__[None]],
                 ),
+            ]
+        else:
+            detours = [
+                svg.G(
+                    id=f'detours_{cable_type}',
+                    **common_attr,
+                    stroke_width=3 + 3 * cable_type,
+                    elements=[svg.Polyline(points=points) for points in points_],
+                )
+                for cable_type, points_ in points__.items()
+            ]
+
+        self.detoursE.extend(
+            (
+                *detours,
                 svg.G(  # Detour nodes
                     id='DTgrp',
                     elements=[
