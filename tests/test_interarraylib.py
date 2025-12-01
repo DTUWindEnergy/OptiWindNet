@@ -1,6 +1,4 @@
-# imports
 import copy
-import hashlib
 import math
 import networkx as nx
 import numpy as np
@@ -62,7 +60,7 @@ def test_assign_cables():
 
     # graph-level checks
     assert G2.graph['cables'] == cables2
-    #assert G2.graph['currency'] == '€'
+    # assert G2.graph['currency'] == '€'
     assert G2.graph['capacity'] == 1
 
     def compare_cable_and_cost(edges_expected, edges_actual):
@@ -136,7 +134,7 @@ def test_describe_G():
     G = wfn.G
 
     desc = describe_G(G)
-    expected = ['κ = 4, T = 4', '(+0) [-1]: 1', 'Σλ = 5.5456 m', '55 €']
+    expected = ['κ = 4, T = 4', '(+0) [-1]: 1', 'Σλ = 5.5456\u00a0m', '55\u00a0€']
 
     assert desc == expected, f'Output mismatch:\nGot: {desc}\nExpected: {expected}'
 
@@ -294,7 +292,6 @@ def test_G_from_S():
     G2 = G_from_S(S, A2)
     assert G2.graph['is_normalized']
 
-
     # shortcuts in A
     A[0][2]['shortcuts'] = [9]
     A[2][-1]['shortcuts'] = [9]
@@ -395,7 +392,6 @@ def test_S_from_terse_links():
     terse_links = np.array([-1, 0, 1, 2])
 
     def check_S(S, expected_capacity=None):
-
         # Check number of nodes
         assert len(S.nodes()) == len(terse_links) + 1  # +1 for root node
         assert S.graph['T'] == 4
@@ -413,7 +409,6 @@ def test_S_from_terse_links():
             assert S.graph['capacity'] == S.graph.get('max_load')
         else:
             assert S.graph['capacity'] == expected_capacity
-
 
     # Test without explicit capacity
     S1 = S_from_terse_links(terse_links)
@@ -455,9 +450,7 @@ def test_as_single_root():
             [2, 1],
         ]
     )  # Roots -3, -2, -1
-    L_prime = nx.Graph(
-        T=T, R=R, VertexC=VertexC, name='Site', handle='site_handle'
-    )
+    L_prime = nx.Graph(T=T, R=R, VertexC=VertexC, name='Site', handle='site_handle')
     L_prime.add_nodes_from(range(T), kind='wtg')
     L_prime.add_nodes_from(range(-R, 0), kind='oss')
 
@@ -585,13 +578,12 @@ def test_as_undetoured():
     G1 = G.copy()
     out1 = as_undetoured(G1)
     assert_graph_equal(out1, G1)
-    
+
     # --- Case B: D == 0
     G2 = G.copy()
     G2.graph['D'] = 0  # explicitly mark no detours
     out2 = as_undetoured(G2)
     assert_graph_equal(out2, G2)
- 
 
     # --- Case C: D > 0 and C == 0
     G3 = G.copy()
@@ -604,7 +596,9 @@ def test_as_undetoured():
     G3.graph['D'] = 1
     out3 = as_undetoured(G3)
 
-    assert detour_node not in out3.nodes(), 'detour node should be removed by as_undetoured()'
+    assert detour_node not in out3.nodes(), (
+        'detour node should be removed by as_undetoured()'
+    )
 
     # --- Case D: D > 0,  C == 0 and fnT
     G4 = G.copy()
@@ -645,7 +639,6 @@ def test_as_stratified_vertices():
     )
     L2 = as_stratified_vertices(L0)
     assert np.array_equal(L2.graph['VertexC'], expected_VertexC)
-
 
 
 def test_scaffolded():
@@ -707,8 +700,8 @@ def test_count_diagonals():
     wfn = tiny_wfn()
     diagonals = count_diagonals(wfn.S, wfn.A)
     assert diagonals == 0
-    
-    
+
+
 def test_as_hooked_to_head():
     wfn1 = tiny_wfn()
     G1 = as_hooked_to_head(wfn1.S, wfn1.A.graph['d2roots'])
@@ -719,14 +712,14 @@ def test_as_hooked_to_head():
     G2 = as_hooked_to_head(wfn2.S, wfn2.A.graph['d2roots'])
     expected = [(-1, 0), (-1, 1), (-1, 2), (-1, 3)]
     assert G2.graph['tentative'] == expected
-    
-    
+
+
 def test_as_hooked_to_nearest():
     wfn1 = tiny_wfn()
     G1 = as_hooked_to_nearest(wfn1.S, wfn1.A.graph['d2roots'])
     expected = [(-1, 0)]
     assert G1.graph['tentative'] == expected
-    
+
     wfn2 = tiny_wfn(cables=1)
     G2 = as_hooked_to_nearest(wfn2.S, wfn2.A.graph['d2roots'])
     expected = [(-1, 0), (-1, 1), (-1, 2), (-1, 3)]
