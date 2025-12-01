@@ -117,9 +117,16 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     if length > 0:
         intdigits = int(np.floor(np.log10(length))) + 1
         fracdigits = max(0, significant_digits - intdigits)
-        desc.append(f'Σλ = {{:.{fracdigits}f}} m'.format(round(length, fracdigits)))
+        desc.append(
+            f'Σλ = {{:_.{fracdigits}f}}\u00a0m'.format(
+                round(length, fracdigits)
+            ).replace('_', '\u202f')
+        )
     if 'currency' in G.graph:
-        desc.append(f'{G.size(weight="cost"):.0f} {G.graph["currency"]}')
+        desc.append(
+            f'{G.size(weight="cost"):_.0f}\u00a0'.replace('_', '\u202f')
+            + G.graph['currency']
+        )
     return desc
 
 
