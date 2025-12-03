@@ -32,12 +32,20 @@ error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 
 class SolverSCIP(Solver, PoolHandler):
-
     name: str = 'scip'
     solution_pool: list[tuple[float, dict]]
 
     def __init__(self):
-        self.options = {}
+        self.options = {
+            # SCIP's concurrent solver uses min(8, cpu_count()) by default
+            # but it may use a lower number if RAM usage is huge
+            # 'parallel/maxnthreads': 16,
+            'concurrent/scip-feas/prefprio': 0.6,
+            'concurrent/scip/prefprio': 0.3,
+            'concurrent/scip-cpsolver/prefprio': 0,
+            'concurrent/scip-easycip/prefprio': 0,
+            'concurrent/scip-opti/prefprio': 0,
+        }
 
     def _link_val(self, var: Any) -> int:
         # work-around for SCIP: use round() to coerce link_ value (should be binary)
@@ -76,6 +84,8 @@ class SolverSCIP(Solver, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = self.options | options
+        # this would be ideal for displaying the log in notebooks, but is killing python
+        # model.redirectOutput()
         model.setParams(applied_options)
         model.setParam('limits/time', time_limit)
         model.setParam('limits/gap', mip_gap)
@@ -188,7 +198,15 @@ def make_min_length_model(
     #############
 
     link_ = {e: m.addVar(f'link_{e}', 'B') for e in linkset}
-    flow_ = {e: m.addVar(f'flow_{e}', 'I', lb=0, ub=k - 1, ) for e in chain(E, Eʹ)}
+    flow_ = {
+        e: m.addVar(
+            f'flow_{e}',
+            'I',
+            lb=0,
+            ub=k - 1,
+        )
+        for e in chain(E, Eʹ)
+    }
     flow_ |= {e: m.addVar(f'flow_{e}', lb=0, ub=k) for e in stars}
 
     ###############
@@ -206,18 +224,30 @@ def make_min_length_model(
     if feeder_route is FeederRoute.STRAIGHT:
         for (u, v), (r, t) in gateXing_iter(A):
             if u >= 0:
-                m.addConsSOS1((link_[(u, v)], link_[(v, u)], link_[t, r]), name=f'feeder_link_cross({u}~{v})({t}~{r})')
+                m.addConsSOS1(
+                    (link_[(u, v)], link_[(v, u)], link_[t, r]),
+                    name=f'feeder_link_cross({u}~{v})({t}~{r})',
+                )
             else:
                 # a feeder crossing another feeder (possible in multi-root instances)
-                m.addConsSOS1((link_[(u, v)], link_[t, r]), name=f'feeder_feeder_cross({u}~{v})({t}~{r})')
+                m.addConsSOS1(
+                    (link_[(u, v)], link_[t, r]),
+                    name=f'feeder_feeder_cross({u}~{v})({t}~{r})',
+                )
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):
-        m.addConsSOS1(sum(((link_[u, v], link_[v, u]) for u, v in Xing), ()), name=f'link_link_cross{Xing}')
+        m.addConsSOS1(
+            sum(((link_[u, v], link_[v, u]) for u, v in Xing), ()),
+            name=f'link_link_cross{Xing}',
+        )
 
     # bind flow to link activation
     for t, n in linkset:
-        m.addCons(flow_[t, n] <= link_[t, n]*(k if n < 0 else (k - 1)), name=f'flow_ub_({t}~{n})')
+        m.addCons(
+            flow_[t, n] <= link_[t, n] * (k if n < 0 else (k - 1)),
+            name=f'flow_ub_({t}~{n})',
+        )
         m.addCons(flow_[t, n] >= link_[t, n], name=f'flow_lb_({t}~{n})')
 
     # flow conservation with possibly non-unitary node power
@@ -274,12 +304,17 @@ def make_min_length_model(
                 feeder_min_load = T // min_feeders
                 if feeder_min_load < capacity:
                     for t, r in stars:
-                        m.addCons(flow_[t, r] >= link_[t, r] * feeder_min_load, name=f'balanced({t}~{r})')
+                        m.addCons(
+                            flow_[t, r] >= link_[t, r] * feeder_min_load,
+                            name=f'balanced({t}~{r})',
+                        )
 
     # radial or branched topology
     if topology is Topology.RADIAL:
         for t in _T:
-            m.addConsSOS1(sum(link_[n, t] for n in A_nodes.neighbors(t)), name=f'radial_{t}')
+            m.addConsSOS1(
+                sum(link_[n, t] for n in A_nodes.neighbors(t)), name=f'radial_{t}'
+            )
 
     # assert all nodes are connected to some root
     m.addCons(sum(flow_[t, r] for r in _R for t in _T) == W, name='total_power_sank')
@@ -290,16 +325,21 @@ def make_min_length_model(
         m.addCons(
             sum(flow_[n, t] for n in A_nodes.neighbors(t))
             <= k - A.nodes[t].get('power', 1),
-            name=f'inflow_limit_{t}'
+            name=f'inflow_limit_{t}',
         )
         # only one out-edge per terminal
-        m.addCons(sum(link_[t, n] for n in chain(A_nodes.neighbors(t), _R)) == 1, name=f'single_out_link_{t}')
+        m.addCons(
+            sum(link_[t, n] for n in chain(A_nodes.neighbors(t), _R)) == 1,
+            name=f'single_out_link_{t}',
+        )
 
     #############
     # Objective #
     #############
 
-    m.setObjective(sum(w*x for w, x in zip(weight_, link_.values())), sense='minimize')
+    m.setObjective(
+        sum(w * x for w, x in zip(weight_, link_.values())), sense='minimize'
+    )
 
     ##################
     # Store metadata #
@@ -328,9 +368,7 @@ def make_min_length_model(
 _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
 
-def warmup_model(
-    model: Model, metadata: ModelMetadata, S: nx.Graph
-) -> Model:
+def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
     """Set initial solution into `model`.
 
     Changes `model` in-place.
@@ -370,7 +408,9 @@ def warmup_model(
     for t, r in metadata.linkset[-R * T :]:
         edgeD = S.edges.get((t, r))
         model.setSolVal(sol, metadata.link_[t, r], 0 if edgeD is None else 1)
-        model.setSolVal(sol, metadata.flow_[t, r], 0 if edgeD is None else edgeD['load'])
+        model.setSolVal(
+            sol, metadata.flow_[t, r], 0 if edgeD is None else edgeD['load']
+        )
     accepted = model.addSol(sol)
     if not accepted:
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
