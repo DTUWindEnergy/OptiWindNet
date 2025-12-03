@@ -167,14 +167,14 @@ def make_min_length_model(
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
-    A_nodes = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_nodes.nodes(data='power', default=1))
+    A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
+    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
 
     # Sets
     _T = range(T)
     _R = range(-R, 0)
 
-    E = tuple(((u, v) if u < v else (v, u)) for u, v in A_nodes.edges())
+    E = tuple(((u, v) if u < v else (v, u)) for u, v in A_terminals.edges())
     # using directed node-node links -> create the reversed tuples
     Eʹ = tuple((v, u) for u, v in E)
     # set of feeders to all roots
@@ -197,17 +197,12 @@ def make_min_length_model(
     # Variables #
     #############
 
-    link_ = {e: m.addVar(f'link_{e}', 'B') for e in linkset}
+    link_ = {(u, v): m.addVar(f'link_{u}~{v}', 'B') for u, v in chain(E, Eʹ)}
+    link_ |= {(t, r): m.addVar(f'link_{t}~r{-r}', 'B') for t, r in stars}
     flow_ = {
-        e: m.addVar(
-            f'flow_{e}',
-            'I',
-            lb=0,
-            ub=k - 1,
-        )
-        for e in chain(E, Eʹ)
+        (u, v): m.addVar(f'flow_{u}~{v}', 'I', lb=0, ub=k - 1) for u, v in chain(E, Eʹ)
     }
-    flow_ |= {e: m.addVar(f'flow_{e}', lb=0, ub=k) for e in stars}
+    flow_ |= {(t, r): m.addVar(f'flow_{t}~r{-r}', lb=0, ub=k) for t, r in stars}
 
     ###############
     # Constraints #
@@ -218,7 +213,7 @@ def make_min_length_model(
 
     # enforce a single directed edge between each node pair
     for u, v in E:
-        m.addConsSOS1((link_[(u, v)], link_[(v, u)]), name='single_dir_link')
+        m.addConsSOS1((link_[(u, v)], link_[(v, u)]), name=f'single_dir_link_{u}~{v}')
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
@@ -226,37 +221,38 @@ def make_min_length_model(
             if u >= 0:
                 m.addConsSOS1(
                     (link_[(u, v)], link_[(v, u)], link_[t, r]),
-                    name=f'feeder_link_cross({u}~{v})({t}~{r})',
+                    name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
                 )
             else:
                 # a feeder crossing another feeder (possible in multi-root instances)
                 m.addConsSOS1(
                     (link_[(u, v)], link_[t, r]),
-                    name=f'feeder_feeder_cross({u}~{v})({t}~{r})',
+                    name=f'feeder_feeder_cross_{u}~{v}_{t}~r{-r}',
                 )
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):
         m.addConsSOS1(
             sum(((link_[u, v], link_[v, u]) for u, v in Xing), ()),
-            name=f'link_link_cross{Xing}',
+            name=f'link_link_cross_{"_".join(f"{u}~{v}" for u, v in Xing)}',
         )
 
     # bind flow to link activation
     for t, n in linkset:
+        _n = str(n) if n >= 0 else f'r{-n}'
         m.addCons(
             flow_[t, n] <= link_[t, n] * (k if n < 0 else (k - 1)),
-            name=f'flow_ub_({t}~{n})',
+            name=f'flow_ub_{t}~{_n}',
         )
-        m.addCons(flow_[t, n] >= link_[t, n], name=f'flow_lb_({t}~{n})')
+        m.addCons(flow_[t, n] >= link_[t, n], name=f'flow_lb_{t}~{_n}')
 
     # flow conservation with possibly non-unitary node power
     for t in _T:
         m.addCons(
-            sum((flow_[t, n] - flow_[n, t]) for n in A_nodes.neighbors(t))
+            sum((flow_[t, n] - flow_[n, t]) for n in A_terminals.neighbors(t))
             + sum(flow_[t, r] for r in _R)
             == A.nodes[t].get('power', 1),
-            name='flow_conserv_{t}',
+            name=f'flow_conserv_{t}',
         )
 
     # feeder limits
@@ -306,14 +302,14 @@ def make_min_length_model(
                     for t, r in stars:
                         m.addCons(
                             flow_[t, r] >= link_[t, r] * feeder_min_load,
-                            name=f'balanced({t}~{r})',
+                            name=f'balanced_{t}~{r}',
                         )
 
     # radial or branched topology
     if topology is Topology.RADIAL:
         for t in _T:
             m.addConsSOS1(
-                sum(link_[n, t] for n in A_nodes.neighbors(t)), name=f'radial_{t}'
+                sum(link_[n, t] for n in A_terminals.neighbors(t)), name=f'radial_{t}'
             )
 
     # assert all nodes are connected to some root
@@ -323,13 +319,13 @@ def make_min_length_model(
     for t in _T:
         # incoming flow limit
         m.addCons(
-            sum(flow_[n, t] for n in A_nodes.neighbors(t))
+            sum(flow_[n, t] for n in A_terminals.neighbors(t))
             <= k - A.nodes[t].get('power', 1),
             name=f'inflow_limit_{t}',
         )
         # only one out-edge per terminal
         m.addCons(
-            sum(link_[t, n] for n in chain(A_nodes.neighbors(t), _R)) == 1,
+            sum(link_[t, n] for n in chain(A_terminals.neighbors(t), _R)) == 1,
             name=f'single_out_link_{t}',
         )
 
