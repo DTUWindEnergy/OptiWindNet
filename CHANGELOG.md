@@ -1,3 +1,18 @@
+# v0.1.4
+
+[Commit history since v0.1.3](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.3...v0.1.4)
+
+Drop-in replacement for v0.1.3.
+
+- gplot() and svgplot() now draw links with different line thickness to represent cable type (after assign_cables() is called)
+- improve number formatting inside infobox of gplot() and svgplot()
+- switch SCIP modelling from Pyomo to PySCIPOpt, enabling the launching of concurrent solvers for the same problem (competitive mode)
+- refactor MILP code for reducing code duplication and improving consistency between model descriptions for the different APIs
+- add information on how to install missing solvers when a requested solver is not available
+- bump dependency NetworkX version to 3.6 (resolves pickling issues with nx.PlanarEmbedding)
+- update the documentation to reflect the changes involving solver SCIP and plotting functions
+- fix the assignment of graph attributes 'creator' (all solvers) and 'runtime' (scip)
+
 # v0.1.3
 
 [Commit history since v0.1.2](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.2...v0.1.3)
