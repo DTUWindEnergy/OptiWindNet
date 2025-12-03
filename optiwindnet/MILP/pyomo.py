@@ -295,14 +295,14 @@ def make_min_length_model(
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
-    A_nodes = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_nodes.nodes(data='power', default=1))
+    A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
+    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
 
     # Sets
     _T = range(T)
     _R = range(-R, 0)
 
-    E = tuple(((u, v) if u < v else (v, u)) for u, v in A_nodes.edges())
+    E = tuple(((u, v) if u < v else (v, u)) for u, v in A_terminals.edges())
     # using directed node-node links -> create the reversed tuples
     Eʹ = tuple((v, u) for u, v in E)
     # set of feeders to all roots
@@ -346,11 +346,15 @@ def make_min_length_model(
     ###############
 
     # total number of edges must be equal to number of non-root nodes
-    m.cons_edges_eq_nodes = pyo.Constraint(rule=lambda m: sum(m.link_.values()) == T)
+    m.cons_num_links_eq_T = pyo.Constraint(
+        rule=(lambda m: sum(m.link_.values()) == T), name='num_links_eq_T'
+    )
 
     # enforce a single directed edge between each node pair
-    m.cons_one_diEdge = pyo.Constraint(
-        E, rule=lambda m, u, v: m.link_[u, v] + m.link_[v, u] <= 1
+    m.cons_single_dir_link = pyo.Constraint(
+        E,
+        rule=(lambda m, u, v: m.link_[u, v] + m.link_[v, u] <= 1),
+        name='single_dir_link',
     )
 
     # feeder-edge crossings
@@ -363,7 +367,9 @@ def make_min_length_model(
                 # a feeder crossing another feeder (possible in multi-root instances)
                 return m.link_[u, v] + m.link_[t, r] <= 1
 
-        m.cons_feederXedge = pyo.Constraint(gateXing_iter(A), rule=feederXedge_rule)
+        m.cons_feeder_cross = pyo.Constraint(
+            gateXing_iter(A), rule=feederXedge_rule, name='feeder_cross'
+        )
 
     # edge-edge crossings
     def edgeXedge_rule(m, *vertices):
@@ -381,52 +387,64 @@ def make_min_length_model(
         else:
             tripleXings.append(Xing)
     if doubleXings:
-        m.cons_edgeXedge = pyo.Constraint(doubleXings, rule=edgeXedge_rule)
+        m.cons_link_pair_cross = pyo.Constraint(
+            doubleXings, rule=edgeXedge_rule, name='link_pair_cross'
+        )
     if tripleXings:
-        m.cons_edgeXedgeXedge = pyo.Constraint(tripleXings, rule=edgeXedge_rule)
+        m.cons_link_trio_cross = pyo.Constraint(
+            tripleXings, rule=edgeXedge_rule, name='link_trio_cross'
+        )
 
     # bind flow to link activation
-    m.cons_link_used_iff_demand_lb = pyo.Constraint(
+    m.cons_flow_ub = pyo.Constraint(
         m.linkset,
         rule=(
             lambda m, u, v: m.flow_[(u, v)]
             <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
         ),
+        name='flow_ub',
     )
-    m.cons_link_used_iff_demand_ub = pyo.Constraint(
-        m.linkset, rule=lambda m, u, v: m.link_[(u, v)] <= m.flow_[(u, v)]
+    m.cons_flow_lb = pyo.Constraint(
+        m.linkset,
+        rule=(lambda m, u, v: m.link_[(u, v)] <= m.flow_[(u, v)]),
+        name='flow_lb',
     )
 
     # flow conservation with possibly non-unitary node power
-    m.cons_flow_conservation = pyo.Constraint(
+    m.cons_flow_conserv = pyo.Constraint(
         m.T,
         rule=(
             lambda m, u: (
-                sum((m.flow_[u, v] - m.flow_[v, u]) for v in A_nodes.neighbors(u))
+                sum((m.flow_[u, v] - m.flow_[v, u]) for v in A_terminals.neighbors(u))
                 + sum(m.flow_[u, r] for r in _R)
                 == A.nodes[u].get('power', 1)
             )
         ),
+        name='flow_conserv',
     )
 
     # feeder limits
     min_feeders = math.ceil(T / m.k)
-    if feeder_limit is not FeederLimit.UNLIMITED:
-
-        def feeder_limit_eq_rule(m):
-            return sum(m.link_[t, r] for r in _R for t in _T) == min_feeders
-
-        def feeder_limit_ub_rule(m):
-            return sum(m.link_[t, r] for r in _R for t in _T) <= max_feeders
-
-        feeder_rule = feeder_limit_ub_rule
+    if feeder_limit is FeederLimit.UNLIMITED:
+        # valid inequality: number of feeders is at least the minimum
+        m.cons_feeder_limit_lb = pyo.Constraint(
+            rule=(lambda m: sum(m.link_[t, r] for r in _R for t in _T) >= min_feeders),
+            name='feeder_limit_lb',
+        )
+        if balanced:
+            warn(
+                'Model option <balanced = True> is incompatible with <feeder_limit'
+                ' = UNLIMITED>: model will not enforce balanced subtrees.'
+            )
+    else:
+        is_equal_not_range = False
         if feeder_limit is FeederLimit.SPECIFIED:
             if max_feeders == min_feeders:
-                feeder_rule = feeder_limit_eq_rule
+                is_equal_not_range = True
             elif max_feeders < min_feeders:
                 raise ValueError('max_feeders is below the minimum necessary')
         elif feeder_limit is FeederLimit.MINIMUM:
-            feeder_rule = feeder_limit_eq_rule
+            is_equal_not_range = True
         elif feeder_limit is FeederLimit.MIN_PLUS1:
             max_feeders = min_feeders + 1
         elif feeder_limit is FeederLimit.MIN_PLUS2:
@@ -435,17 +453,29 @@ def make_min_length_model(
             max_feeders = min_feeders + 3
         else:
             raise NotImplementedError('Unknown value:', feeder_limit)
-        m.cons_feeder_limit = pyo.Constraint(rule=feeder_rule)
-
+        if is_equal_not_range:
+            m.cons_feeder_limit_eq = pyo.Constraint(
+                rule=(
+                    lambda m: sum(m.link_[t, r] for r in _R for t in _T) == min_feeders
+                ),
+                name='feeder_limit_eq',
+            )
+        else:
+            m.cons_feeder_limit_lb = pyo.Constraint(
+                rule=(
+                    lambda m: sum(m.link_[t, r] for r in _R for t in _T) >= min_feeders
+                ),
+                name='feeder_limit_lb',
+            )
+            m.cons_feeder_limit_ub = pyo.Constraint(
+                rule=(
+                    lambda m: sum(m.link_[t, r] for r in _R for t in _T) <= max_feeders
+                ),
+                name='feeder_limit_ub',
+            )
         # enforce balanced subtrees (subtree loads differ at most by one unit)
         if balanced:
-            if feeder_rule is not feeder_limit_eq_rule:
-                warn(
-                    'Model option <balanced = True> is incompatible with '
-                    'having a range of possible feeder counts: model will '
-                    'not enforce balanced subtrees.'
-                )
-            else:
+            if is_equal_not_range:
                 feeder_min_load = T // min_feeders
                 if feeder_min_load < capacity:
                     m.cons_balanced = pyo.Constraint(
@@ -455,46 +485,49 @@ def make_min_length_model(
                             lambda m, t, r: m.flow_[t, r]
                             >= m.link_[t, r] * feeder_min_load
                         ),
+                        name='balanced',
                     )
-    elif balanced:
-        warn(
-            'Model option <balanced = True> is incompatible with <feeder_limit'
-            ' = UNLIMITED>: model will not enforce balanced subtrees.'
-        )
+            else:
+                warn(
+                    'Model option <balanced = True> is incompatible with '
+                    'having a range of possible feeder counts: model will '
+                    'not enforce balanced subtrees.'
+                )
 
-        # auxiliary variables
     # radial or branched topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
         # limited by the m.cons_one_out_edge
         m.cons_radial = pyo.Constraint(
             m.T,
-            rule=lambda m, u: (sum(m.link_[v, u] for v in A_nodes.neighbors(u)) <= 1),
+            rule=(
+                lambda m, u: sum(m.link_[v, u] for v in A_terminals.neighbors(u)) <= 1
+            ),
+            name='radial',
         )
 
     # assert all nodes are connected to some root
-    m.cons_all_nodes_connected = pyo.Constraint(
-        rule=lambda m: sum(m.flow_[t, r] for r in _R for t in _T) == W
+    m.cons_total_power_sank = pyo.Constraint(
+        rule=(lambda m: sum(m.flow_[t, r] for r in _R for t in _T) == W),
+        name='total_power_sank',
     )
 
     # valid inequalities
-    m.cons_min_gates_required = pyo.Constraint(
-        rule=lambda m: (
-            sum(m.link_[t, r] for r in _R for t in _T) >= math.ceil(T / m.k)
-        )
-    )
-    m.cons_incoming_demand_limit = pyo.Constraint(
+    m.cons_inflow_limit = pyo.Constraint(
         m.T,
-        rule=lambda m, u: (
-            sum(m.flow_[v, u] for v in A_nodes.neighbors(u))
+        rule=(
+            lambda m, u: sum(m.flow_[v, u] for v in A_terminals.neighbors(u))
             <= m.k - A.nodes[u].get('power', 1)
         ),
+        name='inflow_limit',
     )
-    m.cons_one_out_edge = pyo.Constraint(
+    m.cons_single_out_link = pyo.Constraint(
         m.T,
-        rule=lambda m, u: (
-            sum(m.link_[u, v] for v in chain(A_nodes.neighbors(u), _R)) == 1
+        rule=(
+            lambda m, u: sum(m.link_[u, v] for v in chain(A_terminals.neighbors(u), _R))
+            == 1
         ),
+        name='single_out_link',
     )
 
     #############
