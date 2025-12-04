@@ -14,7 +14,7 @@ dependencies:
   - immutabledict >=3.0.0  # from ortools
   - makefun >=1.15.6
   - matplotlib-base >=3.10.1
-  - networkx >=3.5
+  - networkx >=3.6
   - numba >=0.62.1
   - numpy >=2.0
   - pandas >=2.0  # from ortools
