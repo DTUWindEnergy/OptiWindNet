@@ -21,7 +21,7 @@ def expand_polygon_safely(polygon, buffer_dist):
             warning(
                 'The defined border is non-convex and buffering may introduce unexpected changes. For visual comparison use plot_original_vs_buffered().'
             )
-    return polygon.buffer(buffer_dist, resolution=2)
+    return polygon.buffer(buffer_dist, quad_segs=2)
 
 
 def shrink_polygon_safely(polygon, shrink_dist, indx):
