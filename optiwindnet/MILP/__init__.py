@@ -87,6 +87,22 @@ def solver_factory(solver_name: str) -> Solver:
                 "Package 'pyscipopt' not found. Try 'pip install pyscipopt' or "
                 "'conda install -c conda-forge pyscipopt'."
             )
+        case 'fscip':
+            if find_spec('pyscipopt'):
+                if shutil.which('fscip'):
+                    from .fscip import SolverFSCIP
+
+                    return SolverFSCIP()
+                else:
+                    raise FileNotFoundError(
+                        "Executable 'fscip' not found. Ensure the system PATH includes the "
+                        "path to 'fscip' (part of scipoptsuite from https://www.scipopt.org)."
+                    )
+            else:
+                raise ModuleNotFoundError(
+                    "Package 'pyscipopt' not found. Try 'pip install pyscipopt' or "
+                    "'conda install -c conda-forge pyscipopt'."
+                )
         case 'highs':
             if find_spec('highspy'):
                 from .pyomo import SolverPyomoAppsi
