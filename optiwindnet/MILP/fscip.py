@@ -3,8 +3,8 @@
 
 import logging
 import os
+import re
 import subprocess
-import tempfile
 from itertools import chain
 from typing import Any
 
@@ -32,6 +32,8 @@ error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 class SolverFSCIP(Solver, PoolHandler):
     name: str = 'fscip'
     solution_pool: list[tuple[float, dict]]
+    _regexp_objective = re.compile(r'^objective value:\s+([0-9]+(?:\.[0-9]+)?)$')
+    _regexp_var_value = re.compile(r'^(\S+)\s+([0-9]+(?:\.[0-9]+)?)\s+\(obj:\S+\)$')
 
     def __init__(self):
         self.options = {}
@@ -55,6 +57,10 @@ class SolverFSCIP(Solver, PoolHandler):
         self.P, self.A, self.capacity = P, A, capacity
         self.model_options = model_options
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
+        self.var_from_name = {
+            var.name: var
+            for var in chain(metadata.link_.values(), metadata.flow_.values())
+        }
         self.model, self.metadata = model, metadata
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
@@ -74,60 +80,83 @@ class SolverFSCIP(Solver, PoolHandler):
             raise
         applied_options = self.options | options
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir = '.'
-            mps_path = os.path.join(tmpdir, 'problem.mps')
-            fscip_params_path = os.path.join(tmpdir, 'fscip.prm')
-            settings_path = os.path.join(tmpdir, 'options.set')
-            sol_path = os.path.join(tmpdir, 'best.sol')
-            model.writeProblem(mps_path)
-            with open(fscip_params_path, 'w') as f:
-                f.write(
-                    f'Quiet = FALSE\nTimeLimit = {time_limit}\n'
-                    'LocalBranching = TRUE\n'  # RampUpPhaseProcess = 0\n'
-                    'RacingRampUpTerminationCriteria = 1\n'
-                    'StopRacingTimeLimit = 20\n'
-                )
-            with open(settings_path, 'w') as f:
-                f.writelines(
-                    chain(
-                        (f'limits/gap = {mip_gap}\n',),
-                        (f'{k} = {v}\n' for k, v in applied_options.items()),
-                    )
-                )
-                if not verbose:
-                    f.write('display/verblevel = 1\n')  # 1: warnings; 0: no output
-            cmd = [
-                'fscip',
-                fscip_params_path,
-                mps_path,
-                '-s',
-                settings_path,
-                '-sth',
-                '6',
-                '-fsol',
-                sol_path,
-            ]
-            if model.getNSols() > 0:
-                isol_path = os.path.join(tmpdir, 'warmstart.sol')
-                model.writeBestSol(isol_path)
-                cmd.extend(['-isol', isol_path])
-                #  with open(isol_path, 'r') as f:
-                #      for line in f.readlines():
-                #          print(line, end='')
-            result = subprocess.run(cmd)
-            print('DONE')
-            with open(sol_path, 'r') as f:
-                for line in f.readlines():
-                    print(line, end='')
-            print(result)
-            model.readSol(sol_path)
+        #  with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = '.'
+        mps_path = os.path.join(tmpdir, 'problem.mps')
+        fscip_params_path = os.path.join(tmpdir, 'fscip.prm')
+        settings_path = os.path.join(tmpdir, 'options.set')
+        sol_path = os.path.join(tmpdir, 'best.sol')
+        log_path = os.path.join(tmpdir, 'fscip.log')
+        model.writeProblem(mps_path)
+        if 'load_coordinator' in applied_options:
+            options_LC = applied_options.pop('load_coordinator')
+        else:
+            options_LC = dict(
+                Quiet='TRUE',
+                #  LocalBranching='TRUE',
+                #  RampUpPhaseProcess=0,
+                #  RacingRampUpTerminationCriteria=1,
+                StopRacingTimeLimit=15,
+            )
+        options_LC['TimeLimit'] = str(time_limit)
+        with open(fscip_params_path, 'w') as f:
+            f.write('\n'.join(f'{k} = {v}' for k, v in options_LC.items()))
+        with open(settings_path, 'w') as f:
+            if not verbose:
+                f.write('display/verblevel = 1\n')  # 1: warnings; 0: no output
+            f.write(
+                f'limits/gap = {mip_gap}\n'
+                + '\n'.join(f'{k} = {v}\n' for k, v in applied_options.items())
+            )
+        cmd = [
+            'fscip',
+            fscip_params_path,
+            mps_path,
+            '-s',
+            settings_path,
+            '-sth',
+            '8',  # number of parallel scip instances
+            '-fsol',
+            sol_path,
+            '-l',
+            log_path,
+        ]
+        if model.getNSols() > 0:
+            isol_path = os.path.join(tmpdir, 'warmstart.sol')
+            model.writeBestSol(isol_path)
+            cmd.extend(['-isol', isol_path])
+        subprocess.run(cmd)
+        # non-zero variable values are 2*T (T for link_ and T for flow_)
+        table_range = range(2 * self.A.graph['T'])
+        var_from_name = self.var_from_name
+        with open(sol_path, 'r') as f:
+            while True:
+                first_line = f.readline()
+                if not first_line:
+                    break
+                assert first_line in ('\n', '[ Final Solution ]\n')
+                solution = model.createOrigSol()
+                objective = self._regexp_objective.match(f.readline()).group(1)
+                print('objective:', objective)
+                for _, line in zip(table_range, f.readlines()):
+                    m = self._regexp_var_value.match(line)
+                    if m is not None:
+                        name, value = m.groups()
+                        model.setSolVal(
+                            solution, var_from_name[name], round(float(value))
+                        )
+                    else:
+                        error('Unexpected line in', sol_path, ':\n', line)
+                print(objective, model.addSol(solution))
+        #  model.readSol(sol_path)
         num_solutions = model.getNSols()
         if num_solutions == 0:
             raise OWNSolutionNotFound(
                 f'Unable to find a solution. Solver {self.name} terminated with: {model.getStatus()}'
             )
-        bound = model.getDualbound()
+        # TODO: find a way to get that from the logs
+        #  bound = model.getDualbound()
+        bound = objective
         objective = model.getObjVal()
         self.solution_pool = [(model.getSolObjVal(sol), sol) for sol in model.getSols()]
         self.num_solutions = num_solutions
