@@ -32,8 +32,7 @@ test_linux:
     # >>> fscip section begin
     - wget -O "$CI_PROJECT_DIR/scipoptsuite.zip" "https://www.scipopt.org/download/release/scipoptsuite-10.0.0-win-x64.zip"
     - unzip -o "$CI_PROJECT_DIR/scipoptsuite.zip" -d "$CI_PROJECT_DIR"
-    - export SCIP_DIR="$(find "$CI_PROJECT_DIR" -maxdepth 1 -type d -name 'scipoptsuite*' | head -n 1)"
-    - export PATH="$PATH:$SCIP_DIR/bin"
+    - export PATH="$PATH:$(find "$CI_PROJECT_DIR" -maxdepth 1 -type d -name 'scipoptsuite*' | head -n 1)/bin"
     # <<< fscip section end
     - pip install -e .[test]
     - python3 --version
@@ -61,10 +60,9 @@ test_windows:
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
     - conda install scip coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
     # >>> fscip section begin
-    - Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/scipoptsuite-10.0.0-win-x64.zip -OutFile '$env:CI_PROJECT_DIR\scipoptsuite.zip'
-    - Expand-Archive -Path '$env:CI_PROJECT_DIR\scipoptsuite.zip' -DestinationPath '$env:CI_PROJECT_DIR\scip' -Force
-    - Move-Item -Path "$(Get-ChildItem -Path $env:CI_PROJECT_DIR\scip -Directory | Select-Object -First 1)\*" -Destination '$env:CI_PROJECT_DIR\scip' -Force
-    - $env:Path = "$env:Path;$env:CI_PROJECT_DIR\scip\bin\"
+    - Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/scipoptsuite-10.0.0-win-x64.zip -OutFile $env:CI_PROJECT_DIR\scipoptsuite.zip
+    - Expand-Archive -Path $env:CI_PROJECT_DIR\scipoptsuite.zip -DestinationPath $env:CI_PROJECT_DIR -Force
+    - $env:Path = "$env:Path;$(Get-ChildItem -Path $env:CI_PROJECT_DIR -Filter "scipoptsuite*" -Directory | Select-Object -First 1)\bin\"
     # <<< fscip section end
     - pip install -e .[test]
     - python --version
