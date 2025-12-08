@@ -34,7 +34,7 @@ def P_A_toy():
 
 @pytest.mark.parametrize(
     'solver_name',
-    ['ortools', 'gurobi', 'cplex', 'highs', 'scip', 'cbc'],
+    ['ortools', 'gurobi', 'cplex', 'highs', 'scip', 'cbc', 'fscip'],
 )
 def test_MILP_solvers(P_A_toy, solver_name):
     ctx = multiprocessing.get_context('spawn')
