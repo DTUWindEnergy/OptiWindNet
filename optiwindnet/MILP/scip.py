@@ -47,13 +47,13 @@ class SolverSCIP(Solver, PoolHandler):
             'concurrent/scip-opti/prefprio': 0,
         }
 
+    # Variable values in a SCIP solution may be slightly off of an integer:
+    #   use round() to coerce the float to the nearest integer
     def _link_val(self, var: Any) -> int:
-        # work-around for SCIP: use round() to coerce link_ value (should be binary)
-        #   values for link_ variables are floats and may be slightly off of 0
         return round(self._value_map[var])
 
     def _flow_val(self, var: Any) -> int:
-        return self._value_map[var]
+        return round(self._value_map[var])
 
     def set_problem(
         self,
