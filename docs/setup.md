@@ -38,8 +38,10 @@ And finally:
 
 ### If using `conda`
 
-    conda create --name optiwindnet_env python=3.12 optiwindnet 
+    conda create --name optiwindnet_env --channel conda-forge python=3.12 optiwindnet 
     conda activate optiwindnet_env
+
+The flag `--channel conda-forge` may be omitted if using *miniforge* or if the global *conda* configuration already sets **conda-forge** as the highest-priority channel.
 
 ## Optional - Solvers
 
@@ -79,14 +81,14 @@ See below for specific instructions for each solver.
 [HiGHS](https://highs.dev/) is open source software:
 
     pip install highspy
-    conda install highspy
+    conda install -c conda-forge highspy
 
 ### SCIP
 
 [SCIP](https://www.scipopt.org/) is open source software:
 
     pip install pyscipopt
-    conda install pyscipopt
+    conda install -c conda-forge pyscipopt
 
 Note that these **pyscipopt** packages may not have been compiled with multi-threading capability. If you get the warning:
 ```
@@ -101,7 +103,7 @@ For **conda**-based environments, `conda install scip` will install the SCIP lib
 
 ```
 conda activate your_env_name
-conda install clang_win-64
+conda install -c conda-forge clang_win-64
 cd %CONDA_PREFIX%\Library\bin
 mklink link.exe lld-link.exe
 mklink cl.exe clang-cl.exe
@@ -117,7 +119,7 @@ Follow the [instructions](https://pyscipopt.readthedocs.io/en/latest/build.html)
 
 Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for it, but it may also be installed by following the instructions in the links above:
 
-    conda install coin-or-cbc
+    conda install -c conda-forge coin-or-cbc
 
 
 ## Updating

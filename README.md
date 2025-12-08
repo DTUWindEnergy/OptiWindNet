@@ -33,7 +33,7 @@ pip install optiwindnet
 ```
 or
 ```
-conda install optiwindnet
+conda install --channel conda-forge optiwindnet
 ```
 
 Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/setup.html#installation).
