@@ -66,7 +66,7 @@ test_windows:
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
     - conda install coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
     # >>> scip/fscip section begin
-    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS.zip")) { New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null; Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS.zip -OutFile "downloads" }
+    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS.zip")) { New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null; Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS.zip -OutFile "downloads\$env:SCIP_WINDOWS.zip" }
     - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS.zip" -DestinationPath .
     - $env:Path = "$env:Path;$env:SCIP_WINDOWS\bin\"
     # <<< scip/fscip section end
