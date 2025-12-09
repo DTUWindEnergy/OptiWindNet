@@ -36,7 +36,7 @@ test_linux:
     # <<< scip/fscip section end
     - python3 -m venv tests/venv
     - source tests/venv/bin/activate
-    - pip install -e .[test]
+    - pip install --progress-bar off -e .[test]
     - python3 --version
   script:
     - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
@@ -61,16 +61,16 @@ test_windows:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression   
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
-    - conda create --name own_test python=3.12
+    - conda -y -q create --name own_test python=3.12
     - conda activate own_test
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
-    - conda install coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
+    - conda -y -q install coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
     # >>> scip/fscip section begin
     - if (!(Test-Path "downloads\$env:SCIP_WINDOWS.zip")) { New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null; Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS.zip -OutFile "downloads\$env:SCIP_WINDOWS.zip" }
     - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS.zip" -DestinationPath .
     - $env:Path = "$env:Path;$env:SCIP_WINDOWS\bin\"
     # <<< scip/fscip section end
-    - pip install -e .[test]
+    - pip install --progress-bar off -e .[test]
     - python --version
   script:
     - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
@@ -94,8 +94,8 @@ make_pages:
       when: manual
   script:
     - apt-get update
-    - apt-get -y install make pandoc graphviz
-    - pip install .[docs] --upgrade
+    - apt-get -yq install make pandoc graphviz
+    - pip install --progress-bar off .[docs] --upgrade
     - cd docs; make html
     - cd ../; mv docs/build/html public/
   artifacts:
@@ -109,6 +109,6 @@ pypi_linux:
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   script:
-    - pip install --upgrade pip build twine packaging
+    - pip install --progress-bar off --upgrade pip build twine packaging
     - python3 -m build
     - twine upload dist/* -u $TWINE_USERNAME -p $TWINE_PASSWORD
