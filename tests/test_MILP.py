@@ -19,7 +19,11 @@ _GAP = 0.001
 # (ortools contains a SCIP library). Typical usage of OWN is with a single solver.
 # Use a workaround for tests: spawn a new python process for each solver.
 def _worker_MILP_solver(P, A, solver_name, queue) -> None | tuple:
-    solver = solver_factory(solver_name)
+    try:
+        solver = solver_factory(solver_name)
+    except (FileNotFoundError, ModuleNotFoundError) as exc:
+        queue.put(exc)
+        return
     solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
     solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
     queue.put((solution_info, solver.get_solution()))
@@ -40,14 +44,13 @@ def test_MILP_solvers(P_A_toy, solver_name):
     ctx = multiprocessing.get_context('spawn')
     queue = ctx.Queue(maxsize=1)
     p = ctx.Process(target=_worker_MILP_solver, args=(*P_A_toy, solver_name, queue))
+    p.start()
+    p.join()
+    result = queue.get(timeout=10+_RUNTIME)
 
-    try:
-        p.start()
-    except (FileNotFoundError, ModuleNotFoundError):
+    if isinstance(result, BaseException):
         pytest.skip(f'{solver_name} not available')
-    finally:
-        p.join()
 
-    solution_info, (S, _) = queue.get()
+    solution_info, (S, _) = result
     assert solution_info.termination.lower() == 'optimal'
     assert (terse_links_from_S(S) == _terse_toy_farm_5).all()
