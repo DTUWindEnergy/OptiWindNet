@@ -552,6 +552,7 @@ def make_min_length_model(
     metadata = ModelMetadata(
         R,
         T,
+        A.graph['handle'],
         capacity,
         m.linkset,
         m.link_,

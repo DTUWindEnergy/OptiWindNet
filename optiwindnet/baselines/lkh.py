@@ -260,6 +260,7 @@ def lkh(
     S = nx.Graph(
         T=T,
         R=R,
+        handle=A.graph['handle'],
         capacity=capacity,
         has_loads=True,
         objective=float(minimum) / scale,

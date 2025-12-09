@@ -372,6 +372,7 @@ def make_min_length_model(
     metadata = ModelMetadata(
         R,
         T,
+        A.graph['handle'],
         k,
         linkset,
         link_,
