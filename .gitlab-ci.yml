@@ -31,7 +31,7 @@ test_linux:
     - apt-get update
     - apt-get install -y coinor-cbc
     # >>> scip/fscip section begin
-    - test -f "downloads/$SCIP_LINUX" || wget -P downloads "https://www.scipopt.org/download/release/$SCIP_LINUX"
+    - test -f "downloads/$SCIP_LINUX" || wget --no-verbose -P downloads "https://www.scipopt.org/download/release/$SCIP_LINUX"
     - apt-get install -y "./downloads/$SCIP_LINUX"
     # <<< scip/fscip section end
     - python3 -m venv tests/venv
@@ -66,7 +66,7 @@ test_windows:
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
     - conda install coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
     # >>> scip/fscip section begin
-    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS")) { Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS -OutFile "downloads\$env:SCIP_WINDOWS" }
+    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS")) { New-Item -Force -Name "downloads" -ItemType "Directory"; Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS -OutFile "downloads\$env:SCIP_WINDOWS" }
     - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS" -DestinationPath .
     - $env:Path = "$env:Path;$env:SCIP_WINDOWS_DIR\bin\"
     # <<< scip/fscip section end
