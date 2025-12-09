@@ -39,7 +39,7 @@ test_linux:
     - pip install -e .[test]
     - python3 --version
   script:
-    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   cache:
     key: CI_JOB_NAME
     paths:
@@ -73,7 +73,7 @@ test_windows:
     - pip install -e .[test]
     - python --version
   script:
-    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   cache:
     key: CI_JOB_NAME
     paths:
