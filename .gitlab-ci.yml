@@ -8,8 +8,7 @@ workflow:
 
 variables:
   SCIP_LINUX: "scipoptsuite_10.0.0-1+trixie_amd64.deb"
-  SCIP_WINDOWS: "scipoptsuite-10.0.0-win-x64.zip"
-  SCIP_WINDOWS_DIR: "scipoptsuite-10.0.0"
+  SCIP_WINDOWS: "scipoptsuite-10.0.0-win-x64"
 
 .test_rules:
   rules:
@@ -67,9 +66,9 @@ test_windows:
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
     - conda install coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
     # >>> scip/fscip section begin
-    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS")) { New-Item -Force -Name "downloads" -ItemType "Directory"; Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS -OutFile "downloads\$env:SCIP_WINDOWS" }
-    - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS" -DestinationPath .
-    - $env:Path = "$env:Path;$env:SCIP_WINDOWS_DIR\bin\"
+    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS.zip")) { New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null; Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS.zip -OutFile "downloads" }
+    - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS.zip" -DestinationPath .
+    - $env:Path = "$env:Path;$env:SCIP_WINDOWS\bin\"
     # <<< scip/fscip section end
     - pip install -e .[test]
     - python --version
