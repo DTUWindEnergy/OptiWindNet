@@ -42,7 +42,7 @@ test_linux:
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   cache:
     key: CI_JOB_NAME
-    path:
+    paths:
       - downloads
 
 # ===== Test OptiWindNet on Windows =====
@@ -76,7 +76,7 @@ test_windows:
     - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   cache:
     key: CI_JOB_NAME
-    path:
+    paths:
       - downloads
 
 # ===== Update GitLab Pages =====
