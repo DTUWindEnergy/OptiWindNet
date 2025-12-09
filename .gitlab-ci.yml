@@ -61,10 +61,10 @@ test_windows:
     - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression   
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
-    - conda -y -q create --name own_test python=3.12
+    - conda create -y -q --name own_test python=3.12
     - conda activate own_test
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
-    - conda -y -q install coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
+    - conda install -y -q coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
     # >>> scip/fscip section begin
     - if (!(Test-Path "downloads\$env:SCIP_WINDOWS.zip")) { New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null; Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS.zip -OutFile "downloads\$env:SCIP_WINDOWS.zip" }
     - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS.zip" -DestinationPath .
