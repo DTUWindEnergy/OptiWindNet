@@ -69,6 +69,7 @@ test  = [ "dill", # for loading dill data
           "coverage",
           "pytest",  # for testing
           "pytest-cov",  # for calculating coverage
+          "pytest-xdist",  # for testing in parallel
           "psutil",  # memory profiling
           "memory_profiler",  # memory profiling
           "line_profiler",  # to check speed

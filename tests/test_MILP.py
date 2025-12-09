@@ -18,11 +18,11 @@ _GAP = 0.001
 # Loading solvers ortools and scip within the same python instance causes DLL hell
 # (ortools contains a SCIP library). Typical usage of OWN is with a single solver.
 # Use a workaround for tests: spawn a new python process for each solver.
-def _worker_MILP_solver(P, A, solver_name) -> None | tuple:
+def _worker_MILP_solver(P, A, solver_name, queue) -> None | tuple:
     solver = solver_factory(solver_name)
     solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
     solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
-    return solution_info, solver.get_solution()
+    queue.put((solution_info, solver.get_solution()))
 
 
 @pytest.fixture(scope='module')
@@ -38,14 +38,16 @@ def P_A_toy():
 )
 def test_MILP_solvers(P_A_toy, solver_name):
     ctx = multiprocessing.get_context('spawn')
+    queue = ctx.Queue(maxsize=1)
+    p = ctx.Process(target=_worker_MILP_solver, args=(*P_A_toy, solver_name, queue))
 
     try:
-        with ctx.Pool(1) as pool:
-            solution_info, (S, G) = pool.apply(
-                _worker_MILP_solver, args=(*P_A_toy, solver_name)
-            )
+        p.start()
     except (FileNotFoundError, ModuleNotFoundError):
         pytest.skip(f'{solver_name} not available')
+    finally:
+        p.join()
 
+    solution_info, (S, _) = queue.get()
     assert solution_info.termination.lower() == 'optimal'
     assert (terse_links_from_S(S) == _terse_toy_farm_5).all()
