@@ -28,11 +28,12 @@ test_linux:
     - !reference [.test_rules, rules]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   before_script:
+    - export DEBIAN_FRONTEND=noninteractive
     - apt-get update
-    - apt-get install -y coinor-cbc
+    - apt-get install -yq coinor-cbc
     # >>> scip/fscip section begin
     - test -f "downloads/$SCIP_LINUX" || wget --no-verbose -P downloads "https://www.scipopt.org/download/release/$SCIP_LINUX"
-    - apt-get install -y "./downloads/$SCIP_LINUX"
+    - apt-get install -yq "./downloads/$SCIP_LINUX"
     # <<< scip/fscip section end
     - python3 -m venv tests/venv
     - source tests/venv/bin/activate
