@@ -246,14 +246,16 @@ def packnodes(G: nx.Graph) -> PackType:
 
 
 def packmethod(method_options: dict) -> PackType:
-    options = method_options.copy()
-    ffprint = options.pop('fun_fingerprint')
-    solver_name = options.pop('solver_name')
-    optionsstr = json.dumps(options)
-    digest = sha256(ffprint['funhash'] + optionsstr.encode()).digest()
+    options = {
+        k: method_options[k]
+        for k in sorted(method_options)
+        if k not in ('fun_fingerprint', 'solver_name')
+    }
+    ffprint = method_options['fun_fingerprint']
+    digest = sha256(ffprint['funhash'] + json.dumps(options).encode()).digest()
     pack = dict(
         digest=digest,
-        solver_name=solver_name,
+        solver_name=method_options['solver_name'],
         options=options,
         **ffprint,
     )

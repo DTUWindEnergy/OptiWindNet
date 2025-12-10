@@ -368,6 +368,7 @@ def make_min_length_model(
         feeder_route=feeder_route,
         feeder_limit=feeder_limit,
         max_feeders=max_feeders,
+        balanced=balanced,
     )
     metadata = ModelMetadata(
         R,
