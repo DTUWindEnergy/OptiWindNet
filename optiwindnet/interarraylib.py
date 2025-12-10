@@ -704,6 +704,7 @@ def terse_links_from_S(S):
 def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     """Make a shallow copy of an instance and reduce its roots to one.
 
+    TODO: fix the obstacles that use a root-vertex (currently buggy)
     The output's root is the centroid of the input's roots.
 
     Args:
@@ -712,13 +713,28 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     Returns:
       location with a single root.
     """
-    R, VertexCʹ = (Lʹ.graph[k] for k in ('R', 'VertexC'))
+    R, T, VertexCʹ = (Lʹ.graph[k] for k in ('R', 'T', 'VertexC'))
     L = Lʹ.copy()
     if R <= 1:
         return L
+    if 'border' in L.graph:
+        borderʹ = L.graph['border']
+        root_in_border = borderʹ < 0
+        if root_in_border.any():
+            border = borderʹ.copy()
+            Bʹ = Lʹ.graph['B']
+            B =  Bʹ + sum(root_in_border)
+            border[np.flatnonzero(root_in_border)] = range(T + Bʹ, T + B)
+            L.graph['border'] = border
+    else:
+        borderʹ = []
+        root_in_border = slice(0, 0)
+    VertexC = np.vstack((
+        VertexCʹ[: -R],
+        VertexCʹ[borderʹ[root_in_border]],
+        VertexCʹ[-R:].mean(axis=0)
+    ))
     L.remove_nodes_from(range(-R, -1))
-    VertexC = VertexCʹ[: -R + 1].copy()
-    VertexC[-1] = VertexCʹ[-R:].mean(axis=0)
     L.graph.update(VertexC=VertexC, R=1)
     L.graph['name'] += '.1_OSS'
     L.graph['handle'] += '_1'
