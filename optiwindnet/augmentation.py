@@ -16,7 +16,7 @@ from .interarraylib import L_from_site
 _lggr = logging.getLogger(__name__)
 warn = _lggr.warning
 
-__all__ = ('normalize_site_single_oss', 'poisson_disc_filler', 'turbinate')
+__all__ = ('get_shape_to_fill', 'poisson_disc_filler', 'turbinate')
 
 
 def _get_border_scale_offset(
@@ -201,7 +201,7 @@ def _poisson_disc_filler_core(
     return points[:out_count], iter_count
 
 
-def normalize_site_single_oss(L: nx.Graph) -> tuple[CoordPairs, CoordPairs]:
+def get_shape_to_fill(L: nx.Graph) -> tuple[CoordPairs, CoordPairs]:
     """Calculate the area and scale the border so that it has area 1.
 
     The border and OSS are translated to the 1st quadrant, near the origin.
