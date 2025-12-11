@@ -450,7 +450,9 @@ def test_as_single_root():
             [2, 1],
         ]
     )  # Roots -3, -2, -1
-    L_prime = nx.Graph(T=T, R=R, VertexC=VertexC, name='Site', handle='site_handle')
+    L_prime = nx.Graph(
+        T=T, R=R, B=0, VertexC=VertexC, name='Site', handle='site_handle'
+    )
     L_prime.add_nodes_from(range(T), kind='wtg')
     L_prime.add_nodes_from(range(-R, 0), kind='oss')
 
