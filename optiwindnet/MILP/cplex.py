@@ -37,14 +37,7 @@ class SolverCplex(SolverPyomo, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return round(self._value_map[var.name])
 
-    def solve(
-        self,
-        time_limit: float,
-        mip_gap: float,
-        options: dict[str, Any] = {},
-        verbose: bool = False,
-    ) -> SolutionInfo:
-        solution_info = super().solve(time_limit, mip_gap, options, verbose)
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         cplex = self.solver._solver_model
         num_solutions = cplex.solution.pool.get_num()
         self.num_solutions, self.cplex = num_solutions, cplex
@@ -55,14 +48,11 @@ class SolverCplex(SolverPyomo, PoolHandler):
         # set the selected (last visited) soln to the best one
         self.soln = self.sorted_index_[0]
         self.vars = self.solver._pyomo_var_to_ndx_map.keys()
-        return solution_info
-
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self.topology_from_mip_pool()
+            S = self._topology_from_mip_pool()
             G = PathFinder(
                 G_from_S(S, A),
                 P,
@@ -70,16 +60,16 @@ class SolverCplex(SolverPyomo, PoolHandler):
                 branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
-            S, G = self.investigate_pool(P, A)
+            S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
         return S, G
 
-    def objective_at(self, index: int) -> float:
+    def _objective_at(self, index: int) -> float:
         soln = self.sorted_index_[index]
         objective = self.cplex.solution.pool.get_objective_value(soln)
         self.soln = soln
         return objective
 
-    def topology_from_mip_pool(self) -> nx.Graph:
+    def _topology_from_mip_pool(self) -> nx.Graph:
         self._value_map = {var.name: val for var, val in zip(self.vars, self.solver._solver_model.solution.pool.get_values(self.soln))}
-        return self.topology_from_mip_sol()
+        return self._topology_from_mip_sol()

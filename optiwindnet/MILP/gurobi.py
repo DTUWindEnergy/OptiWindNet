@@ -99,7 +99,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         P, model_options = self.P, self.model_options
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
-                S = self.topology_from_mip_pool()
+                S = self._topology_from_mip_pool()
                 G = PathFinder(
                     G_from_S(S, A),
                     P,
@@ -107,7 +107,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
                     branched=model_options['topology'] is Topology.BRANCHED,
                 ).create_detours()
             else:
-                S, G = self.investigate_pool(P, A)
+                S, G = self._investigate_pool(P, A)
         except Exception as exc:
             raise exc
         else:
@@ -116,14 +116,14 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         finally:
             self.solver.close()
 
-    def objective_at(self, index: int) -> float:
+    def _objective_at(self, index: int) -> float:
         solver_model = self.solver._solver_model
         solver_model.setParam('SolutionNumber', index)
         return solver_model.getAttr('PoolObjVal')
 
-    def topology_from_mip_pool(self) -> nx.Graph:
+    def _topology_from_mip_pool(self) -> nx.Graph:
         self._value_map = {
             omovar.name: round(gurvar.Xn)
             for omovar, gurvar in self.solver._pyomo_var_to_solver_var_map.items()
         }
-        return self.topology_from_mip_sol()
+        return self._topology_from_mip_sol()

@@ -236,7 +236,7 @@ class Solver(abc.ABC):
             attr['warmstart'] = metadata.warmed_by
         return attr
 
-    def topology_from_mip_sol(self):
+    def _topology_from_mip_sol(self):
         """Create a topology graph from the solution to the MILP model.
 
         Returns:
@@ -290,16 +290,16 @@ class PoolHandler(abc.ABC):
     model_options: ModelOptions
 
     @abc.abstractmethod
-    def objective_at(self, index: int) -> float:
+    def _objective_at(self, index: int) -> float:
         "Get objective value from solution pool at position `index`"
         pass
 
     @abc.abstractmethod
-    def topology_from_mip_pool(self) -> nx.Graph:
+    def _topology_from_mip_pool(self) -> nx.Graph:
         "Build topology from the pool solution at the last requested position"
         pass
 
-    def investigate_pool(
+    def _investigate_pool(
         self, P: nx.PlanarEmbedding, A: nx.Graph
     ) -> tuple[nx.Graph, nx.Graph]:
         """Go through the solver's solutions checking which has the shortest length
@@ -309,13 +309,13 @@ class PoolHandler(abc.ABC):
         num_solutions = self.num_solutions
         info(f'Solution pool has {num_solutions} solutions.')
         for i in range(num_solutions):
-            λ = self.objective_at(i)
+            λ = self._objective_at(i)
             if λ > Λ:
                 info(
                     f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length"
                 )
                 break
-            Sʹ = self.topology_from_mip_pool()
+            Sʹ = self._topology_from_mip_pool()
             Gʹ = PathFinder(
                 G_from_S(Sʹ, A), planar=P, A=A, branched=branched
             ).create_detours()

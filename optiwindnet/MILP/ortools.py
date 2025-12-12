@@ -63,7 +63,7 @@ class SolverORTools(Solver, PoolHandler):
     """
 
     name: str = 'ortools'
-    solution_pool: list[tuple[float, dict]]
+    _solution_pool: list[tuple[float, dict]]
     solver: cp_model.CpSolver
 
     def __init__(self):
@@ -124,7 +124,7 @@ class SolverORTools(Solver, PoolHandler):
                 f'Unable to find a solution. Solver {self.name} terminated with: {solver.status_name()}'
             )
         storer.solutions.reverse()
-        self.solution_pool = storer.solutions
+        self._solution_pool = storer.solutions
         _, self._value_map = storer.solutions[0]
         self.num_solutions = num_solutions
         bound = solver.best_objective_bound
@@ -145,7 +145,7 @@ class SolverORTools(Solver, PoolHandler):
             A = self.A
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self.topology_from_mip_pool()
+            S = self._topology_from_mip_pool()
             G = PathFinder(
                 G_from_S(S, A),
                 P,
@@ -153,17 +153,17 @@ class SolverORTools(Solver, PoolHandler):
                 branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
-            S, G = self.investigate_pool(P, A)
+            S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
         G.graph['solver_details'].update(strategy=self.solver.solution_info())
         return S, G
 
-    def objective_at(self, index: int) -> float:
-        objective_value, self._value_map = self.solution_pool[index]
+    def _objective_at(self, index: int) -> float:
+        objective_value, self._value_map = self._solution_pool[index]
         return objective_value
 
-    def topology_from_mip_pool(self) -> nx.Graph:
-        return self.topology_from_mip_sol()
+    def _topology_from_mip_pool(self) -> nx.Graph:
+        return self._topology_from_mip_sol()
 
 
 def make_min_length_model(

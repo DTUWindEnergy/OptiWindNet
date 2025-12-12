@@ -32,7 +32,7 @@ error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 class SolverFSCIP(Solver, PoolHandler):
     name: str = 'fscip'
-    solution_pool: list[tuple[float, dict]]
+    _solution_pool: list[tuple[float, dict]]
     _regexp_objective = re.compile(r'^objective value:\s+([0-9]+(?:\.[0-9]+)?)$')
     _regexp_var_value = re.compile(r'^(\S+)\s+([0-9]+(?:\.[0-9]+)?)\s+\(obj:\S+\)$')
     _termination_from_status = {
@@ -236,7 +236,7 @@ class SolverFSCIP(Solver, PoolHandler):
                     print(line)
         solution_pool = [(model.getSolObjVal(sol), sol) for sol in model.getSols()]
         solution_pool.sort()
-        self.solution_pool = solution_pool
+        self._solution_pool = solution_pool
         self.num_solutions = num_solutions
         solution_info = SolutionInfo(
             runtime=solving_time,
@@ -255,7 +255,7 @@ class SolverFSCIP(Solver, PoolHandler):
             A = self.A
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self.topology_from_mip_pool()
+            S = self._topology_from_mip_pool()
             G = PathFinder(
                 G_from_S(S, A),
                 P,
@@ -263,13 +263,13 @@ class SolverFSCIP(Solver, PoolHandler):
                 branched=model_options['topology'] is Topology.BRANCHED,
             ).create_detours()
         else:
-            S, G = self.investigate_pool(P, A)
+            S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
         return S, G
 
-    def objective_at(self, index: int) -> float:
-        objective_value, self._value_map = self.solution_pool[index]
+    def _objective_at(self, index: int) -> float:
+        objective_value, self._value_map = self._solution_pool[index]
         return objective_value
 
-    def topology_from_mip_pool(self) -> nx.Graph:
-        return self.topology_from_mip_sol()
+    def _topology_from_mip_pool(self) -> nx.Graph:
+        return self._topology_from_mip_sol()

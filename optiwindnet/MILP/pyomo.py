@@ -159,7 +159,7 @@ class SolverPyomo(Solver):
         model.solutions.load_from(result)
         if A is None:
             A = self.A
-        S = self.topology_from_mip_sol()
+        S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
@@ -255,7 +255,7 @@ class SolverPyomoAppsi(Solver):
         #  model.solutions.load_from(result)
         if A is None:
             A = self.A
-        S = self.topology_from_mip_sol()
+        S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         G = PathFinder(
             G_from_S(S, A),
