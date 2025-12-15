@@ -39,7 +39,7 @@ class SolverCplex(SolverPyomo, PoolHandler):
         self.solver = pyo.SolverFactory('cplex', solver_io='python')
 
     def _link_val(self, var: Any) -> int:
-        return self._value_map[var.name]
+        return round(self._value_map[var.name])
 
     def _flow_val(self, var: Any) -> int:
         return round(self._value_map[var.name])
