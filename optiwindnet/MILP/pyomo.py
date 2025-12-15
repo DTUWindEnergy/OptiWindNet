@@ -80,7 +80,7 @@ class SolverPyomo(Solver):
         self.solver = pyo.SolverFactory(prefix + name + suffix, **kwargs)
 
     def _link_val(self, var: Any) -> int:
-        return var.value
+        return round(var.value)
 
     def _flow_val(self, var: Any) -> int:
         return round(var.value)
