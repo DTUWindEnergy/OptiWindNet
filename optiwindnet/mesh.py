@@ -1222,6 +1222,8 @@ def make_planar_embedding(
     for uv in A_edges_to_revisit:
         st = diagonals.inv.get(uv)
         if st is not None:
+            # delaunay uv was removed, so its entry in diagonals must also be
+            del diagonals.inv[uv]
             # prevent promotion of two diagonals of the same triangle
             promote_st = True
             for n in uv:
@@ -1238,9 +1240,9 @@ def make_planar_embedding(
                         if (w, y) not in diagonals.inv:
                             diagonals[st] = w, y
                         else:
-                            warn(
-                                'Delaunay edge %s already has a diagonal. '
-                                'Unable to add «%d–%d» as its diagonal',
+                            debug(
+                                'Diagonal %s is not promoted to Delaunay because '
+                                'former diagonal «%d–%d» is now its Delaunay edge.',
                                 st,
                                 w,
                                 y,
@@ -1249,7 +1251,6 @@ def make_planar_embedding(
             if promote_st:
                 edgeD = A.edges[st]
                 edgeD['kind'] = 'contour_delaunay' if 'midpath' in edgeD else 'delaunay'
-                del diagonals[st]
                 u, v = uv
                 promoted_diagonal_from_parent_node[u] = st, v
                 promoted_diagonal_from_parent_node[v] = st, u
