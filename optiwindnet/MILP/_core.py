@@ -154,6 +154,7 @@ class Solver(abc.ABC):
     metadata: ModelMetadata
     solver: Any
     options: dict[str, Any]
+    stopping: dict[str, Any]
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
 

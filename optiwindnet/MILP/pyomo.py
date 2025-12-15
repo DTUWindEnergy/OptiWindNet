@@ -117,13 +117,14 @@ class SolverPyomo(Solver):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = self.options | options
-        stopping = {
-            _optkey[name].time_limit: time_limit,
-            _optkey[name].mip_gap: mip_gap,
-        }
-        self.stopping = stopping
+        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
         solver.options.update(applied_options)
-        solver.options.update(stopping)
+        solver.options.update(
+            {
+                _optkey[name].time_limit: time_limit,
+                _optkey[name].mip_gap: mip_gap,
+            }
+        )
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
         result = solver.solve(
             model, **self.solve_kwargs, tee=verbose, load_solutions=False
