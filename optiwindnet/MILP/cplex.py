@@ -9,7 +9,7 @@ import pyomo.environ as pyo
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from ._core import FeederRoute, PoolHandler, SolutionInfo, Topology
+from ._core import FeederRoute, PoolHandler, Topology
 from .pyomo import SolverPyomo
 
 __all__ = ()
@@ -25,7 +25,14 @@ class SolverCplex(SolverPyomo, PoolHandler):
         # default solution pool size limit is 2100000000
         # mip_pool_replace=1,  # irrelevant with the default pool size
         parallel=-1,  # opportunistic parallelism (non-deterministic)
-        emphasis_mip=4,  # focus on producing solutions
+        # emphasis_mip:
+        #   0|BALANCED|(default) Balance optimality and feasibility; default
+        #   1|FEASIBILITY|Emphasize feasibility over optimality
+        #   2|OPTIMALITY|Emphasize optimality over feasibility
+        #   3|BESTBOUND|Emphasize moving best bound
+        #   4|HIDDENFEAS|Emphasize finding hidden feasible solutions
+        #   5|HEURISTIC|Emphasize finding high quality feasible solutions earlier
+        emphasis_mip=4,
     )
 
     def __init__(self) -> None:
@@ -71,5 +78,10 @@ class SolverCplex(SolverPyomo, PoolHandler):
         return objective
 
     def _topology_from_mip_pool(self) -> nx.Graph:
-        self._value_map = {var.name: val for var, val in zip(self.vars, self.solver._solver_model.solution.pool.get_values(self.soln))}
+        self._value_map = {
+            var.name: val
+            for var, val in zip(
+                self.vars, self.solver._solver_model.solution.pool.get_values(self.soln)
+            )
+        }
         return self._topology_from_mip_sol()
