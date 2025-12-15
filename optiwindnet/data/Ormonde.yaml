@@ -9,7 +9,7 @@ TURBINE:
   model: REpower 5M 126m
   power_MW: 5
 
-LANDSCAPE_ANGLE: 45
+LANDSCAPE_ANGLE: 41.8
 
 EXTENTS: |-
   A 54°06.510'N 03°26.681'W

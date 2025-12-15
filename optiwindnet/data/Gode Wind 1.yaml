@@ -9,7 +9,7 @@ TURBINE:
   model: SWT-6.0-154
   power_MW: 6
 
-LANDSCAPE_ANGLE: -135
+LANDSCAPE_ANGLE: 45.9
 
 # BK03, BK04 and BK05 were added to fix KIS-ORCA's extents
 #  C 53°59.914'N 07°04.055'E

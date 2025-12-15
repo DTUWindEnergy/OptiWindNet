@@ -14,7 +14,7 @@ TURBINE:
   model: Haliade-X
   power_MW: 12
 
-LANDSCAPE_ANGLE: 0
+LANDSCAPE_ANGLE: 0.3
 
 EXTENTS: |-
   A 54°39.557'N 001°58.617'E

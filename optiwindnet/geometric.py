@@ -1055,7 +1055,8 @@ def rotation_checkers_factory(
 
 
 def rotating_calipers(
-    convex_hull: NDArray[np.int_],
+    convex_hull: NDArray,
+    metric: str = 'height',
 ) -> tuple[NDArray[np.int_], float, float, CoordPairs]:
     # inspired by:
     # jhultman/rotating-calipers:
@@ -1069,17 +1070,18 @@ def rotating_calipers(
     Args:
       convex_hull: (H, 2) array of coordinates of the convex hull
         in counter-clockwise order
+      metric: what should be minimized, one of {'height', 'area'}
 
     Returns:
-      best_calipers, best_caliper_angle, area_min, bbox
+      best_calipers, best_caliper_angle, best_metric, bbox
     """
-    caliper_angles = np.array([0.5 * np.pi, 0, -0.5 * np.pi, np.pi], dtype=float)
-    area_min = np.inf
+    best_metric = np.inf
     H = convex_hull.shape[0]
-    left, bottom = convex_hull.argmin(axis=0)
-    right, top = convex_hull.argmax(axis=0)
+    min_x, min_y = convex_hull.argmin(axis=0)
+    max_x, max_y = convex_hull.argmax(axis=0)
 
-    calipers = np.array([left, top, right, bottom], dtype=np.int_)
+    calipers = np.array([min_y, max_x, max_y, min_x], dtype=np.int_)
+    caliper_angles = np.array([np.pi, -0.5*np.pi, 0, 0.5 * np.pi], dtype=float)
 
     for _ in range(H):
         # Roll vertices counter-clockwise
@@ -1097,18 +1099,29 @@ def rotating_calipers(
         # Rotate all supporting lines by angle delta
         caliper_angles -= angle_deltas[pivot]
 
-        # calculate area for current calipers
+        # 
         angle = caliper_angles[np.abs(caliper_angles).argmin()]
         c, s = np.cos(angle), np.sin(angle)
         calipers_rot = convex_hull[calipers] @ np.array(((c, -s), (s, c)))
         bbox_rot_min = calipers_rot.min(axis=0)
         bbox_rot_max = calipers_rot.max(axis=0)
-        area = (bbox_rot_max - bbox_rot_min).prod()
+        width, height = (bbox_rot_max - bbox_rot_min).tolist()
+        angle_offset = 0
+        if metric == 'height':
+            if width < height:
+                metric_value = width
+            else:
+                metric_value = height
+                angle_offset = 0.5 * math.pi
+        elif metric == 'area':
+            metric_value = width*height
+        else:
+            raise ValueError(f'Unknown metric: {metric}')
         # check if area is a new minimum
-        if area < area_min:
-            area_min = area
+        if metric_value < best_metric:
+            best_metric = metric_value
             best_calipers = calipers.copy()
-            best_caliper_angle = angle
+            best_caliper_angle = angle + angle_offset
             best_bbox_rot_min = bbox_rot_min
             best_bbox_rot_max = bbox_rot_max
 
@@ -1120,7 +1133,7 @@ def rotating_calipers(
         ((b[0], b[1]), (b[0], t[1]), (t[0], t[1]), (t[0], b[1])), dtype=float
     ) @ np.array(((c, -s), (s, c)))
 
-    return best_calipers, best_caliper_angle, area_min, bbox
+    return best_calipers, best_caliper_angle.item(), best_metric, bbox
 
 
 def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
