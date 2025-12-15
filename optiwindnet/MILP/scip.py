@@ -87,8 +87,9 @@ class SolverSCIP(Solver, PoolHandler):
         # this would be ideal for displaying the log in notebooks, but is killing python
         # model.redirectOutput()
         model.setParams(applied_options)
-        model.setParam('limits/time', time_limit)
         model.setParam('limits/gap', mip_gap)
+        model.setParam('limits/time', time_limit)
+        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
         if not verbose:
             model.setParam('display/verblevel', 1)  # 1: warnings; 0: no output
         info('>>> SCIP parameters <<<\n%s\n', model.getParams())
@@ -100,7 +101,9 @@ class SolverSCIP(Solver, PoolHandler):
             )
         bound = model.getDualbound()
         objective = model.getObjVal()
-        self._solution_pool = [(model.getSolObjVal(sol), sol) for sol in model.getSols()]
+        self._solution_pool = [
+            (model.getSolObjVal(sol), sol) for sol in model.getSols()
+        ]
         self.num_solutions = num_solutions
         solution_info = SolutionInfo(
             runtime=model.getSolvingTime(),

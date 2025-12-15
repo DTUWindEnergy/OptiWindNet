@@ -116,12 +116,14 @@ class SolverPyomo(Solver):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = (
-            self.options
-            | options
-            | {_optkey[name].time_limit: time_limit, _optkey[name].mip_gap: mip_gap}
-        )
+        applied_options = self.options | options
+        stopping = {
+            _optkey[name].time_limit: time_limit,
+            _optkey[name].mip_gap: mip_gap,
+        }
+        self.stopping = stopping
         solver.options.update(applied_options)
+        solver.options.update(stopping)
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
         result = solver.solve(
             model, **self.solve_kwargs, tee=verbose, load_solutions=False
@@ -218,12 +220,13 @@ class SolverPyomoAppsi(Solver):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = (
-            self.options
-            | options
-            | {_optkey[name].time_limit: time_limit, _optkey[name].mip_gap: mip_gap}
-        )
-        for k, v in applied_options.items():
+        applied_options = self.options | options
+        stopping = {
+            _optkey[name].time_limit: time_limit,
+            _optkey[name].mip_gap: mip_gap,
+        }
+        self.stopping = stopping
+        for k, v in (applied_options | stopping).items():
             solver.config[k] = v
         solver.config.load_solution = False
         solver.config.stream_solver = verbose

@@ -246,6 +246,7 @@ class SolverFSCIP(Solver, PoolHandler):
             relgap=1.0 - bound / objective,
             termination=termination,
         )
+        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
         self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info

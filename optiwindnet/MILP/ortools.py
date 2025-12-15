@@ -115,6 +115,7 @@ class SolverORTools(Solver, PoolHandler):
             setattr(solver.parameters, key, val)
         solver.parameters.max_time_in_seconds = time_limit
         solver.parameters.relative_gap_limit = mip_gap
+        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
         solver.parameters.log_search_progress = verbose
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
         _ = solver.solve(model, storer)
