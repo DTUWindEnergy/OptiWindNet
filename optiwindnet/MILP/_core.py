@@ -225,18 +225,19 @@ class Solver(abc.ABC):
     def _make_graph_attributes(self) -> dict[str, Any]:
         metadata, solution_info = self.metadata, self.solution_info
         solver_details = self.applied_options.copy()
+        method_options = dict(
+            solver_name=self.name,
+            fun_fingerprint=metadata.fun_fingerprint,
+            **metadata.model_options,
+            **self.stopping,
+        )
         attr = dict(
             **asdict(solution_info),
-            method_options=dict(
-                solver_name=self.name,
-                fun_fingerprint=metadata.fun_fingerprint,
-                solver_details=solver_details,
-                **self.stopping,
-                **metadata.model_options,
-            ),
+            method_options=method_options,
+            solver_details=solver_details,
         )
-        if 'max_feeders' in attr:
-            solver_details['max_feeders'] = attr.pop('max_feeders')
+        if 'max_feeders' in method_options:
+            solver_details['max_feeders'] = method_options.pop('max_feeders')
         if metadata.warmed_by:
             attr['warmstart'] = metadata.warmed_by
         return attr
