@@ -94,10 +94,10 @@ class SolverPyomo(Solver):
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
-        model, self.metadata = make_min_length_model(A, capacity, **model_options)
-        self.model, self.model_options = model, model_options
+        model, metadata = make_min_length_model(A, capacity, **model_options)
+        self.model, self.model_options, self.metadata = model, model_options, metadata
         if warmstart is not None and self.solver.warm_start_capable():
-            warmup_model(model, warmstart)
+            warmup_model(model, metadata, warmstart)
             self.solve_kwargs = {'warmstart': True}
         else:
             self.solve_kwargs = {}
@@ -200,10 +200,10 @@ class SolverPyomoAppsi(Solver):
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
-        model, self.metadata = make_min_length_model(A, capacity, **model_options)
-        self.model, self.model_options = model, model_options
+        model, metadata = make_min_length_model(A, capacity, **model_options)
+        self.model, self.model_options, self.metadata = model, model_options, metadata
         if warmstart is not None and self.solver.warm_start_capable():
-            warmup_model(model, warmstart)
+            warmup_model(model, metadata, warmstart)
             self.solver.config.warmstart = True
         else:
             if warmstart is not None:
@@ -571,13 +571,16 @@ def make_min_length_model(
 _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
 
-def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
+def warmup_model(
+    model: pyo.ConcreteModel, metadata: ModelMetadata, S: nx.Graph
+) -> pyo.ConcreteModel:
     """Set initial solution into `model`.
 
-    Changes `model` in-place.
+    Changes `model` and `metadata` in-place.
 
     Args:
       model: pyomo model to apply the solution to.
+      metadata: indices to the model's variables.
       S: solution topology
 
     Returns:
@@ -600,5 +603,5 @@ def warmup_model(model: pyo.ConcreteModel, S: nx.Graph) -> pyo.ConcreteModel:
     # next(find_infeasible_bounds(model), False)
     if next(find_infeasible_constraints(model), False):
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
-    model.warmed_by = S.graph['creator']
+    metadata.warmed_by = S.graph['creator']
     return model

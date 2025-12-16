@@ -225,12 +225,14 @@ class Solver(abc.ABC):
     def _make_graph_attributes(self) -> dict[str, Any]:
         metadata, solution_info = self.metadata, self.solution_info
         solver_details = self.applied_options.copy()
+        # the method_options dict is extracted by db utility function packmethod()
         method_options = dict(
             solver_name=self.name,
             fun_fingerprint=metadata.fun_fingerprint,
-            **metadata.model_options,
             **self.stopping,
+            **metadata.model_options,
         )
+        # remaining graph attributes (key=value) are stored in db.RouteSet[].misc
         attr = dict(
             **asdict(solution_info),
             method_options=method_options,

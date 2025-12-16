@@ -371,7 +371,7 @@ _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
     """Set initial solution into `model`.
 
-    Changes `model` in-place.
+    Changes `model` and `metadata` in-place.
 
     Args:
       model: SCIP model to apply the solution to.

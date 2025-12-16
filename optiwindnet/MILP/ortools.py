@@ -393,7 +393,7 @@ def warmup_model(
 ) -> cp_model.CpModel:
     """Set initial solution into `model`.
 
-    Changes `model` in-place.
+    Changes `model` and `metadata` in-place.
 
     Args:
       model: CP-SAT model to apply the solution to.
