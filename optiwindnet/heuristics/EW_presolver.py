@@ -50,6 +50,8 @@ def EW_presolver(
     A.remove_nodes_from(roots)
     # END: prepare auxiliary graph with all allowed edges and metrics
 
+    # ensure roots are added, even if the star graph uses a subset of them
+    S.add_nodes_from(range(-R, 0))
     # BEGIN: create initial star graph
     S.add_edges_from(((n, r) for n, r in A.nodes(data='root')))
     # END: create initial star graph

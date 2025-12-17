@@ -252,6 +252,8 @@ class Solver(abc.ABC):
         """
         metadata = self.metadata
         S = nx.Graph(R=metadata.R, T=metadata.T)
+        # ensure roots are added, even if some are not connected
+        S.add_nodes_from(range(-metadata.R, 0))
         # Get active links and if flow is reversed (i.e. from small to big)
         rev_from_link = {
             (u, v): u < v
