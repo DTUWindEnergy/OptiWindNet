@@ -55,7 +55,7 @@ def test_assign_cables():
     G2 = wfn2.G
 
     # 1) check defaults
-    cables2 = [(1, 0)]
+    cables2 = [(1, 0.0)]
     assign_cables(G2, cables2)
 
     # graph-level checks
@@ -63,42 +63,34 @@ def test_assign_cables():
     # assert G2.graph['currency'] == '€'
     assert G2.graph['capacity'] == 1
 
-    def compare_cable_and_cost(edges_expected, edges_actual):
-        # Convert EdgeDataView to a list
-        edges_actual = list(edges_actual)
-
+    def compare_cable_and_cost(G, edges_expected):
         # Optional: check lengths match
-        assert len(edges_expected) == len(edges_actual), 'Number of edges mismatch'
+        assert len(edges_expected) == G.number_of_edges(), 'Number of edges mismatch'
 
         # Iterate pairwise
-        for edge_1, edge_2 in zip(edges_expected, edges_actual):
-            u1, v1, attr1 = edge_1
-            _, _, attr2 = edge_2
+        for u, v, expectedD in edges_expected:
+            actualD = G[u][v]
 
             # Check cable type
-            assert attr1['cable'] == attr2['cable'], (
-                f'Edge ({u1}, {v1}) cable mismatch: {attr1["cable"]} != {attr2["cable"]}'
+            assert expectedD['cable'] == actualD['cable'], (
+                f'Edge {u, v} cable mismatch: {expectedD["cable"]} != {actualD["cable"]}'
             )
 
             # Check cost (approximate)
             assert math.isclose(
-                attr1['cost'], attr2['cost'], rel_tol=1e-7, abs_tol=1e-9
-            ), f'Edge ({u1}, {v1}) cost mismatch: {attr1["cost"]} != {attr2["cost"]}'
+                expectedD['cost'], actualD['cost'], rel_tol=1e-7, abs_tol=1e-9
+            ), f'Edge {u, v} cost mismatch: {expectedD["cost"]} != {actualD["cost"]}'
 
     expected_1 = [
         (0, 12, {'cable': 2, 'cost': 107.70329614269008}),
-        (0, -1, {'cable': 2, 'cost': 200.0}),
+        (-1, 0, {'cable': 2, 'cost': 200.0}),
         (1, 13, {'cable': 2, 'cost': 141.4213562373095}),
         (1, 2, {'cable': 1, 'cost': 150.0}),
         (2, 3, {'cable': 0, 'cost': 200.0}),
         (12, 13, {'cable': 2, 'cost': 60.0}),
     ]
-    actual_1 = [
-        (u, v, {'cable': d['cable'], 'cost': d['cost']})
-        for u, v, d in G.edges(data=True)
-    ]
 
-    compare_cable_and_cost(expected_1, actual_1)
+    compare_cable_and_cost(G, expected_1)
 
     # 2) Assign again with a different cable set: currency should update, cables update
     cables2 = [(10, 1000.0), (20, 1500.0), (30, 2000.0)]
@@ -235,6 +227,12 @@ def test_S_from_G():
     wfn = tiny_wfn()
     G = wfn.G
 
+    def check_nodes(G, expected):
+        return all(G.nodes[node] == nodeD for node, nodeD in expected)
+
+    def check_edges(G, expected):
+        return all(G[u][v] == edgeD for u, v, edgeD in expected)
+
     expected_nodes = [
         (-1, {'kind': 'oss', 'load': 4}),
         (0, {'kind': 'wtg', 'load': 4, 'subtree': 0}),
@@ -252,8 +250,8 @@ def test_S_from_G():
 
     S = S_from_G(G)
 
-    assert list(S.nodes(data=True)) == expected_nodes
-    assert list(S.edges(data=True)) == expected_edges
+    assert check_nodes(S, expected_nodes)
+    assert check_edges(S, expected_edges)
 
     # test other branches
     G.graph['has_loads'] = False
@@ -261,8 +259,8 @@ def test_S_from_G():
     G.graph.pop('method_options')
 
     S2 = S_from_G(G)
-    assert list(S.nodes(data=True)) == expected_nodes
-    assert list(S.edges(data=True)) == expected_edges
+    assert check_nodes(S2, expected_nodes)
+    assert check_edges(S2, expected_edges)
     assert S2.graph['has_loads']
     assert 'creator' not in S2.graph
     assert 'method_options' not in S2.graph
@@ -275,9 +273,8 @@ def test_G_from_S():
 
     # 1) basic test
     G = G_from_S(S, A)
-    expected = [(0, 12), (0, -1), (1, 13), (1, 2), (2, 3), (12, 13)]
-    actual = list(wfn.G.edges())  # convert EdgeView to list
-    assert set(actual) == set(expected)
+    expected = [(0, 12), (-1, 0), (1, 13), (1, 2), (2, 3), (12, 13)]
+    assert all(uv in G.edges for uv in expected)
 
     # No tentative/rogue
     assert 'tentative' not in G.graph or G.graph.get('tentative') == []
@@ -299,7 +296,7 @@ def test_G_from_S():
     S.add_edge(2, -1, load=1, reverse=False)
     G = G_from_S(S, A)
 
-    assert (0, 2) in G.edges() or (2, 0) in G.edges()
+    assert (0, 2) in G.edges
     assert G[0][2]['kind'] == 'contour'
     assert (0, 2) in G.graph['shortened_contours']
 
@@ -325,7 +322,7 @@ def test_G_from_S():
         G = G_from_S(S_copy, A_copy)
 
         # Check edge exists
-        assert (s, t) in G.edges() or (t, s) in G.edges()
+        assert (s, t) in G.edges
 
         # Check kind based on s
         expected_kind = 'contour' if s >= 0 else 'tentative'
@@ -349,9 +346,9 @@ def test_G_from_S():
         G = G_from_S(S_copy, A_copy)
 
         # Check edge exists
-        assert (s, t) in G.edges() or (t, s) in G.edges()
+        assert (s, t) in G.edges
         expected_kind = 'rogue' if s >= 0 else 'tentative'
-        actual_kind = G[s][t]['kind'] if (s, t) in G.edges() else G[t][s]['kind']
+        actual_kind = G[s][t]['kind']
         assert actual_kind == expected_kind
 
 
