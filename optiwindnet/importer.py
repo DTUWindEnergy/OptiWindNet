@@ -252,7 +252,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                 power_kind = e.tags.get('power')
                 if power_kind is None:
                     power_kind = e.tags.get('construction:power')
-                label = e.tags.get('name') or e.tags.get('ref')
+                label = e.tags.get('ref') or e.tags.get('name')
                 match power_kind:
                     case 'substation' | 'transformer':
                         substations.append(e.lonlat[::-1])
@@ -275,7 +275,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                             raise ValueError('Only a single border is supported.')
                         border_raw = [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
                     case 'substation' | 'transformer':
-                        label = e.tags.get('name') or e.tags.get('ref')
+                        label = e.tags.get('ref') or e.tags.get('name')
                         substations.append(
                             [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
                         )
@@ -416,14 +416,18 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                 np.array(obstacle, dtype=np.int_) for obstacle in obstacles
             ]
         border_list.extend([r for r in range(-R, 0) if r not in set(border_list)])
-        hullC_ = VertexC[np.array(border_list)[ConvexHull(VertexC[border_list]).vertices]]
+        hullC_ = VertexC[
+            np.array(border_list)[ConvexHull(VertexC[border_list]).vertices]
+        ]
     else:
         # if no border is defined, pass all vertices to ConvexHull
         hullC_ = VertexC[ConvexHull(VertexC).vertices]
     _, best_caliper_angle, _, _ = rotating_calipers(hullC_, metric='height')
     best_caliper_angle_deg = 180 * best_caliper_angle / math.pi
     ls_angle = 90 - best_caliper_angle_deg
-    ls_angle = ls_angle if -90 <= ls_angle < 90 else ls_angle + (180 if ls_angle < 0 else -180)
+    ls_angle = (
+        ls_angle if -90 <= ls_angle < 90 else ls_angle + (180 if ls_angle < 0 else -180)
+    )
     L.graph['landscape_angle'] = ls_angle
 
     L.graph['B'] = B
@@ -451,7 +455,10 @@ class IncludeLoader(yaml.SafeLoader):
         # Construct the full path of the file to include, relative to parent YAML
         include_path = Path(self.construct_scalar(node))
         if include_path.suffix not in ('.yml', '.yaml'):
-            warn('Ignoring YAML "!include" directive to unsupported file type (%s)', include_path)
+            warn(
+                'Ignoring YAML "!include" directive to unsupported file type (%s)',
+                include_path,
+            )
             return {}
         if not include_path.is_absolute():
             include_path = self._parent / include_path
