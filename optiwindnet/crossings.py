@@ -12,7 +12,7 @@ from .interarraylib import calcload
 
 def get_interferences_list(
     Edge: np.ndarray, VertexC: np.ndarray, fnT: np.ndarray | None = None, EPSILON=1e-15
-) -> list:
+) -> list[tuple[tuple[int, int, int, int], int | None]]:
     """List all crossings between edges in the `Edge` (E×2) numpy array.
 
     Coordinates must be provided in the `VertexC` (V×2) array.
@@ -22,16 +22,21 @@ def get_interferences_list(
     must be provided.
 
     Should be used when edges are not limited to the expanded Delaunay set.
+
+    Returns:
+      list of interferences, where each interference is:
+        ((4 vertices of the two edges involved), one of the vertices or None)
+        the last tuple element indicates a vertex that lays exactly on the edge
     """
     crossings = []
     if fnT is None:
         V = VertexC[Edge[:, 1]] - VertexC[Edge[:, 0]]
     else:
         V = VertexC[fnT[Edge[:, 1]]] - VertexC[fnT[Edge[:, 0]]]
-    for i, ((UVx, UVy), (u, v)) in enumerate(zip(V[:-1], Edge[:-1])):
+    for i, ((UVx, UVy), (u, v)) in enumerate(zip(V[:-1], Edge[:-1].tolist())):
         u_, v_ = (u, v) if fnT is None else fnT[[u, v]]
         (uCx, uCy), (vCx, vCy) = VertexC[[u_, v_]]
-        for (STx, STy), (s, t) in zip(-V[i + 1 :], Edge[i + 1 :]):
+        for (STx, STy), (s, t) in zip(-V[i + 1 :], Edge[i + 1 :].tolist()):
             s_, t_ = (s, t) if fnT is None else fnT[[s, t]]
             if s_ == u_ or t_ == u_ or s_ == v_ or t_ == v_:
                 # <edges have a common node>
@@ -304,8 +309,8 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
             u, v = uvst[2:] if p == 2 else uvst[:1:-1]
             s, t = uvst[:2]
 
-        u_, v_, s_, t_ = fnT[uvst,]
-        bunch = [fnT[nb] for nb in G[u]]
+        u_, v_, s_, t_ = fnT[uvst,].tolist()
+        bunch = [fnT[nb].item() for nb in G[u]]
         is_split, insideI, outsideI = is_bunch_split_by_corner(
             VertexC[bunch], *VertexC[[s_, u_, t_]]
         )
@@ -315,12 +320,12 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
     # ¿do we need a special case for a detour segment going through a node?
 
     # check detour nodes for branch-splitting
-    for d, d_ in zip(range(T, T + D), fnT[T : T + D]):
+    for d, d_ in zip(range(T, T + D), fnT[T : T + D].tolist()):
         if G.degree[d_] == 1:
             # trivial case: no way to break a branch apart
             continue
         dA, dB = (fnT[nb] for nb in G[d])
-        bunch = [fnT[nb] for nb in G[d_]]
+        bunch = [fnT[nb].item() for nb in G[d_]]
         is_split, insideI, outsideI = is_bunch_split_by_corner(
             VertexC[bunch], *VertexC[[dA, d_, dB]]
         )
