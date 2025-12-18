@@ -1,3 +1,28 @@
+# v0.1.5
+
+[Commit history since v0.1.4](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.4...v0.1.5)
+
+Drop-in replacement for v0.1.4.
+
+## Features
+- Added new offshore wind locations: Dogger Bank B/C, Coastal Virginia, Inch Cape, Changhua 1, Gangkou 1/2, Yunlin, Noirmoutier, Tréport, Borkum Riffgrund 3, He Dreiht.
+- Experimental **FiberSCIP (fscip)** solver support (system call, file-based interface).
+- Improved automatic `landscape_angle` calculation
+- Added `as_obstacle_free()` method to remove location obstacles; improved `as_single_root()`.
+- `.osm.pbf` parsing now prioritizes tag `ref` over `name` for node labels.
+
+## Fixes
+-  Fixed dangling reference in diagonals (`make_planar_embedding()`) which could cause errors when checking for crossings.
+- Applied rounding in `_link_val()`/`_flow_val()` for MILP Solvers CPLEX and SCIP to eliminate tiny non-zero values (error manifested as cyclic solutions).
+- Corrected setting of `B` in `L_from_windIO()`.
+- Resolved `_hull_processor()` edge case (wrong P for Yunlin).
+- Ensured roots are added to solution topology `S` even if disconnected.
+- Enforced integer values for SCIP model variables.
+- Updated deprecated Shapely `buffer()` argument name.
+- Adjusted graph attributes in MILP solvers.
+- Multiple robustness improvements in tests and solver handling.
+
+
 # v0.1.4
 
 [Commit history since v0.1.3](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.3...v0.1.4)
