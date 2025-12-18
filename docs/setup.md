@@ -52,9 +52,9 @@ Other solvers can be used for mathematical optimization, but they are not instal
 The commands suggested here assume that the Python environment for *OptiWindNet* has been already activated and that `conda` is configured for the `conda-forge` channel.
 For packages that are installable with both `pip` and `conda`, **enter only one** of the commands.
 
-Solvers perform a search across the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Dec/2025, only `gurobi`, `cplex` and `cbc` have this multi-threaded search capability.
+Solvers perform a search across the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Dec/2025, only `gurobi`, `cplex`, `cbc` and `fscip` have this multi-threaded search capability.
 
-Solvers `ortools` and `scip` also benefit from multi-core systems by launching multiple concurrent solvers in parallel, with some information exchange among them. `ortools` diversifies the algorithms/strategies among threads, while `scip` diversifies the random seeds among threads. Both have several user-configurable settings regarding that diversification.
+Solvers `ortools` and `scip` also benefit from multi-core systems by launching multiple concurrent solvers in parallel, with some information exchange among them. `ortools` diversifies the algorithms/strategies among threads, while `scip` diversifies the random seeds and may use different emphasis among threads. Both have several user-configurable settings regarding that diversification.
 
 For installing all pip-available solvers:
 
@@ -83,6 +83,15 @@ See below for specific instructions for each solver.
     pip install highspy
     conda install -c conda-forge highspy
 
+### CBC
+
+[COIN-OR's Optimization Suite](https://coin-or.github.io/user_introduction.html) is open source software and its MILP solver is [coin-or/Cbc: COIN-OR Branch-and-Cut solver](https://github.com/coin-or/Cbc).
+
+Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for CBC, but it may also be installed by following the instructions in the links above:
+
+    conda install -c conda-forge coin-or-cbc
+
+
 ### SCIP
 
 [SCIP](https://www.scipopt.org/) is open source software:
@@ -95,35 +104,17 @@ Note that these **pyscipopt** packages may not have been compiled with multi-thr
 optiwindnet\MILP\scip.py:96: UserWarning: SCIP was compiled without task processing interface. Parallel solve not possible - using optimize() instead of solveConcurrent()
   model.solveConcurrent()
 ```
-Then SCIP will still work, but will under-perform as it is limited to a single core. To overcome that, you will need to install a multi-threading-enabled SCIP library and to build the **pyscipopt** package locally.
+Then SCIP will still work, but will under-perform as it is limited to a single core. To overcome that, you will need to replace your current **pyscipopt** with a multi-threading-enabled one. PyPI-distributed **pyscipopt** version 6.0.0 is multi-threading-capable on all platforms (**recommended**). The one distributed via conda-forge is still at version 5.6.0 and is **not** multi-threading-capable.
 
-For **pip**-based environments install **SCIPOptSuite** binaries ([download](https://www.scipopt.org/index.php#download)) for your platform (as of SCIP version 10.0.0, binaries for all platforms have multi-threading enabled). You will need a C compiler (such as GNU gcc, Clang or [Microsoft Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)) to build **pyscipopt**.
+### FiberSCIP
 
-For **conda**-based environments, `conda install scip` will install the SCIP library. Before building **pyscipopt**, ensure that the conda environment (or the system) has compiling and building tools. This can be accomplished on *Windows* with the commands below:
+FiberSCIP is a parallelized version of SCIP based on the [Ubiquity Generator framework](https://ug.zib.de/index.php#reference). It splits the branch-and-bound search tree among multiple SCIP threads (in a shared-memory system). It is different from SCIP's `concurrentSolve()` in that each thread works on a different part of the tree, reducing duplicate work.
 
-```
-conda activate your_env_name
-conda install -c conda-forge clang_win-64
-cd %CONDA_PREFIX%\Library\bin
-mklink link.exe lld-link.exe
-mklink cl.exe clang-cl.exe
-```
-
-The build process for **pyscipopt** on *Windows* expects `cl.exe` and `link.exe` to be available. If symbolic links are disabled and `mklink` fails, use instead: `copy lld-link.exe link.exe` and `copy clang-cl.exe cl.exe`.
-
-Follow the [instructions](https://pyscipopt.readthedocs.io/en/latest/build.html) from **PySCIPOpt** to build and install the package in your Python environment. Note: if using the **conda**-installed SCIP, there is no need to set the environment variable `SCIPOPTDIR`.
-
-### CBC
-
-[COIN-OR's Optimization Suite](https://coin-or.github.io/user_introduction.html) is open source software and its MILP solver is [coin-or/Cbc: COIN-OR Branch-and-Cut solver](https://github.com/coin-or/Cbc).
-
-Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for it, but it may also be installed by following the instructions in the links above:
-
-    conda install -c conda-forge coin-or-cbc
-
+The `'fscip'` solver in *OptiWindNet* is currently **experimental**, use at your own risk. The executable `fscip` must be reachable through the **PATH** environment. The **pyscipopt** package is required (see the SCIP section above), as well as a recent [SCIP Optimization Suite](https://scipopt.org/index.php#download) (10.0.0+). Not all binary distributions of SCIPOptSuite include `fscip`, using one of the precompiled packages from that page is recommended.
 
 ## Updating
 
 Activate the Python environment for *OptiWindNet* and enter:
 
     pip install --upgrade optiwindnet
+    conda update optiwindnet
