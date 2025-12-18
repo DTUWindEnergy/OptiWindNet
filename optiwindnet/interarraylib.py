@@ -31,6 +31,7 @@ __all__ = (
     'L_from_G',
     'S_from_terse_links',
     'terse_links_from_S',
+    'as_obstacle_free',
     'as_single_root',
     'as_normalized',
     'as_rescaled',

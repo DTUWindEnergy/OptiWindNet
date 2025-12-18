@@ -490,18 +490,16 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     T = terminalC.shape[0]
     R = rootC.shape[0]
+    B = borderC.shape[0]
     if handle is None:
         handle = make_handle(name)
 
     L = L_from_site(
         R=R,
         T=T,
+        B=B,
         VertexC=np.vstack((terminalC, borderC, rootC)),
-        **(
-            {'border': np.arange(T, T + borderC.shape[0])}
-            if (borderC is not None and borderC.shape[0] >= 3)
-            else {}
-        ),
+        **({'border': np.arange(T, T + B)} if (borderC is not None and B >= 3) else {}),
         name=name,
         handle=handle,
     )
