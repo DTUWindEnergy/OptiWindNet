@@ -94,7 +94,9 @@ Pyomo's interface with CBC is through a system call, so it does not need to be p
 
 ### SCIP
 
-[SCIP](https://www.scipopt.org/) is open source software:
+[SCIP](https://www.scipopt.org/) is open source software.
+
+> **Attention**: Avoid loading both `scip` and `ortools` solvers within the same Python interpreter instance, since `ortools` contains a SCIP library and its version may be different from the one used by **pyscipopt**.
 
     pip install pyscipopt
     conda install -c conda-forge pyscipopt
