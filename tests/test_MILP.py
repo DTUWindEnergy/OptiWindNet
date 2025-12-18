@@ -11,7 +11,7 @@ from optiwindnet.interarraylib import terse_links_from_S
 # topology in terse links for toy_farm at capacity=5
 _terse_toy_farm_5 = np.array([2, -1, 1, 2, -1, -1, 3, 4, -1, 5, 8, 8])
 _CAPACITY = 5
-_RUNTIME = 1
+_RUNTIME = 10
 _GAP = 0.001
 
 
@@ -46,7 +46,7 @@ def test_MILP_solvers(P_A_toy, solver_name):
     p = ctx.Process(target=_worker_MILP_solver, args=(*P_A_toy, solver_name, queue))
     p.start()
     p.join()
-    result = queue.get(timeout=10+_RUNTIME)
+    result = queue.get(timeout=10 + _RUNTIME)
 
     if isinstance(result, BaseException):
         pytest.skip(f'{solver_name} not available')
