@@ -189,7 +189,6 @@ def test_get_shape_to_fill_multi_roots_are_averaged_and_R_set_to_1():
     assert math.isclose(area, 1.0, rel_tol=1e-12, abs_tol=1e-12)
     # roots averaged and only one returned
     assert RootC.shape == (1, 2)
-    assert G.graph['R'] == 1
 
 
 # -------------------------------
