@@ -29,4 +29,4 @@ dependencies:
   - utm >=0.7.0
   - pip
   - pip:
-      - ortools >=9.12.4544
+      - ortools >=9.14.6206
