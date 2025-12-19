@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python>=3.11
+  - python=3.12
   - absl-py>=2.0.0  # from ortools
   - bidict>=0.23.1
   - bitarray>=3.4.2
