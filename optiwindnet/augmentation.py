@@ -215,7 +215,6 @@ def get_shape_to_fill(L: nx.Graph) -> tuple[CoordPairs, CoordPairs]:
     # deal with multiple roots
     if R > 1:
         RootC = ((VertexC[-R:].mean(axis=0) - offsetC) * norm_scale)[np.newaxis, :]
-        L.graph['R'] = 1
     else:
         RootC = (VertexC[-1:] - offsetC) * norm_scale
     BorderC -= offsetC
