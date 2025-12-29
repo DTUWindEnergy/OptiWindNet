@@ -75,7 +75,7 @@ _default_options = dict(
 
 class SolverPyomo(Solver):
     def __init__(self, name, prefix='', suffix='', **kwargs) -> None:
-        self.name = name
+        self.name = 'pyomo.' + name
         self.options = _default_options[name]
         self.solver = pyo.SolverFactory(prefix + name + suffix, **kwargs)
 
@@ -179,7 +179,7 @@ class SolverPyomoAppsi(Solver):
     only solver using v3 at that point."""
 
     def __init__(self, name, solver_cls, **kwargs) -> None:
-        self.name = name
+        self.name = 'pyomo.' + name
         self.options = _default_options[name]
         self.solver = solver_cls(**kwargs)
 

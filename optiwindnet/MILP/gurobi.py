@@ -26,7 +26,7 @@ error, info = _lggr.error, _lggr.info
 
 
 class SolverGurobi(SolverPyomo, PoolHandler):
-    name: str = 'gurobi'
+    name: str = 'pyomo.gurobi'
     # default options to pass to Pyomo solver
     options: dict = dict(
         mipfocus=1,

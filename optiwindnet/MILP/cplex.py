@@ -19,7 +19,7 @@ error, info = _lggr.error, _lggr.info
 
 
 class SolverCplex(SolverPyomo, PoolHandler):
-    name: str = 'cplex'
+    name: str = 'pyomo.cplex'
     # default options to pass to Pyomo solver
     options: dict = dict(
         # default solution pool size limit is 2100000000
