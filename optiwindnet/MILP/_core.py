@@ -72,6 +72,7 @@ class Topology(StrEnum):
 
     RADIAL = auto()
     BRANCHED = auto()
+    RINGED = auto()
     DEFAULT = BRANCHED
 
 

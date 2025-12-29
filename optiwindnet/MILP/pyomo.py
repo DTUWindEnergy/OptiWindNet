@@ -8,6 +8,7 @@ from itertools import chain
 from typing import Any
 
 import networkx as nx
+from pyomo.common import log
 import pyomo.environ as pyo
 from pyomo.util.infeasible import find_infeasible_constraints
 
@@ -313,12 +314,18 @@ def make_min_length_model(
     Eʹ = tuple((v, u) for u, v in E)
     # set of feeders to all roots
     stars = tuple((t, r) for t in _T for r in _R)
+    if topology is Topology.RINGED:
+        # append the links leaving the roots
+        starsʹ = tuple((r, t) for t, r in stars)
+    else:
+        starsʹ = ()
+
 
     # Create model
     m = pyo.ConcreteModel()
     m.T = pyo.RangeSet(0, T - 1)
     m.R = pyo.RangeSet(-R, -1)
-    m.linkset = pyo.Set(initialize=E + Eʹ + stars)
+    m.linkset = pyo.Set(initialize=E + Eʹ + stars + starsʹ)
 
     ##############
     # Parameters #
@@ -330,7 +337,7 @@ def make_min_length_model(
         domain=pyo.PositiveReals,
         name='link_weight',
         initialize=lambda m, u, v: (
-            A.edges[(u, v)]['length'] if v >= 0 else d2roots[u, v]
+            A.edges[(u, v)]['length'] if v >= 0 and u >= 0 else d2roots[(u, v) if u >= 0 else (v, u)]
         ),
     )
 
@@ -344,7 +351,9 @@ def make_min_length_model(
         return (0, (m.k if v < 0 else m.k - 1))
 
     m.flow_ = pyo.Var(
-        m.linkset, domain=pyo.NonNegativeIntegers, bounds=flow_bounds, initialize=0
+        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
+        domain=pyo.NonNegativeIntegers,
+        bounds=flow_bounds, initialize=0
     )
 
     ###############
@@ -352,9 +361,10 @@ def make_min_length_model(
     ###############
 
     # total number of edges must be equal to number of non-root nodes
-    m.cons_num_links_eq_T = pyo.Constraint(
-        rule=(lambda m: sum(m.link_.values()) == T), name='num_links_eq_T'
-    )
+    if topology != Topology.RINGED:
+        m.cons_num_links_eq_T = pyo.Constraint(
+            rule=(lambda m: sum(m.link_.values()) == T), name='num_links_eq_T'
+        )
 
     # enforce a single directed edge between each node pair
     m.cons_single_dir_link = pyo.Constraint(
@@ -366,12 +376,20 @@ def make_min_length_model(
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
 
-        def feederXedge_rule(m, u, v, r, t):
-            if u >= 0:
-                return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
-            else:
-                # a feeder crossing another feeder (possible in multi-root instances)
-                return m.link_[u, v] + m.link_[t, r] <= 1
+        if topology == Topology.RINGED:
+            def feederXedge_rule(m, u, v, r, t):
+                if u >= 0:
+                    return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t] <= 1
+                else:
+                    # a feeder crossing another feeder (possible in multi-root instances)
+                    return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t] <= 1
+        else:
+            def feederXedge_rule(m, u, v, r, t):
+                if u >= 0:
+                    return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
+                else:
+                    # a feeder crossing another feeder (possible in multi-root instances)
+                    return m.link_[u, v] + m.link_[t, r] <= 1
 
         m.cons_feeder_cross = pyo.Constraint(
             gateXing_iter(A), rule=feederXedge_rule, name='feeder_cross'
@@ -403,7 +421,7 @@ def make_min_length_model(
 
     # bind flow to link activation
     m.cons_flow_ub = pyo.Constraint(
-        m.linkset,
+        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
         rule=(
             lambda m, u, v: (
                 m.flow_[(u, v)] <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
@@ -412,7 +430,7 @@ def make_min_length_model(
         name='flow_ub',
     )
     m.cons_flow_lb = pyo.Constraint(
-        m.linkset,
+        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
         rule=(lambda m, u, v: m.link_[(u, v)] <= m.flow_[(u, v)]),
         name='flow_lb',
     )
@@ -502,7 +520,7 @@ def make_min_length_model(
                     'not enforce balanced subtrees.'
                 )
 
-    # radial or branched topology
+    # only for radial or ringed topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
         # limited by the m.cons_single_out_link
@@ -510,6 +528,16 @@ def make_min_length_model(
             m.T,
             rule=(
                 lambda m, u: sum(m.link_[v, u] for v in A_terminals.neighbors(u)) <= 1
+            ),
+            name='radial',
+        )
+    elif topology is Topology.RINGED:
+        # just need to limit incoming edges since the outgoing are
+        # limited by the m.cons_one_out_edge
+        m.cons_ringed = pyo.Constraint(
+            m.T,
+            rule=(
+                lambda m, t: sum(m.link_[v, t] for v in A_terminals.neighbors(t)) + sum(m.link_[r, t] for r in m.R) == 1
             ),
             name='radial',
         )
@@ -577,6 +605,7 @@ def make_min_length_model(
 
 _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
+import pyomo.util.infeasible as infeas
 
 def warmup_model(
     model: pyo.ConcreteModel, metadata: ModelMetadata, S: nx.Graph
@@ -596,6 +625,8 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
+    topology = Topology[metadata.model_options['topology'].upper()]
+    κ = metadata.capacity
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
         try:
@@ -604,10 +635,22 @@ def warmup_model(
             raise OWNWarmupFailed(
                 f'warmup_model() failed: model lacks S link ({u, v})'
             ) from None
-        model.flow_[(u, v)] = S[u][v]['load']
+        load = S[u][v]['load']
+        model.flow_[(u, v)] = load
+        if load == 1 and topology is Topology.RINGED:
+            # this is the tail of a radial string, connect it to root
+            s, t = u, v
+            while 0 <= t:
+                nb = list(S.neighbors(t))
+                nb.remove(s)
+                s, t = t, nb[0]
+            # now t is the root of the radial string
+            model.link_[(t, u)] = 1
+
     # check if solution violates any constraints:
     # checking the bounds seem redundant, but the way to do it would be:
     # next(find_infeasible_bounds(model), False)
+    infeas.log_infeasible_constraints(model, log_variables=True)
     if next(find_infeasible_constraints(model), False):
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     metadata.warmed_by = S.graph['creator']
