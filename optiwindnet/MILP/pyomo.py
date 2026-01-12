@@ -34,12 +34,12 @@ error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 # solver option name mapping (pyomo should have taken care of this)
 _common_options = namedtuple('common_options', 'mip_gap time_limit')
-_optkey = dict(
-    cplex=_common_options('mipgap', 'timelimit'),
-    gurobi=_common_options('mipgap', 'timelimit'),
-    cbc=_common_options('ratioGap', 'seconds'),
-    highs=_common_options('mip_gap', 'time_limit'),
-)
+_optkey = {
+    'pyomo.cplex': _common_options('mipgap', 'timelimit'),
+    'pyomo.gurobi': _common_options('mipgap', 'timelimit'),
+    'pyomo.cbc': _common_options('ratioGap', 'seconds'),
+    'pyomo.highs': _common_options('mip_gap', 'time_limit'),
+}
 # usage: _optname[solver_name].mipgap
 
 _default_options = dict(
