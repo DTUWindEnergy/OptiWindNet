@@ -1165,11 +1165,13 @@ def add_link_blockage(A: nx.Graph):
     Only implemented for single-root sites.
     """
     VertexC = A.graph['VertexC']
-    angle_, angle_rank_ = angle_helpers(A, include_borders=False)
-    A.graph['angle_'] = angle_
-    A.graph['angle_rank_'] = angle_rank_
+    angle__, angle_rank__, dups_from_root_rank__ = angle_helpers(A, include_borders=False)
+    A.graph['angle__'] = angle__
+    A.graph['angle_rank__'] = angle_rank__
+    # ¡assuming a single root!
+    angle_, angle_rank_ = angle__[:, 0], angle_rank__[:, 0]
     for u, v, edgeD in A.edges(data=True):
-        uR, vR = angle_rank_[[u, v], 0].tolist()
+        uR, vR = angle_rank_[[u, v]].tolist()
         uv_angle = (angle_[v] - angle_[u]).item()
         if uv_angle < 0:
             uR, vR = vR, uR
