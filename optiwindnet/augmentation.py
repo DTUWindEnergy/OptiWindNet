@@ -16,7 +16,7 @@ from .interarraylib import L_from_site
 _lggr = logging.getLogger(__name__)
 warn = _lggr.warning
 
-__all__ = ('normalize_site_single_oss', 'poisson_disc_filler', 'turbinate')
+__all__ = ('get_shape_to_fill', 'poisson_disc_filler', 'turbinate')
 
 
 def _get_border_scale_offset(
@@ -201,7 +201,7 @@ def _poisson_disc_filler_core(
     return points[:out_count], iter_count
 
 
-def normalize_site_single_oss(L: nx.Graph) -> tuple[CoordPairs, CoordPair]:
+def get_shape_to_fill(L: nx.Graph) -> tuple[CoordPairs, CoordPairs]:
     """Calculate the area and scale the border so that it has area 1.
 
     The border and OSS are translated to the 1st quadrant, near the origin.
@@ -215,7 +215,6 @@ def normalize_site_single_oss(L: nx.Graph) -> tuple[CoordPairs, CoordPair]:
     # deal with multiple roots
     if R > 1:
         RootC = ((VertexC[-R:].mean(axis=0) - offsetC) * norm_scale)[np.newaxis, :]
-        L.graph['R'] = 1
     else:
         RootC = (VertexC[-1:] - offsetC) * norm_scale
     BorderC -= offsetC
@@ -298,8 +297,14 @@ def poisson_disc_filler(
         RepellerS = None
         repel_radius_sq = 0.0
     else:
-        RepellerS = (RepellerC - offsetC) / cell_size
-        repel_radius_sq = (repel_radius / cell_size) ** 2
+        # check if Repellers are inside borders
+        is_inside_rep = _contains_np(BorderC, RepellerC)
+        if is_inside_rep.any():
+            RepellerS = (RepellerC[is_inside_rep] - offsetC) / cell_size
+            repel_radius_sq = (repel_radius / cell_size) ** 2
+        else:
+            RepellerS = None
+            repel_radius_sq = 0.0
 
     # Alternate implementation using np.mgrid
     #  pts = np.reshape(

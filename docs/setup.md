@@ -38,8 +38,10 @@ And finally:
 
 ### If using `conda`
 
-    conda create --name optiwindnet_env python=3.12 optiwindnet 
+    conda create --name optiwindnet_env --channel conda-forge python=3.12 optiwindnet 
     conda activate optiwindnet_env
+
+The flag `--channel conda-forge` may be omitted if using *miniforge* or if the global *conda* configuration already sets **conda-forge** as the highest-priority channel.
 
 ## Optional - Solvers
 
@@ -50,7 +52,9 @@ Other solvers can be used for mathematical optimization, but they are not instal
 The commands suggested here assume that the Python environment for *OptiWindNet* has been already activated and that `conda` is configured for the `conda-forge` channel.
 For packages that are installable with both `pip` and `conda`, **enter only one** of the commands.
 
-Solvers perform a search accross the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Mar/2025, only `gurobi`, `cplex` and `cbc` have this multi-threaded search capability. The `ortools` solver also benefits from multi-core systems by launching a portfolio of algorithms in parallel, with some information exchange among them.
+Solvers perform a search across the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Dec/2025, only `gurobi`, `cplex`, `cbc` and `fscip` have this multi-threaded search capability.
+
+Solvers `ortools` and `scip` also benefit from multi-core systems by launching multiple concurrent solvers in parallel, with some information exchange among them. `ortools` diversifies the algorithms/strategies among threads, while `scip` diversifies the random seeds and may use different emphasis among threads. Both have several user-configurable settings regarding that diversification.
 
 For installing all pip-available solvers:
 
@@ -77,26 +81,42 @@ See below for specific instructions for each solver.
 [HiGHS](https://highs.dev/) is open source software:
 
     pip install highspy
-    conda install highspy
-
-### SCIP
-
-[SCIP](https://www.scipopt.org/) is open source software:
-
-    pip install pyscipopt
-    conda install pyscipopt
+    conda install -c conda-forge highspy
 
 ### CBC
 
 [COIN-OR's Optimization Suite](https://coin-or.github.io/user_introduction.html) is open source software and its MILP solver is [coin-or/Cbc: COIN-OR Branch-and-Cut solver](https://github.com/coin-or/Cbc).
 
-Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for it, but it may also be installed by following the instructions in the links above:
+Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for CBC, but it may also be installed by following the instructions in the links above:
 
-    conda install coin-or-cbc
+    conda install -c conda-forge coin-or-cbc
 
+
+### SCIP
+
+[SCIP](https://www.scipopt.org/) is open source software.
+
+> **Attention**: Avoid loading both `scip` and `ortools` solvers within the same Python interpreter instance, since `ortools` contains a SCIP library and its version may be different from the one used by **pyscipopt**.
+
+    pip install pyscipopt
+    conda install -c conda-forge pyscipopt
+
+Note that these **pyscipopt** packages may not have been compiled with multi-threading capability. If you get the warning:
+```
+optiwindnet\MILP\scip.py:96: UserWarning: SCIP was compiled without task processing interface. Parallel solve not possible - using optimize() instead of solveConcurrent()
+  model.solveConcurrent()
+```
+Then SCIP will still work, but will under-perform as it is limited to a single core. To overcome that, you will need to replace your current **pyscipopt** with a multi-threading-enabled one. PyPI-distributed **pyscipopt** version 6.0.0 is multi-threading-capable on all platforms (**recommended**). The one distributed via conda-forge is still at version 5.6.0 and is **not** multi-threading-capable.
+
+### FiberSCIP
+
+FiberSCIP is a parallelized version of SCIP based on the [Ubiquity Generator framework](https://ug.zib.de/index.php#reference). It splits the branch-and-bound search tree among multiple SCIP threads (in a shared-memory system). It is different from SCIP's `concurrentSolve()` in that each thread works on a different part of the tree, reducing duplicate work.
+
+The `'fscip'` solver in *OptiWindNet* is currently **experimental**, use at your own risk. The executable `fscip` must be reachable through the **PATH** environment. The **pyscipopt** package is required (see the SCIP section above), as well as a recent [SCIP Optimization Suite](https://scipopt.org/index.php#download) (10.0.0+). Not all binary distributions of SCIPOptSuite include `fscip`, using one of the precompiled packages from that page is recommended.
 
 ## Updating
 
 Activate the Python environment for *OptiWindNet* and enter:
 
     pip install --upgrade optiwindnet
+    conda update optiwindnet

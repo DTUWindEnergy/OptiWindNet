@@ -9,7 +9,7 @@ TURBINE:
   model: SWT-4.0-120
   power_MW: 4
 
-LANDSCAPE_ANGLE: 48
+LANDSCAPE_ANGLE: 47
 
 #  F 53°58.433'N 06°29.483'E -> was not including G04
 #  C 53°57.650'N 06°37.016'E -> was not including R06

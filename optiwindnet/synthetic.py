@@ -26,30 +26,20 @@ def toyfarm():
             [707.0, -244.0],
             [-104.0, -966.0],  # row 4
             [494.0, -772.0],
-            # Border vertices
-            [49.0, 993.0],  # row 0
-            [-145.0, 388.0],  # row 1
-            [-371.0, -147.0],  # row 2
-            [-585.0, -655.0],  # row 3
-            [-104.0, -966.0],  # row 4
-            [494.0, -772.0],
-            [707.0, -244.0],
-            [972.0, 206.0],
-            [699.0, 566.0],
             # Root
             [0.0, 0.0],  # OSS
         ]
     )
     R = 1
     T = 12
-    B = 9
+    B = 0
     # create networkx graph
     G = nx.Graph(
         R=R,
         T=T,
         B=B,
         VertexC=VertexC,
-        border=np.arange(T, T + B),
+        border=np.array((0, 1, 4, 7, 10, 11, 9, 6, 3)),
         name='toy',
         handle='toy',
     )

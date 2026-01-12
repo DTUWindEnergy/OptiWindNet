@@ -19,6 +19,10 @@ import pytest
 
 from . import paths
 
+# required env variables for coverage to work with multiprocessing
+os.environ['PYTHONPATH'] = '.'
+os.environ['COVERAGE_PROCESS_START'] = '.coveragerc'
+
 REPO_ROOT = paths.REPO_ROOT
 END_TO_END_DILL = paths.END_TO_END_DILL
 TEST_FILES_DIR = paths.TEST_FILES_DIR

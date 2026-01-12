@@ -33,7 +33,7 @@ pip install optiwindnet
 ```
 or
 ```
-conda install optiwindnet
+conda install --channel conda-forge optiwindnet
 ```
 
 Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/setup.html#installation).
@@ -59,16 +59,18 @@ European Journal of Operational Research,
 2025, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
 
 ```{code-block} bib
-@article{
-    SOUZADEALENCAR2025,
-    title = {Flexible cable routing framework for wind farm collection system optimization},
-    journal = {European Journal of Operational Research},
-    year = {2025},
-    issn = {0377-2217},
-    doi = {https://doi.org/10.1016/j.ejor.2025.07.069},
-    url = {https://www.sciencedirect.com/science/article/pii/S0377221725005946},
-    author = {Mauricio {Souza de Alencar} and Tuhfe Göçmen and Nicolaos A. Cutululis},
-    keywords = {Combinatorial optimization, Network design, Collection system, Wind farm},
+@article{SOUZADEALENCAR20261037,
+  title = {Flexible cable routing framework for wind farm collection system optimization},
+  journal = {European Journal of Operational Research},
+  volume = {329},
+  number = {3},
+  pages = {1037-1051},
+  year = {2026},
+  issn = {0377-2217},
+  doi = {https://doi.org/10.1016/j.ejor.2025.07.069},
+  url = {https://www.sciencedirect.com/science/article/pii/S0377221725005946},
+  author = {Mauricio {Souza de Alencar} and Tuhfe Göçmen and Nicolaos A. Cutululis},
+  keywords = {Combinatorial optimization, Network design, Collection system, Wind farm},
 }
 ```
 

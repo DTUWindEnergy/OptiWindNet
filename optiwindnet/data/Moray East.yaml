@@ -9,7 +9,7 @@ TURBINE:
   model: V164-9.5
   power_MW: 9.5
 
-LANDSCAPE_ANGLE: -90
+LANDSCAPE_ANGLE: -81.9
 
 # AJ19-OFF was added to fix KIS-ORCA's extents
 EXTENTS: |-

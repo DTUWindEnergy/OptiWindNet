@@ -302,31 +302,38 @@ def _hull_processor(
     to_remove = []
     for pivot, begin, end in ((a, c, b), (b, a, c), (c, b, a)):
         debug('==== pivot %d ====', pivot)
-        source, target = tee(P.neighbors_cw_order(pivot))
-        outer = begin
-        for u, v in zip(source, chain(target, (next(target),))):
-            if u != begin and u != end and v != end:
+        ccw_in_probation = u = begin
+        # a high number that cannot possibly be a conc_id but is unique
+        conc_id_u = c + u
+        pivotD = P[pivot]
+        for _ in range(len(pivotD) - 1):
+            v = pivotD[u]['cw']
+            conc_id_v = vertex2conc_id_map.get(v, c + v)
+            if u != begin and v != end:
                 # if ⟨u, v⟩ is not incident on a ST vertex, it is convex_hull
                 convex_hull.append(u)
-            if u >= T and v >= T:
-                # (c + 1), (c + 2) are for sure not in vertex2conc_id_map.keys()
-                conc_id_u = vertex2conc_id_map.get(u, c + 1)
-                conc_id_v = vertex2conc_id_map.get(v, c + 2)
-                if conc_id_u < num_holes or conc_id_v < num_holes:
-                    # if ⟨u, v⟩ touches an obstacle, the triangle <u, v, pivot> remains
-                    continue
-                if u == outer:
+            if conc_id_u < num_holes or conc_id_v < num_holes:
+                # triangle touches an obstacle, leave it as it may the way around it
+                continue
+            if conc_id_v < c:
+                if u == ccw_in_probation:
                     to_remove.append((pivot, u))
-                    debug('del_sup %d %d', pivot, u)
-                    outer = v
-                elif v == end:
-                    to_remove.append((pivot, v))
-                    debug('del_sup %d %d', pivot, v)
+                    debug('del_pivot_u %d %d', pivot, u)
+                    ccw_in_probation = v
                 if conc_id_u == conc_id_v:
                     to_remove.append((u, v))
                     conc_outer_edges.add((u, v) if u < v else (v, u))
-                    debug('del_int %d %d', u, v)
-                    outer = v
+                    debug('del_conc %d %d', u, v)
+                    ccw_in_probation = v
+            elif v == end:
+                if conc_id_u < c:
+                    to_remove.append((pivot, end))
+                    debug('del_pivot_end %d %d', pivot, end)
+                    if u == ccw_in_probation:
+                        to_remove.append((pivot, u))
+                        debug('del_pivot_u %d %d', pivot, u)
+            # prepare to loop
+            u, conc_id_u = v, conc_id_v
     return convex_hull, to_remove, conc_outer_edges
 
 
@@ -1222,6 +1229,8 @@ def make_planar_embedding(
     for uv in A_edges_to_revisit:
         st = diagonals.inv.get(uv)
         if st is not None:
+            # delaunay uv was removed, so its entry in diagonals must also be
+            del diagonals.inv[uv]
             # prevent promotion of two diagonals of the same triangle
             promote_st = True
             for n in uv:
@@ -1238,9 +1247,9 @@ def make_planar_embedding(
                         if (w, y) not in diagonals.inv:
                             diagonals[st] = w, y
                         else:
-                            warn(
-                                'Delaunay edge %s already has a diagonal. '
-                                'Unable to add «%d–%d» as its diagonal',
+                            debug(
+                                'Diagonal %s is not promoted to Delaunay because '
+                                'former diagonal «%d–%d» is now its Delaunay edge.',
                                 st,
                                 w,
                                 y,
@@ -1249,7 +1258,6 @@ def make_planar_embedding(
             if promote_st:
                 edgeD = A.edges[st]
                 edgeD['kind'] = 'contour_delaunay' if 'midpath' in edgeD else 'delaunay'
-                del diagonals[st]
                 u, v = uv
                 promoted_diagonal_from_parent_node[u] = st, v
                 promoted_diagonal_from_parent_node[v] = st, u

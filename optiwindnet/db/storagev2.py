@@ -127,9 +127,8 @@ def L_from_nodeset(nodeset: object, handle: str | None = None) -> nx.Graph:
     B = nodeset.B
     border = np.array(nodeset.constraint_vertices[: nodeset.constraint_groups[0]])
     name = nodeset.name
-    name = name if name[0] != '!' else name[1 : name.index('!', 1)]
     if handle is None:
-        handle = make_handle(name)
+        handle = make_handle(name if name[0] != '!' else name[1 : name.index('!', 1)])
     L = nx.Graph(
         R=R,
         T=T,
@@ -246,14 +245,16 @@ def packnodes(G: nx.Graph) -> PackType:
 
 
 def packmethod(method_options: dict) -> PackType:
-    options = method_options.copy()
-    ffprint = options.pop('fun_fingerprint')
-    solver_name = options.pop('solver_name')
-    optionsstr = json.dumps(options)
-    digest = sha256(ffprint['funhash'] + optionsstr.encode()).digest()
+    options = {
+        k: method_options[k]
+        for k in sorted(method_options)
+        if k not in ('fun_fingerprint', 'solver_name')
+    }
+    ffprint = method_options['fun_fingerprint']
+    digest = sha256(ffprint['funhash'] + json.dumps(options).encode()).digest()
     pack = dict(
         digest=digest,
-        solver_name=solver_name,
+        solver_name=method_options['solver_name'],
         options=options,
         **ffprint,
     )

@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
+import math
 import re
 from collections import namedtuple
 from importlib.resources import files
@@ -12,9 +13,11 @@ import esy.osm.pbf
 import networkx as nx
 import numpy as np
 import shapely as shp
+from scipy.spatial import ConvexHull
 import utm
 import yaml
 
+from .geometric import rotating_calipers
 from .interarraylib import L_from_site
 from .utils import make_handle
 
@@ -247,7 +250,9 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             case esy.osm.pbf.Node():
                 nodes[e.id] = e
                 power_kind = e.tags.get('power')
-                label = e.tags.get('name') or e.tags.get('ref')
+                if power_kind is None:
+                    power_kind = e.tags.get('construction:power')
+                label = e.tags.get('ref') or e.tags.get('name')
                 match power_kind:
                     case 'substation' | 'transformer':
                         substations.append(e.lonlat[::-1])
@@ -270,7 +275,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                             raise ValueError('Only a single border is supported.')
                         border_raw = [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
                     case 'substation' | 'transformer':
-                        label = e.tags.get('name') or e.tags.get('ref')
+                        label = e.tags.get('ref') or e.tags.get('name')
                         substations.append(
                             [nodes[nid].lonlat[::-1] for nid in e.refs[:-1]]
                         )
@@ -339,16 +344,16 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     node_latlon.update({node: i for i, node in enumerate(substations, start=-R)})
 
     i = T
-    border = []
+    border_list = []
     border_latlon = []
     for latlon in border_raw:
         if latlon not in node_latlon:
             border_latlon.append(latlon)
-            border.append(i)
+            border_list.append(i)
             node_latlon[latlon] = i
             i += 1
         else:
-            border.append(node_latlon[latlon])
+            border_list.append(node_latlon[latlon])
     B = len(border_latlon)
 
     obstacles = []
@@ -388,6 +393,8 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     # will pick the right zone for all points.
     VertexC = np.c_[utm.from_latlon(*latlon.T)[:2]]
 
+    if handle is None:
+        handle = make_handle(name)
     L = L_from_site(
         T=T,
         R=R,
@@ -400,24 +407,28 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             for i, label in enumerate(labels, start=start):
                 if label is not None:
                     L.nodes[i]['label'] = label
-    if border is not None:
-        L.graph['border'] = np.array(border, dtype=np.int_)
+    if border_list is not None:
+        border = np.array(border_list, dtype=np.int_)
+        L.graph['border'] = border
+        # for now, obstacles are allowed only if a border is defined
         if obstacles:
             L.graph['obstacles'] = [
                 np.array(obstacle, dtype=np.int_) for obstacle in obstacles
             ]
-        # landscape_angle calculation
-        border_utm = shp.Polygon(shell=VertexC[border])
-        x, y = border_utm.minimum_rotated_rectangle.exterior.coords.xy
-        side0 = np.hypot(x[1] - x[0], y[1] - y[0])
-        side1 = np.hypot(x[2] - x[1], y[2] - y[1])
-        if side0 < side1:
-            angle = np.arctan2((x[1] - x[0]), (y[1] - y[0])).item()
-        else:
-            angle = np.arctan2((x[2] - x[1]), (y[2] - y[1])).item()
-        if abs(angle) > np.pi / 2:
-            angle += np.pi if angle < 0 else -np.pi
-        L.graph['landscape_angle'] = 180 * angle / np.pi
+        border_list.extend([r for r in range(-R, 0) if r not in set(border_list)])
+        hullC_ = VertexC[
+            np.array(border_list)[ConvexHull(VertexC[border_list]).vertices]
+        ]
+    else:
+        # if no border is defined, pass all vertices to ConvexHull
+        hullC_ = VertexC[ConvexHull(VertexC).vertices]
+    _, best_caliper_angle, _, _ = rotating_calipers(hullC_, metric='height')
+    best_caliper_angle_deg = 180 * best_caliper_angle / math.pi
+    ls_angle = 90 - best_caliper_angle_deg
+    ls_angle = (
+        ls_angle if -90 <= ls_angle < 90 else ls_angle + (180 if ls_angle < 0 else -180)
+    )
+    L.graph['landscape_angle'] = ls_angle
 
     L.graph['B'] = B
 
@@ -444,7 +455,10 @@ class IncludeLoader(yaml.SafeLoader):
         # Construct the full path of the file to include, relative to parent YAML
         include_path = Path(self.construct_scalar(node))
         if include_path.suffix not in ('.yml', '.yaml'):
-            warn('Ignoring YAML "!include" directive to unsupported file type (%s)', include_path)
+            warn(
+                'Ignoring YAML "!include" directive to unsupported file type (%s)',
+                include_path,
+            )
             return {}
         if not include_path.is_absolute():
             include_path = self._parent / include_path
@@ -476,18 +490,16 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     T = terminalC.shape[0]
     R = rootC.shape[0]
+    B = borderC.shape[0]
     if handle is None:
         handle = make_handle(name)
 
     L = L_from_site(
         R=R,
         T=T,
+        B=B,
         VertexC=np.vstack((terminalC, borderC, rootC)),
-        **(
-            {'border': np.arange(T, T + borderC.shape[0])}
-            if (borderC is not None and borderC.shape[0] >= 3)
-            else {}
-        ),
+        **({'border': np.arange(T, T + B)} if (borderC is not None and B >= 3) else {}),
         name=name,
         handle=handle,
     )

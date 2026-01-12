@@ -1,2 +1,3 @@
-conda install --channel conda-forge scip coin-or-cbc
-pip install gurobipy highspy optiwindnet
+conda install --channel conda-forge optiwindnet pyscipopt coin-or-cbc
+conda install --channel gurobi gurobi
+pip install ortools

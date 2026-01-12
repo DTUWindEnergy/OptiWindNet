@@ -129,6 +129,8 @@ def hgs_cvrp(
             seed=seed,
         ),
     )
+    # ensure roots are added, even if some are not connected
+    S.add_nodes_from(range(-R, 0))
     if keep_log:
         S.graph['method_log'] = log
 
@@ -346,7 +348,6 @@ def hgs_multiroot(
     S = nx.Graph(
         T=T,
         R=R,
-        handle=A.graph['handle'],
         capacity=capacity,
         has_loads=True,
         objective=sum(cost_),
@@ -364,6 +365,8 @@ def hgs_multiroot(
             seed=seed,
         ),
     )
+    # ensure roots are added, even if some are not connected
+    S.add_nodes_from(range(-R, 0))
     if keep_log:
         S.graph['method_log'] = log_
     subtree_id_start = 0

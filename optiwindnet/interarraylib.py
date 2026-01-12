@@ -31,6 +31,7 @@ __all__ = (
     'L_from_G',
     'S_from_terse_links',
     'terse_links_from_S',
+    'as_obstacle_free',
     'as_single_root',
     'as_normalized',
     'as_rescaled',
@@ -117,9 +118,16 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     if length > 0:
         intdigits = int(np.floor(np.log10(length))) + 1
         fracdigits = max(0, significant_digits - intdigits)
-        desc.append(f'Σλ = {{:.{fracdigits}f}} m'.format(round(length, fracdigits)))
+        desc.append(
+            f'Σλ = {{:_.{fracdigits}f}}\u00a0m'.format(
+                round(length, fracdigits)
+            ).replace('_', '\u202f')
+        )
     if 'currency' in G.graph:
-        desc.append(f'{G.size(weight="cost"):.0f} {G.graph["currency"]}')
+        desc.append(
+            f'{G.size(weight="cost"):_.0f}\u00a0'.replace('_', '\u202f')
+            + G.graph['currency']
+        )
     return desc
 
 
@@ -694,10 +702,61 @@ def terse_links_from_S(S):
     return terse_links
 
 
+def as_obstacle_free(Lʹ: nx.Graph) -> nx.Graph:
+    """Make a shallow copy of an instance and remove its obstacles.
+
+    The vertices that are used only by obstacles are also removed.
+    To be used on locations (edge-less graphs).
+
+    Args:
+      Lʹ: input location
+
+    Returns:
+      location without obstacles.
+    """
+    L = Lʹ.copy()
+    obstacles = Lʹ.graph.get('obstacles')
+    if obstacles is None:
+        # Lʹ has no obstacles to remove
+        return L
+    del L.graph['obstacles']
+    T = L.graph['T']
+    R = L.graph['R']
+    borderʹ = Lʹ.graph.get('border')
+    borderset = set(borderʹ[borderʹ >= T].tolist()) if borderʹ is not None else set()
+    removable = set()
+    for obstacle in obstacles:
+        removable.update(set(obstacle[obstacle >= T].tolist()) - borderset)
+    to_remove = sorted(removable)
+    VertexCʹ = Lʹ.graph['VertexC']
+    Bʹ = Lʹ.graph['B']
+    VertexC = np.vstack(
+        (
+            VertexCʹ[:T],
+            VertexCʹ[[i for i in range(T, T + Bʹ) if i not in to_remove]],
+            VertexCʹ[-R:],
+        )
+    )
+    B = Bʹ - len(to_remove)
+    L.graph.update(
+        B=B,
+        VertexC=VertexC,
+        name=Lʹ.graph.get('name', '') + '.solid',
+        handle=Lʹ.graph.get('handle', '') + '_solid',
+    )
+    if borderʹ is not None:
+        border = borderʹ.copy()
+        for i, v in enumerate(to_remove):
+            border[border >= (v - i)] -= 1
+        L.graph['border'] = border
+    return L
+
+
 def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     """Make a shallow copy of an instance and reduce its roots to one.
 
     The output's root is the centroid of the input's roots.
+    This may not work well for locations with obstacles, use as_obstacle_free() first.
 
     Args:
       Lʹ: input location
@@ -705,14 +764,39 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     Returns:
       location with a single root.
     """
-    R, VertexCʹ = (Lʹ.graph[k] for k in ('R', 'VertexC'))
+    R, T, VertexCʹ = (Lʹ.graph[k] for k in ('R', 'T', 'VertexC'))
     L = Lʹ.copy()
     if R <= 1:
         return L
+    to_transfer = {}
+    Bʹ = Lʹ.graph['B']
+    if 'border' in L.graph:
+        borderʹ = L.graph['border']
+        root_in_border = borderʹ < 0
+        if root_in_border.any():
+            border = borderʹ.copy()
+            next_v = T + Bʹ
+            for i in np.flatnonzero(root_in_border):
+                v = borderʹ[i]
+                if v in to_transfer:
+                    border[i] = to_transfer[v]
+                else:
+                    to_transfer[v] = next_v
+                    border[i] = next_v
+                    next_v += 1
+            B = Bʹ + len(to_transfer)
+            L.graph['border'] = border
+        else:
+            B = Bʹ
+    else:
+        borderʹ = []
+        root_in_border = slice(0, 0)
+        B = Bʹ
+    VertexC = np.vstack(
+        (VertexCʹ[:-R], VertexCʹ[list(to_transfer.keys())], VertexCʹ[-R:].mean(axis=0))
+    )
     L.remove_nodes_from(range(-R, -1))
-    VertexC = VertexCʹ[: -R + 1].copy()
-    VertexC[-1] = VertexCʹ[-R:].mean(axis=0)
-    L.graph.update(VertexC=VertexC, R=1)
+    L.graph.update(VertexC=VertexC, R=1, B=B)
     L.graph['name'] += '.1_OSS'
     L.graph['handle'] += '_1'
     return L

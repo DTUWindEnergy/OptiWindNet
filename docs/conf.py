@@ -163,6 +163,8 @@ nbsphinx_prolog = r"""
             </a>
 
 """
+# Alternatively, the binder badge may link to the DTU Wind Energy GitLab:
+# <a href="https://mybinder.org/v2/git/https%3A%2F%2Fgitlab.windenergy.dtu.dk%2FTOPFARM%2FOptiWindNet/mybinder?urlpath={{ doc_path_quoted }}" target="_blank">
 
 # This is processed by Jinja2 and inserted after each notebook
 # nbsphinx_epilog = r"""

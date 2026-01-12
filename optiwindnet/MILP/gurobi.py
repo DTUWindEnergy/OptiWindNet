@@ -26,7 +26,7 @@ error, info = _lggr.error, _lggr.info
 
 
 class SolverGurobi(SolverPyomo, PoolHandler):
-    name: str = 'gurobi'
+    name: str = 'pyomo.gurobi'
     # default options to pass to Pyomo solver
     options: dict = dict(
         mipfocus=1,
@@ -58,14 +58,13 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = (
-            self.options | options | dict(timelimit=time_limit, mipgap=mip_gap)
-        )
+        applied_options = self.options | options
+        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
         solver = pyo.SolverFactory(
             'gurobi',
             solver_io='python',
             manage_env=True,
-            options=applied_options,
+            options=applied_options | dict(timelimit=time_limit, mipgap=mip_gap),
         )
         self.solver = solver
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
@@ -99,7 +98,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         P, model_options = self.P, self.model_options
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
-                S = self.topology_from_mip_pool()
+                S = self._topology_from_mip_pool()
                 G = PathFinder(
                     G_from_S(S, A),
                     P,
@@ -107,7 +106,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
                     branched=model_options['topology'] is Topology.BRANCHED,
                 ).create_detours()
             else:
-                S, G = self.investigate_pool(P, A)
+                S, G = self._investigate_pool(P, A)
         except Exception as exc:
             raise exc
         else:
@@ -116,14 +115,14 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         finally:
             self.solver.close()
 
-    def objective_at(self, index: int) -> float:
+    def _objective_at(self, index: int) -> float:
         solver_model = self.solver._solver_model
         solver_model.setParam('SolutionNumber', index)
         return solver_model.getAttr('PoolObjVal')
 
-    def topology_from_mip_pool(self) -> nx.Graph:
+    def _topology_from_mip_pool(self) -> nx.Graph:
         self._value_map = {
             omovar.name: round(gurvar.Xn)
             for omovar, gurvar in self.solver._pyomo_var_to_solver_var_map.items()
         }
-        return self.topology_from_mip_sol()
+        return self._topology_from_mip_sol()

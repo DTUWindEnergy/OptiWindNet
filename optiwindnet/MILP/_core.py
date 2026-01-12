@@ -154,6 +154,7 @@ class Solver(abc.ABC):
     metadata: ModelMetadata
     solver: Any
     options: dict[str, Any]
+    stopping: dict[str, Any]
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
 
@@ -223,20 +224,27 @@ class Solver(abc.ABC):
 
     def _make_graph_attributes(self) -> dict[str, Any]:
         metadata, solution_info = self.metadata, self.solution_info
+        solver_details = self.applied_options.copy()
+        # the method_options dict is extracted by db utility function packmethod()
+        method_options = dict(
+            solver_name=self.name,
+            fun_fingerprint=metadata.fun_fingerprint,
+            **self.stopping,
+            **metadata.model_options,
+        )
+        # remaining graph attributes (key=value) are stored in db.RouteSet[].misc
         attr = dict(
             **asdict(solution_info),
-            method_options=dict(
-                solver_name=self.name,
-                fun_fingerprint=metadata.fun_fingerprint,
-                **self.applied_options,
-                **metadata.model_options,
-            ),
+            method_options=method_options,
+            solver_details=solver_details,
         )
+        if 'max_feeders' in method_options:
+            solver_details['max_feeders'] = method_options.pop('max_feeders')
         if metadata.warmed_by:
             attr['warmstart'] = metadata.warmed_by
         return attr
 
-    def topology_from_mip_sol(self):
+    def _topology_from_mip_sol(self):
         """Create a topology graph from the solution to the MILP model.
 
         Returns:
@@ -244,6 +252,8 @@ class Solver(abc.ABC):
         """
         metadata = self.metadata
         S = nx.Graph(R=metadata.R, T=metadata.T)
+        # ensure roots are added, even if some are not connected
+        S.add_nodes_from(range(-metadata.R, 0))
         # Get active links and if flow is reversed (i.e. from small to big)
         rev_from_link = {
             (u, v): u < v
@@ -290,16 +300,16 @@ class PoolHandler(abc.ABC):
     model_options: ModelOptions
 
     @abc.abstractmethod
-    def objective_at(self, index: int) -> float:
+    def _objective_at(self, index: int) -> float:
         "Get objective value from solution pool at position `index`"
         pass
 
     @abc.abstractmethod
-    def topology_from_mip_pool(self) -> nx.Graph:
+    def _topology_from_mip_pool(self) -> nx.Graph:
         "Build topology from the pool solution at the last requested position"
         pass
 
-    def investigate_pool(
+    def _investigate_pool(
         self, P: nx.PlanarEmbedding, A: nx.Graph
     ) -> tuple[nx.Graph, nx.Graph]:
         """Go through the solver's solutions checking which has the shortest length
@@ -309,13 +319,13 @@ class PoolHandler(abc.ABC):
         num_solutions = self.num_solutions
         info(f'Solution pool has {num_solutions} solutions.')
         for i in range(num_solutions):
-            λ = self.objective_at(i)
+            λ = self._objective_at(i)
             if λ > Λ:
                 info(
                     f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length"
                 )
                 break
-            Sʹ = self.topology_from_mip_pool()
+            Sʹ = self._topology_from_mip_pool()
             Gʹ = PathFinder(
                 G_from_S(Sʹ, A), planar=P, A=A, branched=branched
             ).create_detours()

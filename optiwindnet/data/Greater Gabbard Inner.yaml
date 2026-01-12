@@ -9,7 +9,7 @@ TURBINE:
   model: SWT-3.6-107
   power_MW: 3.6
 
-LANDSCAPE_ANGLE: -87
+LANDSCAPE_ANGLE: -77.4
 
 # Inner Gabbard
 EXTENTS: |-
