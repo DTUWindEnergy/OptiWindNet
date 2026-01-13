@@ -11,6 +11,7 @@ from typing import Callable, Literal, NewType
 import networkx as nx
 import numba as nb
 import numpy as np
+from bitarray import bitarray
 from numba.np.extensions import cross2d
 from numpy.typing import NDArray
 from scipy.sparse import coo_array
@@ -43,7 +44,7 @@ __all__ = (
     'rotation_checkers_factory',
     'rotating_calipers',
     'area_from_polygon_vertices',
-    'add_link_blockage',
+    'add_link_blockmap',
     'add_link_cosines',
 )
 
@@ -1156,42 +1157,48 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     )
 
 
-def add_link_blockage(A: nx.Graph):
-    """Experimental. Add edge attribute 'num_blocked'.
+def add_link_blockmap(A: nx.Graph):
+    """Experimental. Add attributes 'blocked__' to edges and nodes.
 
-    Changes A in place. Assesses the number of terminals whose line-of-sight
-    to the root is intersected by the edge.
-
-    Only implemented for single-root sites.
+    Edges' 'blocked__' are R-long list of T-long bitarray maps. A 1-bit in position
+    `t` on the bitarray for root `r` means the edge crosses the line-of-sight t-r.
+    
+    Changes `A` in place. `A` should have no feeder edges.
     """
     VertexC = A.graph['VertexC']
-    angle__, angle_rank__, dups_from_root_rank__ = angle_helpers(A, include_borders=False)
+    R, T = A.graph['R'], A.graph['T']
+    angle__, angle_rank__, dups_from_root_rank__ = angle_helpers(
+        A, include_borders=False
+    )
+    # TODO: check if dups_from_root_rank__ has a role here
     A.graph['angle__'] = angle__
     A.graph['angle_rank__'] = angle_rank__
-    # ¡assuming a single root!
-    angle_, angle_rank_ = angle__[:, 0], angle_rank__[:, 0]
+    A.graph['dups_from_root_rank__'] = dups_from_root_rank__
     for u, v, edgeD in A.edges(data=True):
-        uR, vR = angle_rank_[[u, v]].tolist()
-        uv_angle = (angle_[v] - angle_[u]).item()
-        if uv_angle < 0:
-            uR, vR = vR, uR
-        if abs(uv_angle) <= np.pi:
-            inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
-        else:
-            inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
-        if len(inside_wedge) > 0:
-            vec = VertexC[v] - VertexC[u]
-            wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
-            cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
-            # ¡assuming a single root!
-            root_vec = VertexC[-1] - VertexC[u]
-            is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
-            # ¡assuming a single root!
-            edgeD['num_blocked'] = [
-                sum((cross <= 0) if is_root_sign_pos else (cross >= 0)).item()
-            ]
-        else:
-            edgeD['num_blocked'] = [0]
+        blocked__ = []
+        for angle_, angle_rank_, rootC in zip(angle__.T, angle_rank__.T, VertexC[-R:]):
+            blocked_ = bitarray(T)
+            uR, vR = angle_rank_[[u, v]].tolist()
+            uv_angle = (angle_[v] - angle_[u]).item()
+            if uv_angle < 0:
+                uR, vR = vR, uR
+            if abs(uv_angle) <= np.pi:
+                inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
+            else:
+                inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
+            if len(inside_wedge) > 0:
+                vec = VertexC[v] - VertexC[u]
+                wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
+                cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
+                root_vec = rootC - VertexC[u]
+                is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
+                blocked_[
+                    inside_wedge[
+                        (cross <= 0) if is_root_sign_pos else (cross >= 0)
+                    ].tolist()
+                ] = 1
+            blocked__.append(blocked_)
+        edgeD['blocked__'] = blocked__
 
 
 def add_link_cosines(A: nx.Graph):
