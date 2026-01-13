@@ -12,6 +12,7 @@ import networkx as nx
 import numpy as np
 import torch
 from mlhelpers import modelbuilders
+from mlhelpers.moments import hu_moments
 from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
@@ -21,6 +22,7 @@ from ..geometric import (
     assign_root,
     minimum_spanning_forest,
     angle_helpers,
+    add_link_blockmap,
 )
 from ..interarraylib import as_normalized, calcload
 
@@ -29,51 +31,6 @@ debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
 __version = 'DDHv8'
-
-
-def add_link_blocked_set(A: nx.Graph):
-    """Experimental. Add attributes 'blocked' to edges and nodes.
-
-    Edges' 'blocked__' are R-long list of bitarray masks, while nodes' 'blocked__' are tuples of node ids.
-
-    Changes `A` in place. `A` should have no feeder edges.
-
-    Assesses the terminals whose line-of-sight to the root is intersected by the edge.
-    """
-    VertexC = A.graph['VertexC']
-    R, T = A.graph['R'], A.graph['T']
-    #  d2rootsRank = rankdata(A.graph['d2roots'], method='dense', axis=0)
-    angle__, angle_rank__, dups_from_root_rank__ = angle_helpers(
-        A, include_borders=False
-    )
-    A.graph['angle__'] = angle__
-    A.graph['angle_rank__'] = angle_rank__
-    A.graph['dups_from_root_rank__'] = dups_from_root_rank__
-    for u, v, edgeD in A.edges(data=True):
-        blocked__ = []
-        for angle_, angle_rank_, rootC in zip(angle__.T, angle_rank__.T, VertexC[-R:]):
-            blocked_ = bitarray(T)
-            uR, vR = angle_rank_[[u, v]].tolist()
-            uv_angle = (angle_[v] - angle_[u]).item()
-            if uv_angle < 0:
-                uR, vR = vR, uR
-            if abs(uv_angle) <= np.pi:
-                inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
-            else:
-                inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
-            if len(inside_wedge) > 0:
-                vec = VertexC[v] - VertexC[u]
-                wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
-                cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
-                root_vec = rootC - VertexC[u]
-                is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
-                blocked_[
-                    inside_wedge[
-                        (cross <= 0) if is_root_sign_pos else (cross >= 0)
-                    ].tolist()
-                ] = 1
-            blocked__.append(blocked_)
-        edgeD['blocked__'] = blocked__
 
 
 class LinkCount(IntEnum):
@@ -137,14 +94,16 @@ class AppraiserFactory:
         model = self.model
         # problem features
         capacity_onehot = {
-            4: (1, 0, 0, 0),
-            5: (0, 1, 0, 0),
-            6: (0, 0, 1, 0),
-            7: (0, 0, 0, 1),
+            4: (1, 0, 0, 0, 0, 0),
+            5: (0, 1, 0, 0, 0, 0),
+            6: (0, 0, 1, 0, 0, 0),
+            7: (0, 0, 0, 1, 0, 0),
+            8: (0, 0, 0, 0, 1, 0),
+            9: (0, 0, 0, 0, 0, 1),
         }[capacity]
         T = A.graph['T']
         d2roots = A.graph['d2roots'][:T]
-        rel_moment = A.graph['rel_moment']
+        hu_moment_ = A.graph['hu_moment_']
 
         def appraise(partial_features_):
             # rules for making an appraisal stale:
@@ -162,7 +121,13 @@ class AppraiserFactory:
             #  ['s_is_subroot',
             #   't_is_subroot',
             #   'is_delaunay',
-            #   'rel_moment',
+            #   'moment_h1',
+            #   'moment_h2',
+            #   'moment_h3',
+            #   'moment_h4',
+            #   'moment_h5',
+            #   'moment_h6',
+            #   'moment_h7',
             #   's_rel_load',
             #   't_rel_load',
             #   's_span',
@@ -209,7 +174,7 @@ class AppraiserFactory:
                         s_is_subroot,  # s_is_subroot,
                         t_is_subroot,  # t_is_subroot,
                         is_delaunay,  # is_delaunay
-                        rel_moment,  # rel_moment
+                        *hu_moment_, # Hu moment_h1..7
                         s_load / capacity,  # s_rel_load
                         t_load / capacity,  # t_rel_load
                         angle_ccw(s_span_lo, t_root, s_span_hi),  # s_span
@@ -286,10 +251,12 @@ def data_driven_hybrid(
 
     # calculate the ratio (second moment of area)/(s.m.a of homogeneous circle)
     # use unit area for the moment; only wrt the first root (the hard-coded 0)
-    norm_T_d2root = Aʹ.graph['norm_scale'] * Aʹ.graph['d2roots'][:T, 0]
+    #  norm_T_d2root = Aʹ.graph['norm_scale'] * Aʹ.graph['d2roots'][:T, 0]
     # the unit area circle with root at the center and T homogeneously distributed
     # terminals would have a moment of inertia T/2/π - use it to normalize (range 1..7)
-    A.graph['rel_moment'] = (norm_T_d2root**2).sum().item() * 2 * np.pi / T
+    #  A.graph['rel_moment'] = (norm_T_d2root**2).sum().item() * 2 * np.pi / T
+    VertexC = A.graph['VertexC']
+    A.graph['hu_moment_'] = hu_moments(VertexC[:T], VertexC[-1])
 
     d2roots = A.graph['d2roots']
     roots = range(-R, 0)
@@ -297,7 +264,7 @@ def data_driven_hybrid(
     assign_root(A)
     # removing root nodes from A to speedup union searches
     A.remove_nodes_from(roots)
-    add_link_blocked_set(A)
+    add_link_blockmap(A)
     add_link_cosines(A)
 
     # remove links that have negative savings both ways from the start
@@ -314,15 +281,15 @@ def data_driven_hybrid(
             unfeas_links.append((u, v))
         # TODO: handle multiple roots properly
         elif (
-            len(edgeD['blocked'][root]) > max_blockable_by_link
+            edgeD['blocked__'][root].count() > max_blockable_by_link
             and edgeD['cos_'][root] < blockage_link_cos_lim
         ):
             unfeas_links.append((u, v))
     debug('links removed in pre-processing: %s', unfeas_links)
     A.remove_edges_from(unfeas_links)
     # BEGIN: time-saving pre-calculations
-    angle_, angle_rank_ = A.graph['angle_'], A.graph['angle_rank_']
-    union_limits, angle_ccw = angle_oracles_factory(angle_, angle_rank_)
+    angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
+    union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
     is_delaunay_ = {}
     for u, v, kind in A.edges(data='kind'):
         uv_uniq = (u, v) if u < v else (v, u)
@@ -338,7 +305,9 @@ def data_driven_hybrid(
 
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
-    subtree_ = [[t] for t in _T]
+    subtree_ = [bitarray(T) for _ in _T]
+    for t, subtree in zip(_T, subtree_):
+        subtree[t] = 1
     # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
 
@@ -347,7 +316,7 @@ def data_driven_hybrid(
     #                  subtree
     subtree_span_ = [[(t, t) for _ in roots] for t in _T]
     # <subtree_blocked_>: sets of blocked terminals from other components
-    subtree_blocked_ = [set() for _ in _T]
+    subtree_blocked_ = [bitarray(T) for _ in _T]
     max_blockable = blockage_subtree_feeder_lim * capacity
 
     # other structures
@@ -395,7 +364,7 @@ def data_driven_hybrid(
         - mark those that depend on subtree[subroot] as stale;
         """
         root = A.nodes[subroot]['root']
-        load_self = len(subtree_[subroot])
+        load_self = subtree_[subroot].count()
         load_left = capacity - load_self
         unfeas_links = []
         # feasible (feas) means union load <= capacity
@@ -407,13 +376,13 @@ def data_driven_hybrid(
         extent_min = float('inf')
         union_span_cache = {}
         link_caused_staleness = set()
-        for u in (t for t in subtree_[subroot] if A[t]):
+        for u in (t for t in subtree_[subroot].search(1) if A[t]):
             u_is_subroot = u == subroot
             for v, uvD in A[u].items():
                 uv_uniq = (u, v) if u < v else (v, u)
                 sr_v = subroot_[v]
                 root_v = A.nodes[sr_v]['root']
-                load_other = len(subtree_[sr_v])
+                load_other = subtree_[sr_v].count()
                 extent = uvD['length']
                 if sr_v == subroot:
                     # link internal to subtree only add once
@@ -422,10 +391,10 @@ def data_driven_hybrid(
                     continue
                 elif (
                     load_other > load_left
-                    or len(
-                        subtree_blocked_[subroot].difference(subtree_[sr_v])
-                        | subtree_blocked_[sr_v].difference(subtree_[subroot])
-                    )
+                    or (
+                        (subtree_blocked_[subroot] & ~subtree_[sr_v])
+                        | (subtree_blocked_[sr_v] & ~subtree_[subroot])
+                    ).count()
                     > max_blockable
                 ):
                     link_caused_staleness.add(sr_v)
@@ -464,7 +433,7 @@ def data_driven_hybrid(
                             is_delaunay_[uv_uniq],
                             extent,
                             uvD['cos_'][root_v],
-                            len(uvD['blocked'][root_v]),
+                            uvD['blocked__'][root_v].count(),
                             union_span,
                         )
                     )
@@ -490,10 +459,10 @@ def data_driven_hybrid(
         if not feas_unions:
             # this handles subtrees that became isolated
             S.add_edge(subroot, root)
-            A.remove_nodes_from(subtree_[subroot])
+            A.remove_nodes_from(subtree_[subroot].search(1))
             debug('<refresh> subroot <%d> finalized (isolated)', subroot)
             is_feederless_[subroot] = False
-            purge_log[iteration].append(tuple(subtree_[subroot]))
+            purge_log[iteration].append(tuple(subtree_[subroot].search(1)))
             steps_log[iteration].append((subroot, root))
             stale_subtrees.update(whoneeds_[subroot] - fresh_subtrees)
             return [], []
@@ -621,18 +590,18 @@ def data_driven_hybrid(
         subtree_span_[sr_kept] = union_span_
         # update the component's blocked set
         # TODO: handle multiple roots
-        subtree_blocked_[sr_kept].update(
-            A[u][v]['blocked'][root].difference(subtree_[sr_kept], subtree_[sr_dropped])
+        subtree_blocked_[sr_kept] = (
+            A[u][v]['blocked__'][root] & ~(subtree_[sr_kept] | subtree_[sr_dropped])
         )
         # update terminal->subroot mapping for sr_dropped's terminals
-        for t in subtree_[sr_dropped]:
+        for t in subtree_[sr_dropped].search(1):
             subroot_[t] = sr_kept
 
-        subtree.extend(subtree_[sr_dropped])
+        subtree |= subtree_[sr_dropped]
         stale_subtrees.clear()
         stale_subtrees.update(whoneeds_[sr_kept], whoneeds_[sr_dropped])
         A.remove_edge(u, v)
-        if len(subtree) == capacity:
+        if subtree.count() == capacity:
             stale_subtrees.discard(sr_kept)
             S.add_edge(sr_kept, root)
             debug('subroot <%d> finalized (full load)', sr_kept)
@@ -640,8 +609,8 @@ def data_driven_hybrid(
             steps_log[iteration].append((sr_kept, root))
             #  prio_tier_[cat_feas_unions_[sr_kept]].remove(sr_kept)
             prio_tier_[cat_feas_unions_[sr_kept]].discard(sr_kept)
-            A.remove_nodes_from(subtree)
-            purge_log[iteration].append(tuple(subtree))
+            A.remove_nodes_from(subtree.search(1))
+            purge_log[iteration].append(tuple(subtree.search(1)))
             for sr in whoneeds_[sr_dropped]:
                 # TODO: rethink why not: whoneeds_[sr].remove(sr_dropped)
                 whoneeds_[sr].discard(sr_dropped)
