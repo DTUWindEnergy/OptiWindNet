@@ -32,6 +32,7 @@ debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 __version = 'DDHv8'
 
+ONE = bitarray('1')
 
 class LinkCount(IntEnum):
     ONE_OR_TWO = 0
@@ -376,7 +377,7 @@ def data_driven_hybrid(
         extent_min = float('inf')
         union_span_cache = {}
         link_caused_staleness = set()
-        for u in (t for t in subtree_[subroot].search(1) if A[t]):
+        for u in (t for t in subtree_[subroot].search(ONE) if A[t]):
             u_is_subroot = u == subroot
             for v, uvD in A[u].items():
                 uv_uniq = (u, v) if u < v else (v, u)
@@ -392,8 +393,10 @@ def data_driven_hybrid(
                 elif (
                     load_other > load_left
                     or (
-                        (subtree_blocked_[subroot] & ~subtree_[sr_v])
-                        | (subtree_blocked_[sr_v] & ~subtree_[subroot])
+                        (subtree_blocked_[subroot]
+                        | subtree_blocked_[sr_v]
+                        | uvD['blocked__'][root_v])
+                        & ~(subtree_[sr_v] | subtree_[subroot])
                     ).count()
                     > max_blockable
                 ):
@@ -459,10 +462,11 @@ def data_driven_hybrid(
         if not feas_unions:
             # this handles subtrees that became isolated
             S.add_edge(subroot, root)
-            A.remove_nodes_from(subtree_[subroot].search(1))
+            subtree_nodes = tuple(subtree_[subroot].search(ONE))
+            A.remove_nodes_from(subtree_nodes)
             debug('<refresh> subroot <%d> finalized (isolated)', subroot)
             is_feederless_[subroot] = False
-            purge_log[iteration].append(tuple(subtree_[subroot].search(1)))
+            purge_log[iteration].append(subtree_nodes)
             steps_log[iteration].append((subroot, root))
             stale_subtrees.update(whoneeds_[subroot] - fresh_subtrees)
             return [], []
@@ -590,14 +594,13 @@ def data_driven_hybrid(
         subtree_span_[sr_kept] = union_span_
         # update the component's blocked set
         # TODO: handle multiple roots
-        subtree_blocked_[sr_kept] = (
-            A[u][v]['blocked__'][root] & ~(subtree_[sr_kept] | subtree_[sr_dropped])
-        )
+        subtree_blocked_[sr_kept] |= subtree_blocked_[sr_dropped] | A[u][v]['blocked__'][root]
+        subtree |= subtree_[sr_dropped]
+        subtree_blocked_[sr_kept] &= ~subtree
         # update terminal->subroot mapping for sr_dropped's terminals
-        for t in subtree_[sr_dropped].search(1):
+        for t in subtree_[sr_dropped].search(ONE):
             subroot_[t] = sr_kept
 
-        subtree |= subtree_[sr_dropped]
         stale_subtrees.clear()
         stale_subtrees.update(whoneeds_[sr_kept], whoneeds_[sr_dropped])
         A.remove_edge(u, v)
@@ -609,8 +612,9 @@ def data_driven_hybrid(
             steps_log[iteration].append((sr_kept, root))
             #  prio_tier_[cat_feas_unions_[sr_kept]].remove(sr_kept)
             prio_tier_[cat_feas_unions_[sr_kept]].discard(sr_kept)
-            A.remove_nodes_from(subtree.search(1))
-            purge_log[iteration].append(tuple(subtree.search(1)))
+            subtree_nodes = tuple(subtree.search(ONE))
+            A.remove_nodes_from(subtree_nodes)
+            purge_log[iteration].append(subtree_nodes)
             for sr in whoneeds_[sr_dropped]:
                 # TODO: rethink why not: whoneeds_[sr].remove(sr_dropped)
                 whoneeds_[sr].discard(sr_dropped)
