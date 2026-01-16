@@ -36,22 +36,14 @@ class _SolutionStore(cp_model.CpSolverSolutionCallback):
 
     solutions: list[tuple[float, dict]]
 
-    def __init__(self, model: cp_model.CpModel):
+    def __init__(self, metadata: ModelMetadata):
         super().__init__()
+        self.metadata = metadata
         self.solutions = []
-        int_lits = []
-        bool_lits = []
-        for var in model._CpModel__var_list._VariableList__var_list:
-            if var.is_boolean:
-                bool_lits.append(var)
-            elif var.is_integer():
-                int_lits.append(var)
-        self.bool_lits = bool_lits
-        self.int_lits = int_lits
 
     def on_solution_callback(self):
-        solution = {var.index: self.boolean_value(var) for var in self.bool_lits}
-        solution |= {var.index: self.value(var) for var in self.int_lits}
+        solution = {var.index: self.boolean_value(var) for var in self.metadata.link_.values()}
+        solution |= {var.index: self.value(var) for var in self.metadata.flow_.values()}
         self.solutions.append((self.objective_value, solution))
 
 
@@ -109,7 +101,7 @@ class SolverORTools(Solver, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        storer = _SolutionStore(model)
+        storer = _SolutionStore(self.metadata)
         applied_options = self.options | options
         for key, val in applied_options.items():
             setattr(solver.parameters, key, val)
