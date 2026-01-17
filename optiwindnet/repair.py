@@ -384,7 +384,7 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
             src_path = list_path(S_T, gateS)
             dst_path = list_path(S_T, gateD)
             # TODO: remove this
-            #  print([f'{F[n]}' for n in dst_path])
+            #  print(dst_path)
             choices = _find_fix_choices_path(A, swapS, src_path, dst_path)
             choices = filter(not_crossing, choices)
             quant_choices.extend(
@@ -396,16 +396,8 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
             continue
         quant_choices.sort()
         # TODO: remove this
-        #  for line in [' | '.join(
-        #      (f'{cost:.3f}', F[swapD],
-        #          ' '.join(['–'.join((F[u], F[v])) for u, v in edges_del]),
-        #          ' '.join(['–'.join((F[u], F[v])) for u, v in edges_add]),
-        #          ' '.join(['–'.join((F[u], F[v])) for u, v in gates_del]),
-        #          ' '.join(['–'.join((F[u], F[v])) for u, v in gates_add])))
-        #          for cost, (swapD, edges_del, edges_add, gates_del,
-        #                     gates_add)
-        #          in quant_choices]:
-        #      print(line)
+        #  for cost, choice_data in quant_choices:
+        #      print(f'{cost:.3f} |', '|'.join(str(data) for data in choice_data))
         _, choice = quant_choices[0]
         # apply_choice works on a copy of Sʹ
         S = _apply_choice(S, A, *choice)

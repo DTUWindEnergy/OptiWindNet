@@ -18,8 +18,6 @@ from scipy.sparse import coo_array
 from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
 from scipy.spatial.distance import cdist
 
-from .utils import F, NodeStr
-
 __all__ = (
     'triangle_AR',
     'point_d2line',
@@ -629,7 +627,7 @@ def apply_edge_exemptions(G, allow_edge_deletion=True):
         # if arc is π/2 or more, remove the edge (it's shorter to go to root)
         if allow_edge_deletion and any(arc >= np.pi / 2):
             G.remove_edge(u, v)
-            print('angles', arc, 'removing «', '–'.join([F[n] for n in (u, v)]), '»')
+            print(f'angles {arc} removing «{u}~{v}»')
 
 
 def perimeter(VertexC, vertices_ordered):
@@ -844,7 +842,6 @@ def check_crossings(G, debug=False, MARGIN=0.1):
         AllnodesC = VertexC
     roots = range(-R, 0)
     fnT[-R:] = roots
-    n2s = NodeStr(fnT, T)
 
     crossings = []
     pivot_plus_edge = []
@@ -869,11 +866,11 @@ def check_crossings(G, debug=False, MARGIN=0.1):
             if point_d2line(*AllnodesC[[n2test, w, x]]) < MARGIN:
                 # cmp node is approx. overlapping the edge: skip
                 continue
-            # print(F[fnT[w]], F[fnT[x]], F[fnT[ref]], F[fnT[cmp]])
+            # print(fnT[w], fnT[x], fnT[ref], fnT[cmp])
             if not is_same_side(*AllnodesC[[w, x, ref, n2test]], touch_is_cross=False):
                 print(
-                    f'ERROR <splitting>: edge {n2s(w, x)} crosses '
-                    f'{n2s(ref, *pivots, n2test)}'
+                    f'ERROR <splitting>: edge «{fnT[w]}~{fnT[x]}» crosses '
+                    f'{[fnT[n] for n in (ref, *pivots, n2test)]}'
                 )
                 # crossings.append(((w,  x), (ref, pivot, cmp)))
                 crossings.append(((w, x), (ref, n2test)))
@@ -883,7 +880,7 @@ def check_crossings(G, debug=False, MARGIN=0.1):
     for root in roots:
         # edges = list(nx.edge_dfs(G, source=root))
         edges = list(nx.edge_bfs(G, source=root))
-        # outstr = ', '.join([f'«{F[fnT[u]]}–{F[fnT[v]]}»' for u, v in edges])
+        # outstr = ', '.join([f'«{fnT[u]}~{fnT[v]}»' for u, v in edges])
         # print(outstr)
         potential = []
         for i, (u, v) in enumerate(edges):
@@ -905,7 +902,7 @@ def check_crossings(G, debug=False, MARGIN=0.1):
                         count=4,
                     )
                     # print('distances[' +
-                    #       ', '.join((F[fnT[n]] for n in (u, v, s, t))) +
+                    #       ', '.join((fnT[n] for n in (u, v, s, t))) +
                     #       ']: ', distances)
                     nearmask = distances < MARGIN
                     close_count = sum(nearmask)
@@ -916,8 +913,8 @@ def check_crossings(G, debug=False, MARGIN=0.1):
                         # print(distances)
                         print(
                             f'ERROR <edge-edge>: '
-                            f'edge «{F[fnT[u]]}–{F[fnT[v]]}» '
-                            f'crosses «{F[fnT[s]]}–{F[fnT[t]]}»'
+                            f'edge «{fnT[u]}~{fnT[v]}» '
+                            f'crosses «{fnT[s]}~{fnT[t]}»'
                         )
                     elif close_count == 1:
                         # (u, v) and (s, t) touch node-to-edge
@@ -939,12 +936,12 @@ def check_crossings(G, debug=False, MARGIN=0.1):
                         touch_uv, touch_st = uvst[np.flatnonzero(nearmask)]
                         free_uv, free_st = uvst[np.flatnonzero(~nearmask)]
                         # print(
-                        #    f'touch/free u, v :«{F[fnT[touch_uv]]}–'
-                        #    f'{F[fnT[free_uv]]}»; s, t:«{F[fnT[touch_st]]}–'
-                        #    f'{F[fnT[free_st]]}»')
+                        #    f'touch/free u, v :«{fnT[touch_uv]}~'
+                        #    f'{fnT[free_uv]}»; s, t:«{fnT[touch_st]}~'
+                        #    f'{fnT[free_st]}»')
                         nb_uv, nb_st = list(G[touch_uv]), list(G[touch_st])
-                        # print([F[fnT[n]] for n in nb_uv])
-                        # print([F[fnT[n]] for n in nb_st])
+                        # print([fnT[n] for n in nb_uv])
+                        # print([fnT[n] for n in nb_st])
                         nbNuv, nbNst = len(nb_uv), len(nb_st)
                         if nbNuv == 1 or nbNst == 1:
                             # <a leaf node with a clone – not a crossing>
@@ -968,10 +965,10 @@ def check_crossings(G, debug=False, MARGIN=0.1):
                         if crossing:
                             print(
                                 f'ERROR <split>: edges '
-                                f'«{F[fnT[u]]}–{F[fnT[v]]}» '
-                                f'and «{F[fnT[s]]}–{F[fnT[t]]}» '
+                                f'«{fnT[u]}~{fnT[v]}» '
+                                f'and «{fnT[s]}–{fnT[t]}» '
                                 f'break a bunch apart at '
-                                f'{F[fnT[touch_uv]]}, {F[fnT[touch_st]]}'
+                                f'{fnT[touch_uv]}, {fnT[touch_st]}'
                             )
                             crossings.append(((u, v), (s, t)))
                     else:  # close_count > 2:
@@ -1009,18 +1006,15 @@ def check_crossings(G, debug=False, MARGIN=0.1):
                                     if is_same_side(*AllnodesC[[q, r, a, b]]):
                                         print(
                                             f'ERROR <partial overlap>: edge '
-                                            f'«{F[fnT[u]]}–{F[fnT[v]]}» '
+                                            f'«{fnT[u]}~{fnT[v]}» '
                                             f'crosses '
-                                            f'«{F[fnT[s]]}–{F[fnT[t]]}»'
+                                            f'«{fnT[s]}~{fnT[t]}»'
                                         )
                                         crossings.append(((u, v), (s, t)))
     debug and potential and print(
         'potential crossings: '
         + ', '.join(
-            [
-                f'«{F[fnT[u]]}–{F[fnT[v]]}» × «{F[fnT[s]]}–{F[fnT[t]]}»'
-                for u, v, s, t in potential
-            ]
+            [f'«{fnT[u]}~{fnT[v]}» × «{fnT[s]}~{fnT[t]}»' for u, v, s, t in potential]
         )
     )
     return crossings
@@ -1083,7 +1077,7 @@ def rotating_calipers(
     max_x, max_y = convex_hull.argmax(axis=0)
 
     calipers = np.array([min_y, max_x, max_y, min_x], dtype=np.int_)
-    caliper_angles = np.array([np.pi, -0.5*np.pi, 0, 0.5 * np.pi], dtype=float)
+    caliper_angles = np.array([np.pi, -0.5 * np.pi, 0, 0.5 * np.pi], dtype=float)
 
     for _ in range(H):
         # Roll vertices counter-clockwise
@@ -1101,7 +1095,7 @@ def rotating_calipers(
         # Rotate all supporting lines by angle delta
         caliper_angles -= angle_deltas[pivot]
 
-        # 
+        #
         angle = caliper_angles[np.abs(caliper_angles).argmin()]
         c, s = np.cos(angle), np.sin(angle)
         calipers_rot = convex_hull[calipers] @ np.array(((c, -s), (s, c)))
@@ -1116,7 +1110,7 @@ def rotating_calipers(
                 metric_value = height
                 angle_offset = 0.5 * math.pi
         elif metric == 'area':
-            metric_value = width*height
+            metric_value = width * height
         else:
             raise ValueError(f'Unknown metric: {metric}')
         # check if area is a new minimum
@@ -1162,7 +1156,7 @@ def add_link_blockmap(A: nx.Graph):
 
     Edges' 'blocked__' are R-long list of T-long bitarray maps. A 1-bit in position
     `t` on the bitarray for root `r` means the edge crosses the line-of-sight t-r.
-    
+
     Changes `A` in place. `A` should have no feeder edges.
     """
     VertexC = A.graph['VertexC']
