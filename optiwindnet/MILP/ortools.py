@@ -42,7 +42,9 @@ class _SolutionStore(cp_model.CpSolverSolutionCallback):
         self.solutions = []
 
     def on_solution_callback(self):
-        solution = {var.index: self.boolean_value(var) for var in self.metadata.link_.values()}
+        solution = {
+            var.index: self.boolean_value(var) for var in self.metadata.link_.values()
+        }
         solution |= {var.index: self.value(var) for var in self.metadata.flow_.values()}
         self.solutions.append((self.objective_value, solution))
 
@@ -115,9 +117,11 @@ class SolverORTools(Solver, PoolHandler):
         # TODO: remove this work-around for ortools v9.15
         response = getattr(
             solver,
-            '_checked_response', # ortools v9.15
-            getattr(solver, '_CpSolver__response_wrapper'), # ortoold v9.14
+            '_checked_response',  # ortools v9.15
+            None,
         )
+        if response is None:
+            response = getattr(solver, '_CpSolver__response_wrapper'),  # ortools v9.14
         if callable(response.status):
             # we are in ortools v9.14 or the bug was fixed
             status = response.status()
