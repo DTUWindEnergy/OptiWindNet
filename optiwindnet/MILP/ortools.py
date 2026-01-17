@@ -118,8 +118,10 @@ class SolverORTools(Solver, PoolHandler):
         response = getattr(
             solver,
             '_checked_response',  # ortools v9.15
-            getattr(solver, '_CpSolver__response_wrapper'),  # ortoold v9.14
+            None,
         )
+        if response is None:
+            response = getattr(solver, '_CpSolver__response_wrapper'),  # ortools v9.14
         if callable(response.status):
             # we are in ortools v9.14 or the bug was fixed
             status = response.status()
