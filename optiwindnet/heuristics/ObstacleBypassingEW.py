@@ -821,12 +821,12 @@ def OBEW(
         # choose between the low or high corners
         if store[0][0] < savings or store[1][0] < savings:
             loNotHi = store[0][0] < store[1][0]
-            cost, path, LoNotHi, direct, shift = store[not loNotHi]
+            cost, path, LoNotHi, direct, shift = store[int(not loNotHi)]
             Awarn(
                 f'({depth}) '
-                f'take: {store[not loNotHi][1] + (goal_,)} (@{cost:.0f}), '
-                f'drop: {store[loNotHi][1] + (goal_,)} '
-                f'(@{store[loNotHi][0]:.0f})'
+                f'take: {store[int(not loNotHi)][1] + (goal_,)} (@{cost:.0f}), '
+                f'drop: {store[int(loNotHi)][1] + (goal_,)} '
+                f'(@{store[int(loNotHi)][0]:.0f})'
             )
             debug(
                 f'<plan_detour[{depth}]>: «{u}-{v}» crosses «{blocked}-{goal_}» but '
