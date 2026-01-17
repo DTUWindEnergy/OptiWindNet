@@ -112,14 +112,17 @@ class SolverORTools(Solver, PoolHandler):
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
         _ = solver.solve(model, storer)
         num_solutions = len(storer.solutions)
-        try:
-          status_name = solver.status_name()
-        except TypeError:
-          # TODO: remove this work-around for ortools v9.15
-          status_name = solver.status_name(solver.response.status)
+        # TODO: remove this work-around for ortools v9.15
+        if callable(solver._checked_response.status):
+            # we are in ortools v9.14 or the bug was fixed
+            termination = solver.status_name()
+        else:
+            # we are in the buggy v9.15.6755
+            # https://github.com/google/or-tools/issues/4985
+            termination = solver.status_name
         if num_solutions == 0:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {status_name}'
+                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
             )
         storer.solutions.reverse()
         self._solution_pool = storer.solutions
@@ -132,7 +135,7 @@ class SolverORTools(Solver, PoolHandler):
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,
-            termination=status_name,
+            termination=termination,
         )
         self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
