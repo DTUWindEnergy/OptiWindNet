@@ -1040,16 +1040,15 @@ def make_planar_embedding(
     #  changes_obstacles = _flip_triangles_near_obstacles(P, T, B + 3,
     #                                                       VertexC)
     #  P.check_structure()
-    #  print('changes_super', [(F[a], F[b]) for a, b in changes_super])
-    #  print('changes_obstacles',
-    #        [(F[a], F[b]) for a, b in changes_obstacles])
+    #  print('changes_super', changes_super)
+    #  print('changes_obstacles', changes_obstacles)
 
     #  print('&'*80 + '\n', P_A.edges - P.edges, '\n' + '&'*80)
     #  print('\n' + '&'*80)
     #
     #  # Favor the triagulation in P_A over the one in P where possible.
     #  for u, v in P_A.edges - P.edges:
-    #      print(F[u], F[v])
+    #      print(u, v)
     #      s, t = P_A[u][v]['cw'], P_A[u][v]['ccw']
     #      if (s == P_A[v][u]['ccw']
     #              and t == P_A[v][u]['cw']
@@ -1058,12 +1057,12 @@ def make_planar_embedding(
     #          if (w == u and x == v
     #                  and w == P[t][s]['ccw']
     #                  and x == P[t][s]['cw']):
-    #              print(F[u], F[v], 'replaces', F[s], F[t])
+    #              print(u, v, 'replaces', s, t)
     #              P.add_half_edge(u, v, ccw=t)
     #              P.add_half_edge(v, u, ccw=s)
     #              P.remove_edge(s, t)
     #      #  else:
-    #      #      print(F[u], F[v], 'not in P, but', F[s], F[t],
+    #      #      print(u, v, 'not in P, but', s, t,
     #      #            'not available for flipping')
     #  print('&'*80)
 
@@ -1640,10 +1639,10 @@ def planar_flipped_by_routeset(
             continue
         #  if not (s == planar[v][u]['ccw']
         #          and t == planar[v][u]['cw']):
-        #      print(f'{F[u]}–{F[v]} is not in two triangles')
+        #      print(f'{u}~{v} is not in two triangles')
         #      continue
         #  if (s, t) not in planar:
-        #      print(f'{F[s]}–{F[t]} is not in planar')
+        #      print(f'{s}~{t} is not in planar')
         #      continue
         if (s, t) in unflippables:
             warn(

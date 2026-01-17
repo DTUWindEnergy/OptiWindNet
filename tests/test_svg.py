@@ -1,8 +1,8 @@
 from .helpers import tiny_wfn
 from optiwindnet.svg import svgplot, SvgRepr
 
+
 def test_svgplot():
-    
     wfn1 = tiny_wfn()
     G1 = wfn1.G
     svg_obj1 = svgplot(G1)

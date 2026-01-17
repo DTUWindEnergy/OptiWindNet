@@ -36,22 +36,16 @@ class _SolutionStore(cp_model.CpSolverSolutionCallback):
 
     solutions: list[tuple[float, dict]]
 
-    def __init__(self, model: cp_model.CpModel):
+    def __init__(self, metadata: ModelMetadata):
         super().__init__()
+        self.metadata = metadata
         self.solutions = []
-        int_lits = []
-        bool_lits = []
-        for var in model._CpModel__var_list._VariableList__var_list:
-            if var.is_boolean:
-                bool_lits.append(var)
-            elif var.is_integer():
-                int_lits.append(var)
-        self.bool_lits = bool_lits
-        self.int_lits = int_lits
 
     def on_solution_callback(self):
-        solution = {var.index: self.boolean_value(var) for var in self.bool_lits}
-        solution |= {var.index: self.value(var) for var in self.int_lits}
+        solution = {
+            var.index: self.boolean_value(var) for var in self.metadata.link_.values()
+        }
+        solution |= {var.index: self.value(var) for var in self.metadata.flow_.values()}
         self.solutions.append((self.objective_value, solution))
 
 
@@ -109,7 +103,7 @@ class SolverORTools(Solver, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        storer = _SolutionStore(model)
+        storer = _SolutionStore(self.metadata)
         applied_options = self.options | options
         for key, val in applied_options.items():
             setattr(solver.parameters, key, val)
@@ -120,9 +114,25 @@ class SolverORTools(Solver, PoolHandler):
         info('>>> ORTools CpSat parameters <<<\n%s\n', solver.parameters)
         _ = solver.solve(model, storer)
         num_solutions = len(storer.solutions)
+        # TODO: remove this work-around for ortools v9.15
+        response = getattr(
+            solver,
+            '_checked_response',  # ortools v9.15
+            None,
+        )
+        if response is None:
+            response = getattr(solver, '_CpSolver__response_wrapper'),  # ortools v9.14
+        if callable(response.status):
+            # we are in ortools v9.14 or the bug was fixed
+            status = response.status()
+        else:
+            # we are in the buggy v9.15.6755
+            # https://github.com/google/or-tools/issues/4985
+            status = response.status
+        termination = solver.status_name(status)
         if num_solutions == 0:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {solver.status_name()}'
+                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
             )
         storer.solutions.reverse()
         self._solution_pool = storer.solutions
@@ -135,7 +145,7 @@ class SolverORTools(Solver, PoolHandler):
             bound=bound,
             objective=objective,
             relgap=1.0 - bound / objective,
-            termination=solver.status_name(),
+            termination=termination,
         )
         self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)

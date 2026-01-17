@@ -127,9 +127,8 @@ def L_from_nodeset(nodeset: object, handle: str | None = None) -> nx.Graph:
     B = nodeset.B
     border = np.array(nodeset.constraint_vertices[: nodeset.constraint_groups[0]])
     name = nodeset.name
-    name = name if name[0] != '!' else name[1 : name.index('!', 1)]
     if handle is None:
-        handle = make_handle(name)
+        handle = make_handle(name if name[0] != '!' else name[1 : name.index('!', 1)])
     L = nx.Graph(
         R=R,
         T=T,

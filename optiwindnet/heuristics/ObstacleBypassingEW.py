@@ -568,8 +568,7 @@ def OBEW(
                     ) or (is_hop_a_barriers_clone and (discrim != loNotHi))
                     Awarn(f'concavity check at {hop2check}: {is_concave_at_hop2check}')
                     if is_concave_at_hop2check:
-                        # Awarn(f'CONCAVE at {n2s(hop2check)}')
-                        #       f'at {n2s(hop2check)}: {is_concave_at_hop2check}, '
+                        # Awarn(f'CONCAVE at {(fnT[n] for n in hop2check)}')
                         #       f'remove: {", ".join([r for r in remove])}')
                         if hop2check not in remove:
                             if prevhop >= T and hop2check not in Barrier:
@@ -625,9 +624,7 @@ def OBEW(
                 # <bend unnecessary>
                 detourL = np.hypot(*(goalC - hookC))
                 addedL = prevL - detourL
-                # debug and print(f'[{i}] CONCAVE: '
-                # print(f'[{i}] CONCAVE: '
-                #       f'{n2s(hook, corner_, goal_)}')
+                # print(f'[{i}] CONCAVE:', fnT[hook], fnT[corner_], fnT[goal_])
                 detourX = get_crossings(goal_, hook, detour_waiver=True)
                 if not detourX:
                     path = (hook,)
@@ -745,7 +742,7 @@ def OBEW(
                 continue
             elif FarXsubtree:  # there is one crossing
                 subbarrier, farX = FarXsubtree.popitem()
-                # print('farX:', n2s(*farX))
+                # print('farX:', (fnT[n] for n in farX))
                 if depth > maxDepth:
                     warn('<plan_detour[%d]> max depth (%d) exceeded.', depth, maxDepth)
                     store.append((np.inf, (hook, corner_)))
@@ -788,9 +785,7 @@ def OBEW(
                     #          subfarL = np.hypot(*(cornerC - subcornerC))
                     #          subnearL = subaddedL - subfarL + nearL
                     #          dc_addedL += subnearL
-                    #      # debug and print(f'[{i}] CONCAVE: '
-                    #      # print(f'[{i}] CONCAVE: '
-                    #      #       f'{n2s(hook, corner_, goal_)}')
+                    #      # print(f'[{i}] CONCAVE:', fnT[hook], fnT[corner_], fnT[goal_])
                     #      dcX = get_crossings(subcorner_, corner_,
                     #                          detour_waiver=True)
                     #      if not dcX:
@@ -821,12 +816,12 @@ def OBEW(
         # choose between the low or high corners
         if store[0][0] < savings or store[1][0] < savings:
             loNotHi = store[0][0] < store[1][0]
-            cost, path, LoNotHi, direct, shift = store[not loNotHi]
+            cost, path, LoNotHi, direct, shift = store[int(not loNotHi)]
             Awarn(
                 f'({depth}) '
-                f'take: {store[not loNotHi][1] + (goal_,)} (@{cost:.0f}), '
-                f'drop: {store[loNotHi][1] + (goal_,)} '
-                f'(@{store[loNotHi][0]:.0f})'
+                f'take: {store[int(not loNotHi)][1] + (goal_,)} (@{cost:.0f}), '
+                f'drop: {store[int(loNotHi)][1] + (goal_,)} '
+                f'(@{store[int(loNotHi)][0]:.0f})'
             )
             debug(
                 f'<plan_detour[{depth}]>: «{u}-{v}» crosses «{blocked}-{goal_}» but '

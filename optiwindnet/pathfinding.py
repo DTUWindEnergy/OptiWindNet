@@ -126,7 +126,6 @@ class PathFinder:
         # Block for facilitating the printing of debug messages.
         allnodes = np.arange(T + R + B + 3)
         allnodes[-R:] = range(-R, 0)
-        #  self.n2s = NodeStr(allnodes, T + B + 3)
 
         debug(
             '>PathFinder: "%s" (T = %d)',
@@ -439,7 +438,7 @@ class PathFinder:
 
             #  if _nearside == _apex:  # debug info
             #      print(f"{'RIGHT' if side else 'LEFT '} "
-            #            f'nearside({F[_nearside]}) == apex({F[_apex]})')
+            #            f'nearside({_nearside}) == apex({_apex})')
             debug(
                 '<%d> %s _new(%d) _nearside(%d) _farside(%d) _apex(%d), _wedge_end: %d %d, _funnel: %s',
                 trav_id,
@@ -464,8 +463,8 @@ class PathFinder:
                     contender_wapex = paths[current_wapex].parent
                     _contender_wapex = paths.prime_from_id[contender_wapex]
                     #  print(f"{'RIGHT' if side else 'LEFT '} "
-                    #        f'current_wapex({F[_current_wapex]}) '
-                    #        f'contender_wapex({F[_contender_wapex]})')
+                    #        f'current_wapex({_current_wapex}) '
+                    #        f'contender_wapex({_contender_wapex})')
                     while (
                         _current_wapex != _farside
                         and _contender_wapex >= 0
@@ -478,8 +477,8 @@ class PathFinder:
                         contender_wapex = paths[current_wapex].parent
                         _contender_wapex = paths.prime_from_id[contender_wapex]
                         #  print(f"{'RIGHT' if side else 'LEFT '} "
-                        #        f'current_wapex({F[_current_wapex]}) '
-                        #        f'contender_wapex({F[_contender_wapex]})')
+                        #        f'current_wapex({_current_wapex}) '
+                        #        f'contender_wapex({_contender_wapex})')
                     _apex = _current_wapex
                     apex = current_wapex
                 else:
@@ -492,7 +491,7 @@ class PathFinder:
                 debug('<%d> infranear', trav_id)
                 current_wapex = wedge_end[side]
                 _current_wapex = paths.prime_from_id[current_wapex]
-                #  print(f'{F[_current_wapex]}')
+                #  print(f'{_current_wapex}')
                 contender_wapex = paths[current_wapex].parent
                 _contender_wapex = paths.prime_from_id[contender_wapex]
                 while (
@@ -502,7 +501,7 @@ class PathFinder:
                 ):
                     current_wapex = contender_wapex
                     _current_wapex = _contender_wapex
-                    #  print(f'{F[current_wapex]}')
+                    #  print(f'{current_wapex}')
                     contender_wapex = paths[current_wapex].parent
                     _contender_wapex = paths.prime_from_id[contender_wapex]
                 _apex_eff, apex_eff = _current_wapex, current_wapex

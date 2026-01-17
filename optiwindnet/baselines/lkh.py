@@ -18,49 +18,10 @@ from scipy.spatial.distance import pdist, squareform
 
 from ..interarraylib import fun_fingerprint
 from ..repair import repair_routeset_path
-from ..geometric import angle_helpers
+from ..geometric import angle_helpers, add_link_blockmap
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
-
-
-def _add_link_blockage(A: nx.Graph):
-    """Experimental. Add edge attribute 'num_blocked'.
-
-    Changes A in place. Assesses the number of terminals whose line-of-sight
-    to the root is intersected by the edge.
-
-    Only implemented for single-root sites.
-    """
-    VertexC = A.graph['VertexC']
-    angle_, angle_rank_, _ = angle_helpers(A, include_borders=False)
-    A.graph['angle_'] = angle_
-    A.graph['angle_rank_'] = angle_rank_
-    for u, v, edgeD in A.edges(data=True):
-        if u < 0 or v < 0:
-            edgeD['num_blocked'] = [0]
-            continue
-        uR, vR = angle_rank_[[u, v], 0].tolist()
-        uv_angle = (angle_[v] - angle_[u]).item()
-        if uv_angle < 0:
-            uR, vR = vR, uR
-        if abs(uv_angle) <= np.pi:
-            inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
-        else:
-            inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
-        if len(inside_wedge) > 0:
-            vec = VertexC[v] - VertexC[u]
-            wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
-            cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
-            # ¡assuming a single root!
-            root_vec = VertexC[-1] - VertexC[u]
-            is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
-            # ¡assuming a single root!
-            edgeD['num_blocked'] = [
-                sum((cross <= 0) if is_root_sign_pos else (cross >= 0)).item()
-            ]
-        else:
-            edgeD['num_blocked'] = [0]
 
 
 #  def prune_bad_links(A: nx.Graph, blockage_link_feeder_lim: float = 3.0):
@@ -70,13 +31,15 @@ def _prune_bad_links(A: nx.Graph, max_blockable_per_link: int):
     d2roots = A.graph['d2roots']
     unfeas_links = []
     for u, v, edgeD in A.edges(data=True):
+        if u < 0 or v < 0:
+            continue
         extent = edgeD['length']
         root = A.nodes[v]['root']
         if (
             extent > d2roots[u, A.nodes[u]['root']]
             and extent > d2roots[v, A.nodes[v]['root']]
         ) or (
-            edgeD['num_blocked'][root] > max_blockable_per_link
+            edgeD['blocked__'][root].count() > max_blockable_per_link
             #  and edgeD['cos_'][root] < blockage_link_cos_lim
         ):
             unfeas_links.append((u, v) if u < v else (v, u))

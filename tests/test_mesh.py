@@ -12,13 +12,14 @@ from optiwindnet.mesh import (
 from .helpers import tiny_wfn
 
 # disable Numba JIT for CI/test determinism if available
-os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
+os.environ.setdefault('NUMBA_DISABLE_JIT', '1')
 try:
     import numba
 
     numba.config.DISABLE_JIT = True
 except Exception:
     pass
+
 
 # ----------------------- tests -----------------------
 def test_make_planar_embedding_basic():
@@ -32,7 +33,7 @@ def test_make_planar_embedding_basic():
     assert A.number_of_edges() > 0
 
     # check basic keys in A
-    for key in ("T", "R", "B", "VertexC", "hull"):
+    for key in ('T', 'R', 'B', 'VertexC', 'hull'):
         assert key in A.graph
 
 
@@ -44,30 +45,30 @@ def test_A_graph_all(monkeypatch):
     # Delaunay-based, no weightfun
     A_d = A_graph(L, delaunay_based=True, weightfun=None)
     assert A_d.number_of_edges() > 0
-    assert all(d.get("length", 0.0) > 0.0 for _, _, d in A_d.edges(data=True))
-    assert all("weight" not in d for _, _, d in A_d.edges(data=True))
+    assert all(d.get('length', 0.0) > 0.0 for _, _, d in A_d.edges(data=True))
+    assert all('weight' not in d for _, _, d in A_d.edges(data=True))
 
     # Complete graph path with custom weight function that sets 'cost'
     def cost_fn(_edge):
         return 42.0
 
-    A_c = A_graph(L, delaunay_based=False, weightfun=cost_fn, weight_attr="cost")
+    A_c = A_graph(L, delaunay_based=False, weightfun=cost_fn, weight_attr='cost')
     assert A_c.number_of_edges() > 0
-    assert all(d.get("cost") == 42.0 for _, _, d in A_c.edges(data=True))
+    assert all(d.get('cost') == 42.0 for _, _, d in A_c.edges(data=True))
 
     # When weightfun is provided on the Delaunay path, apply_edge_exemptions should be called.
-    calls = {"n": 0}
+    calls = {'n': 0}
     import optiwindnet.mesh as mesh_mod
 
     def fake_apply_edge_exemptions(a):
-        calls["n"] += 1
+        calls['n'] += 1
         return a
 
-    monkeypatch.setattr(mesh_mod, "apply_edge_exemptions", fake_apply_edge_exemptions)
+    monkeypatch.setattr(mesh_mod, 'apply_edge_exemptions', fake_apply_edge_exemptions)
 
     A_dw = A_graph(L, delaunay_based=True, weightfun=lambda e: 1.23)
-    assert calls["n"] == 1
-    assert all("weight" in d for _, _, d in A_dw.edges(data=True))
+    assert calls['n'] == 1
+    assert all('weight' in d for _, _, d in A_dw.edges(data=True))
 
 
 def test_edges_and_hull_from_cdt_all():

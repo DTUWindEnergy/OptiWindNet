@@ -34,12 +34,12 @@ error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 # solver option name mapping (pyomo should have taken care of this)
 _common_options = namedtuple('common_options', 'mip_gap time_limit')
-_optkey = dict(
-    cplex=_common_options('mipgap', 'timelimit'),
-    gurobi=_common_options('mipgap', 'timelimit'),
-    cbc=_common_options('ratioGap', 'seconds'),
-    highs=_common_options('mip_gap', 'time_limit'),
-)
+_optkey = {
+    'pyomo.cplex': _common_options('mipgap', 'timelimit'),
+    'pyomo.gurobi': _common_options('mipgap', 'timelimit'),
+    'pyomo.cbc': _common_options('ratioGap', 'seconds'),
+    'pyomo.highs': _common_options('mip_gap', 'time_limit'),
+}
 # usage: _optname[solver_name].mipgap
 
 _default_options = dict(
@@ -75,7 +75,7 @@ _default_options = dict(
 
 class SolverPyomo(Solver):
     def __init__(self, name, prefix='', suffix='', **kwargs) -> None:
-        self.name = name
+        self.name = 'pyomo.' + name
         self.options = _default_options[name]
         self.solver = pyo.SolverFactory(prefix + name + suffix, **kwargs)
 
@@ -179,7 +179,7 @@ class SolverPyomoAppsi(Solver):
     only solver using v3 at that point."""
 
     def __init__(self, name, solver_cls, **kwargs) -> None:
-        self.name = name
+        self.name = 'pyomo.' + name
         self.options = _default_options[name]
         self.solver = solver_cls(**kwargs)
 
