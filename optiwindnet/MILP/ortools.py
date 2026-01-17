@@ -113,13 +113,19 @@ class SolverORTools(Solver, PoolHandler):
         _ = solver.solve(model, storer)
         num_solutions = len(storer.solutions)
         # TODO: remove this work-around for ortools v9.15
-        if callable(solver._checked_response.status):
+        response = getattr(
+            solver,
+            '_checked_response', # ortools v9.15
+            getattr(solver, '_CpSolver__response'), # ortoold v9.14
+        )
+        if callable(response.status):
             # we are in ortools v9.14 or the bug was fixed
-            termination = solver.status_name()
+            status = response.status()
         else:
             # we are in the buggy v9.15.6755
             # https://github.com/google/or-tools/issues/4985
-            termination = solver.status_name
+            status = response.status
+        termination = solver.status_name(status)
         if num_solutions == 0:
             raise OWNSolutionNotFound(
                 f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
