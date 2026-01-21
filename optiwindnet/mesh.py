@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
-
 import logging
 import math
 from bisect import bisect_left
@@ -16,11 +15,11 @@ import shapely as shp
 from bidict import bidict
 from scipy.spatial.distance import cdist
 
+from .interarraylib import add_terminal_closest_root
 from .geometric import (
     CoordPairs,
     Indices,
     apply_edge_exemptions,
-    assign_root,
     complete_graph,
     find_edges_bbox_overlaps,
     is_crossing_no_bbox,
@@ -134,7 +133,7 @@ def _halfedges_from_triangulation(
 
 def _edges_and_hull_from_cdt(
     triangles: list[cdt.Triangle], vertmap: Indices
-) -> list[tuple[int, int]]:
+) -> tuple[list[tuple[int, int]], list[int]]:
     """Get edges/hull from triangulation.
 
     THIS FUNCTION MAY BE IRRELEVANT, AS WE TYPICALLY NEED THE
@@ -239,7 +238,7 @@ def _planar_from_cdt_triangles(
         triangles = [tuple(sorted(tri.tolist())) for tri in triangleI]
         triangles.sort()
     else:
-        triangles = None
+        triangles = []
 
     # formula for number of triangulation's edges is: 3*V - H - 3
     # H = 3 since CDT's Hull is always the supertriangle
@@ -1409,7 +1408,7 @@ def delaunay(L: nx.Graph, bind2root: bool = False) -> nx.Graph:
     """
     _, A = make_planar_embedding(L)
     if bind2root:
-        assign_root(A)
+        add_terminal_closest_root(A)
         R = L.graph['R']
         # assign each edge to the root closest to the edge's middle point
         VertexC = A.graph['VertexC']
