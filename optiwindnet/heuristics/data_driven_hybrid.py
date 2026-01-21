@@ -17,20 +17,22 @@ from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
 from ..geometric import (
-    add_link_cosines,
     angle_oracles_factory,
-    assign_root,
     minimum_spanning_forest,
-    angle_helpers,
-    add_link_blockmap,
 )
-from ..interarraylib import as_normalized, calcload
+from ..interarraylib import (
+    as_normalized,
+    calcload,
+    add_link_cosines,
+    add_link_blockmap,
+    add_terminal_closest_root
+)
 
 lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
-__version = 'DDHv8'
+__version = 'DDHv9'
 
 ONE = bitarray('1')
 
@@ -262,7 +264,7 @@ def data_driven_hybrid(
     d2roots = A.graph['d2roots']
     roots = range(-R, 0)
 
-    assign_root(A)
+    add_terminal_closest_root(A)
     # removing root nodes from A to speedup union searches
     A.remove_nodes_from(roots)
     add_link_blockmap(A)
