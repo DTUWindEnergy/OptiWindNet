@@ -14,12 +14,11 @@ from ..geometric import (
     angle_helpers,
     angle_oracles_factory,
     apply_edge_exemptions,
-    assign_root,
     complete_graph,
     is_crossing,
     is_same_side,
 )
-from ..interarraylib import fun_fingerprint
+from ..interarraylib import fun_fingerprint, add_terminal_closest_root
 from ..mesh import delaunay
 from .priorityqueue import PriorityQueue
 
@@ -72,7 +71,7 @@ def CPEW(
     else:
         A = complete_graph(L)
 
-    assign_root(A)
+    add_terminal_closest_root(A)
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
     angle__, angle_rank__, _ = angle_helpers(L)
@@ -254,7 +253,7 @@ def CPEW(
                             v,
                             subroot,
                         )
-                        _, _, _, (s, t) = pq.tags.get(subroot_[v])
+                        _, _, _, (s, t) = pq.tags[subroot_[v]]
                         if t == u:
                             ComponIn[subroot].remove(subroot_[v])
                             stale_subtrees.add(subroot_[v])

@@ -8,8 +8,7 @@ import networkx as nx
 from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
-from ..geometric import assign_root
-from ..interarraylib import calcload, fun_fingerprint
+from ..interarraylib import calcload, fun_fingerprint, add_terminal_closest_root
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -42,7 +41,7 @@ def EW_presolver(
 
     roots = range(-R, 0)
 
-    assign_root(A)
+    add_terminal_closest_root(A)
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
 
     # removing root nodes from A to speedup enqueue_best_union

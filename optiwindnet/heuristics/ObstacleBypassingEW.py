@@ -17,12 +17,11 @@ from ..geometric import (
     angle_helpers,
     angle_oracles_factory,
     apply_edge_exemptions,
-    assign_root,
     is_bunch_split_by_corner,
     is_crossing,
     is_same_side,
 )
-from ..interarraylib import L_from_G, fun_fingerprint
+from ..interarraylib import L_from_G, fun_fingerprint, add_terminal_closest_root
 from ..mesh import make_planar_embedding
 from ..utils import Alerter
 from .priorityqueue import PriorityQueue
@@ -105,7 +104,7 @@ def OBEW(
     # crossings = L.graph['crossings']
     # BEGIN: prepare auxiliary graph with all allowed edges and metrics
     _, A = make_planar_embedding(L)
-    assign_root(A)
+    add_terminal_closest_root(A)
     P = A.graph['planar']
     diagonals = A.graph['diagonals']
     d2roots = A.graph['d2roots']
