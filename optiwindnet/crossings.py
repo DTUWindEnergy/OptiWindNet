@@ -332,9 +332,9 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
         if is_split:
             Xings.append((d_, d_, bunch[insideI[0]], bunch[outsideI[0]]))
         # assert not is_split, \
-        #     f'Detour around node {F[d_]} splits a branch; ' \
-        #     f'inside: {[F[bunch[i]] for i in insideI]}; ' \
-        #     f'outside: {[F[bunch[i]] for i in outsideI]}'
+        #     f'Detour around node {d_} splits a branch; ' \
+        #     f'inside: {[bunch[i] for i in insideI]}; ' \
+        #     f'outside: {[bunch[i] for i in outsideI]}'
     return Xings
 
 

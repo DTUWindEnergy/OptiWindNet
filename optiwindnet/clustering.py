@@ -54,7 +54,7 @@ def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
             heappush(expel, saved)
         was_cluster_exp_round = (len(cluster_[r_exp]) % capacity) == 0
         cluster.remove(n_exp)
-        #  print(f'{F[n_exp]}: {F[r]} -> {F[r_exp]}', end='|')
+        #  print(f'{n_exp}: {r} -> {r_exp}', end='|')
         cluster_[r_exp].add(n_exp)
         d_exp = d2roots[n_exp, r_exp]
         for i in idx_[r_exp]:

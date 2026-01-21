@@ -1,3 +1,13 @@
+# v0.1.6
+
+[Commit history since v0.1.5](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.5...v0.1.6)
+
+Drop-in replacement for v0.1.5. This release provides maily two important fixes:
+- fix bugs caused by ortools v9.15.6755 released on 2026-01-12
+- remove a duplicate turbine from the included location Gangkou 2
+
+In addition, the graph attribute 'creator' of solutions produced by OWN was reverted back to using the naming convention adopted in earlier OWN versions, which includes the 'pyomo' string if the solver was called through it (e.g. 'MILP.pyomo.cplex' instead of 'MILP.cplex').
+
 # v0.1.5
 
 [Commit history since v0.1.4](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.4...v0.1.5)
