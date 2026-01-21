@@ -89,18 +89,15 @@ def EW_presolver(
     log = []
     # END: helper data structures
 
-    def component_merging_edge(subroot, forbidden=None, margin=1.02):
+    def component_merging_edge(subroot, margin=1.02):
         # gather all the edges leaving the subtree of subroot
-        if forbidden is None:
-            forbidden = set()
-        forbidden.add(subroot)
         capacity_left = capacity - len(subtree_[subroot])
         choices = []
         sr_d2root = d2roots[subroot, A.nodes[subroot]['root']]
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
-                if subroot_[v] in forbidden or len(subtree_[v]) > capacity_left:
+                if subroot_[v] == subroot or len(subtree_[v]) > capacity_left:
                     # useless edges
                     edges2discard.append((u, v))
                 else:
