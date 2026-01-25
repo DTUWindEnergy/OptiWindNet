@@ -111,6 +111,39 @@ def get_interferences_list(
     return crossings
 
 
+def edge_conflicts(
+    u: int, v: int, diagonals: bidict
+) -> Generator[tuple[int, int], None, None]:
+    """Generator of edges conflicting with (u, v).
+
+    Args:
+      u: node
+      v: node
+      diagonals: map of crossings Delaunay<->diagonals
+    """
+    u, v = (u, v) if u < v else (v, u)
+    st = diagonals.get((u, v))
+    if st is None:
+        # ⟨u, v⟩ is a Delaunay edge
+        st = diagonals.inv.get((u, v))
+        if st is not None and st[0] >= 0:
+            yield st
+    else:
+        # ⟨u, v⟩ is a diagonal of Delanay edge ⟨s, t⟩
+        # crossing with Delaunay edge
+        yield st
+
+        s, t = st
+        # two triangles may contain ⟨s, t⟩, each defined by their non-st vertex
+        for hat in (u, v):
+            for diag in (
+                diagonals.inv.get((w, y) if w < y else (y, w))
+                for w, y in ((s, hat), (hat, t))
+            ):
+                if diag is not None and diag[0] >= 0:
+                    yield diag
+
+
 def edge_crossings(
     u: int, v: int, G: nx.Graph, diagonals: bidict
 ) -> list[tuple[int, int]]:

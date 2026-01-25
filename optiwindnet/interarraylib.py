@@ -1143,9 +1143,11 @@ def add_terminal_closest_root(A: nx.Graph) -> None:
       A: available-links graph
     """
     R = A.graph['R']
+    T = A.graph['T']
     closest_root_ = np.argmin(A.graph['d2roots'], axis=1) - R
     nx.set_node_attributes(A, {n: r.item() for n, r in enumerate(closest_root_)}, 'root')
-    A.graph['rootmap__'] = [bitarray((closest_root_ == r).tolist()) for r in range(-R, 0)]
+    # while 'd2roots' includes border vertices, 'rootmap__' must not
+    A.graph['rootmask__'] = [bitarray((closest_root_[:T] == r).tolist()) for r in range(-R, 0)]
 
 
 def add_link_blockmap(A: nx.Graph):
