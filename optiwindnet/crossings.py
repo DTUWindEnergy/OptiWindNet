@@ -111,10 +111,8 @@ def get_interferences_list(
     return crossings
 
 
-def edge_conflicts(
-    u: int, v: int, diagonals: bidict
-) -> Generator[tuple[int, int], None, None]:
-    """Generator of edges conflicting with (u, v).
+def edge_conflicts(u: int, v: int, diagonals: bidict) -> Iterator[tuple[int, int]]:
+    """Iterate over edges conflicting with (u, v).
 
     Args:
       u: node
