@@ -8,6 +8,7 @@ import numpy as np
 import networkx as nx
 from scipy.stats import rankdata
 from bitarray import bitarray
+from bitarray.util import ones, zeros
 
 from ..crossings import edge_conflicts
 from ..geometric import (
@@ -28,7 +29,7 @@ __all__ = ()
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
-ONE = bitarray('1')
+_ONE = bitarray('1')
 
 
 def constructor(
@@ -88,20 +89,19 @@ def constructor(
 
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
-    subtree_ = [bitarray(T) for _ in _T]
+    subtree_ = [zeros(T) for _ in _T]
     for t, subtree in zip(_T, subtree_):
-        subtree[t] = 1
+        subtree[t] = True
     # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
-    final_hop_of = [t for t in _T]
+    last_hop_of = [t for t in _T]
     hooks_of = [[t] for t in _T]
     # <is_stale_>: mask of stale subroots (in need of target refresh)
-    is_stale_ = bitarray(T)
-    is_stale_.setall(1)
+    is_stale_ = ones(T)
     # <is_not_full_>: mask of subroots with spare capacity
-    is_not_full_ = bitarray(T)
-    is_not_full_.setall(1)
-    # <to_retarget>: mask of subroots that are stale and not full
+    is_not_full_ = ones(T)
+    # memory allocation for temporary constructs
+    # <to_retarget_>: mask of subroots that are stale and not full
     to_retarget_ = bitarray(T)
 
     # mappings from components (indexed by their subroots)
@@ -117,9 +117,9 @@ def constructor(
     who_targets_ = [set() for _ in _T]
 
     # other structures
-    # <final_hops_count_>: number of times a particular node is used as the hop closest
+    # <last_hops_count_>: number of times a particular node is used as the hop closest
     #                   to root in the feeder link
-    final_hops_count_ = [1 for _ in _T]
+    last_hops_count_ = [1 for _ in _T]
     # <pq>: the smaller the payload, the higher the priority
     pq = PriorityQueue()
     # enqueue_best_union()
@@ -138,7 +138,7 @@ def constructor(
         capacity_left = capacity - subtree.count()
         choices = []
         edges2discard = []
-        for u in subtree.search(ONE):
+        for u in subtree.search(_ONE):
             for v in A[u]:
                 if subroot_[v] == subroot or subtree_[subroot_[v]].count() > capacity_left:
                     # useless edges
@@ -158,7 +158,7 @@ def constructor(
         sr_d2root = d2roots[subroot, A.nodes[subroot]['root']]
         choices = []
         edges2discard = []
-        for u in subtree.search(ONE):
+        for u in subtree.search(_ONE):
             for v in A[u]:
                 if subroot_[v] == subroot or subtree_[subroot_[v]].count() > capacity_left:
                     # useless edges
@@ -192,7 +192,7 @@ def constructor(
         root_lust = 0.6 * capacity_used / capacity
         choices = []
         edges2discard = []
-        for u in subtree.search(ONE):
+        for u in subtree.search(_ONE):
             for v in A[u]:
                 sr_v = subroot_[v]
                 if sr_v == subroot or subtree_[sr_v].count() > capacity_left:
@@ -217,14 +217,14 @@ def constructor(
         blocked__ = A[u][v]['blocked__']
         detour_increase = 0.
         clones = []
-        is_final_hop_ = bitarray(count > 0 for count in final_hops_count_)
+        is_last_hop_ = bitarray(count > 0 for count in last_hops_count_)
         union_ = subtree_[sr_dropped] | subtree_[sr_kept]
         for r, rootmask_, blocked_ in zip(roots, rootmask__, blocked__):
             # subtree_span__[sr_kept] gives the span of the union because it was
             #   updated just before calling this function
             lo, hi = subtree_span__[sr_kept][r]
-            for hop in (rootmask_ & is_final_hop_ & (blocked_ | union_)).search(ONE):
-                count = final_hops_count_[hop] - (hop == sr_dropped) - (hop == sr_kept)
+            for hop in (rootmask_ & is_last_hop_ & (blocked_ | union_)).search(_ONE):
+                count = last_hops_count_[hop] - (hop == sr_dropped) - (hop == sr_kept)
                 if hop == lo or hop == hi or count == 0:
                     # no increase if the union span is not extending beyond hop's angle
                     continue
@@ -276,7 +276,7 @@ def constructor(
         debug('[%d]', i)
         to_retarget_[:] = is_stale_ & is_not_full_
         if to_retarget_.any():
-            stale_subtrees = tuple(to_retarget_.search(ONE))
+            stale_subtrees = tuple(to_retarget_.search(_ONE))
             debug('stale_subtrees: %s', stale_subtrees)
             for subtree in stale_subtrees:
                 enqueue_best_union(subtree)
@@ -313,19 +313,19 @@ def constructor(
                 subtree_span__[sr_kept] = sr_kept_old_span
                 continue
 
-            # update the final hops
-            final_hop_dropped = final_hop_of[sr_dropped]
-            final_hops_count_[final_hop_dropped] -= 1
-            hooks_of[final_hop_dropped].remove(sr_dropped)
-            final_hop_of[sr_dropped] = None
+            # update the last hops
+            last_hop_dropped = last_hop_of[sr_dropped]
+            last_hops_count_[last_hop_dropped] -= 1
+            hooks_of[last_hop_dropped].remove(sr_dropped)
+            last_hop_of[sr_dropped] = None
             # reroute
-            for old_final_hop, new_final_hop, count in clones:
-                final_hops_count_[old_final_hop] -= count
-                final_hops_count_[new_final_hop] += count
-                for hook in hooks_of[old_final_hop]:
-                    final_hop_of[hook] = new_final_hop
-                hooks_of[new_final_hop].extend(hooks_of[old_final_hop])
-                hooks_of[old_final_hop] = []
+            for old_last_hop, new_last_hop, count in clones:
+                last_hops_count_[old_last_hop] -= count
+                last_hops_count_[new_last_hop] += count
+                for hook in hooks_of[old_last_hop]:
+                    last_hop_of[hook] = new_last_hop
+                hooks_of[new_last_hop].extend(hooks_of[old_last_hop])
+                hooks_of[old_last_hop] = []
 
             # update the component's blocked set
             for r, subtree_blocked_ in zip(roots, subtree_blocked__):
@@ -352,7 +352,7 @@ def constructor(
         if root_u != root:
             rootmask__[root_u] &= ~subtree_dropped
             rootmask__[root] |= subtree_dropped
-        for t in subtree_dropped.search(ONE):
+        for t in subtree_dropped.search(_ONE):
             A.nodes[t]['root'] = root
             subroot_[t] = sr_kept
         A.graph['rootmask__'][root] |= subtree_dropped
@@ -370,32 +370,32 @@ def constructor(
         if capacity_left > 0:
             if method == 'rootlust':
                 # rootlust needs a more aggressive retargetting
-                is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = 1
+                is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
                 who_targets_[sr_kept].clear()
             else:
                 for subroot in tuple(who_targets_[sr_kept]):
                     if subtree_[subroot].count() > capacity_left:
                         who_targets_[sr_kept].remove(subroot)
-                        is_stale_[subroot] = 1
+                        is_stale_[subroot] = True
                 for subroot in who_targets_[sr_dropped]:
                     if subtree_[subroot].count() > capacity_left:
-                        is_stale_[subroot] = 1
+                        is_stale_[subroot] = True
                     else:
                         who_targets_[sr_kept].add(subroot)
-            is_stale_[sr_kept] = 1
+            is_stale_[sr_kept] = True
         else:
             # max capacity reached: subtree full
-            is_not_full_[sr_kept] = 0
+            is_not_full_[sr_kept] = False
             if sr_kept in pq.tags:
                 # this is required because of i=0 feeders
                 pq.cancel(sr_kept)
-            subtree_nodes = tuple(subtree.search(ONE))
+            subtree_nodes = tuple(subtree.search(_ONE))
             # by removing nodes, all the useless edges are discarded
             A.remove_nodes_from(subtree_nodes)
             debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)            
-            is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = 1
+            is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
             who_targets_[sr_kept] = None
-        is_not_full_[sr_dropped] = 0
+        is_not_full_[sr_dropped] = False
         subtree_[sr_dropped] = None
         who_targets_[sr_dropped] = None
     # END: main loop
@@ -403,7 +403,7 @@ def constructor(
     # add feeders
     is_subroot_ = bitarray(subtree is not None for subtree in subtree_)
     for r, rootmask_ in zip(roots, rootmask__):
-        for sr in (rootmask_ & is_subroot_).search(ONE):
+        for sr in (rootmask_ & is_subroot_).search(_ONE):
             S.add_edge(r, sr)
 
     calcload(S)
@@ -415,7 +415,7 @@ def constructor(
         iterations=i,
         prevented_crossings=prevented_crossings,
         method_options=dict(
-            fun_fingerprint=_NEW_fun_fingerprint,
+            fun_fingerprint=_constructor_fun_fingerprint,
         ),
     )
     #  if keep_log:
@@ -423,4 +423,4 @@ def constructor(
     return S
 
 
-_NEW_fun_fingerprint = fun_fingerprint(constructor)
+_constructor_fun_fingerprint = fun_fingerprint(constructor)
