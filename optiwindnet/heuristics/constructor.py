@@ -204,11 +204,10 @@ def constructor(
                         # useful edges
                         root_v = A.nodes[v]['root']
                         d2rGain = d2root - d2roots[sr_v, root_v]
-                        if d2rGain >= 0:
-                            tiebreaker = d2rootsRank[v, root_v]
-                            choices.append(
-                                (W - d2root - d2rGain * root_lust, tiebreaker, u, v)
-                            )
+                        tiebreaker = d2rootsRank[v, root_v]
+                        choices.append(
+                            (W - d2root - d2rGain * root_lust, tiebreaker, u, v)
+                        )
         return (min(choices) if choices else ()), edges2discard
     # END: alternative methods of selecting the best edge to expand components
 
