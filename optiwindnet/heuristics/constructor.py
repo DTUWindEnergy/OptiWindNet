@@ -95,6 +95,14 @@ def constructor(
     subroot_ = list(_T)
     final_hop_of = [t for t in _T]
     hooks_of = [[t] for t in _T]
+    # <is_stale_>: mask of stale subroots (in need of target refresh)
+    is_stale_ = bitarray(T)
+    is_stale_.setall(1)
+    # <is_not_full_>: mask of subroots with spare capacity
+    is_not_full_ = bitarray(T)
+    is_not_full_.setall(1)
+    # <to_retarget>: mask of subroots that are stale and not full
+    to_retarget_ = bitarray(T)
 
     # mappings from components (indexed by their subroots)
     # <subtree_span__>: pairs (most_CW, most_CCW) of extreme nodes of each
@@ -105,8 +113,8 @@ def constructor(
     max_blockable = blockage_subtree_feeder_lim * capacity
 
     # mappings from components (identified by their subroots)
-    # <needed_by_>: maps component to set of components queued to merge in
-    needed_by_ = [set() for _ in _T]
+    # <who_targets_>: maps component to set of components queued to merge in
+    who_targets_ = [set() for _ in _T]
 
     # other structures
     # <final_hops_count_>: number of times a particular node is used as the hop closest
@@ -115,9 +123,6 @@ def constructor(
     # <pq>: the smaller the payload, the higher the priority
     pq = PriorityQueue()
     # enqueue_best_union()
-    # <stale_subtrees>: deque for components that need to go through
-    # stale_subtrees = deque()
-    stale_subtrees = set()
     # <i>: iteration counter
     i = 0
     # <prevented_crossing>: counter for edges discarded due to crossings
@@ -198,11 +203,12 @@ def constructor(
                     if W <= d2root:
                         # useful edges
                         root_v = A.nodes[v]['root']
-                        tiebreaker = d2rootsRank[v, root_v]
                         d2rGain = d2root - d2roots[sr_v, root_v]
-                        choices.append(
-                            (W - d2root - d2rGain * root_lust, tiebreaker, u, v)
-                        )
+                        if d2rGain >= 0:
+                            tiebreaker = d2rootsRank[v, root_v]
+                            choices.append(
+                                (W - d2root - d2rGain * root_lust, tiebreaker, u, v)
+                            )
         return (min(choices) if choices else ()), edges2discard
     # END: alternative methods of selecting the best edge to expand components
 
@@ -250,54 +256,13 @@ def constructor(
         if best_choice:
             priority, _, u, v = best_choice
             pq.add(priority, subroot, (u, v))
-            needed_by_[subroot_[v]].add(subroot)
+            who_targets_[subroot_[v]].add(subroot)
             debug('<pushed> sr_u <%d>, «%d~%d», priority = %.3f', subroot, u, v, priority)
         else:
-            # no viable edge is better than subroot for this node
+            # no viable edge is shorter than subroot for this subtree
             debug('<cancelling> %d', subroot)
             if subroot in pq.tags:
                 pq.cancel(subroot)
-
-    def ban_queued_union(sr_u, u, v):
-        if (u, v) in A.edges:
-            A.remove_edge(u, v)
-        else:
-            debug('<<< UNLIKELY <ban_queued_union()> «%d~%d» not in A >>>', u, v)
-        sr_v = subroot_[v]
-        # TODO: think about why a discard was needed
-        needed_by_[sr_v].discard(sr_u)
-        # stale_subtrees.appendleft(sr_u)
-        stale_subtrees.add(sr_u)
-        # enqueue_best_union(sr_u)
-
-        # BEGIN: block to be simplified
-        is_reverse = False
-        is_needed = sr_v in needed_by_[sr_u]
-        reverse_entry = pq.tags.get(sr_v)
-        if reverse_entry is not None:
-            _, _, _, (s, t) = reverse_entry
-            if (t, s) == (u, v):
-                # TODO: think about why a discard was needed
-                needed_by_[sr_u].discard(sr_v)
-                # this is assymetric on purpose (i.e. not calling
-                # pq.cancel(sr_u), because enqueue_best_union will do)
-                pq.cancel(sr_v)
-                enqueue_best_union(sr_v)
-                is_reverse = True
-
-        if is_needed != is_reverse:
-            # TODO: Why did I expect always False here? It is sometimes True.
-            debug(
-                '«%d~%d», sr_u <%d>, sr_v <%d> is_needed: %s, is_reverse: %s',
-                u,
-                v,
-                sr_u,
-                sr_v,
-                is_needed,
-                is_reverse,
-            )
-
-        # END: block to be simplified
 
     # initialize pq
     for n in _T:
@@ -310,11 +275,13 @@ def constructor(
             error('maxiter reached (%d)', i)
             break
         debug('[%d]', i)
-        if stale_subtrees:
+        to_retarget_[:] = is_stale_ & is_not_full_
+        if to_retarget_.any():
+            stale_subtrees = tuple(to_retarget_.search(ONE))
             debug('stale_subtrees: %s', stale_subtrees)
             for subtree in stale_subtrees:
                 enqueue_best_union(subtree)
-            stale_subtrees.clear()
+            is_stale_.setall(0)
         if not pq:
             # finished
             break
@@ -324,7 +291,6 @@ def constructor(
         # check if the union still makes sense
         if (u, v) not in A.edges:
             debug('<discard> «%d~%d» not in A anymore', u, v)
-            ban_queued_union(sr_dropped, u, v)
             continue
 
         sr_kept = subroot_[v]
@@ -346,7 +312,6 @@ def constructor(
             if savings < detour_increase:
                 debug('<discard> «%d~%d» too long detours', u, v)
                 subtree_span__[sr_kept] = sr_kept_old_span
-                ban_queued_union(sr_dropped, u, v)
                 continue
 
             # update the final hops
@@ -371,16 +336,17 @@ def constructor(
         # add edge to effect union of subtree of u to subtree of v (via subroot of v)
         subtree = subtree_[sr_kept]
         subtree_dropped = subtree_[sr_dropped]
-        subtree_[sr_dropped] = None
         subtree |= subtree_dropped
         capacity_left = capacity - subtree.count()
 
         sr_v_entry = pq.tags.get(sr_kept)
         if sr_v_entry is not None:
             _, _, _, (_, t) = sr_v_entry
-            needed_by_[subroot_[t]].remove(sr_kept)
+            sr_kept_target = subroot_[t]
+            if sr_kept_target != sr_dropped:
+                who_targets_[sr_kept_target].remove(sr_kept)
         # TODO: think about why a discard was needed
-        needed_by_[sr_kept].discard(sr_dropped)
+        who_targets_[sr_kept].remove(sr_dropped)
 
         # assign root, subroot and subtree to the newly added nodes
         root_u = A.nodes[u]['root']
@@ -401,28 +367,26 @@ def constructor(
         A.remove_edges_from(edge_conflicts(u, v, diagonals))
 
         # finished adding the edge, now check the consequences
+        who_targets_[sr_dropped].discard(sr_kept)
         if capacity_left > 0:
-            for subroot in list(needed_by_[sr_kept]):
-                if len(subtree_[subroot]) > capacity_left:
-                    # TODO: think about why a discard was needed
-                    # needed_by_[sr_kept].remove(subroot)
-                    needed_by_[sr_kept].discard(subroot)
-                    # enqueue_best_union(subroot)
-                    # stale_subtrees.append(subroot)
-                    stale_subtrees.add(subroot)
-            for subroot in needed_by_[sr_dropped] - needed_by_[sr_kept]:
-                if subtree_[subroot].count() > capacity_left:
-                    # enqueue_best_union(subroot)
-                    # stale_subtrees.append(subroot)
-                    stale_subtrees.add(subroot)
-                else:
-                    needed_by_[sr_kept].add(subroot)
-            # needed_by_[sr_dropped] = None
-            # enqueue_best_union(sr_kept)
-            # stale_subtrees.append(sr_kept)
-            stale_subtrees.add(sr_kept)
+            if method == 'rootlust':
+                # rootlust needs a more aggressive retargetting
+                is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = 1
+                who_targets_[sr_kept].clear()
+            else:
+                for subroot in tuple(who_targets_[sr_kept]):
+                    if subtree_[subroot].count() > capacity_left:
+                        who_targets_[sr_kept].remove(subroot)
+                        is_stale_[subroot] = 1
+                for subroot in who_targets_[sr_dropped]:
+                    if subtree_[subroot].count() > capacity_left:
+                        is_stale_[subroot] = 1
+                    else:
+                        who_targets_[sr_kept].add(subroot)
+            is_stale_[sr_kept] = 1
         else:
             # max capacity reached: subtree full
+            is_not_full_[sr_kept] = 0
             if sr_kept in pq.tags:
                 # this is required because of i=0 feeders
                 pq.cancel(sr_kept)
@@ -430,12 +394,11 @@ def constructor(
             # by removing nodes, all the useless edges are discarded
             A.remove_nodes_from(subtree_nodes)
             debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)            
-            for subroot in needed_by_[sr_dropped] | needed_by_[sr_kept]:
-                # enqueue_best_union(subroot)
-                # stale_subtrees.append(subroot)
-                stale_subtrees.add(subroot)
-            # needed_by_[sr_dropped] = None
-            # needed_by_[sr_kept] = None
+            is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = 1
+            who_targets_[sr_kept] = None
+        is_not_full_[sr_dropped] = 0
+        subtree_[sr_dropped] = None
+        who_targets_[sr_dropped] = None
     # END: main loop
 
     # add feeders
@@ -461,4 +424,4 @@ def constructor(
     return S
 
 
-_NEW_fun_fingerprint = fun_fingerprint(NEW)
+_NEW_fun_fingerprint = fun_fingerprint(constructor)
