@@ -65,14 +65,24 @@ DTU Wind and Energy Systems, Technical University of Denmark (2025, March),
 url: <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>
 
 ```{code-block} bib
-@article{
-    optiwindnet_2025,
-    title={OptiWindNet: Tool for designing and optimizing the electrical cable network of offshore wind farms},
-    author={Mauricio {Souza de Alencar} and Amir Arasteh and Mikkel Friis-Møller},
-    url="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet",
-    publisher={DTU Wind and Energy Systems, Technical University of Denmark},
-    year={2025},
-    month={4}
+@software{souza_de_alencar_2026_18388439,
+  author       = {Souza de Alencar, Mauricio and
+                  Arasteh, Amir and
+                  Friis-Møller, Mikkel},
+  title        = {DTUWindEnergy/OptiWindNet: Release of v0.1.7},
+  month        = jan,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {v0.1.7},
+  doi          = {10.5281/zenodo.18388439},
+  url          = {https://doi.org/10.5281/zenodo.18388439},
+  swhid        = {swh:1:dir:289eeb68be1214f069d0634666fe0c3bad2df84d
+                   ;origin=https://doi.org/10.5281/zenodo.18388438;vi
+                   sit=swh:1:snp:8ca52a089ae33194f300b466a6168ef29e58
+                   2eb4;anchor=swh:1:rel:c660f0924a7df34ae674a91b178c
+                   715c43f6317c;path=DTUWindEnergy-
+                   OptiWindNet-9c6db85
+                  },
 }
 ```
 
