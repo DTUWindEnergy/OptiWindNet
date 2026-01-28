@@ -37,6 +37,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: "OptiWindNet ${{ github.ref_name }}"
           body: ${{ steps.tag_data.outputs.tag_message }}
           files: |
             dist/*.tar.gz
