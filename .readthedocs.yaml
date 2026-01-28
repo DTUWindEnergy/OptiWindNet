@@ -12,6 +12,12 @@ build:
   apt_packages:
     - pandoc
     - graphviz
+  jobs:
+    post_checkout:
+      # Ensure the repo isn't shallow so setuptools_scm can see the history
+      - git fetch --unshallow || true
+      # Explicitly fetch tags so the commit SHA is associated with the tag
+      - git fetch --tags
 
 
 # Build documentation in the "docs/" directory with Sphinx
