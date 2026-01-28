@@ -1,6 +1,6 @@
 [![pipeline status](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/pipeline.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
 [![PyPi](https://img.shields.io/pypi/v/optiwindnet)](https://pypi.org/project/optiwindnet/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18388439.svg)](https://doi.org/10.5281/zenodo.18388439)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18400851.svg)](https://doi.org/10.5281/zenodo.18400851)
 [![License](https://img.shields.io/pypi/l/optiwindnet)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/blob/main/LICENSE)
 [![coverage report](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/coverage.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
 <!---

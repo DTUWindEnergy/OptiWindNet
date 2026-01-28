@@ -65,23 +65,23 @@ DTU Wind and Energy Systems, Technical University of Denmark (2025, March),
 url: <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>
 
 ```{code-block} bib
-@software{souza_de_alencar_2026_18388439,
+@software{souza_de_alencar_2026_18400851,
   author       = {Souza de Alencar, Mauricio and
                   Arasteh, Amir and
                   Friis-Møller, Mikkel},
-  title        = {DTUWindEnergy/OptiWindNet: Release of v0.1.7},
+  title        = {DTUWindEnergy/OptiWindNet: OptiWindNet v0.1.6},
   month        = jan,
   year         = 2026,
   publisher    = {Zenodo},
-  version      = {v0.1.7},
-  doi          = {10.5281/zenodo.18388439},
-  url          = {https://doi.org/10.5281/zenodo.18388439},
-  swhid        = {swh:1:dir:289eeb68be1214f069d0634666fe0c3bad2df84d
+  version      = {v0.1.6},
+  doi          = {10.5281/zenodo.18400851},
+  url          = {https://doi.org/10.5281/zenodo.18400851},
+  swhid        = {swh:1:dir:047c893b761a4bc8e1af7f5447587c301ba93d25
                    ;origin=https://doi.org/10.5281/zenodo.18388438;vi
-                   sit=swh:1:snp:8ca52a089ae33194f300b466a6168ef29e58
-                   2eb4;anchor=swh:1:rel:c660f0924a7df34ae674a91b178c
-                   715c43f6317c;path=DTUWindEnergy-
-                   OptiWindNet-9c6db85
+                   sit=swh:1:snp:de59f2c0875971a38020ed3990e581f7450b
+                   c8bb;anchor=swh:1:rel:a500b34edde6ed685d0f56751ded
+                   7587496ba1d3;path=DTUWindEnergy-
+                   OptiWindNet-d8e2ea3
                   },
 }
 ```
