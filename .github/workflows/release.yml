@@ -32,7 +32,9 @@ jobs:
         id: tag_data
         run: |
           # Extracts the annotation message from the tag
-          echo "tag_message=$(git tag -l --format='%(contents:subject)' ${{ github.ref_name }})" >> $GITHUB_OUTPUT
+          echo "tag_message<<EOF" >> $GITHUB_OUTPUT
+          git tag -l --format='%(contents)' ${{ github.ref_name }} | sed '---BEGIN.*SIGNATURE---/,$d' >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
