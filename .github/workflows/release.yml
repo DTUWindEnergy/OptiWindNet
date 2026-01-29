@@ -31,10 +31,13 @@ jobs:
       - name: Get tag message
         id: tag_data
         run: |
-          # Extracts the annotation message from the tag
-          echo "tag_message<<EOF" >> $GITHUB_OUTPUT
-          git tag -l --format='%(contents)' ${{ github.ref_name }} | sed '/---BEGIN.*SIGNATURE---/,$d' >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          tag_message="$(git tag -l --format='%(contents)' ${{ github.ref_name }} | sed '/---BEGIN.*SIGNATURE---/,$d')"
+          printf "=== ${{ github.ref_name }} ===\n%s\n=====================\n" "$tag_message"
+          {
+            echo 'tag_message<<EOF'
+            printf '%s\n' "$tag_message"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
