@@ -58,14 +58,11 @@ European Journal of Operational Research,
 }
 ```
 
-The OptiWindNet software package can be cited as:
-- Mauricio Souza de Alencar, Amir Arasteh and Mikkel Friis-Møller.
-_OptiWindNet: An open-source wind farm electrical network optimization tool_,
-DTU Wind and Energy Systems, Technical University of Denmark (2025, March),
-url: <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>
+The OptiWindNet software package can be cited through [OptiWindNet's Zenodo DOI](https://doi.org/10.5281/zenodo.18388438). Check the bottom right of that page for multiple ready-to-use citation formats for the latest OptiWindNet version. Below how it looks like for a specific version:
+- Souza de Alencar, M., Arasteh, A., & Friis-Møller, M. (2026). DTUWindEnergy/OptiWindNet v0.1.6. Zenodo. https://doi.org/10.5281/zenodo.18412871
 
 ```{code-block} bib
-@software{souza_de_alencar_2026_18400851,
+@software{souza_de_alencar_2026_18412871,
   author       = {Souza de Alencar, Mauricio and
                   Arasteh, Amir and
                   Friis-Møller, Mikkel},
@@ -74,14 +71,14 @@ url: <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>
   year         = 2026,
   publisher    = {Zenodo},
   version      = {v0.1.6},
-  doi          = {10.5281/zenodo.18400851},
-  url          = {https://doi.org/10.5281/zenodo.18400851},
-  swhid        = {swh:1:dir:047c893b761a4bc8e1af7f5447587c301ba93d25
+  doi          = {10.5281/zenodo.18412871},
+  url          = {https://doi.org/10.5281/zenodo.18412871},
+  swhid        = {swh:1:dir:4a878e11de821bf286be35b57f0be04a1f7d6c18
                    ;origin=https://doi.org/10.5281/zenodo.18388438;vi
-                   sit=swh:1:snp:de59f2c0875971a38020ed3990e581f7450b
-                   c8bb;anchor=swh:1:rel:a500b34edde6ed685d0f56751ded
-                   7587496ba1d3;path=DTUWindEnergy-
-                   OptiWindNet-d8e2ea3
+                   sit=swh:1:snp:856057cac93c99089b0b234b52ca94669fb4
+                   ae21;anchor=swh:1:rel:d4f37fc1764e2aa218b3d46d742c
+                   36153118d373;path=DTUWindEnergy-OptiWindNet-
+                   ebc8e37
                   },
 }
 ```
