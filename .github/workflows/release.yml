@@ -33,7 +33,7 @@ jobs:
         run: |
           # Extracts the annotation message from the tag
           echo "tag_message<<EOF" >> $GITHUB_OUTPUT
-          git tag -l --format='%(contents)' ${{ github.ref_name }} | sed '---BEGIN.*SIGNATURE---/,$d' >> $GITHUB_OUTPUT
+          git tag -l --format='%(contents)' ${{ github.ref_name }} | sed -e '---BEGIN.*SIGNATURE---/,$d' >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
