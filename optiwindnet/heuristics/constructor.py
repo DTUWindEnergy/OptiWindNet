@@ -16,11 +16,9 @@ from ..geometric import (
 )
 from ..interarraylib import (
     fun_fingerprint,
-    as_normalized,
     calcload,
-    add_link_cosines,
     add_link_blockmap,
-    add_terminal_closest_root
+    add_terminal_closest_root,
 )
 from .priorityqueue import PriorityQueue
 
@@ -31,11 +29,20 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 _ONE = bitarray('1')
 
+# empirically obtained coefficients
+_rootlust_coefs = (
+    # rootlust_0 = [0] + [1]/capacity
+    (0.08927350087510766, 0.3660630101515834),
+    # rootlust_1 = [0] + [1]*rootlust_0
+    (0.6105314984368293, -2.0350588552021245),
+)
+
 
 def constructor(
     Aʹ: nx.Graph,
     capacity: int,
     method: str = 'esau_williams',
+    rootlust_: tuple[float, float] = (),
     maxiter: int = 10000,
     keep_log: bool = False,
     blockage_link_cos_lim: float = 0.85,  # 30°
@@ -67,12 +74,21 @@ def constructor(
     d2roots = Aʹ.graph['d2roots']
     S = nx.Graph(R=R, T=T)
     A = Aʹ.copy()
+    P_A = A.graph['planar']
 
     roots = range(-R, 0)
 
     add_terminal_closest_root(A)
     rootmask__ = A.graph['rootmask__']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
+    if not rootlust_:
+        # closed form approximations for providing the best rootlust for the capacity
+        rootlust_0 = _rootlust_coefs[0][0] + _rootlust_coefs[0][1] / capacity
+        rootlust_1 = _rootlust_coefs[1][0] + _rootlust_coefs[1][1] * rootlust_0
+        # pre-scale rootlust_1 to avoid the division inside the loop
+        rootlust_ = rootlust_0, rootlust_1 / (capacity - 1)
+    else:
+        rootlust_ = rootlust_[0], rootlust_[1] / (capacity - 1)
 
     # removing root nodes from A to speedup enqueue_best_union
     # this may be done because G already starts with feeders
@@ -110,7 +126,6 @@ def constructor(
     subtree_span__ = [[(t, t) for _ in roots] for t in _T]
     # <subtree_blocked__>: sets of blocked terminals from other components wrt each root
     subtree_blocked__ = [[bitarray(T) for _ in _T] for _ in roots]
-    max_blockable = blockage_subtree_feeder_lim * capacity
 
     # mappings from components (identified by their subroots)
     # <who_targets_>: maps component to set of components queued to merge in
@@ -140,18 +155,26 @@ def constructor(
         edges2discard = []
         for u in subtree.search(_ONE):
             for v in A[u]:
-                if subroot_[v] == subroot or subtree_[subroot_[v]].count() > capacity_left:
+                if (
+                    subroot_[v] == subroot
+                    or subtree_[subroot_[v]].count() > capacity_left
+                ):
                     # useless edges
                     edges2discard.append((u, v))
                 else:
-                    tradeoff = A[u][v]['length'] - d2roots[subroot, A.nodes[subroot]['root']]
+                    tradeoff = (
+                        A[u][v]['length'] - d2roots[subroot, A.nodes[subroot]['root']]
+                    )
                     if tradeoff <= 0:
                         # useful edges
                         # v's proximity to root is used as tie-breaker
-                        choices.append((tradeoff, d2rootsRank[v, A.nodes[v]['root']], u, v))
+                        choices.append(
+                            (tradeoff, d2rootsRank[v, A.nodes[v]['root']], u, v)
+                        )
         return (min(choices) if choices else ()), edges2discard
 
     margin = 1.02
+
     def find_union_mod_esau_williams_tradeoff(subroot):
         subtree = subtree_[subroot]
         capacity_left = capacity - subtree.count()
@@ -160,7 +183,10 @@ def constructor(
         edges2discard = []
         for u in subtree.search(_ONE):
             for v in A[u]:
-                if subroot_[v] == subroot or subtree_[subroot_[v]].count() > capacity_left:
+                if (
+                    subroot_[v] == subroot
+                    or subtree_[subroot_[v]].count() > capacity_left
+                ):
                     # useless edges
                     edges2discard.append((u, v))
                 else:
@@ -168,7 +194,9 @@ def constructor(
                     if extent <= sr_d2root:
                         # useful edges
                         # v's proximity to root is used as tie-breaker
-                        choices.append((extent, d2rootsRank[v, A.nodes[v]['root']], u, v))
+                        choices.append(
+                            (extent, d2rootsRank[v, A.nodes[v]['root']], u, v)
+                        )
         if choices:
             choices.sort()
             best_extent, best_rank, *best_edge = choices[0]
@@ -189,7 +217,7 @@ def constructor(
         d2root = d2roots[subroot, root]
         capacity_used = subtree.count()
         capacity_left = capacity - capacity_used
-        root_lust = 0.6 * capacity_used / capacity
+        rootlust = rootlust_[0] + rootlust_[1] * capacity_used
         choices = []
         edges2discard = []
         for u in subtree.search(_ONE):
@@ -206,16 +234,17 @@ def constructor(
                         d2rGain = d2root - d2roots[sr_v, root_v]
                         tiebreaker = d2rootsRank[v, root_v]
                         choices.append(
-                            (W - d2root - d2rGain * root_lust, tiebreaker, u, v)
+                            (W - d2root - d2rGain * rootlust, tiebreaker, u, v)
                         )
         return (min(choices) if choices else ()), edges2discard
+
     # END: alternative methods of selecting the best edge to expand components
 
     def savings_outweight_detours(sr_dropped, u, v):
         """Note: the detour_increase calculated here is an estimate."""
         sr_kept = subroot_[v]
         blocked__ = A[u][v]['blocked__']
-        detour_increase = 0.
+        detour_increase = 0.0
         clones = []
         is_last_hop_ = bitarray(count > 0 for count in last_hops_count_)
         union_ = subtree_[sr_dropped] | subtree_[sr_kept]
@@ -230,12 +259,19 @@ def constructor(
                     continue
                 extent_lo = d2roots[lo, r] + np.hypot(*(VertexC[lo] - VertexC[hop]))
                 extent_hi = d2roots[hi, r] + np.hypot(*(VertexC[hi] - VertexC[hop]))
-                extent, clone = (extent_lo, lo) if extent_lo <= extent_hi else (extent_hi, hi)
+                extent, clone = (
+                    (extent_lo, lo) if extent_lo <= extent_hi else (extent_hi, hi)
+                )
                 detour_increase += count * (extent - d2roots[hop, r]).item()
                 clones.append((hop, clone, count))
         savings = d2roots[sr_dropped].min().item() - A[u][v]['length']
         if clones:
-            debug('savings of %.3f vs. detour increase of %.3f for rerouting %s', savings, detour_increase, clones)
+            debug(
+                'savings of %.3f vs. detour increase of %.3f for rerouting %s',
+                savings,
+                detour_increase,
+                clones,
+            )
         return savings, detour_increase, clones
 
     if method == 'esau_williams':
@@ -256,7 +292,9 @@ def constructor(
             priority, _, u, v = best_choice
             pq.add(priority, subroot, (u, v))
             who_targets_[subroot_[v]].add(subroot)
-            debug('<pushed> sr_u <%d>, «%d~%d», priority = %.3f', subroot, u, v, priority)
+            debug(
+                '<pushed> sr_u <%d>, «%d~%d», priority = %.3f', subroot, u, v, priority
+            )
         else:
             # no viable edge is shorter than subroot for this subtree
             debug('<cancelling> %d', subroot)
@@ -305,9 +343,14 @@ def constructor(
             ]
             debug('<angle_span> //%s//', union_span_[root])
             # update the component's angle span
-            subtree_span__[sr_kept], sr_kept_old_span = union_span_, subtree_span__[sr_kept]
+            subtree_span__[sr_kept], sr_kept_old_span = (
+                union_span_,
+                subtree_span__[sr_kept],
+            )
 
-            savings, detour_increase, clones = savings_outweight_detours(sr_dropped, u, v)
+            savings, detour_increase, clones = savings_outweight_detours(
+                sr_dropped, u, v
+            )
             if savings < detour_increase:
                 debug('<discard> «%d~%d» too long detours', u, v)
                 subtree_span__[sr_kept] = sr_kept_old_span
@@ -329,7 +372,9 @@ def constructor(
 
             # update the component's blocked set
             for r, subtree_blocked_ in zip(roots, subtree_blocked__):
-                subtree_blocked_[sr_kept] |= subtree_blocked_[sr_dropped] | A[u][v]['blocked__'][r]
+                subtree_blocked_[sr_kept] |= (
+                    subtree_blocked_[sr_dropped] | A[u][v]['blocked__'][r]
+                )
                 subtree_blocked_[sr_kept] &= ~subtree_[sr_kept]
 
         # add edge to effect union of subtree of u to subtree of v (via subroot of v)
@@ -367,6 +412,22 @@ def constructor(
 
         # finished adding the edge, now check the consequences
         who_targets_[sr_dropped].discard(sr_kept)
+
+        if method == 'rootlust' and ((u, v) if u < v else (v, u)) not in diagonals:
+            # this fixes unions that result in 2 sides of a triangle being used but
+            #   where the unused side is not the longest one (this fix make it so)
+            for rot in ('cw', 'ccw'):
+                s = P_A[v][u][rot]
+                if (
+                    subtree[s]
+                    and s in S[v]
+                    and P_A[s][v][rot] == u
+                    and Aʹ[u][s]['length'] < Aʹ[v][s]['length']
+                ):
+                    S.remove_edge(v, s)
+                    S.add_edge(u, s)
+                    A.remove_edge(u, s)
+
         if capacity_left > 0:
             if method == 'rootlust':
                 # rootlust needs a more aggressive retargetting
@@ -392,7 +453,7 @@ def constructor(
             subtree_nodes = tuple(subtree.search(_ONE))
             # by removing nodes, all the useless edges are discarded
             A.remove_nodes_from(subtree_nodes)
-            debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)            
+            debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)
             is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
             who_targets_[sr_kept] = None
         is_not_full_[sr_dropped] = False
