@@ -30,12 +30,19 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 _ONE = bitarray('1')
 
 # empirically obtained coefficients
-_rootlust_coefs = (
-    # rootlust_0 = [0] + [1]/capacity
-    (0.08927350087510766, 0.3660630101515834),
-    # rootlust_1 = [0] + [1]*rootlust_0
-    (0.6105314984368293, -2.0350588552021245),
-)
+_empirical_rootlust = {
+    2: (0.199963337895445, 0.08426213176671275),
+    3: (0.242814965204555, 0.039061695424637846),
+    4: (0.18000159349690245, 0.08300298311928281),
+    5: (0.14867313705016125, 0.0801649122840704),
+    6: (0.06253058300839699, 0.09461742952868712),
+    7: (0.15377762467951342, 0.049933595137178356),
+    8: (0.17138512281655421, 0.034559581686989825),
+    9: (0.16983803760158625, 0.03466468487805137),
+    10: (0.17219919344831916, 0.04040308699369742),
+    11: (0.13499063146609241, 0.0566116601450132),
+    12: (0.15550714746208458, 0.02539994948567122),
+}
 
 
 def constructor(
@@ -82,11 +89,7 @@ def constructor(
     rootmask__ = A.graph['rootmask__']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
     if not rootlust_:
-        # closed form approximations for providing the best rootlust for the capacity
-        rootlust_0 = _rootlust_coefs[0][0] + _rootlust_coefs[0][1] / capacity
-        rootlust_1 = _rootlust_coefs[1][0] + _rootlust_coefs[1][1] * rootlust_0
-        # pre-scale rootlust_1 to avoid the division inside the loop
-        rootlust_ = rootlust_0, rootlust_1 / (capacity - 1)
+        rootlust_ = _empirical_rootlust[capacity]
     else:
         rootlust_ = rootlust_[0], rootlust_[1] / (capacity - 1)
 
