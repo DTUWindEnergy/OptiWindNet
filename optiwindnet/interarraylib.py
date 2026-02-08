@@ -834,7 +834,7 @@ def as_normalized(
     for _, _, eData in A.edges(data=True):
         eData['length'] *= scale
     A.graph['VertexC'] = scale * (Aʹ.graph['VertexC'] - offset)
-    d2roots = Aʹ.graph.get('d2root')
+    d2roots = Aʹ.graph.get('d2roots')
     if d2roots is not None:
         A.graph['d2roots'] = scale * d2roots
     return A
