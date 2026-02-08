@@ -4,10 +4,12 @@
 import logging
 import math
 from typing import Callable
+from itertools import pairwise
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import numba as nb
+from numba.typed import List
 import numpy as np
 from scipy.spatial import ConvexHull
 
@@ -166,6 +168,7 @@ def _poisson_disc_filler_core(
     j_len: int,
     cell_idc: IndexPairs,
     BorderS: CoordPairs,
+    obstacleS__: list[CoordPairs],
     repel_radius_sq: float,
     RepellerS: CoordPairs | None,
     rng: np.random.Generator,
@@ -240,14 +243,19 @@ def _poisson_disc_filler_core(
             if not _clears(RepellerS, repel_radius_sq, dartC):
                 miss_streak += 1
                 continue
-        miss_streak = 0
-        # add new point and remove cell from empty list
-        points[out_count] = dartC
-        cells[i, j] = out_count
-        del idc_list[empty_idx]
-        out_count += 1
-        if out_count == T or not idc_list:
-            break
+        for obstacleS_ in obstacleS__:
+            if _contains(obstacleS_, dartC):
+                miss_streak += 1
+                break
+        else:
+            miss_streak = 0
+            # add new point and remove cell from empty list
+            points[out_count] = dartC
+            cells[i, j] = out_count
+            del idc_list[empty_idx]
+            out_count += 1
+            if out_count == T or not idc_list:
+                break
 
     return points[:out_count], iter_count
 
@@ -279,7 +287,7 @@ def poisson_disc_filler(
     BorderC: CoordPairs,
     RepellerC: CoordPairs | None = None,
     repel_radius: float = 0.0,
-    obstacles: list[CoordPairs] | None = None,
+    obstacleC__: list[CoordPairs] = [],
     seed: int | None = None,
     max_iter: int = 10000,
     plot: bool = False,
@@ -292,15 +300,13 @@ def poisson_disc_filler(
     placed points that are at least `min_dist` apart and that
     don't fall inside any of the `RepellerC` discs or `obstacles` areas.
 
-    >>> Handling of `obstacles` is not yet implemented. <<<<
-
     Args:
       T: number of points to place.
       min_dist: minimum distance between place points.
       BorderC: coordinates (B × 2) of border polygon.
       RepellerC: coordinates (R × 2) of the centers of forbidden discs.
       repel_radius: the radius of the forbidden discs.
-      obstacles: iterable (O × X × 2).
+      obstacleC__: sequence of coordinate arrays (X × 2).
       iter_max_factor: factor to multiply by `T` to limit the number of
         iterations.
       rounds: number of times to start from empty while `T` is not reached.
@@ -310,9 +316,6 @@ def poisson_disc_filler(
     Returns:
       coordinates (T, 2) of placed points
     """
-    # TODO: implement obstacles zones
-    if obstacles is not None:
-        raise NotImplementedError('obstacles not implemented')
 
     # quick check for outrageous densities
     # circle packing efficiency limit: η = π srqt(3)/6 = 0.9069
@@ -353,6 +356,10 @@ def poisson_disc_filler(
         else:
             RepellerS = None
             repel_radius_sq = 0.0
+    obstacleS__ = List.empty_list(nb.float64[:, :])
+    for obsC_ in obstacleC__:
+      obstacleS__.append((obsC_ - offsetC) / cell_size)
+      #  obstacleS__.append((obsC_[::-1] - offsetC) / cell_size)
 
     # Alternate implementation using np.mgrid
     #  pts = np.reshape(
@@ -363,7 +370,14 @@ def poisson_disc_filler(
     cornerS__ = cornerS_.reshape((i_len + 1, j_len + 1, 2))
     cornerS__[..., 0] = np.arange(i_len + 1)[:, np.newaxis]
     cornerS__[..., 1] = np.arange(j_len + 1)[np.newaxis, :]
-    is_corner_within_border = _contains_np(BorderS, cornerS_).reshape((i_len + 1, j_len + 1))
+
+    # process the area's border
+    is_corner_within_border_ = _contains_np(BorderS, cornerS_)
+
+    for obstacleS_ in obstacleS__:
+        is_corner_within_border_ &= ~_contains_np(obstacleS_, cornerS_)
+
+    is_corner_within_border = is_corner_within_border_.reshape((i_len + 1, j_len + 1), copy=False)
 
     cell_corners = np.lib.stride_tricks.as_strided(
         is_corner_within_border,
@@ -391,6 +405,9 @@ def poisson_disc_filler(
         fig, ax = plt.subplots(layout='constrained')
         ax.pcolormesh(cell_covers_polygon__.T + 2*cell_intercepts_polygon__.T)
         ax.plot(*np.vstack((BorderS, BorderS[:1])).T, 'k', lw=1)
+        for obstacleS_ in obstacleS__:
+            ax.plot(*np.vstack((obstacleS_, obstacleS_[:1])).T, 'navy', lw=1)
+        ax.plot(*np.vstack((BorderS, BorderS[:1])).T, 'k', lw=1)
         ax.scatter(*np.nonzero(is_corner_within_border), marker='+', s=15, c='k', lw=1)
         ax.scatter(*BorderS.T, marker='o', s=15, lw=1, c='navy')
         ax.scatter(*np.array(points).T, marker='x', s=12, lw=0.8, c='red')
@@ -412,6 +429,7 @@ def poisson_disc_filler(
             j_len,
             cell_idc,
             BorderS,
+            obstacleS__,
             repel_radius_sq,
             RepellerS,
             rng,
@@ -472,6 +490,7 @@ def turbinate(
     VertexC = L.graph['VertexC']
     border = L.graph['border']
     R = L.graph['R']
+    B = L.graph['B']
     BorderC = VertexC[border]
     _, best_caliper_angle, _, _ = rotating_calipers(
         BorderC[ConvexHull(BorderC).vertices],
@@ -481,24 +500,30 @@ def turbinate(
     rotation = best_caliper_angle*180./np.pi
 
     RootC = VertexC[-R:]
+    obstacles = L.graph.get('obstacles', [])
+    obstacleC__ = [VertexC[obs] for obs in obstacles]
 
     TerminalC = rotate(poisson_disc_filler(
         T,
         d,
         BorderC=rotate(BorderC, -rotation),
         RepellerC=rotate(RootC, -rotation),
+        obstacleC__=[rotate(obsC_, -rotation) for obsC_ in obstacleC__],
         repel_radius=(d if root_clearance is None else root_clearance),
         max_iter=max_iter,
         rounds=rounds,
         plot=plot,
     ), rotation)
     T = TerminalC.shape[0]
-    B = BorderC.shape[0]
+    border_sizes = np.array([border.shape[0]] + [obsC_.shape[0] for obsC_ in obstacleC__])
+    B = border_sizes.sum()
+    obstacle_idxs = np.cumsum(border_sizes) + T
     return L_from_site(
         T=T,
         B=B,
-        border=np.arange(T, T + B),
-        VertexC=np.vstack((TerminalC, BorderC, RootC)),
+        border=np.arange(T, T + border.shape[0]),
+        obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)],
+        VertexC=np.vstack((TerminalC, BorderC, *obstacleC__, RootC)),
         **{
             k: v
             for k, v in L.graph.items()
