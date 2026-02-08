@@ -115,14 +115,6 @@ def test_poisson_disc_filler_respects_repeller_radius():
     assert np.all(dists >= repel_radius - 1e-9)
 
 
-def test_poisson_disc_filler_obstacles_not_implemented():
-    BorderC = _square(10, 10)
-    with pytest.raises(NotImplementedError):
-        aug.poisson_disc_filler(
-            T=5, min_dist=1.0, BorderC=BorderC, obstacles=[_square(2, 2)]
-        )
-
-
 def test_poisson_disc_filler_efficiency_guard_raises_when_partial_false():
     # Border area = 100. With d=5, area_demand per point ~ 19.635.
     # For T=6 => demand ~117.8 > 0.9069 * 100 => should raise if partial_fulfilment=False.
@@ -154,6 +146,7 @@ def _make_graph(borderC, rootsC):
     G.graph['VertexC'] = VertexC
     G.graph['border'] = np.arange(len(borderC), dtype=int)
     G.graph['R'] = len(rootsC)
+    G.graph['B'] = len(borderC)
     # optional extras passed through turbinate -> L_from_site
     G.graph['name'] = 'test'
     G.graph['handle'] = 'h'
@@ -195,12 +188,13 @@ def test_get_shape_to_fill_multi_roots_are_averaged_and_R_set_to_1():
 # turbinate
 # -------------------------------
 def test_turbinate_builds_graph_with_spaced_turbines():
-    borderC = _square(10, 10)
+    square_side = 10
+    T_req = 20
+    d = 2.0
     rootsC = np.array([[5.0, 5.0]])
+    borderC = _square(square_side, square_side)
     L = _make_graph(borderC, rootsC)
 
-    T_req = 10
-    d = 0.10  # in normalized units (turbinate normalizes area to 1)
     L2 = aug.turbinate(L, T=T_req, d=d, max_iter=50_000, rounds=2)
 
     assert isinstance(L2, nx.Graph)
@@ -208,12 +202,12 @@ def test_turbinate_builds_graph_with_spaced_turbines():
     R = L2.graph['R']
     # In turbinate(), VertexC = [TerminalS, BorderS, RepellerS]; R roots at end.
     T_out = V.shape[0] - len(L.graph['border']) - R
-    assert 0 < T_out <= T_req
+    assert T_out == T_req
 
     turbines = V[:T_out]
-    # All turbines inside the normalized [0,1]x[0,1] (square normalized to area 1)
+    # All turbines inside the square
     assert np.all(turbines >= -1e-9)
-    assert np.all(turbines <= 1.0 + 1e-9)
+    assert np.all(turbines <= square_side + 1e-9)
     # Spacing respected (allow tiny slack)
     assert _pairwise_min_dist(turbines) >= d - 1e-9
     # Also respect root clearance (defaults to d)
