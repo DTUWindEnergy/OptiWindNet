@@ -50,6 +50,56 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
     ).all()
 
 
+@nb.njit(cache=True, inline='always')
+def _walk_along_perimeter(polygonC: CoordPairs, max_loops: int) -> tuple[list[tuple[int, int]], list[tuple[float, float]]]:
+    """Find crossings of the polygons' perimeter with the unit grid.
+
+    Auxiliar function to poisson_disc_filler(). Used for identifying unit cells that
+    cover the polygon's shell. The polygon's vertices are also included in the lists.
+
+    Args:
+      polygonC: N×2 coordinates that define the polygon (unique vertices)
+      max_loops: a failsafe maximum for the inner loop (e.g. i_len + j_len + 1)
+
+    Returns:
+      list of cell index pairs and list of coordinate pairs
+    """
+    # list cells along the boundary (essential when cells are few)
+    points = []  # only used for the debugging plot
+    cells = []
+    xy = polygonC[-1]
+    ij = np.floor(xy)
+    vec = np.empty((2,))
+    t = np.empty((2,))
+    for k, xy_fwd in enumerate(polygonC):
+        ij_fwd = np.floor(xy_fwd)
+        point = xy[0], xy[1]
+        vec[:] = xy_fwd - xy
+        is_vec_gt0 = vec > 0
+        vec_sign = np.sign(vec)
+        frac = xy - ij
+        for _ in range(max_loops):
+            points.append(point)
+            cells.append((int(ij[0]), int(ij[1])))
+            if (ij == ij_fwd).all():
+                break
+            t[:] = (
+                ((is_vec_gt0[0] - frac[0]) / vec[0]) if vec[0] != 0 else np.inf,
+                ((is_vec_gt0[1] - frac[1]) / vec[1]) if vec[1] != 0 else np.inf,
+            )
+            y_not_x = np.argmin(t)
+            if y_not_x:
+                frac[:] = frac[0] + t[1]*vec[0], 1.0*~is_vec_gt0[1]
+                point = ij[0] + frac[0], ij[1] + is_vec_gt0[1]
+                ij[1] += vec_sign[1]
+            else:
+                frac[:] = 1.0*~is_vec_gt0[0], frac[1] + t[0]*vec[1]
+                point = ij[0] + is_vec_gt0[0], ij[1] + frac[1]
+                ij[0] += vec_sign[0]
+        xy, ij = xy_fwd, ij_fwd
+    return cells, points
+
+
 def _contains_np(
     polyC: CoordPairs, pts: CoordPairs
 ) -> np.ndarray[tuple[int], np.dtype[np.bool_]]:
@@ -324,42 +374,10 @@ def poisson_disc_filler(
     cell_covers_polygon__ = cell_corners.any(axis=(0, 1))
     cell_strictly_inside_polygon__ = cell_corners.all(axis=(0, 1))
 
-    # include cells along the boundary (essential when cells are few)
-    points = []  # only used for the debugging plot
-    cells = []
-    xy = BorderS[-1]
-    i, j = (int(z) for z in xy)
-    vec = np.empty((2,))
-    t = np.empty((2,))
-    max_loops = i_len + j_len + 1
-    for k, xy_fwd in enumerate(BorderS):
-        ij_fwd = tuple(int(z) for z in xy_fwd)
-        point = tuple(xy.tolist())
-        vec[:] = xy_fwd - xy
-        is_vec_gt0 = vec > 0
-        vec_sign = np.sign(vec).astype(int)
-        frac = np.modf(xy)[0]
-        for _ in range(max_loops):
-            points.append(point)
-            cells.append((i, j))
-            cell_covers_polygon__[i, j] = True
-            cell_strictly_inside_polygon__[i, j] = False
-            if (i, j) == ij_fwd:
-                break
-            t[:] = (
-                ((is_vec_gt0[0] - frac[0]) / vec[0]) if vec[0] != 0 else np.inf,
-                ((is_vec_gt0[1] - frac[1]) / vec[1]) if vec[1] != 0 else np.inf,
-            )
-            y_not_x = np.argmin(t)
-            if y_not_x:
-                frac[:] = frac[0] + t[1]*vec[0], ~is_vec_gt0[1]
-                point = i + frac[0], float(j + is_vec_gt0[1])
-                j += vec_sign[1]
-            else:
-                frac[:] = ~is_vec_gt0[0], frac[1] + t[0]*vec[1]
-                point = float(i + is_vec_gt0[0]), j + frac[1]
-                i += vec_sign[0]
-        xy, (i, j) = xy_fwd, ij_fwd
+    cells, points = _walk_along_perimeter(BorderS, i_len + j_len + 1)
+    for i, j in cells:
+        cell_covers_polygon__[i, j] = True
+        cell_strictly_inside_polygon__[i, j] = False
 
     cell_intercepts_polygon__ = np.logical_and(cell_covers_polygon__, ~cell_strictly_inside_polygon__)
 
