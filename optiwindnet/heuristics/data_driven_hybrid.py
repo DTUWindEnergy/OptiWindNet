@@ -227,7 +227,7 @@ def data_driven_hybrid(
     threshold: float = 0.0,
     blockage_link_cos_lim: float = 0.85,  # 30°
     blockage_link_feeder_lim: float = 2.0,
-    blockage_subtree_feeder_lim: float = 2.5,
+    blockage_subtree_feeder_lim: float = 7.0,
 ) -> nx.Graph:
     """Hybrid machine-learning and Esau-Williams heuristic for C-MST
 
