@@ -245,6 +245,7 @@ def data_driven_hybrid(
     _T = range(T)
     diagonals = Aʹ.graph['diagonals']
     d2rootsʹ = Aʹ.graph['d2roots']
+    P_A = Aʹ.graph['planar']
     d2roots_rank_ = rankdata(d2rootsʹ, method='dense').reshape(d2rootsʹ.shape)
 
     # calculate the reference extent
@@ -593,6 +594,35 @@ def data_driven_hybrid(
         debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
         S.add_edge(u, v)
         steps_log[iteration].append((u, v))
+
+        if ((u, v) if u < v else (v, u)) not in diagonals:
+            # this fixes unions that result in 2 sides of a triangle being used but
+            #   where the unused side is not the longest one (this fix make it so)
+            for rot in ('cw', 'ccw'):
+                s = P_A[v][u][rot]
+                if P_A[s][v][rot] != u:
+                    # uvs is not a triangle
+                    continue
+                # TODO: redundant `and`: is `subtree[s]` way faster than `s in S[v]`?
+                if subtree[s] and s in S[v]:
+                    Aʹs = Aʹ[s]
+                    if u in Aʹs and Aʹs[u]['length'] < Aʹs[v]['length']:
+                        S.remove_edge(v, s)
+                        S.add_edge(u, s)
+                        if (u, s) in A:
+                            A.remove_edge(u, s)
+                        continue
+                diagonal = diagonals.inv.get((s, v) if s < v else (v, s))
+                if diagonal is not None:
+                    w, x = diagonal
+                    t = w if x == v else x
+                    if subtree[t] and t in S[v]:
+                        Aʹt = Aʹ[t]
+                        if u in Aʹt and Aʹt[u]['length'] < Aʹt[v]['length']:
+                            S.remove_edge(v, t)
+                            S.add_edge(u, t)
+                            if (u, t) in A:
+                                A.remove_edge(u, t)
 
         is_feederless_[sr_dropped] = False
         # update the component's angle span
