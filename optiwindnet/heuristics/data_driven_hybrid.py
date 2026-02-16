@@ -273,8 +273,7 @@ def data_driven_hybrid(
     add_link_cosines(A)
 
     # remove links that have negative savings both ways from the start
-    max_blockable_by_link = blockage_link_feeder_lim * capacity
-    unfeas_links = []
+    to_remove = []
     for u, v, edgeD in A.edges(data=True):
         extent = edgeD['length']
         root = A.nodes[v]['root']
@@ -283,15 +282,10 @@ def data_driven_hybrid(
             and extent > d2roots[v, A.nodes[v]['root']]
         ):
             # negative savings -> useless link
-            unfeas_links.append((u, v))
-        # TODO: handle multiple roots properly
-        elif (
-            edgeD['blocked__'][root].count() > max_blockable_by_link
-            and edgeD['cos_'][root] < blockage_link_cos_lim
-        ):
-            unfeas_links.append((u, v))
-    debug('links removed in pre-processing: %s', unfeas_links)
-    A.remove_edges_from(unfeas_links)
+            to_remove.append((u, v))
+    debug('links removed in pre-processing: %s', to_remove)
+    A.remove_edges_from(to_remove)
+    del to_remove
     # BEGIN: time-saving pre-calculations
     angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
     union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
