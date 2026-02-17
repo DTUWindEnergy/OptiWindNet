@@ -83,6 +83,7 @@ class AppraiserFactory:
             **model_data['config']
         )
         self.model.load_state_dict(model_data['state'])
+        self.model.eval()
         self.name = model_data['name']
 
     def get_appraiser(
