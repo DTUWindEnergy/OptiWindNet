@@ -3,6 +3,7 @@
 
 import logging
 import time
+import math
 from collections import defaultdict
 from enum import IntEnum
 from typing import Callable, Self
@@ -75,8 +76,6 @@ class UnionCount(IntEnum):
 
 
 class AppraiserFactory:
-    features_changed_: list[bool]
-
     def __init__(self, model_data: dict):
         # load pytorch model
         self.model = getattr(modelbuilders, model_data['cls']).from_suggestions(
@@ -107,6 +106,8 @@ class AppraiserFactory:
             9: (0, 0, 0, 0, 0, 1),
         }[capacity]
         T = A.graph['T']
+        T_scaled = math.log(T * 0.02)
+        max_steps = T - math.ceil(T / capacity)
         d2roots = A.graph['d2roots'][:T]
         hu_moment_ = A.graph['hu_moment_']
 
@@ -154,6 +155,7 @@ class AppraiserFactory:
             #  partial_features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
             features_list = []
             for (
+                num_steps,
                 sr_s,
                 sr_t,
                 s_is_subroot,
@@ -179,6 +181,13 @@ class AppraiserFactory:
                         s_is_subroot,  # s_is_subroot,
                         t_is_subroot,  # t_is_subroot,
                         is_delaunay,  # is_delaunay
+                        T_scaled,  # T_scaled
+                        # NOTE: step completeness is tricky, because it would trigger
+                        #       a full appraisal refresh after each step. This is not
+                        #       implemented and probably should not be. As a result,
+                        #       the appraisals reflect the step when they were last
+                        #       updated. Hopefully the update won't lag too many steps.
+                        num_steps / max_steps,  # step_completeness
                         *hu_moment_,  # Hu moment_h1..7
                         s_load / capacity,  # s_rel_load
                         t_load / capacity,  # t_rel_load
@@ -186,9 +195,9 @@ class AppraiserFactory:
                         angle_ccw(t_span_lo, t_root, t_span_hi),  # t_span
                         extent_min_[sr_s],  # s_extent_min
                         extent_min_[sr_t],  # t_extent_min
-                        -(
+                        (
                             d2roots[sr_s, t_root].item() - d2roots[sr_t, t_root].item()
-                        ),  # INVERTED radial_gain
+                        ),  # radial_gain
                         d2roots[sr_s, s_root].item() - extent,  # saving
                         angle_ccw(union_lo, t_root, union_hi),  # union_span
                         union_load / capacity,  # union_rel_load
@@ -336,6 +345,7 @@ def data_driven_hybrid(
     top_link_ = [None] * T
     # <iteration>: iteration counter
     iteration = 0
+    num_steps = 0
 
     # END: helper data structures
 
@@ -428,6 +438,7 @@ def data_driven_hybrid(
                         union_span_cache[sr_v] = union_span
                     proper_features_.append(
                         (
+                            num_steps,
                             subroot,
                             sr_v,
                             u_is_subroot,
@@ -588,6 +599,7 @@ def data_driven_hybrid(
         # edge addition starts here
         debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
         S.add_edge(u, v)
+        num_steps += 1
         steps_log[iteration].append((u, v))
 
         if ((u, v) if u < v else (v, u)) not in diagonals:
