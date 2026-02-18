@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import abc
 import logging
 import time
 import math
 from collections import defaultdict
 from enum import IntEnum
 from typing import Callable, Self
+from pathlib import Path
 
 from bitarray import bitarray
 import networkx as nx
 import numpy as np
-import torch
-from mlhelpers import modelbuilders
 from mlhelpers.moments import hu_moments
 from scipy.stats import rankdata
 
@@ -75,17 +75,16 @@ class UnionCount(IntEnum):
         return out
 
 
-class AppraiserFactory:
-    def __init__(self, model_data: dict):
-        # load pytorch model
-        self.model = getattr(modelbuilders, model_data['cls']).from_suggestions(
-            **model_data['config']
-        )
-        self.model.load_state_dict(model_data['state'])
-        self.model.eval()
-        self.name = model_data['name']
+class Appraiser(abc.ABC):
+    @abc.abstractmethod
+    def appraise(self, partial_features_: list):
+        pass
 
-    def get_appraiser(
+    def encode_categorical(self, *args):
+        """No encoding by default."""
+        return args
+
+    def update_problem_variables(
         self,
         A: nx.Graph,
         capacity: int,
@@ -94,10 +93,139 @@ class AppraiserFactory:
         cat_feas_unions_: list[int],
         extent_min_: list[float],
         angle_ccw: Callable,
-    ) -> Callable:
-        model = self.model
-        # problem features
-        capacity_onehot = {
+    ):
+        self.A = A
+        self.capacity = capacity
+        self.subtree_span_ = subtree_span_
+        self.cat_feas_links_ = cat_feas_links_
+        self.cat_feas_unions_ = cat_feas_unions_
+        self.extent_min_ = extent_min_
+        self.angle_ccw = angle_ccw
+        self.T = T = A.graph['T']
+        self.T_scaled = math.log(T * 0.02)
+        self.max_steps = T - math.ceil(T / capacity)
+        self.d2roots = A.graph['d2roots'][:T]
+        self.hu_moment_ = A.graph['hu_moment_']
+
+    def full_from_partial_features(self, partial_features_: list) -> list:
+        """DDHv9 features"""
+        full_features = []
+        for (
+            num_steps,
+            sr_s,
+            sr_t,
+            s_is_subroot,
+            t_is_subroot,
+            s_load,
+            t_load,
+            is_delaunay,
+            extent,
+            cos,
+            num_blocked,
+            union_span,
+        ) in partial_features_:
+            s_root = self.A.nodes[sr_s]['root']
+            t_root = self.A.nodes[sr_t]['root']
+            # as of 2025-06: Angle span calculation is not implemented when
+            #   uniting components connected to different roots.
+            s_span_lo, s_span_hi = self.subtree_span_[sr_s][t_root]
+            t_span_lo, t_span_hi = self.subtree_span_[sr_t][t_root]
+            union_lo, union_hi = union_span
+            union_load = s_load + t_load
+            full_features.append(
+                (
+                    s_is_subroot,  # s_is_subroot,
+                    t_is_subroot,  # t_is_subroot,
+                    is_delaunay,  # is_delaunay
+                    self.T_scaled,  # T_scaled
+                    # NOTE: step_completeness is tricky, because it would trigger
+                    #       a full appraisal refresh after each step. This is not
+                    #       implemented and probably should not be. As a result,
+                    #       the appraisals reflect the num_steps when they were last
+                    #       updated. Hopefully the update won't lag too many steps.
+                    num_steps / self.max_steps,  # step_completeness
+                    *self.hu_moment_,  # Hu moment_h1..7
+                    s_load / self.capacity,  # s_rel_load
+                    t_load / self.capacity,  # t_rel_load
+                    self.angle_ccw(s_span_lo, t_root, s_span_hi),  # s_span
+                    self.angle_ccw(t_span_lo, t_root, t_span_hi),  # t_span
+                    self.extent_min_[sr_s],  # s_extent_min
+                    self.extent_min_[sr_t],  # t_extent_min
+                    (
+                        self.d2roots[sr_s, t_root].item()
+                        - self.d2roots[sr_t, t_root].item()
+                    ),  # radial_gain
+                    self.d2roots[sr_s, s_root].item() - extent,  # saving
+                    self.angle_ccw(union_lo, t_root, union_hi),  # union_span
+                    union_load / self.capacity,  # union_rel_load
+                    extent,  # extent
+                    cos,  # cos
+                    num_blocked / self.capacity,  # blocked_subtree_equiv
+                    *self.encode_categorical(
+                        self.cat_feas_links_[sr_s],  # s_num_feas_links_cat
+                        self.cat_feas_links_[sr_t],  # t_num_feas_links_cat
+                        self.cat_feas_unions_[sr_s],  # s_num_feas_unions_cat
+                        self.cat_feas_unions_[sr_t],  # t_num_feas_unions_cat
+                        self.capacity,
+                    ),
+                )
+            )
+        return full_features
+
+
+class AppraiserXGBoost(Appraiser):
+    def __init__(self, model_lib: str | Path):
+        import tl2cgen
+
+        self.model = tl2cgen.Predictor(model_lib)
+        self.name = model_lib
+        self.DMatrix = tl2cgen.DMatrix
+
+    def appraise(self, partial_features_):
+        features = np.array(
+            self.full_from_partial_features(partial_features_),
+            dtype=np.float32,
+        )
+        dmat = self.DMatrix(features)
+        appraisals = self.model.predict(dmat).squeeze(axis=(-2, -1))
+        return appraisals
+
+
+class AppraiserTorch(Appraiser):
+    def __init__(self, model_data: dict):
+        import torch
+
+        self.torch = torch
+        from mlhelpers import modelbuilders
+
+        # load pytorch model
+        self.model = getattr(modelbuilders, model_data['cls']).from_suggestions(
+            **model_data['config']
+        )
+        self.model.load_state_dict(model_data['state'])
+        self.model.eval()
+        self.name = model_data['name']
+
+    def update_problem_variables(
+        self,
+        A: nx.Graph,
+        capacity: int,
+        subtree_span_: list[list[tuple[int, int]]],
+        cat_feas_links_: list[int],
+        cat_feas_unions_: list[int],
+        extent_min_: list[float],
+        angle_ccw: Callable,
+    ):
+        super().update_problem_variables(
+            A,
+            capacity,
+            subtree_span_,
+            cat_feas_links_,
+            cat_feas_unions_,
+            extent_min_,
+            angle_ccw,
+        )
+        self.capacity_onehot = {
             4: (1, 0, 0, 0, 0, 0),
             5: (0, 1, 0, 0, 0, 0),
             6: (0, 0, 1, 0, 0, 0),
@@ -105,139 +233,42 @@ class AppraiserFactory:
             8: (0, 0, 0, 0, 1, 0),
             9: (0, 0, 0, 0, 0, 1),
         }[capacity]
-        T = A.graph['T']
-        T_scaled = math.log(T * 0.02)
-        max_steps = T - math.ceil(T / capacity)
-        d2roots = A.graph['d2roots'][:T]
-        hu_moment_ = A.graph['hu_moment_']
 
-        def appraise(partial_features_):
-            # rules for making an appraisal stale:
-            # - direct_neighbors: every subtree that has feas_links to one of the joined subtrees
-            # - indirect_neighbors: only if there is change in the target's (min_extent, feas_links_cat, feas_unions_cat)
+    def encode_categorical(
+        self,
+        s_num_feas_links_cat,
+        t_num_feas_links_cat,
+        s_num_feas_unions_cat,
+        t_num_feas_unions_cat,
+        capacity,
+    ):
+        return (
+            *LinkCount.onehot(s_num_feas_links_cat),
+            *LinkCount.onehot(t_num_feas_links_cat),
+            *UnionCount.onehot(s_num_feas_unions_cat),
+            *UnionCount.onehot(t_num_feas_unions_cat),
+            *self.capacity_onehot,
+        )
 
-            #  't_is_subroot', stable
-            #  't_rel_load', stable
-            #  't_span', stable
-            #  't_log_rel_extent', ? depends...
-            #  't_log_rel_root_dist', stable
-            #  't_feas_links_cat_0..4', needs checking
-            #  't_feas_unions_cat_0..5', needs checking
-            #  features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
-            #  ['s_is_subroot',
-            #   't_is_subroot',
-            #   'is_delaunay',
-            #   'moment_h1',
-            #   'moment_h2',
-            #   'moment_h3',
-            #   'moment_h4',
-            #   'moment_h5',
-            #   'moment_h6',
-            #   'moment_h7',
-            #   's_rel_load',
-            #   't_rel_load',
-            #   's_span',
-            #   't_span',
-            #   's_extent_min',
-            #   't_extent_min',
-            #   'radial_gain',
-            #   'saving',
-            #   'union_span',
-            #   'union_rel_load',
-            #   'extent',
-            #   'cos',
-            #   'blocked_subtree_equiv',
-            #  's_feas_links_cat_0..4',
-            #  't_feas_links_cat_0..4',
-            #  's_feas_unions_cat_0..5',
-            #  't_feas_unions_cat_0..5',
-            #  'capacity_4..7']
-            #  partial_features: (sr_u, sr_v, u_is_subroot, v_is_subroot, load, target_load, extent, cos_uv_ur)
-            features_list = []
-            for (
-                num_steps,
-                sr_s,
-                sr_t,
-                s_is_subroot,
-                t_is_subroot,
-                s_load,
-                t_load,
-                is_delaunay,
-                extent,
-                cos,
-                num_blocked,
-                union_span,
-            ) in partial_features_:
-                s_root = A.nodes[sr_s]['root']
-                t_root = A.nodes[sr_t]['root']
-                # as of 2025-06: Angle span calculation is not implemented when
-                #   uniting components connected to different roots.
-                s_span_lo, s_span_hi = subtree_span_[sr_s][t_root]
-                t_span_lo, t_span_hi = subtree_span_[sr_t][t_root]
-                union_lo, union_hi = union_span
-                union_load = s_load + t_load
-                features_list.append(
-                    (
-                        s_is_subroot,  # s_is_subroot,
-                        t_is_subroot,  # t_is_subroot,
-                        is_delaunay,  # is_delaunay
-                        T_scaled,  # T_scaled
-                        # NOTE: step completeness is tricky, because it would trigger
-                        #       a full appraisal refresh after each step. This is not
-                        #       implemented and probably should not be. As a result,
-                        #       the appraisals reflect the step when they were last
-                        #       updated. Hopefully the update won't lag too many steps.
-                        num_steps / max_steps,  # step_completeness
-                        *hu_moment_,  # Hu moment_h1..7
-                        s_load / capacity,  # s_rel_load
-                        t_load / capacity,  # t_rel_load
-                        angle_ccw(s_span_lo, t_root, s_span_hi),  # s_span
-                        angle_ccw(t_span_lo, t_root, t_span_hi),  # t_span
-                        extent_min_[sr_s],  # s_extent_min
-                        extent_min_[sr_t],  # t_extent_min
-                        (
-                            d2roots[sr_s, t_root].item() - d2roots[sr_t, t_root].item()
-                        ),  # radial_gain
-                        d2roots[sr_s, s_root].item() - extent,  # saving
-                        angle_ccw(union_lo, t_root, union_hi),  # union_span
-                        union_load / capacity,  # union_rel_load
-                        extent,  # extent
-                        cos,  # cos
-                        num_blocked / capacity,  # blocked_subtree_equiv
-                        *LinkCount.onehot(
-                            cat_feas_links_[sr_s]
-                        ),  # s_num_feas_links_cat
-                        *LinkCount.onehot(
-                            cat_feas_links_[sr_t]
-                        ),  # t_num_feas_links_cat
-                        *UnionCount.onehot(
-                            cat_feas_unions_[sr_s]
-                        ),  # s_num_feas_unions_cat
-                        *UnionCount.onehot(
-                            cat_feas_unions_[sr_t]
-                        ),  # t_num_feas_unions_cat
-                        *capacity_onehot,
-                    )
-                )
-
-            #  print(features_list[-1])
-            features = torch.tensor(features_list, dtype=torch.float32)
-            with torch.no_grad():
-                appraisals = model(features)
-            return appraisals.squeeze(1)
-
-        return appraise
+    def appraise(self, partial_features_: list):
+        features = self.torch.tensor(
+            self.full_from_partial_features(partial_features_),
+            dtype=self.torch.float32,
+        )
+        with self.torch.no_grad():
+            appraisals = self.model(features)
+        return appraisals.squeeze(1)
 
 
 def data_driven_hybrid(
     Aʹ: nx.Graph,
     capacity: int,
-    appraiser_factory: AppraiserFactory,
+    appraiser: Appraiser,
     maxiter=10000,
     threshold: float = 0.0,
     blockage_link_cos_lim: float = 0.85,  # 30°
     blockage_link_feeder_lim: float = 2.0,
-    blockage_subtree_feeder_lim: float = 7.0,
+    blockage_subtree_feeder_lim: float = 5.5,
 ) -> nx.Graph:
     """Hybrid machine-learning and Esau-Williams heuristic for C-MST
 
@@ -356,7 +387,7 @@ def data_driven_hybrid(
     purge_log = defaultdict(list)
     stale_log = {}
     # END: output data containers
-    appraise = appraiser_factory.get_appraiser(
+    appraiser.update_problem_variables(
         A,
         capacity,
         subtree_span_,
@@ -538,7 +569,7 @@ def data_driven_hybrid(
         #  print('prio_tier\n', prio_tier_)
         # appraise and enqueue links
         if links_features:
-            appraisals = appraise(links_features)
+            appraisals = appraiser.appraise(links_features)
             appraisal_log[iteration] = tuple(links_to_upd), appraisals
             j = 0
             for sr_u, num_appraisals in link_groups:
