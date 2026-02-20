@@ -13,7 +13,6 @@ from pathlib import Path
 from bitarray import bitarray
 import networkx as nx
 import numpy as np
-from mlhelpers.moments import hu_moments
 from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
@@ -33,7 +32,7 @@ lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
-__version = 'DDHv9'
+__version = 'DDHv10'
 
 _ONE = bitarray('1')
 
@@ -87,6 +86,7 @@ class Appraiser(abc.ABC):
     def update_problem_variables(
         self,
         A: nx.Graph,
+        Aʹ: nx.Graph,
         capacity: int,
         subtree_span_: list[list[tuple[int, int]]],
         cat_feas_links_: list[int],
@@ -105,12 +105,21 @@ class Appraiser(abc.ABC):
         self.T_scaled = math.log(T * 0.02)
         self.max_steps = T - math.ceil(T / capacity)
         self.d2roots = A.graph['d2roots'][:T]
-        self.hu_moment_ = A.graph['hu_moment_']
+        self.log_d2roots = np.log(A.graph['d2roots'][:T])
+
+        # calculate the ratio (second moment of area)/(s.m.a of homogeneous circle)
+        # use unit area for the moment; only wrt the first root (the hard-coded -1)
+        norm_T_d2root = Aʹ.graph['norm_scale'] * Aʹ.graph['d2roots'][:T, -1]
+        # the unit area circle with root at the center and T homogeneously distributed
+        # terminals would have a moment of inertia T/2/π - use it to normalize (range 1..7)
+        self.log_rel_moment = math.log((norm_T_d2root**2).sum().item() * 2 * np.pi / T)
 
     def full_from_partial_features(self, partial_features_: list) -> list:
-        """DDHv9 features"""
+        """DDHv10 features"""
         full_features = []
         for (
+            s,
+            t,
             num_steps,
             sr_s,
             sr_t,
@@ -132,6 +141,7 @@ class Appraiser(abc.ABC):
             t_span_lo, t_span_hi = self.subtree_span_[sr_t][t_root]
             union_lo, union_hi = union_span
             union_load = s_load + t_load
+            link_angle = self.angle_ccw(s, t_root, t)
             full_features.append(
                 (
                     s_is_subroot,  # s_is_subroot,
@@ -144,22 +154,33 @@ class Appraiser(abc.ABC):
                     #       the appraisals reflect the num_steps when they were last
                     #       updated. Hopefully the update won't lag too many steps.
                     num_steps / self.max_steps,  # step_completeness
-                    *self.hu_moment_,  # Hu moment_h1..7
+                    self.log_rel_moment,  # log_rel_moment
                     s_load / self.capacity,  # s_rel_load
                     t_load / self.capacity,  # t_rel_load
+                    self.log_d2roots[sr_s, s_root].item(),  # log_s_subroot_d2root
+                    self.log_d2roots[sr_t, t_root].item(),  # log_t_subroot_d2root
                     self.angle_ccw(s_span_lo, t_root, s_span_hi),  # s_span
                     self.angle_ccw(t_span_lo, t_root, t_span_hi),  # t_span
                     self.extent_min_[sr_s],  # s_extent_min
                     self.extent_min_[sr_t],  # t_extent_min
-                    (
-                        self.d2roots[sr_s, t_root].item()
-                        - self.d2roots[sr_t, t_root].item()
-                    ),  # radial_gain
-                    self.d2roots[sr_s, s_root].item() - extent,  # saving
+                    np.log(
+                        np.maximum(
+                            self.d2roots[sr_s, t_root] - self.d2roots[sr_t, t_root],
+                            np.e**-6,
+                        )
+                    ).item(),  # log_radial_gain
+                    math.log(
+                        max(self.d2roots[sr_s, s_root].item() - extent, math.e**-6)
+                    ),  # saving
                     self.angle_ccw(union_lo, t_root, union_hi),  # union_span
                     union_load / self.capacity,  # union_rel_load
-                    extent,  # extent
+                    math.log(extent),  # extent
                     cos,  # cos
+                    (
+                        link_angle
+                        if link_angle <= math.pi
+                        else (2 * math.pi - link_angle)
+                    ),  # span
                     num_blocked / self.capacity,  # blocked_subtree_equiv
                     *self.encode_categorical(
                         self.cat_feas_links_[sr_s],  # s_num_feas_links_cat
@@ -209,6 +230,7 @@ class AppraiserTorch(Appraiser):
     def update_problem_variables(
         self,
         A: nx.Graph,
+        Aʹ: nx.Graph,
         capacity: int,
         subtree_span_: list[list[tuple[int, int]]],
         cat_feas_links_: list[int],
@@ -218,6 +240,7 @@ class AppraiserTorch(Appraiser):
     ):
         super().update_problem_variables(
             A,
+            Aʹ,
             capacity,
             subtree_span_,
             cat_feas_links_,
@@ -266,8 +289,6 @@ def data_driven_hybrid(
     appraiser: Appraiser,
     maxiter=10000,
     threshold: float = 0.0,
-    blockage_link_cos_lim: float = 0.85,  # 30°
-    blockage_link_feeder_lim: float = 2.0,
     blockage_subtree_feeder_lim: float = 5.5,
 ) -> nx.Graph:
     """Hybrid machine-learning and Esau-Williams heuristic for C-MST
@@ -294,16 +315,6 @@ def data_driven_hybrid(
     # normalize all distances by the average edge extent of the MST forest
     A = as_normalized(Aʹ, scale=T / MSF.size(weight='length'))
     A.graph['d2roots_rank_'] = d2roots_rank_
-
-    # calculate the ratio (second moment of area)/(s.m.a of homogeneous circle)
-    # use unit area for the moment; only wrt the first root (the hard-coded 0)
-    #  norm_T_d2root = Aʹ.graph['norm_scale'] * Aʹ.graph['d2roots'][:T, 0]
-    # the unit area circle with root at the center and T homogeneously distributed
-    # terminals would have a moment of inertia T/2/π - use it to normalize (range 1..7)
-    #  A.graph['rel_moment'] = (norm_T_d2root**2).sum().item() * 2 * np.pi / T
-    VertexC = A.graph['VertexC']
-    A.graph['hu_moment_'] = hu_moments(VertexC[:T], VertexC[-1])
-
     d2roots = A.graph['d2roots']
     roots = range(-R, 0)
 
@@ -389,6 +400,7 @@ def data_driven_hybrid(
     # END: output data containers
     appraiser.update_problem_variables(
         A,
+        Aʹ,
         capacity,
         subtree_span_,
         cat_feas_links_,
@@ -469,6 +481,8 @@ def data_driven_hybrid(
                         union_span_cache[sr_v] = union_span
                     proper_features_.append(
                         (
+                            u,
+                            v,
                             num_steps,
                             subroot,
                             sr_v,
