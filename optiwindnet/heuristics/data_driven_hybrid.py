@@ -195,11 +195,11 @@ class Appraiser(abc.ABC):
 
 
 class AppraiserXGBoost(Appraiser):
-    def __init__(self, model_lib: str | Path):
+    def __init__(self, model_data: dict):
         import tl2cgen
 
-        self.model = tl2cgen.Predictor(model_lib)
-        self.name = model_lib
+        self.model = tl2cgen.Predictor(model_data['lib'])
+        self.name = model_data['name']
         self.DMatrix = tl2cgen.DMatrix
 
     def appraise(self, partial_features_):
@@ -599,6 +599,7 @@ def data_driven_hybrid(
                     (*top_link_[sr], sr) for sr in prio_tier
                 )
                 if appraisal < threshold:
+                    # best appraisal at this tier is not high enough, move to next tier
                     best_sr = max(best_sr, (appraisal, sr_dropped, tier_id))
                     continue
                 break
