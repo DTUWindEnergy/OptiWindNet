@@ -7,8 +7,7 @@ import time
 import math
 from collections import defaultdict
 from enum import IntEnum
-from typing import Callable, Self
-from pathlib import Path
+from typing import Callable, Self, Sequence
 
 from bitarray import bitarray
 import networkx as nx
@@ -75,8 +74,12 @@ class UnionCount(IntEnum):
 
 
 class Appraiser(abc.ABC):
+    # DDHv10 - arbitrary constants (must match data-wrangling values)
+    CAPACITY_FLOOR = 4
+    T_SCALE = 0.02
+    LOG_FLOOR = np.e**-6
     @abc.abstractmethod
-    def appraise(self, partial_features_: list):
+    def appraise(self, partial_features_: list[tuple]) -> Sequence:
         pass
 
     def encode_categorical(self, *args):
@@ -96,13 +99,14 @@ class Appraiser(abc.ABC):
     ):
         self.A = A
         self.capacity = capacity
+        self.capacity_cat = capacity - self.CAPACITY_FLOOR
         self.subtree_span_ = subtree_span_
         self.cat_feas_links_ = cat_feas_links_
         self.cat_feas_unions_ = cat_feas_unions_
         self.extent_min_ = extent_min_
         self.angle_ccw = angle_ccw
         self.T = T = A.graph['T']
-        self.T_scaled = math.log(T * 0.02)
+        self.T_scaled = math.log(T * self.T_SCALE)
         self.max_steps = T - math.ceil(T / capacity)
         self.d2roots = A.graph['d2roots'][:T]
         self.log_d2roots = np.log(A.graph['d2roots'][:T])
@@ -166,12 +170,12 @@ class Appraiser(abc.ABC):
                     np.log(
                         np.maximum(
                             self.d2roots[sr_s, t_root] - self.d2roots[sr_t, t_root],
-                            np.e**-6,
+                            self.LOG_FLOOR,
                         )
                     ).item(),  # log_radial_gain
-                    math.log(
-                        max(self.d2roots[sr_s, s_root].item() - extent, math.e**-6)
-                    ),  # saving
+                    np.log(
+                        np.maximum(self.d2roots[sr_s, s_root] - extent, self.LOG_FLOOR)
+                    ).item(),  # saving
                     self.angle_ccw(union_lo, t_root, union_hi),  # union_span
                     union_load / self.capacity,  # union_rel_load
                     math.log(extent),  # extent
@@ -187,7 +191,7 @@ class Appraiser(abc.ABC):
                         self.cat_feas_links_[sr_t],  # t_num_feas_links_cat
                         self.cat_feas_unions_[sr_s],  # s_num_feas_unions_cat
                         self.cat_feas_unions_[sr_t],  # t_num_feas_unions_cat
-                        self.capacity,
+                        self.capacity_cat,
                     ),
                 )
             )
@@ -202,7 +206,7 @@ class AppraiserXGBoost(Appraiser):
         self.name = model_data['name']
         self.DMatrix = tl2cgen.DMatrix
 
-    def appraise(self, partial_features_):
+    def appraise(self, partial_features_: list[tuple]) -> Sequence:
         features = np.array(
             self.full_from_partial_features(partial_features_),
             dtype=np.float32,
@@ -263,7 +267,7 @@ class AppraiserTorch(Appraiser):
         t_num_feas_links_cat,
         s_num_feas_unions_cat,
         t_num_feas_unions_cat,
-        capacity,
+        capacity_cat,
     ):
         return (
             *LinkCount.onehot(s_num_feas_links_cat),
@@ -273,7 +277,7 @@ class AppraiserTorch(Appraiser):
             *self.capacity_onehot,
         )
 
-    def appraise(self, partial_features_: list):
+    def appraise(self, partial_features_: list[tuple]) -> Sequence:
         features = self.torch.tensor(
             self.full_from_partial_features(partial_features_),
             dtype=self.torch.float32,
