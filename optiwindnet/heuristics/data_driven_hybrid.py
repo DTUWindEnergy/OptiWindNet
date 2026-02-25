@@ -739,6 +739,7 @@ def data_driven_hybrid(
             subroot_[t] = sr_kept
 
         stale_subtrees.clear()
+        whoneeds_[sr_kept].remove(sr_dropped)
         stale_subtrees.update(whoneeds_[sr_kept], whoneeds_[sr_dropped])
         A.remove_edge(u, v)
         if subtree.count() == capacity:
