@@ -554,6 +554,7 @@ def data_driven_hybrid(
 
         stale_subtrees.update(link_caused_staleness - fresh_subtrees)
         fresh_subtrees.add(subroot)
+        prev_cat_feas_unions = cat_feas_unions_[subroot]
         if not feas_unions:
             # this handles subtrees that became isolated
             S.add_edge(subroot, root)
@@ -564,6 +565,8 @@ def data_driven_hybrid(
             purge_log[iteration].append(subtree_nodes)
             steps_log[iteration].append((subroot, root))
             stale_subtrees.update(whoneeds_[subroot] - fresh_subtrees)
+            if prev_cat_feas_unions >= 0:
+                prio_tier_[prev_cat_feas_unions].remove(subroot)
             return [], []
         # discard useless edges
         if unfeas_links:
@@ -573,7 +576,6 @@ def data_driven_hybrid(
         cat_feas_unions = UnionCount.encode(len(feas_unions))
         cat_feas_links = LinkCount.encode(num_feas_links)
         update_stales = False
-        prev_cat_feas_unions = cat_feas_unions_[subroot]
         if cat_feas_unions != prev_cat_feas_unions:
             if prev_cat_feas_unions >= 0:
                 #  prio_tier_[prev_cat_feas_unions].remove(subroot)
