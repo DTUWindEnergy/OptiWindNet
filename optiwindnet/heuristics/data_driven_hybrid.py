@@ -566,7 +566,9 @@ def data_driven_hybrid(
             steps_log[iteration].append((subroot, root))
             stale_subtrees.update(whoneeds_[subroot] - fresh_subtrees)
             if prev_cat_feas_unions >= 0:
-                prio_tier_[prev_cat_feas_unions].remove(subroot)
+                #  prio_tier_[prev_cat_feas_unions].remove(subroot)
+                prio_tier_[prev_cat_feas_unions].discard(subroot)
+            cat_feas_unions_[subroot] = -1
             return [], []
         # discard useless edges
         if unfeas_links:
