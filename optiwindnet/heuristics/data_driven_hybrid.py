@@ -595,6 +595,9 @@ def data_driven_hybrid(
         return proper_links, proper_features_
 
     loop = True
+    links_to_appraise = []
+    links_features = []
+    link_groups = []
     # BEGIN: main loop
     while loop:
         debug('[%d]', iteration)
@@ -604,9 +607,9 @@ def data_driven_hybrid(
                 len(stale_subtrees),
                 stale_subtrees,
             )
-        links_to_upd = []
-        links_features = []
-        link_groups = []
+        links_to_appraise.clear()
+        links_features.clear()
+        link_groups.clear()
         #  print(stale_subtrees)
         while stale_subtrees:
             subroot = stale_subtrees.pop()
@@ -614,20 +617,22 @@ def data_driven_hybrid(
             #  print(subroot, proper_links)
             if proper_links:
                 link_groups.append((subroot, len(proper_links)))
-                links_to_upd.extend(proper_links)
+                links_to_appraise.extend(proper_links)
                 links_features.extend(proper_features)
 
         #  print('LINK_GROUPS\n', link_groups)
         #  print('prio_tier\n', prio_tier_)
         # appraise and enqueue links
-        if links_features:
+        if links_to_appraise:
             appraisals = appraiser.appraise(links_features)
-            appraisal_log[iteration] = tuple(links_to_upd), appraisals
+            appraisal_log[iteration] = tuple(links_to_appraise), appraisals
             j = 0
             for sr_u, num_appraisals in link_groups:
                 # get best-appraised link for each subroot
                 i, j = j, j + num_appraisals
-                top_link_[sr_u] = max(zip(appraisals[i:j].tolist(), links_to_upd[i:j]))
+                top_link_[sr_u] = max(
+                    zip(appraisals[i:j].tolist(), links_to_appraise[i:j])
+                )
 
         best_sr = (-float('inf'), -1, -1)
         for tier_id, prio_tier in enumerate(prio_tier_):
