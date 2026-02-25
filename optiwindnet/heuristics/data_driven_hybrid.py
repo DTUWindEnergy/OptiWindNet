@@ -31,7 +31,7 @@ lggr = logging.getLogger(__name__)
 debug, info, warn, error = lggr.debug, lggr.info, lggr.warning, lggr.error
 
 
-__version = 'DDHv10'
+__version = 'v10'
 
 _ONE = bitarray('1')
 
@@ -78,6 +78,7 @@ class Appraiser(abc.ABC):
     CAPACITY_FLOOR = 4
     T_SCALE = 0.02
     LOG_FLOOR = np.e**-6
+
     @abc.abstractmethod
     def appraise(self, partial_features_: list[tuple]) -> Sequence:
         pass
@@ -198,11 +199,44 @@ class Appraiser(abc.ABC):
         return full_features
 
 
+class AppraiserSGDClassifier(Appraiser):
+    def __init__(self, model_data: dict):
+        from sklearn.linear_model import SGDClassifier
+        from sklearn.preprocessing import StandardScaler
+
+        self.name = model_data['name']
+        model_params = np.load(model_data['path'])
+
+        self.feature_subset_ = model_params['feature_subset_']
+
+        self.model = model = SGDClassifier(loss='modified_huber')
+        model.coef_ = model_params['coef_']
+        model.intercept_ = model_params['intercept_']
+        model.classes_ = model_params['classes_']
+        model.n_features_in_ = model_params['n_features_in'].item()
+
+        self.scaler = scaler = StandardScaler()
+        scaler.mean_ = model_params['mean_']
+        scaler.scale_ = model_params['scale_']
+        scaler.var_ = scaler.scale_**2
+        scaler.n_features_in_ = model_params['n_features_in'].item()
+        scaler.n_samples_seen_ = model_params['n_samples_seen'].item()
+
+    def appraise(self, partial_features_: list[tuple]) -> Sequence:
+        features = np.array(
+            self.full_from_partial_features(partial_features_),
+            dtype=np.float32,
+        )
+        z_features = self.scaler.transform(features[:, self.feature_subset_])
+        appraisals = self.model.predict_proba(z_features)[:, 1]
+        return appraisals
+
+
 class AppraiserXGBoost(Appraiser):
     def __init__(self, model_data: dict):
         import tl2cgen
 
-        self.model = tl2cgen.Predictor(model_data['lib'])
+        self.model = tl2cgen.Predictor(model_data['path'])
         self.name = model_data['name']
         self.DMatrix = tl2cgen.DMatrix
 
