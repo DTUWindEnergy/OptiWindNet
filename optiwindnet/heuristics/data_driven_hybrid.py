@@ -761,6 +761,7 @@ def data_driven_hybrid(
                 # TODO: rethink why not: whoneeds_[sr].remove(sr_dropped)
                 whoneeds_[sr].discard(sr_kept)
             whoneeds_[sr_kept].clear()
+            cat_feas_unions_[sr_kept] = -1
         else:
             purge_log[iteration].append(((u, v),))
             # this block might be unnecessary if whoneeds is not for dropped dependencies
@@ -772,15 +773,16 @@ def data_driven_hybrid(
                 whoneeds_[sr].discard(sr_dropped)
                 whoneeds_[sr].add(sr_kept)
 
+        cat_feas_unions_[sr_dropped] = -1
         # remove from A and pq the edges that cross ⟨u, v⟩
         for s, t in edge_crossings(u, v, A, diagonals):
             A.remove_edge(s, t)
             purge_log[iteration].append(((s, t),))
-            stale_subtrees.add(subroot_[s])
-            stale_subtrees.add(subroot_[t])
-        # in case sr_dropped was marked as stale because of crossings
-        # TODO: rethink why not: stale_subtrees.remove(sr_dropped)
-        stale_subtrees.discard(sr_dropped)
+            sr_s, sr_t = subroot_[s], subroot_[t]
+            if cat_feas_unions_[sr_s] >= 0:
+                stale_subtrees.add(sr_s)
+            if cat_feas_unions_[sr_t] >= 0:
+                stale_subtrees.add(sr_t)
         #  print('TOP_LINK\n', top_link_)
 
         #  if pq:
