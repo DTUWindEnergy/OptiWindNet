@@ -5,6 +5,7 @@ import abc
 import logging
 import time
 import math
+import heapq
 from collections import defaultdict
 from enum import IntEnum
 from typing import Callable, Self, Sequence
@@ -422,7 +423,8 @@ def data_driven_hybrid(
     extent_min_ = [-1.0] * T
     # indexed by the cat_feas_unions of the subroots:
     prio_tier_ = tuple(set() for _ in range(len(UnionCount)))
-    top_link_ = [None] * T
+    _NULL_UNION = (-float('inf'), -1, -1, -1, -1)
+    top_outbound_ = [_NULL_UNION] * T
     # <iteration>: iteration counter
     iteration = 0
     num_steps = 0
@@ -508,7 +510,7 @@ def data_driven_hybrid(
                         # sr_v needs to be reprocessed
                         fresh_subtrees.discard(sr_v)
                         continue
-                    proper_links.append(uv_uniq)
+                    proper_links.append((uv_uniq, subroot, sr_v))
                     u_span = subtree_span_[subroot][root_v]
                     union_span = union_span_cache.get(sr_v)
                     if union_span is None:
@@ -582,8 +584,7 @@ def data_driven_hybrid(
             if prev_cat_feas_unions >= 0:
                 #  prio_tier_[prev_cat_feas_unions].remove(subroot)
                 prio_tier_[prev_cat_feas_unions].discard(subroot)
-            if len(proper_links) > 0:
-                prio_tier_[cat_feas_unions].add(subroot)
+            prio_tier_[cat_feas_unions].add(subroot)
             cat_feas_unions_[subroot] = cat_feas_unions
             update_stales = True
         if cat_feas_links != cat_feas_links_[subroot]:
@@ -599,6 +600,7 @@ def data_driven_hybrid(
         return proper_links, proper_features_
 
     loop = True
+    inbound_unions_ = [[] for _ in _T]
     links_to_appraise = []
     links_features = []
     link_groups = []
@@ -614,7 +616,6 @@ def data_driven_hybrid(
         links_to_appraise.clear()
         links_features.clear()
         link_groups.clear()
-        #  print(stale_subtrees)
         while stale_subtrees:
             subroot = stale_subtrees.pop()
             proper_links, proper_features = refresh_subtree(subroot)
@@ -623,58 +624,85 @@ def data_driven_hybrid(
                 link_groups.append((subroot, len(proper_links)))
                 links_to_appraise.extend(proper_links)
                 links_features.extend(proper_features)
+            else:
+                top_outbound_[subroot] = _NULL_UNION
 
         #  print('LINK_GROUPS\n', link_groups)
         #  print('prio_tier\n', prio_tier_)
         # appraise and enqueue links
         if links_to_appraise:
-            appraisals = appraiser.appraise(links_features)
-            appraisal_log[iteration] = tuple(links_to_appraise), appraisals
+            fresh_appraisals = appraiser.appraise(links_features)
+            appraisal_log[iteration] = tuple(links_to_appraise), fresh_appraisals
             j = 0
             for sr_u, num_appraisals in link_groups:
-                # get best-appraised link for each subroot
                 i, j = j, j + num_appraisals
-                top_link_[sr_u] = max(
-                    zip(appraisals[i:j].tolist(), links_to_appraise[i:j])
+                for appraisal, (uv_uniq, _, sr_v) in zip(
+                    fresh_appraisals[i:j].tolist(), links_to_appraise[i:j]
+                ):
+                    heapq.heappush(
+                        inbound_unions_[sr_v], (-appraisal, uv_uniq, sr_u, sr_v)
+                    )
+                # get best-appraised outbound link for sr_u
+                argmax = fresh_appraisals[i:j].argmax() + i
+                top_outbound_[sr_u] = (
+                    fresh_appraisals[argmax].item(),
+                    *links_to_appraise[argmax],
                 )
 
-        best_sr = (-float('inf'), -1, -1)
-        for tier_id, prio_tier in enumerate(prio_tier_):
+        prio_union = _NULL_UNION
+        for prio_tier in prio_tier_:
             if prio_tier:
                 # get the best-appraised link from the highest-priority non-empty tier
-                appraisal, uv_uniq, sr_dropped = max(
-                    (*top_link_[sr], sr) for sr in prio_tier
-                )
-                if appraisal < threshold:
-                    # best appraisal at this tier is not high enough, move to next tier
-                    best_sr = max(best_sr, (appraisal, sr_dropped, tier_id))
-                    continue
-                break
+                for sr in prio_tier:
+                    if top_outbound_[sr] > prio_union:
+                        prio_union = top_outbound_[sr]
+                        #  if subroot_[prio_union[1][0]] not in prio_union[2:4] or subroot_[prio_union[1][1]] not in prio_union[2:4]:
+                        #      print(f'ERROR: top_outbound subroot <{sr}> prio_tier: {prio_tier}')
+                    inbound_heap = inbound_unions_[sr]
+                    while inbound_heap and -inbound_heap[0][0] > prio_union[0]:
+                        negappraisal, (u, v), sr_dropped, sr_kept = inbound_heap[0]
+                        sr_u, sr_v = subroot_[u], subroot_[v]
+                        # if sr_dropped or sr_kept is out of sync with subroot_, the entry is stale
+                        if (u, v) in A.edges and (
+                            (sr_u == sr_dropped and sr_v == sr_kept)
+                            or (sr_v == sr_dropped and sr_u == sr_kept)
+                        ):
+                            prio_union = -negappraisal, (u, v), sr_dropped, sr_kept
+                            break
+                        # remove stale entry (u, v) no longer in A
+                        heapq.heappop(inbound_heap)
+                if prio_union[0] > threshold:
+                    # tier's best union qualifies
+                    break
         else:
-            if best_sr[1] == -1:
+            # no union appraisal was higher than threshold
+            if prio_union[1] == -1:
                 # finished
                 break
-            else:
-                #  print('@', end='')
-                appraisal, sr_dropped, tier_id = best_sr
-                prio_tier = prio_tier_[tier_id]
-                uv_uniq = top_link_[sr_dropped][1]
-        #  print(tier_id, appraisal, best_sr[1] == -1)
-        prio_tier.remove(sr_dropped)
+        appraisal, uv_uniq, sr_dropped, sr_kept = prio_union
+        prio_tier_[cat_feas_unions_[sr_dropped]].remove(sr_dropped)
+        inbound_unions_[sr_dropped].clear()
+        inbound_unions_[sr_kept].clear()
         #  debug('heap top loop-top: <%d>, «%s» %.3f', pq[0][-1], pq[0][-2], -pq[0][0])
 
         # TODO: reassess this hack
         if uv_uniq not in A.edges:
             stale_log[iteration] = uv_uniq
             debug('>>> popped link ⟨%s⟩ is not in A anymore <<<', uv_uniq)
-            #  print(f'>>> popped link ⟨{uv_uniq}⟩ is not in A anymore <<<')
-            prio_tier_[tier_id].discard(sr_dropped)
+            print(f'>>> link ⟨{uv_uniq}⟩ is not in A anymore <<<')
+            #  prio_tier_[tier_id].discard(sr_dropped)
             continue
         # convert uv_uniq back to ⟨source, target⟩
+        #  print(subroot_[uv_uniq[0]], sr_dropped, sr_kept)
         u, v = uv_uniq if subroot_[uv_uniq[0]] == sr_dropped else uv_uniq[::-1]
-        sr_kept = subroot_[v]
         debug(
-            '<popped> «%d~%d», sr_u: <%d>, appraisal: %.3f', u, v, sr_dropped, appraisal
+            '<got> !%s! «%d~%d», dropped: <%d> kept: <%d>, appraisal: %.3f',
+            uv_uniq,
+            u,
+            v,
+            sr_dropped,
+            sr_kept,
+            appraisal,
         )
 
         root = A.nodes[sr_kept]['root']
@@ -687,7 +715,12 @@ def data_driven_hybrid(
             )
             for r in roots
         ]
-        debug('<angle_span> //%s//', union_span_[root])
+        debug(
+            '<angle_span> //%s// dropped: %s; kept: %s',
+            union_span_[root],
+            subtree_span_[sr_dropped][root],
+            subtree_span_[sr_kept][root],
+        )
 
         # edge addition starts here
         debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
@@ -739,7 +772,9 @@ def data_driven_hybrid(
             subroot_[t] = sr_kept
 
         stale_subtrees.clear()
-        whoneeds_[sr_kept].remove(sr_dropped)
+        # TODO: figure out why .discard() instead of .remove()
+        #  whoneeds_[sr_kept].remove(sr_dropped)
+        whoneeds_[sr_kept].discard(sr_dropped)
         stale_subtrees.update(whoneeds_[sr_kept], whoneeds_[sr_dropped])
         A.remove_edge(u, v)
         if subtree.count() == capacity:
@@ -790,6 +825,7 @@ def data_driven_hybrid(
         #  else:
         #      debug('heap EMPTY')
         iteration += 1
+        #  print(iteration, end='.')
         if iteration == maxiter:
             error(
                 'ERROR[data_driven_hybrid]: reached maximum number of iterations (%d)',
