@@ -10,6 +10,7 @@ from enum import IntEnum
 from typing import Callable, Self, Sequence
 
 from bitarray import bitarray
+from bitarray.util import zeros
 import networkx as nx
 import numpy as np
 from scipy.stats import rankdata
@@ -394,7 +395,7 @@ def data_driven_hybrid(
 
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
-    subtree_ = [bitarray(T) for _ in _T]
+    subtree_ = [zeros(T) for _ in _T]
     for t, subtree in zip(_T, subtree_):
         subtree[t] = 1
     # <subroot_>: maps terminals to their subroots
@@ -405,7 +406,7 @@ def data_driven_hybrid(
     #                  subtree
     subtree_span_ = [[(t, t) for _ in roots] for t in _T]
     # <subtree_blocked_>: sets of blocked terminals from other components
-    subtree_blocked_ = [bitarray(T) for _ in _T]
+    subtree_blocked_ = [zeros(T) for _ in _T]
     max_blockable = blockage_subtree_feeder_lim * capacity
 
     # other structures
@@ -476,8 +477,9 @@ def data_driven_hybrid(
                 load_other = subtree_[sr_v].count()
                 extent = uvD['length']
                 if sr_v == subroot:
-                    # link internal to subtree only add once
+                    # link internal to subtree
                     if u < v:
+                        # only add to unfeas_links once
                         unfeas_links.append(uv_uniq)
                     continue
                 elif (

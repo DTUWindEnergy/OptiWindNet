@@ -11,6 +11,7 @@ from itertools import pairwise, chain
 import networkx as nx
 import numpy as np
 from bitarray import bitarray
+from bitarray.util import zeros
 
 from .geometric import CoordPair, rotate, angle_helpers
 
@@ -1168,7 +1169,7 @@ def add_link_blockmap(A: nx.Graph):
     for u, v, edgeD in A.edges(data=True):
         blocked__ = []
         for angle_, angle_rank_, rootC in zip(angle__.T, angle_rank__.T, VertexC[-R:]):
-            blocked_ = bitarray(T)
+            blocked_ = zeros(T)
             uR, vR = angle_rank_[[u, v]].tolist()
             uv_angle = (angle_[v] - angle_[u]).item()
             if uv_angle < 0:
