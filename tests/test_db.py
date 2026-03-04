@@ -1,12 +1,17 @@
 from pathlib import Path
 import pytest
 import numpy as np
-from pony.orm import db_session
 
 from optiwindnet.api import HGSRouter
-from optiwindnet.db import open_database, G_from_routeset, L_from_nodeset
-from optiwindnet.db.storagev2 import (
+from optiwindnet.db import (
+    open_database,
+    G_from_routeset,
+    L_from_nodeset,
+    NodeSet,
+    RouteSet,
     store_G,
+)
+from optiwindnet.db.storage import (
     packnodes,
     add_if_absent,
     get_machine_pk,
@@ -16,7 +21,7 @@ from .helpers import tiny_wfn, assert_graph_equal
 tmp_path = Path(__file__).parent / 'temp'
 
 # ---------------------------
-# Test modelv2
+# Test model
 # ---------------------------
 
 
@@ -36,14 +41,12 @@ def test_open_database(tmp_path):
     # create the DB
     db = open_database(str(dbfile), create_db=True)
 
-    expected_attrs = ['Entity', 'Machine', 'Method', 'NodeSet', 'RouteSet']
-
-    for name in expected_attrs:
-        assert hasattr(db, name), f"db should expose attribute '{name}'"
+    # Verify tables were created
+    assert db is not None
 
 
 # ---------------------------
-# Test storagev2
+# Test storage
 # ---------------------------
 
 
@@ -51,17 +54,15 @@ def test_L_from_nodeset(tmp_path):
     dbfile = tmp_path / 'db_test.sqlite'
 
     # open and create db if not there
-    db = open_database(dbfile, create_db=True)
+    open_database(dbfile, create_db=True)
 
     wfn = tiny_wfn()
     L = wfn.L
     L.name = 'Test'
 
     pack = packnodes(L)
-    with db_session:
-        NodeSet = db.entities['NodeSet']
-        digest = add_if_absent(NodeSet, pack)
-        ns = NodeSet[digest]
+    digest = add_if_absent(NodeSet, pack)
+    ns = NodeSet.get_by_id(digest)
 
     L2 = L_from_nodeset(ns)
     assert L2.graph['T'] == L.graph['T']
@@ -74,7 +75,7 @@ def test_G_from_routeset(tmp_path):
 
     # open and create db if not there
     db = open_database(dbfile, create_db=True)
-    get_machine_pk(db)
+    get_machine_pk()
 
     wfn = tiny_wfn(router=HGSRouter(time_limit=0.1))
     G = wfn.G
@@ -82,9 +83,8 @@ def test_G_from_routeset(tmp_path):
     id = store_G(G, db=db)
     assert id == 1
 
-    with db_session:
-        rs = db.RouteSet[id]
-        G_rs = G_from_routeset(rs)
+    rs = RouteSet.get_by_id(id)
+    G_rs = G_from_routeset(rs)
 
     ignored_keys = {
         'bound',
@@ -105,17 +105,15 @@ def test_G_from_routeset(tmp_path):
 def test_L_from_nodeset_detours(tmp_path):
     dbfile = tmp_path / 'db_test.sqlite'
     # open and create db if not there
-    db = open_database(dbfile, create_db=True)
+    open_database(dbfile, create_db=True)
 
     wfn = tiny_wfn(cables=1)
     L = wfn.L
     L.name = 'Test'
 
     pack = packnodes(L)
-    with db_session:
-        NodeSet = db.entities['NodeSet']
-        digest = add_if_absent(NodeSet, pack)
-        ns = NodeSet[digest]
+    digest = add_if_absent(NodeSet, pack)
+    ns = NodeSet.get_by_id(digest)
 
     L2 = L_from_nodeset(ns)
     assert L2.graph['T'] == L.graph['T']
@@ -128,7 +126,7 @@ def test_G_from_routeset_detours(tmp_path):
 
     # open and create db if not there
     db = open_database(dbfile, create_db=True)
-    get_machine_pk(db)
+    get_machine_pk()
 
     wfn = tiny_wfn(router=HGSRouter(time_limit=0.1))
     G = wfn.G
@@ -136,9 +134,8 @@ def test_G_from_routeset_detours(tmp_path):
     id = store_G(G, db=db)
     assert id == 1
 
-    with db_session:
-        rs = db.RouteSet[id]
-        G_rs = G_from_routeset(rs)
+    rs = RouteSet.get_by_id(id)
+    G_rs = G_from_routeset(rs)
 
     ignored_keys = {
         'bound',

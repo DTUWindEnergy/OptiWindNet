@@ -4,7 +4,7 @@
 
 *OptiWindNet* has been tested on Windows 10/11 and on Linux systems, but should run on MacOSX as well.
 
-Python version 3.11 or 3.12 is recommended to run *OptiWindNet*. Python 3.13+ may cause issues with the `optiwindnet.db` module, but all other features work fine. The last version to support Python 3.10 was v0.1.0.
+Python version 3.11+ is required. The last version to support Python 3.10 was v0.1.0.
 
 Running *OptiWindNet* within a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
 
