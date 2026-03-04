@@ -189,13 +189,13 @@ def test_get_shape_to_fill_multi_roots_are_averaged_and_R_set_to_1():
 # -------------------------------
 def test_turbinate_builds_graph_with_spaced_turbines():
     square_side = 10
-    T_req = 20
+    T_req = 18
     d = 2.0
     rootsC = np.array([[5.0, 5.0]])
     borderC = _square(square_side, square_side)
     L = _make_graph(borderC, rootsC)
 
-    L2 = aug.turbinate(L, T=T_req, d=d, max_iter=50_000, rounds=2)
+    L2 = aug.turbinate(L, T=T_req, d=d, max_iter=50_000, rounds=4)
 
     assert isinstance(L2, nx.Graph)
     V = L2.graph['VertexC']

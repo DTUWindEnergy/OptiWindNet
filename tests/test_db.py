@@ -74,13 +74,13 @@ def test_G_from_routeset(tmp_path):
     dbfile = tmp_path / 'db_test.sqlite'
 
     # open and create db if not there
-    db = open_database(dbfile, create_db=True)
+    open_database(dbfile, create_db=True)
     get_machine_pk()
 
     wfn = tiny_wfn(router=HGSRouter(time_limit=0.1))
     G = wfn.G
 
-    id = store_G(G, db=db)
+    id = store_G(G)
     assert id == 1
 
     rs = RouteSet.get_by_id(id)
@@ -125,13 +125,13 @@ def test_G_from_routeset_detours(tmp_path):
     dbfile = tmp_path / 'db_test.sqlite'
 
     # open and create db if not there
-    db = open_database(dbfile, create_db=True)
+    open_database(dbfile, create_db=True)
     get_machine_pk()
 
     wfn = tiny_wfn(router=HGSRouter(time_limit=0.1))
     G = wfn.G
 
-    id = store_G(G, db=db)
+    id = store_G(G)
     assert id == 1
 
     rs = RouteSet.get_by_id(id)
