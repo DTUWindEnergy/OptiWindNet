@@ -19,7 +19,7 @@ from .api_utils import (
     parse_cables_input,
     plot_org_buff,
 )
-from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
+from .baselines.hgs import hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml, L_from_windIO
 from .importer import load_repository as load_repository
@@ -690,31 +690,15 @@ class HGSRouter(Router):
         verbose = verbose or self.verbose
 
         # optimizing
-        R = A.graph['R']
-        if R == 1:
-            S = iterative_hgs_cvrp(
-                as_normalized(A),
-                capacity=cables_capacity,
-                time_limit=self.time_limit,
-                max_retries=self.max_retries,
-                vehicles=self.feeder_limit,
-                seed=self.seed,
-            )
-        else:
-            S = hgs_multiroot(
-                as_normalized(A),
-                capacity=cables_capacity,
-                time_limit=self.time_limit,
-                balanced=self.balanced,
-                seed=self.seed,
-            )
-            if verbose and self.feeder_limit:
-                print(
-                    'WARNING: HGSRouter is used for a plant with more than one '
-                    'substation and feeder-limit is neglected (The current '
-                    'implementation of HGSRouter does not support limiting the number '
-                    'of feeders in multi-substation plants.)'
-                )
+        S = hgs_cvrp(
+            as_normalized(A),
+            capacity=cables_capacity,
+            time_limit=self.time_limit,
+            max_retries=self.max_retries,
+            vehicles=self.feeder_limit,
+            balanced=self.balanced,
+            seed=self.seed,
+        )
 
         G_tentative = G_from_S(S, A)
 
@@ -816,18 +800,12 @@ class MILPRouter(Router):
                     elif feeder_route == 'straight':
                         S_warm = S_from_G(CPEW(A, capacity=cables_capacity))
                 else:
-                    if A.graph['R'] == 1:
-                        S_warm = iterative_hgs_cvrp(
-                            as_normalized(A),
-                            capacity=cables_capacity,
-                            time_limit=min(self.time_limit, 0.2),
-                        )
-                    else:
-                        S = hgs_multiroot(
-                            as_normalized(A),
-                            capacity=cables_capacity,
-                            time_limit=min(self.time_limit, 0.2),
-                        )
+                    S_warm = hgs_cvrp(
+                        as_normalized(A),
+                        capacity=cables_capacity,
+                        time_limit=min(self.time_limit, 0.2),
+                        repair=True,
+                    )
 
         else:
             raise OWNWarmupFailed('Unable to warm-start model.')
