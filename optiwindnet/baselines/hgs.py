@@ -4,6 +4,7 @@
 import logging
 import math
 import random
+import warnings
 from typing import Callable
 from typing import Sequence
 from collections import defaultdict
@@ -228,10 +229,10 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
         T=A.graph['T'],
         objective=sum(cost_),
         runtime=max(runtime_),
-        solution_time=solution_time_,
+        solution_time=solution_time_ if R > 1 else solution_time_[0],
         method_options=algo_params[0],
         solver_details=dict(
-            vehicles=vehicles_,
+            vehicles=vehicles_ if R > 1 else vehicles_[0],
         ),
     )
     if keep_log:
@@ -278,8 +279,13 @@ def hgs_cvrp(
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered and each cluster is solved concurrently.
 
+    For multi-root instances, the vehicles (feeders) parameter can only be left
+    undefined (meaning unlimited) or set to the minimum feasible value. Attempting
+    to set other values will result in a warning and the minimum being used. 
+
     If ``repair=True`` (the default), the solution is iteratively repaired
-    until no crossings remain (or ``max_retries`` is reached).
+    until no crossings remain (or ``max_retries`` is reached). This may cause the
+    actual runtime to be up to (max_retries + 1) times the given time_limit.
 
     Args:
         A: graph with allowed edges (if it has 0 edges, use complete graph)
@@ -342,13 +348,10 @@ def hgs_cvrp(
         )
         return S
 
-    if not repair:
-        return _solve()
-
     # iterative repair loop
     diagonals = A.graph['diagonals']
     i = 0
-    while True:
+    while repair:
         S = _solve()
         S = repair_routeset_path(S, A)
         crossings = S.graph.get('outstanding_crossings', [])
@@ -383,6 +386,9 @@ def hgs_cvrp(
                 if uv in diagonals:
                     del diagonals[uv]
                 A.remove_edge(*uv)
+    else:
+        # repair was false, while loop skipped
+        S = _solve()
     if i > 0:
         S.graph['retries'] = i
         if crossings:
@@ -410,3 +416,72 @@ def hgs_cvrp(
 
 
 _hgs_cvrp_fun_fingerprint = fun_fingerprint(hgs_cvrp)
+
+
+# TODO: remove deprecated function
+def iterative_hgs_cvrp(
+    A: nx.Graph,
+    *,
+    capacity: float,
+    time_limit: float,
+    vehicles: int | None = None,
+    seed: int | None = None,
+    max_retries: int = 10,
+    keep_log: bool = False,
+    complete: bool = False,
+) -> nx.Graph:
+    """DEPRECATED: Backward-compatible alias of `hgs_cvrp()`, use it instead."""
+    warnings.warn(
+        '`iterative_hgs_cvrp()` is deprecated and will be removed in a future release. '
+        'Use `hgs_cvrp()` instead, as it now iterates and repairs solution by default.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if complete:
+        warnings.warn(
+            'The `complete` parameter is deprecated and ignored.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if A.graph['R'] > 1:
+        raise ValueError('Use hgs_cvrp() for multiple-root problems')
+    return hgs_cvrp(
+        A,
+        capacity=capacity,
+        time_limit=time_limit,
+        vehicles=vehicles,
+        seed=seed,
+        keep_log=keep_log,
+        repair=True,
+        max_retries=max_retries,
+        balanced=False,
+    )
+
+
+# TODO: remove deprecated function
+def hgs_multiroot(
+    A: nx.Graph,
+    *,
+    capacity: int,
+    time_limit: float,
+    balanced: bool = False,
+    seed: int | None = None,
+    keep_log: bool = False,
+) -> nx.Graph:
+    """DEPRECATED: Backward-compatible alias of `hgs_cvrp()`, use it instead."""
+    warnings.warn(
+        '`hgs_multiroot()` is deprecated and will be removed in a future release. '
+        'Use `hgs_cvrp()` instead, as it now also works for multi-root instances.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return hgs_cvrp(
+        A,
+        capacity=capacity,
+        time_limit=time_limit,
+        vehicles=None,
+        seed=seed,
+        keep_log=keep_log,
+        repair=False,
+        balanced=balanced,
+    )
