@@ -343,13 +343,10 @@ def hgs_cvrp(
         )
         return S
 
-    if not repair:
-        return _solve()
-
     # iterative repair loop
     diagonals = A.graph['diagonals']
     i = 0
-    while True:
+    while repair:
         S = _solve()
         S = repair_routeset_path(S, A)
         crossings = S.graph.get('outstanding_crossings', [])
@@ -384,6 +381,9 @@ def hgs_cvrp(
                 if uv in diagonals:
                     del diagonals[uv]
                 A.remove_edge(*uv)
+    else:
+        # repair was false, while loop skipped
+        S = _solve()
     if i > 0:
         S.graph['retries'] = i
         if crossings:
