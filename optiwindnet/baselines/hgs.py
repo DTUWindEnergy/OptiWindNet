@@ -229,10 +229,10 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
         T=A.graph['T'],
         objective=sum(cost_),
         runtime=max(runtime_),
-        solution_time=solution_time_,
+        solution_time=solution_time_ if R > 1 else solution_time_[0],
         method_options=algo_params[0],
         solver_details=dict(
-            vehicles=vehicles_,
+            vehicles=vehicles_ if R > 1 else vehicles_[0],
         ),
     )
     if keep_log:
@@ -279,8 +279,13 @@ def hgs_cvrp(
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered and each cluster is solved concurrently.
 
+    For multi-root instances, the vehicles (feeders) parameter can only be left
+    undefined (meaning unlimited) or set to the minimum feasible value. Attempting
+    to set other values will result in a warning and the minimum being used. 
+
     If ``repair=True`` (the default), the solution is iteratively repaired
-    until no crossings remain (or ``max_retries`` is reached).
+    until no crossings remain (or ``max_retries`` is reached). This may cause the
+    actual runtime to be up to (max_retries + 1) times the given time_limit.
 
     Args:
         A: graph with allowed edges (if it has 0 edges, use complete graph)
@@ -413,15 +418,6 @@ def hgs_cvrp(
 _hgs_cvrp_fun_fingerprint = fun_fingerprint(hgs_cvrp)
 
 
-def _warn_deprecated(name: str, replacement: str) -> None:
-    warnings.warn(
-        f'`{name}()` is deprecated and will be removed in a future release. '
-        f'Use `{replacement}` instead.',
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-
 # TODO: remove deprecated function
 def iterative_hgs_cvrp(
     A: nx.Graph,
@@ -434,7 +430,7 @@ def iterative_hgs_cvrp(
     keep_log: bool = False,
     complete: bool = False,
 ) -> nx.Graph:
-    """Backward-compatible deprecated alias of :func:`hgs_cvrp`."""
+    """DEPRECATED: Backward-compatible alias of `hgs_cvrp()`, use it instead."""
     warnings.warn(
         '`iterative_hgs_cvrp()` is deprecated and will be removed in a future release. '
         'Use `hgs_cvrp()` instead, as it now iterates and repairs solution by default.',
@@ -472,7 +468,7 @@ def hgs_multiroot(
     seed: int | None = None,
     keep_log: bool = False,
 ) -> nx.Graph:
-    """Deprecated wrapper around :func:`hgs_cvrp` for multi-root behavior."""
+    """DEPRECATED: Backward-compatible alias of `hgs_cvrp()`, use it instead."""
     warnings.warn(
         '`hgs_multiroot()` is deprecated and will be removed in a future release. '
         'Use `hgs_cvrp()` instead, as it now also works for multi-root instances.',
