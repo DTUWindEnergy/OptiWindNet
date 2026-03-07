@@ -4,6 +4,7 @@
 import logging
 import math
 import random
+import warnings
 from typing import Callable
 from typing import Sequence
 from collections import defaultdict
@@ -410,3 +411,81 @@ def hgs_cvrp(
 
 
 _hgs_cvrp_fun_fingerprint = fun_fingerprint(hgs_cvrp)
+
+
+def _warn_deprecated(name: str, replacement: str) -> None:
+    warnings.warn(
+        f'`{name}()` is deprecated and will be removed in a future release. '
+        f'Use `{replacement}` instead.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
+# TODO: remove deprecated function
+def iterative_hgs_cvrp(
+    A: nx.Graph,
+    *,
+    capacity: float,
+    time_limit: float,
+    vehicles: int | None = None,
+    seed: int | None = None,
+    max_retries: int = 10,
+    keep_log: bool = False,
+    complete: bool = False,
+) -> nx.Graph:
+    """Backward-compatible deprecated alias of :func:`hgs_cvrp`."""
+    warnings.warn(
+        '`iterative_hgs_cvrp()` is deprecated and will be removed in a future release. '
+        'Use `hgs_cvrp()` instead, as it now iterates and repairs solution by default.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if complete:
+        warnings.warn(
+            'The `complete` parameter is deprecated and ignored.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if A.graph['R'] > 1:
+        raise ValueError('Use hgs_cvrp() for multiple-root problems')
+    return hgs_cvrp(
+        A,
+        capacity=capacity,
+        time_limit=time_limit,
+        vehicles=vehicles,
+        seed=seed,
+        keep_log=keep_log,
+        repair=True,
+        max_retries=max_retries,
+        balanced=False,
+    )
+
+
+# TODO: remove deprecated function
+def hgs_multiroot(
+    A: nx.Graph,
+    *,
+    capacity: int,
+    time_limit: float,
+    balanced: bool = False,
+    seed: int | None = None,
+    keep_log: bool = False,
+) -> nx.Graph:
+    """Deprecated wrapper around :func:`hgs_cvrp` for multi-root behavior."""
+    warnings.warn(
+        '`hgs_multiroot()` is deprecated and will be removed in a future release. '
+        'Use `hgs_cvrp()` instead, as it now also works for multi-root instances.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return hgs_cvrp(
+        A,
+        capacity=capacity,
+        time_limit=time_limit,
+        vehicles=None,
+        seed=seed,
+        keep_log=keep_log,
+        repair=False,
+        balanced=balanced,
+    )
