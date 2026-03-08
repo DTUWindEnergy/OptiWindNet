@@ -236,7 +236,7 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
         ),
     )
     if keep_log:
-        S.graph['method_log'] = log_
+        S.graph['method_log'] = log_ if R > 1 else log_[0]
 
     S.add_nodes_from(range(-R, 0))
     subtree_id_start = 0

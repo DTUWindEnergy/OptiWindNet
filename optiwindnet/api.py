@@ -45,8 +45,8 @@ from .svg import svgplot
 plt.rcParams['svg.fonttype'] = 'none'
 
 # Set up a logger and create shortcuts for error, warning, and info logging methods
-logger = logging.getLogger(__name__)
-error, warning, info = logger.error, logger.warning, logger.info
+_logger = logging.getLogger(__name__)
+_error, _warning, _info = _logger.error, _logger.warning, _logger.info
 
 
 class Router(ABC):
@@ -160,7 +160,7 @@ class WindFarmNetwork:
         # decide source of L
         if L is not None:
             if turbinesC is not None or substationsC is not None:
-                warning(
+                _warning(
                     'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
             L = as_stratified_vertices(L)
@@ -268,7 +268,7 @@ class WindFarmNetwork:
     def S(self) -> nx.Graph:
         "Solution topology (selected links)."
         if self._is_stale_SG:
-            raise RuntimeError('Call the `optimize()` method to update G.')
+            raise RuntimeError('Call the `optimize()` method to update S.')
         return self._S
 
     @property
@@ -391,7 +391,7 @@ class WindFarmNetwork:
 
         for u, v, reverse in self.S.edges(data='reverse'):
             if reverse is None:
-                error('reverse must not be None')
+                _error('reverse must not be None')
             u, v = (u, v) if u < v else (v, u)
             i, target = (u, v) if reverse else (v, u)
             terse[i] = target
@@ -618,8 +618,6 @@ class EWRouter(Router):
         self.feeder_route = feeder_route
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        verbose = verbose or self.verbose
-
         # optimizing
         if self.feeder_route == 'segmented':
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
@@ -687,7 +685,6 @@ class HGSRouter(Router):
         self.seed = seed
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        verbose = verbose or self.verbose
 
         # optimizing
         S = hgs_cvrp(
@@ -749,7 +746,7 @@ class MILPRouter(Router):
         try:
             self.optiwindnet_default_options = self.solver.options
         except AttributeError:
-            self.optiwindnet_default_options = 'Not available'
+            self.optiwindnet_default_options = {}
 
         if verbose and solver_name == 'ortools':
             enable_ortools_logging_if_jupyter(self.solver)
@@ -776,7 +773,7 @@ class MILPRouter(Router):
                 model_options=self.model_options,
                 S_warm_has_detour=S_warm_has_detour,
                 solver_name=self.solver_name,
-                logger=logging.getLogger(__name__),
+                logger=_logger,
                 verbose=verbose,
             )
 
