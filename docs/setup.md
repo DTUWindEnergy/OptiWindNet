@@ -92,6 +92,8 @@ Pyomo's interface with CBC is through a system call, so it does not need to be p
     conda install -c conda-forge coin-or-cbc
 
 
+Users on Windows might find it difficult to get a multi-threaded CBC on that platform (the symptom of single-threaded CBC binary is it not recognizing the `threads` parameter). If that is the case, use the CBC binary from <https://github.com/mdealencar/Cbc/releases>.
+
 ### SCIP
 
 [SCIP](https://www.scipopt.org/) is open source software.
