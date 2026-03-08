@@ -58,30 +58,10 @@ European Journal of Operational Research,
 }
 ```
 
-The OptiWindNet software package can be cited through [OptiWindNet's Zenodo DOI](https://doi.org/10.5281/zenodo.18388438). Check the bottom right of that page for multiple ready-to-use citation formats for the latest OptiWindNet version. Below how it looks like for a specific version:
-- Souza de Alencar, M., Arasteh, A., & Friis-Møller, M. (2026). DTUWindEnergy/OptiWindNet v0.1.6. Zenodo. https://doi.org/10.5281/zenodo.18412871
+The OptiWindNet software package can be cited (unversioned) as:
+> Souza de Alencar, M., Arasteh, A., & Friis-Møller, M. (2026). OptiWindNet by DTU Wind Energy. Zenodo. https://doi.org/10.5281/zenodo.18388438
 
-```{code-block} bib
-@software{souza_de_alencar_2026_18412871,
-  author       = {Souza de Alencar, Mauricio and
-                  Arasteh, Amir and
-                  Friis-Møller, Mikkel},
-  title        = {DTUWindEnergy/OptiWindNet: OptiWindNet v0.1.6},
-  month        = jan,
-  year         = 2026,
-  publisher    = {Zenodo},
-  version      = {v0.1.6},
-  doi          = {10.5281/zenodo.18412871},
-  url          = {https://doi.org/10.5281/zenodo.18412871},
-  swhid        = {swh:1:dir:4a878e11de821bf286be35b57f0be04a1f7d6c18
-                   ;origin=https://doi.org/10.5281/zenodo.18388438;vi
-                   sit=swh:1:snp:856057cac93c99089b0b234b52ca94669fb4
-                   ae21;anchor=swh:1:rel:d4f37fc1764e2aa218b3d46d742c
-                   36153118d373;path=DTUWindEnergy-OptiWindNet-
-                   ebc8e37
-                  },
-}
-```
+To cite a specific version, get the version-specific DOI at [OptiWindNet's entry at Zenodo](https://doi.org/10.5281/zenodo.18388438). Select the desired version on the right column and use one of the ready-to-use citation formats available at the bottom right of that page.
 
 ```{toctree}
 setup

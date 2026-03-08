@@ -1,3 +1,20 @@
+# v0.2.0
+
+[Commit history since v0.1.6](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.6...v0.2.0)
+
+## Breaking Changes
+- **HGS-CVRP interface unified**: `baselines.hgs` functions `hgs_multiroot()` and `iterative_hgs_cvrp()` are deprecated; `hgs_cvrp()` replaces them with no loss in functionality. Users of HGSRouter from the Network/Router API will not notice the change.
+- **Database format updated to v3**: Switched from Pony ORM (incompatible with Python 3.13+) to Peewee. Use `python -m optiwindnet.db.migrate input.v2.sqlite output.v3.sqlite` to migrate existing databases.
+
+## Features
+- Obstacles are now supported in `turbinate()` and `poisson_disc_filler()`.
+- `as_normalized()` now works also with `L`.
+- Replaced `multiprocessing.Pool` with `concurrent.futures.ThreadPoolExecutor` in HGS-CVRP calls, enabling concurrent solver instances without the quirks of the multiprocessing module. This requires a new version (v0.1.1+) of dependency hybgensea.
+- Removed dependency `py`.
+
+## Fixes
+- Fixed potential infinite loop in `PathFinder` for inconsistent graphs.
+
 # v0.1.6
 
 [Commit history since v0.1.5](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.5...v0.1.6)
