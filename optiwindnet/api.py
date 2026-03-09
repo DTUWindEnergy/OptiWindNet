@@ -604,6 +604,7 @@ class EWRouter(Router):
         **kwargs,
     ) -> None:
         """Create a Esau-Williams-based router.
+
         Args:
           maxiter: Maximum iterations.
           feeder_route: Feeder routing mode ("segmented" or "straight").
@@ -726,6 +727,7 @@ class MILPRouter(Router):
         **kwargs,
     ) -> None:
         """Create a MILP-based router.
+
         Args:
             solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools", "cplex", "highs", "scip").
             time_limit: Maximum runtime (seconds).
