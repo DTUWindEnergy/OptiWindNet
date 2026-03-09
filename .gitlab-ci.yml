@@ -8,18 +8,10 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "web"
 
 variables:
+  # DEFAULT_PYTHON sets the version to use for the tests triggered by each commit
+  DEFAULT_PYTHON: "3.14"
   SCIP_LINUX: "scipoptsuite_10.0.0-1+trixie_amd64.deb"
   SCIP_WINDOWS: "scipoptsuite-10.0.0-win-x64"
-
-.test_rules:
-  rules:
-    - if: $CI_COMMIT_BRANCH
-      changes:
-        compare_to: refs/heads/main
-        paths:
-          - optiwindnet/**/*
-          - tests/**/*
-    - when: manual
 
 # ===== Base templates =====
 .test_linux_base:
@@ -80,40 +72,37 @@ variables:
 # ===== Test OptiWindNet on Linux =====
 test_linux:
   extends: .test_linux_base
-  variables:
-    PYTHON_VERSION: "3.12"
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
   rules:
-    - !reference [.test_rules, rules]
+    - if: $CI_COMMIT_BRANCH && $PYTHON_VERSION == $DEFAULT_PYTHON
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - optiwindnet/**/*
+          - tests/**/*
+    - when: manual
 
 # ===== Test OptiWindNet on Windows =====
 test_windows:
   extends: .test_windows_base
-  variables:
-    PYTHON_VERSION: "3.12"
-  rules:
-    - !reference [.test_rules, rules]
-
-# ===== Manual multi-version test matrix =====
-test_matrix_linux:
-  extends: .test_linux_base
-  rules:
-    - when: manual
   parallel:
     matrix:
       - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
-
-test_matrix_windows:
-  extends: .test_windows_base
   rules:
+    - if: $CI_COMMIT_BRANCH && $PYTHON_VERSION == $DEFAULT_PYTHON
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - optiwindnet/**/*
+          - tests/**/*
     - when: manual
-  parallel:
-    matrix:
-      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
 
 # ===== Update GitLab Pages =====
 make_pages:
   stage: base
-  image: python:3.12
+  image: python:3.13
   tags: [linux]
   pages: true
   allow_failure: true
@@ -135,7 +124,7 @@ make_pages:
 # ===== Publish new version on PyPI =====
 pypi_linux:
   stage: deploy
-  image: python:3.12
+  image: python:3.13
   tags: [linux]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
