@@ -14,8 +14,10 @@ variables:
   rules:
     - if: $CI_COMMIT_BRANCH
       changes:
-        - optiwindnet/**/*
-        - tests/**/*
+        compare_to: refs/heads/main
+        paths:
+          - optiwindnet/**/*
+          - tests/**/*
     - when: manual
 
 # ===== Test OptiWindNet on Linux =====
