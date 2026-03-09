@@ -78,8 +78,7 @@ class Router(ABC):
           **kwargs : Additional router-specific parameters.
 
         Returns:
-          S : Solution topology (selected links).
-          G : Optimized network graph with routes and cable types.
+          Tuple of (solution topology (selected links), optimized route set).
         """
         pass
 
@@ -118,6 +117,7 @@ class WindFarmNetwork:
 
         Args:
           cables: Multiple formats are accepted (capacity is in number of turbines):
+
             * Set of cable specifications as: [(capacity, linear_cost), ...].
             * Sequence of maximum capacity per cable type: [capacity_0, capacity_1, ...]
             * Maximum capacity of all available cables: capacity
@@ -685,7 +685,6 @@ class HGSRouter(Router):
         self.seed = seed
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-
         # optimizing
         S = hgs_cvrp(
             as_normalized(A),
