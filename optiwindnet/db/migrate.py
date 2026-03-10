@@ -13,14 +13,8 @@ import os
 import sqlite3
 import sys
 
-from .model import (
-    Machine,
-    Method,
-    NodeSet,
-    RouteSet,
-    database_proxy,
-)
-from .storage import open_database
+from . import open_database, Machine, Method, NodeSet, RouteSet
+from .model import database_proxy
 
 
 def _get_v2_table_name(v2_conn, candidate_names):
