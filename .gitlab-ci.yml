@@ -7,9 +7,11 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "web"
 
+# Python version lists for test jobs (update these when adding/removing versions)
+.default_python: &default_python ["3.14"]
+.other_pythons: &other_pythons ["3.11", "3.12", "3.13"]
+
 variables:
-  # DEFAULT_PYTHON sets the version to use for the tests triggered by each commit
-  DEFAULT_PYTHON: "3.14"
   SCIP_LINUX: "scipoptsuite_10.0.0-1+trixie_amd64.deb"
   SCIP_WINDOWS: "scipoptsuite-10.0.0-win-x64"
 
@@ -72,9 +74,9 @@ variables:
 # ===== Test OptiWindNet on Linux =====
 test_linux:
   extends: .test_linux_base
-  description: "Python $DEFAULT_PYTHON"
-  variables:
-    PYTHON_VERSION: $DEFAULT_PYTHON
+  parallel:
+    matrix:
+      - PYTHON_VERSION: *default_python
   rules:
     - if: $CI_COMMIT_BRANCH
       changes:
@@ -86,9 +88,9 @@ test_linux:
 # ===== Test OptiWindNet on Windows =====
 test_windows:
   extends: .test_windows_base
-  description: "Python $DEFAULT_PYTHON"
-  variables:
-    PYTHON_VERSION: $DEFAULT_PYTHON
+  parallel:
+    matrix:
+      - PYTHON_VERSION: *default_python
   rules:
     - if: $CI_COMMIT_BRANCH
       changes:
@@ -102,23 +104,19 @@ test_matrix_linux:
   extends: .test_linux_base
   allow_failure: true
   rules:
-    - if: $PYTHON_VERSION == $DEFAULT_PYTHON
-      when: never
     - when: manual
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+      - PYTHON_VERSION: *other_pythons
 
 test_matrix_windows:
   extends: .test_windows_base
   allow_failure: true
   rules:
-    - if: $PYTHON_VERSION == $DEFAULT_PYTHON
-      when: never
     - when: manual
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+      - PYTHON_VERSION: *other_pythons
 
 # ===== Update GitLab Pages =====
 make_pages:
