@@ -187,6 +187,12 @@ pypi_deploy:
   tags: [linux]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  before_script:
+    - |
+      if ! git branch -a --contains "$CI_COMMIT_SHA" | grep -q "origin/$CI_DEFAULT_BRANCH"; then
+        echo "ERROR: Tag is not reachable from $CI_DEFAULT_BRANCH, aborting deploy"
+        exit 1
+      fi
   script:
     - pip install --progress-bar off --upgrade pip build twine packaging
     - python3 -m build
