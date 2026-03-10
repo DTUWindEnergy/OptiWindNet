@@ -1,9 +1,12 @@
-stages:
-  - base
-  - deploy
+# stages:
+#   - base
+#   - deploy
 
 workflow:
   rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "web"
 
@@ -12,13 +15,17 @@ workflow:
 .other_pythons: &other_pythons ["3.11", "3.12", "3.13"]
 
 variables:
+  # Tools = {
+  #     sphinx (publish docs on Gitlab Pages),
+  #     twine (publish package on PyPI)
+  # } (all running on linux)
   PYTHON_VERSION_FOR_TOOLS: "3.13"
   SCIP_LINUX: "scipoptsuite_10.0.0-1+trixie_amd64.deb"
   SCIP_WINDOWS: "scipoptsuite-10.0.0-win-x64"
 
 # ===== Base templates =====
 .test_linux_base:
-  stage: base
+  # stage: base
   image: python:${PYTHON_VERSION}
   tags: [linux]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
@@ -42,7 +49,7 @@ variables:
       - downloads
 
 .test_windows_base:
-  stage: base
+  # stage: base
   image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
   tags: [docker-windows]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
@@ -79,10 +86,13 @@ test_linux:
     matrix:
       - PYTHON_VERSION: *default_python
   rules:
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         compare_to: refs/heads/main
         paths:
+          - pyproject.toml
           - optiwindnet/**/*
           - tests/**/*
 
@@ -93,22 +103,39 @@ test_windows:
     matrix:
       - PYTHON_VERSION: *default_python
   rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - pyproject.toml
+          - optiwindnet/**/*
+          - tests/**/*
     - if: $CI_COMMIT_BRANCH
       changes:
         compare_to: refs/heads/main
         paths:
+          - pyproject.toml
           - optiwindnet/**/*
           - tests/**/*
+      when: manual
 
 # ===== Manual multi-version test matrix =====
 test_matrix_linux:
   extends: .test_linux_base
   allow_failure: true
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-      # for releases (i.e. version tag applied), the entire matrix must pass
-      allow_failure: false
-    - when: manual
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - pyproject.toml
+          - optiwindnet/**/*
+          - tests/**/*
+      when: manual
   parallel:
     matrix:
       - PYTHON_VERSION: *other_pythons
@@ -117,17 +144,23 @@ test_matrix_windows:
   extends: .test_windows_base
   allow_failure: true
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-      # for releases (i.e. version tag applied), the entire matrix must pass
-      allow_failure: false
-    - when: manual
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - pyproject.toml
+          - optiwindnet/**/*
+          - tests/**/*
+      when: manual
   parallel:
     matrix:
       - PYTHON_VERSION: *other_pythons
 
 # ===== Update GitLab Pages =====
 make_pages:
-  stage: base
+  # stage: base
   image: python:$PYTHON_VERSION_FOR_TOOLS
   tags: [linux]
   pages: true
@@ -142,14 +175,14 @@ make_pages:
     - apt-get update
     - apt-get -yq install make pandoc graphviz
     - pip install --progress-bar off .[docs] --upgrade
-    - cd docs; make html
-    - cd ../; mv docs/build/html public/
+    - make -C docs html
+    - mv docs/build/html public/
   artifacts:
     paths: [public]
 
 # ===== Publish new version on PyPI =====
-pypi_linux:
-  stage: deploy
+pypi_deploy:
+  # stage: deploy
   image: python:$PYTHON_VERSION_FOR_TOOLS
   tags: [linux]
   rules:
