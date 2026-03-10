@@ -5,6 +5,9 @@
 #   - coordinates are converted to floats, so floats may be used as well
 COORDINATE_FORMAT: planar
 
+# handle is optional (if omited, one is derived from the file name)
+HANDLE: example
+
 # extents define a polygon:
 #   - do not repeat the initial vertex at the end
 #   - line breaks are optional
@@ -22,6 +25,9 @@ EXTENTS: [
 ]
 
 # obstacles is optional and must be a list of polygons (even if 1 obstacle)
+#   - obstacles must be strictly inside the extents polygon
+#   - the parser will not complain about borders of obstacles overlapping
+#     borders of extents, but optiwindnet will behave unpredictably
 OBSTACLES: [
   [  # first obstacle
     [1540, 920],

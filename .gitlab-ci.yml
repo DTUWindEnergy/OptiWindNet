@@ -5,26 +5,19 @@ stages:
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "web"
 
 variables:
+  # DEFAULT_PYTHON sets the version to use for the tests triggered by each commit
+  DEFAULT_PYTHON: "3.14"
   SCIP_LINUX: "scipoptsuite_10.0.0-1+trixie_amd64.deb"
   SCIP_WINDOWS: "scipoptsuite-10.0.0-win-x64"
 
-.test_rules:
-  rules:
-    - if: $CI_COMMIT_BRANCH
-      changes:
-        - optiwindnet/**/*
-        - tests/**/*
-    - when: manual
-
-# ===== Test OptiWindNet on Linux =====
-test_linux:
+# ===== Base templates =====
+.test_linux_base:
   stage: base
-  image: python:3.12
+  image: python:${PYTHON_VERSION}
   tags: [linux]
-  rules:
-    - !reference [.test_rules, rules]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   before_script:
     - export DEBIAN_FRONTEND=noninteractive
@@ -45,23 +38,20 @@ test_linux:
     paths:
       - downloads
 
-# ===== Test OptiWindNet on Windows =====
-test_windows:
+.test_windows_base:
   stage: base
   image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
   tags: [docker-windows]
-  rules:
-    - !reference [.test_rules, rules]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   before_script:
     # The next 3 lines install the Miniforge3 conda
     # - Invoke-WebRequest -UserAgent curl https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe -OutFile Miniforge3-Windows-x86_64.exe
     # - Start-Process -Wait -FilePath Miniforge3-Windows-x86_64.exe -ArgumentList "/InstallationType=JustMe","/RegisterPython=0","/S","/D=$($env:UserProfile)\condaforge"
     # - . "$($env:UserProfile)\condaforge\shell\condabin\conda-hook.ps1"
-    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression   
+    - (conda shell.powershell hook) | Out-String | ?{$_} | Invoke-Expression
     - conda config --add channels conda-forge
     - conda config --set channel_priority strict
-    - conda create -y -q --name own_test python=3.12
+    - conda create -y -q --name own_test python=${PYTHON_VERSION}
     - conda activate own_test
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
     - conda install -y -q coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
@@ -79,10 +69,40 @@ test_windows:
     paths:
       - downloads
 
+# ===== Test OptiWindNet on Linux =====
+test_linux:
+  extends: .test_linux_base
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+  rules:
+    - if: $CI_COMMIT_BRANCH && $PYTHON_VERSION == $DEFAULT_PYTHON
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - optiwindnet/**/*
+          - tests/**/*
+    - when: manual
+
+# ===== Test OptiWindNet on Windows =====
+test_windows:
+  extends: .test_windows_base
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+  rules:
+    - if: $CI_COMMIT_BRANCH && $PYTHON_VERSION == $DEFAULT_PYTHON
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - optiwindnet/**/*
+          - tests/**/*
+    - when: manual
+
 # ===== Update GitLab Pages =====
 make_pages:
   stage: base
-  image: python:3.12
+  image: python:3.13
   tags: [linux]
   pages: true
   allow_failure: true
@@ -104,7 +124,7 @@ make_pages:
 # ===== Publish new version on PyPI =====
 pypi_linux:
   stage: deploy
-  image: python:3.12
+  image: python:3.13
   tags: [linux]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/

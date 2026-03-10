@@ -592,13 +592,16 @@ class PathFinder:
                     sec_left = NULL
                 else:
                     sec_left = right
-                    while True:
+                    for _ in P[left]:
                         sec_left = P[left][sec_left]['ccw']
                         incr_edge = (
                             (sec_left, left) if sec_left < left else (left, sec_left)
                         )
                         if incr_edge in edges_G_primed or incr_edge in constraint_edges:
                             break
+                    else:
+                        # G is inconsistent, unable to identify sec_left
+                        sec_left = NULL
 
                 if right >= ST or (right in G.nodes and len(G._adj[right]) == 0):
                     sec_right = NULL
