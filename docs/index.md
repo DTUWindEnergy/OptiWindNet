@@ -58,23 +58,10 @@ European Journal of Operational Research,
 }
 ```
 
-The OptiWindNet software package can be cited as:
-- Mauricio Souza de Alencar, Amir Arasteh and Mikkel Friis-Møller.
-_OptiWindNet: An open-source wind farm electrical network optimization tool_,
-DTU Wind and Energy Systems, Technical University of Denmark (2025, March),
-url: <https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet>
+The OptiWindNet software package can be cited (unversioned) as:
+> Souza de Alencar, M., Arasteh, A., & Friis-Møller, M. (2026). OptiWindNet by DTU Wind Energy. Zenodo. https://doi.org/10.5281/zenodo.18388438
 
-```{code-block} bib
-@article{
-    optiwindnet_2025,
-    title={OptiWindNet: Tool for designing and optimizing the electrical cable network of offshore wind farms},
-    author={Mauricio {Souza de Alencar} and Amir Arasteh and Mikkel Friis-Møller},
-    url="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet",
-    publisher={DTU Wind and Energy Systems, Technical University of Denmark},
-    year={2025},
-    month={4}
-}
-```
+To cite a specific version, get the version-specific DOI at [OptiWindNet's entry at Zenodo](https://doi.org/10.5281/zenodo.18388438). Select the desired version on the right column and use one of the ready-to-use citation formats available at the bottom right of that page.
 
 ```{toctree}
 setup

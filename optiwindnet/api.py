@@ -19,7 +19,7 @@ from .api_utils import (
     parse_cables_input,
     plot_org_buff,
 )
-from .baselines.hgs import hgs_multiroot, iterative_hgs_cvrp
+from .baselines.hgs import hgs_cvrp
 from .heuristics import CPEW, EW_presolver
 from .importer import L_from_pbf, L_from_site, L_from_yaml, L_from_windIO
 from .importer import load_repository as load_repository
@@ -45,8 +45,8 @@ from .svg import svgplot
 plt.rcParams['svg.fonttype'] = 'none'
 
 # Set up a logger and create shortcuts for error, warning, and info logging methods
-logger = logging.getLogger(__name__)
-error, warning, info = logger.error, logger.warning, logger.info
+_logger = logging.getLogger(__name__)
+_error, _warning, _info = _logger.error, _logger.warning, _logger.info
 
 
 class Router(ABC):
@@ -78,8 +78,7 @@ class Router(ABC):
           **kwargs : Additional router-specific parameters.
 
         Returns:
-          S : Solution topology (selected links).
-          G : Optimized network graph with routes and cable types.
+          Tuple of (solution topology (selected links), optimized route set).
         """
         pass
 
@@ -118,6 +117,7 @@ class WindFarmNetwork:
 
         Args:
           cables: Multiple formats are accepted (capacity is in number of turbines):
+
             * Set of cable specifications as: [(capacity, linear_cost), ...].
             * Sequence of maximum capacity per cable type: [capacity_0, capacity_1, ...]
             * Maximum capacity of all available cables: capacity
@@ -160,7 +160,7 @@ class WindFarmNetwork:
         # decide source of L
         if L is not None:
             if turbinesC is not None or substationsC is not None:
-                warning(
+                _warning(
                     'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
                 )
             L = as_stratified_vertices(L)
@@ -268,7 +268,7 @@ class WindFarmNetwork:
     def S(self) -> nx.Graph:
         "Solution topology (selected links)."
         if self._is_stale_SG:
-            raise RuntimeError('Call the `optimize()` method to update G.')
+            raise RuntimeError('Call the `optimize()` method to update S.')
         return self._S
 
     @property
@@ -391,7 +391,7 @@ class WindFarmNetwork:
 
         for u, v, reverse in self.S.edges(data='reverse'):
             if reverse is None:
-                error('reverse must not be None')
+                _error('reverse must not be None')
             u, v = (u, v) if u < v else (v, u)
             i, target = (u, v) if reverse else (v, u)
             terse[i] = target
@@ -604,6 +604,7 @@ class EWRouter(Router):
         **kwargs,
     ) -> None:
         """Create a Esau-Williams-based router.
+
         Args:
           maxiter: Maximum iterations.
           feeder_route: Feeder routing mode ("segmented" or "straight").
@@ -618,8 +619,6 @@ class EWRouter(Router):
         self.feeder_route = feeder_route
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        verbose = verbose or self.verbose
-
         # optimizing
         if self.feeder_route == 'segmented':
             S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
@@ -687,34 +686,16 @@ class HGSRouter(Router):
         self.seed = seed
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        verbose = verbose or self.verbose
-
         # optimizing
-        R = A.graph['R']
-        if R == 1:
-            S = iterative_hgs_cvrp(
-                as_normalized(A),
-                capacity=cables_capacity,
-                time_limit=self.time_limit,
-                max_retries=self.max_retries,
-                vehicles=self.feeder_limit,
-                seed=self.seed,
-            )
-        else:
-            S = hgs_multiroot(
-                as_normalized(A),
-                capacity=cables_capacity,
-                time_limit=self.time_limit,
-                balanced=self.balanced,
-                seed=self.seed,
-            )
-            if verbose and self.feeder_limit:
-                print(
-                    'WARNING: HGSRouter is used for a plant with more than one '
-                    'substation and feeder-limit is neglected (The current '
-                    'implementation of HGSRouter does not support limiting the number '
-                    'of feeders in multi-substation plants.)'
-                )
+        S = hgs_cvrp(
+            as_normalized(A),
+            capacity=cables_capacity,
+            time_limit=self.time_limit,
+            max_retries=self.max_retries,
+            vehicles=self.feeder_limit,
+            balanced=self.balanced,
+            seed=self.seed,
+        )
 
         G_tentative = G_from_S(S, A)
 
@@ -746,6 +727,7 @@ class MILPRouter(Router):
         **kwargs,
     ) -> None:
         """Create a MILP-based router.
+
         Args:
             solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools", "cplex", "highs", "scip").
             time_limit: Maximum runtime (seconds).
@@ -765,7 +747,7 @@ class MILPRouter(Router):
         try:
             self.optiwindnet_default_options = self.solver.options
         except AttributeError:
-            self.optiwindnet_default_options = 'Not available'
+            self.optiwindnet_default_options = {}
 
         if verbose and solver_name == 'ortools':
             enable_ortools_logging_if_jupyter(self.solver)
@@ -792,7 +774,7 @@ class MILPRouter(Router):
                 model_options=self.model_options,
                 S_warm_has_detour=S_warm_has_detour,
                 solver_name=self.solver_name,
-                logger=logging.getLogger(__name__),
+                logger=_logger,
                 verbose=verbose,
             )
 
@@ -816,18 +798,12 @@ class MILPRouter(Router):
                     elif feeder_route == 'straight':
                         S_warm = S_from_G(CPEW(A, capacity=cables_capacity))
                 else:
-                    if A.graph['R'] == 1:
-                        S_warm = iterative_hgs_cvrp(
-                            as_normalized(A),
-                            capacity=cables_capacity,
-                            time_limit=min(self.time_limit, 0.2),
-                        )
-                    else:
-                        S = hgs_multiroot(
-                            as_normalized(A),
-                            capacity=cables_capacity,
-                            time_limit=min(self.time_limit, 0.2),
-                        )
+                    S_warm = hgs_cvrp(
+                        as_normalized(A),
+                        capacity=cables_capacity,
+                        time_limit=min(self.time_limit, 0.2),
+                        repair=True,
+                    )
 
         else:
             raise OWNWarmupFailed('Unable to warm-start model.')

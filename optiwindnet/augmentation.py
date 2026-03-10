@@ -4,17 +4,20 @@
 import logging
 import math
 from typing import Callable
+from itertools import pairwise
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import numba as nb
+from numba.typed import List
 import numpy as np
+from scipy.spatial import ConvexHull
 
-from .geometric import CoordPair, CoordPairs, IndexPairs, area_from_polygon_vertices
+from .geometric import CoordPair, CoordPairs, IndexPairs, area_from_polygon_vertices, rotating_calipers, rotate
 from .interarraylib import L_from_site
 
 _lggr = logging.getLogger(__name__)
-warn = _lggr.warning
+info, warn = _lggr.info, _lggr.warning
 
 __all__ = ('get_shape_to_fill', 'poisson_disc_filler', 'turbinate')
 
@@ -47,6 +50,56 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
     return (
         ((point[np.newaxis, :] - RepellerC) ** 2).sum(axis=1) >= repel_radius_sq
     ).all()
+
+
+@nb.njit(cache=True, inline='always')
+def _walk_along_perimeter(polygonC: CoordPairs, max_loops: int) -> tuple[list[tuple[int, int]], list[tuple[float, float]]]:
+    """Find crossings of the polygons' perimeter with the unit grid.
+
+    Auxiliar function to poisson_disc_filler(). Used for identifying unit cells that
+    cover the polygon's shell. The polygon's vertices are also included in the lists.
+
+    Args:
+      polygonC: N×2 coordinates that define the polygon (unique vertices)
+      max_loops: a failsafe maximum for the inner loop (e.g. i_len + j_len + 1)
+
+    Returns:
+      list of cell index pairs and list of coordinate pairs
+    """
+    # list cells along the boundary (essential when cells are few)
+    points = []  # only used for the debugging plot
+    cells = []
+    xy = polygonC[-1]
+    ij = np.floor(xy)
+    vec = np.empty((2,))
+    t = np.empty((2,))
+    for k, xy_fwd in enumerate(polygonC):
+        ij_fwd = np.floor(xy_fwd)
+        point = xy[0], xy[1]
+        vec[:] = xy_fwd - xy
+        is_vec_gt0 = vec > 0
+        vec_sign = np.sign(vec)
+        frac = xy - ij
+        for _ in range(max_loops):
+            points.append(point)
+            cells.append((int(ij[0]), int(ij[1])))
+            if (ij == ij_fwd).all():
+                break
+            t[:] = (
+                ((is_vec_gt0[0] - frac[0]) / vec[0]) if vec[0] != 0 else np.inf,
+                ((is_vec_gt0[1] - frac[1]) / vec[1]) if vec[1] != 0 else np.inf,
+            )
+            y_not_x = np.argmin(t)
+            if y_not_x:
+                frac[:] = frac[0] + t[1]*vec[0], 1.0*~is_vec_gt0[1]
+                point = ij[0] + frac[0], ij[1] + is_vec_gt0[1]
+                ij[1] += vec_sign[1]
+            else:
+                frac[:] = 1.0*~is_vec_gt0[0], frac[1] + t[0]*vec[1]
+                point = ij[0] + is_vec_gt0[0], ij[1] + frac[1]
+                ij[0] += vec_sign[0]
+        xy, ij = xy_fwd, ij_fwd
+    return cells, points
 
 
 def _contains_np(
@@ -115,6 +168,7 @@ def _poisson_disc_filler_core(
     j_len: int,
     cell_idc: IndexPairs,
     BorderS: CoordPairs,
+    obstacleS__: list[CoordPairs],
     repel_radius_sq: float,
     RepellerS: CoordPairs | None,
     rng: np.random.Generator,
@@ -189,14 +243,19 @@ def _poisson_disc_filler_core(
             if not _clears(RepellerS, repel_radius_sq, dartC):
                 miss_streak += 1
                 continue
-        miss_streak = 0
-        # add new point and remove cell from empty list
-        points[out_count] = dartC
-        cells[i, j] = out_count
-        del idc_list[empty_idx]
-        out_count += 1
-        if out_count == T or not idc_list:
-            break
+        for obstacleS_ in obstacleS__:
+            if _contains(obstacleS_, dartC):
+                miss_streak += 1
+                break
+        else:
+            miss_streak = 0
+            # add new point and remove cell from empty list
+            points[out_count] = dartC
+            cells[i, j] = out_count
+            del idc_list[empty_idx]
+            out_count += 1
+            if out_count == T or not idc_list:
+                break
 
     return points[:out_count], iter_count
 
@@ -228,7 +287,7 @@ def poisson_disc_filler(
     BorderC: CoordPairs,
     RepellerC: CoordPairs | None = None,
     repel_radius: float = 0.0,
-    obstacles: list[CoordPairs] | None = None,
+    obstacleC__: list[CoordPairs] = [],
     seed: int | None = None,
     max_iter: int = 10000,
     plot: bool = False,
@@ -241,15 +300,13 @@ def poisson_disc_filler(
     placed points that are at least `min_dist` apart and that
     don't fall inside any of the `RepellerC` discs or `obstacles` areas.
 
-    >>> Handling of `obstacles` is not yet implemented. <<<<
-
     Args:
       T: number of points to place.
       min_dist: minimum distance between place points.
       BorderC: coordinates (B × 2) of border polygon.
       RepellerC: coordinates (R × 2) of the centers of forbidden discs.
       repel_radius: the radius of the forbidden discs.
-      obstacles: iterable (O × X × 2).
+      obstacleC__: sequence of coordinate arrays (X × 2).
       iter_max_factor: factor to multiply by `T` to limit the number of
         iterations.
       rounds: number of times to start from empty while `T` is not reached.
@@ -259,17 +316,12 @@ def poisson_disc_filler(
     Returns:
       coordinates (T, 2) of placed points
     """
-    # TODO: implement obstacles zones
-    if obstacles is not None:
-        raise NotImplementedError('obstacles not implemented')
-
-    offsetC, norm_factor, width, height = _get_border_scale_offset(BorderC)
-    area_avail = 1.0 / norm_factor**2
 
     # quick check for outrageous densities
     # circle packing efficiency limit: η = π srqt(3)/6 = 0.9069
     # A Simple Proof of Thue's Theorem on Circle Packing
     # https://arxiv.org/abs/1009.4322
+    area_avail = area_from_polygon_vertices(*BorderC.T)
     area_demand = T * np.pi * min_dist**2 / 4
     efficiency = area_demand / area_avail
     efficiency_optimal = math.pi * math.sqrt(3) / 6
@@ -280,13 +332,12 @@ def poisson_disc_filler(
             f'the optimal possible ({efficiency_optimal:.3f}).'
         )
         if partial_fulfilment:
-            print(
-                'Info: Attempting partial fullfillment.',
-                msg,
-                'Try with lower T and/or min_dist.',
-            )
+            info('Attempting partial fullfillment %s. Reduce T and/or min_dist.', msg)
         else:
             raise ValueError(msg)
+
+    offsetC = BorderC.min(axis=0)
+    width, height = BorderC.max(axis=0) - offsetC
 
     # create auxiliary grid covering the defined BorderC
     cell_size = min_dist / math.sqrt(2)
@@ -305,79 +356,68 @@ def poisson_disc_filler(
         else:
             RepellerS = None
             repel_radius_sq = 0.0
+    obstacleS__ = List.empty_list(nb.float64[:, :])
+    for obsC_ in obstacleC__:
+      obstacleS__.append((obsC_ - offsetC) / cell_size)
+      #  obstacleS__.append((obsC_[::-1] - offsetC) / cell_size)
 
     # Alternate implementation using np.mgrid
     #  pts = np.reshape(
     #      np.moveaxis(np.mgrid[0: i_len + 1, 0: j_len + 1], 0, -1),
     #      ((i_len + 1)*(j_len + 1), 2)
     #  )
-    pts = np.empty(((i_len + 1) * (j_len + 1), 2), dtype=int)
-    pts_temp = pts.reshape((i_len + 1, j_len + 1, 2))
-    pts_temp[..., 0] = np.arange(i_len + 1)[:, np.newaxis]
-    pts_temp[..., 1] = np.arange(j_len + 1)[np.newaxis, :]
-    inside = _contains_np(BorderS, pts).reshape((i_len + 1, j_len + 1))
+    cornerS_ = np.empty(((i_len + 1) * (j_len + 1), 2), dtype=int)
+    cornerS__ = cornerS_.reshape((i_len + 1, j_len + 1, 2))
+    cornerS__[..., 0] = np.arange(i_len + 1)[:, np.newaxis]
+    cornerS__[..., 1] = np.arange(j_len + 1)[np.newaxis, :]
 
-    # reduce 2×2 sub-matrices of `inside` with logical_or (i.e. .any())
-    cell_covers_polygon = np.lib.stride_tricks.as_strided(
-        inside,
-        shape=(2, 2, inside.shape[0] - 1, inside.shape[1] - 1),
-        strides=inside.strides * 2,
+    # process the area's border
+    is_corner_within_border_ = _contains_np(BorderS, cornerS_)
+
+    for obstacleS_ in obstacleS__:
+        is_corner_within_border_ &= ~_contains_np(obstacleS_, cornerS_)
+
+    is_corner_within_border = is_corner_within_border_.reshape((i_len + 1, j_len + 1), copy=False)
+
+    cell_corners = np.lib.stride_tricks.as_strided(
+        is_corner_within_border,
+        shape=(2, 2, is_corner_within_border.shape[0] - 1, is_corner_within_border.shape[1] - 1),
+        strides=is_corner_within_border.strides * 2,
         writeable=False,
-    ).any(axis=(0, 1))
+    )
+    cell_covers_polygon__ = cell_corners.any(axis=(0, 1))
+    cell_strictly_inside_polygon__ = cell_corners.all(axis=(0, 1))
 
-    # check boundary's vertices
-    for k, (i, j) in enumerate(BorderS.astype(int)):
-        if not cell_covers_polygon[i, j]:
-            ij = BorderS[k].copy()
-            direction = BorderS[k - 1] - ij
-            direction /= np.linalg.norm(direction)
-            to_mark = [(i, j)]
-            while True:
-                nbr = (
-                    cell_covers_polygon[max(0, i - 1), j]
-                    or cell_covers_polygon[min(i_len - 1, i + 1), j]
-                    or cell_covers_polygon[i, max(0, j - 1)]
-                    or cell_covers_polygon[i, min(j_len - 1, j + 1)]
-                )
-                if nbr:
-                    break
-                ij += direction * 0.999
-                i, j = ij.astype(int)
-                to_mark.append((i, j))
-            for i, j in to_mark:
-                cell_covers_polygon[i, j] = True
+    cells, points = _walk_along_perimeter(BorderS, i_len + j_len + 1)
+    for i, j in cells:
+        cell_covers_polygon__[i, j] = True
+        cell_strictly_inside_polygon__[i, j] = False
+
+    cell_intercepts_polygon__ = np.logical_and(cell_covers_polygon__, ~cell_strictly_inside_polygon__)
 
     if RepellerS is not None and repel_radius >= min_dist:
         # the cells that contain the repellers can be discarded
         for r_i, r_j in RepellerS.astype(int):
-            cell_covers_polygon[r_i, r_j] = False
-    # Sequence of (i, j) of cells that overlap with the polygon
-    cell_idc = np.argwhere(cell_covers_polygon)
-
-    rng = np.random.default_rng(seed)
+            cell_covers_polygon__[r_i, r_j] = False
 
     # useful plot for debugging purposes only
     if plot:
-        fig, ax = plt.subplots()
-        ax.imshow(
-            cell_covers_polygon.T,
-            origin='lower',
-            extent=[0, cell_covers_polygon.shape[0], 0, cell_covers_polygon.shape[1]],
-        )
-        ax.scatter(*np.nonzero(inside), marker='+', facecolor='tab:green', s=7, lw=0.2)
-        ax.scatter(
-            *BorderS.T,
-            marker='o',
-            facecolor='none',
-            s=10,
-            lw=0.4,
-            edgecolor='tab:orange',
-            alpha=0.6,
-        )
-        ax.plot(*np.vstack((BorderS, BorderS[:1])).T)
+        fig, ax = plt.subplots(layout='constrained')
+        ax.pcolormesh(cell_covers_polygon__.T + 2*cell_intercepts_polygon__.T)
+        ax.plot(*np.vstack((BorderS, BorderS[:1])).T, 'k', lw=1)
+        for obstacleS_ in obstacleS__:
+            ax.plot(*np.vstack((obstacleS_, obstacleS_[:1])).T, 'navy', lw=1)
+        ax.plot(*np.vstack((BorderS, BorderS[:1])).T, 'k', lw=1)
+        ax.scatter(*np.nonzero(is_corner_within_border), marker='+', s=15, c='k', lw=1)
+        ax.scatter(*BorderS.T, marker='o', s=15, lw=1, c='navy')
+        ax.scatter(*np.array(points).T, marker='x', s=12, lw=0.8, c='red')
         ax.axis('off')
-        ax.grid()
+        ax.set_aspect('equal')
 
+    # Sequence of (i, j) of cells that overlap with the polygon
+    cell_idc = np.argwhere(cell_covers_polygon__)
+
+    rng = np.random.default_rng(seed)
     best_T = 0
     iter_counts = []
     for _ in range(rounds):
@@ -389,6 +429,7 @@ def poisson_disc_filler(
             j_len,
             cell_idc,
             BorderS,
+            obstacleS__,
             repel_radius_sq,
             RepellerS,
             rng,
@@ -449,27 +490,40 @@ def turbinate(
     VertexC = L.graph['VertexC']
     border = L.graph['border']
     R = L.graph['R']
+    B = L.graph['B']
     BorderC = VertexC[border]
-    offsetC, norm_scale, _, _ = _get_border_scale_offset(BorderC)
-    BorderS = (BorderC - offsetC) * norm_scale
-    RepellerS = (VertexC[-R:] - offsetC) * norm_scale
-    TerminalS = poisson_disc_filler(
+    _, best_caliper_angle, _, _ = rotating_calipers(
+        BorderC[ConvexHull(BorderC).vertices],
+        metric='area',
+    )
+    # angle that minimizes the number of cells created by poisson_disc_filler
+    rotation = best_caliper_angle*180./np.pi
+
+    RootC = VertexC[-R:]
+    obstacles = L.graph.get('obstacles', [])
+    obstacleC__ = [VertexC[obs] for obs in obstacles]
+
+    TerminalC = rotate(poisson_disc_filler(
         T,
         d,
-        BorderC=BorderS,
-        RepellerC=RepellerS,
+        BorderC=rotate(BorderC, -rotation),
+        RepellerC=rotate(RootC, -rotation),
+        obstacleC__=[rotate(obsC_, -rotation) for obsC_ in obstacleC__],
         repel_radius=(d if root_clearance is None else root_clearance),
         max_iter=max_iter,
         rounds=rounds,
         plot=plot,
-    )
-    T = TerminalS.shape[0]
-    B = BorderS.shape[0]
+    ), rotation)
+    T = TerminalC.shape[0]
+    border_sizes = np.array([border.shape[0]] + [obsC_.shape[0] for obsC_ in obstacleC__])
+    B = border_sizes.sum()
+    obstacle_idxs = np.cumsum(border_sizes) + T
     return L_from_site(
         T=T,
         B=B,
-        border=np.arange(T, T + B),
-        VertexC=np.vstack((TerminalS, BorderS, RepellerS)),
+        border=np.arange(T, T + border.shape[0]),
+        obstacles=[np.arange(a, b) for a, b in pairwise(obstacle_idxs)],
+        VertexC=np.vstack((TerminalC, BorderC, *obstacleC__, RootC)),
         **{
             k: v
             for k, v in L.graph.items()
