@@ -72,32 +72,53 @@ variables:
 # ===== Test OptiWindNet on Linux =====
 test_linux:
   extends: .test_linux_base
-  parallel:
-    matrix:
-      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+  description: "Python $DEFAULT_PYTHON"
+  variables:
+    PYTHON_VERSION: $DEFAULT_PYTHON
   rules:
-    - if: $CI_COMMIT_BRANCH && $PYTHON_VERSION == $DEFAULT_PYTHON
+    - if: $CI_COMMIT_BRANCH
       changes:
         compare_to: refs/heads/main
         paths:
           - optiwindnet/**/*
           - tests/**/*
-    - when: manual
 
 # ===== Test OptiWindNet on Windows =====
 test_windows:
   extends: .test_windows_base
-  parallel:
-    matrix:
-      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+  description: "Python $DEFAULT_PYTHON"
+  variables:
+    PYTHON_VERSION: $DEFAULT_PYTHON
   rules:
-    - if: $CI_COMMIT_BRANCH && $PYTHON_VERSION == $DEFAULT_PYTHON
+    - if: $CI_COMMIT_BRANCH
       changes:
         compare_to: refs/heads/main
         paths:
           - optiwindnet/**/*
           - tests/**/*
+
+# ===== Manual multi-version test matrix =====
+test_matrix_linux:
+  extends: .test_linux_base
+  allow_failure: true
+  rules:
+    - if: $PYTHON_VERSION == $DEFAULT_PYTHON
+      when: never
     - when: manual
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+
+test_matrix_windows:
+  extends: .test_windows_base
+  allow_failure: true
+  rules:
+    - if: $PYTHON_VERSION == $DEFAULT_PYTHON
+      when: never
+    - when: manual
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
 
 # ===== Update GitLab Pages =====
 make_pages:
