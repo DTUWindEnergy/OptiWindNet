@@ -344,17 +344,20 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     node_latlon.update({node: i for i, node in enumerate(substations, start=-R)})
 
     i = T
-    border_list = []
     border_latlon = []
-    for latlon in border_raw:
-        if latlon not in node_latlon:
-            border_latlon.append(latlon)
-            border_list.append(i)
-            node_latlon[latlon] = i
-            i += 1
-        else:
-            border_list.append(node_latlon[latlon])
-    B = len(border_latlon)
+    border_list = []
+    if border_raw is None:
+        B = 0
+    else:
+        for latlon in border_raw:
+            if latlon not in node_latlon:
+                border_latlon.append(latlon)
+                border_list.append(i)
+                node_latlon[latlon] = i
+                i += 1
+            else:
+                border_list.append(node_latlon[latlon])
+        B = len(border_latlon)
 
     obstacles = []
     obstacles_latlon = []
@@ -407,7 +410,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             for i, label in enumerate(labels, start=start):
                 if label is not None:
                     L.nodes[i]['label'] = label
-    if border_list is not None:
+    if border_list:
         border = np.array(border_list, dtype=np.int_)
         L.graph['border'] = border
         # for now, obstacles are allowed only if a border is defined
