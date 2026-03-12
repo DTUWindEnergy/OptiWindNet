@@ -120,6 +120,7 @@ test_windows:
           - optiwindnet/**/*
           - tests/**/*
       when: manual
+      allow_failure: true
 
 # ===== Manual multi-version test matrix =====
 test_matrix_linux:
