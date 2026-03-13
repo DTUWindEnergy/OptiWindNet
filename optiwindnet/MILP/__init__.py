@@ -37,7 +37,9 @@ def solver_factory(solver_name: str) -> Solver:
     Check OptiWindNet's documentation on how to install optional solvers.
 
     Args:
-      solver_name: one of 'ortools', 'cplex', 'gurobi', 'cbc', 'scip', 'highs'.
+      solver_name: one of 'ortools', 'ortools.cp_sat', 'ortools.gscip',
+        'ortools.gurobi', 'ortools.glpk', 'ortools.highs',
+        'ortools.santorini', 'cplex', 'gurobi', 'cbc', 'scip', 'highs'.
 
     Returns:
       Solver instance that can produce solutions for the cable routing problem.
@@ -48,6 +50,14 @@ def solver_factory(solver_name: str) -> Solver:
                 from .ortools import SolverORTools
 
                 return SolverORTools()
+            raise ModuleNotFoundError(
+                "Package 'ortools' not found. Try 'pip install ortools'."
+            )
+        case 'ortools.cp_sat' | 'ortools.gscip' | 'ortools.gurobi' | 'ortools.glpk' | 'ortools.highs' | 'ortools.santorini':
+            if find_spec('ortools'):
+                from .ortools import SolverORTools
+
+                return SolverORTools(solver_name.split('.', 1)[1])
             raise ModuleNotFoundError(
                 "Package 'ortools' not found. Try 'pip install ortools'."
             )
