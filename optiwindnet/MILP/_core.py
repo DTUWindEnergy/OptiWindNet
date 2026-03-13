@@ -3,7 +3,7 @@
 
 import abc
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from enum import StrEnum, auto
 from itertools import chain
@@ -135,6 +135,8 @@ class ModelMetadata:
     flow_: Mapping
     model_options: dict
     fun_fingerprint: dict[str, str | bytes]
+    weight_: tuple = ()
+    solution_hint: dict[Any, float] = field(default_factory=dict)
     warmed_by: str = ''
 
 
