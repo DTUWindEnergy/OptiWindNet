@@ -10,6 +10,7 @@ Tables:
 """
 
 import os
+from contextlib import contextmanager
 from peewee import (
     AutoField,
     BlobField,
@@ -133,3 +134,21 @@ def open_database(filepath: str, create_db: bool = False) -> SqliteDatabase:
     db.connect()
     db.create_tables(_ALL_MODELS)
     return db
+
+
+@contextmanager
+def database_connection(filepath: str, create_db: bool = False):
+    """Open the sqlite database for the duration of a context block.
+
+    Args:
+      filepath: path to database file
+      create_db: True -> create a new file if it does not exist
+
+    Yields:
+      Connected SqliteDatabase object (Peewee)
+    """
+    db = open_database(filepath, create_db=create_db)
+    try:
+        yield db
+    finally:
+        db.close()
