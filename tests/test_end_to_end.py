@@ -1,24 +1,34 @@
 # test end to end
 import pytest
 from optiwindnet.api import WindFarmNetwork, EWRouter, MILPRouter
-from .helpers import tiny_wfn, router_factory, assert_graph_equal, load_dill
-from .paths import END_TO_END_DILL
+from .helpers import tiny_wfn, router_factory, load_instances
+from .paths import SOLUTIONS_FILE
 
 
 def pytest_generate_tests(metafunc):
     if 'routed_instance' in metafunc.fixturenames:
-        blob = load_dill(END_TO_END_DILL)
+        if not SOLUTIONS_FILE.exists():
+            metafunc.parametrize(
+                'routed_instance',
+                [
+                    pytest.param(
+                        None,
+                        marks=pytest.mark.skip(
+                            reason=(
+                                f'Missing expected test data: {SOLUTIONS_FILE}\n'
+                                'To (re)generate run: python update_expected_values.py\n'
+                                'Or run pytest with --regen-expected.'
+                            ),
+                        ),
+                    )
+                ],
+            )
+            return
+        all_instances = load_instances(SOLUTIONS_FILE)
         routed_instances = []
         ids = []
-        for case in blob['Cases']:
-            key = case['key']
-            routed_instances.append(
-                dict(
-                    location=case['location'],
-                    router_spec=blob['Routers'][case['router']],
-                    G=blob['Graphs'][key],
-                )
-            )
+        for key in sorted(all_instances):
+            routed_instances.append(all_instances[key])
             ids.append(key)
         metafunc.parametrize('routed_instance', routed_instances, ids=ids)
 
@@ -29,12 +39,11 @@ def test_expected_router_graphs_match(routed_instance, locations):
         router = router_factory(router_spec)
     except (FileNotFoundError, ModuleNotFoundError):
         pytest.skip(f'{router_spec["params"]["solver_name"]} not available')
-    G_ref = routed_instance['G']
+    terse_ref = routed_instance['terse_links']
     L = getattr(locations, routed_instance['location'])
     wfn = WindFarmNetwork(L=L, cables=router_spec['cables'])
     wfn.optimize(router=router)
-    ignored_keys = {'solution_time', 'runtime', 'pool_count'}
-    assert_graph_equal(wfn.G, G_ref, ignored_graph_keys=ignored_keys, verbose=False)
+    assert tuple(wfn.terse_links().tolist()) == terse_ref
 
 
 def test_ortools_with_warmstart():

@@ -10,6 +10,7 @@ Tables:
 """
 
 import os
+from contextlib import contextmanager
 from peewee import (
     AutoField,
     BlobField,
@@ -110,14 +111,18 @@ class RouteSet(BaseModel):
 
 
 _ALL_MODELS = [NodeSet, Method, Machine, RouteSet]
+_DEFAULT_SQLITE_TIMEOUT = 15
 
 
-def open_database(filepath: str, create_db: bool = False) -> SqliteDatabase:
+def open_database(
+    filepath: str, create_db: bool = False, timeout: int = _DEFAULT_SQLITE_TIMEOUT
+) -> SqliteDatabase:
     """Opens the sqlite database v3 file specified in `filepath`.
 
     Args:
       filepath: path to database file
       create_db: True -> create a new file if it does not exist
+      timeout: seconds to wait for a locked database to be released
 
     Returns:
       SqliteDatabase object (Peewee)
@@ -127,9 +132,31 @@ def open_database(filepath: str, create_db: bool = False) -> SqliteDatabase:
         raise OSError(f'Database file not found: {filepath}')
     db = SqliteDatabase(
         filepath,
-        pragmas={'journal_mode': 'wal', 'foreign_keys': 1},
+        pragmas={'foreign_keys': 1},
+        timeout=timeout,
     )
     database_proxy.initialize(db)
     db.connect()
     db.create_tables(_ALL_MODELS)
     return db
+
+
+@contextmanager
+def database_connection(
+    filepath: str, create_db: bool = False, timeout: int = _DEFAULT_SQLITE_TIMEOUT
+):
+    """Open the sqlite database for the duration of a context block.
+
+    Args:
+      filepath: path to database file
+      create_db: True -> create a new file if it does not exist
+      timeout: seconds to wait for a locked database to be released
+
+    Yields:
+      Connected SqliteDatabase object (Peewee)
+    """
+    db = open_database(filepath, create_db=create_db, timeout=timeout)
+    try:
+        yield db
+    finally:
+        db.close()

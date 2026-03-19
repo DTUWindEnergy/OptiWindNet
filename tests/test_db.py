@@ -1,10 +1,10 @@
-from pathlib import Path
 import pytest
 import numpy as np
 
 from optiwindnet.api import HGSRouter
 from optiwindnet.db import (
     open_database,
+    database_connection,
     G_from_routeset,
     L_from_nodeset,
     NodeSet,
@@ -18,7 +18,6 @@ from optiwindnet.db.storage import (
 )
 from .helpers import tiny_wfn, assert_graph_equal
 
-tmp_path = Path(__file__).parent / 'temp'
 
 # ---------------------------
 # Test model
@@ -43,6 +42,33 @@ def test_open_database(tmp_path):
 
     # Verify tables were created
     assert db is not None
+
+
+def test_database_connection_closes_db(tmp_path):
+    dbfile = tmp_path / 'db_test.sqlite'
+
+    with database_connection(str(dbfile), create_db=True) as db:
+        assert db is not None
+        assert not db.is_closed()
+
+    assert db.is_closed()
+
+
+def test_database_connection_supports_db_usage(tmp_path):
+    dbfile = tmp_path / 'db_test.sqlite'
+
+    with database_connection(dbfile, create_db=True):
+        wfn = tiny_wfn()
+        L = wfn.L
+        L.name = 'Test'
+
+        pack = packnodes(L)
+        digest = add_if_absent(NodeSet, pack)
+        ns = NodeSet.get_by_id(digest)
+
+        L2 = L_from_nodeset(ns)
+        assert L2.graph['T'] == L.graph['T']
+        assert L2.graph['R'] == L.graph['R']
 
 
 # ---------------------------

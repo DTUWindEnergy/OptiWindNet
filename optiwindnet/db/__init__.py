@@ -1,7 +1,14 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-from .model import open_database, Machine, Method, NodeSet, RouteSet
+from .model import (
+    Machine,
+    Method,
+    NodeSet,
+    RouteSet,
+    database_connection,
+    open_database,
+)
 from .storage import (
     G_by_method,
     G_from_routeset,
@@ -15,6 +22,7 @@ __all__ = (
     'Method',
     'NodeSet',
     'RouteSet',
+    'database_connection',
     'open_database',
     'L_from_nodeset',
     'G_from_routeset',

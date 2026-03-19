@@ -2,15 +2,11 @@
 Generate expected graphs for specified sites-routers.
 """
 
-import platform
-import sys
-from importlib import metadata, util
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence
+import pickle
+from typing import Any, Dict, Optional, Sequence
 
-import dill
 from optiwindnet.api import WindFarmNetwork
-from optiwindnet.importer import load_repository
+from optiwindnet.importer import L_from_yaml
 
 import paths
 from helpers import router_factory
@@ -35,24 +31,11 @@ def print_header(title: str) -> None:
     print('=' * 10)
 
 
-def environment_meta() -> Dict[str, Any]:
-    meta = {
-        'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
-        'platform': platform.platform(),
-        'python': sys.version.split()[0],
-        'package_versions': {},
-    }
-    for name in ('networkx', 'numpy', 'ortools', 'pyomo', 'gurobipy', 'pyscipopt'):
-        if util.find_spec(name):
-            meta['package_versions'][name] = metadata.version(name)
-    return meta
-
-
 def generate_expected_values_end_to_end_tests():
     """
-    Generate the end-to-end expected dill file.
+    Generate the end-to-end expected instances file.
     """
-    SITES_DIR = paths.SITES_DIR
+    LOCATIONS_DIR = paths.LOCATIONS_DIR
 
     # -----------------------
     # Local helpers / specs
@@ -188,19 +171,31 @@ def generate_expected_values_end_to_end_tests():
     # -----------------------
     # Prepare plan and output
     # -----------------------
-    sites_union: List[str] = list(SITES_1) + list(SITES_2) + list(SITES_3)
     routers_union = merge_router_specs(ROUTERS_1, ROUTERS_2, ROUTERS_3)
 
-    cases: List[Dict[str, str]] = []
+    cases: list[Dict[str, str]] = []
     router_graphs: Dict[str, Any] = {}
 
     print_header('Generating expected graphs')
 
     # -----------------------
-    # Load repository (sites)
+    # Load locations by explicit file name
     # -----------------------
-    print('Loading repository from:', SITES_DIR)
-    locations = load_repository(path=str(SITES_DIR))
+    from collections import namedtuple
+
+    data_dir = paths.DATA_DIR
+    location_files = {
+        'hornsea': (L_from_yaml, data_dir / 'Hornsea One.yaml'),
+        'london': (L_from_yaml, data_dir / 'London Array.yaml'),
+        'taylor_2023': (L_from_yaml, data_dir / 'Taylor-2023.yaml'),
+        'yi_2019': (L_from_yaml, data_dir / 'Yi-2019.yaml'),
+        'borkum2': (L_from_yaml, data_dir / 'Borkum Riffgrund 2.yaml'),
+        'example_location': (L_from_yaml, LOCATIONS_DIR / 'example_location.yaml'),
+    }
+    print('Loading locations:', ', '.join(location_files.keys()))
+    loaded = {handle: loader(path) for handle, (loader, path) in location_files.items()}
+    Locations = namedtuple('Locations', loaded.keys())
+    locations = Locations(**loaded)
 
     S1, S2, R1, R2 = SITES_1, SITES_2, ROUTERS_1, ROUTERS_2
 
@@ -229,7 +224,7 @@ def generate_expected_values_end_to_end_tests():
                 else:
                     wfn.optimize(router=router)
 
-                router_graphs[key] = wfn.G.copy()
+                router_graphs[key] = tuple(wfn.terse_links().tolist())
                 del wfn, router
 
     run_plan = [
@@ -240,31 +235,27 @@ def generate_expected_values_end_to_end_tests():
     for label, s, r in run_plan:
         run_batch(s, r, label)
 
-    expected = {
-        'Locations': tuple(sites_union),
-        'Routers': routers_union,
-        'Cases': cases,
-        'Graphs': router_graphs,
-        'Meta': environment_meta(),
-    }
-
     print_header('Completed')
     print(f'Cases generated: {len(cases)}; Number of graphs: {len(router_graphs)}')
-    return expected
+
+    # Build per-instance dicts keyed by case key
+    instances = {}
+    for case in cases:
+        key = case['key']
+        instances[key] = {
+            'location': case['location'],
+            'router_spec': routers_union[case['router']],
+            'terse_links': router_graphs[key],
+        }
+    return instances
 
 
 if __name__ == '__main__':
     print_header('Generating end_to_end expected values...')
 
-    expected = generate_expected_values_end_to_end_tests()
-    output_path = paths.END_TO_END_DILL
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        output_path.unlink(missing_ok=True)
-        print(f'Removed (if existed): {output_path}')
-    except Exception as e:
-        print(f'Error removing old file: {e}')
+    instances = generate_expected_values_end_to_end_tests()
+    output_path = paths.SOLUTIONS_FILE
     with output_path.open('wb') as f:
-        dill.dump(expected, f, protocol=dill.HIGHEST_PROTOCOL)
+        pickle.dump(instances, f)
 
-    print_header(f'Saved expected values to: {output_path}')
+    print_header(f'Saved {len(instances)} instances to: {output_path}')
