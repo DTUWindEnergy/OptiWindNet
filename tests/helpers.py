@@ -10,14 +10,12 @@ from optiwindnet.MILP import ModelOptions
 
 
 def load_instances(path: Path) -> Any:
-    """Load an instances file; raise FileNotFoundError with regeneration hint if missing."""
+    """Load a pickled instance file; raise FileNotFoundError with regeneration hint if missing."""
     if not path.exists():
         raise FileNotFoundError(
             f'Missing expected test data file: {path}\n\n'
-            'To (re)generate this file run the appropriate generator script, e.g.:\n'
-            'update_expected_values.py\n'
-            'Or run pytest with --regen-expected to attempt regeneration automatically '
-            '(only if you really want that behavior).'
+            'To (re)generate run: python update_expected_values.py\n'
+            'Or run pytest with --regen-expected.'
         )
     with path.open('rb') as fh:
         return pickle.load(fh)
@@ -195,7 +193,7 @@ def tiny_wfn(
     substationsC=None,
     borderC=None,
     obstacleC_=None,
-    cables=[(4, 10)],
+    cables=[(4, 10.0)],
     optimize=True,
     router=None,
 ):

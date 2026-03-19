@@ -1,4 +1,3 @@
-from pathlib import Path
 import pytest
 import numpy as np
 
@@ -19,7 +18,6 @@ from optiwindnet.db.storage import (
 )
 from .helpers import tiny_wfn, assert_graph_equal
 
-tmp_path = Path(__file__).parent / 'temp'
 
 # ---------------------------
 # Test model

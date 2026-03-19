@@ -42,4 +42,4 @@ def test_rotate():
         ]
     )
 
-    np.array_equal(rotated_vertexC, expected)
+    np.testing.assert_allclose(rotated_vertexC, expected, atol=1e-6)
