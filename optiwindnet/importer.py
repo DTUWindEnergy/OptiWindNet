@@ -467,7 +467,7 @@ class IncludeLoader(yaml.SafeLoader):
             include_path = self._parent / include_path
         with open(include_path, 'r') as f:
             # When processing includes, use IncludeLoader to maintain correct directory context
-            return yaml.load(f, IncludeLoader)
+            return yaml.load(f, Loader=IncludeLoader)
 
 
 def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
@@ -483,7 +483,7 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     if isinstance(filepath, str):
         filepath = Path(filepath)
     name = filepath.stem
-    system = yaml.load(filepath.open(), IncludeLoader)
+    system = yaml.load(filepath.open(), Loader=IncludeLoader)
     coords = system['wind_farm']['layouts']['initial_layout']['coordinates']
     terminalC = np.c_[coords['x'], coords['y']]
     coords = system['wind_farm']['electrical_substations']['coordinates']

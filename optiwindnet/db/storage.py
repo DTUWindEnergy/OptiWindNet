@@ -193,10 +193,15 @@ def G_from_routeset(routeset: object) -> nx.Graph:
 def packnodes(G: nx.Graph) -> PackType:
     R, T, B = (G.graph[k] for k in 'RTB')
     VertexC = G.graph['VertexC']
+
+    # TODO: remove this legacy code
+    # BEGIN: Legacy code block (from the time when G's VertexC would include stunts coordinates)
     num_stunts = G.graph.get('num_stunts')
     if num_stunts:
         B -= num_stunts
         VertexC = np.vstack((VertexC[: T + B], VertexC[-R:]))
+    # END: Legacy code block
+
     VertexC_npy_io = io.BytesIO()
     np.lib.format.write_array(VertexC_npy_io, VertexC, version=(3, 0))
     VertexC_npy = VertexC_npy_io.getvalue()

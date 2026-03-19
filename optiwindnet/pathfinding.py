@@ -150,13 +150,23 @@ class PathFinder:
             for r, n in tentative:
                 hooks2check[r].add(n)
 
+        # P's constraint_edges might use stunt nodes, but G's VertexC does not include them
+        stunts_primes = planar.graph.get('stunts_primes')
+        constraint_edges = planar.graph.get('constraint_edges')
+        if stunts_primes and constraint_edges:
+            translator = np.arange(T + B + len(stunts_primes) + R)
+            translator[-R - len(stunts_primes) : -R] = stunts_primes
+            borders = [translator[edge,] for edge in constraint_edges]
+        else:
+            borders = constraint_edges
+
         Xings = list(
             gateXing_iter(
                 G,
                 hooks=[
                     np.fromiter(h2c, count=len(h2c), dtype=int) for h2c in hooks2check
                 ],
-                borders=planar.graph.get('constraint_edges'),
+                borders=borders,
             )
         )
 

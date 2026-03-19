@@ -372,13 +372,13 @@ def is_crossing_numpy(u, v, s, t):
     C = u - s
 
     # denominator
-    f = np.cross(B, A)
+    f = B[0] * A[1] - B[1] * A[0]
     if f == 0:
         # segments are parallel
         return False
 
     # alpha and beta numerators
-    for num in (np.cross(P, Q) for P, Q in ((C, B), (A, C))):
+    for num in (P[0] * Q[1] - P[1] * Q[0] for P, Q in ((C, B), (A, C))):
         if f > 0:
             if num < 0 or num > f:
                 return False
