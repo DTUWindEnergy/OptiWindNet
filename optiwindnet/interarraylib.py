@@ -338,6 +338,16 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         value = A.graph.get(k)
         if value is not None:
             G.graph[k] = value
+
+    stunts_primes = A.graph.get('stunts_primes')
+    if stunts_primes:
+        num_stunts = len(stunts_primes)
+        G.graph['B'] -= num_stunts
+    else:
+        num_stunts = 0
+    # remove supertriangle and stunts coordinates from VertexC
+    G.graph['VertexC'] = np.vstack((VertexC[: -R - 3 - num_stunts], VertexC[-R:]))
+
     nx.set_node_attributes(
         G,
         {n: label for n, label in A.nodes(data='label') if label is not None},
@@ -348,8 +358,6 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         G.nodes[r]['kind'] = 'oss'
     if 'is_normalized' in A.graph:
         G.graph['is_normalized'] = True
-    # remove supertriangle coordinates from VertexC
-    G.graph['VertexC'] = np.vstack((VertexC[: -R - 3], VertexC[-R:]))
     # non_A_edges are the far-reaching gates and ocasionally the result of
     # a poor solver (e.g. LKH-3)
     non_A_edges = S.edges - A.edges
@@ -647,6 +655,9 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     """
     R, T = (G.graph[k] for k in 'RT')
     L = nx.Graph(**{k: G.graph[k] for k in _essential_graph_attrs if k in G.graph})
+
+    # TODO: remove this legacy code
+    # BEGIN: Legacy code block (from the time when G's VertexC would include stunts coordinates)
     stunts_primes = G.graph.get('stunts_primes')
     if stunts_primes:
         VertexC = G.graph['VertexC']
@@ -654,6 +665,8 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
             (VertexC[: -R - len(stunts_primes)], VertexC[-R:])
         )
         L.graph['B'] -= len(stunts_primes)
+    # END: Legacy code block
+
     L.add_nodes_from(
         ((n, {'label': label}) for n, label in G.nodes(data='label') if 0 <= n < T),
         kind='wtg',
