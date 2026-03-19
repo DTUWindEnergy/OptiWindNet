@@ -289,12 +289,14 @@ def test_G_from_S():
     G2 = G_from_S(S, A2)
     assert G2.graph['is_normalized']
 
-    # shortcuts in A
-    A[0][2]['shortcuts'] = [9]
-    A[2][-1]['shortcuts'] = [9]
-    S.add_edge(0, 2, load=1, reverse=False)
-    S.add_edge(2, -1, load=1, reverse=False)
-    G = G_from_S(S, A)
+    # shortcuts in A — work on copies to avoid polluting later sub-tests
+    A_sc = copy.deepcopy(A)
+    S_sc = copy.deepcopy(S)
+    A_sc[0][2]['shortcuts'] = [9]
+    A_sc[2][-1]['shortcuts'] = [9]
+    S_sc.add_edge(0, 2, load=1, reverse=False)
+    S_sc.add_edge(2, -1, load=1, reverse=False)
+    G = G_from_S(S_sc, A_sc)
 
     assert (0, 2) in G.edges
     assert G[0][2]['kind'] == 'contour'
@@ -304,9 +306,9 @@ def test_G_from_S():
     edges_to_test = [(0, 1), (0, 2), (0, 3), (-1, 2)]
 
     for s, t in edges_to_test:
-        # Deep copy A and S to restore originals at each iteration
-        A_copy = copy.deepcopy(A)
-        S_copy = copy.deepcopy(S)
+        # Deep copy from the shortcut-mutated state for each iteration
+        A_copy = copy.deepcopy(A_sc)
+        S_copy = copy.deepcopy(S_sc)
 
         # Add only the current edge
         S_copy.add_edge(s, t, load=1, reverse=False)
@@ -333,9 +335,9 @@ def test_G_from_S():
     edges_to_test = [(1, 3), (-1, 1)]
 
     for s, t in edges_to_test:
-        # Deep copy A and S to restore originals at each iteration
-        A_copy = copy.deepcopy(A)
-        S_copy = copy.deepcopy(S)
+        # Deep copy from the shortcut-mutated state for each iteration
+        A_copy = copy.deepcopy(A_sc)
+        S_copy = copy.deepcopy(S_sc)
 
         # Add only the current edge
         S_copy.add_edge(s, t, load=1, reverse=False)
