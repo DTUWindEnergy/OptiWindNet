@@ -132,7 +132,7 @@ def open_database(
         raise OSError(f'Database file not found: {filepath}')
     db = SqliteDatabase(
         filepath,
-        pragmas={'journal_mode': 'wal', 'foreign_keys': 1},
+        pragmas={'foreign_keys': 1},
         timeout=timeout,
     )
     database_proxy.initialize(db)
