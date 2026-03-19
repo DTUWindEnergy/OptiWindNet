@@ -5,7 +5,7 @@ Central pytest fixtures for optiwindnet tests.
 Responsibilities:
  - Ensure deterministic test environment (disable numba JIT).
  - Resolve repository/test-files paths.
- - Load expected dill blobs with helpful messages.
+ - Load expected instances blobs with helpful messages.
  - Provide factory fixtures (router construction, L/G loader, site extractor).
  - Optionally regenerate expected data when `--regen-expected` is passed.
 """
@@ -24,7 +24,7 @@ os.environ['PYTHONPATH'] = '.'
 os.environ['COVERAGE_PROCESS_START'] = '.coveragerc'
 
 REPO_ROOT = paths.REPO_ROOT
-END_TO_END_DILL = paths.END_TO_END_DILL
+END_TO_END_INSTANCES = paths.END_TO_END_INSTANCES
 TEST_FILES_DIR = paths.TEST_FILES_DIR
 SITES_DIR = paths.SITES_DIR
 GEN_END2END_SCRIPT = paths.GEN_END2END_SCRIPT
@@ -58,7 +58,7 @@ def pytest_addoption(parser):
         action='store_true',
         default=False,
         help=(
-            'If set, pytest will attempt to regenerate missing expected dill files '
+            'If set, pytest will attempt to regenerate missing expected instances files '
             'by running the repository generator scripts. Use with care (generators '
             'may be slow or require external solvers).'
         ),
@@ -72,9 +72,10 @@ def pytest_sessionstart(session):
         return
 
     # Attempt to regenerate missing expected files (best-effort; fail loudly if generator fails)
-    if not END_TO_END_DILL.exists() and GEN_END2END_SCRIPT.exists():
+    if not END_TO_END_INSTANCES.exists() and GEN_END2END_SCRIPT.exists():
         session.config.warn(
-            'optiwindnet', f'Regenerating {END_TO_END_DILL} via {GEN_END2END_SCRIPT}'
+            'optiwindnet',
+            f'Regenerating {END_TO_END_INSTANCES} via {GEN_END2END_SCRIPT}',
         )
         _maybe_run_generator(GEN_END2END_SCRIPT)
 

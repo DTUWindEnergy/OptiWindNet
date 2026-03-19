@@ -1,13 +1,13 @@
 # test end to end
 import pytest
 from optiwindnet.api import WindFarmNetwork, EWRouter, MILPRouter
-from .helpers import tiny_wfn, router_factory, assert_graph_equal, load_dill
-from .paths import END_TO_END_DILL
+from .helpers import tiny_wfn, router_factory, assert_graph_equal, load_instances
+from .paths import END_TO_END_INSTANCES
 
 
 def pytest_generate_tests(metafunc):
     if 'routed_instance' in metafunc.fixturenames:
-        blob = load_dill(END_TO_END_DILL)
+        blob = load_instances(END_TO_END_INSTANCES)
         routed_instances = []
         ids = []
         for case in blob['Cases']:

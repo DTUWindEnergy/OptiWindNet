@@ -1,7 +1,7 @@
 import copy
+import pickle
 from pathlib import Path
 from typing import Iterable, Any, Dict, Optional
-import dill
 import numpy as np
 import networkx as nx
 from optiwindnet.api import WindFarmNetwork
@@ -9,8 +9,8 @@ from optiwindnet.api import EWRouter, HGSRouter, MILPRouter
 from optiwindnet.MILP import ModelOptions
 
 
-def load_dill(path: Path) -> Any:
-    """Load a dill file; raise FileNotFoundError with regeneration hint if missing."""
+def load_instances(path: Path) -> Any:
+    """Load an instances file; raise FileNotFoundError with regeneration hint if missing."""
     if not path.exists():
         raise FileNotFoundError(
             f'Missing expected test data file: {path}\n\n'
@@ -20,7 +20,7 @@ def load_dill(path: Path) -> Any:
             '(only if you really want that behavior).'
         )
     with path.open('rb') as fh:
-        return dill.load(fh)
+        return pickle.load(fh)
 
 
 def router_factory(spec: Optional[Dict[str, Any]]):

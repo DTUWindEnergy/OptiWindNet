@@ -4,11 +4,11 @@ Generate expected graphs for specified sites-routers.
 
 import platform
 import sys
+import pickle
 from importlib import metadata, util
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
-import dill
 from optiwindnet.api import WindFarmNetwork
 from optiwindnet.importer import load_repository
 
@@ -50,7 +50,7 @@ def environment_meta() -> Dict[str, Any]:
 
 def generate_expected_values_end_to_end_tests():
     """
-    Generate the end-to-end expected dill file.
+    Generate the end-to-end expected instances file.
     """
     SITES_DIR = paths.SITES_DIR
 
@@ -257,7 +257,7 @@ if __name__ == '__main__':
     print_header('Generating end_to_end expected values...')
 
     expected = generate_expected_values_end_to_end_tests()
-    output_path = paths.END_TO_END_DILL
+    output_path = paths.END_TO_END_INSTANCES
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         output_path.unlink(missing_ok=True)
@@ -265,6 +265,6 @@ if __name__ == '__main__':
     except Exception as e:
         print(f'Error removing old file: {e}')
     with output_path.open('wb') as f:
-        dill.dump(expected, f, protocol=dill.HIGHEST_PROTOCOL)
+        pickle.dump(expected, f)
 
     print_header(f'Saved expected values to: {output_path}')

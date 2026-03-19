@@ -59,34 +59,34 @@ dependencies = [
 
 [project.optional-dependencies]
 solvers = [
-  "cplex",
-  "gurobipy",
-  "highspy",
-  "pyscipopt",
+    "cplex",
+    "gurobipy",
+    "highspy",
+    "pyscipopt",
 ]
-test  = [ "dill", # for loading dill data
-          "coverage",
-          "pytest",  # for testing
-          "pytest-cov",  # for calculating coverage
-          "pytest-xdist",  # for testing in parallel
-          "psutil",  # memory profiling
-          "memory_profiler",  # memory profiling
-          "line_profiler",  # to check speed
-          "optiwindnet[solvers]",
-        ]
+test  = [
+    "coverage",
+    "pytest",  # for testing
+    "pytest-cov",  # for calculating coverage
+    "pytest-xdist",  # for testing in parallel
+    "psutil",  # memory profiling
+    "memory_profiler",  # memory profiling
+    "line_profiler",  # to check speed
+    "optiwindnet[solvers]",
+]
 docs = [
-          "sphinx",
-          "nbsphinx", 
-          "myst-parser",
-          "myst-nb",
-          "furo",
-          "sphinx-versioned-docs",
-          "sphinx-autoapi",
-          "sphinx_copybutton", 
-          "sphinx_sitemap", 
-          "pypandoc",
-          "setuptools-scm",
-        ]
+    "sphinx",
+    "nbsphinx", 
+    "myst-parser",
+    "myst-nb",
+    "furo",
+    "sphinx-versioned-docs",
+    "sphinx-autoapi",
+    "sphinx_copybutton", 
+    "sphinx_sitemap", 
+    "pypandoc",
+    "setuptools-scm",
+]
 
 [tool.setuptools]
 include-package-data = true
