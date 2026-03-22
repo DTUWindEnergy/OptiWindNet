@@ -656,16 +656,22 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     R, T = (G.graph[k] for k in 'RT')
     L = nx.Graph(**{k: G.graph[k] for k in _essential_graph_attrs if k in G.graph})
 
-    # TODO: remove this legacy code
-    # BEGIN: Legacy code block (from the time when G's VertexC would include stunts coordinates)
+    # TODO: remove this entire legacy compatibility block after a couple of releases.
+    # BEGIN: Legacy compatibility block for graphs whose VertexC/B still reflect stunts
+    num_stunts = G.graph.get('num_stunts')
+    if num_stunts:
+        VertexC = G.graph['VertexC']
+        base_B = G.graph['B'] - num_stunts
+        L.graph['VertexC'] = np.vstack((VertexC[: T + base_B], VertexC[-R:]))
+        L.graph['B'] = base_B
     stunts_primes = G.graph.get('stunts_primes')
     if stunts_primes:
-        VertexC = G.graph['VertexC']
+        VertexC = L.graph['VertexC']
         L.graph['VertexC'] = np.vstack(
             (VertexC[: -R - len(stunts_primes)], VertexC[-R:])
         )
         L.graph['B'] -= len(stunts_primes)
-    # END: Legacy code block
+    # END: Legacy compatibility block
 
     L.add_nodes_from(
         ((n, {'label': label}) for n, label in G.nodes(data='label') if 0 <= n < T),
