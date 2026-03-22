@@ -177,26 +177,27 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
         stunt_count = len(stuntC)
         lo = nodeset.T + nodeset.B
         hi = lo + stunt_count
-        edges = list(routeset.edges)
-        for i, target in enumerate(edges):
-            if lo <= target < hi:
-                raise ValueError(
-                    f'RouteSet {routeset.id} edge target points into stunt range: '
-                    f'edges[{i}]={target}, stunt range=[{lo}, {hi})'
-                )
-            if target >= hi:
-                edges[i] = target - stunt_count
+        edges = np.asarray(routeset.edges, dtype=int)
+        edge_targets_stunt = (lo <= edges) & (edges < hi)
+        if np.any(edge_targets_stunt):
+            first = int(np.flatnonzero(edge_targets_stunt)[0])
+            target = int(edges[first])
+            raise ValueError(
+                f'RouteSet {routeset.id} edge target points into stunt range: '
+                f'edges[{first}]={target}, stunt range=[{lo}, {hi})'
+            )
+        edges[edges >= hi] -= stunt_count
         if clone2prime:
-            clone2prime = list(clone2prime)
-            VertexC = np.lib.format.read_array(io.BytesIO(nodeset.VertexC))
-            nearest: list[int] = []
-            for coord in stuntC:
-                delta = VertexC - coord
-                sqdist = np.einsum('ij,ij->i', delta, delta)
-                nearest.append(int(np.argmin(sqdist)))
-            for i, target in enumerate(clone2prime):
-                if lo <= target < hi:
-                    clone2prime[i] = nearest[target - lo]
+            VertexC = G.graph['VertexC']
+            clone2prime = np.asarray(clone2prime, dtype=int)
+            sqdist = np.sum((stuntC[:, None, :] - VertexC[None, :, :]) ** 2, axis=2)
+            nearest = np.argmin(sqdist, axis=1)
+            clone_targets_stunt = (lo <= clone2prime) & (clone2prime < hi)
+            clone2prime[clone_targets_stunt] = nearest[
+                clone2prime[clone_targets_stunt] - lo
+            ]
+            clone2prime = clone2prime.tolist()
+        edges = edges.tolist()
 
     untersify_to_G(G, terse=edges, clone2prime=clone2prime)
     calc_length = G.size(weight='length')
