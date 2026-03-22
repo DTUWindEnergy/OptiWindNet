@@ -170,13 +170,6 @@ def G_from_routeset(routeset: object) -> nx.Graph:
     if routeset.detextra is not None:
         G.graph['detextra'] = routeset.detextra
 
-    if routeset.stuntC:
-        stuntC = np.lib.format.read_array(io.BytesIO(routeset.stuntC))
-        num_stunts = len(stuntC)
-        G.graph['num_stunts'] = num_stunts
-        G.graph['B'] += num_stunts
-        VertexC = G.graph['VertexC']
-        G.graph['VertexC'] = np.vstack((VertexC[:-R], stuntC, VertexC[-R:]))
     untersify_to_G(G, terse=routeset.edges, clone2prime=routeset.clone2prime)
     calc_length = G.size(weight='length')
     if abs(calc_length / routeset.length - 1) > 1e-5:
@@ -193,14 +186,6 @@ def G_from_routeset(routeset: object) -> nx.Graph:
 def packnodes(G: nx.Graph) -> PackType:
     R, T, B = (G.graph[k] for k in 'RTB')
     VertexC = G.graph['VertexC']
-
-    # TODO: remove this legacy code
-    # BEGIN: Legacy code block (from the time when G's VertexC would include stunts coordinates)
-    num_stunts = G.graph.get('num_stunts')
-    if num_stunts:
-        B -= num_stunts
-        VertexC = np.vstack((VertexC[: T + B], VertexC[-R:]))
-    # END: Legacy code block
 
     VertexC_npy_io = io.BytesIO()
     np.lib.format.write_array(VertexC_npy_io, VertexC, version=(3, 0))
@@ -378,13 +363,6 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
         **terse_pack,
     )
     # Optional fields
-    num_stunts = G.graph.get('num_stunts')
-    if num_stunts:
-        VertexC = G.graph['VertexC']
-        stuntC = VertexC[T + B - num_stunts : T + B].copy()
-        stuntC_npy_io = io.BytesIO()
-        np.lib.format.write_array(stuntC_npy_io, stuntC, version=(3, 0))
-        packed_G['stuntC'] = stuntC_npy_io.getvalue()
     if C + D > 0:
         packed_G['clone2prime'] = G.graph['fnT'][-C - D - R : -R].tolist()
     concatenate_tuples = partial(sum, start=())

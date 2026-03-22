@@ -377,13 +377,31 @@ def test_L_from_G():
     assert L.number_of_edges() == 0
     assert L.graph['VertexC'].shape[0] == len(G.graph['VertexC'])
 
-    # 2) test stunts_primes
-    G.graph['stunts_primes'] = [100, 101]  # new dummy nodes to simulate stunts/primes
-    L_stunts = L_from_G(G)
+    # 2) test num_stunts
+    original_B = G.graph['B']
+    original_len = len(G.graph['VertexC'])
+    G.graph['num_stunts'] = 2
+    G.graph['B'] = original_B + 2
+    G.graph['VertexC'] = np.vstack(
+        (
+            G.graph['VertexC'][:-R],
+            np.array([[10.0, 10.0], [20.0, 20.0]]),
+            G.graph['VertexC'][-R:],
+        )
+    )
+    L_no_stunts = L_from_G(G)
+    assert L_no_stunts.number_of_edges() == 0
+    assert L_no_stunts.graph['B'] == original_B
+    assert L_no_stunts.graph['VertexC'].shape[0] == original_len
+
+    # 3) test stunts_primes
+    G_stunts = tiny_wfn().G
+    G_stunts.graph['stunts_primes'] = [100, 101]
+    L_stunts = L_from_G(G_stunts)
     assert L_stunts.number_of_edges() == 0
     # Check VertexC adjusted for stunts_primes
-    assert L_stunts.graph['VertexC'].shape[0] == len(G.graph['VertexC']) - len(
-        G.graph['stunts_primes']
+    assert L_stunts.graph['VertexC'].shape[0] == len(G_stunts.graph['VertexC']) - len(
+        G_stunts.graph['stunts_primes']
     )
 
 
