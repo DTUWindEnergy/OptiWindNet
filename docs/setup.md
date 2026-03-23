@@ -43,7 +43,17 @@ And finally:
 
 The flag `--channel conda-forge` may be omitted if using *miniforge* or if the global *conda* configuration already sets **conda-forge** as the highest-priority channel.
 
-## Optional - Solvers
+## Interactive use
+
+The best way to experiment with *OptiWindNet* is by using it from a Jupyter notebook interface. Click on the {image}`https://mybinder.org/badge_logo.svg` button on the top of some pages to open a new browser tab with the current notebook ready to run inside a cloud-based JupyterLab instance (thanks to [Binder](https://mybinder.org/)).
+
+*Binder* is an easy way to get started, but, for more serious work, a local installation is recommended. Here are some links to comprehensive tutorials on popular Jupyter interfaces:
+
+- [Get Started with JupyterLab](https://jupyterlab.readthedocs.io/en/stable/getting_started/overview.html)
+- [Jupyter Notebooks in VS Code](https://code.visualstudio.com/docs/datascience/jupyter-notebooks)
+- [How to Use Jupyter Notebook: A Beginner’s Tutorial – Dataquest](https://www.dataquest.io/blog/jupyter-notebook-tutorial/)
+
+## Solvers (optional)
 
 The installation procedure above enables *OptiWindNet*'s heuristics, meta-heuristic and mathematical optimization with [Google's OR-Tools](https://developers.google.com/optimization) (open-source software).
 

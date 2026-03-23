@@ -6,7 +6,7 @@
 :align: center
 ```
 # OptiWindNet Documentation
-**OptiWindNet = Optimize Windfarm Network**\
+**OptiWindNet: Wind Farm Electrical Network Optimizer**\
 (distributed under the [MIT License](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/blob/main/LICENSE))
 
 |||
@@ -21,11 +21,11 @@ Jupyter notebooks used in this manual | <https://gitlab.windenergy.dtu.dk/TOPFAR
 OptiWindNet is an electrical network design tool for offshore wind farms developed at the Technical University of Denmark -- DTU.
 The package offers a framework to obtain optimal or near-optimal cable routes for a given turbine layout within the cable-laying boundaries. It provides high-level access to heuristic, meta-heuristic and mathematical optimization approaches to the problem.
 
-The tool is distributed as an open-source Python package that is suitable for use within an interactive Python session (e.g. Jupyter notebook). Alternatively, OptiWindNet's API can be invoked directly from another application.
+The tool is distributed as the open-source Python package **optiwindnet**, which can be used either within an interactive Python session (e.g. Jupyter notebook) or as a library, by invoking OptiWindNet's API directly from another application.
 
 ## What can OptiWindNet do?
 
-* Optimize the network of array cables;
+* Optimize the network of array cables (aka collection system, infield cables, internal grid, inter-array cables);
 * Route the cables so as to avoid crossings;
 * Assign cable types and calculate network costs;
 * Use different optimization approaches according to the preferred time/quality trade-off;

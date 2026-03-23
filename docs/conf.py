@@ -21,7 +21,7 @@ version: str = '.'.join(release.split('.')[:2])
 # -- Project information -----------------------------------------------------
 
 project = 'OptiWindNet'
-copyright = '2025, DTU Wind Energy'
+copyright = '2026, DTU Wind Energy'
 author = 'DTU Wind Energy'
 
 # -- General configuration ---------------------------------------------------
@@ -155,11 +155,11 @@ nbsphinx_prolog = r"""
 
         .. raw:: html
 
-            <a href="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/{{ doc_path }}">
-            <img alt="Edit on Gitlab" src="https://img.shields.io/badge/Edit%20on-Gitlab-blue?style=flat&logo=gitlab" style="vertical-align:text-bottom">
-            </a>
             <a href="https://mybinder.org/v2/gh/DTUWindEnergy/OptiWindNet/mybinder?urlpath={{ doc_path_quoted }}" target="_blank">
             <img alt="Launch with Binder" src="https://mybinder.org/badge_logo.svg" style="vertical-align:text-bottom">
+            </a>
+            <a href="https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/{{ doc_path }}">
+            <img alt="Edit on Gitlab" src="https://img.shields.io/badge/Edit%20on-Gitlab-blue?style=flat&logo=gitlab" style="vertical-align:text-bottom">
             </a>
 
 """
