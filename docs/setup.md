@@ -1,5 +1,9 @@
 # Setup
 
+## No-install trial
+
+The easiest way to experiment with OptiWindNet is in JupyterLab. Click the ![launch|binder](https://mybinder.org/badge_logo.svg) button at the top of supported pages to launch the corresponding notebook in a cloud-based JupyterLab session, ready to run directly in your browser (via [Binder](https://mybinder.org/)).
+
 ## Requirements
 
 *OptiWindNet* has been tested on Windows 10/11 and on Linux systems, but should run on MacOSX as well.
@@ -45,9 +49,7 @@ The flag `--channel conda-forge` may be omitted if using *miniforge* or if the g
 
 ## Interactive use
 
-The best way to experiment with *OptiWindNet* is by using it from a Jupyter notebook interface. Click on the {image}`https://mybinder.org/badge_logo.svg` button on the top of some pages to open a new browser tab with the current notebook ready to run inside a cloud-based JupyterLab instance (thanks to [Binder](https://mybinder.org/)).
-
-*Binder* is an easy way to get started, but, for more serious work, a local installation is recommended. Here are some links to comprehensive tutorials on popular Jupyter interfaces:
+The **launch|binder** button is an easy way to get started, but a local installation of a notebook interface is recommended for more serious work. Here are some links to comprehensive tutorials on popular Jupyter interfaces:
 
 - [Get Started with JupyterLab](https://jupyterlab.readthedocs.io/en/stable/getting_started/overview.html)
 - [Jupyter Notebooks in VS Code](https://code.visualstudio.com/docs/datascience/jupyter-notebooks)
@@ -113,12 +115,10 @@ Users on Windows might find it difficult to get a multi-threaded CBC on that pla
     pip install pyscipopt
     conda install -c conda-forge pyscipopt
 
-Note that these **pyscipopt** packages may not have been compiled with multi-threading capability. If you get the warning:
-```
-optiwindnet\MILP\scip.py:96: UserWarning: SCIP was compiled without task processing interface. Parallel solve not possible - using optimize() instead of solveConcurrent()
-  model.solveConcurrent()
-```
-Then SCIP will still work, but will under-perform as it is limited to a single core. To overcome that, you will need to replace your current **pyscipopt** with a multi-threading-enabled one. PyPI-distributed **pyscipopt** version 6.0.0 is multi-threading-capable on all platforms (**recommended**). The one distributed via conda-forge is still at version 5.6.0 and is **not** multi-threading-capable.
+If a call to `WindFarmNetwork().optimize()` or to `Solver.solve()` produces the warning:
+> UserWarning: SCIP was compiled without task processing interface. Parallel solve not possible - using optimize() instead of solveConcurrent()
+
+It means that the **pyscipopt** package currently installed was not compiled with multi-threading capability. SCIP will still work, but will under-perform as it is limited to a single core. To overcome that, you will need to upgrade **pyscipopt** to version 6.0.0+, which is multi-threading-capable on all platforms.
 
 ### FiberSCIP
 

@@ -26,7 +26,7 @@ The tool is distributed as the open-source Python package **optiwindnet**, which
 ## What can OptiWindNet do?
 
 * Optimize the network of array cables (aka collection system, infield cables, internal grid, inter-array cables);
-* Route the cables so as to avoid crossings;
+* Route the cables to avoid exclusion zones and cable-to-cable crossings;
 * Assign cable types and calculate network costs;
 * Use different optimization approaches according to the preferred time/quality trade-off;
 * Employ user-provided models and objective functions within the mathematical optimization approach.

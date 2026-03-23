@@ -227,7 +227,7 @@ def angle_helpers(
         L: location (also works with A or G)
 
     Returns:
-        Tuple of (angle__, angle_rank__, dups_from_root_rank__)
+        Tuple of (``angle__``, ``angle_rank__``, ``dups_from_root_rank__``)
     """
 
     T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
@@ -259,8 +259,8 @@ def angle_oracles_factory(
     Inputs are the outputs of `angle_helpers()`.
 
     Args:
-      angle__: (T, R)-array of angles wrt root (+-pi)
-      angle_rank__: (T, R)-array of the relative placement of angles
+      ``angle__``: (T, R)-array of angles wrt root (+-pi)
+      ``angle_rank__``: (T, R)-array of the relative placement of angles
 
     Returns:
       union_limits() and angle_ccw()
@@ -1152,9 +1152,9 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
 
 
 def add_link_blockmap(A: nx.Graph):
-    """Experimental. Add attributes 'blocked__' to edges and nodes.
+    """Experimental. Add attribute ``blocked__`` to edges and nodes.
 
-    Edges' 'blocked__' are R-long list of T-long bitarray maps. A 1-bit in position
+    Edges' ``blocked__`` are R-long list of T-long bitarray maps. A 1-bit in position
     `t` on the bitarray for root `r` means the edge crosses the line-of-sight t-r.
 
     Changes `A` in place. `A` should have no feeder edges.
