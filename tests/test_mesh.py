@@ -1,6 +1,3 @@
-# imports
-import os
-
 import numpy as np
 import networkx as nx
 import condeltri as cdt
@@ -10,15 +7,6 @@ from optiwindnet.mesh import (
     A_graph,
 )
 from .helpers import tiny_wfn
-
-# disable Numba JIT for CI/test determinism if available
-os.environ.setdefault('NUMBA_DISABLE_JIT', '1')
-try:
-    import numba
-
-    numba.config.DISABLE_JIT = True
-except Exception:
-    pass
 
 
 # ----------------------- tests -----------------------

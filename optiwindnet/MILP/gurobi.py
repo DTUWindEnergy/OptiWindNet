@@ -12,6 +12,7 @@ from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 from ._core import (
     FeederRoute,
+    ModelOptions,
     OWNSolutionNotFound,
     PoolHandler,
     SolutionInfo,
@@ -26,6 +27,16 @@ error, info = _lggr.error, _lggr.info
 
 
 class SolverGurobi(SolverPyomo, PoolHandler):
+    """
+    For setting `threadlimit`, the SolverGurobi instance must have this option in
+    its `options` attribute before the call to .set_problem().
+
+    Example:
+      solver.options.update(threadlimit=8)
+      solver.set_problem(...)
+      solver.solve(...)
+    """
+
     name: str = 'pyomo.gurobi'
     # default options to pass to Pyomo solver
     options: dict = dict(
@@ -42,6 +53,26 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return self._value_map[var.name]
 
+    def set_problem(
+        self,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        capacity: int,
+        model_options: ModelOptions,
+        warmstart: nx.Graph | None = None,
+    ):
+        """
+        This will keep the Gurobi license in use until a call to `get_solution()`.
+        """
+        solver = pyo.SolverFactory(
+            'gurobi_persistent',
+            manage_env=True,
+            options=self.options,
+        )
+        self.solver = solver
+        super().set_problem(P, A, capacity, model_options, warmstart)
+        self.solver.set_instance(self.model)
+
     def solve(
         self,
         time_limit: float,
@@ -49,10 +80,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         options: dict[str, Any] = {},
         verbose: bool = False,
     ) -> SolutionInfo:
-        """
-        This will keep the Gurobi license in use until a call to `get_solution()`.
-        """
-        model = self.model
+        model, solver = self.model, self.solver
         try:
             model = self.model
         except AttributeError as exc:
@@ -60,16 +88,13 @@ class SolverGurobi(SolverPyomo, PoolHandler):
             raise
         applied_options = self.options | options
         self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
-        solver = pyo.SolverFactory(
-            'gurobi',
-            solver_io='python',
-            manage_env=True,
-            options=applied_options | dict(timelimit=time_limit, mipgap=mip_gap),
-        )
-        self.solver = solver
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
         result = solver.solve(
-            model, **self.solve_kwargs, tee=verbose, load_solutions=False
+            model,
+            **self.solve_kwargs,
+            options=applied_options | dict(timelimit=time_limit, mipgap=mip_gap),
+            tee=verbose,
+            load_solutions=False,
         )
         num_solutions = solver._solver_model.getAttr('SolCount')
         termination = result['Solver'][0]['Termination condition'].name

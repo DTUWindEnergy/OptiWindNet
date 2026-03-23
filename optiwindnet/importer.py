@@ -22,7 +22,7 @@ from .interarraylib import L_from_site
 from .utils import make_handle
 
 _lggr = logging.getLogger(__name__)
-info, warn = _lggr.info, _lggr.warning
+_info, _warn = _lggr.info, _lggr.warning
 
 __all__ = ('L_from_yaml', 'L_from_pbf', 'L_from_windIO', 'load_repository')
 
@@ -150,20 +150,31 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     Terminal, TerminalLabel = coordinate_parser[format](parsed_dict['TURBINES'])
     T = Terminal.shape[0]
     R = Root.shape[0]
-    node_xy = {xy: i for i, xy in enumerate(map(tuple, Terminal))}
-    node_xy.update({xy: i for i, xy in enumerate(map(tuple, Root), start=-R)})
+    vertex_xy = {xy: i for i, xy in enumerate(map(tuple, Terminal.tolist()))}
+    vertex_xy.update(
+        {xy: i for i, xy in enumerate(map(tuple, Root.tolist()), start=-R)}
+    )
     i = T
-    border_xy = []
+    border_xy_ = []
     border = []
-    for xy in map(tuple, Border):
-        if xy not in node_xy:
-            border_xy.append(xy)
+    for xy in map(tuple, Border.tolist()):
+        j = vertex_xy.get(xy)
+        if j is None:
+            border_xy_.append(xy)
             border.append(i)
-            node_xy[xy] = i
+            vertex_xy[xy] = i
             i += 1
         else:
-            border.append(node_xy[xy])
-    B = len(border_xy)
+            if j >= T:
+                _warn(
+                    'Repeated EXTENTS vertex detected: %s. This is not supported for a '
+                    "location's border. Skipping this vertex, please fix the file: %s.",
+                    xy,
+                    filepath,
+                )
+                continue
+            border.append(vertex_xy[xy])
+    B = len(border_xy_)
     optional = {}
     obstacles = parsed_dict.get('OBSTACLES')
     obstacleC_ = []
@@ -173,23 +184,23 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         for obstacle_entry in parsed_dict['OBSTACLES']:
             obstacleC, poly_tag = coordinate_parser[format](obstacle_entry)
 
-            obstacle_xy = []
+            obstacle_xy_ = []
             obstacle = []
-            for xy in map(tuple, obstacleC):
-                if xy not in node_xy:
-                    obstacle_xy.append(xy)
+            for xy in map(tuple, obstacleC.tolist()):
+                if xy not in vertex_xy:
+                    obstacle_xy_.append(xy)
                     obstacle.append(i)
-                    node_xy[xy] = i
+                    vertex_xy[xy] = i
                     i += 1
                 else:
-                    obstacle_xy.append(node_xy[xy])
-            B += len(obstacle_xy)
+                    obstacle_xy_.append(vertex_xy[xy])
+            B += len(obstacle_xy_)
 
             indices.append(np.array(obstacle, dtype=np.int_))
-            obstacleC_.extend(obstacle_xy)
+            obstacleC_.extend(obstacle_xy_)
         optional['obstacles'] = indices
 
-    VertexC = np.vstack((Terminal, *border_xy, *obstacleC_, Root))
+    VertexC = np.vstack((Terminal, *border_xy_, *obstacleC_, Root))
 
     lsangle = parsed_dict.get('LANDSCAPE_ANGLE')
     if lsangle is not None:
@@ -261,7 +272,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                         turbines.append(e.lonlat[::-1])
                         turbine_labels.append(label)
                     case _:
-                        info('Unhandled power category for Node: %s', power_kind)
+                        _info('Unhandled power category for Node: %s', power_kind)
 
             case esy.osm.pbf.Way():
                 power_kind = e.tags.get('power')
@@ -281,12 +292,12 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                         )
                         substation_labels.append(label)
                     case 'generator':
-                        info('Generator must be Node, not Way.')
+                        _info('Generator must be Node, not Way.')
                     case None:
                         # likely to be used in a Relation
                         ways[e.id] = e
                     case _:
-                        info('Unhandled power category for Way: %s', power_kind)
+                        _info('Unhandled power category for Way: %s', power_kind)
             case esy.osm.pbf.Relation():
                 if e.tags.get('type') == 'multipolygon':
                     power_kind = e.tags.get('power')
@@ -318,7 +329,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                                                     ]
                                                 )
                         case _:
-                            info(
+                            _info(
                                 'Unhandled power category for Relation: %s', power_kind
                             )
 
@@ -458,7 +469,7 @@ class IncludeLoader(yaml.SafeLoader):
         # Construct the full path of the file to include, relative to parent YAML
         include_path = Path(self.construct_scalar(node))
         if include_path.suffix not in ('.yml', '.yaml'):
-            warn(
+            _warn(
                 'Ignoring YAML "!include" directive to unsupported file type (%s)',
                 include_path,
             )
@@ -467,7 +478,7 @@ class IncludeLoader(yaml.SafeLoader):
             include_path = self._parent / include_path
         with open(include_path, 'r') as f:
             # When processing includes, use IncludeLoader to maintain correct directory context
-            return yaml.load(f, IncludeLoader)
+            return yaml.load(f, Loader=IncludeLoader)
 
 
 def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
@@ -483,7 +494,7 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     if isinstance(filepath, str):
         filepath = Path(filepath)
     name = filepath.stem
-    system = yaml.load(filepath.open(), IncludeLoader)
+    system = yaml.load(filepath.open(), Loader=IncludeLoader)
     coords = system['wind_farm']['layouts']['initial_layout']['coordinates']
     terminalC = np.c_[coords['x'], coords['y']]
     coords = system['wind_farm']['electrical_substations']['coordinates']

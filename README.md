@@ -42,7 +42,7 @@ Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stabl
 Requirements
 ------------
 
-*OptiWindNet* requires Python version 3.11+ (tested with 3.11-14). The last version to support Python 3.10 was v0.1.0.
+*OptiWindNet* requires Python version 3.11+ (tested with 3.11-14). The last version to support Python 3.10 was v0.0.6.
 
 The use of a Python virtual environment is recommended. OptiWindNet's dependencies (except for MILP solvers, see docs) will be installed automatically when using `pip install optiwindnet` or `conda install optiwindnet`.
 
