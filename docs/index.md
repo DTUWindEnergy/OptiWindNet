@@ -21,7 +21,7 @@ Jupyter notebooks used in this manual | <https://gitlab.windenergy.dtu.dk/TOPFAR
 OptiWindNet is an electrical network design tool for offshore wind farms developed at the Technical University of Denmark -- DTU.
 The package offers a framework to obtain optimal or near-optimal cable routes for a given turbine layout within the cable-laying boundaries. It provides high-level access to heuristic, meta-heuristic and mathematical optimization approaches to the problem.
 
-The tool is distributed as the open-source Python package **optiwindnet**, which can be used either within an interactive Python session (e.g. Jupyter notebook) or as a library, by invoking OptiWindNet's API directly from another application.
+The tool is distributed as the open-source Python package **optiwindnet**, which can be used either within an interactive Python session (e.g. Jupyter notebook) or as a library, by invoking OptiWindNet's API directly from another application (e.g. [TOPFARM](https://topfarm.pages.windenergy.dtu.dk/TopFarm2/notebooks/cables.html), [Ard](https://github.com/NLRWindSystems/Ard)).
 
 ## What can OptiWindNet do?
 
