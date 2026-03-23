@@ -35,29 +35,23 @@ def solver_factory(solver_name: str) -> Solver:
 
     Note that the only solver that is a dependency of OptiWindNet is 'ortools'.
     Check OptiWindNet's documentation on how to install optional solvers.
+    
+    Legacy compatibility: if solver_name == 'ortools' then the CP-SAT backend is used.
 
     Args:
-      solver_name: one of 'ortools', 'ortools.cp_sat', 'ortools.gscip',
-        'ortools.gurobi', 'ortools.glpk', 'ortools.highs',
-        'ortools.santorini', 'cplex', 'gurobi', 'cbc', 'scip', 'highs'.
+      solver_name: one of 'ortools.cp_sat', 'ortools.gscip',
+        'ortools.gurobi', 'ortools.highs', 'cplex', 'gurobi', 'cbc', 'scip', 'highs'.
 
     Returns:
       Solver instance that can produce solutions for the cable routing problem.
     """
+    solver_name, *backend = solver_name.split('.', maxsplit=1)
     match solver_name:
         case 'ortools':
             if find_spec('ortools'):
                 from .ortools import SolverORTools
 
-                return SolverORTools()
-            raise ModuleNotFoundError(
-                "Package 'ortools' not found. Try 'pip install ortools'."
-            )
-        case 'ortools.cp_sat' | 'ortools.gscip' | 'ortools.gurobi' | 'ortools.glpk' | 'ortools.highs' | 'ortools.santorini':
-            if find_spec('ortools'):
-                from .ortools import SolverORTools
-
-                return SolverORTools(solver_name.split('.', 1)[1])
+                return SolverORTools(backend[0] if backend else 'cp_sat')
             raise ModuleNotFoundError(
                 "Package 'ortools' not found. Try 'pip install ortools'."
             )

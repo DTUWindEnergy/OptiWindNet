@@ -3,13 +3,13 @@
 
 import logging
 import math
+import os
 from datetime import timedelta
 from itertools import chain
 from typing import Any
 
 import networkx as nx
 from ortools.math_opt.python import mathopt
-from ortools.sat import sat_parameters_pb2
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
@@ -33,55 +33,12 @@ _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 _SOLVER_TYPES = {
     'cp_sat': mathopt.SolverType.CP_SAT,
-    'glpk': mathopt.SolverType.GLPK,
     'gscip': mathopt.SolverType.GSCIP,
     'gurobi': mathopt.SolverType.GUROBI,
     'highs': mathopt.SolverType.HIGHS,
-    'santorini': mathopt.SolverType.SANTORINI,
 }
-_CALLBACK_BACKENDS = frozenset({'cp_sat', 'gurobi'})
+_CALLBACK_BACKENDS = ('cp_sat', 'gurobi')
 
-
-class _MathOptSolverHandle:
-    """Small adapter that preserves the public surface used elsewhere."""
-
-    backend: str
-    solver_type: mathopt.SolverType
-    parameters: Any
-    log_callback: Any
-    _result: mathopt.SolveResult | None
-
-    def __init__(self, backend: str, solver_type: mathopt.SolverType):
-        self.backend = backend
-        self.solver_type = solver_type
-        self.parameters = self._make_parameters(backend)
-        self.log_callback = None
-        self._result = None
-
-    def solution_info(self) -> str:
-        if self._result is None:
-            return ''
-        termination = self._result.termination
-        detail = f' ({termination.detail})' if termination.detail else ''
-        return f'{termination.reason.name}{detail}'
-
-    @staticmethod
-    def _make_parameters(backend: str) -> Any:
-        match backend:
-            case 'cp_sat':
-                return sat_parameters_pb2.SatParameters()
-            case 'gurobi':
-                return mathopt.GurobiParameters()
-            case 'glpk':
-                return mathopt.GlpkParameters()
-            case 'gscip':
-                return mathopt.SolveParameters().gscip
-            case 'highs':
-                return mathopt.SolveParameters().highs
-            case 'santorini':
-                return None
-            case _:
-                raise ValueError(f'Unsupported OR-Tools MathOpt backend: {backend}')
 
 
 class _SolutionStore:
@@ -119,15 +76,19 @@ class SolverORTools(Solver, PoolHandler):
     solutions found to a pool. Meant to be used with `investigate_pool()`.
     """
 
-    name: str = 'ortools'
+    name: str
     backend: str
+    log_callback: Any
     _solution_pool: list[tuple[float, dict]]
-    solver: _MathOptSolverHandle
+    _solve_result: mathopt.SolveResult | None
 
-    def __init__(self, backend: str = 'cp_sat'):
+    def __init__(self, backend: str):
+        if backend not in _SOLVER_TYPES:
+            raise ValueError(f'Unsupported OR-Tools MathOpt backend: {backend}')
         self.backend = backend
-        self.name = 'ortools' if backend == 'cp_sat' else f'ortools.{backend}'
-        self.solver = _MathOptSolverHandle(backend, _SOLVER_TYPES[backend])
+        self.name = f'ortools.{backend}'
+        self.log_callback = None
+        self._solve_result = None
         self.options = {}
 
     def _link_val(self, var: Any) -> int:
@@ -164,7 +125,7 @@ class SolverORTools(Solver, PoolHandler):
         in the attribute self.solutions.
         """
         try:
-            model, solver = self.model, self.solver
+            model = self.model
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
@@ -183,14 +144,7 @@ class SolverORTools(Solver, PoolHandler):
         solve_params = self._make_solve_parameters(
             time_limit, mip_gap, applied_options, verbose
         )
-        if solver.parameters is not None:
-            info('>>> ORTools %s parameters <<<\n%s\n', self.backend, solver.parameters)
-        else:
-            info(
-                '>>> ORTools %s parameters <<<\n%s\n',
-                self.backend,
-                dict(time_limit=time_limit, relative_gap_tolerance=mip_gap),
-            )
+        info('>>> ORTools %s parameters <<<\n%s\n', self.backend, solve_params)
         model_params = mathopt.ModelSolveParameters(
             variable_values_filter=mathopt.VariableFilter(filtered_items=tracked_vars),
             solution_hints=(
@@ -201,10 +155,10 @@ class SolverORTools(Solver, PoolHandler):
         )
         solve_kwargs = dict(
             opt_model=model,
-            solver_type=solver.solver_type,
+            solver_type=_SOLVER_TYPES[self.backend],
             params=solve_params,
             model_params=model_params,
-            msg_cb=self._msg_cb if solver.log_callback is not None else None,
+            msg_cb=self._msg_cb if self.log_callback is not None else None,
         )
         if self.backend in _CALLBACK_BACKENDS:
             solve_kwargs['callback_reg'] = mathopt.CallbackRegistration(
@@ -213,7 +167,7 @@ class SolverORTools(Solver, PoolHandler):
             )
             solve_kwargs['cb'] = storer.on_solution_callback
         result = mathopt.solve(**solve_kwargs)
-        solver._result = result
+        self._solve_result = result
         if len(storer.solutions) == 0 and result.has_primal_feasible_solution():
             solution = {
                 var.id: round(value)
@@ -258,7 +212,7 @@ class SolverORTools(Solver, PoolHandler):
         else:
             S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
-        G.graph['solver_details'].update(strategy=self.solver.solution_info())
+        G.graph['solver_details'].update(strategy=self._solver_termination_detail())
         return S, G
 
     def _objective_at(self, index: int) -> float:
@@ -268,9 +222,16 @@ class SolverORTools(Solver, PoolHandler):
     def _topology_from_mip_pool(self) -> nx.Graph:
         return self._topology_from_mip_sol()
 
+    def _solver_termination_detail(self) -> str:
+        if self._solve_result is None:
+            return ''
+        termination = self._solve_result.termination
+        detail = f' ({termination.detail})' if termination.detail else ''
+        return f'{termination.reason.name}{detail}'
+
     def _msg_cb(self, messages: list[str]) -> None:
         for line in messages:
-            self.solver.log_callback(line)
+            self.log_callback(line)
 
     def _make_solve_parameters(
         self,
@@ -279,47 +240,31 @@ class SolverORTools(Solver, PoolHandler):
         applied_options: dict[str, Any],
         verbose: bool,
     ) -> mathopt.SolveParameters:
+        threads = applied_options.pop('threads', len(os.sched_getaffinity(0)))
+        # SolveParameters.threads is only honoured by cp_sat and gscip;
+        # other backends need it injected into their own parameter sub-messages.
         solve_params = mathopt.SolveParameters(
             time_limit=timedelta(seconds=time_limit),
             relative_gap_tolerance=mip_gap,
             enable_output=verbose,
+            threads=threads if self.backend in ('cp_sat', 'gscip') else None,
         )
         match self.backend:
             case 'cp_sat':
                 for key, val in applied_options.items():
-                    setattr(self.solver.parameters, key, val)
                     setattr(solve_params.cp_sat, key, val)
-                self.solver.parameters.max_time_in_seconds = time_limit
-                self.solver.parameters.relative_gap_limit = mip_gap
-                self.solver.parameters.log_search_progress = verbose
-                solve_params.cp_sat.max_time_in_seconds = time_limit
-                solve_params.cp_sat.relative_gap_limit = mip_gap
                 solve_params.cp_sat.log_search_progress = verbose
             case 'gurobi':
+                solve_params.gurobi.param_values['Threads'] = str(threads)
                 for key, val in applied_options.items():
-                    self.solver.parameters.param_values[key] = str(val)
                     solve_params.gurobi.param_values[key] = str(val)
-            case 'glpk':
-                for key, val in applied_options.items():
-                    if not hasattr(self.solver.parameters, key):
-                        raise AttributeError(f'Unknown GLPK MathOpt option: {key}')
-                    setattr(self.solver.parameters, key, val)
-                    setattr(solve_params.glpk, key, val)
             case 'gscip':
                 for key, val in applied_options.items():
-                    setattr(self.solver.parameters, key, val)
                     setattr(solve_params.gscip, key, val)
             case 'highs':
+                solve_params.highs.int_options['threads'] = threads
                 for key, val in applied_options.items():
-                    setattr(self.solver.parameters, key, val)
                     setattr(solve_params.highs, key, val)
-            case 'santorini':
-                if applied_options:
-                    warn(
-                        'ORTools MathOpt backend <santorini> has no backend-specific '
-                        'parameter mapping in OptiWindNet; only common time/gap/output '
-                        'parameters are applied.'
-                    )
             case _:
                 raise ValueError(f'Unsupported OR-Tools MathOpt backend: {self.backend}')
         return solve_params
