@@ -62,7 +62,9 @@ def _patch_cpu_topology(monkeypatch, affinity, mapping=None):
             return mapping[self.path]
 
     monkeypatch.setattr(core.sys, 'platform', 'linux')
-    monkeypatch.setattr(core.os, 'sched_getaffinity', lambda pid: affinity)
+    monkeypatch.setattr(
+        core.os, 'sched_getaffinity', lambda pid: affinity, raising=False
+    )
     monkeypatch.setattr(core, 'Path', FakePath)
 
 
