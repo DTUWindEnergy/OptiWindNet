@@ -40,12 +40,16 @@ And finally:
 
     pip install optiwindnet
 
+The PyPI package installs `ortools` as a dependency.
+
 ### If using `conda`
 
     conda create --name optiwindnet_env --channel conda-forge python=3.12 optiwindnet 
     conda activate optiwindnet_env
 
 The flag `--channel conda-forge` may be omitted if using *miniforge* or if the global *conda* configuration already sets **conda-forge** as the highest-priority channel.
+
+The conda package installs `highspy` as a dependency.
 
 ## Interactive use
 
@@ -57,16 +61,18 @@ The **launch|binder** button is an easy way to get started, but a local installa
 
 ## Solvers (optional)
 
-The installation procedure above enables *OptiWindNet*'s heuristics, meta-heuristic and mathematical optimization with [Google's OR-Tools](https://developers.google.com/optimization) (open-source software).
+The installation procedure above enables *OptiWindNet*'s heuristics, meta-heuristic, and mathematical optimization with [Google's OR-Tools](https://developers.google.com/optimization) when installed from PyPI, or with [HiGHS](https://highs.dev/) when installed from conda.
 
-Other solvers can be used for mathematical optimization, but they are not installed by default.
+Without installing any extra solver package, a PyPI installation of *OptiWindNet* can use `ortools.cp_sat` for CP-SAT, `ortools.gscip` for SCIP, and `ortools.highs` for HiGHS, while a conda installation can use `highs` for HiGHS. The legacy alias `ortools` is still accepted and maps to `ortools.cp_sat`.
+
+Other mathematical optimization backends can also be used, but they must be installed separately.
 
 The commands suggested here assume that the Python environment for *OptiWindNet* has been already activated and that `conda` is configured for the `conda-forge` channel.
 For packages that are installable with both `pip` and `conda`, **enter only one** of the commands.
 
-Solvers perform a search across the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Dec/2025, only `gurobi`, `cplex`, `cbc` and `fscip` have this multi-threaded search capability.
+Solvers perform a search across the branch-and-bound tree. On multi-core computers, some solvers parallelize the tree search itself, while others run several coordinated searches in parallel. As of Dec/2025, `gurobi`, `cplex`, `cbc`, and `fscip` support multi-threaded tree search in *OptiWindNet*.
 
-Solvers `ortools` and `scip` also benefit from multi-core systems by launching multiple concurrent solvers in parallel, with some information exchange among them. `ortools` diversifies the algorithms/strategies among threads, while `scip` diversifies the random seeds and may use different emphasis among threads. Both have several user-configurable settings regarding that diversification.
+The OR-Tools backends and native `scip` can also benefit from multiple cores by running concurrent searches with some information exchange among them. OR-Tools diversifies algorithms and strategies across workers, while SCIP diversifies random seeds and may vary emphasis settings. Both expose user-configurable controls for that behavior.
 
 For installing all pip-available solvers:
 
@@ -90,10 +96,15 @@ See below for specific instructions for each solver.
 
 ### HiGHS
 
-[HiGHS](https://highs.dev/) is open source software:
+[HiGHS](https://highs.dev/) can be called from *OptiWindNet* in two ways:
 
-    pip install highspy
-    conda install -c conda-forge highspy
+* `ortools.highs`: uses the HiGHS backend exposed through OR-Tools;
+* `highs`: uses the native Pyomo + `highspy` backend.
+
+For the PyPI package, `ortools.highs` is available out of the box. The `highs` backend requires `highspy` to be installed separately when it is not already present in the environment:
+
+      pip install highspy
+      conda install -c conda-forge highspy
 
 ### CBC
 
@@ -108,7 +119,12 @@ Users on Windows might find it difficult to get a multi-threaded CBC on that pla
 
 ### SCIP
 
-[SCIP](https://www.scipopt.org/) is open source software.
+[SCIP](https://www.scipopt.org/) can be called from *OptiWindNet* in two ways:
+
+* `ortools.gscip`: uses the SCIP backend exposed through OR-Tools;
+* `scip`: uses the native **pyscipopt** backend.
+
+For the PyPI package, `ortools.gscip` is available out of the box. The native `scip` backend requires a separate installation:
 
 > **Attention**: Avoid loading both `scip` and `ortools` solvers within the same Python interpreter instance, since `ortools` contains a SCIP library and its version may be different from the one used by **pyscipopt**.
 

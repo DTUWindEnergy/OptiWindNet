@@ -49,10 +49,10 @@ def test_expected_router_graphs_match(routed_instance, locations):
 def test_ortools_with_warmstart():
     try:
         router_ortools = MILPRouter(
-            solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True
+            solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
         )
     except (FileNotFoundError, ModuleNotFoundError):
-        pytest.skip('ortools not available')
+        pytest.skip('ortools.cp_sat not available')
     wfn = tiny_wfn()
     wfn.optimize(router=EWRouter())
     terse_links = wfn.optimize(router=router_ortools)
@@ -62,7 +62,7 @@ def test_ortools_with_warmstart():
     # invalid warmstart
     wfn.G.add_edge(-1, 11)
     router_ortools = MILPRouter(
-        solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True
+        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
     )
     terse_links = wfn.optimize(router=router_ortools)
     expected = [-1, 0, 1, 2]
@@ -72,7 +72,7 @@ def test_ortools_with_warmstart():
     wfn = tiny_wfn(cables=1)
     wfn.optimize(router=EWRouter())
     router_ortools = MILPRouter(
-        solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True
+        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
     )
     terse_links = wfn.optimize(router=router_ortools)
     expected = [-1, -1, -1, -1]
@@ -83,7 +83,7 @@ def test_ortools_with_warmstart():
     wfn.G.add_edge(12, 13)
     wfn.G.remove_edge(0, -1)
     router_ortools = MILPRouter(
-        solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True
+        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
     )
     terse_links = wfn.optimize(router=router_ortools)
     expected = [-1, -1, -1, -1]

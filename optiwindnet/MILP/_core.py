@@ -3,7 +3,10 @@
 
 import abc
 import logging
-from dataclasses import asdict, dataclass
+import os
+import sys
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 from enum import StrEnum, auto
 from itertools import chain
@@ -17,6 +20,37 @@ from ..pathfinding import PathFinder
 
 _lggr = logging.getLogger(__name__)
 error, info = _lggr.error, _lggr.info
+
+
+def physical_core_count() -> int:
+    """Count physical cores available to this process (cross-platform).
+
+    On Linux, reads sysfs topology to count physical cores within the
+    process affinity set. On other platforms, falls back to psutil.
+    """
+    if sys.platform == 'linux':
+        try:
+            affinity = os.sched_getaffinity(0)
+        except OSError:
+            affinity = None
+        if affinity is not None:
+            physical_cores = set()
+            for cpu_id in affinity:
+                topo = Path(f'/sys/devices/system/cpu/cpu{cpu_id}/topology')
+                try:
+                    pkg = (topo / 'physical_package_id').read_text().strip()
+                    core = (topo / 'core_id').read_text().strip()
+                    physical_cores.add((pkg, core))
+                except OSError:
+                    # sysfs unavailable (e.g. container), fall through
+                    physical_cores = None
+                    break
+            if physical_cores is not None:
+                return len(physical_cores)
+    # Windows, macOS, or Linux without sysfs
+    import psutil
+
+    return psutil.cpu_count(logical=False) or os.cpu_count() or 1
 
 
 def _identifier_from_class_name(c: type) -> str:
@@ -135,6 +169,8 @@ class ModelMetadata:
     flow_: Mapping
     model_options: dict
     fun_fingerprint: dict[str, str | bytes]
+    weight_: tuple = ()
+    solution_hint: dict[Any, float] = field(default_factory=dict)
     warmed_by: str = ''
 
 
