@@ -4,8 +4,10 @@
 import logging
 import math
 import os
+import sys
 from datetime import timedelta
 from itertools import chain
+from pathlib import Path
 from typing import Any
 
 import networkx as nx
@@ -40,6 +42,36 @@ _SOLVER_TYPES = {
 _CALLBACK_BACKENDS = ('cp_sat', 'gurobi')
 
 
+def _physical_core_count() -> int:
+    """Count physical cores available to this process (cross-platform).
+
+    On Linux, reads sysfs topology to count physical cores within the
+    process affinity set. On other platforms, falls back to psutil.
+    """
+    if sys.platform == 'linux':
+        try:
+            affinity = os.sched_getaffinity(0)
+        except OSError:
+            affinity = None
+        if affinity is not None:
+            physical_cores = set()
+            for cpu_id in affinity:
+                topo = Path(f'/sys/devices/system/cpu/cpu{cpu_id}/topology')
+                try:
+                    pkg = (topo / 'physical_package_id').read_text().strip()
+                    core = (topo / 'core_id').read_text().strip()
+                    physical_cores.add((pkg, core))
+                except OSError:
+                    # sysfs unavailable (e.g. container), fall through
+                    physical_cores = None
+                    break
+            if physical_cores is not None:
+                return len(physical_cores)
+    # Windows, macOS, or Linux without sysfs
+    import psutil
+
+    return psutil.cpu_count(logical=False) or os.cpu_count() or 1
+
 
 class _SolutionStore:
     """Ad hoc callback implementation that stores solutions to a pool."""
@@ -63,7 +95,8 @@ class _SolutionStore:
             var.id: round(cb_data.solution[var]) for var in self.metadata.flow_.values()
         }
         objective_value = sum(
-            weight * solution[var_id] for var_id, weight in self.weight_by_link_id.items()
+            weight * solution[var_id]
+            for var_id, weight in self.weight_by_link_id.items()
         )
         self.solutions.append((objective_value, solution))
         return mathopt.CallbackResult()
@@ -129,7 +162,9 @@ class SolverORTools(Solver, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        tracked_vars = tuple(chain(self.metadata.link_.values(), self.metadata.flow_.values()))
+        tracked_vars = tuple(
+            chain(self.metadata.link_.values(), self.metadata.flow_.values())
+        )
         storer = _SolutionStore(
             self.metadata,
             {
@@ -158,7 +193,11 @@ class SolverORTools(Solver, PoolHandler):
             solver_type=_SOLVER_TYPES[self.backend],
             params=solve_params,
             model_params=model_params,
-            msg_cb=self._msg_cb if self.log_callback is not None else None,
+            # HiGHS triggers a deprecation warning when msg_cb is used
+            # (setLogCallback → setCallback), so skip it for that backend.
+            msg_cb=self._msg_cb
+            if self.log_callback is not None and self.backend != 'highs'
+            else None,
         )
         if self.backend in _CALLBACK_BACKENDS:
             solve_kwargs['callback_reg'] = mathopt.CallbackRegistration(
@@ -171,7 +210,9 @@ class SolverORTools(Solver, PoolHandler):
         if len(storer.solutions) == 0 and result.has_primal_feasible_solution():
             solution = {
                 var.id: round(value)
-                for var, value in zip(tracked_vars, result.variable_values(tracked_vars))
+                for var, value in zip(
+                    tracked_vars, result.variable_values(tracked_vars)
+                )
             }
             storer.solutions.append((result.objective_value(), solution))
         num_solutions = len(storer.solutions)
@@ -240,7 +281,7 @@ class SolverORTools(Solver, PoolHandler):
         applied_options: dict[str, Any],
         verbose: bool,
     ) -> mathopt.SolveParameters:
-        threads = applied_options.pop('threads', len(os.sched_getaffinity(0)))
+        threads = applied_options.pop('threads', _physical_core_count())
         # SolveParameters.threads is only honoured by cp_sat and gscip;
         # other backends need it injected into their own parameter sub-messages.
         solve_params = mathopt.SolveParameters(
@@ -260,13 +301,35 @@ class SolverORTools(Solver, PoolHandler):
                     solve_params.gurobi.param_values[key] = str(val)
             case 'gscip':
                 for key, val in applied_options.items():
-                    setattr(solve_params.gscip, key, val)
+                    if '/' in key:
+                        # SCIP-native parameter (e.g. 'randomization/randomseedshift')
+                        # routed into the appropriate typed dict.
+                        match val:
+                            case bool():
+                                solve_params.gscip.bool_params[key] = val
+                            case int():
+                                solve_params.gscip.int_params[key] = val
+                            case float():
+                                solve_params.gscip.real_params[key] = val
+                            case str() if len(val) == 1:
+                                solve_params.gscip.char_params[key] = val
+                            case str():
+                                solve_params.gscip.string_params[key] = val
+                            case _:
+                                raise TypeError(
+                                    f'Unsupported type {type(val).__name__}'
+                                    f' for GSCIP parameter {key!r}'
+                                )
+                    else:
+                        setattr(solve_params.gscip, key, val)
             case 'highs':
                 solve_params.highs.int_options['threads'] = threads
                 for key, val in applied_options.items():
                     setattr(solve_params.highs, key, val)
             case _:
-                raise ValueError(f'Unsupported OR-Tools MathOpt backend: {self.backend}')
+                raise ValueError(
+                    f'Unsupported OR-Tools MathOpt backend: {self.backend}'
+                )
         return solve_params
 
 
@@ -309,7 +372,7 @@ def make_min_length_model(
     # using directed node-node links -> create the reversed tuples
     Eʹ = tuple((v, u) for u, v in E)
     # set of feeders to all roots
-    stars = tuple((t, r) for t in _T for r in _R)
+    stars = tuple((t, r) for r in _R for t in _T)
     linkset = E + Eʹ + stars
 
     # Create model
@@ -321,7 +384,7 @@ def make_min_length_model(
 
     k = capacity
     weight_ = 2 * tuple(A[u][v]['length'] for u, v in E) + tuple(
-        d2roots[t, r] for t, r in stars
+        chain(*(d2roots[:T, r].tolist() for r in _R))
     )
 
     #############
@@ -329,8 +392,7 @@ def make_min_length_model(
     #############
 
     link_ = {
-        (u, v): m.add_binary_variable(name=f'link_{u}~{v}')
-        for u, v in chain(E, Eʹ)
+        (u, v): m.add_binary_variable(name=f'link_{u}~{v}') for u, v in chain(E, Eʹ)
     }
     link_ |= {(t, r): m.add_binary_variable(name=f'link_{t}~r{-r}') for t, r in stars}
     flow_ = {
