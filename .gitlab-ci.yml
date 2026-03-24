@@ -87,7 +87,6 @@ test_linux:
       - PYTHON_VERSION: *default_python
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      when: never
     - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         compare_to: refs/heads/main
