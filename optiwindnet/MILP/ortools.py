@@ -34,10 +34,9 @@ error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 _SOLVER_TYPES = {
     'cp_sat': mathopt.SolverType.CP_SAT,
     'gscip': mathopt.SolverType.GSCIP,
-    'gurobi': mathopt.SolverType.GUROBI,
     'highs': mathopt.SolverType.HIGHS,
 }
-_CALLBACK_BACKENDS = ('cp_sat', 'gurobi')
+_CALLBACK_BACKENDS = ('cp_sat',)
 
 
 class _SolutionStore:
@@ -264,10 +263,6 @@ class SolverORTools(Solver, PoolHandler):
                 for key, val in applied_options.items():
                     setattr(solve_params.cp_sat, key, val)
                 solve_params.cp_sat.log_search_progress = verbose
-            case 'gurobi':
-                solve_params.gurobi.param_values['Threads'] = str(threads)
-                for key, val in applied_options.items():
-                    solve_params.gurobi.param_values[key] = str(val)
             case 'gscip':
                 for key, val in applied_options.items():
                     if '/' in key:
