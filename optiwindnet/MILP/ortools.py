@@ -3,11 +3,8 @@
 
 import logging
 import math
-import os
-import sys
 from datetime import timedelta
 from itertools import chain
-from pathlib import Path
 from typing import Any
 
 import networkx as nx
@@ -27,6 +24,7 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    physical_core_count,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -40,37 +38,6 @@ _SOLVER_TYPES = {
     'highs': mathopt.SolverType.HIGHS,
 }
 _CALLBACK_BACKENDS = ('cp_sat', 'gurobi')
-
-
-def _physical_core_count() -> int:
-    """Count physical cores available to this process (cross-platform).
-
-    On Linux, reads sysfs topology to count physical cores within the
-    process affinity set. On other platforms, falls back to psutil.
-    """
-    if sys.platform == 'linux':
-        try:
-            affinity = os.sched_getaffinity(0)
-        except OSError:
-            affinity = None
-        if affinity is not None:
-            physical_cores = set()
-            for cpu_id in affinity:
-                topo = Path(f'/sys/devices/system/cpu/cpu{cpu_id}/topology')
-                try:
-                    pkg = (topo / 'physical_package_id').read_text().strip()
-                    core = (topo / 'core_id').read_text().strip()
-                    physical_cores.add((pkg, core))
-                except OSError:
-                    # sysfs unavailable (e.g. container), fall through
-                    physical_cores = None
-                    break
-            if physical_cores is not None:
-                return len(physical_cores)
-    # Windows, macOS, or Linux without sysfs
-    import psutil
-
-    return psutil.cpu_count(logical=False) or os.cpu_count() or 1
 
 
 class _SolutionStore:
@@ -281,7 +248,9 @@ class SolverORTools(Solver, PoolHandler):
         applied_options: dict[str, Any],
         verbose: bool,
     ) -> mathopt.SolveParameters:
-        threads = applied_options.pop('threads', _physical_core_count())
+        threads = applied_options.pop('threads', None)
+        if threads is None and self.backend != 'cp_sat':
+            threads = physical_core_count()
         # SolveParameters.threads is only honoured by cp_sat and gscip;
         # other backends need it injected into their own parameter sub-messages.
         solve_params = mathopt.SolveParameters(
