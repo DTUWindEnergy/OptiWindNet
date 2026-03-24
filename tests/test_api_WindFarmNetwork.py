@@ -454,7 +454,7 @@ def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
         cables_capacity=4,
         model_options=model_options,
         S_warm_has_detour=False,
-        solver_name='ortools',
+        solver_name='ortools.cp_sat',
         logger=logging.getLogger(U.__name__),
         verbose=True,
     )
@@ -475,7 +475,7 @@ def test_warmstart_feeder_limit_specified_allows(capfd):
         cables_capacity=2,
         model_options=model_options,
         S_warm_has_detour=False,
-        solver_name='ortools',
+        solver_name='ortools.cp_sat',
         logger=logging.getLogger(U.__name__),
         verbose=True,
     )

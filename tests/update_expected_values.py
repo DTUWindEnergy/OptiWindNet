@@ -89,7 +89,17 @@ def generate_expected_values_end_to_end_tests():
         ),
         'MILPRouter1_ortools_cap5': r_spec(
             'MILPRouter',
-            {'solver_name': 'ortools', 'time_limit': 5, 'mip_gap': 1e-3},
+            {'solver_name': 'ortools.cp_sat', 'time_limit': 5, 'mip_gap': 1e-3},
+            cables=5,
+        ),
+        'MILPRouter1_ortools_gscip_cap5': r_spec(
+            'MILPRouter',
+            {'solver_name': 'ortools.gscip', 'time_limit': 5, 'mip_gap': 1e-3},
+            cables=5,
+        ),
+        'MILPRouter1_ortools_highs_cap5': r_spec(
+            'MILPRouter',
+            {'solver_name': 'ortools.highs', 'time_limit': 5, 'mip_gap': 1e-3},
             cables=5,
         ),
         'MILPRouter1_gurobi_cap4': r_spec(
@@ -110,7 +120,27 @@ def generate_expected_values_end_to_end_tests():
         'MILPRouter1_ortools_cap10_modeloptions': r_spec(
             'MILPRouter',
             {
-                'solver_name': 'ortools',
+                'solver_name': 'ortools.cp_sat',
+                'time_limit': 5,
+                'mip_gap': 1e-3,
+                'model_options': model_options_strict,
+            },
+            cables=10,
+        ),
+        'MILPRouter1_ortools_gscip_cap10_modeloptions': r_spec(
+            'MILPRouter',
+            {
+                'solver_name': 'ortools.gscip',
+                'time_limit': 5,
+                'mip_gap': 1e-3,
+                'model_options': model_options_strict,
+            },
+            cables=10,
+        ),
+        'MILPRouter1_ortools_highs_cap10_modeloptions': r_spec(
+            'MILPRouter',
+            {
+                'solver_name': 'ortools.highs',
                 'time_limit': 5,
                 'mip_gap': 1e-3,
                 'model_options': model_options_strict,
