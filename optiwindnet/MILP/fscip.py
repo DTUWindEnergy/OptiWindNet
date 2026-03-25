@@ -263,7 +263,8 @@ class SolverFSCIP(Solver, PoolHandler):
                 G_from_S(S, A),
                 P,
                 A,
-                branched=model_options['topology'] is Topology.BRANCHED,
+                branched=model_options["topology"] is Topology.BRANCHED,
+                ringed=model_options["topology"] is Topology.RINGED,
             ).create_detours()
         else:
             S, G = self._investigate_pool(P, A)

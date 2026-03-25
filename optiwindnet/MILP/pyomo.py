@@ -170,7 +170,8 @@ class SolverPyomo(Solver):
             G_from_S(S, A),
             P,
             A,
-            branched=model_options['topology'] is Topology.BRANCHED,
+            branched=model_options["topology"] is Topology.BRANCHED,
+                ringed=model_options["topology"] is Topology.RINGED,
         ).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -268,7 +269,8 @@ class SolverPyomoAppsi(Solver):
             G_from_S(S, A),
             P,
             A,
-            branched=model_options['topology'] is Topology.BRANCHED,
+            branched=model_options["topology"] is Topology.BRANCHED,
+                ringed=model_options["topology"] is Topology.RINGED,
         ).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -304,6 +306,12 @@ def make_min_length_model(
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
     W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
+
+    # For RINGED, double the internal capacity so each ring can hold up to
+    # 2×capacity turbines (capacity per arm); store original for metadata.
+    ring_capacity = capacity
+    if topology is Topology.RINGED:
+        capacity = 2 * capacity
 
     # Sets
     _T = range(T)
@@ -592,7 +600,7 @@ def make_min_length_model(
     metadata = ModelMetadata(
         R,
         T,
-        capacity,
+        ring_capacity,
         m.linkset,
         m.link_,
         m.flow_,

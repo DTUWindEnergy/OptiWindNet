@@ -41,6 +41,7 @@ class Colors:
             None: 'solid',
             'detour': (0, (3, 3)),
             'virtual': 'solid',
+            'split': (0, (6, 2, 1, 2)),
         }
         # kind2dasharray is used only by svg.py
         self.kind2dasharray = dict(
@@ -51,6 +52,7 @@ class Colors:
             scaffold='10 10',
             planar='23 2 5 2',  # dash-dot, mirroring kind2style['planar']
             detour='18 15',
+            split='24 8 4 8',
         )
         if dark:
             self.kind2color = {
@@ -69,6 +71,7 @@ class Colors:
                 None: 'crimson',
                 'detour': 'darkorange',
                 'virtual': 'gold',
+                'split': 'darkorange',
             }
             self.fg_color = 'white'
             self.bg_color = 'black'
@@ -94,6 +97,7 @@ class Colors:
                 None: 'black',
                 'detour': 'royalblue',
                 'virtual': 'gold',
+                'split': 'darkorange',
             }
             self.fg_color = 'black'
             self.bg_color = 'white'

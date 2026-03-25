@@ -216,8 +216,9 @@ def bfs_subtree_loads(G, parent, children, subtree):
     load = nodeD.get('load', default)
     for child in children:
         G.nodes[child]['subtree'] = subtree
-        grandchildren = set(G[child].keys())
-        grandchildren.remove(parent)
+        grandchildren = (
+            {n for n in G[child] if G[child][n].get('kind') != 'split'} - {parent}
+        )
         childload = bfs_subtree_loads(G, child, grandchildren, subtree)
         G[parent][child].update(load=childload, reverse=parent > child)
         load += childload
@@ -378,6 +379,17 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     # add to G the S edges that are in A
     for edge in common_TA:
         s, t = edge if edge[0] < edge[1] else edge[::-1]
+        # split edges are ring midpoints: add directly with kind='split'
+        if S.get_edge_data(s, t, {}).get('kind') == 'split':
+            G.add_edge(
+                s,
+                t,
+                length=A[s][t]['length'],
+                load=S[s][t]['load'],
+                reverse=False,
+                kind='split',
+            )
+            continue
         AedgeD = A[s][t]
         subtree_id = S.nodes[t]['subtree']
         # only count diagonals that are not gates
@@ -505,16 +517,26 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     for s, t in non_A_edges:
         s, t = (s, t) if s < t else (t, s)
         if s < 0:
-            # far-reaching gate
-            G.add_edge(
-                s,
-                t,
-                length=d2roots[t, s].item(),
-                kind='tentative',
-                load=S.nodes[t]['load'],
-                reverse=False,
-            )
-            tentative.append((s, t))
+            if S.get_edge_data(s, t, {}).get('kind') == 'ring_back':
+                # ring-back feeder: a real cable, same physical route as a regular feeder
+                G.add_edge(
+                    s,
+                    t,
+                    length=d2roots[t, s].item(),
+                    load=S[s][t]['load'],
+                    reverse=False,
+                )
+            else:
+                # far-reaching gate
+                G.add_edge(
+                    s,
+                    t,
+                    length=d2roots[t, s].item(),
+                    kind='tentative',
+                    load=S.nodes[t]['load'],
+                    reverse=False,
+                )
+                tentative.append((s, t))
         else:
             # rogue edge (not supposed to be on the routeset, poor solver)
             st_reverse = S.edges[s, t]['reverse']

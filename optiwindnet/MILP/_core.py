@@ -3,6 +3,7 @@
 
 import abc
 import logging
+import math
 import os
 import sys
 from collections.abc import Mapping
@@ -189,6 +190,60 @@ class SolutionInfo:
     termination: str
 
 
+def _split_rings_in_S(S: nx.Graph, A: nx.Graph | None = None) -> None:
+    """Mark the midpoint edge of each RINGED ring cycle as kind='split'.
+
+    Also updates all edge loads in S to reflect the two-arm representation:
+    arm 1 goes from the ring-back root connection outward to the midpoint,
+    arm 2 goes from the feeder root connection outward to the midpoint.
+
+    When the ring has an even number of nodes (odd-length turbine chain), the
+    middle turbine has two incident edges that both yield balanced arms; if A
+    is provided, the longer of the two is chosen as the split edge.
+    """
+    for r in range(-S.graph['R'], 0):
+        for t1 in list(S.neighbors(r)):
+            if t1 < 0:
+                continue
+            if S[r][t1].get('kind') != 'ring_back':
+                continue
+            # Traverse the directed chain from t1 to feeder end tn
+            chain_ = [t1]
+            prev, curr = r, t1
+            while True:
+                nexts = [n for n in S.neighbors(curr) if n != prev]
+                if not nexts or nexts[0] == r:
+                    break
+                chain_.append(nexts[0])
+                prev, curr = curr, nexts[0]
+            n = len(chain_)
+            m = math.ceil(n / 2)  # arm 1 size (ring-back side)
+            # Even ring node count (odd n): unique middle turbine has two valid
+            # split edges — choose the longer one when A is available.
+            if n % 2 == 1 and n > 1 and A is not None:
+                mid = n // 2
+                left_u, left_v = chain_[mid - 1], chain_[mid]
+                right_u, right_v = chain_[mid], chain_[mid + 1]
+                left_len = A[left_u][left_v].get('length', 0) if A.has_edge(left_u, left_v) else 0
+                right_len = A[right_u][right_v].get('length', 0) if A.has_edge(right_u, right_v) else 0
+                if left_len > right_len:
+                    m = mid  # split on left edge; arm 1 gets floor(n/2) nodes
+            # Update ring-back edge load to arm 1 size
+            S[r][chain_[0]]['load'] = m
+            # Update arm 1 interior edge loads: decrease from m-1 toward split
+            for i in range(m - 1):
+                S[chain_[i]][chain_[i + 1]]['load'] = m - 1 - i
+            # Mark the split edge between the two arms (open point: no current flows)
+            if m < n:
+                S[chain_[m - 1]][chain_[m]]['kind'] = 'split'
+                S[chain_[m - 1]][chain_[m]]['load'] = 0
+            # Update feeder edge load to arm 2 size
+            S[chain_[-1]][r]['load'] = n - m
+            # Update arm 2 interior edge loads: increase from split toward feeder
+            for i in range(m, n - 1):
+                S[chain_[i]][chain_[i + 1]]['load'] = i - m + 1
+
+
 class Solver(abc.ABC):
     "Common interface to multiple MILP solvers"
 
@@ -293,6 +348,7 @@ class Solver(abc.ABC):
           Graph topology `S` from the solution.
         """
         metadata = self.metadata
+        topology = Topology[metadata.model_options.get('topology', 'BRANCHED').upper()]
         S = nx.Graph(R=metadata.R, T=metadata.T)
         # ensure roots are added, even if some are not connected
         S.add_nodes_from(range(-metadata.R, 0))
@@ -302,20 +358,37 @@ class Solver(abc.ABC):
             for (u, v), var in metadata.link_.items()
             if self._link_val(var)
         }
+        if topology is Topology.RINGED:
+            # Ring-back links (r→t) have no flow variable; add separately with load=0
+            ringback = {(u, v) for (u, v) in rev_from_link if u < 0 <= v}
+            regular = rev_from_link.keys() - ringback
+        else:
+            ringback = set()
+            regular = rev_from_link.keys()
         S.add_weighted_edges_from(
             (
                 (u, v, self._flow_val(metadata.flow_[u, v]))
-                for (u, v) in rev_from_link.keys()
+                for (u, v) in regular
             ),
             weight='load',
         )
-        # set the 'reverse' edge attribute
-        nx.set_edge_attributes(S, rev_from_link, name='reverse')
+        nx.set_edge_attributes(
+            S, {(u, v): rev_from_link[(u, v)] for (u, v) in regular}, name='reverse'
+        )
+        for u, v in ringback:
+            S.add_edge(u, v, load=0, reverse=False, kind='ring_back')
+        if topology is Topology.RINGED:
+            _split_rings_in_S(S, getattr(self, 'A', None))
+            S_dfs = nx.subgraph_view(
+                S, filter_edge=lambda u, v: S[u][v].get('kind') != 'split'
+            )
+        else:
+            S_dfs = S
         # propagate loads from edges to nodes
         subtree = -1
         max_load = 0
         for r in range(-metadata.R, 0):
-            for u, v in nx.edge_dfs(S, r):
+            for u, v in nx.edge_dfs(S_dfs, r):
                 S.nodes[v]['load'] = S[u][v]['load']
                 if u == r:
                     subtree += 1
@@ -358,6 +431,7 @@ class PoolHandler(abc.ABC):
         after applying the detours with PathFinder."""
         Λ = float('inf')
         branched = self.model_options['topology'] is Topology.BRANCHED
+        ringed = self.model_options['topology'] is Topology.RINGED
         num_solutions = self.num_solutions
         info(f'Solution pool has {num_solutions} solutions.')
         for i in range(num_solutions):
@@ -369,7 +443,7 @@ class PoolHandler(abc.ABC):
                 break
             Sʹ = self._topology_from_mip_pool()
             Gʹ = PathFinder(
-                G_from_S(Sʹ, A), planar=P, A=A, branched=branched
+                G_from_S(Sʹ, A), planar=P, A=A, branched=branched, ringed=ringed
             ).create_detours()
             Λʹ = Gʹ.size(weight='length')
             if Λʹ < Λ:
