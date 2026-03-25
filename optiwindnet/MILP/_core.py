@@ -399,6 +399,18 @@ class Solver(abc.ABC):
                 max_load = max(max_load, subtree_load)
                 rootload += subtree_load
             S.nodes[r]['load'] = rootload
+        if topology is Topology.RINGED:
+            # The two arms of each ring were assigned independent subtree ids by
+            # the DFS above; unify them under the lower of the two ids.
+            remap = {}
+            for u, v, data in S.edges(data=True):
+                if data.get('kind') == 'split':
+                    su, sv = S.nodes[u]['subtree'], S.nodes[v]['subtree']
+                    remap[max(su, sv)] = min(su, sv)
+            if remap:
+                for data in S.nodes.values():
+                    if data.get('subtree') in remap:
+                        data['subtree'] = remap[data['subtree']]
         S.graph.update(
             capacity=metadata.capacity,
             max_load=max_load,

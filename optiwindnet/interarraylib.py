@@ -379,70 +379,72 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     # add to G the S edges that are in A
     for edge in common_TA:
         s, t = edge if edge[0] < edge[1] else edge[::-1]
-        # split edges are ring midpoints: add directly with kind='split'
-        if S.get_edge_data(s, t, {}).get('kind') == 'split':
-            G.add_edge(
-                s,
-                t,
-                length=A[s][t]['length'],
-                load=S[s][t]['load'],
-                reverse=False,
-                kind='split',
-            )
-            continue
+        is_split = S.get_edge_data(s, t, {}).get('kind') == 'split'
         AedgeD = A[s][t]
         subtree_id = S.nodes[t]['subtree']
         # only count diagonals that are not gates
         num_diagonals += AedgeD['kind'] == 'extended' and s >= 0
         midpath = AedgeD.get('midpath')
 
-        # This block checks for gate×edge crossings, which may be unnecessary
-        # depending on how S was generated. (e.g. creator == 'MILP...' and
-        # gateXings_constraint == True).
-        st_is_tentative = False
-        if s < 0:
-            # ⟨s, t⟩ is a gate
-            if midpath is not None:
-                # While we do not have magic portals, make all contoured gate
-                # of kind tentative, so that we do not block access to root
-                # around a contour node.
-                st_is_tentative = True
-            elif (s, t) in diagonals:
-                # ⟨s, t⟩ is a diagonal
-                u, v = diagonals[(s, t)]
-                if (u, v) in S.edges:
-                    # ⟨s, t⟩'s Delaunay is in S -> Xing
+        # split edges are ring midpoints (open point: no current flows)
+        if is_split:
+            load = S[s][t]['load']
+            st_reverse = False
+            if midpath is None:
+                G.add_edge(s, t, length=AedgeD['length'], load=load,
+                           reverse=st_reverse, kind='split')
+                continue
+            # has a contour: fall through to contour expansion below
+        else:
+            # This block checks for gate×edge crossings, which may be unnecessary
+            # depending on how S was generated. (e.g. creator == 'MILP...' and
+            # gateXings_constraint == True).
+            st_is_tentative = False
+            if s < 0:
+                # ⟨s, t⟩ is a gate
+                if midpath is not None:
+                    # While we do not have magic portals, make all contoured gate
+                    # of kind tentative, so that we do not block access to root
+                    # around a contour node.
                     st_is_tentative = True
-                else:
-                    # check the other diagonals that cross ⟨s, t⟩ (in A)
-                    for side in ((u, s), (s, v), (v, t), (t, u)):
-                        side = side if side[0] < side[1] else side[::-1]
-                        if side in diagonals.inv and diagonals.inv[side] in S.edges:
-                            # side's diagonal is in S -> Xing
-                            st_is_tentative = True
-                            break
-            elif (s, t) in diagonals.inv and diagonals.inv[(s, t)] in S.edges:
-                # ⟨s, t⟩ is a Delanay edge and its diagonal is in S -> Xing
-                st_is_tentative = True
+                elif (s, t) in diagonals:
+                    # ⟨s, t⟩ is a diagonal
+                    u, v = diagonals[(s, t)]
+                    if (u, v) in S.edges:
+                        # ⟨s, t⟩'s Delaunay is in S -> Xing
+                        st_is_tentative = True
+                    else:
+                        # check the other diagonals that cross ⟨s, t⟩ (in A)
+                        for side in ((u, s), (s, v), (v, t), (t, u)):
+                            side = side if side[0] < side[1] else side[::-1]
+                            if side in diagonals.inv and diagonals.inv[side] in S.edges:
+                                # side's diagonal is in S -> Xing
+                                st_is_tentative = True
+                                break
+                elif (s, t) in diagonals.inv and diagonals.inv[(s, t)] in S.edges:
+                    # ⟨s, t⟩ is a Delanay edge and its diagonal is in S -> Xing
+                    st_is_tentative = True
 
-        load = S[s][t]['load']
-        st_reverse = S.nodes[s]['load'] < S.nodes[t]['load']
-        if st_is_tentative:
-            G.add_edge(
-                s,
-                t,
-                length=AedgeD['length'],
-                load=load,
-                reverse=st_reverse,
-                kind='tentative',
-            )
-            tentative.append((s, t))
-            continue
-        if midpath is None:
-            # no contour in A's ⟨s, t⟩ -> straightforward
-            G.add_edge(s, t, length=AedgeD['length'], load=load, reverse=st_reverse)
-            continue
-        # contour edge
+            load = S[s][t]['load']
+            st_reverse = S.nodes[s]['load'] < S.nodes[t]['load']
+            if st_is_tentative:
+                G.add_edge(
+                    s,
+                    t,
+                    length=AedgeD['length'],
+                    load=load,
+                    reverse=st_reverse,
+                    kind='tentative',
+                )
+                tentative.append((s, t))
+                continue
+            if midpath is None:
+                # no contour in A's ⟨s, t⟩ -> straightforward
+                G.add_edge(s, t, length=AedgeD['length'], load=load, reverse=st_reverse)
+                continue
+
+        # contour edge (reached for regular contour edges and split edges with contour)
+        edge_kind = 'split' if is_split else 'contour'
         shortcuts = AedgeD.get('shortcuts')
         if shortcuts is not None:
             if len(shortcuts) == len(midpath):
@@ -464,7 +466,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                 G.add_edge(
                     s,
                     t,
-                    kind='contour',
+                    kind=edge_kind,
                     reverse=st_reverse,
                     load=load,
                     length=AedgeD['length'],
@@ -490,7 +492,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                 v,
                 length=length.item(),
                 load=load,
-                kind='contour',
+                kind=edge_kind,
                 reverse=reverse,
                 A_edge=(s, t),
             )
@@ -501,7 +503,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
             t,
             length=lengths[-1].item(),
             load=load,
-            kind='contour',
+            kind=edge_kind,
             reverse=reverse,
             A_edge=(s, t),
         )
@@ -523,9 +525,11 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                     s,
                     t,
                     length=d2roots[t, s].item(),
+                    kind='tentative',
                     load=S[s][t]['load'],
                     reverse=False,
                 )
+                tentative.append((s, t))
             else:
                 # far-reaching gate
                 G.add_edge(

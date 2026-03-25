@@ -41,7 +41,7 @@ class Colors:
             None: 'solid',
             'detour': (0, (3, 3)),
             'virtual': 'solid',
-            'split': (0, (6, 2, 1, 2)),
+            'split': 'solid',
         }
         # kind2dasharray is used only by svg.py
         self.kind2dasharray = dict(
@@ -71,7 +71,7 @@ class Colors:
                 None: 'crimson',
                 'detour': 'darkorange',
                 'virtual': 'gold',
-                'split': 'darkorange',
+                'split': 'orangered',
             }
             self.fg_color = 'white'
             self.bg_color = 'black'
@@ -97,7 +97,7 @@ class Colors:
                 None: 'black',
                 'detour': 'royalblue',
                 'virtual': 'gold',
-                'split': 'darkorange',
+                'split': 'dimgray',
             }
             self.fg_color = 'black'
             self.bg_color = 'white'
