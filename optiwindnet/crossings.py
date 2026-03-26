@@ -1,6 +1,5 @@
 import math
 from collections.abc import Iterable, Iterator
-from itertools import chain
 
 import networkx as nx
 import numpy as np
@@ -175,7 +174,6 @@ def gateXing_iter(
     G: nx.Graph,
     *,
     hooks: Iterable | None = None,
-    borders: Iterable | None = None,
     touch_is_cross: bool = True,
 ) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
     """Iterate over all crossings between gates and edges/borders in G.
@@ -188,7 +186,6 @@ def gateXing_iter(
       hooks: Nodes to check, grouped by root in sub-sequences from root `-R`
         to `-1`. If `None`, all non-root nodes are checked using `'root'`
         node attribute.
-      borders: Impassable line segments between border vertices.
       touch_is_cross: If `True`, count as crossing a gate going over a node.
 
     Yields:
@@ -206,8 +203,6 @@ def gateXing_iter(
     #       being checked between different roots. Unlikely but possible case.
     # iterable of non-gate edges:
     Edge = nx.subgraph_view(G, filter_node=lambda n: n >= 0).edges()
-    if borders is not None:
-        Edge = chain(Edge, borders)
     if hooks is None:
         all_nodes = np.arange(T)
         IGate = [all_nodes] * R

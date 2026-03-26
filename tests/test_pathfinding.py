@@ -87,9 +87,8 @@ def test_pathfinder_detects_crossings():
     pf = PathFinder(G_tent, planar=P, A=A)
     assert len(pf.Xings) > 0
     # Xings identify which gates are crossing
-    crossing_gates = {gate for _, gate in pf.Xings}
-    assert (-1, 1) in crossing_gates
-    assert (-1, 2) in crossing_gates
+    assert (-1, 1) in pf.Xings
+    assert (-1, 2) in pf.Xings
 
 
 def test_create_detours_adds_detour_nodes():
@@ -248,16 +247,6 @@ def test_best_paths_overlay_structure():
     # J should have virtual edges
     has_virtual = any(d.get('kind') == 'virtual' for _, _, d in J.edges(data=True))
     assert has_virtual, 'overlay graph J should contain virtual path edges'
-
-
-def test_pathfinder_without_A():
-    """PathFinder should work without A, building its own distance metrics."""
-    G_tent, P, _ = _make_crossing_case()
-    pf = PathFinder(G_tent, planar=P, A=None)
-    G_det = pf.create_detours()
-
-    assert _all_turbines_connected(G_det)
-    assert _edges_cross(G_det) == []
 
 
 def test_pathfinder_branched_false():

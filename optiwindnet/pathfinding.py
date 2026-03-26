@@ -11,7 +11,6 @@ from itertools import chain
 import networkx as nx
 import numpy as np
 from bitarray import bitarray
-from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 
 from .crossings import gateXing_iter
@@ -104,7 +103,7 @@ class PathFinder:
         self,
         Gʹ: nx.Graph,
         planar: nx.PlanarEmbedding,
-        A: nx.Graph | None = None,
+        A: nx.Graph,
         *,
         branched: bool = True,
         iterations_limit: int = 15000,
@@ -118,7 +117,7 @@ class PathFinder:
         self.bad_streak_limit = bad_streak_limit
         self.iterations = 0
         G = Gʹ.copy()
-        R, T, B = (G.graph[k] for k in 'RTB')
+        R, T, B = (A.graph[k] for k in 'RTB')
         C = G.graph.get('C', 0)
         assert not G.graph.get('D'), 'Gʹ has already has detours.'
         self.ST = T + B
@@ -135,10 +134,9 @@ class PathFinder:
 
         # tentative will be copied later, by initializing a set from it.
         tentative = G.graph.get('tentative')
-        hooks2check = []
         if tentative is None:
-            # TODO: this case should be removed ('tentative' attr mandatory)
             tentative = []
+            hooks2check = []
             for r in range(-R, 0):
                 gates = set(
                     n for n in G.neighbors(r) if G[r][n].get('kind') == 'tentative'
@@ -146,28 +144,18 @@ class PathFinder:
                 tentative.extend((r, n) for n in gates)
                 hooks2check.append(gates)
         else:
-            hooks2check.extend(set() for _ in range(R))
+            hooks2check = [set() for _ in range(R)]
             for r, n in tentative:
                 hooks2check[r].add(n)
+        hooks_ = [np.fromiter(h2c, count=len(h2c), dtype=int) for h2c in hooks2check]
 
-        # P's constraint_edges might use stunt nodes, but G's VertexC does not include them
-        stunts_primes = planar.graph.get('stunts_primes')
-        constraint_edges = planar.graph.get('constraint_edges')
-        if stunts_primes and constraint_edges:
-            translator = np.arange(T + B + len(stunts_primes) + R)
-            translator[-R - len(stunts_primes) : -R] = stunts_primes
-            borders = [translator[edge,] for edge in constraint_edges]
-        else:
-            borders = constraint_edges
-
-        Xings = list(
-            gateXing_iter(
-                G,
-                hooks=[
-                    np.fromiter(h2c, count=len(h2c), dtype=int) for h2c in hooks2check
-                ],
-                borders=borders,
-            )
+        Xings = [feeder for _, feeder in gateXing_iter(G, hooks=hooks_)]
+        # add also the feeders that are not in a straight line due to borders
+        Xings.extend(
+            (r, n)
+            for r in range(-R, 0)
+            for n in G.neighbors(r)
+            if 'straight2root_' in A.nodes[n] and r in A.nodes[n]['straight2root_']
         )
 
         self.G, self.Xings, self.tentative = G, Xings, set(tentative)
@@ -184,25 +172,10 @@ class PathFinder:
             fnT[-R:] = range(-R, 0)
             clone2prime = []
         self.fnT = fnT
-        #  clone2prime = list(G.graph.get('clone2prime', ()))
-        # TODO: work around PathFinder getting metrics for the supertriangle
-        #       nodes -> do away with A metrics, eliminate A from args
-        if A is None:
-            VertexC = G.graph['VertexC']
-            supertriangleC = planar.graph['supertriangleC']
-            if G.graph.get('is_normalized'):
-                supertriangleC = G.graph['norm_scale'] * (
-                    supertriangleC - G.graph['norm_offset']
-                )
-            VertexC = np.vstack((VertexC[: T + B], supertriangleC, VertexC[-R:]))
-            d2roots = cdist(VertexC[:-R], VertexC[-R:])
-            Rank = None
-            diagonals = None
-        else:
-            VertexC = A.graph['VertexC']
-            d2roots = A.graph['d2roots']
-            Rank = A.graph.get('d2rootsRank')
-            diagonals = A.graph['diagonals']
+        VertexC = A.graph['VertexC']
+        d2roots = A.graph['d2roots']
+        Rank = A.graph.get('d2rootsRank')
+        diagonals = A.graph['diagonals']
         self.saved_shortened_contours = saved_shortened_contours = []
         shortened_contours = G.graph.get('shortened_contours')
         if shortened_contours is not None:
@@ -263,6 +236,7 @@ class PathFinder:
         self.branched = branched
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
+        self.stunts_primes = A.graph.get('stunts_primes')
         self.hooks2check = hooks2check
         self.num_revisits = 0
         self.adv_counter = 0
@@ -753,7 +727,7 @@ class PathFinder:
             subtree_from_subtree_id[subtree_id].append(n)
             subtree_id_from_n[n] = subtree_id
 
-        for r, n in set(gate for _, gate in Xings):
+        for r, n in set(Xings):
             tentative.remove((r, n))
             subtree_id = subtree_id_from_n[n]
             subtree = subtree_from_subtree_id[subtree_id]
@@ -893,9 +867,8 @@ class PathFinder:
 
         D = clone_idx - T - B - C
         detextra = G.size(weight='length') / self.predetour_length - 1
-        stunts_primes = G.graph.pop('stunts_primes', False)
-        if stunts_primes:
-            num_stunts = len(stunts_primes)
+        if self.stunts_primes is not None:
+            num_stunts = len(self.stunts_primes)
             G = nx.relabel_nodes(
                 G,
                 {clone: clone - num_stunts for clone in range(T + B, clone_idx)},
@@ -903,10 +876,8 @@ class PathFinder:
             )
             clone_idx -= num_stunts
             B -= num_stunts
-            VertexC = G.graph['VertexC']
-            G.graph['VertexC'] = np.vstack((VertexC[: T + B], VertexC[-R:]))
             if clone2prime:
-                for stunt, prime in enumerate(stunts_primes, start=T + B):
+                for stunt, prime in enumerate(self.stunts_primes, start=T + B):
                     try:
                         while True:
                             i = clone2prime.index(stunt)
