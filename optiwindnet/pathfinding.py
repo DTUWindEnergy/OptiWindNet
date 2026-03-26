@@ -11,7 +11,6 @@ from itertools import chain
 import networkx as nx
 import numpy as np
 from bitarray import bitarray
-from scipy.spatial.distance import cdist
 from scipy.stats import rankdata
 
 from .crossings import gateXing_iter
@@ -104,7 +103,7 @@ class PathFinder:
         self,
         Gʹ: nx.Graph,
         planar: nx.PlanarEmbedding,
-        A: nx.Graph | None = None,
+        A: nx.Graph,
         *,
         branched: bool = True,
         iterations_limit: int = 15000,
@@ -184,25 +183,10 @@ class PathFinder:
             fnT[-R:] = range(-R, 0)
             clone2prime = []
         self.fnT = fnT
-        #  clone2prime = list(G.graph.get('clone2prime', ()))
-        # TODO: work around PathFinder getting metrics for the supertriangle
-        #       nodes -> do away with A metrics, eliminate A from args
-        if A is None:
-            VertexC = G.graph['VertexC']
-            supertriangleC = planar.graph['supertriangleC']
-            if G.graph.get('is_normalized'):
-                supertriangleC = G.graph['norm_scale'] * (
-                    supertriangleC - G.graph['norm_offset']
-                )
-            VertexC = np.vstack((VertexC[: T + B], supertriangleC, VertexC[-R:]))
-            d2roots = cdist(VertexC[:-R], VertexC[-R:])
-            Rank = None
-            diagonals = None
-        else:
-            VertexC = A.graph['VertexC']
-            d2roots = A.graph['d2roots']
-            Rank = A.graph.get('d2rootsRank')
-            diagonals = A.graph['diagonals']
+        VertexC = A.graph['VertexC']
+        d2roots = A.graph['d2roots']
+        Rank = A.graph.get('d2rootsRank')
+        diagonals = A.graph['diagonals']
         self.saved_shortened_contours = saved_shortened_contours = []
         shortened_contours = G.graph.get('shortened_contours')
         if shortened_contours is not None:
