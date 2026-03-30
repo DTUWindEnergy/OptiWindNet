@@ -6,8 +6,10 @@ from optiwindnet.geometric import (
     add_link_cosines,
     angle,
     any_pairs_opposite_edge,
+    area_from_polygon_vertices,
     complete_graph,
     is_crossing,
+    is_crossing_no_bbox,
     is_crossing_numpy,
     minimum_spanning_forest,
     perimeter,
@@ -15,6 +17,26 @@ from optiwindnet.geometric import (
     rotate,
     rotating_calipers,
 )
+
+
+def test_area_from_polygon_vertices():
+    # Square 1x1
+    X = np.array([0, 1, 1, 0])
+    Y = np.array([0, 0, 1, 1])
+    assert area_from_polygon_vertices(X, Y) == 1.0
+
+    # Square 1x1 reverse order
+    assert area_from_polygon_vertices(X[::-1], Y[::-1]) == 1.0
+
+    # Triangle base 2, height 2 -> area 2
+    X_tri = np.array([0, 2, 0])
+    Y_tri = np.array([0, 0, 2])
+    assert area_from_polygon_vertices(X_tri, Y_tri) == 2.0
+
+    # Negative coordinates square 2x2
+    X_neg = np.array([-1, 1, 1, -1])
+    Y_neg = np.array([-1, -1, 1, 1])
+    assert area_from_polygon_vertices(X_neg, Y_neg) == 4.0
 
 
 def test_minimum_spanning_forest():
@@ -194,6 +216,37 @@ def test_is_crossing_touch_is_cross():
     assert is_crossing(u, v, s, t, touch_is_cross=True)
     # touch_is_cross=False: touching does not count
     assert not is_crossing(u, v, s, t, touch_is_cross=False)
+
+
+def test_crossings_corner_cases():
+    # Crossing
+    u, v = np.array([0, 0]), np.array([2, 2])
+    s, t = np.array([0, 2]), np.array([2, 0])
+    assert is_crossing_numpy(u, v, s, t) is True
+    assert is_crossing_no_bbox(u, v, s, t) is True
+    assert is_crossing(u, v, s, t) is True
+
+    # Touch (endpoint on segment)
+    u, v = np.array([0, 0]), np.array([2, 2])
+    s, t = np.array([1, 1]), np.array([1, 0])
+    assert is_crossing_numpy(u, v, s, t) is True
+    assert is_crossing_no_bbox(u, v, s, t) is True
+    assert is_crossing(u, v, s, t, touch_is_cross=True) is True
+    assert is_crossing(u, v, s, t, touch_is_cross=False) is False
+
+    # Parallel (no overlap)
+    u, v = np.array([0, 0]), np.array([2, 0])
+    s, t = np.array([0, 1]), np.array([2, 1])
+    assert is_crossing_numpy(u, v, s, t) is False
+    assert is_crossing_no_bbox(u, v, s, t) is False
+    assert is_crossing(u, v, s, t) is False
+
+    # Superposition (overlap)
+    u, v = np.array([0, 0]), np.array([2, 0])
+    s, t = np.array([1, 0]), np.array([3, 0])
+    assert is_crossing_numpy(u, v, s, t) is False
+    assert is_crossing_no_bbox(u, v, s, t) is False
+    assert is_crossing(u, v, s, t) is False
 
 
 # --- perimeter ---

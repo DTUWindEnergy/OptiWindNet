@@ -146,7 +146,6 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
       Graph G containing the routeset.
     """
     nodeset = routeset.nodes
-    R = nodeset.R
     G = L_from_nodeset(nodeset)
     misc = routeset.misc if routeset.misc is not None else {}
     G.graph.update(
@@ -261,7 +260,7 @@ def packmethod(method_options: dict) -> PackType:
     return pack
 
 
-def add_if_absent(entity: NodeSet | Method, pack: PackType) -> bytes:
+def add_if_absent(entity: type, pack: PackType) -> bytes:
     digest = pack['digest']
     if not entity.select().where(entity.digest == digest).exists():
         entity.create(**pack)

@@ -346,10 +346,13 @@ def find_edges_bbox_overlaps(
 def is_crossing_numpy(u, v, s, t):
     """Checks if (u, v) crosses (s, t).
 
+    Parallel or collinear segments (including superposition) are not considered
+    crossings. Touching segments (including common endpoints) are considered
+    crossings.
+
     Returns:
       True in case of crossing.
     """
-    # TODO: document output in corner cases (e.g. superposition, touch)
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
     # Faster Line Segment Intersection
@@ -406,10 +409,13 @@ def is_crossing_no_bbox(
     first to filter out edges with disjoint bounding boxes (cheaper than the
     calculations here).
 
+    Parallel or collinear segments (including superposition) are not considered
+    crossings. Touching segments (including common endpoints) are considered
+    crossings.
+
     Returns:
       True in case of crossing.
     """
-    # TODO: document output in corner cases (e.g. superposition, touch)
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
     # Faster Line Segment Intersection
@@ -449,6 +455,10 @@ def is_crossing(
     touch_is_cross: bool = True,
 ) -> bool:
     """Checks if (uC, vC) crosses (sC, tC).
+
+    Parallel or collinear segments (including superposition) are not considered
+    crossings. For non-parallel segments, behavior for touching points
+    (including common endpoints) is determined by `touch_is_cross`.
 
     Args:
       uC, vC, sC, tC: (2,) numpy array coordinates of edge ends
