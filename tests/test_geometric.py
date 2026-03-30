@@ -6,6 +6,7 @@ from optiwindnet.geometric import (
     add_link_cosines,
     angle,
     any_pairs_opposite_edge,
+    area_from_polygon_vertices,
     complete_graph,
     is_crossing,
     is_crossing_numpy,
@@ -15,6 +16,26 @@ from optiwindnet.geometric import (
     rotate,
     rotating_calipers,
 )
+
+
+def test_area_from_polygon_vertices():
+    # Square 1x1
+    X = np.array([0, 1, 1, 0])
+    Y = np.array([0, 0, 1, 1])
+    assert area_from_polygon_vertices(X, Y) == 1.0
+
+    # Square 1x1 reverse order
+    assert area_from_polygon_vertices(X[::-1], Y[::-1]) == 1.0
+
+    # Triangle base 2, height 2 -> area 2
+    X_tri = np.array([0, 2, 0])
+    Y_tri = np.array([0, 0, 2])
+    assert area_from_polygon_vertices(X_tri, Y_tri) == 2.0
+
+    # Negative coordinates square 2x2
+    X_neg = np.array([-1, 1, 1, -1])
+    Y_neg = np.array([-1, -1, 1, 1])
+    assert area_from_polygon_vertices(X_neg, Y_neg) == 4.0
 
 
 def test_minimum_spanning_forest():
