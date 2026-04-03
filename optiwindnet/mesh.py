@@ -1314,11 +1314,11 @@ def make_planar_embedding(
                 real_path.append(n)
                 if len(real_path) > 2:
                     debug('d2roots[%d, %d] updated', n, r)
-                    node_d2roots = A.nodes[n].get('d2roots')
-                    if node_d2roots is None:
-                        A.nodes[n]['d2roots'] = {r: d2roots[n, r]}
+                    straight2root_ = A.nodes[n].get('straight2root_')
+                    if straight2root_ is None:
+                        A.nodes[n]['straight2root_'] = {r: d2roots[n, r].item()}
                     else:
-                        node_d2roots.update({r: d2roots[n, r]})
+                        straight2root_.update({r: d2roots[n, r].item()})
                     d2roots[n, r] = (
                         np.hypot(*(VertexC[real_path[1:]] - VertexC[real_path[:-1]]).T)
                         .sum()

@@ -9,7 +9,7 @@ import pyomo.environ as pyo
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from ._core import FeederRoute, PoolHandler, Topology
+from ._core import FeederRoute, PoolHandler, Topology, ModelOptions
 from .pyomo import SolverPyomo
 
 __all__ = ()
@@ -36,13 +36,24 @@ class SolverCplex(SolverPyomo, PoolHandler):
     )
 
     def __init__(self) -> None:
-        self.solver = pyo.SolverFactory('cplex', solver_io='python')
+        self.solver = pyo.SolverFactory('cplex_persistent')
 
     def _link_val(self, var: Any) -> int:
         return round(self._value_map[var.name])
 
     def _flow_val(self, var: Any) -> int:
         return round(self._value_map[var.name])
+
+    def set_problem(
+        self,
+        P: nx.PlanarEmbedding,
+        A: nx.Graph,
+        capacity: int,
+        model_options: ModelOptions,
+        warmstart: nx.Graph | None = None,
+    ):
+        super().set_problem(P, A, capacity, model_options, warmstart)
+        self.solver.set_instance(self.model)
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         cplex = self.solver._solver_model

@@ -241,7 +241,7 @@ def enable_ortools_logging_if_jupyter(solver):
         pass
     else:
         if shell == 'ZMQInteractiveShell':  # Jupyter notebook or lab
-            solver.solver.log_callback = print
+            solver.log_callback = print
 
 
 def extract_network_as_array(G):

@@ -1,21 +1,31 @@
-stages:
-  - base
-  - deploy
+# stages:
+#   - base
+#   - deploy
 
 workflow:
   rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "web"
 
+# Python version lists for test jobs (update these when adding/removing versions)
+.default_python: &default_python ["3.14"]
+.other_pythons: &other_pythons ["3.11", "3.12", "3.13"]
+
 variables:
-  # DEFAULT_PYTHON sets the version to use for the tests triggered by each commit
-  DEFAULT_PYTHON: "3.14"
+  # Tools = {
+  #     sphinx (publish docs on Gitlab Pages),
+  #     twine (publish package on PyPI)
+  # } (all running on linux)
+  PYTHON_VERSION_FOR_TOOLS: "3.13"
   SCIP_LINUX: "scipoptsuite_10.0.0-1+trixie_amd64.deb"
   SCIP_WINDOWS: "scipoptsuite-10.0.0-win-x64"
 
 # ===== Base templates =====
 .test_linux_base:
-  stage: base
+  # stage: base
   image: python:${PYTHON_VERSION}
   tags: [linux]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
@@ -39,7 +49,7 @@ variables:
       - downloads
 
 .test_windows_base:
-  stage: base
+  # stage: base
   image: registry.windenergy.dtu.dk/dockerimages/windows-miniconda:ltsc2019
   tags: [docker-windows]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
@@ -74,35 +84,84 @@ test_linux:
   extends: .test_linux_base
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+      - PYTHON_VERSION: *default_python
   rules:
-    - if: $CI_COMMIT_BRANCH && $PYTHON_VERSION == $DEFAULT_PYTHON
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         compare_to: refs/heads/main
         paths:
+          - pyproject.toml
           - optiwindnet/**/*
           - tests/**/*
-    - when: manual
 
 # ===== Test OptiWindNet on Windows =====
 test_windows:
   extends: .test_windows_base
   parallel:
     matrix:
-      - PYTHON_VERSION: ["3.11", "3.12", "3.13", "3.14"]
+      - PYTHON_VERSION: *default_python
   rules:
-    - if: $CI_COMMIT_BRANCH && $PYTHON_VERSION == $DEFAULT_PYTHON
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
         compare_to: refs/heads/main
         paths:
+          - pyproject.toml
           - optiwindnet/**/*
           - tests/**/*
-    - when: manual
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - pyproject.toml
+          - optiwindnet/**/*
+          - tests/**/*
+      when: manual
+      allow_failure: true
+
+# ===== Manual multi-version test matrix =====
+test_matrix_linux:
+  extends: .test_linux_base
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - pyproject.toml
+          - optiwindnet/**/*
+          - tests/**/*
+      when: manual
+  parallel:
+    matrix:
+      - PYTHON_VERSION: *other_pythons
+
+test_matrix_windows:
+  extends: .test_windows_base
+  allow_failure: true
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: never
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - pyproject.toml
+          - optiwindnet/**/*
+          - tests/**/*
+      when: manual
+  parallel:
+    matrix:
+      - PYTHON_VERSION: *other_pythons
 
 # ===== Update GitLab Pages =====
 make_pages:
-  stage: base
-  image: python:3.13
+  # stage: base
+  image: python:$PYTHON_VERSION_FOR_TOOLS
   tags: [linux]
   pages: true
   allow_failure: true
@@ -116,18 +175,24 @@ make_pages:
     - apt-get update
     - apt-get -yq install make pandoc graphviz
     - pip install --progress-bar off .[docs] --upgrade
-    - cd docs; make html
-    - cd ../; mv docs/build/html public/
+    - make -C docs html
+    - mv docs/build/html public/
   artifacts:
     paths: [public]
 
 # ===== Publish new version on PyPI =====
-pypi_linux:
-  stage: deploy
-  image: python:3.13
+pypi_deploy:
+  # stage: deploy
+  image: python:$PYTHON_VERSION_FOR_TOOLS
   tags: [linux]
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  before_script:
+    - |
+      if ! git branch -a --contains "$CI_COMMIT_SHA" | grep -q "origin/$CI_DEFAULT_BRANCH"; then
+        echo "ERROR: Tag is not reachable from $CI_DEFAULT_BRANCH, aborting deploy"
+        exit 1
+      fi
   script:
     - pip install --progress-bar off --upgrade pip build twine packaging
     - python3 -m build

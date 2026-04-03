@@ -423,17 +423,13 @@ def test_enable_ortools_logging_if_jupyter_sets_callback(monkeypatch):
     ZMQInteractiveShell = type('ZMQInteractiveShell', (), {})
     monkeypatch.setattr(U, 'get_ipython', lambda: ZMQInteractiveShell(), raising=False)
 
-    class DummyInner:
+    class DummySolver:
         def __init__(self):
             self.log_callback = None
 
-    class DummySolver:
-        def __init__(self):
-            self.solver = DummyInner()
-
     s = DummySolver()
     U.enable_ortools_logging_if_jupyter(s)
-    assert s.solver.log_callback is print
+    assert s.log_callback is print
 
 
 @pytest.mark.parametrize(
@@ -458,7 +454,7 @@ def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
         cables_capacity=4,
         model_options=model_options,
         S_warm_has_detour=False,
-        solver_name='ortools',
+        solver_name='ortools.cp_sat',
         logger=logging.getLogger(U.__name__),
         verbose=True,
     )
@@ -479,7 +475,7 @@ def test_warmstart_feeder_limit_specified_allows(capfd):
         cables_capacity=2,
         model_options=model_options,
         S_warm_has_detour=False,
-        solver_name='ortools',
+        solver_name='ortools.cp_sat',
         logger=logging.getLogger(U.__name__),
         verbose=True,
     )

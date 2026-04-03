@@ -5,7 +5,7 @@ Central pytest fixtures for optiwindnet tests.
 Responsibilities:
  - Ensure deterministic test environment (disable numba JIT).
  - Resolve repository/test-files paths.
- - Load expected dill blobs with helpful messages.
+ - Load expected instances blobs with helpful messages.
  - Provide factory fixtures (router construction, L/G loader, site extractor).
  - Optionally regenerate expected data when `--regen-expected` is passed.
 """
@@ -24,9 +24,8 @@ os.environ['PYTHONPATH'] = '.'
 os.environ['COVERAGE_PROCESS_START'] = '.coveragerc'
 
 REPO_ROOT = paths.REPO_ROOT
-END_TO_END_DILL = paths.END_TO_END_DILL
-TEST_FILES_DIR = paths.TEST_FILES_DIR
-SITES_DIR = paths.SITES_DIR
+SOLUTIONS_FILE = paths.SOLUTIONS_FILE
+LOCATIONS_DIR = paths.LOCATIONS_DIR
 GEN_END2END_SCRIPT = paths.GEN_END2END_SCRIPT
 
 # Ensure Numba JIT is disabled for tests
@@ -58,7 +57,7 @@ def pytest_addoption(parser):
         action='store_true',
         default=False,
         help=(
-            'If set, pytest will attempt to regenerate missing expected dill files '
+            'If set, pytest will attempt to regenerate missing expected instances files '
             'by running the repository generator scripts. Use with care (generators '
             'may be slow or require external solvers).'
         ),
@@ -72,9 +71,10 @@ def pytest_sessionstart(session):
         return
 
     # Attempt to regenerate missing expected files (best-effort; fail loudly if generator fails)
-    if not END_TO_END_DILL.exists() and GEN_END2END_SCRIPT.exists():
+    if not SOLUTIONS_FILE.exists() and GEN_END2END_SCRIPT.exists():
         session.config.warn(
-            'optiwindnet', f'Regenerating {END_TO_END_DILL} via {GEN_END2END_SCRIPT}'
+            'optiwindnet',
+            f'Regenerating {SOLUTIONS_FILE} via {GEN_END2END_SCRIPT}',
         )
         _maybe_run_generator(GEN_END2END_SCRIPT)
 
@@ -84,11 +84,20 @@ def pytest_sessionstart(session):
 # -----------------------
 @pytest.fixture(scope='session')
 def locations():
-    """Load repository-backed sites (the same loader used by generator scripts)."""
-    try:
-        from optiwindnet.importer import load_repository  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(
-            'Failed to import load_repository from optiwindnet.importer'
-        ) from exc
-    return load_repository(SITES_DIR)
+    """Load locations used by end-to-end tests, by explicit file name."""
+    from collections import namedtuple
+
+    from optiwindnet.importer import L_from_yaml
+
+    data_dir = paths.DATA_DIR
+    location_files = {
+        'hornsea': (L_from_yaml, data_dir / 'Hornsea One.yaml'),
+        'london': (L_from_yaml, data_dir / 'London Array.yaml'),
+        'taylor_2023': (L_from_yaml, data_dir / 'Taylor-2023.yaml'),
+        'yi_2019': (L_from_yaml, data_dir / 'Yi-2019.yaml'),
+        'borkum2': (L_from_yaml, data_dir / 'Borkum Riffgrund 2.yaml'),
+        'example_location': (L_from_yaml, LOCATIONS_DIR / 'example_location.yaml'),
+    }
+    loaded = {handle: loader(path) for handle, (loader, path) in location_files.items()}
+    Locations = namedtuple('Locations', loaded.keys())
+    return Locations(**loaded)

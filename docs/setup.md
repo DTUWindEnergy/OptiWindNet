@@ -1,10 +1,14 @@
 # Setup
 
+## No-install trial
+
+The easiest way to experiment with OptiWindNet is in JupyterLab. Click the ![launch|binder](https://mybinder.org/badge_logo.svg) button at the top of supported pages to launch the corresponding notebook in a cloud-based JupyterLab session, ready to run directly in your browser (via [Binder](https://mybinder.org/)).
+
 ## Requirements
 
 *OptiWindNet* has been tested on Windows 10/11 and on Linux systems, but should run on MacOSX as well.
 
-Python version 3.11+ is required. The last version to support Python 3.10 was v0.1.0.
+Python version 3.11+ is required. The last version to support Python 3.10 was v0.0.6.
 
 Running *OptiWindNet* within a dedicated Python virtual environment is recommended. This can be achieved by installing **either**:
 
@@ -36,6 +40,8 @@ And finally:
 
     pip install optiwindnet
 
+The PyPI package installs `ortools` as a dependency.
+
 ### If using `conda`
 
     conda create --name optiwindnet_env --channel conda-forge python=3.12 optiwindnet 
@@ -43,18 +49,30 @@ And finally:
 
 The flag `--channel conda-forge` may be omitted if using *miniforge* or if the global *conda* configuration already sets **conda-forge** as the highest-priority channel.
 
-## Optional - Solvers
+The conda package installs `highspy` as a dependency.
 
-The installation procedure above enables *OptiWindNet*'s heuristics, meta-heuristic and mathematical optimization with [Google's OR-Tools](https://developers.google.com/optimization) (open-source software).
+## Interactive use
 
-Other solvers can be used for mathematical optimization, but they are not installed by default.
+The **launch|binder** button is an easy way to get started, but a local installation of a notebook interface is recommended for more serious work. Here are some links to comprehensive tutorials on popular Jupyter interfaces:
+
+- [Get Started with JupyterLab](https://jupyterlab.readthedocs.io/en/stable/getting_started/overview.html)
+- [Jupyter Notebooks in VS Code](https://code.visualstudio.com/docs/datascience/jupyter-notebooks)
+- [How to Use Jupyter Notebook: A Beginner’s Tutorial – Dataquest](https://www.dataquest.io/blog/jupyter-notebook-tutorial/)
+
+## Solvers (optional)
+
+The installation procedure above enables *OptiWindNet*'s heuristics, meta-heuristic, and mathematical optimization with [Google's OR-Tools](https://developers.google.com/optimization) when installed from PyPI, or with [HiGHS](https://highs.dev/) when installed from conda.
+
+Without installing any extra solver package, a PyPI installation of *OptiWindNet* can use `ortools.cp_sat` for CP-SAT, `ortools.gscip` for SCIP, and `ortools.highs` for HiGHS, while a conda installation can use `highs` for HiGHS. The legacy alias `ortools` is still accepted and maps to `ortools.cp_sat`.
+
+Other mathematical optimization backends can also be used, but they must be installed separately.
 
 The commands suggested here assume that the Python environment for *OptiWindNet* has been already activated and that `conda` is configured for the `conda-forge` channel.
 For packages that are installable with both `pip` and `conda`, **enter only one** of the commands.
 
-Solvers perform a search across the branch-and-bound tree. This process can be accelerated in multi-core computers by using concurrent threads, but not all solvers have this feature. As of Dec/2025, only `gurobi`, `cplex`, `cbc` and `fscip` have this multi-threaded search capability.
+Solvers perform a search across the branch-and-bound tree. On multi-core computers, some solvers parallelize the tree search itself, while others run several coordinated searches in parallel. As of Dec/2025, `gurobi`, `cplex`, `cbc`, and `fscip` support multi-threaded tree search in *OptiWindNet*.
 
-Solvers `ortools` and `scip` also benefit from multi-core systems by launching multiple concurrent solvers in parallel, with some information exchange among them. `ortools` diversifies the algorithms/strategies among threads, while `scip` diversifies the random seeds and may use different emphasis among threads. Both have several user-configurable settings regarding that diversification.
+The OR-Tools backends and native `scip` can also benefit from multiple cores by running concurrent searches with some information exchange among them. OR-Tools diversifies algorithms and strategies across workers, while SCIP diversifies random seeds and may vary emphasis settings. Both expose user-configurable controls for that behavior.
 
 For installing all pip-available solvers:
 
@@ -78,10 +96,15 @@ See below for specific instructions for each solver.
 
 ### HiGHS
 
-[HiGHS](https://highs.dev/) is open source software:
+[HiGHS](https://highs.dev/) can be called from *OptiWindNet* in two ways:
 
-    pip install highspy
-    conda install -c conda-forge highspy
+* `ortools.highs`: uses the HiGHS backend exposed through OR-Tools;
+* `highs`: uses the native Pyomo + `highspy` backend.
+
+For the PyPI package, `ortools.highs` is available out of the box. The `highs` backend requires `highspy` to be installed separately when it is not already present in the environment:
+
+      pip install highspy
+      conda install -c conda-forge highspy
 
 ### CBC
 
@@ -96,19 +119,22 @@ Users on Windows might find it difficult to get a multi-threaded CBC on that pla
 
 ### SCIP
 
-[SCIP](https://www.scipopt.org/) is open source software.
+[SCIP](https://www.scipopt.org/) can be called from *OptiWindNet* in two ways:
+
+* `ortools.gscip`: uses the SCIP backend exposed through OR-Tools;
+* `scip`: uses the native **pyscipopt** backend.
+
+For the PyPI package, `ortools.gscip` is available out of the box. The native `scip` backend requires a separate installation:
 
 > **Attention**: Avoid loading both `scip` and `ortools` solvers within the same Python interpreter instance, since `ortools` contains a SCIP library and its version may be different from the one used by **pyscipopt**.
 
     pip install pyscipopt
     conda install -c conda-forge pyscipopt
 
-Note that these **pyscipopt** packages may not have been compiled with multi-threading capability. If you get the warning:
-```
-optiwindnet\MILP\scip.py:96: UserWarning: SCIP was compiled without task processing interface. Parallel solve not possible - using optimize() instead of solveConcurrent()
-  model.solveConcurrent()
-```
-Then SCIP will still work, but will under-perform as it is limited to a single core. To overcome that, you will need to replace your current **pyscipopt** with a multi-threading-enabled one. PyPI-distributed **pyscipopt** version 6.0.0 is multi-threading-capable on all platforms (**recommended**). The one distributed via conda-forge is still at version 5.6.0 and is **not** multi-threading-capable.
+If a call to `WindFarmNetwork().optimize()` or to `Solver.solve()` produces the warning:
+> UserWarning: SCIP was compiled without task processing interface. Parallel solve not possible - using optimize() instead of solveConcurrent()
+
+It means that the **pyscipopt** package currently installed was not compiled with multi-threading capability. SCIP will still work, but will under-perform as it is limited to a single core. To overcome that, you will need to upgrade **pyscipopt** to version 6.0.0+, which is multi-threading-capable on all platforms.
 
 ### FiberSCIP
 

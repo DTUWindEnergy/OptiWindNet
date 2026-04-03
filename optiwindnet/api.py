@@ -229,7 +229,6 @@ class WindFarmNetwork:
             L = self._L
             T = L.graph['T']
             border_sizes = np.array(
-                #  [len(L.graph['border'])] + [len(obs) for obs in L.graph['obstacles']],
                 [len(L.graph.get('border', []))]
                 + [len(obs) for obs in L.graph.get('obstacles', [])],
                 dtype=np.int_,

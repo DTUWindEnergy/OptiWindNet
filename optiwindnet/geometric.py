@@ -4,13 +4,14 @@
 import math
 import operator
 from collections import defaultdict
-from itertools import combinations, pairwise, product
+from itertools import combinations, pairwise, product, chain
 from math import isclose
 from typing import Callable, Literal, NewType
 
 import networkx as nx
 import numba as nb
 import numpy as np
+from bitarray import bitarray
 from numba.np.extensions import cross2d
 from numpy.typing import NDArray
 from scipy.sparse import coo_array
@@ -223,7 +224,7 @@ def angle_helpers(
         L: location (also works with A or G)
 
     Returns:
-        Tuple of (angle__, angle_rank__, dups_from_root_rank__)
+        Tuple of (``angle__``, ``angle_rank__``, ``dups_from_root_rank__``)
     """
 
     T, R, VertexC = (L.graph[k] for k in ('T', 'R', 'VertexC'))
@@ -255,8 +256,8 @@ def angle_oracles_factory(
     Inputs are the outputs of `angle_helpers()`.
 
     Args:
-      angle__: (T, R)-array of angles wrt root (+-pi)
-      angle_rank__: (T, R)-array of the relative placement of angles
+      ``angle__``: (T, R)-array of angles wrt root (+-pi)
+      ``angle_rank__``: (T, R)-array of the relative placement of angles
 
     Returns:
       union_limits() and angle_ccw()
@@ -342,10 +343,13 @@ def find_edges_bbox_overlaps(
 def is_crossing_numpy(u, v, s, t):
     """Checks if (u, v) crosses (s, t).
 
+    Parallel or collinear segments (including superposition) are not considered
+    crossings. Touching segments (including common endpoints) are considered
+    crossings.
+
     Returns:
       True in case of crossing.
     """
-    # TODO: document output in corner cases (e.g. superposition, touch)
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
     # Faster Line Segment Intersection
@@ -368,13 +372,13 @@ def is_crossing_numpy(u, v, s, t):
     C = u - s
 
     # denominator
-    f = np.cross(B, A)
+    f = B[0] * A[1] - B[1] * A[0]
     if f == 0:
         # segments are parallel
         return False
 
     # alpha and beta numerators
-    for num in (np.cross(P, Q) for P, Q in ((C, B), (A, C))):
+    for num in (P[0] * Q[1] - P[1] * Q[0] for P, Q in ((C, B), (A, C))):
         if f > 0:
             if num < 0 or num > f:
                 return False
@@ -402,10 +406,13 @@ def is_crossing_no_bbox(
     first to filter out edges with disjoint bounding boxes (cheaper than the
     calculations here).
 
+    Parallel or collinear segments (including superposition) are not considered
+    crossings. Touching segments (including common endpoints) are considered
+    crossings.
+
     Returns:
       True in case of crossing.
     """
-    # TODO: document output in corner cases (e.g. superposition, touch)
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
     # Faster Line Segment Intersection
@@ -445,6 +452,10 @@ def is_crossing(
     touch_is_cross: bool = True,
 ) -> bool:
     """Checks if (uC, vC) crosses (sC, tC).
+
+    Parallel or collinear segments (including superposition) are not considered
+    crossings. For non-parallel segments, behavior for touching points
+    (including common endpoints) is determined by `touch_is_cross`.
 
     Args:
       uC, vC, sC, tC: (2,) numpy array coordinates of edge ends
@@ -1132,4 +1143,81 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     # Shoelace formula for area (https://stackoverflow.com/a/30408825/287217).
     return 0.5 * abs(
         X[-1] * Y[0] - Y[-1] * X[0] + np.dot(X[:-1], Y[1:]) - np.dot(Y[:-1], X[1:])
+    )
+
+
+def add_link_blockmap(A: nx.Graph):
+    """Experimental. Add attribute ``blocked__`` to edges and nodes.
+
+    Edges' ``blocked__`` are R-long list of T-long bitarray maps. A 1-bit in position
+    `t` on the bitarray for root `r` means the edge crosses the line-of-sight t-r.
+
+    Changes `A` in place. `A` should have no feeder edges.
+    """
+    VertexC = A.graph['VertexC']
+    R, T = A.graph['R'], A.graph['T']
+    angle__, angle_rank__, dups_from_root_rank__ = angle_helpers(
+        A, include_borders=False
+    )
+    # TODO: check if dups_from_root_rank__ has a role here
+    A.graph['angle__'] = angle__
+    A.graph['angle_rank__'] = angle_rank__
+    A.graph['dups_from_root_rank__'] = dups_from_root_rank__
+    for u, v, edgeD in A.edges(data=True):
+        blocked__ = []
+        for angle_, angle_rank_, rootC in zip(angle__.T, angle_rank__.T, VertexC[-R:]):
+            blocked_ = bitarray(T)
+            uR, vR = angle_rank_[[u, v]].tolist()
+            uv_angle = (angle_[v] - angle_[u]).item()
+            if uv_angle < 0:
+                uR, vR = vR, uR
+            if abs(uv_angle) <= np.pi:
+                inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
+            else:
+                inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
+            if len(inside_wedge) > 0:
+                vec = VertexC[v] - VertexC[u]
+                wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
+                cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
+                root_vec = rootC - VertexC[u]
+                is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
+                blocked_[
+                    inside_wedge[
+                        (cross <= 0) if is_root_sign_pos else (cross >= 0)
+                    ].tolist()
+                ] = 1
+            blocked__.append(blocked_)
+        edgeD['blocked__'] = blocked__
+
+
+def add_link_cosines(A: nx.Graph):
+    """Add cosine of the angle wrt each root to all links of A as attribute '_cos'.
+
+    Changes A in-place. The cosine is of the acute angle between the link line and the
+    line that contains the mid-point of the link and the root (for each root).
+    """
+    R = A.graph['R']
+    VertexC = A.graph['VertexC']
+    RootC = VertexC[-R:]
+
+    edge_ = np.fromiter(
+        chain.from_iterable(A.edges()),
+        dtype=int,
+        count=2 * A.number_of_edges(),
+    ).reshape((-1, 2))
+    edgeC = VertexC[edge_]
+    uC = edgeC[:, 0, :]
+    vC = edgeC[:, 1, :]
+    edge_vec_ = vC - uC
+    edge_len_ = np.hypot(*edge_vec_.T)
+    mid_edge_ = 0.5 * (uC + vC)
+    mid_vec_ = mid_edge_[:, None, :] - RootC
+    mid_len_ = np.hypot(mid_vec_[..., 0], mid_vec_[..., 1])
+    cos__ = abs(np.vecdot(edge_vec_[:, None, :], mid_vec_)) / (
+        edge_len_[:, None] * mid_len_
+    )
+    nx.set_edge_attributes(
+        A,
+        {(edge[0], edge[1]): cos_.tolist() for edge, cos_ in zip(edge_, cos__)},
+        name='cos_',
     )

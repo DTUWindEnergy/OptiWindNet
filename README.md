@@ -1,8 +1,8 @@
-[![pipeline status](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/pipeline.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
 [![PyPi](https://img.shields.io/pypi/v/optiwindnet)](https://pypi.org/project/optiwindnet/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18388438.svg)](https://doi.org/10.5281/zenodo.18388438)
-[![License](https://img.shields.io/pypi/l/optiwindnet)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/blob/main/LICENSE)
-[![coverage report](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/coverage.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/commits/main)
+[![License](https://img.shields.io/pypi/l/optiwindnet)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/blob/main/LICENSE.txt)
+[![pipeline status](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/pipeline.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/pipelines)
+[![coverage report](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/badges/main/coverage.svg)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/jobs)
 <!---
 [![DOI](https://zenodo.org/badge/164115313.svg)](https://zenodo.org/badge/latestdoi/164115313)
 -->
@@ -42,7 +42,7 @@ Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stabl
 Requirements
 ------------
 
-*OptiWindNet* requires Python version 3.11+ (tested with 3.11-14). The last version to support Python 3.10 was v0.1.0.
+*OptiWindNet* requires Python version 3.11+ (tested with 3.11-14). The last version to support Python 3.10 was v0.0.6.
 
 The use of a Python virtual environment is recommended. OptiWindNet's dependencies (except for MILP solvers, see docs) will be installed automatically when using `pip install optiwindnet` or `conda install optiwindnet`.
 
