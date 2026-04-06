@@ -3,6 +3,7 @@
 
 import logging
 import time
+from itertools import chain, tee
 
 import numpy as np
 import networkx as nx
@@ -55,6 +56,8 @@ def constructor(
     - 'esau_williams': Esau-Williams C-MST heuristic modified to avoid crossings.
     - 'modified_EW': EW further modified with a small bias towards moving radially.
     - 'rootlust': EW further modified so that the lust towards root increases as capacity decreases.
+    - 'path_insertion': Path-only trade-off heuristic with endpoint extensions
+      and singleton insertions guided by the planar embedding.
 
     Args:
       Aʹ: available links graph
@@ -113,7 +116,7 @@ def constructor(
     last_hop_of = [t for t in _T]
     hooks_of = [[t] for t in _T]
     # <is_stale_>: mask of stale subroots (in need of target refresh)
-    is_stale_ = ones(T)
+    is_stale_ = zeros(T)
     # <is_not_full_>: mask of subroots with spare capacity
     is_not_full_ = ones(T)
     # memory allocation for temporary constructs
@@ -142,6 +145,10 @@ def constructor(
     i = 0
     # <prevented_crossing>: counter for edges discarded due to crossings
     prevented_crossings = 0
+    if method == 'path_insertion':
+        # <tail_>: the endpoint of path subtrees (path_insertion)
+        tail_ = [t for t in _T]
+        num_insertions = 0
     # END: helper data structures
 
     # BEGIN: alternative methods of selecting the best edge to expand components
@@ -238,6 +245,69 @@ def constructor(
                         )
         return (min(choices) if choices else ()), edges2discard
 
+    def find_union_path_insertion_tradeoff(subroot):
+        subtree = subtree_[subroot]
+        subtree_count = subtree.count()
+        capacity_left = capacity - subtree_count
+        choices = []
+        edges2discard = []
+        d2root = d2roots[subroot, A.nodes[subroot]['root']]
+        if subtree_count == 1:
+            # insertion is only assessed when subtree has a single node
+            # TODO: do not check for candidates when i == 0
+            candidates = []
+            source, target = tee(P_A.neighbors_cw_order(subroot))
+            for u, v in zip(source, chain(target, (next(target),))):
+                # assess path insertion options
+                nb_ = A[subroot]
+                if u in nb_ and v in nb_ and (u, v) in S.edges:
+                    candidates.append((u, v))
+                elif diag := diagonals.inv.get((u, v) if u < v else (v, u)):
+                    n = diag[0] if diag[1] == subroot else diag[1]
+                    # check the triangles (u, subroot, n) and (n, subroot, v)
+                    if u in nb_ and n in nb_ and (u, v) in S.edges:
+                        candidates.append((u, n))
+                    if n in nb_ and v in nb_ and (n, v) in S.edges:
+                        candidates.append((n, v))
+            for u, v in candidates:
+                insertion_cost = (
+                    A[subroot][u]['length'] + A[subroot][v]['length'] - Aʹ[u][v]['length']
+                )
+                tradeoff = d2root - insertion_cost
+                if tradeoff > 0:
+                    tiebreaker = d2rootsRank[subroot_[u], A.nodes[u]['root']]
+                    choices.append((-tradeoff, tiebreaker, u, v))
+            # this is for finding extension options
+            endpoints = ((subroot, tail_[subroot]),)
+        else:
+            endpoints = ((subroot, tail_[subroot]), (tail_[subroot], subroot))
+
+        for u, tail_u in endpoints:
+            for v in A[u]:
+                sr_v = subroot_[v]
+                subtree_v = subtree_[sr_v]
+                tail_v = tail_[sr_v]
+                if (
+                    sr_v == subroot
+                    or subtree_v.count() > capacity_left
+                ):
+                    edges2discard.append((u, v))
+                    continue
+                if v != sr_v and v != tail_v:
+                    continue
+                tradeoff = d2root - A[u][v]['length']
+                if tradeoff >= 0:
+                    if v == sr_v and v != tail_v:
+                        # subroot must change to the tail of subroot or of sr_v 
+                        union_feeder = min(d2roots[tail_u].min(), d2roots[tail_[sr_v]].min())
+                        tradeoff += d2roots[sr_v, A.nodes[sr_v]['root']] - union_feeder
+                        if tradeoff < 0:
+                            continue
+                    choices.append(
+                        (-tradeoff, d2rootsRank[v, A.nodes[v]['root']], u, v)
+                    )
+        return (min(choices) if choices else ()), edges2discard
+
     # END: alternative methods of selecting the best edge to expand components
 
     def savings_outweight_detours(sr_dropped, u, v):
@@ -283,6 +353,14 @@ def constructor(
         find_union = find_union_rootlust
         angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
+    elif method == 'path_insertion':
+        find_union = find_union_path_insertion_tradeoff
+    else:
+        raise ValueError(f'Unsupported constructor method: {method!r}')
+
+    def cancel_if_queued(subroot):
+        if subroot in pq.tags:
+            pq.cancel(subroot)
 
     def enqueue_best_union(subroot):
         debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
@@ -291,15 +369,28 @@ def constructor(
         if best_choice:
             priority, _, u, v = best_choice
             pq.add(priority, subroot, (u, v))
-            who_targets_[subroot_[v]].add(subroot)
+            if who_targets_ is not None:
+                who_targets_[subroot_[v]].add(subroot)
             debug(
                 '<pushed> sr_u <%d>, «%d~%d», priority = %.3f', subroot, u, v, priority
             )
         else:
-            # no viable edge is shorter than subroot for this subtree
             debug('<cancelling> %d', subroot)
-            if subroot in pq.tags:
-                pq.cancel(subroot)
+            cancel_if_queued(subroot)
+
+    def reassign_subroot(subroot_from, subroot_to, root_to):
+        debug('reassigning subroot %d to %d via root %d', subroot_from, subroot_to, root_to)
+        for n in subtree_[subroot_from].search(_ONE):
+            subroot_[n] = subroot_to
+            A.nodes[n]['root'] = root_to
+        subtree_[subroot_to], subtree_[subroot_from] = subtree_[subroot_from], subtree_[subroot_to]
+        tail_[subroot_to] = subroot_from
+        who_targets_[subroot_to] = who_targets_[subroot_from]
+        # TODO: find the sets in who_targets_ that contain subroot_from and replace with subroot_to
+        for who in who_targets_:
+            if who is not None and subroot_from in who:
+                who.remove(subroot_from)
+                who.add(subroot_to)
 
     # initialize pq
     for n in _T:
@@ -316,28 +407,86 @@ def constructor(
         if to_retarget_.any():
             stale_subtrees = tuple(to_retarget_.search(_ONE))
             debug('stale_subtrees: %s', stale_subtrees)
-            for subtree in stale_subtrees:
-                enqueue_best_union(subtree)
+            for subroot in stale_subtrees:
+                enqueue_best_union(subroot)
             is_stale_.setall(0)
         if not pq:
-            # finished
             break
-        sr_dropped, (u, v) = pq.top()
+
+        sr_u, (u, v) = pq.top()
+        sr_kept = subroot_[v]
+        sr_dropped = sr_u
         debug('<popped> «%d~%d», sr_dropped: <%d>', u, v, sr_dropped)
 
-        # check if the union still makes sense
-        if (u, v) not in A.edges:
-            debug('<discard> «%d~%d» not in A anymore', u, v)
-            continue
+        if method == 'path_insertion':
+            #  if subroot_[u] == subroot_[v]:
+            if subroot_[u] != sr_u:
+                # this is an insertion
+                if (u, sr_u) not in A.edges or (v, sr_u) not in A.edges:
+                    debug('<discard> «%d~%d~%d» not in A anymore', u, sr_u, v)
+                    continue
+                debug('INSERTION of %d between %d and %d', sr_u, u, v)
+                num_insertions += 1
+                # start by opening the receiver path
+                S.remove_edge(u, v)
+                # add only one of the edges of the insertion here
+                S.add_edge(u, sr_u)
+                A.remove_edge(u, sr_u)
+                A.remove_edges_from(edge_conflicts(u, sr_u, diagonals))
+                # set it up so that the common machinery adds the other edge
+                u = sr_u
+            elif v == sr_kept and subtree_[v].count() > 1:
+                # this is an extension and the union feeder must be other than sr_kept
+                if (u, v) not in A.edges:
+                    debug('<discard> «%d~%d» not in A anymore', u, v)
+                    continue
+                debug('EXTENSION with sr_kept (%d) change', sr_kept)
+                # find the free endpoint of the dropped subroot
+                if u == sr_u:
+                    alt_sr_u = tail_[sr_u]
+                    root_u = d2roots[alt_sr_u].argmin() - R
+                else:
+                    alt_sr_u = sr_u
+                    root_u = A.nodes[sr_u]['root']
+                tail_v = tail_[sr_kept]
+                alt_root_v = d2roots[tail_v].argmin() - R
+                if d2roots[tail_v, alt_root_v] <= d2roots[alt_sr_u, root_u]:
+                    # union subroot is the tail of kept subroot
+                    reassign_subroot(sr_kept, tail_v, alt_root_v)
+                    debug('SUBROOT %d -> %d', sr_kept, tail_v)
+                    sr_kept = tail_v
+                else:
+                    # union subroot is in the dropped subroot: reverse direction
+                    if alt_sr_u != sr_u:
+                        # subroot_[u] must change
+                        reassign_subroot(sr_u, alt_sr_u, root_u)
+                        debug('SUBROOT %d -> %d', sr_u, alt_sr_u)
+                    u, v, sr_dropped, sr_kept = v, u, sr_kept, alt_sr_u
+                    debug('DIRECTION (%d, %d) -> (%d, %d)', v, u, u, v)
+                # set the tail of the union outcome
+                tail_[sr_kept] = tail_[sr_dropped]
+            elif u == tail_[sr_dropped]:
+                # set the tail of the union outcome
+                tail_[sr_kept] = sr_u
+            else:
+                # set the tail of the union outcome
+                tail_[sr_kept] = tail_[sr_dropped]
+        else:
+            if (u, v) not in A.edges:
+                debug('<discard> «%d~%d» not in A anymore', u, v)
+                continue
 
-        sr_kept = subroot_[v]
         root = A.nodes[sr_kept]['root']
 
         if method == 'rootlust':
             # assess the union's angle span
             union_span_ = [
                 union_limits(
-                    r, u, *subtree_span__[sr_dropped][r], v, *subtree_span__[sr_kept][r]
+                    r,
+                    u,
+                    *subtree_span__[sr_dropped][r],
+                    v,
+                    *subtree_span__[sr_kept][r],
                 )
                 for r in roots
             ]
@@ -389,8 +538,8 @@ def constructor(
             sr_kept_target = subroot_[t]
             if sr_kept_target != sr_dropped:
                 who_targets_[sr_kept_target].remove(sr_kept)
-        # TODO: think about why a discard was needed
-        who_targets_[sr_kept].remove(sr_dropped)
+        who_targets_[sr_kept].discard(sr_dropped)
+        who_targets_[sr_dropped].discard(sr_kept)
 
         # assign root, subroot and subtree to the newly added nodes
         root_u = A.nodes[u]['root']
@@ -402,6 +551,7 @@ def constructor(
             subroot_[t] = sr_kept
         A.graph['rootmask__'][root] |= subtree_dropped
         debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
+        debug('TAIL of %d: %d', sr_kept, tail_[sr_kept])
         if _lggr.isEnabledFor(logging.DEBUG) and pq:
             debug('heap top: <%d>, «%s» %.3f', pq[0][-2], pq[0][-1], pq[0][0])
         else:
@@ -411,7 +561,6 @@ def constructor(
         A.remove_edges_from(edge_conflicts(u, v, diagonals))
 
         # finished adding the edge, now check the consequences
-        who_targets_[sr_dropped].discard(sr_kept)
 
         if method == 'rootlust' and ((u, v) if u < v else (v, u)) not in diagonals:
             # this fixes unions that result in 2 sides of a triangle being used but
@@ -441,9 +590,11 @@ def constructor(
                             A.remove_edge(u, t)
 
         if capacity_left > 0:
-            if method == 'rootlust':
-                # rootlust needs a more aggressive retargetting
-                is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
+            if method in ('rootlust', 'path_insertion'):
+                # some methods need aggressive retargetting
+                is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = (
+                    True
+                )
                 who_targets_[sr_kept].clear()
             else:
                 for subroot in tuple(who_targets_[sr_kept]):
@@ -466,7 +617,9 @@ def constructor(
             # by removing nodes, all the useless edges are discarded
             A.remove_nodes_from(subtree_nodes)
             debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)
-            is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
+            is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = (
+                True
+            )
             who_targets_[sr_kept] = None
         is_not_full_[sr_dropped] = False
         subtree_[sr_dropped] = None
@@ -488,9 +641,12 @@ def constructor(
         iterations=i,
         prevented_crossings=prevented_crossings,
         method_options=dict(
+            method=method,
             fun_fingerprint=_constructor_fun_fingerprint,
         ),
     )
+    if method == 'path_insertion':
+        S.graph['num_insertions'] = num_insertions
     #  if keep_log:
     #      S.graph['method_log'] = log
     return S
