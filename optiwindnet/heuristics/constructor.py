@@ -254,31 +254,32 @@ def constructor(
         d2root = d2roots[subroot, A.nodes[subroot]['root']]
         if subtree_count == 1:
             # insertion is only assessed when subtree has a single node
-            # TODO: do not check for candidates when i == 0
-            candidates = []
-            source, target = tee(P_A.neighbors_cw_order(subroot))
-            for u, v in zip(source, chain(target, (next(target),))):
-                # assess path insertion options
-                nb_ = A[subroot]
-                if u in nb_ and v in nb_ and (u, v) in S.edges:
-                    candidates.append((u, v))
-                elif diag := diagonals.inv.get((u, v) if u < v else (v, u)):
-                    n = diag[0] if diag[1] == subroot else diag[1]
-                    # check the triangles (u, subroot, n) and (n, subroot, v)
-                    if u in nb_ and n in nb_ and (u, v) in S.edges:
-                        candidates.append((u, n))
-                    if n in nb_ and v in nb_ and (n, v) in S.edges:
-                        candidates.append((n, v))
-            for u, v in candidates:
-                insertion_cost = (
-                    A[subroot][u]['length']
-                    + A[subroot][v]['length']
-                    - Aʹ[u][v]['length']
-                )
-                tradeoff = d2root - insertion_cost
-                if tradeoff > 0:
-                    tiebreaker = d2rootsRank[subroot_[u], A.nodes[u]['root']]
-                    choices.append((-tradeoff, tiebreaker, u, v))
+            if i != 0:
+                # search for insertions only after the initial queue-filling run
+                candidates = []
+                source, target = tee(P_A.neighbors_cw_order(subroot))
+                for u, v in zip(source, chain(target, (next(target),))):
+                    # assess path insertion options
+                    nb_ = A[subroot]
+                    if u in nb_ and v in nb_ and (u, v) in S.edges:
+                        candidates.append((u, v))
+                    elif diag := diagonals.inv.get((u, v) if u < v else (v, u)):
+                        n = diag[0] if diag[1] == subroot else diag[1]
+                        # check the triangles (u, subroot, n) and (n, subroot, v)
+                        if u in nb_ and n in nb_ and (u, v) in S.edges:
+                            candidates.append((u, n))
+                        if n in nb_ and v in nb_ and (n, v) in S.edges:
+                            candidates.append((n, v))
+                for u, v in candidates:
+                    insertion_cost = (
+                        A[subroot][u]['length']
+                        + A[subroot][v]['length']
+                        - Aʹ[u][v]['length']
+                    )
+                    tradeoff = d2root - insertion_cost
+                    if tradeoff > 0:
+                        tiebreaker = d2rootsRank[subroot_[u], A.nodes[u]['root']]
+                        choices.append((-tradeoff, tiebreaker, u, v))
             # this is for finding extension options
             endpoints = ((subroot, tail_[subroot]),)
         else:
