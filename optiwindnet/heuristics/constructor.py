@@ -67,15 +67,14 @@ def constructor(
     description, but the similarities are still substantial.
 
     Note that constructor cannot be constrained in the number of feeders and that only
-    method 'path_insertion' is constrained to producing radial topologies (i.e. subtrees are
+    method 'radial_EW' is constrained to producing radial topologies (i.e. subtrees are
     always simple paths) as opposed to the branched topologies produced by the others.
 
     Methods:
     - 'esau_williams': Esau-Williams C-MST heuristic modified to avoid crossings (EW).
     - 'modified_EW': EW with a bias towards moving radially (root-ward) on quasi-ties.
     - 'rootlust': EW with a tunable root-ward bias that increases as capacity decreases.
-    - 'path_insertion': Path-only trade-off heuristic with endpoint extensions
-      and singleton insertions guided by the planar embedding.
+    - 'radial_EW': EW variant that produces radial subtrees (simple paths from root).
 
     Args:
       Aʹ: available links graph
@@ -163,8 +162,8 @@ def constructor(
     i = 0
     # <prevented_crossing>: counter for edges discarded due to crossings
     prevented_crossings = 0
-    if method == 'path_insertion':
-        # <tail_>: the endpoint of path subtrees (path_insertion)
+    if method == 'radial_EW':
+        # <tail_>: the endpoint of path subtrees (radial_EW)
         tail_ = [t for t in _T]
         num_insertions = 0
     # END: helper data structures
@@ -269,7 +268,7 @@ def constructor(
                         )
         return (min(choices) if choices else ()), edges2discard
 
-    def find_union_path_insertion_tradeoff(subroot):
+    def find_union_radial_EW_tradeoff(subroot):
         subtree = subtree_[subroot]
         subtree_count = subtree.count()
         capacity_left = capacity - subtree_count
@@ -387,8 +386,8 @@ def constructor(
         find_union = find_union_rootlust_tradeoff
         angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
-    elif method == 'path_insertion':
-        find_union = find_union_path_insertion_tradeoff
+    elif method == 'radial_EW':
+        find_union = find_union_radial_EW_tradeoff
     else:
         raise ValueError(f'Unsupported constructor method: {method!r}')
 
@@ -415,7 +414,7 @@ def constructor(
     def reassign_subroot(subroot_from, subroot_to, root_to):
         """Change the subroot of a subtree to another node of that subtree.
 
-        This is only relevant to the 'path_insertion' method. Any unions that need a
+        This is only relevant to the 'radial_EW' method. Any unions that need a
         subroot that is different from the sr_kept one may need this reassignment.
 
         Subroots are used in multiple data structures, a call to this function must
@@ -473,7 +472,7 @@ def constructor(
             debug('<discard> «%d~%d» not in A anymore', u, v)
             continue
 
-        if method == 'path_insertion':
+        if method == 'radial_EW':
             #  if subroot_[u] == subroot_[v]:
             if subroot_[u] != sr_u:
                 # this is an insertion
@@ -638,7 +637,7 @@ def constructor(
                             A.remove_edge(u, t)
 
         if capacity_left > 0:
-            if method in ('rootlust', 'path_insertion'):
+            if method in ('rootlust', 'radial_EW'):
                 # some methods need aggressive retargetting
                 is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
                 who_targets_[sr_kept].clear()
@@ -689,7 +688,7 @@ def constructor(
             fun_fingerprint=_constructor_fun_fingerprint,
         ),
     )
-    if method == 'path_insertion':
+    if method == 'radial_EW':
         S.graph['num_insertions'] = num_insertions
     #  if keep_log:
     #      S.graph['method_log'] = log
