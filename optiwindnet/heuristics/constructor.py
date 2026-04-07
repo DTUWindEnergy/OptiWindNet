@@ -29,6 +29,7 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 _ONE = bitarray('1')
+_DEFAULT_BIAS_MARGIN = 0.02
 
 # empirically obtained coefficients
 _rootlust_coefs = (
@@ -42,9 +43,11 @@ _rootlust_coefs = (
 def constructor(
     Aʹ: nx.Graph,
     capacity: int,
-    method: str = 'esau_williams',
+    method: str = 'rootlust',
+    *,
     rootlust_: tuple[float, float] = (),
     maxiter: int = 10000,
+    bias_margin: float = _DEFAULT_BIAS_MARGIN,
     keep_log: bool = False,
     blockage_link_cos_lim: float = 0.85,  # 30°
     blockage_link_feeder_lim: float = 2.0,
@@ -52,17 +55,32 @@ def constructor(
 ) -> nx.Graph:
     """Create a network using a constructive greedy heuristic.
 
+    The overall structure of the constructive algorithm is based on:
+
+      Esau, L. R., and K. C. Williams. "On Teleprocessing System Design, Part II: A Method
+        for Approximating the Optimal Network." IBM Systems Journal 5, no. 3 (1966):
+        142–47. https://doi.org/10.1147/sj.53.0142.
+
+    However, this implementation uses the extended Delaunay triangulation (given in A) as
+    the base connectivity, and implements terminal-terminal crossing prevention. This
+    means that even the method named 'esau_williams' does not match exactly the paper's
+    description, but the similarities are still substantial.
+
+    Note that constructor cannot be constrained in the number of feeders and that only
+    method 'path_insertion' is constrained to producing radial topologies (i.e. subtrees are
+    always simple paths) as opposed to the branched topologies produced by the others.
+
     Methods:
-    - 'esau_williams': Esau-Williams C-MST heuristic modified to avoid crossings.
-    - 'modified_EW': EW further modified with a small bias towards moving radially.
-    - 'rootlust': EW further modified so that the lust towards root increases as capacity decreases.
+    - 'esau_williams': Esau-Williams C-MST heuristic modified to avoid crossings (EW).
+    - 'modified_EW': EW with a bias towards moving radially (root-ward) on quasi-ties.
+    - 'rootlust': EW with a tunable root-ward bias that increases as capacity decreases.
     - 'path_insertion': Path-only trade-off heuristic with endpoint extensions
       and singleton insertions guided by the planar embedding.
 
     Args:
       Aʹ: available links graph
       capacity: max number of terminals in a subtree
-      method: choice of method (see list above)
+      method: choice of method (see Methods)
       maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
@@ -153,8 +171,13 @@ def constructor(
 
     # BEGIN: alternative methods of selecting the best edge to expand components
     def find_union_esau_williams_tradeoff(subroot):
+        """Straightforward implementation of the Esau-Williams trade-off.
+
+        Included for educational purposes, since both 'modified_EW' and 'rootlust'
+        produce better topologies on average.
+        """
         # Esau, L. R., and K. C. Williams.
-        # “On Teleprocessing System Design, Part II: A Method for Approximating the Optimal Network.”
+        # "On Teleprocessing System Design, Part II: A Method for Approximating the Optimal Network."
         # IBM Systems Journal 5, no. 3 (1966): 142–47. https://doi.org/10.1147/sj.53.0142.
         subtree = subtree_[subroot]
         capacity_left = capacity - subtree.count()
@@ -180,12 +203,13 @@ def constructor(
                         )
         return (min(choices) if choices else ()), edges2discard
 
-    margin = 1.02
+    # relative limit to consider extents equivalent in 'modified_EW'
+    extent_threshold = 1.0 + bias_margin
 
     def find_union_mod_esau_williams_tradeoff(subroot):
         subtree = subtree_[subroot]
         capacity_left = capacity - subtree.count()
-        sr_d2root = d2roots[subroot, A.nodes[subroot]['root']]
+        d2root = d2roots[subroot, A.nodes[subroot]['root']]
         choices = []
         edges2discard = []
         for u in subtree.search(_ONE):
@@ -198,7 +222,7 @@ def constructor(
                     edges2discard.append((u, v))
                 else:
                     extent = A[u][v]['length']
-                    if extent <= sr_d2root:
+                    if extent <= d2root:
                         # useful edges
                         # v's proximity to root is used as tie-breaker
                         choices.append(
@@ -208,16 +232,16 @@ def constructor(
             choices.sort()
             best_extent, best_rank, *best_edge = choices[0]
             for extent, rank, *edge in choices[1:]:
-                if extent > margin * best_extent:
+                if extent > extent_threshold * best_extent:
                     # no more edges within margin
                     break
                 if rank < best_rank:
                     best_extent, best_rank, best_edge = extent, rank, edge
-            return (best_extent - sr_d2root, best_rank, *best_edge), edges2discard
+            return (best_extent - d2root, best_rank, *best_edge), edges2discard
         else:
             return (), edges2discard
 
-    def find_union_rootlust(subroot):
+    def find_union_rootlust_tradeoff(subroot):
         # gather all the edges leaving the subtree of subroot
         subtree = subtree_[subroot]
         root = A.nodes[subroot]['root']
@@ -309,7 +333,7 @@ def constructor(
             choices.sort()
             best_extent, best_rank, *best_edge = choices[0]
             for extent, rank, *edge in choices[1:]:
-                if extent > margin * best_extent:
+                if extent > extent_threshold * best_extent:
                     # no more edges within margin
                     break
                 if rank < best_rank:
@@ -360,7 +384,7 @@ def constructor(
         find_union = find_union_mod_esau_williams_tradeoff
     elif method == 'rootlust':
         add_link_blockmap(A)
-        find_union = find_union_rootlust
+        find_union = find_union_rootlust_tradeoff
         angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
     elif method == 'path_insertion':
