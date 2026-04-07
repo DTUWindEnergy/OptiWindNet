@@ -271,15 +271,14 @@ def constructor(
                         if n in nb_ and v in nb_ and (n, v) in S.edges:
                             candidates.append((n, v))
                 for u, v in candidates:
-                    insertion_cost = (
+                    extent = (
                         A[subroot][u]['length']
                         + A[subroot][v]['length']
                         - Aʹ[u][v]['length']
                     )
-                    tradeoff = d2root - insertion_cost
-                    if tradeoff > 0:
+                    if extent <= d2root:
                         tiebreaker = d2rootsRank[subroot_[u], A.nodes[u]['root']]
-                        choices.append((-tradeoff, tiebreaker, u, v))
+                        choices.append((extent, tiebreaker, u, v))
             # this is for finding extension options
             endpoints = ((subroot, tail_[subroot]),)
         else:
@@ -295,20 +294,29 @@ def constructor(
                     continue
                 if v != sr_v and v != tail_v:
                     continue
-                tradeoff = d2root - A[u][v]['length']
-                if tradeoff >= 0:
+                extent = A[u][v]['length']
+                if extent <= d2root:
                     if v == sr_v and v != tail_v:
                         # subroot must change to the tail of subroot or of sr_v
                         union_feeder = min(
                             d2roots[tail_u].min(), d2roots[tail_[sr_v]].min()
                         )
-                        tradeoff += d2roots[sr_v, A.nodes[sr_v]['root']] - union_feeder
-                        if tradeoff < 0:
+                        extent += union_feeder - d2roots[sr_v, A.nodes[sr_v]['root']]
+                        if extent > d2root:
                             continue
-                    choices.append(
-                        (-tradeoff, d2rootsRank[v, A.nodes[v]['root']], u, v)
-                    )
-        return (min(choices) if choices else ()), edges2discard
+                    choices.append((extent, d2rootsRank[v, A.nodes[v]['root']], u, v))
+        if choices:
+            choices.sort()
+            best_extent, best_rank, *best_edge = choices[0]
+            for extent, rank, *edge in choices[1:]:
+                if extent > margin * best_extent:
+                    # no more edges within margin
+                    break
+                if rank < best_rank:
+                    best_extent, best_rank, best_edge = extent, rank, edge
+            return (best_extent - d2root, best_rank, *best_edge), edges2discard
+        else:
+            return (), edges2discard
 
     # END: alternative methods of selecting the best edge to expand components
 
