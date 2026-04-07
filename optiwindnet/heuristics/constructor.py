@@ -72,7 +72,7 @@ def constructor(
 
     Methods:
     - 'esau_williams': Esau-Williams C-MST heuristic modified to avoid crossings (EW).
-    - 'modified_EW': EW with a bias towards moving radially (root-ward) on quasi-ties.
+    - 'biased_EW': EW with a bias towards moving radially (root-ward) on quasi-ties.
     - 'rootlust': EW with a tunable root-ward bias that increases as capacity decreases.
     - 'radial_EW': EW variant that produces radial subtrees (simple paths from root).
 
@@ -172,7 +172,7 @@ def constructor(
     def find_union_esau_williams_tradeoff(subroot):
         """Straightforward implementation of the Esau-Williams trade-off.
 
-        Included for educational purposes, since both 'modified_EW' and 'rootlust'
+        Included for educational purposes, since both 'biased_EW' and 'rootlust'
         produce better topologies on average.
         """
         # Esau, L. R., and K. C. Williams.
@@ -202,10 +202,10 @@ def constructor(
                         )
         return (min(choices) if choices else ()), edges2discard
 
-    # relative limit to consider extents equivalent in 'modified_EW'
+    # relative limit to consider extents equivalent in 'biased_EW'
     extent_threshold = 1.0 + bias_margin
 
-    def find_union_mod_esau_williams_tradeoff(subroot):
+    def find_union_biased_EW_tradeoff(subroot):
         subtree = subtree_[subroot]
         capacity_left = capacity - subtree.count()
         d2root = d2roots[subroot, A.nodes[subroot]['root']]
@@ -300,7 +300,7 @@ def constructor(
                         - Aʹ[u][v]['length']
                     )
                     if extent <= d2root:
-                        tiebreaker = d2rootsRank[subroot_[u], A.nodes[u]['root']]
+                        tiebreaker = d2roots[subroot_[u], A.nodes[u]['root']]
                         choices.append((extent, tiebreaker, u, v))
             # this is for finding extension options
             endpoints = ((subroot, tail_[subroot]),)
@@ -319,25 +319,26 @@ def constructor(
                     continue
                 extent = A[u][v]['length']
                 if extent <= d2root:
+                    d2root_sr_v = d2roots[sr_v, A.nodes[sr_v]['root']]
                     if v == sr_v and v != tail_v:
                         # subroot must change to the tail of subroot or of sr_v
                         union_feeder = min(
                             d2roots[tail_u].min(), d2roots[tail_[sr_v]].min()
                         )
-                        extent += union_feeder - d2roots[sr_v, A.nodes[sr_v]['root']]
+                        extent += union_feeder - d2root_sr_v
                         if extent > d2root:
                             continue
-                    choices.append((extent, d2rootsRank[v, A.nodes[v]['root']], u, v))
+                    choices.append((extent, d2root_sr_v, u, v))
         if choices:
             choices.sort()
-            best_extent, best_rank, *best_edge = choices[0]
-            for extent, rank, *edge in choices[1:]:
+            best_extent, best_feeder_length, *best_edge = choices[0]
+            for extent, feeder_length, *edge in choices[1:]:
                 if extent > extent_threshold * best_extent:
                     # no more edges within margin
                     break
-                if rank < best_rank:
-                    best_extent, best_rank, best_edge = extent, rank, edge
-            return (best_extent - d2root, best_rank, *best_edge), edges2discard
+                if feeder_length < best_feeder_length:
+                    best_extent, best_feeder_length, best_edge = extent, feeder_length, edge
+            return (best_extent - d2root, best_feeder_length, *best_edge), edges2discard
         else:
             return (), edges2discard
 
@@ -379,8 +380,8 @@ def constructor(
 
     if method == 'esau_williams':
         find_union = find_union_esau_williams_tradeoff
-    elif method == 'modified_EW':
-        find_union = find_union_mod_esau_williams_tradeoff
+    elif method == 'biased_EW':
+        find_union = find_union_biased_EW_tradeoff
     elif method == 'rootlust':
         add_link_blockmap(A)
         find_union = find_union_rootlust_tradeoff
@@ -454,6 +455,9 @@ def constructor(
             error('maxiter reached (%d)', i)
             break
         debug('[%d]', i)
+
+        # REFRESH entries of stale subtrees
+
         to_retarget_[:] = is_stale_ & is_not_full_
         if to_retarget_.any():
             stale_subtrees = tuple(to_retarget_.search(_ONE))
@@ -464,7 +468,12 @@ def constructor(
         if not pq:
             break
 
+        # GET prioritary union (changes only the queue)
+
         sr_u, (u, v) = pq.top()
+
+        # ASSESS prioritary union (no change in state)
+
         sr_kept = subroot_[v]
         sr_dropped = sr_u
         debug('<popped> «%d~%d», sr_dropped: <%d>', u, v, sr_dropped)
@@ -551,6 +560,8 @@ def constructor(
                 debug('<discard> «%d~%d» too long detours', u, v)
                 subtree_span__[sr_kept] = sr_kept_old_span
                 continue
+
+            # EFFECT prioritary union
 
             # update the last hops
             last_hop_dropped = last_hop_of[sr_dropped]
