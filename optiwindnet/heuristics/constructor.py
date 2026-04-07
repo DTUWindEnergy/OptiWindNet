@@ -108,12 +108,12 @@ def constructor(
 
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
-    subtree_ = [zeros(T) for _ in _T]
+    subtree_: list[bitarray | None] = [zeros(T) for _ in _T]
     for t, subtree in zip(_T, subtree_):
         subtree[t] = True
     # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
-    last_hop_of = [t for t in _T]
+    last_hop_of: list[int | None] = [t for t in _T]
     hooks_of = [[t] for t in _T]
     # <is_stale_>: mask of stale subroots (in need of target refresh)
     is_stale_ = zeros(T)
@@ -132,7 +132,7 @@ def constructor(
 
     # mappings from components (identified by their subroots)
     # <who_targets_>: maps component to set of components queued to merge in
-    who_targets_ = [set() for _ in _T]
+    who_targets_: list[set[int] | None] = [set() for _ in _T]
 
     # other structures
     # <last_hops_count_>: number of times a particular node is used as the hop closest
@@ -271,7 +271,9 @@ def constructor(
                         candidates.append((n, v))
             for u, v in candidates:
                 insertion_cost = (
-                    A[subroot][u]['length'] + A[subroot][v]['length'] - Aʹ[u][v]['length']
+                    A[subroot][u]['length']
+                    + A[subroot][v]['length']
+                    - Aʹ[u][v]['length']
                 )
                 tradeoff = d2root - insertion_cost
                 if tradeoff > 0:
@@ -287,10 +289,7 @@ def constructor(
                 sr_v = subroot_[v]
                 subtree_v = subtree_[sr_v]
                 tail_v = tail_[sr_v]
-                if (
-                    sr_v == subroot
-                    or subtree_v.count() > capacity_left
-                ):
+                if sr_v == subroot or subtree_v.count() > capacity_left:
                     edges2discard.append((u, v))
                     continue
                 if v != sr_v and v != tail_v:
@@ -298,8 +297,10 @@ def constructor(
                 tradeoff = d2root - A[u][v]['length']
                 if tradeoff >= 0:
                     if v == sr_v and v != tail_v:
-                        # subroot must change to the tail of subroot or of sr_v 
-                        union_feeder = min(d2roots[tail_u].min(), d2roots[tail_[sr_v]].min())
+                        # subroot must change to the tail of subroot or of sr_v
+                        union_feeder = min(
+                            d2roots[tail_u].min(), d2roots[tail_[sr_v]].min()
+                        )
                         tradeoff += d2roots[sr_v, A.nodes[sr_v]['root']] - union_feeder
                         if tradeoff < 0:
                             continue
@@ -379,14 +380,32 @@ def constructor(
             cancel_if_queued(subroot)
 
     def reassign_subroot(subroot_from, subroot_to, root_to):
-        debug('reassigning subroot %d to %d via root %d', subroot_from, subroot_to, root_to)
+        """Change the subroot of a subtree to another node of that subtree.
+
+        This is only relevant to the 'path_insertion' method. Any unions that need a
+        subroot that is different from the sr_kept one may need this reassignment.
+
+        Subroots are used in multiple data structures, a call to this function must
+        effect the change across all of them. One additional change is the possible
+        root reassignment if `subroot_to` is closer to a different root than that of
+        `subroot_from`.
+        """
+        debug(
+            'reassigning subroot %d to %d via root %d',
+            subroot_from,
+            subroot_to,
+            root_to,
+        )
         for n in subtree_[subroot_from].search(_ONE):
             subroot_[n] = subroot_to
             A.nodes[n]['root'] = root_to
-        subtree_[subroot_to], subtree_[subroot_from] = subtree_[subroot_from], subtree_[subroot_to]
+        subtree_[subroot_to], subtree_[subroot_from] = (
+            subtree_[subroot_from],
+            subtree_[subroot_to],
+        )
         tail_[subroot_to] = subroot_from
         who_targets_[subroot_to] = who_targets_[subroot_from]
-        # TODO: find the sets in who_targets_ that contain subroot_from and replace with subroot_to
+        who_targets_[subroot_from] = None
         for who in who_targets_:
             if who is not None and subroot_from in who:
                 who.remove(subroot_from)
@@ -417,6 +436,9 @@ def constructor(
         sr_kept = subroot_[v]
         sr_dropped = sr_u
         debug('<popped> «%d~%d», sr_dropped: <%d>', u, v, sr_dropped)
+        if (u, v) not in A.edges and subroot_[u] == sr_u:
+            debug('<discard> «%d~%d» not in A anymore', u, v)
+            continue
 
         if method == 'path_insertion':
             #  if subroot_[u] == subroot_[v]:
@@ -437,9 +459,6 @@ def constructor(
                 u = sr_u
             elif v == sr_kept and subtree_[v].count() > 1:
                 # this is an extension and the union feeder must be other than sr_kept
-                if (u, v) not in A.edges:
-                    debug('<discard> «%d~%d» not in A anymore', u, v)
-                    continue
                 debug('EXTENSION with sr_kept (%d) change', sr_kept)
                 # find the free endpoint of the dropped subroot
                 if u == sr_u:
@@ -471,10 +490,6 @@ def constructor(
             else:
                 # set the tail of the union outcome
                 tail_[sr_kept] = tail_[sr_dropped]
-        else:
-            if (u, v) not in A.edges:
-                debug('<discard> «%d~%d» not in A anymore', u, v)
-                continue
 
         root = A.nodes[sr_kept]['root']
 
@@ -592,9 +607,7 @@ def constructor(
         if capacity_left > 0:
             if method in ('rootlust', 'path_insertion'):
                 # some methods need aggressive retargetting
-                is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = (
-                    True
-                )
+                is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
                 who_targets_[sr_kept].clear()
             else:
                 for subroot in tuple(who_targets_[sr_kept]):
@@ -617,9 +630,7 @@ def constructor(
             # by removing nodes, all the useless edges are discarded
             A.remove_nodes_from(subtree_nodes)
             debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)
-            is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = (
-                True
-            )
+            is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
             who_targets_[sr_kept] = None
         is_not_full_[sr_dropped] = False
         subtree_[sr_dropped] = None
