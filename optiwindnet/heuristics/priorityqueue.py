@@ -20,8 +20,7 @@ class PriorityQueue(list):
         previous entry."""
         if payload is None:
             raise ValueError('payload cannot be None.')
-        if tag in self.tags:
-            self.cancel(tag)
+        self.cancel(tag)
         entry = [priority, next(self.counter), tag, payload]
         self.tags[tag] = entry
         heappush(self, entry)
@@ -35,9 +34,10 @@ class PriorityQueue(list):
                 break
 
     def cancel(self, tag):
-        entry = self.tags.pop(tag)
-        entry[-1] = None
-        self.strip()
+        entry = self.tags.pop(tag, None)
+        if entry is not None:
+            entry[-1] = None
+            self.strip()
 
     def top(self):
         "returns the payload with lowest priority"

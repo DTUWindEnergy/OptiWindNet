@@ -48,6 +48,7 @@ def constructor(
     rootlust_: tuple[float, float] = (),
     maxiter: int = 10000,
     bias_margin: float = _DEFAULT_BIAS_MARGIN,
+    weigh_detours: bool = True,
     keep_log: bool = False,
     blockage_link_cos_lim: float = 0.85,  # 30°
     blockage_link_feeder_lim: float = 2.0,
@@ -80,6 +81,8 @@ def constructor(
       Aʹ: available links graph
       capacity: max number of terminals in a subtree
       method: choice of method (see Methods)
+      bias_margin: (biased_EW | radial_EW) fractional margin within with edges are equivalent
+      weigh_detours: (rootlust | radial_EW) only add edges whose tradeoff is not outweighted by detours
       maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
@@ -117,9 +120,6 @@ def constructor(
 
     # ensure roots are added, even if the star graph uses a subset of them
     S.add_nodes_from(roots)
-    # BEGIN: create initial star graph
-    #  S.add_edges_from(((n, r) for n, r in A.nodes(data='root')))
-    # END: create initial star graph
 
     # BEGIN: helper data structures
 
@@ -141,8 +141,7 @@ def constructor(
     to_retarget_ = bitarray(T)
 
     # mappings from components (indexed by their subroots)
-    # <subtree_span__>: pairs (most_CW, most_CCW) of extreme nodes of each
-    #                  subtree
+    # <subtree_span__>: pairs (most_CW, most_CCW) of extreme nodes of each subtree
     subtree_span__ = [[(t, t) for _ in roots] for t in _T]
     # <subtree_blocked__>: sets of blocked terminals from other components wrt each root
     subtree_blocked__ = [[bitarray(T) for _ in _T] for _ in roots]
@@ -155,7 +154,7 @@ def constructor(
     # <last_hops_count_>: number of times a particular node is used as the hop closest
     #                   to root in the feeder link
     last_hops_count_ = [1 for _ in _T]
-    # <pq>: the smaller the payload, the higher the priority
+    # <pq>: the smaller the entry, the higher the priority
     pq = PriorityQueue()
     # enqueue_best_union()
     # <i>: iteration counter
@@ -328,7 +327,7 @@ def constructor(
                 if extent <= d2root:
                     d2root_sr_v = d2roots[sr_v, A.nodes[sr_v]['root']]
                     if v == sr_v and v != tail_v:
-                        # subroot must change either to u_tail of to the tail of sr_v
+                        # subroot must change either to u_tail or to the tail of sr_v
                         union_feeder = min(
                             d2roots[u_tail].min(), d2roots[tail_[sr_v]].min()
                         )
@@ -344,7 +343,7 @@ def constructor(
 
     # END: alternative methods of selecting the best edge to expand components
 
-    def union_impact_on_detours(u, v, sr_dropped, sr_kept):
+    def get_union_blockage(u, v, sr_dropped, sr_kept):
         """Note: the detour_increase calculated here is an estimate."""
         # assess the union's angle span
         union_span_ = [
@@ -376,33 +375,25 @@ def constructor(
                 )
                 detour_increase += count * (extent - d2roots[hop, r]).item()
                 clones.append((hop, clone, count))
-        tradeoff = d2roots[sr_dropped].min().item() - A[u][v]['length']
         if clones:
-            debug(
-                'tradeoff of %.3f vs. detour increase of %.3f for rerouting %s',
-                tradeoff,
-                detour_increase,
-                clones,
-            )
-        return tradeoff < detour_increase, union_span_, clones
+            debug('detour increase of %.3f for rerouting %s', detour_increase, clones)
+        return detour_increase, union_span_, clones
 
-    if method == 'esau_williams':
-        find_union = find_union_esau_williams_tradeoff
-    elif method == 'biased_EW':
-        find_union = find_union_biased_EW_tradeoff
-    elif method == 'rootlust':
+    try:
+        find_union = dict(
+            esau_williams=find_union_esau_williams_tradeoff,
+            biased_EW=find_union_biased_EW_tradeoff,
+            rootlust=find_union_rootlust_tradeoff,
+            radial_EW=find_union_radial_EW_tradeoff,
+        )[method]
+    except KeyError:
+        raise ValueError(f'Unsupported constructor method: {method!r}')
+    use_blockage = weigh_detours and method in ('rootlust', 'radial_EW')
+
+    if use_blockage:
         add_link_blockmap(A)
-        find_union = find_union_rootlust_tradeoff
         angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
-    elif method == 'radial_EW':
-        find_union = find_union_radial_EW_tradeoff
-    else:
-        raise ValueError(f'Unsupported constructor method: {method!r}')
-
-    def cancel_if_queued(subroot):
-        if subroot in pq.tags:
-            pq.cancel(subroot)
 
     def enqueue_best_union(subroot):
         debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
@@ -418,7 +409,7 @@ def constructor(
             )
         else:
             debug('<cancelling> %d', subroot)
-            cancel_if_queued(subroot)
+            pq.cancel(subroot)
 
     def reassign_subroot(subroot_from, subroot_to, root_to):
         """Change the subroot of a subtree to another node of that subtree.
@@ -437,13 +428,15 @@ def constructor(
             subroot_to,
             root_to,
         )
+        pq.cancel(subroot_from)
+        is_not_full_[subroot_from] = False
+        is_not_full_[subroot_to] = True
+        # not necessary to reassign: is_stale_, is_not_full_
         for n in subtree_[subroot_from].search(_ONE):
             subroot_[n] = subroot_to
             A.nodes[n]['root'] = root_to
-        subtree_[subroot_to], subtree_[subroot_from] = (
-            subtree_[subroot_from],
-            subtree_[subroot_to],
-        )
+        subtree_[subroot_to] = subtree_[subroot_from]
+        subtree_[subroot_from] = None
         tail_[subroot_to] = subroot_from
         who_targets_[subroot_to] = who_targets_[subroot_from]
         who_targets_[subroot_from] = None
@@ -451,6 +444,18 @@ def constructor(
             if who is not None and subroot_from in who:
                 who.remove(subroot_from)
                 who.add(subroot_to)
+        if use_blockage:
+            subtree_span__[subroot_to] = subtree_span__[subroot_from]
+            for subtree_blocked_ in subtree_blocked__:
+                subtree_blocked_[subroot_to] = subtree_blocked_[subroot_from]
+            # this resets any previous detours of subroot_from
+            old_last_hop = last_hop_of[subroot_from]
+            hooks_of[old_last_hop].remove(subroot_from)
+            hooks_of[subroot_to].append(subroot_to)
+            last_hops_count_[last_hop_of[subroot_from]] -= 1
+            last_hop_of[subroot_from] = None
+            last_hop_of[subroot_to] = subroot_to
+            last_hops_count_[subroot_to] += 1
 
     # initialize pq
     for n in _T:
@@ -476,25 +481,46 @@ def constructor(
         if not pq:
             break
 
-        # GET prioritary union (changes only the queue)
+        # GET union candidate (changes only the queue)
 
-        sr_u, (u, v) = pq.top()
+        prio, sr_u, (u, v) = pq.top()
+        tradeoff = -prio
 
-        # ASSESS prioritary union (no change in state)
+        # ASSESS union (no change in state)
 
         sr_kept = subroot_[v]
-        sr_dropped = sr_u
-        debug('<popped> «%d~%d», sr_dropped: <%d>', u, v, sr_dropped)
-        if (u, v) not in A.edges and subroot_[u] == sr_u:
-            debug('<discard> «%d~%d» not in A anymore', u, v)
-            continue
+        # HACK: queue entries encode an insertion if sr_kept has edge (u, v) in S
+        is_insertion = subroot_[u] != sr_u and (u, v) in S.edges
+        debug('<pop> «%d~%d», sr_dropped: <%d>, ins: %s', u, v, sr_u, is_insertion)
+        if (u, v) not in A.edges:
+            if not is_insertion:
+                debug('<discard> «%d~%d» not in A anymore', u, v)
+                continue
+            elif (u, sr_u) not in A.edges or (v, sr_u) not in A.edges:
+                debug('<discard> «%d~%d~%d» not in A anymore', u, sr_u, v)
+                continue
+
+        if use_blockage:
+            # only proceed if tradeoff is greater of equal to the growth in detours
+            detours_growth, union_span_, clones = get_union_blockage(
+                *((sr_u, v, sr_u, sr_kept) if is_insertion else (u, v, sr_u, sr_kept))
+            )
+
+            if tradeoff < detours_growth:
+                debug(
+                    '<discard> «%d~%d»: tradeoff (%.3f) smaller than growth in detours (%.3f)',
+                    u,
+                    v,
+                    tradeoff,
+                    detours_growth,
+                )
+                continue
+
+        # EFFECT union
 
         if method == 'radial_EW':
-            if subroot_[u] != sr_u:
+            if is_insertion:
                 # this is an insertion
-                if (u, sr_u) not in A.edges or (v, sr_u) not in A.edges:
-                    debug('<discard> «%d~%d~%d» not in A anymore', u, sr_u, v)
-                    continue
                 debug('INSERTION of %d between %d and %d', sr_u, u, v)
                 num_insertions += 1
                 # start by opening the receiver path
@@ -523,36 +549,29 @@ def constructor(
                     debug('SUBROOT %d -> %d', sr_kept, tail_v)
                     sr_kept = tail_v
                 else:
-                    # union subroot is in the dropped subroot: reverse direction
+                    # union subroot is in the dropped subtree: reverse union direction
                     if alt_sr_u != sr_u:
                         # subroot_[u] must change
                         reassign_subroot(sr_u, alt_sr_u, root_u)
                         debug('SUBROOT %d -> %d', sr_u, alt_sr_u)
-                    u, v, sr_dropped, sr_kept = v, u, sr_kept, alt_sr_u
+                    u, v, sr_u, sr_kept = v, u, sr_kept, alt_sr_u
+                    pq.cancel(sr_u)
                     debug('DIRECTION (%d, %d) -> (%d, %d)', v, u, u, v)
                 # set the tail of the union outcome
-                tail_[sr_kept] = tail_[sr_dropped]
-            elif u == tail_[sr_dropped]:
+                tail_[sr_kept] = tail_[sr_u]
+            elif u == tail_[sr_u]:
                 # set the tail of the union outcome
                 tail_[sr_kept] = sr_u
             else:
                 # set the tail of the union outcome
-                tail_[sr_kept] = tail_[sr_dropped]
+                tail_[sr_kept] = tail_[sr_u]
 
+        sr_dropped = sr_u
         root = A.nodes[sr_kept]['root']
 
-        if method == 'rootlust':
-            is_adverse, union_span_, clones = union_impact_on_detours(
-                u, v, sr_dropped, sr_kept
-            )
+        if use_blockage:
             debug('<angle_span> //%s//', union_span_[root])
-
-            if is_adverse:
-                debug('<discard> «%d~%d»: detours cost more than tradeoff', u, v)
-                continue
             subtree_span__[sr_kept] = union_span_
-
-            # EFFECT prioritary union
 
             # update the last hops
             last_hop_dropped = last_hop_of[sr_dropped]
