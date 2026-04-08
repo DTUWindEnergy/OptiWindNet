@@ -168,6 +168,27 @@ def constructor(
         num_insertions = 0
     # END: helper data structures
 
+    # relative limit to consider two extents equivalent
+    extent_threshold = 1.0 + bias_margin
+
+    def biased_chooser(choices, d2root):
+        # Choose the union candidate with a bias towards extending root-ward
+        if choices:
+            choices.sort()
+            best_extent, best_feeder_length, *best_edge = choices[0]
+            extent_lim = best_extent * extent_threshold
+            for extent, feeder_length, *edge in choices[1:]:
+                if extent > extent_lim:
+                    # no more edges within bias_margin
+                    break
+                # the runner-up edge is "equivalent" to the best one, compare feeders
+                if feeder_length < best_feeder_length:
+                    best_extent, best_feeder_length = extent, feeder_length
+                    best_edge = edge
+            return (best_extent - d2root, best_feeder_length, *best_edge)
+        else:
+            return ()
+
     # BEGIN: alternative methods of selecting the best edge to expand components
     def find_union_esau_williams_tradeoff(subroot):
         """Straightforward implementation of the Esau-Williams trade-off.
@@ -202,9 +223,6 @@ def constructor(
                         )
         return (min(choices) if choices else ()), edges2discard
 
-    # relative limit to consider extents equivalent in 'biased_EW'
-    extent_threshold = 1.0 + bias_margin
-
     def find_union_biased_EW_tradeoff(subroot):
         subtree = subtree_[subroot]
         capacity_left = capacity - subtree.count()
@@ -227,18 +245,7 @@ def constructor(
                         choices.append(
                             (extent, d2rootsRank[v, A.nodes[v]['root']], u, v)
                         )
-        if choices:
-            choices.sort()
-            best_extent, best_rank, *best_edge = choices[0]
-            for extent, rank, *edge in choices[1:]:
-                if extent > extent_threshold * best_extent:
-                    # no more edges within margin
-                    break
-                if rank < best_rank:
-                    best_extent, best_rank, best_edge = extent, rank, edge
-            return (best_extent - d2root, best_rank, *best_edge), edges2discard
-        else:
-            return (), edges2discard
+        return biased_chooser(choices, d2root), edges2discard
 
     def find_union_rootlust_tradeoff(subroot):
         # gather all the edges leaving the subtree of subroot
@@ -276,7 +283,7 @@ def constructor(
         edges2discard = []
         d2root = d2roots[subroot, A.nodes[subroot]['root']]
         if subtree_count == 1:
-            # insertion is only assessed when subtree has a single node
+            # insertion is only considered when subtree has a single node
             if i != 0:
                 # search for insertions only after the initial queue-filling run
                 candidates = []
@@ -307,40 +314,33 @@ def constructor(
         else:
             endpoints = ((subroot, tail_[subroot]), (tail_[subroot], subroot))
 
-        for u, tail_u in endpoints:
-            for v in A[u]:
+        for u_head, u_tail in endpoints:
+            for v in A[u_head]:
                 sr_v = subroot_[v]
                 subtree_v = subtree_[sr_v]
                 tail_v = tail_[sr_v]
                 if sr_v == subroot or subtree_v.count() > capacity_left:
-                    edges2discard.append((u, v))
+                    edges2discard.append((u_head, v))
                     continue
                 if v != sr_v and v != tail_v:
                     continue
-                extent = A[u][v]['length']
+                extent = A[u_head][v]['length']
                 if extent <= d2root:
                     d2root_sr_v = d2roots[sr_v, A.nodes[sr_v]['root']]
                     if v == sr_v and v != tail_v:
-                        # subroot must change to the tail of subroot or of sr_v
+                        # subroot must change either to u_tail of to the tail of sr_v
                         union_feeder = min(
-                            d2roots[tail_u].min(), d2roots[tail_[sr_v]].min()
+                            d2roots[u_tail].min(), d2roots[tail_[sr_v]].min()
                         )
+                        # add the increase in feeder length to the edge extent
                         extent += union_feeder - d2root_sr_v
                         if extent > d2root:
                             continue
-                    choices.append((extent, d2root_sr_v, u, v))
-        if choices:
-            choices.sort()
-            best_extent, best_feeder_length, *best_edge = choices[0]
-            for extent, feeder_length, *edge in choices[1:]:
-                if extent > extent_threshold * best_extent:
-                    # no more edges within margin
-                    break
-                if feeder_length < best_feeder_length:
-                    best_extent, best_feeder_length, best_edge = extent, feeder_length, edge
-            return (best_extent - d2root, best_feeder_length, *best_edge), edges2discard
-        else:
-            return (), edges2discard
+                        tiebreaker = union_feeder
+                    else:
+                        tiebreaker = d2root_sr_v
+                    choices.append((extent, tiebreaker, u_head, v))
+        return biased_chooser(choices, d2root), edges2discard
 
     # END: alternative methods of selecting the best edge to expand components
 
@@ -482,7 +482,6 @@ def constructor(
             continue
 
         if method == 'radial_EW':
-            #  if subroot_[u] == subroot_[v]:
             if subroot_[u] != sr_u:
                 # this is an insertion
                 if (u, sr_u) not in A.edges or (v, sr_u) not in A.edges:
@@ -609,7 +608,7 @@ def constructor(
             subroot_[t] = sr_kept
         A.graph['rootmask__'][root] |= subtree_dropped
         debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
-        debug('TAIL of %d: %d', sr_kept, tail_[sr_kept])
+        #  debug('TAIL of %d: %d', sr_kept, tail_[sr_kept])
         if _lggr.isEnabledFor(logging.DEBUG) and pq:
             debug('heap top: <%d>, «%s» %.3f', pq[0][-2], pq[0][-1], pq[0][0])
         else:
