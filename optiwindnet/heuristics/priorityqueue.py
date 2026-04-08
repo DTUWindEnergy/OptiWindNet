@@ -44,4 +44,4 @@ class PriorityQueue(list):
         priority, count, tag, payload = heappop(self)
         del self.tags[tag]
         self.strip()
-        return tag, payload
+        return priority, tag, payload

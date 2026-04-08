@@ -1123,7 +1123,7 @@ def OBEW(
                 return
             tradeoff = pq[0][0]
             debug('[%d] -tradeoff = %.0f', i, -tradeoff)
-            sr_u, (u, v) = pq.top()
+            _, sr_u, (u, v) = pq.top()
             debug('<loop> POPPED «%d~%d», sr_u: <%d>', u, v, sr_u)
             capacity_left = capacity - len(subtree_[u]) - len(subtree_[v])
 

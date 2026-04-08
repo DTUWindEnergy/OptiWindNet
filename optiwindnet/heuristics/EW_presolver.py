@@ -213,7 +213,7 @@ def EW_presolver(
         if not pq:
             # finished
             break
-        sr_u, (u, v) = pq.top()
+        _, sr_u, (u, v) = pq.top()
         debug('<popped> «%d~%d», sr_u: <%d>', u, v, sr_u)
 
         # TODO: main loop should do only
