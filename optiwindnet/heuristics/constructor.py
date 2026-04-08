@@ -344,18 +344,26 @@ def constructor(
 
     # END: alternative methods of selecting the best edge to expand components
 
-    def savings_outweight_detours(sr_dropped, u, v):
+    def union_impact_on_detours(u, v, sr_dropped, sr_kept):
         """Note: the detour_increase calculated here is an estimate."""
-        sr_kept = subroot_[v]
+        # assess the union's angle span
+        union_span_ = [
+            union_limits(
+                r,
+                u,
+                *subtree_span__[sr_dropped][r],
+                v,
+                *subtree_span__[sr_kept][r],
+            )
+            for r in roots
+        ]
         blocked__ = A[u][v]['blocked__']
         detour_increase = 0.0
         clones = []
         is_last_hop_ = bitarray(count > 0 for count in last_hops_count_)
         union_ = subtree_[sr_dropped] | subtree_[sr_kept]
         for r, rootmask_, blocked_ in zip(roots, rootmask__, blocked__):
-            # subtree_span__[sr_kept] gives the span of the union because it was
-            #   updated just before calling this function
-            lo, hi = subtree_span__[sr_kept][r]
+            lo, hi = union_span_[r]
             for hop in (rootmask_ & is_last_hop_ & (blocked_ | union_)).search(_ONE):
                 count = last_hops_count_[hop] - (hop == sr_dropped) - (hop == sr_kept)
                 if hop == lo or hop == hi or count == 0:
@@ -368,15 +376,15 @@ def constructor(
                 )
                 detour_increase += count * (extent - d2roots[hop, r]).item()
                 clones.append((hop, clone, count))
-        savings = d2roots[sr_dropped].min().item() - A[u][v]['length']
+        tradeoff = d2roots[sr_dropped].min().item() - A[u][v]['length']
         if clones:
             debug(
-                'savings of %.3f vs. detour increase of %.3f for rerouting %s',
-                savings,
+                'tradeoff of %.3f vs. detour increase of %.3f for rerouting %s',
+                tradeoff,
                 detour_increase,
                 clones,
             )
-        return savings, detour_increase, clones
+        return tradeoff < detour_increase, union_span_, clones
 
     if method == 'esau_williams':
         find_union = find_union_esau_williams_tradeoff
@@ -534,31 +542,15 @@ def constructor(
         root = A.nodes[sr_kept]['root']
 
         if method == 'rootlust':
-            # assess the union's angle span
-            union_span_ = [
-                union_limits(
-                    r,
-                    u,
-                    *subtree_span__[sr_dropped][r],
-                    v,
-                    *subtree_span__[sr_kept][r],
-                )
-                for r in roots
-            ]
+            is_adverse, union_span_, clones = union_impact_on_detours(
+                u, v, sr_dropped, sr_kept
+            )
             debug('<angle_span> //%s//', union_span_[root])
-            # update the component's angle span
-            subtree_span__[sr_kept], sr_kept_old_span = (
-                union_span_,
-                subtree_span__[sr_kept],
-            )
 
-            savings, detour_increase, clones = savings_outweight_detours(
-                sr_dropped, u, v
-            )
-            if savings < detour_increase:
-                debug('<discard> «%d~%d» too long detours', u, v)
-                subtree_span__[sr_kept] = sr_kept_old_span
+            if is_adverse:
+                debug('<discard> «%d~%d»: detours cost more than tradeoff', u, v)
                 continue
+            subtree_span__[sr_kept] = union_span_
 
             # EFFECT prioritary union
 
