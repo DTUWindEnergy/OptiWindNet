@@ -16,9 +16,8 @@ import networkx as nx
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
 
-from ..interarraylib import fun_fingerprint
+from ..interarraylib import fun_fingerprint, add_link_blockmap
 from ..repair import repair_routeset_path
-from ..geometric import angle_helpers, add_link_blockmap
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
@@ -368,7 +367,7 @@ def iterative_lkh(
     diagonals = Aʹ.graph['diagonals'].copy()
     A.graph['diagonals'] = diagonals
     nx.set_node_attributes(A, -1, 'root')
-    _add_link_blockage(A)
+    add_link_blockmap(A)
     _prune_bad_links(A, math.ceil(2.4 * capacity))
     i = 0
     while True:

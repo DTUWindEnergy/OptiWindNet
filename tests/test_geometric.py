@@ -2,8 +2,6 @@ import numpy as np
 import pytest
 from .helpers import tiny_wfn
 from optiwindnet.geometric import (
-    add_link_blockmap,
-    add_link_cosines,
     angle,
     any_pairs_opposite_edge,
     area_from_polygon_vertices,
@@ -325,31 +323,3 @@ def test_rotating_calipers_unknown_metric():
     hull = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
     with pytest.raises(ValueError, match='Unknown metric'):
         rotating_calipers(hull, metric='invalid')
-
-
-# --- add_link_blockmap ---
-
-
-def test_add_link_blockmap():
-    wfn = tiny_wfn()
-    A = wfn.A
-    add_link_blockmap(A)
-    # Should add 'blocked__' to edges
-    for _, _, d in A.edges(data=True):
-        assert 'blocked__' in d
-        assert len(d['blocked__']) == A.graph['R']
-    # Should add angle arrays to graph
-    assert 'angle__' in A.graph
-    assert 'angle_rank__' in A.graph
-
-
-# --- add_link_cosines ---
-
-
-def test_add_link_cosines():
-    wfn = tiny_wfn()
-    A = wfn.A
-    add_link_cosines(A)
-    for _, _, d in A.edges(data=True):
-        assert 'cos_' in d
-        assert len(d['cos_']) == A.graph['R']

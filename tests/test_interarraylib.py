@@ -26,6 +26,8 @@ from optiwindnet.interarraylib import (
     count_diagonals,
     as_hooked_to_head,
     as_hooked_to_nearest,
+    add_link_blockmap,
+    add_link_cosines,
 )
 
 from .helpers import assert_graph_equal, tiny_wfn
@@ -743,3 +745,31 @@ def test_as_hooked_to_nearest():
     G2 = as_hooked_to_nearest(wfn2.S, wfn2.A.graph['d2roots'])
     expected = [(-1, 0), (-1, 1), (-1, 2), (-1, 3)]
     assert G2.graph['tentative'] == expected
+
+
+# --- add_link_blockmap ---
+
+
+def test_add_link_blockmap():
+    wfn = tiny_wfn()
+    A = wfn.A
+    add_link_blockmap(A)
+    # Should add 'blocked__' to edges
+    for _, _, d in A.edges(data=True):
+        assert 'blocked__' in d
+        assert len(d['blocked__']) == A.graph['R']
+    # Should add angle arrays to graph
+    assert 'angle__' in A.graph
+    assert 'angle_rank__' in A.graph
+
+
+# --- add_link_cosines ---
+
+
+def test_add_link_cosines():
+    wfn = tiny_wfn()
+    A = wfn.A
+    add_link_cosines(A)
+    for _, _, d in A.edges(data=True):
+        assert 'cos_' in d
+        assert len(d['cos_']) == A.graph['R']
