@@ -144,8 +144,8 @@ def constructor(
     is_stale_ = zeros(T)
     # <is_extendable_>: mask of subroots with spare capacity
     is_extendable_ = ones(T)
-    # <is_root_nb__>: mask of node coordinates that have an edge to a root (weigh_detours)
-    is_root_nb__ = tuple(rootmask_.copy() for rootmask_ in rootmask__)
+    # <is_root_nb__>: mask of node coordinates that are the last hop of a full feeder route (weigh_detours)
+    is_root_nb__ = tuple(zeros(T) for _ in roots)
     # <is_corner_>: mask of node coordinates that are detour corners (weigh_detours)
     is_corner_ = zeros(T)
     # memory allocation for temporary constructs
@@ -445,6 +445,7 @@ def constructor(
                 '<pushed> sr_u <%d>, «%d~%d», priority = %.3f', subroot, u, v, priority
             )
         else:
+            is_root_nb__[A.nodes[subroot]['root']][subroot] = True
             _debug('<cancelling> %d', subroot)
             pq.cancel(subroot)
 
@@ -481,9 +482,6 @@ def constructor(
             if who is not None and subroot_from in who:
                 who.remove(subroot_from)
                 who.add(subroot_to)
-        for is_root_nb_ in is_root_nb__:
-            is_root_nb_[subroot_from] = False
-        is_root_nb__[root_to][subroot_to] = True
         if use_blockage:
             subtree_span__[subroot_to] = subtree_span__[subroot_from]
             # update the component's blocked set
@@ -659,7 +657,6 @@ def constructor(
 
         # assign root, subroot and subtree to the newly added nodes
         root_u = A.nodes[u]['root']
-        is_root_nb__[root_u][sr_dropped] = is_corner_[sr_dropped]
         if root_u != root:
             rootmask__[root_u] &= ~subtree_dropped
             rootmask__[root] |= subtree_dropped
@@ -730,6 +727,7 @@ def constructor(
         else:
             # max capacity reached: subtree full
             is_extendable_[sr_kept] = False
+            is_root_nb__[root][sr_kept] = True
             if sr_kept in pq.tags:
                 # this is required because of i=0 feeders
                 pq.cancel(sr_kept)
