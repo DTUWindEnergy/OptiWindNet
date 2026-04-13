@@ -20,7 +20,7 @@ from .api_utils import (
     plot_org_buff,
 )
 from .baselines.hgs import hgs_cvrp
-from .heuristics import CPEW, EW_presolver
+from .heuristics import constructor
 from .importer import L_from_pbf, L_from_site, L_from_yaml, L_from_windIO
 from .importer import load_repository as load_repository
 from .interarraylib import (
@@ -619,16 +619,18 @@ class EWRouter(Router):
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
         # optimizing
+        #  constructor_args=dict(method='rootlust', maxiter=self.maxiter)
+        constructor_args = dict(method='biased_EW', maxiter=self.maxiter)
         if self.feeder_route == 'segmented':
-            S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
+            constructor_args.update(weigh_detours=True, straight_feeder_route=False)
         elif self.feeder_route == 'straight':
-            G_cpew = CPEW(A, capacity=cables_capacity, maxiter=self.maxiter)
-            S = S_from_G(G_cpew)
+            constructor_args.update(weigh_detours=False, straight_feeder_route=True)
         else:
             raise ValueError(
                 f'{self.feeder_route} is not among the valid feeder_route values. Choose among: ("segmented", "straight").'
             )
 
+        S = constructor(A, capacity=cables_capacity, **constructor_args)
         G_tentative = G_from_S(S, A)
 
         G = PathFinder(G_tentative, planar=P, A=A).create_detours()
@@ -713,6 +715,7 @@ class MILPRouter(Router):
     * Requires a longer runtime than heuristics- and meta-heuristics-based routers.
     """
 
+    default_heuristic = 'rootlust'
     _summary_attrs = ('runtime', 'bound', 'objective', 'relgap', 'termination')
 
     def __init__(
@@ -793,9 +796,20 @@ class MILPRouter(Router):
                 if self.model_options['topology'] == 'branched':
                     feeder_route = self.model_options['feeder_route']
                     if feeder_route == 'segmented':
-                        S_warm = EW_presolver(A, capacity=cables_capacity)
+                        constructor_args = dict(
+                            method=self.default_heuristic,
+                            weigh_detours=True,
+                            straight_feeder_route=False,
+                        )
                     elif feeder_route == 'straight':
-                        S_warm = S_from_G(CPEW(A, capacity=cables_capacity))
+                        constructor_args = dict(
+                            method=self.default_heuristic,
+                            weigh_detours=False,
+                            straight_feeder_route=True,
+                        )
+                    S_warm = S_from_G(
+                        constructor(A, capacity=cables_capacity, **constructor_args)
+                    )
                 else:
                     S_warm = hgs_cvrp(
                         as_normalized(A),

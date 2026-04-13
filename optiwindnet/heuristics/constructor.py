@@ -50,7 +50,7 @@ def constructor(
     maxiter: int = 10000,
     bias_margin: float = _DEFAULT_BIAS_MARGIN,
     weigh_detours: bool = True,
-    straight_feeder_routes: bool = False,
+    straight_feeder_route: bool = False,
     keep_log: bool = False,
     blockage_link_cos_lim: float = 0.85,  # 30°
     blockage_link_feeder_lim: float = 2.0,
@@ -85,7 +85,7 @@ def constructor(
       method: choice of method (see Methods)
       bias_margin: (biased_EW | radial_EW) fractional margin within with edges are equivalent
       weigh_detours: (!= esau_williams) only add edges whose tradeoff is not outweighted by detours
-      straight_feeder_routes: prevent crossings of feeders (incompatible with `weigh_detours=True`)
+      straight_feeder_route: prevent crossings of feeders (incompatible with `weigh_detours=True`)
       maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
@@ -93,9 +93,9 @@ def constructor(
     """
 
     start_time = time.perf_counter()
-    if straight_feeder_routes and weigh_detours:
+    if straight_feeder_route and weigh_detours:
         _warn(
-            'Setting `weigh_detours` to False because `straight_feeder_routes=True` '
+            'Setting `weigh_detours` to False because `straight_feeder_route=True` '
             'was requested. Set `weigh_detours=False` to suppress this message.'
         )
     R, T = (Aʹ.graph[k] for k in 'RT')
@@ -427,7 +427,7 @@ def constructor(
     #  use_blockage = weigh_detours and method in ('rootlust', 'radial_EW')
     use_blockage = weigh_detours and method != 'esau_williams'
 
-    if use_blockage or straight_feeder_routes:
+    if use_blockage or straight_feeder_route:
         add_link_blockmap(A)
         angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
@@ -553,7 +553,7 @@ def constructor(
                 )
                 continue
 
-        if straight_feeder_routes:
+        if straight_feeder_route:
             blocked = blocked_feeders(
                 *((sr_u, v, sr_u, sr_kept) if is_insertion else (u, v, sr_u, sr_kept))
             )
