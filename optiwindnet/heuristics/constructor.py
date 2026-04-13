@@ -27,7 +27,7 @@ from .priorityqueue import PriorityQueue
 __all__ = ()
 
 _lggr = logging.getLogger(__name__)
-debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
+_debug, _info, _warn, _error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 _ONE = bitarray('1')
 _DEFAULT_BIAS_MARGIN = 0.02
@@ -50,6 +50,7 @@ def constructor(
     maxiter: int = 10000,
     bias_margin: float = _DEFAULT_BIAS_MARGIN,
     weigh_detours: bool = True,
+    straight_feeder_routes: bool = False,
     keep_log: bool = False,
     blockage_link_cos_lim: float = 0.85,  # 30°
     blockage_link_feeder_lim: float = 2.0,
@@ -83,7 +84,8 @@ def constructor(
       capacity: max number of terminals in a subtree
       method: choice of method (see Methods)
       bias_margin: (biased_EW | radial_EW) fractional margin within with edges are equivalent
-      weigh_detours: (rootlust | radial_EW) only add edges whose tradeoff is not outweighted by detours
+      weigh_detours: (!= esau_williams) only add edges whose tradeoff is not outweighted by detours
+      straight_feeder_routes: prevent crossings of feeders (incompatible with `weigh_detours=True`)
       maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
@@ -91,6 +93,11 @@ def constructor(
     """
 
     start_time = time.perf_counter()
+    if straight_feeder_routes and weigh_detours:
+        _warn(
+            'Setting `weigh_detours` to False because `straight_feeder_routes=True` '
+            'was requested. Set `weigh_detours=False` to suppress this message.'
+        )
     R, T = (Aʹ.graph[k] for k in 'RT')
     _T = range(T)
     VertexC = Aʹ.graph['VertexC']
@@ -110,9 +117,9 @@ def constructor(
         rootlust_0 = _rootlust_coefs[0][0] + _rootlust_coefs[0][1] / capacity
         rootlust_1 = _rootlust_coefs[1][0] + _rootlust_coefs[1][1] * rootlust_0
         # pre-scale rootlust_1 to avoid the division inside the loop
-        rootlust_ = rootlust_0, rootlust_1 / (capacity - 1)
+        rootlust_ = rootlust_0, rootlust_1 / max(capacity - 1, 1)
     else:
-        rootlust_ = rootlust_[0], rootlust_[1] / (capacity - 1)
+        rootlust_ = rootlust_[0], rootlust_[1] / max(capacity - 1, 1)
 
     # removing root nodes from A to speedup enqueue_best_union
     # this may be done because G already starts with feeders
@@ -344,6 +351,16 @@ def constructor(
 
     # END: alternative methods of selecting the best edge to expand components
 
+    def blocked_feeders(u, v, sr_dropped, sr_kept):
+        blocked__ = A[u][v]['blocked__']
+        union = subtree_[sr_dropped] | subtree_[sr_kept]
+        feeders = []
+        for r, blocked_, is_root_nb_ in zip(roots, blocked__, is_root_nb__):
+            feeders.extend(
+                (r, n) for n in (is_root_nb_ & blocked_ & ~union).search(_ONE)
+            )
+        return feeders
+
     def estimate_detours(u, v, sr_dropped, sr_kept):
         """Note: the detour_increase calculated here is an estimate."""
         # assess the union's angle span
@@ -395,7 +412,7 @@ def constructor(
                 detour_increase += (extent - former_extent).item()
                 changes.append((hop, corner, r, dropped))
         if changes:
-            info('detour increase of %.3f for rerouting %s', detour_increase, changes)
+            _debug('detour increase of %.3f for rerouting %s', detour_increase, changes)
         return detour_increase, union_span_, changes
 
     try:
@@ -410,13 +427,13 @@ def constructor(
     #  use_blockage = weigh_detours and method in ('rootlust', 'radial_EW')
     use_blockage = weigh_detours and method != 'esau_williams'
 
-    if use_blockage:
+    if use_blockage or straight_feeder_routes:
         add_link_blockmap(A)
         angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
 
     def enqueue_best_union(subroot):
-        debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
+        _debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
         best_choice, edges2discard = find_union(subroot)
         A.remove_edges_from(edges2discard)
         if best_choice:
@@ -424,11 +441,11 @@ def constructor(
             pq.add(priority, subroot, (u, v))
             if who_targets_ is not None:
                 who_targets_[subroot_[v]].add(subroot)
-            debug(
+            _debug(
                 '<pushed> sr_u <%d>, «%d~%d», priority = %.3f', subroot, u, v, priority
             )
         else:
-            debug('<cancelling> %d', subroot)
+            _debug('<cancelling> %d', subroot)
             pq.cancel(subroot)
 
     def reassign_subroot(subroot_from, subroot_to, root_to):
@@ -442,7 +459,7 @@ def constructor(
         root reassignment if `subroot_to` is closer to a different root than that of
         `subroot_from`.
         """
-        debug(
+        _debug(
             'reassigning subroot %d to %d via root %d',
             subroot_from,
             subroot_to,
@@ -464,14 +481,14 @@ def constructor(
             if who is not None and subroot_from in who:
                 who.remove(subroot_from)
                 who.add(subroot_to)
+        for is_root_nb_ in is_root_nb__:
+            is_root_nb_[subroot_from] = False
+        is_root_nb__[root_to][subroot_to] = True
         if use_blockage:
             subtree_span__[subroot_to] = subtree_span__[subroot_from]
             # update the component's blocked set
             #  for subtree_blocked_ in subtree_blocked__:
             #      subtree_blocked_[subroot_to] = subtree_blocked_[subroot_from]
-            for is_root_nb_ in is_root_nb__:
-                is_root_nb_[subroot_from] = False
-            is_root_nb__[root_to][subroot_to] = True
 
     # initialize pq
     for n in _T:
@@ -481,16 +498,16 @@ def constructor(
     while True:
         i += 1
         if i > maxiter:
-            error('maxiter reached (%d)', i)
+            _error('maxiter reached (%d)', i)
             break
-        debug('[%d]', i)
+        _debug('[%d]', i)
 
         # REFRESH entries of stale subtrees
 
         to_retarget_[:] = is_stale_ & is_extendable_
         if to_retarget_.any():
             stale_subtrees = tuple(to_retarget_.search(_ONE))
-            debug('stale_subtrees: %s', stale_subtrees)
+            _debug('stale_subtrees: %s', stale_subtrees)
             for subroot in stale_subtrees:
                 enqueue_best_union(subroot)
             is_stale_.setall(0)
@@ -507,14 +524,14 @@ def constructor(
         sr_kept = subroot_[v]
         # HACK: queue entries encode an insertion if sr_kept has edge (u, v) in S
         is_insertion = subroot_[u] != sr_u and (u, v) in S.edges
-        debug('<pop> «%d~%d», sr_dropped: <%d>, ins: %s', u, v, sr_u, is_insertion)
+        _debug('<pop> «%d~%d», sr_dropped: <%d>, ins: %s', u, v, sr_u, is_insertion)
         if (u, v) not in A.edges:
             if not is_insertion:
-                debug('<discard> «%d~%d» not in A anymore', u, v)
+                _debug('<discard> «%d~%d» not in A anymore', u, v)
                 is_stale_[sr_u] = True
                 continue
             elif (u, sr_u) not in A.edges or (v, sr_u) not in A.edges:
-                debug('<discard> «%d~%d~%d» not in A anymore', u, sr_u, v)
+                _debug('<discard> «%d~%d~%d» not in A anymore', u, sr_u, v)
                 is_stale_[sr_u] = True
                 continue
 
@@ -527,7 +544,7 @@ def constructor(
             if tradeoff < detours_growth:
                 A.remove_edge((sr_u if is_insertion else u), v)
                 is_stale_[sr_u] = True
-                debug(
+                _debug(
                     '<discard> «%d~%d»: tradeoff (%.3f) smaller than growth in detours (%.3f)',
                     u,
                     v,
@@ -536,12 +553,22 @@ def constructor(
                 )
                 continue
 
+        if straight_feeder_routes:
+            blocked = blocked_feeders(
+                *((sr_u, v, sr_u, sr_kept) if is_insertion else (u, v, sr_u, sr_kept))
+            )
+            if blocked:
+                A.remove_edge((sr_u if is_insertion else u), v)
+                is_stale_[sr_u] = True
+                _debug('<discard> «%d~%d»: would cross feeders %s', u, v, blocked)
+                continue
+
         # EFFECT union
 
         if method == 'radial_EW':
             if is_insertion:
                 # this is an insertion
-                debug('INSERTION of %d between %d and %d', sr_u, u, v)
+                _debug('INSERTION of %d between %d and %d', sr_u, u, v)
                 num_insertions += 1
                 # start by opening the receiver path
                 S.remove_edge(u, v)
@@ -553,7 +580,7 @@ def constructor(
                 u = sr_u
             elif v == sr_kept and subtree_[v].count() > 1:
                 # this is an extension and the union feeder must be other than sr_kept
-                debug('EXTENSION with sr_kept (%d) change', sr_kept)
+                _debug('EXTENSION with sr_kept (%d) change', sr_kept)
                 # find the free endpoint of the dropped subroot
                 if u == sr_u:
                     alt_sr_u = tail_[sr_u]
@@ -566,17 +593,17 @@ def constructor(
                 if d2roots[tail_v, alt_root_v] <= d2roots[alt_sr_u, root_u]:
                     # union subroot is the tail of kept subroot
                     reassign_subroot(sr_kept, tail_v, alt_root_v)
-                    debug('SUBROOT %d -> %d', sr_kept, tail_v)
+                    _debug('SUBROOT %d -> %d', sr_kept, tail_v)
                     sr_kept = tail_v
                 else:
                     # union subroot is in the dropped subtree: reverse union direction
                     if alt_sr_u != sr_u:
                         # subroot_[u] must change
                         reassign_subroot(sr_u, alt_sr_u, root_u)
-                        debug('SUBROOT %d -> %d', sr_u, alt_sr_u)
+                        _debug('SUBROOT %d -> %d', sr_u, alt_sr_u)
                     u, v, sr_u, sr_kept = v, u, sr_kept, alt_sr_u
                     pq.cancel(sr_u)
-                    debug('DIRECTION (%d, %d) -> (%d, %d)', v, u, u, v)
+                    _debug('DIRECTION (%d, %d) -> (%d, %d)', v, u, u, v)
                 # set the tail of the union outcome
                 tail_[sr_kept] = tail_[sr_u]
             elif u == tail_[sr_u]:
@@ -590,7 +617,7 @@ def constructor(
         root = A.nodes[sr_kept]['root']
 
         if use_blockage:
-            info('<angle_span> //%s//', union_span_[root])
+            _debug('<angle_span> //%s//', union_span_[root])
             subtree_span__[sr_kept] = union_span_
 
             for hop, corner, r, dropped in changes:
@@ -640,12 +667,12 @@ def constructor(
             A.nodes[t]['root'] = root
             subroot_[t] = sr_kept
         A.graph['rootmask__'][root] |= subtree_dropped
-        debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
-        #  debug('TAIL of %d: %d', sr_kept, tail_[sr_kept])
+        _debug('<add edge> «%d~%d» subroot <%d>', u, v, sr_kept)
+        #  _debug('TAIL of %d: %d', sr_kept, tail_[sr_kept])
         if _lggr.isEnabledFor(logging.DEBUG) and pq:
-            debug('heap top: <%d>, «%s» %.3f', pq[0][-2], pq[0][-1], pq[0][0])
+            _debug('heap top: <%d>, «%s» %.3f', pq[0][-2], pq[0][-1], pq[0][0])
         else:
-            debug('heap EMPTY')
+            _debug('heap EMPTY')
         S.add_edge(u, v)
         A.remove_edge(u, v)
         A.remove_edges_from(edge_conflicts(u, v, diagonals))
@@ -709,7 +736,7 @@ def constructor(
             subtree_nodes = tuple(subtree.search(_ONE))
             # by removing nodes, all the useless edges are discarded
             A.remove_nodes_from(subtree_nodes)
-            debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)
+            _debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)
             is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
             who_targets_[sr_kept] = None
         is_extendable_[sr_dropped] = False
