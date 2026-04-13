@@ -407,7 +407,8 @@ def constructor(
         )[method]
     except KeyError:
         raise ValueError(f'Unsupported constructor method: {method!r}')
-    use_blockage = weigh_detours and method in ('rootlust', 'radial_EW')
+    #  use_blockage = weigh_detours and method in ('rootlust', 'radial_EW')
+    use_blockage = weigh_detours and method != 'esau_williams'
 
     if use_blockage:
         add_link_blockmap(A)
@@ -653,7 +654,8 @@ def constructor(
 
         if method == 'rootlust' and ((u, v) if u < v else (v, u)) not in diagonals:
             # this fixes unions that result in 2 sides of a triangle being used but
-            #   where the unused side is not the longest one (this fix make it so)
+            #   where the unused side is not the longest one (this fix makes it so)
+            to_swap = ()
             for rot in ('cw', 'ccw'):
                 s = P_A[v][u][rot]
                 if P_A[s][v][rot] != u:
@@ -663,10 +665,8 @@ def constructor(
                 if subtree[s] and s in S[v]:
                     Aʹs = Aʹ[s]
                     if u in Aʹs and Aʹs[u]['length'] < Aʹs[v]['length']:
-                        S.remove_edge(v, s)
-                        S.add_edge(u, s)
-                        A.remove_edge(u, s)
-                        continue
+                        to_swap = (s, v, u)
+                        break
                 diagonal = diagonals.inv.get((s, v) if s < v else (v, s))
                 if diagonal is not None:
                     w, x = diagonal
@@ -674,12 +674,18 @@ def constructor(
                     if subtree[t] and t in S[v]:
                         Aʹt = Aʹ[t]
                         if u in Aʹt and Aʹt[u]['length'] < Aʹt[v]['length']:
-                            S.remove_edge(v, t)
-                            S.add_edge(u, t)
-                            A.remove_edge(u, t)
+                            to_swap = (t, v, u)
+                            break
+            if to_swap:
+                pivot, v, u = to_swap
+                S.remove_edge(v, pivot)
+                S.add_edge(u, pivot)
+                if pivot in A[u]:
+                    A.remove_edge(u, pivot)
 
         if capacity_left > 0:
-            if method in ('rootlust', 'radial_EW'):
+            #  if method in ('rootlust', 'radial_EW'):
+            if method != 'esau_williams':
                 # some methods need aggressive retargetting
                 is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
                 who_targets_[sr_kept].clear()
