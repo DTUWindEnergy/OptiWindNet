@@ -135,8 +135,8 @@ def constructor(
     #  hooks_of = [[t] for t in _T]
     # <is_stale_>: mask of stale subroots (in need of target refresh)
     is_stale_ = zeros(T)
-    # <is_not_full_>: mask of subroots with spare capacity
-    is_not_full_ = ones(T)
+    # <is_extendable_>: mask of subroots with spare capacity
+    is_extendable_ = ones(T)
     # <is_root_nb__>: mask of node coordinates that have an edge to a root (weigh_detours)
     is_root_nb__ = tuple(rootmask_.copy() for rootmask_ in rootmask__)
     # <is_corner_>: mask of node coordinates that are detour corners (weigh_detours)
@@ -448,9 +448,9 @@ def constructor(
             root_to,
         )
         pq.cancel(subroot_from)
-        is_not_full_[subroot_from] = False
-        is_not_full_[subroot_to] = True
-        # not necessary to reassign: is_stale_, is_not_full_
+        is_extendable_[subroot_from] = False
+        is_extendable_[subroot_to] = True
+        # not necessary to reassign: is_stale_
         for n in subtree_[subroot_from].search(_ONE):
             subroot_[n] = subroot_to
             A.nodes[n]['root'] = root_to
@@ -486,7 +486,7 @@ def constructor(
 
         # REFRESH entries of stale subtrees
 
-        to_retarget_[:] = is_stale_ & is_not_full_
+        to_retarget_[:] = is_stale_ & is_extendable_
         if to_retarget_.any():
             stale_subtrees = tuple(to_retarget_.search(_ONE))
             debug('stale_subtrees: %s', stale_subtrees)
@@ -510,9 +510,11 @@ def constructor(
         if (u, v) not in A.edges:
             if not is_insertion:
                 debug('<discard> «%d~%d» not in A anymore', u, v)
+                is_stale_[sr_u] = True
                 continue
             elif (u, sr_u) not in A.edges or (v, sr_u) not in A.edges:
                 debug('<discard> «%d~%d~%d» not in A anymore', u, sr_u, v)
+                is_stale_[sr_u] = True
                 continue
 
         if use_blockage:
@@ -522,6 +524,8 @@ def constructor(
             )
 
             if tradeoff < detours_growth:
+                A.remove_edge((sr_u if is_insertion else u), v)
+                is_stale_[sr_u] = True
                 debug(
                     '<discard> «%d~%d»: tradeoff (%.3f) smaller than growth in detours (%.3f)',
                     u,
@@ -692,7 +696,7 @@ def constructor(
             is_stale_[sr_kept] = True
         else:
             # max capacity reached: subtree full
-            is_not_full_[sr_kept] = False
+            is_extendable_[sr_kept] = False
             if sr_kept in pq.tags:
                 # this is required because of i=0 feeders
                 pq.cancel(sr_kept)
@@ -702,7 +706,7 @@ def constructor(
             debug('subtree complete <%d>: %s', sr_kept, subtree_nodes)
             is_stale_[list(who_targets_[sr_dropped] | who_targets_[sr_kept])] = True
             who_targets_[sr_kept] = None
-        is_not_full_[sr_dropped] = False
+        is_extendable_[sr_dropped] = False
         subtree_[sr_dropped] = None
         who_targets_[sr_dropped] = None
     # END: main loop
