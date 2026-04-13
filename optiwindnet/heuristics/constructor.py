@@ -4,6 +4,7 @@
 import logging
 import time
 from itertools import chain, tee
+from collections import defaultdict
 
 import numpy as np
 import networkx as nx
@@ -130,12 +131,16 @@ def constructor(
         subtree[t] = True
     # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
-    last_hop_of: list[int | None] = [t for t in _T]
-    hooks_of = [[t] for t in _T]
+    #  last_hop_of: list[int | None] = [t for t in _T]
+    #  hooks_of = [[t] for t in _T]
     # <is_stale_>: mask of stale subroots (in need of target refresh)
     is_stale_ = zeros(T)
     # <is_not_full_>: mask of subroots with spare capacity
     is_not_full_ = ones(T)
+    # <is_root_nb__>: mask of node coordinates that have an edge to a root (weigh_detours)
+    is_root_nb__ = tuple(rootmask_.copy() for rootmask_ in rootmask__)
+    # <is_corner_>: mask of node coordinates that are detour corners (weigh_detours)
+    is_corner_ = zeros(T)
     # memory allocation for temporary constructs
     # <to_retarget_>: mask of subroots that are stale and not full
     to_retarget_ = bitarray(T)
@@ -144,23 +149,19 @@ def constructor(
     # <subtree_span__>: pairs (most_CW, most_CCW) of extreme nodes of each subtree
     subtree_span__ = [[(t, t) for _ in roots] for t in _T]
     # <subtree_blocked__>: sets of blocked terminals from other components wrt each root
-    subtree_blocked__ = [[bitarray(T) for _ in _T] for _ in roots]
+    #  subtree_blocked__ = [[bitarray(T) for _ in _T] for _ in roots]
+    # <detours_via_prime_>: holds the detour segment upstream from corner (weigh_detours)
+    detours_via_prime_ = defaultdict(list)
 
     # mappings from components (identified by their subroots)
     # <who_targets_>: maps component to set of components queued to merge in
     who_targets_: list[set[int] | None] = [set() for _ in _T]
 
     # other structures
-    # <last_hops_count_>: number of times a particular node is used as the hop closest
-    #                   to root in the feeder link
-    last_hops_count_ = [1 for _ in _T]
     # <pq>: the smaller the entry, the higher the priority
     pq = PriorityQueue()
-    # enqueue_best_union()
     # <i>: iteration counter
     i = 0
-    # <prevented_crossing>: counter for edges discarded due to crossings
-    prevented_crossings = 0
     if method == 'radial_EW':
         # <tail_>: the endpoint of path subtrees (radial_EW)
         tail_ = [t for t in _T]
@@ -343,7 +344,7 @@ def constructor(
 
     # END: alternative methods of selecting the best edge to expand components
 
-    def get_union_blockage(u, v, sr_dropped, sr_kept):
+    def estimate_detours(u, v, sr_dropped, sr_kept):
         """Note: the detour_increase calculated here is an estimate."""
         # assess the union's angle span
         union_span_ = [
@@ -358,26 +359,44 @@ def constructor(
         ]
         blocked__ = A[u][v]['blocked__']
         detour_increase = 0.0
-        clones = []
-        is_last_hop_ = bitarray(count > 0 for count in last_hops_count_)
-        union_ = subtree_[sr_dropped] | subtree_[sr_kept]
-        for r, rootmask_, blocked_ in zip(roots, rootmask__, blocked__):
+        changes = []
+        #  is_last_hop_ = bitarray(count > 0 for count in last_hops_count_)
+        union = subtree_[sr_dropped] | subtree_[sr_kept]
+        for r, blocked_, is_root_nb_ in zip(roots, blocked__, is_root_nb__):
             lo, hi = union_span_[r]
-            for hop in (rootmask_ & is_last_hop_ & (blocked_ | union_)).search(_ONE):
-                count = last_hops_count_[hop] - (hop == sr_dropped) - (hop == sr_kept)
-                if hop == lo or hop == hi or count == 0:
-                    # no increase if the union span is not extending beyond hop's angle
-                    continue
+            hops = []
+            for prime in (is_root_nb_ & blocked_ & ~union).search(_ONE):
+                # feeder blocked by (u, v) was not previously detoured by union
+                former_extent = d2roots[prime, r]
+                if prime in detours_via_prime_:
+                    hops.extend(
+                        (prime, former_extent, None) for _ in detours_via_prime_[prime]
+                    )
+                if subtree_[prime] is not None:
+                    hops.append((prime, former_extent, None))
+            moved_by_uv_ = is_root_nb_ & is_corner_ & union
+            # the extremes (lo and hi) of union are not affected by (u, v)
+            moved_by_uv_[lo] = moved_by_uv_[hi] = False
+            for prime in moved_by_uv_.search(_ONE):
+                # edge (u, v) changes an existing feeder detour
+                # move to the previous coordinate in the detour
+                for hop in detours_via_prime_[prime]:
+                    #  former_extent = d2roots[prime, r] + extent
+                    former_extent = d2roots[prime, r] + np.hypot(
+                        *(VertexC[hop] - VertexC[prime])
+                    )
+                    hops.append((hop, former_extent, prime))
+            for hop, former_extent, dropped in hops:
                 extent_lo = d2roots[lo, r] + np.hypot(*(VertexC[lo] - VertexC[hop]))
                 extent_hi = d2roots[hi, r] + np.hypot(*(VertexC[hi] - VertexC[hop]))
-                extent, clone = (
+                extent, corner = (
                     (extent_lo, lo) if extent_lo <= extent_hi else (extent_hi, hi)
                 )
-                detour_increase += count * (extent - d2roots[hop, r]).item()
-                clones.append((hop, clone, count))
-        if clones:
-            debug('detour increase of %.3f for rerouting %s', detour_increase, clones)
-        return detour_increase, union_span_, clones
+                detour_increase += (extent - former_extent).item()
+                changes.append((hop, corner, r, dropped))
+        if changes:
+            info('detour increase of %.3f for rerouting %s', detour_increase, changes)
+        return detour_increase, union_span_, changes
 
     try:
         find_union = dict(
@@ -446,16 +465,12 @@ def constructor(
                 who.add(subroot_to)
         if use_blockage:
             subtree_span__[subroot_to] = subtree_span__[subroot_from]
-            for subtree_blocked_ in subtree_blocked__:
-                subtree_blocked_[subroot_to] = subtree_blocked_[subroot_from]
-            # this resets any previous detours of subroot_from
-            old_last_hop = last_hop_of[subroot_from]
-            hooks_of[old_last_hop].remove(subroot_from)
-            hooks_of[subroot_to].append(subroot_to)
-            last_hops_count_[last_hop_of[subroot_from]] -= 1
-            last_hop_of[subroot_from] = None
-            last_hop_of[subroot_to] = subroot_to
-            last_hops_count_[subroot_to] += 1
+            # update the component's blocked set
+            #  for subtree_blocked_ in subtree_blocked__:
+            #      subtree_blocked_[subroot_to] = subtree_blocked_[subroot_from]
+            for is_root_nb_ in is_root_nb__:
+                is_root_nb_[subroot_from] = False
+            is_root_nb__[root_to][subroot_to] = True
 
     # initialize pq
     for n in _T:
@@ -502,7 +517,7 @@ def constructor(
 
         if use_blockage:
             # only proceed if tradeoff is greater of equal to the growth in detours
-            detours_growth, union_span_, clones = get_union_blockage(
+            detours_growth, union_span_, changes = estimate_detours(
                 *((sr_u, v, sr_u, sr_kept) if is_insertion else (u, v, sr_u, sr_kept))
             )
 
@@ -570,29 +585,30 @@ def constructor(
         root = A.nodes[sr_kept]['root']
 
         if use_blockage:
-            debug('<angle_span> //%s//', union_span_[root])
+            info('<angle_span> //%s//', union_span_[root])
             subtree_span__[sr_kept] = union_span_
 
-            # update the last hops
-            last_hop_dropped = last_hop_of[sr_dropped]
-            last_hops_count_[last_hop_dropped] -= 1
-            hooks_of[last_hop_dropped].remove(sr_dropped)
-            last_hop_of[sr_dropped] = None
-            # reroute
-            for old_last_hop, new_last_hop, count in clones:
-                last_hops_count_[old_last_hop] -= count
-                last_hops_count_[new_last_hop] += count
-                for hook in hooks_of[old_last_hop]:
-                    last_hop_of[hook] = new_last_hop
-                hooks_of[new_last_hop].extend(hooks_of[old_last_hop])
-                hooks_of[old_last_hop] = []
+            for hop, corner, r, dropped in changes:
+                if dropped is not None:
+                    # detour corner swap
+                    # hop->dropped->r changes to hop->corner->r
+                    is_corner_[dropped] = False
+                    if dropped in detours_via_prime_:
+                        del detours_via_prime_[dropped]
+                    is_root_nb__[r][dropped] = False
+                else:
+                    # detour segment creation (hop->corner->r)
+                    is_root_nb__[r][hop] = False
+                detours_via_prime_[corner].append(hop)
+                is_corner_[corner] = True
+                is_root_nb__[r][corner] = True
 
             # update the component's blocked set
-            for r, subtree_blocked_ in zip(roots, subtree_blocked__):
-                subtree_blocked_[sr_kept] |= (
-                    subtree_blocked_[sr_dropped] | A[u][v]['blocked__'][r]
-                )
-                subtree_blocked_[sr_kept] &= ~subtree_[sr_kept]
+            #  for r, subtree_blocked_ in zip(roots, subtree_blocked__):
+            #      subtree_blocked_[sr_kept] |= (
+            #          subtree_blocked_[sr_dropped] | A[u][v]['blocked__'][r]
+            #      )
+            #      subtree_blocked_[sr_kept] &= ~subtree_[sr_kept]
 
         # add edge to effect union of subtree of u to subtree of v (via subroot of v)
         subtree = subtree_[sr_kept]
@@ -611,6 +627,7 @@ def constructor(
 
         # assign root, subroot and subtree to the newly added nodes
         root_u = A.nodes[u]['root']
+        is_root_nb__[root_u][sr_dropped] = is_corner_[sr_dropped]
         if root_u != root:
             rootmask__[root_u] &= ~subtree_dropped
             rootmask__[root] |= subtree_dropped
@@ -701,9 +718,8 @@ def constructor(
     S.graph.update(
         runtime=time.perf_counter() - start_time,
         capacity=capacity,
-        creator='EW_presolver',
+        creator='constructor',
         iterations=i,
-        prevented_crossings=prevented_crossings,
         method_options=dict(
             method=method,
             fun_fingerprint=_constructor_fun_fingerprint,
