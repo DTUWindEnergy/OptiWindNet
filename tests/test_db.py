@@ -38,10 +38,12 @@ def test_open_database(tmp_path):
             pass
 
     # create the DB
-    db = open_database(str(dbfile), create_db=True)
-    # Verify tables were created
-    assert db is not None
-    db.close()
+    try:
+        db = open_database(str(dbfile), create_db=True)
+        # Verify tables were created
+        assert db is not None
+    finally:
+        db.close()
 
 
 def test_database_connection_closes_db(tmp_path):
