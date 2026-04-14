@@ -13,7 +13,14 @@ from numba.typed import List
 import numpy as np
 from scipy.spatial import ConvexHull
 
-from .geometric import CoordPair, CoordPairs, IndexPairs, area_from_polygon_vertices, rotating_calipers, rotate
+from .geometric import (
+    CoordPair,
+    CoordPairs,
+    IndexPairs,
+    area_from_polygon_vertices,
+    rotating_calipers,
+    rotate,
+)
 from .interarraylib import L_from_site
 
 _lggr = logging.getLogger(__name__)
@@ -53,7 +60,9 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
 
 
 @nb.njit(cache=True, inline='always')
-def _walk_along_perimeter(polygonC: CoordPairs, max_loops: int) -> tuple[list[tuple[int, int]], list[tuple[float, float]]]:
+def _walk_along_perimeter(
+    polygonC: CoordPairs, max_loops: int
+) -> tuple[list[tuple[int, int]], list[tuple[float, float]]]:
     """Find crossings of the polygons' perimeter with the unit grid.
 
     Auxiliar function to poisson_disc_filler(). Used for identifying unit cells that
@@ -91,11 +100,11 @@ def _walk_along_perimeter(polygonC: CoordPairs, max_loops: int) -> tuple[list[tu
             )
             y_not_x = np.argmin(t)
             if y_not_x:
-                frac[:] = frac[0] + t[1]*vec[0], 1.0*~is_vec_gt0[1]
+                frac[:] = frac[0] + t[1] * vec[0], 1.0 * ~is_vec_gt0[1]
                 point = ij[0] + frac[0], ij[1] + is_vec_gt0[1]
                 ij[1] += vec_sign[1]
             else:
-                frac[:] = 1.0*~is_vec_gt0[0], frac[1] + t[0]*vec[1]
+                frac[:] = 1.0 * ~is_vec_gt0[0], frac[1] + t[0] * vec[1]
                 point = ij[0] + is_vec_gt0[0], ij[1] + frac[1]
                 ij[0] += vec_sign[0]
         xy, ij = xy_fwd, ij_fwd
@@ -358,8 +367,8 @@ def poisson_disc_filler(
             repel_radius_sq = 0.0
     obstacleS__ = List.empty_list(nb.float64[:, :])
     for obsC_ in obstacleC__:
-      obstacleS__.append((obsC_ - offsetC) / cell_size)
-      #  obstacleS__.append((obsC_[::-1] - offsetC) / cell_size)
+        obstacleS__.append((obsC_ - offsetC) / cell_size)
+        #  obstacleS__.append((obsC_[::-1] - offsetC) / cell_size)
 
     # Alternate implementation using np.mgrid
     #  pts = np.reshape(
@@ -377,11 +386,18 @@ def poisson_disc_filler(
     for obstacleS_ in obstacleS__:
         is_corner_within_border_ &= ~_contains_np(obstacleS_, cornerS_)
 
-    is_corner_within_border = is_corner_within_border_.reshape((i_len + 1, j_len + 1), copy=False)
+    is_corner_within_border = is_corner_within_border_.reshape(
+        (i_len + 1, j_len + 1), copy=False
+    )
 
     cell_corners = np.lib.stride_tricks.as_strided(
         is_corner_within_border,
-        shape=(2, 2, is_corner_within_border.shape[0] - 1, is_corner_within_border.shape[1] - 1),
+        shape=(
+            2,
+            2,
+            is_corner_within_border.shape[0] - 1,
+            is_corner_within_border.shape[1] - 1,
+        ),
         strides=is_corner_within_border.strides * 2,
         writeable=False,
     )
@@ -393,7 +409,9 @@ def poisson_disc_filler(
         cell_covers_polygon__[i, j] = True
         cell_strictly_inside_polygon__[i, j] = False
 
-    cell_intercepts_polygon__ = np.logical_and(cell_covers_polygon__, ~cell_strictly_inside_polygon__)
+    cell_intercepts_polygon__ = np.logical_and(
+        cell_covers_polygon__, ~cell_strictly_inside_polygon__
+    )
 
     if RepellerS is not None and repel_radius >= min_dist:
         # the cells that contain the repellers can be discarded
@@ -403,7 +421,7 @@ def poisson_disc_filler(
     # useful plot for debugging purposes only
     if plot:
         fig, ax = plt.subplots(layout='constrained')
-        ax.pcolormesh(cell_covers_polygon__.T + 2*cell_intercepts_polygon__.T)
+        ax.pcolormesh(cell_covers_polygon__.T + 2 * cell_intercepts_polygon__.T)
         ax.plot(*np.vstack((BorderS, BorderS[:1])).T, 'k', lw=1)
         for obstacleS_ in obstacleS__:
             ax.plot(*np.vstack((obstacleS_, obstacleS_[:1])).T, 'navy', lw=1)
@@ -497,25 +515,30 @@ def turbinate(
         metric='area',
     )
     # angle that minimizes the number of cells created by poisson_disc_filler
-    rotation = best_caliper_angle*180./np.pi
+    rotation = best_caliper_angle * 180.0 / np.pi
 
     RootC = VertexC[-R:]
     obstacles = L.graph.get('obstacles', [])
     obstacleC__ = [VertexC[obs] for obs in obstacles]
 
-    TerminalC = rotate(poisson_disc_filler(
-        T,
-        d,
-        BorderC=rotate(BorderC, -rotation),
-        RepellerC=rotate(RootC, -rotation),
-        obstacleC__=[rotate(obsC_, -rotation) for obsC_ in obstacleC__],
-        repel_radius=(d if root_clearance is None else root_clearance),
-        max_iter=max_iter,
-        rounds=rounds,
-        plot=plot,
-    ), rotation)
+    TerminalC = rotate(
+        poisson_disc_filler(
+            T,
+            d,
+            BorderC=rotate(BorderC, -rotation),
+            RepellerC=rotate(RootC, -rotation),
+            obstacleC__=[rotate(obsC_, -rotation) for obsC_ in obstacleC__],
+            repel_radius=(d if root_clearance is None else root_clearance),
+            max_iter=max_iter,
+            rounds=rounds,
+            plot=plot,
+        ),
+        rotation,
+    )
     T = TerminalC.shape[0]
-    border_sizes = np.array([border.shape[0]] + [obsC_.shape[0] for obsC_ in obstacleC__])
+    border_sizes = np.array(
+        [border.shape[0]] + [obsC_.shape[0] for obsC_ in obstacleC__]
+    )
     B = border_sizes.sum()
     obstacle_idxs = np.cumsum(border_sizes) + T
     return L_from_site(
