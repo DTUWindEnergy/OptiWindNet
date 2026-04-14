@@ -27,6 +27,13 @@ share/python-wheels/
 MANIFEST
 optiwindnet/version.py
 
+# AI agents
+scripts/
+artifacts/
+AGENTS.md
+.codex
+.claude/
+
 # auto-generated backup files
 *.backup
 
