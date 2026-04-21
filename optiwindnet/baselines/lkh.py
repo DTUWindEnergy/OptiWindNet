@@ -64,6 +64,7 @@ def lkh(
     complete: bool = False,
     keep_log: bool = False,
     seed: int | None = None,
+    initial_tour_nodes: list[int] | None = None,
 ) -> nx.Graph:
     """
     Lin-Kernighan-Helsgaun via LKH-3 binary.
@@ -85,6 +86,7 @@ def lkh(
       complete: make the full graph over A available (links not in A assumed direct)
       keep_log: save the LKH text output to graph attr 'method_log'
       seed: for the pseudo-random number generator (if None: random seed)
+      initial_tour_nodes: optional initial tour for LKH (1-indexed nodes)
     Returns:
       Solution topology S
     """
@@ -126,6 +128,7 @@ def lkh(
     )
 
     output_fname = 'solution.out'
+    initial_tour_fname = 'initial.tour'
     specs = dict(
         NAME=A.graph.get('name', 'unnamed'),
         TYPE='OVRP',
@@ -199,6 +202,22 @@ def lkh(
         params['PROBLEM_FILE'] = problem_fpath
         params_fpath = os.path.join(tmpdir, params_fname)
         params['MTSP_SOLUTION_FILE'] = os.path.join(tmpdir, output_fname)
+        if initial_tour_nodes is not None:
+            initial_tour_fpath = os.path.join(tmpdir, initial_tour_fname)
+            Path(initial_tour_fpath).write_text(
+                '\n'.join(
+                    (
+                        f'NAME: {A.graph.get("name", "unnamed")}',
+                        'TYPE: TOUR',
+                        'TOUR_SECTION',
+                        *(str(node) for node in initial_tour_nodes),
+                        '-1',
+                        'EOF',
+                    )
+                )
+            )
+            params['INITIAL_TOUR_FILE'] = initial_tour_fpath
+            params['INITIAL_TOUR_FRACTION'] = 1.0
         Path(params_fpath).write_text(
             '\n'.join((f'{k} = {v}' if v is not None else k) for k, v in params.items())
         )
@@ -252,6 +271,7 @@ def lkh(
     if vehicles is not None:
         solver_details.update(vehicles=vehicles)
 
+    max_load = 0
     if not penalty or result.stderr:
         info('===stdout===\n%s', result.stdout.decode('utf8'))
         error('===stderr===\n%s', result.stderr.decode('utf8'))
@@ -294,6 +314,8 @@ def lkh(
             ).groups()
         )
     for subtree_id, branch in enumerate(branches):
+        branch_load = len(branch)
+        max_load = max(max_load, branch_load)
         loads = range(len(branch), 0, -1)
         S.add_nodes_from(
             ((n, {'load': load}) for n, load in zip(branch, loads)), subtree=subtree_id
@@ -306,6 +328,7 @@ def lkh(
         S.add_edges_from(zip(branch_roll, branch, edgeD))
     root_load = sum(S.nodes[n]['load'] for n in S.neighbors(-1))
     S.nodes[-1]['load'] = root_load
+    S.graph['max_load'] = max_load
     assert root_load == T, 'ERROR: root node load does not match T.'
     return S
 
@@ -370,7 +393,14 @@ def iterative_lkh(
     nx.set_node_attributes(A, -1, 'root')
     add_link_blockmap(A)
     _prune_bad_links(A, math.ceil(2.4 * capacity))
+    T = A.graph['T']
+    vehicles_min = math.ceil(T / capacity)
+    if vehicles is None or vehicles <= vehicles_min:
+        vehicles_for_lkh = vehicles_min
+    else:
+        vehicles_for_lkh = vehicles
     i = 0
+    initial_tour_nodes = None
     while True:
         # solve
         S = lkh(
@@ -385,15 +415,28 @@ def iterative_lkh(
             complete=complete,
             keep_log=keep_log,
             seed=seed,
+            initial_tour_nodes=initial_tour_nodes,
         )
         # repair
         S = repair_routeset_path(S, A)
         # TODO: accumulate solution_time throughout the iterations
         #       (makes sense to add a new field)
         crossings = S.graph.get('outstanding_crossings', [])
-        if not crossings or i == max_retries:
+        max_load = S.graph.get('max_load', 0)
+        over_capacity = max_load > capacity
+        if over_capacity:
+            warn(
+                'Capacity violated in LKH solution: '
+                f'max_load ({max_load}) > capacity ({capacity}). Retrying.'
+            )
+        if (not crossings and not over_capacity) or i == max_retries:
             break
         i += 1
+        initial_tour_nodes = _initial_tour_from_solution(
+            S,
+            original_dimension=A.graph['R'] + A.graph['T'],
+            vehicles=vehicles_for_lkh,
+        )
         # prepare A for retry
         crossing_counterparts = defaultdict(list)
         for uv, st in crossings:
@@ -426,6 +469,42 @@ def iterative_lkh(
                 A.remove_edge(*uv)
     if i > 0:
         S.graph['retries'] = i
-        if crossings:
-            warn('Solution contains crossings (max_retries reached)')
+        if crossings or max_load > capacity:
+            warn('Solution remains invalid (max_retries reached)')
     return S
+
+
+def _initial_tour_from_solution(
+    S: nx.Graph, original_dimension: int, vehicles: int
+) -> list[int]:
+    branches = defaultdict(list)
+    for n, nodeD in S.nodes(data=True):
+        if n < 0:
+            continue
+        subtree = nodeD.get('subtree')
+        if subtree is None:
+            continue
+        branches[subtree].append((nodeD.get('load', 0), n))
+    if branches:
+        ordered_nodes = [
+            n + 1
+            for _, branch in sorted(branches.items())
+            for _, n in sorted(branch, reverse=True)
+        ]
+    else:
+        ordered_nodes = sorted(n + 1 for n in S.nodes if n >= 0)
+    # LKH expects each customer id [1, ..., original_dimension - 1] exactly once.
+    # Repaired or incomplete intermediary solutions may miss some nodes.
+    seen = set()
+    unique_nodes = []
+    for n in ordered_nodes:
+        if n not in seen:
+            unique_nodes.append(n)
+            seen.add(n)
+    for n in range(1, original_dimension):
+        if n not in seen:
+            unique_nodes.append(n)
+    # For CVRP/OVRP, LKH transforms to TSP by appending `vehicles - 1` depot clones.
+    # Their ids are [original_dimension + 1, ..., original_dimension + vehicles - 1].
+    depot_clones = range(original_dimension + 1, original_dimension + vehicles)
+    return unique_nodes + list(depot_clones) + [original_dimension]
