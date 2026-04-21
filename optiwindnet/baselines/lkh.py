@@ -477,34 +477,22 @@ def iterative_lkh(
 def _initial_tour_from_solution(
     S: nx.Graph, original_dimension: int, vehicles: int
 ) -> list[int]:
-    branches = defaultdict(list)
-    for n, nodeD in S.nodes(data=True):
-        if n < 0:
-            continue
-        subtree = nodeD.get('subtree')
-        if subtree is None:
-            continue
-        branches[subtree].append((nodeD.get('load', 0), n))
-    if branches:
-        ordered_nodes = [
-            n + 1
-            for _, branch in sorted(branches.items())
-            for _, n in sorted(branch, reverse=True)
-        ]
-    else:
-        ordered_nodes = sorted(n + 1 for n in S.nodes if n >= 0)
+    # Walk S from each root outward. repair_routeset_path guarantees S is
+    # non-branching, so every non-root node has degree 1 (leaf) or 2.
+    R = S.graph['R']
+    ordered_nodes: list[int] = []
+    for root in range(-R, 0):
+        for cur in S.neighbors(root):
+            rev = root
+            while True:
+                ordered_nodes.append(cur + 1)
+                nb = S[cur]
+                if len(nb) == 1:
+                    break  # leaf
+                a, b = nb
+                rev, cur = cur, a if b == rev else b
     # LKH expects each customer id [1, ..., original_dimension - 1] exactly once.
-    # Repaired or incomplete intermediary solutions may miss some nodes.
-    seen = set()
-    unique_nodes = []
-    for n in ordered_nodes:
-        if n not in seen:
-            unique_nodes.append(n)
-            seen.add(n)
-    for n in range(1, original_dimension):
-        if n not in seen:
-            unique_nodes.append(n)
     # For CVRP/OVRP, LKH transforms to TSP by appending `vehicles - 1` depot clones.
     # Their ids are [original_dimension + 1, ..., original_dimension + vehicles - 1].
     depot_clones = range(original_dimension + 1, original_dimension + vehicles)
-    return unique_nodes + list(depot_clones) + [original_dimension]
+    return ordered_nodes + list(depot_clones) + [original_dimension]

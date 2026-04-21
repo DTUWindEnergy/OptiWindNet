@@ -15,16 +15,6 @@ def _make_routeset(branches: list[list[int]]) -> nx.Graph:
     return S
 
 
-def test_initial_tour_from_solution_orders_branches_and_backfills_missing_nodes():
-    S = _make_routeset([[0, 1], [3]])
-    initial_tour = lkh_mod._initial_tour_from_solution(
-        S,
-        original_dimension=5,
-        vehicles=3,
-    )
-    assert initial_tour == [1, 2, 4, 3, 6, 7, 5]
-
-
 def test_initial_tour_from_solution_preserves_max_load():
     S = _make_routeset([[0, 1, 2], [3]])
     S.graph['max_load'] = 3
