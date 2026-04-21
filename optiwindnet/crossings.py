@@ -315,9 +315,11 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
     # ¿do we need a special case for a detour segment going through a node?
 
     # check detour nodes for branch-splitting
-    for d, d_ in zip(range(T, T + D), fnT[T : T + D].tolist()):
-        if G.degree[d_] == 1:
-            # trivial case: no way to break a branch apart
+    d_start = T + B + C
+    for d, d_ in enumerate(fnT[d_start : d_start + D].tolist(), start=d_start):
+        if d_ >= T or G.degree[d_] == 1:
+            # either the detour node is over a border vertex or the node is a leaf:
+            #   no branch splitting possible
             continue
         dA, dB = (fnT[nb] for nb in G[d])
         bunch = [fnT[nb].item() for nb in G[d_]]

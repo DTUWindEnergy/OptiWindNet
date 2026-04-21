@@ -66,5 +66,4 @@ def test_validate_routeset():
     # with detours
     wfn2 = tiny_wfn(cables=1)
     G2 = wfn2.G
-    with pytest.raises(KeyError):
-        validate_routeset(G2)
+    assert validate_routeset(G2) == []
