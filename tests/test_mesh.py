@@ -1,11 +1,15 @@
 import numpy as np
 import networkx as nx
 import condeltri as cdt
+import shapely as shp
 
 from optiwindnet.mesh import (
+    _build_edge_line_tree,
     _edges_and_hull_from_cdt,
     A_graph,
+    make_planar_embedding,
 )
+from optiwindnet.geometric import is_crossing
 from .helpers import tiny_wfn
 
 
@@ -75,3 +79,63 @@ def test_edges_and_hull_from_cdt_all():
     assert isinstance(ebunch, list) and len(ebunch) > 0
     assert isinstance(hull, list) and len(hull) > 0
     assert all(isinstance(n, (int, np.integer)) for n in hull)
+
+
+def test_build_edge_line_tree_query_crosses():
+    VertexC = np.array(
+        [
+            [0.0, 0.0],
+            [2.0, 2.0],
+            [0.0, 2.0],
+            [2.0, 0.0],
+            [0.0, 1.0],
+            [2.0, 1.0],
+            [3.0, 3.0],
+            [4.0, 4.0],
+        ],
+        dtype=float,
+    )
+    constraint_edges, _, tree = _build_edge_line_tree(VertexC, {(4, 5), (6, 7)})
+    probe = [shp.LineString(VertexC[[0, 1]]), shp.LineString(VertexC[[2, 3]])]
+    pairs = tree.query(probe, predicate='crosses')
+
+    assert constraint_edges == ((4, 5), (6, 7))
+    assert pairs.shape == (2, 2)
+    assert sorted(zip(*pairs.tolist(), strict=False)) == [(0, 0), (1, 0)]
+
+
+def test_make_planar_embedding_marks_exact_los_crossing_without_border_path(
+    monkeypatch,
+):
+    import optiwindnet.mesh as mesh_mod
+
+    L = tiny_wfn(optimize=False).L
+    original = mesh_mod.nx.single_source_dijkstra
+
+    def fake_single_source_dijkstra(G, source, *args, **kwargs):
+        lengths, paths = original(G, source, *args, **kwargs)
+        if source == -1 and 1 in paths:
+            paths = dict(paths)
+            paths[1] = [-1, 0, 1]
+        return lengths, paths
+
+    monkeypatch.setattr(
+        mesh_mod.nx, 'single_source_dijkstra', fake_single_source_dijkstra
+    )
+
+    P, A = make_planar_embedding(L)
+    VertexC = A.graph['VertexC']
+    blocked = any(
+        is_crossing(
+            VertexC[-1],
+            VertexC[1],
+            VertexC[u],
+            VertexC[v],
+            touch_is_cross=False,
+        )
+        for u, v in P.graph['constraint_edges']
+        if 1 not in (u, v)
+    )
+
+    assert blocked
+    assert A.nodes[1]['los_d2root'][-1] > 0.0

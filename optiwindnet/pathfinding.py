@@ -155,7 +155,7 @@ class PathFinder:
             (r, n)
             for r in range(-R, 0)
             for n in G.neighbors(r)
-            if 'straight2root_' in A.nodes[n] and r in A.nodes[n]['straight2root_']
+            if 'los_d2root' in A.nodes[n] and r in A.nodes[n]['los_d2root']
         )
 
         self.G, self.Xings, self.tentative = G, Xings, set(tentative)
