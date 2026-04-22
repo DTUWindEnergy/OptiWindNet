@@ -281,7 +281,7 @@ def hgs_cvrp(
 
     For multi-root instances, the vehicles (feeders) parameter can only be left
     undefined (meaning unlimited) or set to the minimum feasible value. Attempting
-    to set other values will result in a warning and the minimum being used. 
+    to set other values will result in a warning and the minimum being used.
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause the
