@@ -169,36 +169,7 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
     if routeset.detextra is not None:
         G.graph['detextra'] = routeset.detextra
 
-    edges = routeset.edges
-    clone2prime = routeset.clone2prime
-    if routeset.stuntC:
-        stuntC = np.lib.format.read_array(io.BytesIO(routeset.stuntC))
-        stunt_count = len(stuntC)
-        lo = nodeset.T + nodeset.B
-        hi = lo + stunt_count
-        edges = np.asarray(routeset.edges, dtype=int)
-        edge_targets_stunt = (lo <= edges) & (edges < hi)
-        if np.any(edge_targets_stunt):
-            first = int(np.flatnonzero(edge_targets_stunt)[0])
-            target = int(edges[first])
-            raise ValueError(
-                f'RouteSet {routeset.id} edge target points into stunt range: '
-                f'edges[{first}]={target}, stunt range=[{lo}, {hi})'
-            )
-        edges[edges >= hi] -= stunt_count
-        if clone2prime:
-            VertexC = G.graph['VertexC']
-            clone2prime = np.asarray(clone2prime, dtype=int)
-            sqdist = np.sum((stuntC[:, None, :] - VertexC[None, :, :]) ** 2, axis=2)
-            nearest = np.argmin(sqdist, axis=1)
-            clone_targets_stunt = (lo <= clone2prime) & (clone2prime < hi)
-            clone2prime[clone_targets_stunt] = nearest[
-                clone2prime[clone_targets_stunt] - lo
-            ]
-            clone2prime = clone2prime.tolist()
-        edges = edges.tolist()
-
-    untersify_to_G(G, terse=edges, clone2prime=clone2prime)
+    untersify_to_G(G, terse=routeset.edges, clone2prime=routeset.clone2prime)
     calc_length = G.size(weight='length')
     if abs(calc_length / routeset.length - 1) > 1e-5:
         G.graph['length_mismatch_on_db_read'] = calc_length - routeset.length
@@ -384,9 +355,8 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
         capacity=G.graph['capacity'],
         length=length,
         creator=G.graph['creator'],
-        is_normalized=G.graph.get('is_normalized', False),
         runtime=G.graph['runtime'],
-        num_gates=[len(G[root]) for root in range(-R, 0)],
+        feeders_per_root=[len(G[root]) for root in range(-R, 0)],
         misc=misc,
         **terse_pack,
     )
@@ -397,7 +367,6 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     pack_if_given = (  # key, function to prepare data
         ('detextra', None),
         ('num_diagonals', None),
-        ('valid', None),
         ('tentative', concatenate_tuples),
         ('rogue', concatenate_tuples),
     )

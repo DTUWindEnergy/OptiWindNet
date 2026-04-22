@@ -41,14 +41,12 @@ class Machine(BaseModel):
 class RouteSet(BaseModel):
     id: int
     handle: str
-    valid: bool | None
     T: int
     R: int
     capacity: int
     length: float
-    is_normalized: bool
     runtime: float | None
-    num_gates: Any
+    feeders_per_root: Any
     C: int
     D: int
     creator: str | None
@@ -58,7 +56,6 @@ class RouteSet(BaseModel):
     rogue: Any
     timestamp: datetime | None
     misc: Any
-    stuntC: bytes | None
     clone2prime: Any
     edges: Any
     nodes: NodeSet
