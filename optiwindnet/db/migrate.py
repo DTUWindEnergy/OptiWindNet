@@ -100,6 +100,7 @@ def migrate(v2_path, v3_path):
         # JSON columns in RouteSet
         json_cols = {
             'num_gates',
+            'feeders_per_root',
             'edges',
             'tentative',
             'rogue',
@@ -116,6 +117,14 @@ def migrate(v2_path, v3_path):
                     val = row_dict[col]
                     if isinstance(val, str):
                         row_dict[col] = json.loads(val)
+
+            if 'feeders_per_root' not in row_dict and 'num_gates' in row_dict:
+                row_dict['feeders_per_root'] = row_dict.pop('num_gates')
+            else:
+                row_dict.pop('num_gates', None)
+
+            for col in ('valid', 'is_normalized', 'stuntC'):
+                row_dict.pop(col, None)
 
             # Ensure misc is never NULL
             if row_dict.get('misc') is None:

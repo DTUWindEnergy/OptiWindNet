@@ -14,7 +14,6 @@ from contextlib import contextmanager
 from peewee import (
     AutoField,
     BlobField,
-    BooleanField,
     CharField,
     DatabaseProxy,
     DateTimeField,
@@ -78,15 +77,13 @@ class Machine(BaseModel):
 class RouteSet(BaseModel):
     id = AutoField()
     handle = CharField()
-    valid = BooleanField(null=True)
     T = IntegerField()  # num_nodes
     R = IntegerField()  # num_roots
     capacity = IntegerField()
     length = FloatField()
-    is_normalized = BooleanField()
     # runtime always in [s]
     runtime = FloatField(null=True)
-    num_gates = JSONField()
+    feeders_per_root = JSONField()
     # number of contour nodes
     C = IntegerField(default=0)
     # number of detour nodes
@@ -101,7 +98,6 @@ class RouteSet(BaseModel):
     rogue = JSONField(null=True)
     timestamp = DateTimeField(null=True, default=_naive_utc_now)
     misc = JSONField(default=dict)  # never NULL, defaults to {}
-    stuntC = BlobField(null=True)  # coords of border stunts
     # len(clone2prime) == C + D
     clone2prime = JSONField(null=True)
     edges = JSONField()
