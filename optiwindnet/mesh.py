@@ -1355,27 +1355,51 @@ def make_planar_embedding(
     if concavities or obstacles:
         # Use P_paths to obtain estimates of d2roots taking into consideration
         # the concavities and obstacle zones.
+        # pre-allocate the line-of-sight (LOS) segments index array
+        los_idx = np.empty((T, 2), dtype=int)
+        los_idx[:, 1] = np.arange(T)
         for r in range(-R, 0):
-            lengths, paths = nx.single_source_dijkstra(P_paths, r, weight='length')
-            los_idx = np.empty((T, 2), dtype=int)
             los_idx[:, 0] = r
-            los_idx[:, 1] = np.arange(T)
             crossing_pairs = constraint_los_tree.query(
                 shp.linestrings(VertexS[los_idx]), predicate='crosses'
             )
-            if crossing_pairs.size > 0:
-                los_crossing_nodes = np.unique(crossing_pairs[0]).tolist()
-            else:
-                los_crossing_nodes = []
+            if crossing_pairs.size == 0:
+                continue
+            los_crossing_nodes = set(crossing_pairs[0].tolist())
+            lengths, paths = nx.single_source_dijkstra(P_paths, r, weight='length')
             for n in los_crossing_nodes:
                 path = paths[n]
                 if all(p < T for p in path[1:-1]):
-                    debug('d2roots[%d, %d] updated by exact LOS crossing', n, r)
-                    # over-estimates the length (no border vertex to do string-pulling)
+                    # no border vertex to do string-pulling: heuristic estimate.
+                    # Remove leading nodes that have LOS to r, keeping only
+                    # the last LOS node before the first non-LOS node.
+                    # n is always in los_crossing_nodes, so next() always finds one.
+                    last_kept = next(p for p in path[1:] if p in los_crossing_nodes)
+                    if last_kept >= 0:
+                        # last_kept is the last LOS node before the first non-LOS
+                        pruned_len = (
+                            d2roots[last_kept, r] + lengths[n] - lengths[last_kept]
+                        )
+                    else:
+                        # no LOS intermediate to shortcut; pruned == original path
+                        pruned_len = lengths[n]
+                    debug(
+                        'd2roots[%d, %d] updated by LOS pruning (path %s prunned at %d)',
+                        n,
+                        r,
+                        path,
+                        last_kept,
+                    )
                     _record_nonstraight_root_distance(
-                        A, d2roots, n, r, float(lengths[n])
+                        # empirical weighting of pruned_len and euclidean distance
+                        A,
+                        d2roots,
+                        n,
+                        r,
+                        (3 * d2roots[n, r] + pruned_len) / 4,
                     )
                     continue
+                # do string pulling to estimate the detour length
                 debug('updating d2root of ⟨%d, %d⟩ (path %s)', r, n, path)
                 b_path = (*(p for p in path[1:-1] if p >= T), n)
                 s = r
