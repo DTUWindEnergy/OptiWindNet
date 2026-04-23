@@ -392,7 +392,6 @@ class PathFinder:
         I_path = self.I_path
         ST = self.ST
         num_traversals = self.num_traversals
-        promising_bar = 1.0 + self.promising_margin
         bad_streak_limit = self.bad_streak_limit
 
         # for next_left, next_right, new_portal_iter in portal_iter:
@@ -495,9 +494,13 @@ class PathFinder:
             pseudoapex = paths[apex_eff]
             d_new = pseudoapex.dist + d_hop
             keeper = I_path[_new].get(sector_new)
-            is_promising = bad_streak < bad_streak_limit and (
-                keeper is None or d_new < promising_bar * paths[keeper].dist
-            )
+            # Prune advancers that haven't improved any (node, sector) incumbent
+            # for `bad_streak_limit` consecutive portals. The previous margin
+            # check (d_new < promising_bar * keeper.dist) was a local comparison
+            # that killed advancers passing through a well-served vertex en
+            # route to a vertex they alone could reach optimally, producing
+            # suboptimal detours (and resulting crossings).
+            is_promising = bad_streak < bad_streak_limit
             # for supertriangle vertices, do not update the d_ref used for prioritizing
             # (it would be sent to the bottom of heapq beacause of the big distances)
             if _new < ST:
