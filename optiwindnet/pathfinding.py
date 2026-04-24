@@ -182,6 +182,26 @@ class PathFinder:
             # G has edges that shortcut some longer paths along P edges.
             # We need to put these paths back in G to flip some of P's edges.
             # The changes made here are undone in `create_detours()`.
+            P_paths_shortcuts = A.graph.get('P_paths_shortcuts', {})
+
+            def expand_P_paths_edge(s, t):
+                key = (s, t) if s < t else (t, s)
+                path = P_paths_shortcuts.get(key)
+                if path is None:
+                    return [s, t]
+                if path[0] != s:
+                    path = path[::-1]
+                expanded = [path[0]]
+                for u, v in zip(path[:-1], path[1:]):
+                    expanded.extend(expand_P_paths_edge(u, v)[1:])
+                return expanded
+
+            def expand_P_paths_path(path):
+                expanded = [path[0]]
+                for s, t in zip(path[:-1], path[1:]):
+                    expanded.extend(expand_P_paths_edge(s, t)[1:])
+                return expanded
+
             edges_to_remove = []
             edges_to_add = []
             clone_offset = T + B
@@ -205,6 +225,7 @@ class PathFinder:
                         v = choices[0]
                 else:
                     v = t
+                midpath = expand_P_paths_path([s] + midpath + [t])[1:-1]
                 while v != t:
                     stored_edges.append((u, v, G[u][v]))
                     edges_to_remove.append((u, v))

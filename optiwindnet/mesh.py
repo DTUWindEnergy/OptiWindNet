@@ -1129,6 +1129,19 @@ def make_planar_embedding(
     debug('PART L')
     P_edges.difference_update((u, v) for v in supertriangle for u in P[v])
     P_paths = nx.Graph(P_edges)
+    P_paths_shortcuts = {}
+
+    def expand_P_paths_edge(s, t):
+        key = (s, t) if s < t else (t, s)
+        path = P_paths_shortcuts.get(key)
+        if path is None:
+            return [s, t]
+        if path[0] != s:
+            path = path[::-1]
+        expanded = [path[0]]
+        for u, v in pairwise(path):
+            expanded.extend(expand_P_paths_edge(u, v)[1:])
+        return expanded
 
     # this adds diagonals to P_paths, but not diagonals that cross constraints
     P_diags = bidict()
@@ -1235,6 +1248,12 @@ def make_planar_embedding(
             s, b, t = path[i : i + 3]
             if is_midpoint_shortable(s, b, t):
                 # PERFORM SHORTCUT
+                shortcut_key = (s, t) if s < t else (t, s)
+                shortcut_path = expand_P_paths_edge(s, b)
+                shortcut_path.extend(expand_P_paths_edge(b, t)[1:])
+                P_paths_shortcuts[shortcut_key] = (
+                    shortcut_path if shortcut_key == (s, t) else shortcut_path[::-1]
+                )
                 del path[i + 1]
                 length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
                 shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
@@ -1474,6 +1493,8 @@ def make_planar_embedding(
         inter_terminal_clearance_min=inter_terminal_clearance_min,
         inter_terminal_clearance_safe=inter_terminal_clearance_safe,
     )
+    if P_paths_shortcuts:
+        A.graph['P_paths_shortcuts'] = P_paths_shortcuts
     if len(border) > 0:
         A.graph['border'] = border
     if obstacles:
