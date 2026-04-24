@@ -1,7 +1,8 @@
 # test end to end
+import numpy as np
 import pytest
 from optiwindnet.api import WindFarmNetwork, EWRouter, MILPRouter
-from .helpers import tiny_wfn, router_factory, load_instances
+from .helpers import tiny_wfn, router_factory, load_instances, canonical_edges
 from .paths import SOLUTIONS_FILE
 
 
@@ -43,7 +44,19 @@ def test_expected_router_graphs_match(routed_instance, locations):
     L = getattr(locations, routed_instance['location'])
     wfn = WindFarmNetwork(L=L, cables=router_spec['cables'])
     wfn.optimize(router=router)
-    assert tuple(wfn.terse_links().tolist()) == terse_ref
+    terse_obt = tuple(wfn.terse_links().tolist())
+    if terse_obt == terse_ref:
+        return
+    # Fallback: terse_links can differ for topologically equivalent route sets
+    # (e.g. a chain's direction flips). Compare the canonical edge sets
+    # (detour clones replaced by their primes) of G instead.
+    G_obt = wfn.G
+    wfn_ref = WindFarmNetwork(L=L, cables=router_spec['cables'])
+    wfn_ref.update_from_terse_links(np.asarray(terse_ref, dtype=np.int64))
+    assert canonical_edges(G_obt) == canonical_edges(wfn_ref.G), (
+        f'terse_links differ and canonical edges differ.\n'
+        f'  obtained: {terse_obt}\n  expected: {terse_ref}'
+    )
 
 
 def test_ortools_with_warmstart():

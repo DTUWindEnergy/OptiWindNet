@@ -22,8 +22,6 @@ from .geometric import (
     apply_edge_exemptions,
     assign_root,
     complete_graph,
-    find_edges_bbox_overlaps,
-    is_crossing_no_bbox,
     is_triangle_pair_a_convex_quadrilateral,
     rotation_checkers_factory,
     triangle_AR,
@@ -57,6 +55,34 @@ def _index(array: Indices, item: np.int_) -> int:
     # value not found (must not happen, maybe should throw exception)
     # raise ValueError('value not found in array')
     return 0
+
+
+def _build_edge_line_tree(
+    VertexC: CoordPairs, edges: set[tuple[int, int]] | list[tuple[int, int]] | tuple
+) -> tuple[tuple[tuple[int, int], ...], np.ndarray, shp.STRtree | None]:
+    """Build a reusable STRtree for a collection of edges."""
+    edges_ = tuple(sorted(edges))
+    if not edges_:
+        return edges_, np.empty(0, dtype=object), None
+    edge_idx = np.asarray(edges_, dtype=int)
+    lines = shp.linestrings(VertexC[edge_idx])
+    return edges_, lines, shp.STRtree(lines)
+
+
+def _record_nonstraight_root_distance(
+    A: nx.Graph,
+    d2roots: np.ndarray,
+    n: int,
+    r: int,
+    new_length: float,
+) -> None:
+    """Store the original straight-root distance and replace it with a detoured one."""
+    los_d2root = A.nodes[n].get('los_d2root')
+    if los_d2root is None:
+        A.nodes[n]['los_d2root'] = {r: d2roots[n, r].item()}
+    else:
+        los_d2root.update({r: d2roots[n, r].item()})
+    d2roots[n, r] = new_length
 
 
 @nb.njit(cache=True)
@@ -843,6 +869,8 @@ def make_planar_embedding(
     # ##########################################
     debug('PART H')
     constraint_edges = set()
+    obstacle_constraint_edges = ()
+    obstacle_constraint_lines = np.empty(0, dtype=object)
     edgesCDT_obstacles = []
     #  hard_constraints_xy_ = set()
     V2d_holes = []
@@ -886,16 +914,18 @@ def make_planar_embedding(
         # Here we use the changes in CDT triangulation to identify the P_A
         # edges that cross obstacles or lay in their vicinity.
         edges_to_examine = P_A_edges - P_edges
-        edges_check = np.array(list(constraint_edges))
+        (
+            obstacle_constraint_edges,
+            obstacle_constraint_lines,
+            obstacle_constraint_tree,
+        ) = _build_edge_line_tree(VertexS, constraint_edges)
         while edges_to_examine:
             u, v = edges_to_examine.pop()
-            uC, vC = VertexS[[u, v]]
             # if ⟨u, v⟩ does not cross any constraint_edges, add it to edgesCDT
-            ovlap = find_edges_bbox_overlaps(VertexS, u, v, edges_check)
-            if not any(
-                is_crossing_no_bbox(uC, vC, *VertexS[edge])
-                for edge in edges_check[ovlap]
-            ):
+            candidate_idx = obstacle_constraint_tree.query(
+                shp.LineString(VertexS[[u, v]]), predicate='intersects'
+            )
+            if candidate_idx.size == 0:
                 # ⟨u, v⟩ was removed from the triangulation but does not cross
                 soft_constraints.add((u, v))
             else:
@@ -921,6 +951,15 @@ def make_planar_embedding(
                 for u, v in soft_constraints
             ]
             mesh.insert_edges(edgesCDT_soft)
+    elif stuntS:
+        VertexS = np.vstack(
+            (
+                VertexS[:-R],
+                *stuntS,
+                np.array([(v.x, v.y) for v in mesh.vertices[:3]]),
+                VertexS[-R:],
+            )
+        )
 
     # #######################################################
     # I) Insert the hull's and concavities' constraint edges.
@@ -966,6 +1005,24 @@ def make_planar_embedding(
     if edgesCDT_concavities:
         mesh.insert_vertices(V2d_concavities)
         mesh.insert_edges(edgesCDT_concavities)
+
+    extra_constraint_edges = tuple(
+        sorted(constraint_edges - set(obstacle_constraint_edges))
+    )
+    if extra_constraint_edges:
+        extra_constraint_lines = shp.linestrings(
+            VertexS[np.asarray(extra_constraint_edges, dtype=int)]
+        )
+        constraint_los_lines = (
+            np.concatenate((obstacle_constraint_lines, extra_constraint_lines))
+            if obstacle_constraint_lines.size > 0
+            else extra_constraint_lines
+        )
+    else:
+        constraint_los_lines = obstacle_constraint_lines
+    constraint_los_tree = (
+        shp.STRtree(constraint_los_lines) if constraint_los_lines.size > 0 else None
+    )
 
     # ############################################################
     # J) Add coordinates for stunts, supertriangle and scale back.
@@ -1298,12 +1355,51 @@ def make_planar_embedding(
     if concavities or obstacles:
         # Use P_paths to obtain estimates of d2roots taking into consideration
         # the concavities and obstacle zones.
+        # pre-allocate the line-of-sight (LOS) segments index array
+        los_idx = np.empty((T, 2), dtype=int)
+        los_idx[:, 1] = np.arange(T)
         for r in range(-R, 0):
+            los_idx[:, 0] = r
+            crossing_pairs = constraint_los_tree.query(
+                shp.linestrings(VertexS[los_idx]), predicate='crosses'
+            )
+            if crossing_pairs.size == 0:
+                continue
+            los_crossing_nodes = set(crossing_pairs[0].tolist())
             lengths, paths = nx.single_source_dijkstra(P_paths, r, weight='length')
-            for n, path in paths.items():
-                if n >= T or n < 0 or all(p < T for p in path[1:-1]):
-                    # skip border and root vertices and paths without borders
+            for n in los_crossing_nodes:
+                path = paths[n]
+                if all(p < T for p in path[1:-1]):
+                    # no border vertex to do string-pulling: heuristic estimate.
+                    # Remove leading nodes that have LOS to r, keeping only
+                    # the last LOS node before the first non-LOS node.
+                    # n is always in los_crossing_nodes, so next() always finds one.
+                    last_kept = next(p for p in path[1:] if p in los_crossing_nodes)
+                    if last_kept >= 0:
+                        # last_kept is the last LOS node before the first non-LOS
+                        pruned_len = (
+                            d2roots[last_kept, r] + lengths[n] - lengths[last_kept]
+                        )
+                    else:
+                        # no LOS intermediate to shortcut; pruned == original path
+                        pruned_len = lengths[n]
+                    debug(
+                        'd2roots[%d, %d] updated by LOS pruning (path %s prunned at %d)',
+                        n,
+                        r,
+                        path,
+                        last_kept,
+                    )
+                    _record_nonstraight_root_distance(
+                        # empirical weighting of pruned_len and euclidean distance
+                        A,
+                        d2roots,
+                        n,
+                        r,
+                        (3 * d2roots[n, r] + pruned_len) / 4,
+                    )
                     continue
+                # do string pulling to estimate the detour length
                 debug('updating d2root of ⟨%d, %d⟩ (path %s)', r, n, path)
                 b_path = (*(p for p in path[1:-1] if p >= T), n)
                 s = r
@@ -1315,15 +1411,14 @@ def make_planar_embedding(
                 real_path.append(n)
                 if len(real_path) > 2:
                     debug('d2roots[%d, %d] updated', n, r)
-                    straight2root_ = A.nodes[n].get('straight2root_')
-                    if straight2root_ is None:
-                        A.nodes[n]['straight2root_'] = {r: d2roots[n, r].item()}
-                    else:
-                        straight2root_.update({r: d2roots[n, r].item()})
-                    d2roots[n, r] = (
+                    _record_nonstraight_root_distance(
+                        A,
+                        d2roots,
+                        n,
+                        r,
                         np.hypot(*(VertexC[real_path[1:]] - VertexC[real_path[:-1]]).T)
                         .sum()
-                        .item()
+                        .item(),
                     )
 
     # ##########################################
