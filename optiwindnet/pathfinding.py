@@ -210,14 +210,25 @@ class PathFinder:
                 subtree_id = G.nodes[t]['subtree']
                 stored_edges = []
                 u = s
-                if shortpath:
+                # G's contour clones follow the expanded shortpath (see
+                # G_from_S), so expand here before locating clones by prime id.
+                expanded_shortpath = (
+                    expand_P_paths_path([s] + shortpath + [t])[1:-1]
+                    if shortpath
+                    else []
+                )
+                if expanded_shortpath:
                     # there may be more than one edge cloning same border vertex
                     choices = [
-                        v for v in G[u] if v >= clone_offset and fnT[v] == shortpath[0]
+                        v
+                        for v in G[u]
+                        if v >= clone_offset and fnT[v] == expanded_shortpath[0]
                     ]
                     if len(choices) > 1:
                         # checks just one more hop -> bizarre cases may lead to error
-                        nb = t if len(shortpath) <= 1 else shortpath[1]
+                        nb = (
+                            t if len(expanded_shortpath) <= 1 else expanded_shortpath[1]
+                        )
                         for v in choices:
                             if (G._adj[v].keys() - {u}).pop() == nb:
                                 break
