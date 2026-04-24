@@ -1299,48 +1299,64 @@ def make_planar_embedding(
     P_to_A_candidates = ((P_edges - P_A_edges) - diagonals.keys()) - constraint_edges
 
     # Diagonals in A which have a missing origin Delaunay edge become edges.
-    promoted_diagonal_from_parent_node = {}
+    # First collect candidates and their mutually-exclusive diagonals.  An
+    # extended diagonal can only cross the other extended diagonals of the two
+    # triangles adjacent to its origin Delaunay edge, so this local bookkeeping
+    # is enough to avoid promoting two crossing diagonals into ordinary edges.
+    promotion_candidates = []
     P_A_edges_to_remove = []
     for uv in A_edges_to_revisit:
         st = diagonals.inv.get(uv)
         if st is not None:
-            # delaunay uv was removed, so its entry in diagonals must also be
-            del diagonals.inv[uv]
-            # prevent promotion of two diagonals of the same triangle
-            promote_st = True
-            for n in uv:
-                promoted = promoted_diagonal_from_parent_node.get(n)
-                if promoted is not None:
-                    (w, y), o = promoted
-                    if (
-                        (y, n) in P_A.edges
-                        or (y, o) in P_A.edges
-                        or (w, n) in P_A.edges
-                        or (w, o) in P_A.edges
-                    ) and (w in uv or y in uv):
-                        # st & promoted are diagonals of the same triangle
-                        if (w, y) not in diagonals.inv:
-                            diagonals[st] = w, y
-                        else:
-                            debug(
-                                'Diagonal %s is not promoted to Delaunay because '
-                                'former diagonal «%d–%d» is now its Delaunay edge.',
-                                st,
-                                w,
-                                y,
-                            )
-                        promote_st = False
-            if promote_st:
-                edgeD = A.edges[st]
-                edgeD['kind'] = 'contour_delaunay' if 'midpath' in edgeD else 'delaunay'
-                u, v = uv
-                promoted_diagonal_from_parent_node[u] = st, v
-                promoted_diagonal_from_parent_node[v] = st, u
-                s, t = st
-                w, y = (u, v) if P_A[u][v]['cw'] == s else (v, u)
-                P_A.add_half_edge(s, t, cw=y)
-                P_A.add_half_edge(t, s, cw=w)
+            u, v = uv
+            left, right = P_A[u][v]['cw'], P_A[u][v]['ccw']
+            incompatible = set()
+            for x, y in ((u, left), (v, left), (u, right), (v, right)):
+                xy = (x, y) if x < y else (y, x)
+                diag = diagonals.inv.get(xy)
+                if diag is not None:
+                    incompatible.add(diag if diag[0] < diag[1] else diag[::-1])
+            st = st if st[0] < st[1] else st[::-1]
+            incompatible.discard(st)
+            promotion_candidates.append((uv, st, incompatible))
         P_A_edges_to_remove.append(uv)
+
+    promoted_diagonals = set()
+    for uv, st, incompatible in promotion_candidates:
+        conflicting_promotions = incompatible & promoted_diagonals
+        if conflicting_promotions:
+            # Keep st as an extended edge crossing the already-promoted edge.
+            parent = min(conflicting_promotions)
+            if st in diagonals:
+                del diagonals[st]
+            if parent in diagonals:
+                # `parent` was promoted already, so any stale key mapping would
+                # contradict its new role as an ordinary edge.
+                del diagonals[parent]
+            if parent in diagonals.inv:
+                # `bidict` cannot map multiple losing diagonals to the same
+                # promoted edge.  Keeping st in A without a diagonal relation
+                # would make it look like an ordinary non-crossing edge.
+                A.remove_edge(*st)
+            else:
+                diagonals[st] = parent
+            debug(
+                'Diagonal %s is not promoted to Delaunay because it conflicts '
+                'with already-promoted diagonal %s.',
+                st,
+                parent,
+            )
+            continue
+        # delaunay uv was removed, so its entry in diagonals must also be
+        del diagonals[st]
+        edgeD = A.edges[st]
+        edgeD['kind'] = 'contour_delaunay' if 'midpath' in edgeD else 'delaunay'
+        promoted_diagonals.add(st)
+        u, v = uv
+        s, t = st
+        w, y = (u, v) if P_A[u][v]['cw'] == s else (v, u)
+        P_A.add_half_edge(s, t, cw=y)
+        P_A.add_half_edge(t, s, cw=w)
     for uv in P_A_edges_to_remove:
         P_A.remove_edge(*uv)
 
