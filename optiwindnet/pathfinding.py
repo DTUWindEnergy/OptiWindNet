@@ -182,6 +182,26 @@ class PathFinder:
             # G has edges that shortcut some longer paths along P edges.
             # We need to put these paths back in G to flip some of P's edges.
             # The changes made here are undone in `create_detours()`.
+            P_paths_shortcuts = A.graph.get('P_paths_shortcuts', {})
+
+            def expand_P_paths_edge(s, t):
+                key = (s, t) if s < t else (t, s)
+                path = P_paths_shortcuts.get(key)
+                if path is None:
+                    return [s, t]
+                if path[0] != s:
+                    path = path[::-1]
+                expanded = [path[0]]
+                for u, v in zip(path[:-1], path[1:]):
+                    expanded.extend(expand_P_paths_edge(u, v)[1:])
+                return expanded
+
+            def expand_P_paths_path(path):
+                expanded = [path[0]]
+                for s, t in zip(path[:-1], path[1:]):
+                    expanded.extend(expand_P_paths_edge(s, t)[1:])
+                return expanded
+
             edges_to_remove = []
             edges_to_add = []
             clone_offset = T + B
@@ -190,14 +210,25 @@ class PathFinder:
                 subtree_id = G.nodes[t]['subtree']
                 stored_edges = []
                 u = s
-                if shortpath:
+                # G's contour clones follow the expanded shortpath (see
+                # G_from_S), so expand here before locating clones by prime id.
+                expanded_shortpath = (
+                    expand_P_paths_path([s] + shortpath + [t])[1:-1]
+                    if shortpath
+                    else []
+                )
+                if expanded_shortpath:
                     # there may be more than one edge cloning same border vertex
                     choices = [
-                        v for v in G[u] if v >= clone_offset and fnT[v] == shortpath[0]
+                        v
+                        for v in G[u]
+                        if v >= clone_offset and fnT[v] == expanded_shortpath[0]
                     ]
                     if len(choices) > 1:
                         # checks just one more hop -> bizarre cases may lead to error
-                        nb = t if len(shortpath) <= 1 else shortpath[1]
+                        nb = (
+                            t if len(expanded_shortpath) <= 1 else expanded_shortpath[1]
+                        )
                         for v in choices:
                             if (G._adj[v].keys() - {u}).pop() == nb:
                                 break
@@ -205,6 +236,7 @@ class PathFinder:
                         v = choices[0]
                 else:
                     v = t
+                midpath = expand_P_paths_path([s] + midpath + [t])[1:-1]
                 while v != t:
                     stored_edges.append((u, v, G[u][v]))
                     edges_to_remove.append((u, v))
