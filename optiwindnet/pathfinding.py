@@ -422,6 +422,7 @@ class PathFinder:
         cw, ccw = rotation_checkers_factory(self.VertexC)
         paths = self.paths
         I_path = self.I_path
+        ST = self.ST
         num_traversals = self.num_traversals
         bad_streak_limit = self.bad_streak_limit
 
@@ -526,7 +527,8 @@ class PathFinder:
             d_new = pseudoapex.dist + d_hop
             keeper = I_path[_new].get(sector_new)
             unseen = keeper is None
-            score_0 = d_new
+            d_prio = d_new if _new < ST else prio[0]
+            score_0 = d_prio
             score_1 = bad_streak + 0.5 if unseen else bad_streak
             score_2 = 1.0 if unseen else (d_new / paths[keeper].dist)
             is_promising = bad_streak < bad_streak_limit
