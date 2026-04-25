@@ -91,10 +91,10 @@ class PathFinder:
         heads/tails
       iterations_limit: maximum number of steps in the path-finding process
       traversals_limit: maximum number of times a single portal may be traversed
-      promissing_margin: fraction in excess of the best path that is still considered
-        promissing, so that the traverser is allowed to proceed
       bad_streak_limit: limit on how many steps in a row without finding an improved
         path the traverser is allowed to take
+      trace: if True, populate ``self.adv_log`` with per-advancer life-cycle data
+        (steps, drop reason, parent advancer). Off by default — has overhead.
 
     Example::
 
@@ -114,14 +114,15 @@ class PathFinder:
         branched: bool = True,
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
-        promising_margin: float = 0.1,
         bad_streak_limit: int = 3,
         cum_turn_kill: float | None = None,
+        trace: bool = False,
     ) -> None:
         self.iterations_limit = iterations_limit
         self.traversals_limit = traversals_limit
-        self.promising_margin = promising_margin
         self.bad_streak_limit = bad_streak_limit
+        self.adv_log: dict | None = {} if trace else None
+        self._cur_iter: int = 0
         # Cumulative-turn kill threshold scales (sub-)logarithmically with
         # cable capacity Q: f(Q) = π/2 + (3π/2) * ln(Q/2) / ln(6),
         # giving f(2) = π/2 and f(12) = 2π. Lower-capacity routes have
@@ -394,6 +395,15 @@ class PathFinder:
                 # get traverser state
                 traverser_args = next(traverser)
                 prio = traverser_args[0]
+                if self.adv_log is not None:
+                    self.adv_log[self.adv_counter] = {
+                        'parent': adv_id,
+                        'origin_portal': portal_bif,
+                        'origin_side': side_bif,
+                        'launch_iter': self._cur_iter,
+                        'steps': [],
+                        'drop': None,
+                    }
                 heapq.heappush(
                     prioqueue,
                     (
@@ -444,6 +454,15 @@ class PathFinder:
         #     - node: contains a pseudonode index (i.e. an index in self.paths)
         #             translation: _node = paths.prime_from_id[node]
         cw, ccw = rotation_checkers_factory(self.VertexC)
+        VertexC_local = self.VertexC
+
+        def is_collinear(A: int, B: int, C: int, _eps: float = 1e-17) -> bool:
+            """True iff B lies on (or numerically on) the line A–C."""
+            Ax, Ay = VertexC_local[A]
+            Bx, By = VertexC_local[B]
+            Cx, Cy = VertexC_local[C]
+            return abs((Bx - Ax) * (Cy - Ay) - (By - Ay) * (Cx - Ax)) < _eps
+
         paths = self.paths
         I_path = self.I_path
         ST = self.ST
@@ -494,10 +513,18 @@ class PathFinder:
                 _funnel,
             )
 
-            if _nearside == _apex or test(_nearside, _new, _apex):
-                # not infranear
-                if test(_farside, _new, _apex):
-                    # ultrafar (⟨new, apex⟩ cuts farside)
+            if (
+                _nearside == _apex
+                or test(_nearside, _new, _apex)
+                or is_collinear(_nearside, _new, _apex)
+            ):
+                # not infranear (collinear with apex→nearside is treated as
+                # line-of-sight: _new lies on the wall, apex stays put)
+                if test(_farside, _new, _apex) and not is_collinear(
+                    _farside, _new, _apex
+                ):
+                    # ultrafar (⟨new, apex⟩ strictly cuts farside; collinear
+                    # with apex→farside is line-of-sight, apex stays put)
                     debug('<%d> ultrafar', trav_id)
                     current_wapex = wedge_end[not side]
                     _current_wapex = paths.prime_from_id[current_wapex]
@@ -589,6 +616,26 @@ class PathFinder:
             )
             running_turn_prev = running_turn
             prio = (score_0, score_1, score_2)
+            event = None
+            if self.adv_log is not None:
+                event = {
+                    'iter': self._cur_iter,
+                    'portal': portal,
+                    '_new': _new,
+                    'sector_new': sector_new,
+                    'prio': prio,
+                    'is_promising': is_promising,
+                    'bad_streak': bad_streak,
+                    'running_turn': running_turn,
+                    'apex_eff_prime': _apex_eff,
+                    'd_hop': d_hop,
+                    'd_new': d_new,
+                    'funnel_primes': tuple(_funnel),
+                    'pnode_added': None,
+                    'pnode_id': None,
+                    'made_keeper': None,
+                }
+                self.adv_log[trav_id]['steps'].append(event)
             yield prio, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
             new_cum = pseudoapex.cum_angle + turn
@@ -600,7 +647,12 @@ class PathFinder:
             num_traversals[portal] += 1
             # get keeper again, as the situation may have changed
             keeper = I_path[_new].get(sector_new)
-            if keeper is None or d_new < paths[keeper].dist:
+            keeper_was_updated = keeper is None or d_new < paths[keeper].dist
+            if event is not None:
+                event['pnode_added'] = self.paths.count > _count_before
+                event['pnode_id'] = new
+                event['made_keeper'] = keeper_was_updated
+            if keeper_was_updated:
                 self.I_path[_new][sector_new] = new
                 debug(
                     '<%d> new keeper for (%d, %d) via %d: d_path = %.2f',
@@ -708,20 +760,37 @@ class PathFinder:
                     traverser_pack,
                     bitarray(len(triangles)),
                 )
+                if self.adv_log is not None:
+                    self.adv_log[self.adv_counter] = {
+                        'parent': None,
+                        'origin_portal': (left, right),
+                        'origin_root': r,
+                        'launch_iter': 0,
+                        'steps': [],
+                        'drop': None,
+                    }
                 heapq.heappush(prioqueue, (prio, self.adv_counter, advancer))
                 self.adv_counter += 1
         # process edges in the prioqueue
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
         _, adv_id, advancer = heapq.heappop(prioqueue)
         iter = 0
+        adv_log = self.adv_log
         while iter < iterations_limit:
             iter += 1
+            self._cur_iter = iter
             debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
             try:
                 # advance one portal
                 prio, portal, is_promising = next(advancer)
             except StopIteration:
                 # advancer decided to stop, get a new one
+                if adv_log is not None and adv_log[adv_id]['drop'] is None:
+                    adv_log[adv_id]['drop'] = {
+                        'iter': iter,
+                        'reason': 'stop_iteration',
+                        'portal': None,
+                    }
                 if not prioqueue:
                     break
                 _, adv_id, advancer = heapq.heappop(prioqueue)
@@ -732,6 +801,14 @@ class PathFinder:
                         prioqueue, (prio, adv_id, advancer)
                     )
                 else:
+                    if adv_log is not None and adv_log[adv_id]['drop'] is None:
+                        adv_log[adv_id]['drop'] = {
+                            'iter': iter,
+                            'reason': 'unpromising_exhausted',
+                            'portal': portal,
+                            'prio': prio,
+                            'num_traversals_at_portal': num_traversals[portal],
+                        }
                     # forget advancer and get a new one
                     if not prioqueue:
                         break
