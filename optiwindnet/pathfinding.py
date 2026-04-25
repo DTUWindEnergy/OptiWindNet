@@ -109,7 +109,7 @@ class PathFinder:
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
         promising_margin: float = 0.1,
-        bad_streak_limit: int = 6,
+        bad_streak_limit: int = 3,
     ) -> None:
         self.iterations_limit = iterations_limit
         self.traversals_limit = traversals_limit
@@ -550,7 +550,9 @@ class PathFinder:
                     _apex_eff,
                     d_new,
                 )
-                bad_streak = 0
+                # first arrival at (_new, sector_new) discounts the bad_streak
+                #   but finding a new keeper resets the bad_streak
+                bad_streak = max(0, bad_streak - 1) if keeper is None else 0
             elif not math.isclose(d_new, paths[keeper].dist):
                 bad_streak += 1
 
