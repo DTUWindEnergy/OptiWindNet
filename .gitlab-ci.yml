@@ -31,6 +31,7 @@ variables:
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   before_script:
     - export DEBIAN_FRONTEND=noninteractive
+    - echo 'deb http://ftp.dk.debian.org/debian testing main contrib' | sudo tee /etc/apt/sources.list.d/debian-testing.list
     - apt-get update
     - apt-get install -yq coinor-cbc
     - apt install -yq -t testing scip
