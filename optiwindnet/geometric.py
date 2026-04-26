@@ -1032,32 +1032,32 @@ def check_crossings(G, debug=False, MARGIN=0.1):
 
 def rotation_checkers_factory(
     VertexC: CoordPairs,
-) -> tuple[Callable[[int, int, int], bool], Callable[[int, int, int], bool]]:
-    def cw(A: int, B: int, C: int) -> bool:
-        """Check cw orientation.
+) -> tuple[
+    Callable[[int, int, int], bool],
+    Callable[[int, int, int], bool],
+    Callable[[int, int, int], float],
+]:
+    def cross(A: int, B: int, C: int) -> float:
+        """Signed twice-area of triangle ABC.
 
-        Returns:
-          True: if A->B->C traverses the triangle ABC clockwise
-          False: otherwise
+        > 0: A->B->C is counter-clockwise
+        < 0: A->B->C is clockwise
+        == 0: A, B, C are collinear (use a tolerance for float input)
         """
         Ax, Ay = VertexC[A]
         Bx, By = VertexC[B]
         Cx, Cy = VertexC[C]
-        return (Bx - Ax) * (Cy - Ay) < (By - Ay) * (Cx - Ax)
+        return (Bx - Ax) * (Cy - Ay) - (By - Ay) * (Cx - Ax)
+
+    def cw(A: int, B: int, C: int) -> bool:
+        """True if A->B->C traverses the triangle ABC clockwise."""
+        return cross(A, B, C) < 0
 
     def ccw(A: int, B: int, C: int) -> bool:
-        """Check ccw orientation.
+        """True if A->B->C traverses the triangle ABC counter-clockwise."""
+        return cross(A, B, C) > 0
 
-        Returns:
-          True: if A->B->C traverses the triangle ABC counter-clockwise
-          False: otherwise
-        """
-        Ax, Ay = VertexC[B]
-        Bx, By = VertexC[A]
-        Cx, Cy = VertexC[C]
-        return (Bx - Ax) * (Cy - Ay) < (By - Ay) * (Cx - Ax)
-
-    return cw, ccw
+    return cw, ccw, cross
 
 
 def rotating_calipers(

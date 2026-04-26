@@ -451,15 +451,11 @@ class PathFinder:
         #     - _node: the index it contains maps to a coordinate in VertexC
         #     - node: contains a pseudonode index (i.e. an index in self.paths)
         #             translation: _node = paths.prime_from_id[node]
-        cw, ccw = rotation_checkers_factory(self.VertexC)
-        VertexC_local = self.VertexC
-
-        def is_collinear(A: int, B: int, C: int, _eps: float = 1e-17) -> bool:
-            """True iff B lies on (or numerically on) the line A–C."""
-            Ax, Ay = VertexC_local[A]
-            Bx, By = VertexC_local[B]
-            Cx, Cy = VertexC_local[C]
-            return abs((Bx - Ax) * (Cy - Ay) - (By - Ay) * (Cx - Ax)) < _eps
+        cw, ccw, cross = rotation_checkers_factory(self.VertexC)
+        # Tolerance for treating a numerically-zero cross product as collinear:
+        # apex/wall/_new line-of-sight should not flip funnel branches due to
+        # float-arithmetic noise.
+        EPS_COLLINEAR = 1e-17
 
         paths = self.paths
         I_path = self.I_path
@@ -492,6 +488,11 @@ class PathFinder:
             _nearside = _funnel[side]
             _farside = _funnel[not side]
             test = ccw if side else cw
+            # Sign that turns "cross < 0" (cw) into the test for this side.
+            # side==0: test=cw  → orient = cross
+            # side==1: test=ccw → orient = -cross
+            # so orient < 0 ⇔ test passes; |orient| < ε ⇔ collinear.
+            orient_sign = -1.0 if side else 1.0
 
             #  if _nearside == _apex:  # debug info
             #      print(f"{'RIGHT' if side else 'LEFT '} "
@@ -509,16 +510,16 @@ class PathFinder:
                 _funnel,
             )
 
-            if (
-                _nearside == _apex
-                or test(_nearside, _new, _apex)
-                or is_collinear(_nearside, _new, _apex)
-            ):
+            # One signed cross per wall; ε folds collinearity into the same
+            # comparison: "test or collinear" ⇔ orient < ε,
+            # "test and not collinear" ⇔ orient < -ε.
+            orient_near = orient_sign * cross(_nearside, _new, _apex)
+            orient_far = orient_sign * cross(_farside, _new, _apex)
+
+            if _nearside == _apex or orient_near < EPS_COLLINEAR:
                 # not infranear (collinear with apex→nearside is treated as
                 # line-of-sight: _new lies on the wall, apex stays put)
-                if test(_farside, _new, _apex) and not is_collinear(
-                    _farside, _new, _apex
-                ):
+                if orient_far < -EPS_COLLINEAR:
                     # ultrafar (⟨new, apex⟩ strictly cuts farside; collinear
                     # with apex→farside is line-of-sight, apex stays put)
                     debug('<%d> ultrafar', trav_id)

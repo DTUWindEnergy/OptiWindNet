@@ -1165,7 +1165,7 @@ def make_planar_embedding(
     # ###################################################################
     debug('PART M')
 
-    cw, ccw = rotation_checkers_factory(VertexC)
+    cw, ccw, _ = rotation_checkers_factory(VertexC)
     # auxiliary function for parts M and N
 
     def is_midpoint_shortable(s, b, t):
