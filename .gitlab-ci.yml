@@ -32,7 +32,8 @@ variables:
   before_script:
     - export DEBIAN_FRONTEND=noninteractive
     - apt-get update
-    - apt-get install -yq coinor-cbc scip
+    - apt-get install -yq coinor-cbc
+    - apt install -yq -t testing scip
     # >>> scip/fscip section begin
     # - test -f "downloads/$SCIP_LINUX" || wget --no-verbose -P downloads "https://www.scipopt.org/download/release/$SCIP_LINUX"
     # - apt-get install -yq "./downloads/$SCIP_LINUX"
