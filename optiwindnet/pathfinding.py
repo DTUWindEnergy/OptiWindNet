@@ -24,7 +24,7 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
-PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop'.split())
+PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop cum_turn'.split())
 
 
 class PathNodes(dict):
@@ -44,7 +44,13 @@ class PathNodes(dict):
         self.last_added = NULL
 
     def add(
-        self, _source: int, sector: int, parent: int, dist: float, d_hop: float
+        self,
+        _source: int,
+        sector: int,
+        parent: int,
+        dist: float,
+        d_hop: float,
+        cum_turn: float = 0.0,
     ) -> int:
         if parent not in self:
             error(
@@ -58,7 +64,7 @@ class PathNodes(dict):
                 return prev_id
         id = self.count
         self.count += 1
-        self[id] = PseudoNode(_source, sector, parent, dist, d_hop)
+        self[id] = PseudoNode(_source, sector, parent, dist, d_hop, cum_turn)
         self.ids_from_prime_sector[_source, sector].append(id)
         self.prime_from_id[id] = _source
         debug('pseudoedge «%d->%d» added', _source, _parent)
@@ -85,8 +91,6 @@ class PathFinder:
         heads/tails
       iterations_limit: maximum number of steps in the path-finding process
       traversals_limit: maximum number of times a single portal may be traversed
-      promissing_margin: fraction in excess of the best path that is still considered
-        promissing, so that the traverser is allowed to proceed
       bad_streak_limit: limit on how many steps in a row without finding an improved
         path the traverser is allowed to take
 
@@ -108,13 +112,27 @@ class PathFinder:
         branched: bool = True,
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
-        promising_margin: float = 0.1,
-        bad_streak_limit: int = 6,
+        bad_streak_limit: int = 3,
+        turn_limit: float | None = None,
     ) -> None:
         self.iterations_limit = iterations_limit
         self.traversals_limit = traversals_limit
-        self.promising_margin = promising_margin
         self.bad_streak_limit = bad_streak_limit
+        # Path-cumulative turn limit (advancers whose path winding exceeds
+        # this are dropped) scales (sub-)logarithmically with cable capacity
+        # Q: f(Q) = 3π/4 + (5π/4) * ln(Q/2) / ln(6), giving f(2) = 3π/4 and
+        # f(12) = 2π. Lower-capacity routes have simpler geometry, so excess
+        # winding is more likely circling; higher-capacity routes legitimately
+        # need more wrap. Pass an explicit value to override.
+        if turn_limit is None:
+            Q = Gʹ.graph.get('capacity')
+            if Q is None or Q < 2:
+                turn_limit = 2.0 * math.pi
+            else:
+                turn_limit = (3 * math.pi / 4) + (
+                    (5 * math.pi / 4) * math.log(Q / 2) / math.log(6)
+                )
+        self.turn_limit = turn_limit
         self.iterations = 0
         G = Gʹ.copy()
         R, T, B = (A.graph[k] for k in 'RTB')
@@ -419,11 +437,18 @@ class PathFinder:
         #     - _node: the index it contains maps to a coordinate in VertexC
         #     - node: contains a pseudonode index (i.e. an index in self.paths)
         #             translation: _node = paths.prime_from_id[node]
-        cw, ccw = rotation_checkers_factory(self.VertexC)
+        cw, ccw, cross = rotation_checkers_factory(self.VertexC)
+        # Tolerance for treating a numerically-zero cross product as collinear:
+        # apex/wall/_new line-of-sight should not flip funnel branches due to
+        # float-arithmetic noise.
+        EPS_COLLINEAR = 1e-17
+
         paths = self.paths
         I_path = self.I_path
+        ST = self.ST
         num_traversals = self.num_traversals
         bad_streak_limit = self.bad_streak_limit
+        turn_limit = self.turn_limit
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         while True:
@@ -449,6 +474,11 @@ class PathFinder:
             _nearside = _funnel[side]
             _farside = _funnel[not side]
             test = ccw if side else cw
+            # Sign that turns "cross < 0" (cw) into the test for this side.
+            # side==0: test=cw  → orient = cross
+            # side==1: test=ccw → orient = -cross
+            # so orient < 0 ⇔ test passes; |orient| < ε ⇔ collinear.
+            orient_sign = -1.0 if side else 1.0
 
             #  if _nearside == _apex:  # debug info
             #      print(f"{'RIGHT' if side else 'LEFT '} "
@@ -466,10 +496,18 @@ class PathFinder:
                 _funnel,
             )
 
-            if _nearside == _apex or test(_nearside, _new, _apex):
-                # not infranear
-                if test(_farside, _new, _apex):
-                    # ultrafar (⟨new, apex⟩ cuts farside)
+            # One signed cross per wall; ε folds collinearity into the same
+            # comparison: "test or collinear" ⇔ orient < ε,
+            # "test and not collinear" ⇔ orient < -ε.
+            orient_near = orient_sign * cross(_nearside, _new, _apex)
+            orient_far = orient_sign * cross(_farside, _new, _apex)
+
+            if _nearside == _apex or orient_near < EPS_COLLINEAR:
+                # not infranear (collinear with apex→nearside is treated as
+                # line-of-sight: _new lies on the wall, apex stays put)
+                if orient_far < -EPS_COLLINEAR:
+                    # ultrafar (⟨new, apex⟩ strictly cuts farside; collinear
+                    # with apex→farside is line-of-sight, apex stays put)
                     debug('<%d> ultrafar', trav_id)
                     current_wapex = wedge_end[not side]
                     _current_wapex = paths.prime_from_id[current_wapex]
@@ -526,14 +564,38 @@ class PathFinder:
             d_new = pseudoapex.dist + d_hop
             keeper = I_path[_new].get(sector_new)
             unseen = keeper is None
-            score_0 = d_new
+            # signed turn at apex_eff: angle from (grandparent -> apex_eff)
+            # segment to (apex_eff -> _new) segment.
+            gp_id = pseudoapex.parent
+            if gp_id is None:
+                step_turn = 0.0
+            else:
+                _gp = paths.prime_from_id[gp_id]
+                ax = self.VertexC[_apex_eff]
+                gp = self.VertexC[_gp]
+                nv = self.VertexC[_new]
+                v1x, v1y = ax[0] - gp[0], ax[1] - gp[1]
+                v2x, v2y = nv[0] - ax[0], nv[1] - ax[1]
+                step_turn = math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y)
+            cum_turn = pseudoapex.cum_turn + step_turn
+            d_prio = d_new if _new < ST else prio[0]
+            score_0 = d_prio
             score_1 = bad_streak + 0.5 if unseen else bad_streak
             score_2 = 1.0 if unseen else (d_new / paths[keeper].dist)
-            is_promising = bad_streak < bad_streak_limit
+            # Path-cumulative turn cap: total winding from path root to the
+            # candidate pseudonode beyond the threshold marks the advancer
+            # as unpromising. bad_streak <= 1 waives the drop — a recently-
+            # active advancer gets through.
+            is_promising = bad_streak < bad_streak_limit and (
+                abs(cum_turn) <= turn_limit or bad_streak <= 1
+            )
             prio = (score_0, score_1, score_2)
             yield prio, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
-            new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop)
+            _count_before = self.paths.count
+            new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop, cum_turn)
+            if self.paths.count > _count_before:
+                self.adv_pnodes.setdefault(trav_id, set()).add(new)
             wedge_end[side] = new
             num_traversals[portal] += 1
             # get keeper again, as the situation may have changed
@@ -548,7 +610,9 @@ class PathFinder:
                     _apex_eff,
                     d_new,
                 )
-                bad_streak = 0
+                # first arrival at (_new, sector_new) discounts the bad_streak
+                #   but finding a new keeper resets the bad_streak
+                bad_streak = max(0, bad_streak - 1) if keeper is None else 0
             elif not math.isclose(d_new, paths[keeper].dist):
                 bad_streak += 1
 
@@ -567,6 +631,8 @@ class PathFinder:
         self.bifurcation = None
         I_path = defaultdict(dict)
         self.I_path = I_path
+        # advancer (trav_id) -> set of pseudonode ids it was the first to add
+        self.adv_pnodes: dict = {}
 
         # set of portals (i.e. edges of P that are not used in G)
         fnT = G.graph.get('fnT')
@@ -586,7 +652,7 @@ class PathFinder:
 
         # launch channel traversers around the roots to the prioqueue
         for r in range(-R, 0):
-            paths[r] = PseudoNode(r, r, None, 0.0, 0.0)
+            paths[r] = PseudoNode(r, r, None, 0.0, 0.0, 0.0)
             paths.prime_from_id[r] = r
             paths.ids_from_prime_sector[r, r] = [r]
             for left in P.neighbors(r):

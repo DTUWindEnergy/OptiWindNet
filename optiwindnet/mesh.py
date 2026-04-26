@@ -1165,7 +1165,7 @@ def make_planar_embedding(
     # ###################################################################
     debug('PART M')
 
-    cw, ccw = rotation_checkers_factory(VertexC)
+    cw, ccw, _ = rotation_checkers_factory(VertexC)
     # auxiliary function for parts M and N
 
     def is_midpoint_shortable(s, b, t):
@@ -1436,14 +1436,27 @@ def make_planar_embedding(
                     continue
                 # do string pulling to estimate the detour length
                 debug('updating d2root of ⟨%d, %d⟩ (path %s)', r, n, path)
-                b_path = (*(p for p in path[1:-1] if p >= T), n)
-                s = r
-                real_path = [r]
-                for b, t in pairwise(b_path):
-                    if not is_midpoint_shortable(s, b, t):
-                        real_path.append(b)
-                        s = b
-                real_path.append(n)
+                borders = tuple(p for p in path[1:-1] if p >= T)
+                if len(borders) == 1:
+                    # Only one border vertex on the dijkstra path — it is
+                    # the single transit point through the boundary, not a
+                    # corner of a multi-border bend. Skip string-pulling
+                    # and keep it: dropping it would collapse real_path to
+                    # ⟨r, n⟩ even though shapely confirmed obstruction
+                    # (the local `is_midpoint_shortable` test correctly
+                    # finds the vertex shortable on a near-straight border
+                    # stretch, but it cannot see that the resulting
+                    # straight line still crosses other border edges).
+                    real_path = [r, borders[0], n]
+                else:
+                    b_path = (*borders, n)
+                    s = r
+                    real_path = [r]
+                    for b, t in pairwise(b_path):
+                        if not is_midpoint_shortable(s, b, t):
+                            real_path.append(b)
+                            s = b
+                    real_path.append(n)
                 if len(real_path) > 2:
                     debug('d2roots[%d, %d] updated', n, r)
                     _record_nonstraight_root_distance(
