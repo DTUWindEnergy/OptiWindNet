@@ -24,7 +24,7 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
-PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop cum_angle'.split())
+PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop cum_turn'.split())
 
 
 class PathNodes(dict):
@@ -50,7 +50,7 @@ class PathNodes(dict):
         parent: int,
         dist: float,
         d_hop: float,
-        cum_angle: float = 0.0,
+        cum_turn: float = 0.0,
     ) -> int:
         if parent not in self:
             error(
@@ -64,7 +64,7 @@ class PathNodes(dict):
                 return prev_id
         id = self.count
         self.count += 1
-        self[id] = PseudoNode(_source, sector, parent, dist, d_hop, cum_angle)
+        self[id] = PseudoNode(_source, sector, parent, dist, d_hop, cum_turn)
         self.ids_from_prime_sector[_source, sector].append(id)
         self.prime_from_id[id] = _source
         debug('pseudoedge «%d->%d» added', _source, _parent)
@@ -115,7 +115,7 @@ class PathFinder:
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
         bad_streak_limit: int = 3,
-        cum_turn_kill: float | None = None,
+        turn_limit: float | None = None,
         trace: bool = False,
     ) -> None:
         self.iterations_limit = iterations_limit
@@ -123,21 +123,21 @@ class PathFinder:
         self.bad_streak_limit = bad_streak_limit
         self.adv_log: dict | None = {} if trace else None
         self._cur_iter: int = 0
-        # Cumulative-turn kill threshold scales (sub-)logarithmically with
-        # cable capacity Q: f(Q) = π/2 + (3π/2) * ln(Q/2) / ln(6),
-        # giving f(2) = π/2 and f(12) = 2π. Lower-capacity routes have
-        # simpler geometry, so excessive winding is more likely circling;
-        # higher-capacity routes legitimately need more wrap. Computed once
-        # per PathFinder. Pass an explicit value to override.
-        if cum_turn_kill is None:
+        # Path-cumulative turn limit (advancers whose path winding exceeds
+        # this are dropped) scales (sub-)logarithmically with cable capacity
+        # Q: f(Q) = 3π/4 + (5π/4) * ln(Q/2) / ln(6), giving f(2) = 3π/4 and
+        # f(12) = 2π. Lower-capacity routes have simpler geometry, so excess
+        # winding is more likely circling; higher-capacity routes legitimately
+        # need more wrap. Pass an explicit value to override.
+        if turn_limit is None:
             Q = Gʹ.graph.get('capacity')
             if Q is None or Q < 2:
-                cum_turn_kill = 2.0 * math.pi
+                turn_limit = 2.0 * math.pi
             else:
-                cum_turn_kill = (math.pi / 2) + (
-                    (3 * math.pi / 2) * math.log(Q / 2) / math.log(6)
+                turn_limit = (3 * math.pi / 4) + (
+                    (5 * math.pi / 4) * math.log(Q / 2) / math.log(6)
                 )
-        self.cum_turn_kill = cum_turn_kill
+        self.turn_limit = turn_limit
         self.iterations = 0
         G = Gʹ.copy()
         R, T, B = (A.graph[k] for k in 'RTB')
@@ -445,8 +445,6 @@ class PathFinder:
         _funnel: list[int],
         wedge_end: list[int],
         bad_streak: int = 0,
-        running_turn: float = 0.0,
-        running_turn_prev: float = 0.0,
     ):
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
@@ -468,7 +466,7 @@ class PathFinder:
         ST = self.ST
         num_traversals = self.num_traversals
         bad_streak_limit = self.bad_streak_limit
-        cum_turn_kill = self.cum_turn_kill
+        turn_limit = self.turn_limit
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         while True:
@@ -483,8 +481,6 @@ class PathFinder:
                     _funnel.copy(),
                     wedge_end.copy(),
                     bad_streak,
-                    running_turn,
-                    running_turn_prev,
                 )
                 continue
             else:
@@ -582,13 +578,10 @@ class PathFinder:
             keeper = I_path[_new].get(sector_new)
             unseen = keeper is None
             # signed turn at apex_eff: angle from (grandparent -> apex_eff)
-            # segment to (apex_eff -> _new) segment. running_turn accumulates
-            # turn since the last fresh paths.add — a productive advancer
-            # resets it on every new pseudonode, only an advancer that keeps
-            # producing dedup-adds (e.g. circling a barrier) keeps growing it.
+            # segment to (apex_eff -> _new) segment.
             gp_id = pseudoapex.parent
             if gp_id is None:
-                turn = 0.0
+                step_turn = 0.0
             else:
                 _gp = paths.prime_from_id[gp_id]
                 ax = self.VertexC[_apex_eff]
@@ -596,25 +589,19 @@ class PathFinder:
                 nv = self.VertexC[_new]
                 v1x, v1y = ax[0] - gp[0], ax[1] - gp[1]
                 v2x, v2y = nv[0] - ax[0], nv[1] - ax[1]
-                turn = math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y)
-            # cumulative running_turn (no reset) — measures total winding the
-            # advancer has accumulated since launch.
-            running_turn += turn
+                step_turn = math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y)
+            cum_turn = pseudoapex.cum_turn + step_turn
             d_prio = d_new if _new < ST else prio[0]
             score_0 = d_prio
             score_1 = bad_streak + 0.5 if unseen else bad_streak
             score_2 = 1.0 if unseen else (d_new / paths[keeper].dist)
-            # Turn cap is checked against running_turn + running_turn_prev
-            # vs 2*threshold — averaging this iteration's accumulated
-            # winding with the prior iteration's. Requires sustained high
-            # winding to trip; a single late-spike doesn't kill.
-            # bad_streak <= 1 waives the kill — a recently-active advancer
-            # gets through regardless of winding.
+            # Path-cumulative turn cap: total winding from path root to the
+            # candidate pseudonode beyond the threshold marks the advancer
+            # as unpromising. bad_streak <= 1 waives the drop — a recently-
+            # active advancer gets through.
             is_promising = bad_streak < bad_streak_limit and (
-                abs(running_turn + running_turn_prev) <= 2.0 * cum_turn_kill
-                or bad_streak <= 1
+                abs(cum_turn) <= turn_limit or bad_streak <= 1
             )
-            running_turn_prev = running_turn
             prio = (score_0, score_1, score_2)
             event = None
             if self.adv_log is not None:
@@ -626,7 +613,8 @@ class PathFinder:
                     'prio': prio,
                     'is_promising': is_promising,
                     'bad_streak': bad_streak,
-                    'running_turn': running_turn,
+                    'step_turn': step_turn,
+                    'cum_turn': cum_turn,
                     'apex_eff_prime': _apex_eff,
                     'd_hop': d_hop,
                     'd_new': d_new,
@@ -638,9 +626,8 @@ class PathFinder:
                 self.adv_log[trav_id]['steps'].append(event)
             yield prio, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
-            new_cum = pseudoapex.cum_angle + turn
             _count_before = self.paths.count
-            new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop, new_cum)
+            new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop, cum_turn)
             if self.paths.count > _count_before:
                 self.adv_pnodes.setdefault(trav_id, set()).add(new)
             wedge_end[side] = new
