@@ -25,7 +25,8 @@ def get_interferences_list(
     Returns:
       list of interferences, where each interference is:
         ((4 vertices of the two edges involved), one of the vertices or None)
-        the last tuple element indicates a vertex that lays exactly on the edge
+        the last tuple element indicates the index (0..3) of the vertex that
+        lays exactly on the edge in cases of touching (not crossing)
     """
     crossings = []
     if fnT is None:
@@ -297,22 +298,16 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
             # trivial case: no way to break a branch apart
             continue
         # make u be the touch-point within ⟨s, t⟩
-        if p < 2:
-            u, v = uvst[:2] if p == 0 else uvst[1::-1]
-            s, t = uvst[2:]
-        else:
-            u, v = uvst[2:] if p == 2 else uvst[:1:-1]
-            s, t = uvst[:2]
+        u = uvst[p]
+        s, t = uvst[2:] if p < 2 else uvst[:2]
 
-        u_, v_, s_, t_ = fnT[uvst,].tolist()
+        u_, s_, t_ = fnT[(u, s, t),].tolist()
         bunch = [fnT[nb].item() for nb in G[u]]
         is_split, insideI, outsideI = is_bunch_split_by_corner(
             VertexC[bunch], *VertexC[[s_, u_, t_]]
         )
         if is_split:
             Xings.append((s_, t_, bunch[insideI[0]], bunch[outsideI[0]]))
-
-    # ¿do we need a special case for a detour segment going through a node?
 
     # check detour nodes for branch-splitting
     d_start = T + B + C
