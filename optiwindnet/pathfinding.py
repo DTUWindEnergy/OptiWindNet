@@ -93,8 +93,6 @@ class PathFinder:
       traversals_limit: maximum number of times a single portal may be traversed
       bad_streak_limit: limit on how many steps in a row without finding an improved
         path the traverser is allowed to take
-      trace: if True, populate ``self.adv_log`` with per-advancer life-cycle data
-        (steps, drop reason, parent advancer). Off by default — has overhead.
 
     Example::
 
@@ -116,13 +114,10 @@ class PathFinder:
         traversals_limit: int = 3,
         bad_streak_limit: int = 3,
         turn_limit: float | None = None,
-        trace: bool = False,
     ) -> None:
         self.iterations_limit = iterations_limit
         self.traversals_limit = traversals_limit
         self.bad_streak_limit = bad_streak_limit
-        self.adv_log: dict | None = {} if trace else None
-        self._cur_iter: int = 0
         # Path-cumulative turn limit (advancers whose path winding exceeds
         # this are dropped) scales (sub-)logarithmically with cable capacity
         # Q: f(Q) = 3π/4 + (5π/4) * ln(Q/2) / ln(6), giving f(2) = 3π/4 and
@@ -395,15 +390,6 @@ class PathFinder:
                 # get traverser state
                 traverser_args = next(traverser)
                 prio = traverser_args[0]
-                if self.adv_log is not None:
-                    self.adv_log[self.adv_counter] = {
-                        'parent': adv_id,
-                        'origin_portal': portal_bif,
-                        'origin_side': side_bif,
-                        'launch_iter': self._cur_iter,
-                        'steps': [],
-                        'drop': None,
-                    }
                 heapq.heappush(
                     prioqueue,
                     (
@@ -604,27 +590,6 @@ class PathFinder:
                 abs(cum_turn) <= turn_limit or bad_streak <= 1
             )
             prio = (score_0, score_1, score_2)
-            event = None
-            if self.adv_log is not None:
-                event = {
-                    'iter': self._cur_iter,
-                    'portal': portal,
-                    '_new': _new,
-                    'sector_new': sector_new,
-                    'prio': prio,
-                    'is_promising': is_promising,
-                    'bad_streak': bad_streak,
-                    'step_turn': step_turn,
-                    'cum_turn': cum_turn,
-                    'apex_eff_prime': _apex_eff,
-                    'd_hop': d_hop,
-                    'd_new': d_new,
-                    'funnel_primes': tuple(_funnel),
-                    'pnode_added': None,
-                    'pnode_id': None,
-                    'made_keeper': None,
-                }
-                self.adv_log[trav_id]['steps'].append(event)
             yield prio, is_promising
             #  trace('<%d> traverser after second yield', trav_id)
             _count_before = self.paths.count
@@ -635,12 +600,7 @@ class PathFinder:
             num_traversals[portal] += 1
             # get keeper again, as the situation may have changed
             keeper = I_path[_new].get(sector_new)
-            keeper_was_updated = keeper is None or d_new < paths[keeper].dist
-            if event is not None:
-                event['pnode_added'] = self.paths.count > _count_before
-                event['pnode_id'] = new
-                event['made_keeper'] = keeper_was_updated
-            if keeper_was_updated:
+            if keeper is None or d_new < paths[keeper].dist:
                 self.I_path[_new][sector_new] = new
                 debug(
                     '<%d> new keeper for (%d, %d) via %d: d_path = %.2f',
@@ -748,37 +708,20 @@ class PathFinder:
                     traverser_pack,
                     bitarray(len(triangles)),
                 )
-                if self.adv_log is not None:
-                    self.adv_log[self.adv_counter] = {
-                        'parent': None,
-                        'origin_portal': (left, right),
-                        'origin_root': r,
-                        'launch_iter': 0,
-                        'steps': [],
-                        'drop': None,
-                    }
                 heapq.heappush(prioqueue, (prio, self.adv_counter, advancer))
                 self.adv_counter += 1
         # process edges in the prioqueue
         #  print(f'[exp] starting main loop, |prioqueue| = {len(prioqueue)}')
         _, adv_id, advancer = heapq.heappop(prioqueue)
         iter = 0
-        adv_log = self.adv_log
         while iter < iterations_limit:
             iter += 1
-            self._cur_iter = iter
             debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
             try:
                 # advance one portal
                 prio, portal, is_promising = next(advancer)
             except StopIteration:
                 # advancer decided to stop, get a new one
-                if adv_log is not None and adv_log[adv_id]['drop'] is None:
-                    adv_log[adv_id]['drop'] = {
-                        'iter': iter,
-                        'reason': 'stop_iteration',
-                        'portal': None,
-                    }
                 if not prioqueue:
                     break
                 _, adv_id, advancer = heapq.heappop(prioqueue)
@@ -789,14 +732,6 @@ class PathFinder:
                         prioqueue, (prio, adv_id, advancer)
                     )
                 else:
-                    if adv_log is not None and adv_log[adv_id]['drop'] is None:
-                        adv_log[adv_id]['drop'] = {
-                            'iter': iter,
-                            'reason': 'unpromising_exhausted',
-                            'portal': portal,
-                            'prio': prio,
-                            'num_traversals_at_portal': num_traversals[portal],
-                        }
                     # forget advancer and get a new one
                     if not prioqueue:
                         break
