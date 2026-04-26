@@ -101,6 +101,11 @@ class PathFinder:
       G_tentative = G_from_S(S, A)  # G_tentative is almost a route set
       G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
+    Note:
+      On ``capacity=2`` instances the defaults may not suffice to find all
+      shortest feeders. If `validate_routeset(G)` reports any crossings, retry
+      with ``traversals_limit=10`` and ``iterations_limit=50000``.
+
     """
 
     def __init__(
@@ -112,7 +117,7 @@ class PathFinder:
         branched: bool = True,
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
-        bad_streak_limit: int = 3,
+        bad_streak_limit: int = 5,
         turn_limit: float | None = None,
     ) -> None:
         self.iterations_limit = iterations_limit
