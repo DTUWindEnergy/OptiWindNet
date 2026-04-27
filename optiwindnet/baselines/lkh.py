@@ -5,6 +5,7 @@ from itertools import chain
 import logging
 import math
 import os
+import random
 import re
 import subprocess
 import tempfile
@@ -64,6 +65,7 @@ def lkh(
     complete: bool = False,
     keep_log: bool = False,
     seed: int | None = None,
+    initial_tour_nodes: list[int] | None = None,
 ) -> nx.Graph:
     """
     Lin-Kernighan-Helsgaun via LKH-3 binary.
@@ -85,6 +87,7 @@ def lkh(
       complete: make the full graph over A available (links not in A assumed direct)
       keep_log: save the LKH text output to graph attr 'method_log'
       seed: for the pseudo-random number generator (if None: random seed)
+      initial_tour_nodes: optional initial tour for LKH (1-indexed nodes)
     Returns:
       Solution topology S
     """
@@ -126,6 +129,7 @@ def lkh(
     )
 
     output_fname = 'solution.out'
+    initial_tour_fname = 'initial.tour'
     specs = dict(
         NAME=A.graph.get('name', 'unnamed'),
         TYPE='OVRP',
@@ -199,6 +203,22 @@ def lkh(
         params['PROBLEM_FILE'] = problem_fpath
         params_fpath = os.path.join(tmpdir, params_fname)
         params['MTSP_SOLUTION_FILE'] = os.path.join(tmpdir, output_fname)
+        if initial_tour_nodes is not None:
+            initial_tour_fpath = os.path.join(tmpdir, initial_tour_fname)
+            Path(initial_tour_fpath).write_text(
+                '\n'.join(
+                    (
+                        f'NAME: {A.graph.get("name", "unnamed")}',
+                        'TYPE: TOUR',
+                        'TOUR_SECTION',
+                        *(str(node) for node in initial_tour_nodes),
+                        '-1',
+                        'EOF',
+                    )
+                )
+            )
+            params['INITIAL_TOUR_FILE'] = initial_tour_fpath
+            params['INITIAL_TOUR_FRACTION'] = 1.0
         Path(params_fpath).write_text(
             '\n'.join((f'{k} = {v}' if v is not None else k) for k, v in params.items())
         )
@@ -252,6 +272,7 @@ def lkh(
     if vehicles is not None:
         solver_details.update(vehicles=vehicles)
 
+    max_load = 0
     if not penalty or result.stderr:
         info('===stdout===\n%s', result.stdout.decode('utf8'))
         error('===stderr===\n%s', result.stderr.decode('utf8'))
@@ -294,6 +315,8 @@ def lkh(
             ).groups()
         )
     for subtree_id, branch in enumerate(branches):
+        branch_load = len(branch)
+        max_load = max(max_load, branch_load)
         loads = range(len(branch), 0, -1)
         S.add_nodes_from(
             ((n, {'load': load}) for n, load in zip(branch, loads)), subtree=subtree_id
@@ -306,6 +329,7 @@ def lkh(
         S.add_edges_from(zip(branch_roll, branch, edgeD))
     root_load = sum(S.nodes[n]['load'] for n in S.neighbors(-1))
     S.nodes[-1]['load'] = root_load
+    S.graph['max_load'] = max_load
     assert root_load == T, 'ERROR: root node load does not match T.'
     return S
 
@@ -339,6 +363,7 @@ def iterative_lkh(
     time_limit: float,
     scale: float = 1e5,
     vehicles: int | None = None,
+    warmstart: nx.Graph | None = None,
     runs: int = 50,
     per_run_limit: float = 15.0,
     precision: int = 1000,
@@ -370,7 +395,22 @@ def iterative_lkh(
     nx.set_node_attributes(A, -1, 'root')
     add_link_blockmap(A)
     _prune_bad_links(A, math.ceil(2.4 * capacity))
+    T = A.graph['T']
+    vehicles_min = math.ceil(T / capacity)
+    if vehicles is None or vehicles <= vehicles_min:
+        vehicles_for_lkh = vehicles_min
+    else:
+        vehicles_for_lkh = vehicles
     i = 0
+    if warmstart is not None:
+        initial_tour_nodes = _initial_tour_from_solution(
+            warmstart,
+            vehicles=vehicles_for_lkh,
+        )
+    else:
+        initial_tour_nodes = None
+    retry_seed_rng = random.Random(seed) if seed is not None else None
+    current_seed = seed
     while True:
         # solve
         S = lkh(
@@ -378,54 +418,97 @@ def iterative_lkh(
             capacity=capacity,
             time_limit=time_limit,
             scale=scale,
-            vehicles=vehicles,
+            vehicles=vehicles_for_lkh,
             runs=runs,
             per_run_limit=per_run_limit,
             precision=precision,
             complete=complete,
             keep_log=keep_log,
-            seed=seed,
+            seed=current_seed,
+            initial_tour_nodes=initial_tour_nodes,
         )
         # repair
         S = repair_routeset_path(S, A)
         # TODO: accumulate solution_time throughout the iterations
         #       (makes sense to add a new field)
         crossings = S.graph.get('outstanding_crossings', [])
-        if not crossings or i == max_retries:
+        max_load = S.graph.get('max_load', 0)
+        over_capacity = max_load > capacity
+        if over_capacity:
+            warn(
+                'Capacity violated in LKH solution: '
+                f'max_load ({max_load}) > capacity ({capacity}). Retrying with increased vehicles.'
+            )
+
+        if (not crossings and not over_capacity) or i == max_retries:
             break
         i += 1
-        # prepare A for retry
-        crossing_counterparts = defaultdict(list)
-        for uv, st in crossings:
-            # enabling the identification of a link crossing multiple links
-            crossing_counterparts[uv].append(st)
-            crossing_counterparts[st].append(uv)
-        # sorting allows for removing first the links that have the most crossings
-        for uv in sorted(
-            crossing_counterparts,
-            key=lambda k: len(crossing_counterparts[k]),
-            reverse=True,
-        ):
-            counterparts = crossing_counterparts[uv]
-            if counterparts:
-                # when uv crosses a single link st and st is the longest, uv becomes st
-                if (
-                    len(counterparts) == 1
-                    and A.edges[counterparts[0]]['length'] > A.edges[uv]['length']
-                ):
-                    st = counterparts[0]
-                    counterparts = crossing_counterparts[st]
-                    # st is after uv in the sorted list -> remove uv from its counterparts
-                    counterparts.remove(uv)
-                    uv = st
-                # remove uv from the counterparts list of uv's counterparts
-                for st in counterparts:
-                    crossing_counterparts[st].remove(uv)
-                if uv in diagonals:
-                    del diagonals[uv]
-                A.remove_edge(*uv)
+        if over_capacity:
+            vehicles_for_lkh += 1
+            if initial_tour_nodes is not None:
+                initial_tour_nodes = _initial_tour_from_solution(
+                    warmstart,
+                    vehicles=vehicles_for_lkh,
+                )
+        if retry_seed_rng is not None:
+            current_seed = retry_seed_rng.randrange(1, 2**31)
+        if crossings and not over_capacity:
+            initial_tour_nodes = None
+            # prepare A for retry
+            crossing_counterparts = defaultdict(list)
+            for uv, st in crossings:
+                # enabling the identification of a link crossing multiple links
+                crossing_counterparts[uv].append(st)
+                crossing_counterparts[st].append(uv)
+            # sorting allows for removing first the links that have the most crossings
+            for uv in sorted(
+                crossing_counterparts,
+                key=lambda k: len(crossing_counterparts[k]),
+                reverse=True,
+            ):
+                counterparts = crossing_counterparts[uv]
+                if counterparts:
+                    # when uv crosses a single link st and st is the longest, uv becomes st
+                    if (
+                        len(counterparts) == 1
+                        and A.edges[counterparts[0]]['length'] > A.edges[uv]['length']
+                    ):
+                        st = counterparts[0]
+                        counterparts = crossing_counterparts[st]
+                        # st is after uv in the sorted list -> remove uv from its counterparts
+                        counterparts.remove(uv)
+                        uv = st
+                    # remove uv from the counterparts list of uv's counterparts
+                    for st in counterparts:
+                        crossing_counterparts[st].remove(uv)
+                    if uv in diagonals:
+                        del diagonals[uv]
+                    A.remove_edge(*uv)
     if i > 0:
         S.graph['retries'] = i
-        if crossings:
-            warn('Solution contains crossings (max_retries reached)')
+        if crossings or max_load > capacity:
+            warn('Solution remains invalid (max_retries reached)')
     return S
+
+
+def _initial_tour_from_solution(S: nx.Graph, vehicles: int) -> list[int]:
+    # Walk S from each root outward. repair_routeset_path guarantees S is
+    # non-branching, so every non-root node has degree 1 (leaf) or 2.
+    R = S.graph['R']
+    T = S.graph['T']
+    ordered_nodes: list[int] = []
+    for root in range(-R, 0):
+        for cur in S.neighbors(root):
+            rev = root
+            while True:
+                ordered_nodes.append(cur + 1)
+                nb = S[cur]
+                if len(nb) == 1:
+                    break  # leaf
+                a, b = nb
+                rev, cur = cur, a if b == rev else b
+    # LKH expects each customer id [1, ..., R + T - 1] exactly once.
+    # For CVRP/OVRP, LKH transforms to TSP by appending `vehicles - 1` depot clones.
+    # Their ids are [R + T + 1, ..., R + T + vehicles - 1].
+    depot_clones = range(R + T + 1, R + T + vehicles)
+    return ordered_nodes + list(depot_clones) + [R + T]
