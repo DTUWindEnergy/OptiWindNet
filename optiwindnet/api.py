@@ -673,7 +673,8 @@ class HGSRouter(Router):
             verbose: Enable verbose logging.
 
         Notes:
-            * The total runtime may reach up to `max_retries * time_limit` in the worst case.
+            * The total runtime may reach up to `(max_retries + 1) * time_limit` in the
+              worst case.
         """
         # Call the base class initialization
         super().__init__(**kwargs)

@@ -1,3 +1,46 @@
+# v0.2.1
+
+[Commit history since v0.2.0](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.0...v0.2.1)
+
+## Breaking Changes
+- `optiwindnet.db` module only: **RouteSet schema slimmed (v4)**: `num_gates` was renamed to `feeders_per_root`; the unused `valid`, `is_normalized`, and `stuntC` columns were removed. The `python -m optiwindnet.db.migrate` script now writes the v4 schema and accepts both v2 (Pony ORM) and v3 (Peewee) source databases.
+
+## Important Changes
+- **OR-Tools MILP backend switched to MathOpt API** (replacing `cp_model`), enabling multiple backends through a unified wrapper. No impact on use through either API. 
+- **Pyomo CPLEX/Gurobi solvers switched to the persistent interfaces** (`cplex_persistent`, `gurobi_persistent`). Relevant for successive calls to solver.solve().
+- **`PathFinder`**: `A` is now a mandatory argument, it is relied upon to inform about tentative feeder crossings (saves the repeated check done before); default options were updated; search heuristics improved.
+
+## Features
+- LKH improvements: iterations are also triggered on capacity violations, new `warmstart` argument.
+- Better estimation of obstructed feeder lengths pre-optimization (make_planar_embedding).
+- Default thread count for MathOpt solvers set to the number of physical cores; non-OR-Tools solvers also use `physical_core_count()`.
+- New context-managed database connection API; `open_database()` and `database_connection()` accept a `timeout` argument.
+- `.osm.pbf` parsing now accepts locations without borders.
+- Added typing stubs and improved type annotations.
+- Informative string repr for `SvgRepr`.
+
+## Fixes
+- Multiple PathFinder robustness fixes: collinear vertices in funnel apex update, expansion of `P_paths` shortcuts when building contour clones, shortcut provenance tracking for barriers, cumulative turning check for dropping traversers, and `bad_streak` decay on first arrival.
+- `make_planar_embedding` fixes: constraint checks and line-of-sight tagging now use Shapely's `STRtree`, proper handling of diagonal promotion conflicts in concave meshes, string-pulling skipped when only one border vertex is on the path (enabled by STRtree check).
+- `validate_routeset()`: corrected detour index range; touchpoint set as bunch-split corner apex.
+- LKH: replaced stale `_add_link_blockage` call with `add_link_blockmap`.
+- Removed WAL mode from the SQLite open pragma (caused issues on shared clusters).
+- Stunt vertices are no longer placed in `G` (regression since a70b575).
+- Gracefully handle repeated extents' vertices in .yaml input files.
+- Fixed `migrate.py` ImportError.
+
+## Refactoring & Maintenance
+- Replaced `dill` with `pickle` everywhere it was used in tests.
+- Removed `stuntC` from the routeset saving path.
+- CI now runs a test matrix covering Python 3.11–3.14 (default bumped to 3.14); release requires passing on all versions.
+- Increased test coverage and added topology-aware routeset comparison to prevent spurious failures.
+
+## Documentation
+- Major refactor of the Topfarm integration example (now including substation trajectory); several notebook updates.
+- Added links to TOPFARM and Ard, updated preamble with Jupyter tutorial links.
+- Acknowledged the DFF grant in README and doc index.
+- Improved docstrings and setup instructions.
+
 # v0.2.0
 
 [Commit history since v0.1.6](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.6...v0.2.0)
