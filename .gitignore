@@ -1,3 +1,8 @@
+# specific project files
+docs/notebooks/mplstyles/
+docs/notebooks/*.sqlite
+docs/notebooks/XML/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
