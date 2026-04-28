@@ -1,9 +1,12 @@
 import math
 from collections.abc import Iterable, Iterator
+from itertools import combinations
+from typing import Any
 
 import networkx as nx
 import numpy as np
 from bidict import bidict
+import shapely as shp
 
 from .geometric import angle_helpers, is_bunch_split_by_corner, is_same_side
 from .interarraylib import calcload
@@ -328,6 +331,592 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
         #     f'inside: {[bunch[i] for i in insideI]}; ' \
         #     f'outside: {[bunch[i] for i in outsideI]}'
     return Xings
+
+
+def _routeset_fnT(G: nx.Graph) -> np.ndarray:
+    R, T, B = (G.graph[k] for k in 'RTB')
+    C, D = (G.graph.get(k, 0) for k in 'CD')
+    if C > 0 or D > 0:
+        return G.graph['fnT']
+    fnT = np.arange(T + B + R)
+    fnT[-R:] = range(-R, 0)
+    return fnT
+
+
+def _expanded_kind_path(G: nx.Graph, edge: tuple[int, int]) -> tuple[int, ...]:
+    """Expand a contour/detour edge to its maximal same-kind graph path."""
+    edge_kind = G.edges[edge].get('kind')
+    if edge_kind not in {'contour', 'detour'}:
+        return edge
+
+    def walk(prev: int, node: int) -> list[int]:
+        path = [node]
+        while True:
+            candidates = [
+                nb
+                for nb in G[node]
+                if nb != prev and G.edges[node, nb].get('kind') == edge_kind
+            ]
+            if len(candidates) != 1:
+                return path
+            prev, node = node, candidates[0]
+            path.append(node)
+
+    u, v = edge
+    return tuple(reversed(walk(v, u))) + tuple(walk(u, v))
+
+
+def _prime_path(G: nx.Graph, edge: tuple[int, int], fnT: np.ndarray) -> tuple[int, ...]:
+    path = tuple(int(fnT[n]) for n in _expanded_kind_path(G, edge))
+    R = G.graph['R']
+    trimmed = path
+    while len(trimmed) > 1 and -R <= trimmed[0] < 0:
+        trimmed = trimmed[1:]
+    while len(trimmed) > 1 and -R <= trimmed[-1] < 0:
+        trimmed = trimmed[:-1]
+    if len(trimmed) > 1:
+        path = trimmed
+    if len(path) > 1 and path[0] < path[-1]:
+        path = path[::-1]
+    return path
+
+
+def _prime_node_path(
+    G: nx.Graph, path: tuple[int, ...], fnT: np.ndarray
+) -> tuple[int, ...]:
+    prime_path = tuple(int(fnT[n]) for n in path)
+    R = G.graph['R']
+    trimmed = prime_path
+    while len(trimmed) > 1 and -R <= trimmed[0] < 0:
+        trimmed = trimmed[1:]
+    while len(trimmed) > 1 and -R <= trimmed[-1] < 0:
+        trimmed = trimmed[:-1]
+    if len(trimmed) > 1:
+        prime_path = trimmed
+    if len(prime_path) > 1 and prime_path[0] < prime_path[-1]:
+        prime_path = prime_path[::-1]
+    return prime_path
+
+
+def _maximal_graph_paths(G: nx.Graph) -> list[tuple[int, ...]]:
+    visited = set()
+    paths = []
+
+    def step(prev: int, node: int) -> list[int]:
+        path = [node]
+        while G.degree[node] == 2:
+            candidates = [nb for nb in G[node] if nb != prev]
+            if len(candidates) != 1:
+                break
+            prev, node = node, candidates[0]
+            edge = (prev, node) if prev < node else (node, prev)
+            if edge in visited:
+                break
+            path.append(node)
+        return path
+
+    for u, v in G.edges:
+        edge = (u, v) if u < v else (v, u)
+        if edge in visited:
+            continue
+        path = tuple(reversed(step(v, u))) + tuple(step(u, v))
+        for a, b in zip(path[:-1], path[1:]):
+            visited.add((a, b) if a < b else (b, a))
+        paths.append(path)
+    return paths
+
+
+def _routeset_polylines(G: nx.Graph) -> list[dict[str, Any]]:
+    R = G.graph['R']
+    roots = set(range(-R, 0))
+    if max(dict(G.degree()).values(), default=0) <= 2:
+        return [
+            {'path': path, 'kind': 'path', 'non_root_end': None}
+            for path in _maximal_graph_paths(G)
+        ]
+
+    visited = set()
+    polylines: list[dict[str, Any]] = []
+
+    def edge_key(u: int, v: int) -> tuple[int, int]:
+        return (u, v) if u < v else (v, u)
+
+    def walk(prev: int, node: int) -> tuple[int, ...]:
+        path = [prev, node]
+        visited.add(edge_key(prev, node))
+        while node not in roots and G.degree[node] == 2:
+            candidates = [nb for nb in G[node] if nb != prev]
+            if len(candidates) != 1:
+                break
+            nxt = candidates[0]
+            key = edge_key(node, nxt)
+            if key in visited:
+                break
+            prev, node = node, nxt
+            path.append(node)
+            visited.add(key)
+        return tuple(path)
+
+    for root in sorted(roots):
+        for nb in G[root]:
+            path = walk(root, nb)
+            polylines.append({'path': path, 'kind': 'feeder', 'non_root_end': path[-1]})
+
+    starts = [n for n in G if n not in roots and G.degree[n] != 2]
+    for start in starts:
+        for nb in G[start]:
+            if nb in roots:
+                continue
+            if edge_key(start, nb) in visited:
+                continue
+            path = walk(start, nb)
+            polylines.append({'path': path, 'kind': 'link', 'non_root_end': None})
+
+    return polylines
+
+
+def _path_coords(
+    VertexC: np.ndarray, fnT: np.ndarray, path: tuple[int, ...]
+) -> list[tuple[float, float]]:
+    coords = []
+    for node in path:
+        coord = tuple(float(c) for c in VertexC[int(fnT[node])])
+        if not coords or coord != coords[-1]:
+            coords.append(coord)
+    return coords
+
+
+def _common_subpath_span(
+    path_a: tuple[int, ...], path_b: tuple[int, ...]
+) -> tuple[int, int, int, int, tuple[int, ...]] | None:
+    """Find a shared node run of at least one segment between two paths."""
+    best: tuple[int, int, int, int, tuple[int, ...]] | None = None
+    best_len = 1
+    for candidate_b in (path_b, path_b[::-1]):
+        for i, node_a in enumerate(path_a):
+            for j, node_b in enumerate(candidate_b):
+                if node_a != node_b:
+                    continue
+                length = 1
+                while (
+                    i + length < len(path_a)
+                    and j + length < len(candidate_b)
+                    and path_a[i + length] == candidate_b[j + length]
+                ):
+                    length += 1
+                if length > best_len:
+                    best_len = length
+                    best = i, i + length, j, j + length, candidate_b
+    return best
+
+
+def _cross_sign(a: np.ndarray, b: np.ndarray, eps: float = 1e-15) -> int:
+    cross = a[0] * b[1] - a[1] * b[0]
+    if abs(cross) <= eps:
+        return 0
+    return 1 if cross > 0 else -1
+
+
+def _shared_run_has_crossing_cones(
+    path_a: tuple[int, ...], path_b: tuple[int, ...], VertexC: np.ndarray
+) -> bool:
+    """True when approach and separation cones have the same orientation."""
+    span = _common_subpath_span(path_a, path_b)
+    if span is None:
+        return False
+    start_a, end_a, start_b, end_b, oriented_b = span
+    if not (
+        0 < start_a
+        and end_a < len(path_a)
+        and 0 < start_b
+        and end_b < len(oriented_b)
+    ):
+        return False
+
+    shared_start = path_a[start_a]
+    shared_end = path_a[end_a - 1]
+    approach_a = VertexC[shared_start] - VertexC[path_a[start_a - 1]]
+    approach_b = VertexC[shared_start] - VertexC[oriented_b[start_b - 1]]
+    separation_a = VertexC[path_a[end_a]] - VertexC[shared_end]
+    separation_b = VertexC[oriented_b[end_b]] - VertexC[shared_end]
+
+    approach_sign = _cross_sign(approach_a, approach_b)
+    separation_sign = _cross_sign(separation_a, separation_b)
+    return approach_sign != 0 and approach_sign == separation_sign
+
+
+def _point_segment_distance(pC: np.ndarray, aC: np.ndarray, bC: np.ndarray) -> float:
+    ab = bC - aC
+    denom = np.dot(ab, ab)
+    if denom == 0.0:
+        return np.hypot(*(pC - aC)).item()
+    t = np.clip(np.dot(pC - aC, ab) / denom, 0.0, 1.0)
+    closest = aC + t * ab
+    return np.hypot(*(pC - closest)).item()
+
+
+def _unique_rays(rays: list[np.ndarray], angle_tol: float) -> list[np.ndarray]:
+    unique = []
+    for ray in rays:
+        norm = np.hypot(*ray).item()
+        if norm == 0.0:
+            continue
+        unit = ray / norm
+        if all(
+            abs(unit[0] * other[1] - unit[1] * other[0]) > angle_tol
+            or np.dot(unit, other) < 0
+            for other in unique
+        ):
+            unique.append(unit)
+    return unique
+
+
+def _local_rays_at_point(
+    coords: list[tuple[float, float]],
+    point: tuple[float, float],
+    *,
+    endpoint_tol: float,
+    angle_tol: float,
+) -> list[np.ndarray]:
+    pC = np.array(point)
+    rays = []
+    scale = max(
+        (
+            np.hypot(*(np.array(b) - np.array(a))).item()
+            for a, b in zip(coords[:-1], coords[1:])
+        ),
+        default=1.0,
+    )
+    tol = endpoint_tol * max(scale, 1.0)
+    for a, b in zip(coords[:-1], coords[1:]):
+        aC = np.array(a)
+        bC = np.array(b)
+        if _point_segment_distance(pC, aC, bC) > tol:
+            continue
+        if np.hypot(*(aC - pC)).item() > tol:
+            rays.append(aC - pC)
+        if np.hypot(*(bC - pC)).item() > tol:
+            rays.append(bC - pC)
+    return _unique_rays(rays, angle_tol)
+
+
+def _rays_alternate(
+    rays_a: list[np.ndarray], rays_b: list[np.ndarray], angle_tol: float
+) -> bool:
+    if len(rays_a) < 2 or len(rays_b) < 2:
+        return False
+    for pair_a in combinations(rays_a, 2):
+        if abs(pair_a[0][0] * pair_a[1][1] - pair_a[0][1] * pair_a[1][0]) <= angle_tol:
+            continue
+        for pair_b in combinations(rays_b, 2):
+            if (
+                abs(pair_b[0][0] * pair_b[1][1] - pair_b[0][1] * pair_b[1][0])
+                <= angle_tol
+            ):
+                continue
+            ordered = sorted(
+                (
+                    (math.atan2(ray[1], ray[0]) % (2 * math.pi), label)
+                    for label, pair in (('a', pair_a), ('b', pair_b))
+                    for ray in pair
+                )
+            )
+            labels = [label for _, label in ordered]
+            if labels in (['a', 'b', 'a', 'b'], ['b', 'a', 'b', 'a']):
+                return True
+    return False
+
+
+def _polyline_crosses_at_point(
+    coords_a: list[tuple[float, float]],
+    coords_b: list[tuple[float, float]],
+    point: tuple[float, float],
+    *,
+    angle_tol: float,
+    endpoint_tol: float,
+) -> bool:
+    pC = np.array(point)
+    scale = max(
+        max(
+            (
+                np.hypot(*(np.array(b) - np.array(a))).item()
+                for a, b in zip(coords[:-1], coords[1:])
+            ),
+            default=1.0,
+        )
+        for coords in (coords_a, coords_b)
+    )
+    tol = endpoint_tol * max(scale, 1.0)
+    endpoints = (
+        np.array(coords_a[0]),
+        np.array(coords_a[-1]),
+        np.array(coords_b[0]),
+        np.array(coords_b[-1]),
+    )
+    if any(np.hypot(*(pC - endpointC)).item() <= tol for endpointC in endpoints):
+        return False
+    rays_a = _local_rays_at_point(
+        coords_a, point, endpoint_tol=endpoint_tol, angle_tol=angle_tol
+    )
+    rays_b = _local_rays_at_point(
+        coords_b, point, endpoint_tol=endpoint_tol, angle_tol=angle_tol
+    )
+    return _rays_alternate(rays_a, rays_b, angle_tol)
+
+
+def _intersection_is_only_at_shared_nodes(
+    path_a: tuple[int, ...],
+    path_b: tuple[int, ...],
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+    intersection,
+    *,
+    endpoint_tol: float,
+) -> bool:
+    shared_nodes = set(path_a) & set(path_b)
+    if not shared_nodes or intersection.length > 0:
+        return False
+    shared_coords = [VertexC[int(fnT[node])] for node in shared_nodes]
+    points = list(_iter_geometry_points(intersection))
+    if not points:
+        return False
+    for point in points:
+        pC = np.array(point)
+        if not any(
+            np.hypot(*(pC - sharedC)).item() <= endpoint_tol
+            for sharedC in shared_coords
+        ):
+            return False
+    return True
+
+
+def _point_is_at_shared_node(
+    point: tuple[float, float],
+    path_a: tuple[int, ...],
+    path_b: tuple[int, ...],
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+    *,
+    endpoint_tol: float,
+) -> bool:
+    shared_nodes = set(path_a) & set(path_b)
+    if not shared_nodes:
+        return False
+    pC = np.array(point)
+    return any(
+        np.hypot(*(pC - VertexC[int(fnT[node])])).item() <= endpoint_tol
+        for node in shared_nodes
+    )
+
+
+def _point_is_common_prime_endpoint(
+    point: tuple[float, float],
+    path_a: tuple[int, ...],
+    path_b: tuple[int, ...],
+    VertexC: np.ndarray,
+    *,
+    endpoint_tol: float,
+) -> bool:
+    common_primes = set(path_a) & set(path_b)
+    if not common_primes:
+        return False
+    endpoint_primes = {path_a[0], path_a[-1], path_b[0], path_b[-1]}
+    pC = np.array(point)
+    return any(
+        prime in endpoint_primes
+        and np.hypot(*(pC - VertexC[prime])).item() <= endpoint_tol
+        for prime in common_primes
+    )
+
+
+def _iter_geometry_points(geometry) -> Iterator[tuple[float, float]]:
+    if geometry.geom_type == 'Point':
+        yield geometry.x, geometry.y
+    elif geometry.geom_type == 'MultiPoint':
+        for point in geometry.geoms:
+            yield point.x, point.y
+    elif geometry.geom_type in {'LineString', 'LinearRing'}:
+        yield from geometry.coords
+    elif geometry.geom_type.startswith('Multi') or geometry.geom_type == (
+        'GeometryCollection'
+    ):
+        for part in geometry.geoms:
+            yield from _iter_geometry_points(part)
+
+
+def _iter_point_geometries(geometry) -> Iterator[tuple[float, float]]:
+    if geometry.geom_type == 'Point':
+        yield geometry.x, geometry.y
+    elif geometry.geom_type == 'MultiPoint':
+        for point in geometry.geoms:
+            yield point.x, point.y
+    elif geometry.geom_type == 'GeometryCollection':
+        for part in geometry.geoms:
+            yield from _iter_point_geometries(part)
+
+
+def _segment_crosses_robustly(
+    uC: np.ndarray,
+    vC: np.ndarray,
+    sC: np.ndarray,
+    tC: np.ndarray,
+    intersection,
+    *,
+    angle_tol: float,
+    endpoint_tol: float,
+) -> bool:
+    uv = vC - uC
+    st = tC - sC
+    uvL = np.hypot(*uv).item()
+    stL = np.hypot(*st).item()
+    if uvL == 0.0 or stL == 0.0:
+        return False
+    sin_angle = abs((uv[0] * st[1] - uv[1] * st[0]) / (uvL * stL))
+    if sin_angle <= angle_tol:
+        return False
+
+    point_tol = endpoint_tol * max(uvL, stL, 1.0)
+    endpoints = (uC, vC, sC, tC)
+    for point in _iter_geometry_points(intersection):
+        pC = np.array(point)
+        if any(np.hypot(*(pC - endpointC)).item() <= point_tol for endpointC in endpoints):
+            return False
+    return True
+
+
+def full_geometric_crossings(
+    G: nx.Graph,
+    *,
+    include_touches: bool = False,
+    length_tol: float = 1e-12,
+    angle_tol: float = 1e-10,
+    endpoint_tol: float = 1e-9,
+) -> list[dict]:
+    """Find route intersections using Shapely geometries.
+
+    This is a heavier, geometry-first diagnostic complement to
+    :func:`validate_routeset`.  Graph edges are translated through ``fnT`` so
+    contour and detour clones are tested at their prime coordinates.  Returned
+    records include the original graph edges and expanded prime-node polylines.
+
+    Args:
+      G: routeset graph.
+      include_touches: include point contacts that are not proper crossings.
+      length_tol: minimum shared length for a collinear overlap.
+      angle_tol: minimum sine of angle between crossing segments.
+      endpoint_tol: relative distance tolerance for endpoint touches.
+
+    Returns:
+      List of dictionaries with keys ``kind``, ``edge_a``, ``edge_b``,
+      ``path_a``, ``path_b``, ``edge_pairs`` and ``geometry``.
+    """
+    VertexC = G.graph['VertexC']
+    fnT = _routeset_fnT(G)
+    polylines = _routeset_polylines(G)
+    paths = [polyline['path'] for polyline in polylines]
+    prime_paths = [_prime_node_path(G, path, fnT) for path in paths]
+    path_coords = [_path_coords(VertexC, fnT, path) for path in paths]
+    lines = [shp.LineString(coords) for coords in path_coords]
+    tree = shp.STRtree(lines)
+    findings: list[dict[str, Any]] = []
+    seen = set()
+
+    for i, line_a in enumerate(lines):
+        for j in tree.query(line_a, predicate='intersects').tolist():
+            if j <= i:
+                continue
+            key = (i, j)
+            if key in seen:
+                continue
+            seen.add(key)
+            path_nodes_a = paths[i]
+            path_nodes_b = paths[j]
+            line_b = lines[j]
+            intersection = line_a.intersection(line_b)
+            if intersection.is_empty:
+                continue
+            if _intersection_is_only_at_shared_nodes(
+                path_nodes_a,
+                path_nodes_b,
+                fnT,
+                VertexC,
+                intersection,
+                endpoint_tol=endpoint_tol,
+            ):
+                continue
+            path_a = prime_paths[i]
+            path_b = prime_paths[j]
+            kind = None
+            if intersection.length > length_tol:
+                if _shared_run_has_crossing_cones(path_a, path_b, VertexC):
+                    kind = 'overlap_cross'
+            if kind is None:
+                if any(
+                    _polyline_crosses_at_point(
+                        path_coords[i],
+                        path_coords[j],
+                        point,
+                        angle_tol=angle_tol,
+                        endpoint_tol=endpoint_tol,
+                    )
+                    for point in _iter_point_geometries(intersection)
+                    if not _point_is_at_shared_node(
+                        point,
+                        path_nodes_a,
+                        path_nodes_b,
+                        fnT,
+                        VertexC,
+                        endpoint_tol=endpoint_tol,
+                    )
+                    and not _point_is_common_prime_endpoint(
+                        point,
+                        path_a,
+                        path_b,
+                        VertexC,
+                        endpoint_tol=endpoint_tol,
+                    )
+                ):
+                    kind = 'cross'
+                elif include_touches:
+                    kind = 'touch'
+                else:
+                    continue
+                if kind == 'touch':
+                    if include_touches:
+                        kind = 'touch'
+                    else:
+                        continue
+
+            if path_b < path_a:
+                path_nodes_a, path_nodes_b = path_nodes_b, path_nodes_a
+                path_a, path_b = path_b, path_a
+            findings.append(
+                {
+                    'kind': kind,
+                    'path_nodes_a': path_nodes_a,
+                    'path_nodes_b': path_nodes_b,
+                    'edge_pairs': [(path_nodes_a, path_nodes_b)],
+                    'path_a': path_a,
+                    'path_b': path_b,
+                    'geometry': intersection,
+                }
+            )
+
+    merged: dict[tuple[str, tuple[int, ...], tuple[int, ...]], dict[str, Any]] = {}
+    for finding in findings:
+        key = finding['kind'], finding['path_a'], finding['path_b']
+        if key not in merged:
+            merged[key] = finding
+            continue
+        merged[key]['edge_pairs'].extend(finding['edge_pairs'])
+        merged[key]['geometry'] = shp.union_all(
+            [merged[key]['geometry'], finding['geometry']]
+        )
+
+    return [
+        {**finding, 'geometry': finding['geometry'].wkt}
+        for finding in merged.values()
+    ]
 
 
 def list_edge_crossings(
