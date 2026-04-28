@@ -1,5 +1,6 @@
 import math
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
 
@@ -10,6 +11,13 @@ import shapely as shp
 
 from .geometric import angle_helpers, is_bunch_split_by_corner, is_same_side
 from .interarraylib import calcload
+
+
+@dataclass(frozen=True)
+class _RoutePolyline:
+    nodes: tuple[int, ...]
+    role: str
+    non_root_end: int | None = None
 
 
 def get_interferences_list(
@@ -343,44 +351,6 @@ def _routeset_fnT(G: nx.Graph) -> np.ndarray:
     return fnT
 
 
-def _expanded_kind_path(G: nx.Graph, edge: tuple[int, int]) -> tuple[int, ...]:
-    """Expand a contour/detour edge to its maximal same-kind graph path."""
-    edge_kind = G.edges[edge].get('kind')
-    if edge_kind not in {'contour', 'detour'}:
-        return edge
-
-    def walk(prev: int, node: int) -> list[int]:
-        path = [node]
-        while True:
-            candidates = [
-                nb
-                for nb in G[node]
-                if nb != prev and G.edges[node, nb].get('kind') == edge_kind
-            ]
-            if len(candidates) != 1:
-                return path
-            prev, node = node, candidates[0]
-            path.append(node)
-
-    u, v = edge
-    return tuple(reversed(walk(v, u))) + tuple(walk(u, v))
-
-
-def _prime_path(G: nx.Graph, edge: tuple[int, int], fnT: np.ndarray) -> tuple[int, ...]:
-    path = tuple(int(fnT[n]) for n in _expanded_kind_path(G, edge))
-    R = G.graph['R']
-    trimmed = path
-    while len(trimmed) > 1 and -R <= trimmed[0] < 0:
-        trimmed = trimmed[1:]
-    while len(trimmed) > 1 and -R <= trimmed[-1] < 0:
-        trimmed = trimmed[:-1]
-    if len(trimmed) > 1:
-        path = trimmed
-    if len(path) > 1 and path[0] < path[-1]:
-        path = path[::-1]
-    return path
-
-
 def _prime_node_path(
     G: nx.Graph, path: tuple[int, ...], fnT: np.ndarray
 ) -> tuple[int, ...]:
@@ -426,17 +396,17 @@ def _maximal_graph_paths(G: nx.Graph) -> list[tuple[int, ...]]:
     return paths
 
 
-def _routeset_polylines(G: nx.Graph) -> list[dict[str, Any]]:
+def _routeset_polylines(G: nx.Graph) -> list[_RoutePolyline]:
     R = G.graph['R']
     roots = set(range(-R, 0))
     if max(dict(G.degree()).values(), default=0) <= 2:
         return [
-            {'path': path, 'kind': 'path', 'non_root_end': None}
+            _RoutePolyline(path, 'path')
             for path in _maximal_graph_paths(G)
         ]
 
     visited = set()
-    polylines: list[dict[str, Any]] = []
+    polylines: list[_RoutePolyline] = []
 
     def edge_key(u: int, v: int) -> tuple[int, int]:
         return (u, v) if u < v else (v, u)
@@ -460,7 +430,7 @@ def _routeset_polylines(G: nx.Graph) -> list[dict[str, Any]]:
     for root in sorted(roots):
         for nb in G[root]:
             path = walk(root, nb)
-            polylines.append({'path': path, 'kind': 'feeder', 'non_root_end': path[-1]})
+            polylines.append(_RoutePolyline(path, 'feeder', path[-1]))
 
     starts = [n for n in G if n not in roots and G.degree[n] != 2]
     for start in starts:
@@ -470,7 +440,7 @@ def _routeset_polylines(G: nx.Graph) -> list[dict[str, Any]]:
             if edge_key(start, nb) in visited:
                 continue
             path = walk(start, nb)
-            polylines.append({'path': path, 'kind': 'link', 'non_root_end': None})
+            polylines.append(_RoutePolyline(path, 'link'))
 
     return polylines
 
@@ -647,13 +617,8 @@ def _polyline_crosses_at_point(
         for coords in (coords_a, coords_b)
     )
     tol = endpoint_tol * max(scale, 1.0)
-    endpoints = (
-        np.array(coords_a[0]),
-        np.array(coords_a[-1]),
-        np.array(coords_b[0]),
-        np.array(coords_b[-1]),
-    )
-    if any(np.hypot(*(pC - endpointC)).item() <= tol for endpointC in endpoints):
+    all_vertices = tuple(np.array(coord) for coord in (*coords_a, *coords_b))
+    if any(np.hypot(*(pC - vertexC)).item() <= tol for vertexC in all_vertices):
         return False
     rays_a = _local_rays_at_point(
         coords_a, point, endpoint_tol=endpoint_tol, angle_tol=angle_tol
@@ -662,6 +627,190 @@ def _polyline_crosses_at_point(
         coords_b, point, endpoint_tol=endpoint_tol, angle_tol=angle_tol
     )
     return _rays_alternate(rays_a, rays_b, angle_tol)
+
+
+def _detour_node_set(G: nx.Graph) -> set[int]:
+    T, B = (G.graph[k] for k in 'TB')
+    C, D = (G.graph.get(k, 0) for k in 'CD')
+    return set(range(T + B + C, T + B + C + D))
+
+
+def _angle_to_bunch(aC: np.ndarray, oC: np.ndarray, bunchC: np.ndarray) -> np.ndarray:
+    A = aC - oC
+    B = bunchC - oC
+    return np.arctan2(A[0] * B[:, 1] - A[1] * B[:, 0], B @ A)
+
+
+def _bunch_split_by_corner(
+    bunchC: np.ndarray,
+    aC: np.ndarray,
+    oC: np.ndarray,
+    bC: np.ndarray,
+    *,
+    margin: float = 1e-3,
+) -> tuple[bool, np.ndarray, np.ndarray]:
+    angle_a = _angle_to_bunch(aC, oC, bunchC)
+    angle_b = _angle_to_bunch(bC, oC, bunchC)
+    keep = ~np.logical_or(
+        np.isclose(angle_a, 0, atol=margin),
+        np.isclose(angle_b, 0, atol=margin),
+    )
+
+    a = aC - oC
+    b = bC - oC
+    angle_ab = math.atan2(a[0] * b[1] - a[1] * b[0], np.dot(a, b))
+    if angle_ab > 0:
+        in_a = angle_a > 0
+        in_b = angle_b < 0
+    else:
+        in_a = angle_a < 0
+        in_b = angle_b > 0
+    inside = np.logical_and(keep, np.logical_and(in_a, in_b))
+    outside = np.logical_and(keep, np.logical_or(~in_a, ~in_b))
+    return bool(any(inside) and any(outside)), np.flatnonzero(inside), np.flatnonzero(
+        outside
+    )
+
+
+def _detour_split_at_node(
+    G: nx.Graph,
+    node: int,
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+) -> tuple[int, tuple[int, int]] | None:
+    prime = int(fnT[node])
+    if prime not in G or G.degree[prime] == 1 or G.degree[node] != 2:
+        return None
+    dA, dB = (int(fnT[nb]) for nb in G[node])
+    bunch = [int(fnT[nb]) for nb in G[prime]]
+    is_split, insideI, outsideI = _bunch_split_by_corner(
+        VertexC[bunch], *VertexC[[dA, prime, dB]]
+    )
+    if not is_split:
+        return None
+    return prime, (bunch[insideI[0]], bunch[outsideI[0]])
+
+
+def _point_is_geometric_crossing(
+    G: nx.Graph,
+    path_nodes_a: tuple[int, ...],
+    path_nodes_b: tuple[int, ...],
+    coords_a: list[tuple[float, float]],
+    coords_b: list[tuple[float, float]],
+    point: tuple[float, float],
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+    *,
+    angle_tol: float,
+    endpoint_tol: float,
+) -> bool:
+    if _point_is_at_shared_node(
+        point,
+        path_nodes_a,
+        path_nodes_b,
+        fnT,
+        VertexC,
+        endpoint_tol=endpoint_tol,
+    ):
+        return False
+
+    if _point_is_detour_branch_split(
+        G, path_nodes_a, point, fnT, VertexC, endpoint_tol=endpoint_tol
+    ) or _point_is_detour_branch_split(
+        G, path_nodes_b, point, fnT, VertexC, endpoint_tol=endpoint_tol
+    ):
+        return False
+
+    if _point_is_common_graph_endpoint(
+        point,
+        path_nodes_a,
+        path_nodes_b,
+        fnT,
+        VertexC,
+        endpoint_tol=endpoint_tol,
+    ):
+        return False
+
+    return _polyline_crosses_at_point(
+        coords_a,
+        coords_b,
+        point,
+        angle_tol=angle_tol,
+        endpoint_tol=endpoint_tol,
+    )
+
+
+def _point_is_detour_branch_split(
+    G: nx.Graph,
+    path: tuple[int, ...],
+    point: tuple[float, float],
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+    *,
+    endpoint_tol: float,
+) -> bool:
+    detour_nodes = _detour_node_set(G)
+    pC = np.array(point)
+    for node in path[1:-1]:
+        if node not in detour_nodes:
+            continue
+        split = _detour_split_at_node(G, node, fnT, VertexC)
+        if split is None:
+            continue
+        prime, _ = split
+        if np.hypot(*(pC - VertexC[prime])).item() <= endpoint_tol:
+            return True
+    return False
+
+
+def _detour_branch_split_findings(
+    G: nx.Graph,
+    polylines: list[_RoutePolyline],
+    prime_paths: list[tuple[int, ...]],
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+) -> list[dict[str, Any]]:
+    detour_nodes = _detour_node_set(G)
+    if not detour_nodes:
+        return []
+
+    findings: list[dict[str, Any]] = []
+    T = G.graph['T']
+    for polyline, prime_path in zip(polylines, prime_paths):
+        path = polyline.nodes
+        if not any(node in detour_nodes for node in path):
+            continue
+        non_root_end = (
+            int(fnT[polyline.non_root_end])
+            if polyline.non_root_end is not None
+            else None
+        )
+        seen_primes = set()
+        for node in path[1:-1]:
+            if node not in detour_nodes:
+                continue
+            prime = int(fnT[node])
+            if prime in seen_primes or not 0 <= prime < T or prime == non_root_end:
+                continue
+            split = _detour_split_at_node(G, node, fnT, VertexC)
+            if split is None:
+                continue
+            prime, split_nodes = split
+            seen_primes.add(prime)
+            point = (float(VertexC[prime][0]), float(VertexC[prime][1]))
+            findings.append(
+                {
+                    'kind': 'branch_split',
+                    'path_nodes_a': path,
+                    'path_nodes_b': split_nodes,
+                    'edge_pairs': [(path, split_nodes)],
+                    'path_a': prime_path,
+                    'path_b': (prime, prime, *split_nodes),
+                    'split_node': prime,
+                    'geometry': shp.Point(point),
+                }
+            )
+    return findings
 
 
 def _intersection_is_only_at_shared_nodes(
@@ -709,23 +858,25 @@ def _point_is_at_shared_node(
     )
 
 
-def _point_is_common_prime_endpoint(
+def _point_is_common_graph_endpoint(
     point: tuple[float, float],
-    path_a: tuple[int, ...],
-    path_b: tuple[int, ...],
+    path_nodes_a: tuple[int, ...],
+    path_nodes_b: tuple[int, ...],
+    fnT: np.ndarray,
     VertexC: np.ndarray,
     *,
     endpoint_tol: float,
 ) -> bool:
-    common_primes = set(path_a) & set(path_b)
-    if not common_primes:
-        return False
-    endpoint_primes = {path_a[0], path_a[-1], path_b[0], path_b[-1]}
+    endpoint_primes = {
+        int(fnT[path_nodes_a[0]]),
+        int(fnT[path_nodes_a[-1]]),
+        int(fnT[path_nodes_b[0]]),
+        int(fnT[path_nodes_b[-1]]),
+    }
     pC = np.array(point)
     return any(
-        prime in endpoint_primes
-        and np.hypot(*(pC - VertexC[prime])).item() <= endpoint_tol
-        for prime in common_primes
+        np.hypot(*(pC - VertexC[prime])).item() <= endpoint_tol
+        for prime in endpoint_primes
     )
 
 
@@ -755,33 +906,10 @@ def _iter_point_geometries(geometry) -> Iterator[tuple[float, float]]:
             yield from _iter_point_geometries(part)
 
 
-def _segment_crosses_robustly(
-    uC: np.ndarray,
-    vC: np.ndarray,
-    sC: np.ndarray,
-    tC: np.ndarray,
-    intersection,
-    *,
-    angle_tol: float,
-    endpoint_tol: float,
-) -> bool:
-    uv = vC - uC
-    st = tC - sC
-    uvL = np.hypot(*uv).item()
-    stL = np.hypot(*st).item()
-    if uvL == 0.0 or stL == 0.0:
-        return False
-    sin_angle = abs((uv[0] * st[1] - uv[1] * st[0]) / (uvL * stL))
-    if sin_angle <= angle_tol:
-        return False
-
-    point_tol = endpoint_tol * max(uvL, stL, 1.0)
-    endpoints = (uC, vC, sC, tC)
-    for point in _iter_geometry_points(intersection):
-        pC = np.array(point)
-        if any(np.hypot(*(pC - endpointC)).item() <= point_tol for endpointC in endpoints):
-            return False
-    return True
+def _points_geometry(points: list[tuple[float, float]]):
+    if len(points) == 1:
+        return shp.Point(points[0])
+    return shp.MultiPoint(points)
 
 
 def full_geometric_crossings(
@@ -795,30 +923,35 @@ def full_geometric_crossings(
     """Find route intersections using Shapely geometries.
 
     This is a heavier, geometry-first diagnostic complement to
-    :func:`validate_routeset`.  Graph edges are translated through ``fnT`` so
-    contour and detour clones are tested at their prime coordinates.  Returned
-    records include the original graph edges and expanded prime-node polylines.
+    :func:`validate_routeset`. Route polylines are translated through ``fnT`` so
+    contour and detour clones are tested at their prime coordinates.
 
     Args:
       G: routeset graph.
       include_touches: include point contacts that are not proper crossings.
       length_tol: minimum shared length for a collinear overlap.
-      angle_tol: minimum sine of angle between crossing segments.
-      endpoint_tol: relative distance tolerance for endpoint touches.
+      angle_tol: minimum sine-like ray separation for local crossing tests.
+      endpoint_tol: relative distance tolerance for endpoint/common-node touches.
 
     Returns:
-      List of dictionaries with keys ``kind``, ``edge_a``, ``edge_b``,
-      ``path_a``, ``path_b``, ``edge_pairs`` and ``geometry``.
+      List of dictionaries with keys ``kind``, ``path_nodes_a``,
+      ``path_nodes_b``, ``path_a``, ``path_b`` and ``geometry``.
     """
     VertexC = G.graph['VertexC']
     fnT = _routeset_fnT(G)
     polylines = _routeset_polylines(G)
-    paths = [polyline['path'] for polyline in polylines]
+    paths = [polyline.nodes for polyline in polylines]
     prime_paths = [_prime_node_path(G, path, fnT) for path in paths]
     path_coords = [_path_coords(VertexC, fnT, path) for path in paths]
     lines = [shp.LineString(coords) for coords in path_coords]
     tree = shp.STRtree(lines)
-    findings: list[dict[str, Any]] = []
+    findings = _detour_branch_split_findings(
+        G,
+        polylines,
+        prime_paths,
+        fnT,
+        VertexC,
+    )
     seen = set()
 
     for i, line_a in enumerate(lines):
@@ -847,36 +980,30 @@ def full_geometric_crossings(
             path_a = prime_paths[i]
             path_b = prime_paths[j]
             kind = None
+            finding_geometry = intersection
             if intersection.length > length_tol:
                 if _shared_run_has_crossing_cones(path_a, path_b, VertexC):
                     kind = 'overlap_cross'
             if kind is None:
-                if any(
-                    _polyline_crosses_at_point(
+                crossing_points = [
+                    point
+                    for point in _iter_point_geometries(intersection)
+                    if _point_is_geometric_crossing(
+                        G,
+                        path_nodes_a,
+                        path_nodes_b,
                         path_coords[i],
                         path_coords[j],
                         point,
+                        fnT,
+                        VertexC,
                         angle_tol=angle_tol,
                         endpoint_tol=endpoint_tol,
                     )
-                    for point in _iter_point_geometries(intersection)
-                    if not _point_is_at_shared_node(
-                        point,
-                        path_nodes_a,
-                        path_nodes_b,
-                        fnT,
-                        VertexC,
-                        endpoint_tol=endpoint_tol,
-                    )
-                    and not _point_is_common_prime_endpoint(
-                        point,
-                        path_a,
-                        path_b,
-                        VertexC,
-                        endpoint_tol=endpoint_tol,
-                    )
-                ):
+                ]
+                if crossing_points:
                     kind = 'cross'
+                    finding_geometry = _points_geometry(crossing_points)
                 elif include_touches:
                     kind = 'touch'
                 else:
@@ -898,7 +1025,7 @@ def full_geometric_crossings(
                     'edge_pairs': [(path_nodes_a, path_nodes_b)],
                     'path_a': path_a,
                     'path_b': path_b,
-                    'geometry': intersection,
+                    'geometry': finding_geometry,
                 }
             )
 
