@@ -479,7 +479,7 @@ class PathFinder:
                     next(traverser)
                     num_traversals[(n, n)] += 1
                     self._walk_chain(
-                        n, left, self.paths.last_added_pn, is_triangle_seen.copy()
+                        n, left, self.paths.last_added_pn, is_triangle_seen
                     )
                 elif 0 <= n < T:
                     prio, is_promising = traverser.send(((left, n), 1))
@@ -507,9 +507,7 @@ class PathFinder:
                 # chain entry (an additional send would produce a same-prime
                 # self-link).
                 num_traversals[(y, y)] += 1
-                self._walk_chain(
-                    y, x, self.paths.last_added_pn, is_triangle_seen.copy()
-                )
+                self._walk_chain(y, x, self.paths.last_added_pn, is_triangle_seen)
 
     def _walk_chain(
         self,
@@ -672,7 +670,6 @@ class PathFinder:
         paths = self.paths
         prioqueue = self.prioqueue
         portal_set = self.portal_set
-        triangles = P.graph['triangles']
         VertexC = self.VertexC
         best_pn_by_prime_sector = self.best_pn_by_prime_sector
         pn_w = paths[pn_w_id]
@@ -702,7 +699,7 @@ class PathFinder:
                 self.adv_counter,
                 (left, right),
                 funnel_state,
-                bitarray(len(triangles)),
+                is_triangle_seen.copy(),
                 side_init,
             )
             heapq.heappush(prioqueue, (sub_prio, self.adv_counter, sub_advancer))
