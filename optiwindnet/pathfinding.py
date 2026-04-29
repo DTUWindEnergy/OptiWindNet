@@ -319,9 +319,21 @@ class PathFinder:
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.stunts_primes = A.graph.get('stunts_primes')
         self.hooks2check = hooks2check
-        self.num_revisits = 0
         self.adv_counter = 0
         self._find_paths()
+
+    def _trace_path(self, start_prime: int, pn_id: int):
+        """Return the path and hop distances from `start_prime` to a root."""
+        paths = self.paths
+        path = [start_prime]
+        dists = []
+        pn = paths[pn_id]
+        while pn_id >= 0:
+            dists.append(pn.d_hop)
+            pn_id = pn.parent
+            path.append(paths.prime_from_pn[pn_id])
+            pn = paths[pn_id]
+        return path, dists
 
     def get_best_path(self, n: int):
         """
@@ -332,23 +344,15 @@ class PathFinder:
         """
         paths = self.paths
         best_pn_by_prime_sector = self.best_pn_by_prime_sector
-        candidate_pn_ids = tuple(
-            (paths[pn_id].dist, pn_id) for pn_id in best_pn_by_prime_sector[n].values()
-        )
-        if candidate_pn_ids:
-            _, pn_id = min(candidate_pn_ids)
-            path = [n]
-            dists = []
-            pn = paths[pn_id]
-            while pn_id >= 0:
-                dists.append(pn.d_hop)
-                pn_id = pn.parent
-                path.append(paths.prime_from_pn[pn_id])
-                pn = paths[pn_id]
-            return path, dists
-        else:
+        try:
+            _, pn_id = min(
+                (paths[pn_id].dist, pn_id)
+                for pn_id in best_pn_by_prime_sector[n].values()
+            )
+        except ValueError:
             info('Path not found for «%d»', n)
             return [], []
+        return self._trace_path(n, pn_id)
 
     def _get_sector(self, prime: int, portal: tuple[int, int]):
         """
@@ -466,7 +470,7 @@ class PathFinder:
                     self._walk_chain(
                         n, left, self.paths.last_added_pn, is_triangle_seen.copy()
                     )
-                elif 0 <= n <= T:
+                elif 0 <= n < T:
                     prio, is_promising = traverser.send(((left, n), 1))
                     next(traverser)
                 debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
@@ -486,7 +490,6 @@ class PathFinder:
             if (
                 y in chain_end_set
                 and num_traversals[(y, y)] < traversals_limit
-                and y in chain_topo
                 and x not in chain_topo[y].same_link_neighbors
             ):
                 # Reuse the parent's just-narrowed pseudonode for y as the
@@ -888,12 +891,9 @@ class PathFinder:
             prio = (score_0, score_1, score_2)
             yield prio, is_promising
             #  trace('<%d> traverser after second yield', adv_id)
-            _count_before = self.paths.count
             new_pn_id = self.paths.add(
                 _new, sector_new, apex_eff, d_new, d_hop, cum_turn
             )
-            if self.paths.count > _count_before:
-                self.adv_pnodes.setdefault(adv_id, set()).add(new_pn_id)
             wedge_end[side] = new_pn_id
             num_traversals[portal] += 1
             # get best_pn_id again, as the situation may have changed
@@ -926,11 +926,8 @@ class PathFinder:
         traversals_limit = self.traversals_limit
         paths = self.paths = PathNodes()
         triangles = P.graph['triangles']
-        self.bifurcation = None
         best_pn_by_prime_sector = defaultdict(dict)
         self.best_pn_by_prime_sector = best_pn_by_prime_sector
-        # advancer id -> set of pseudonode ids it was the first to add
-        self.adv_pnodes: dict = {}
 
         # set of portals (i.e. edges of P that are not used in G)
         fnT = G.graph.get('fnT')
@@ -1028,11 +1025,11 @@ class PathFinder:
                 # the regular init advancer (Trigger A/B fires on the far
                 # vertex `n`, never on `left`/`right`), so engage the chain
                 # directly here. A chain entrance from root is a single
-                # straight hop — one distance, and sector = NULL (chain-ends
-                # are border vertices, for which `_get_sector` always returns
-                # NULL, so this matches the entry pn that Triggers A/B
-                # produce via funnel narrowing and lets `paths.add` dedupe
-                # against them). Done BEFORE the portal-validity `continue`
+                # straight hop — one distance, and sector = NULL (chain-ends are
+                # constraint-wall vertices, for which `_get_sector` always returns
+                # NULL, so this matches the entry pn that Triggers A/B produce via
+                # funnel narrowing and lets `paths.add` dedupe against them). Done
+                # BEFORE the portal-validity `continue`
                 # because a chain-end may be boxed in by walls (no valid
                 # fan portal touches it), which would otherwise leave it
                 # unengaged. Each chain-end neighbor of `r` becomes `left`
@@ -1137,10 +1134,6 @@ class PathFinder:
         """
         get_best_path = self.get_best_path
         for n in range(self.T):
-            for pn_id in self.best_pn_by_prime_sector[n].values():
-                if pn_id < 0:
-                    # n is a root's neighbor
-                    continue
             path, dists = get_best_path(n)
             nx.add_path(G, path, kind='virtual')
 
@@ -1218,16 +1211,13 @@ class PathFinder:
             )
             debug('hook_candidates: %s', hook_candidates)
 
-            detour_candidates = list(
-                chain.from_iterable(
-                    (
-                        (paths[pn_id].dist, pn_id, hook, sec)
-                        for sec, pn_id in best_pn_by_prime_sector[hook].items()
-                    )
+            try:
+                dist, pn_id, hook, sect = min(
+                    (paths[pn_id].dist, pn_id, hook, sec)
                     for hook in hook_candidates
+                    for sec, pn_id in best_pn_by_prime_sector[hook].items()
                 )
-            )
-            if not detour_candidates:
+            except ValueError:
                 error(
                     'subtree of node %d has no non-crossing paths to '
                     'any root: leaving feeder as-is',
@@ -1236,17 +1226,9 @@ class PathFinder:
                 # unable to fix this crossing
                 failed_detours.append((r, n))
                 continue
-            dist, pn_id, hook, sect = min(detour_candidates)
             debug('best: hook = %d, sector = %d, dist = %.2f', hook, sect, dist)
 
-            path = [hook]
-            dists = []
-            pn = paths[pn_id]
-            while pn_id >= 0:
-                dists.append(pn.d_hop)
-                pn_id = pn.parent
-                path.append(paths.prime_from_pn[pn_id])
-                pn = paths[pn_id]
+            path, dists = self._trace_path(hook, pn_id)
             if not math.isclose(sum(dists), dist):
                 error(
                     'distance sum (%.1f) != best distance (%.1f), hook = %d, path: %s',
