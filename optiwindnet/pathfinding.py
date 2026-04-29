@@ -58,13 +58,6 @@ class PathNodes(dict):
                 parent,
             )
         _parent = self.prime_from_id[parent]
-        if _parent == _source:
-            import traceback
-
-            print(
-                f'DUP self-link: source={_source} parent_id={parent} parent_prime={_parent} sector={sector} d_hop={d_hop}'
-            )
-            traceback.print_stack(limit=12)
         for prev_id in self.ids_from_prime_sector[_source, sector]:
             if self[prev_id].parent == parent:
                 self.last_added = prev_id
@@ -428,42 +421,53 @@ class PathFinder:
                 next(traverser)
             elif not portals:
                 # DEAD-END: both triangle sides are not portals.
-                # If `n` is a chain-end with budget, engage the chain via
-                # explicit fence-anchoring; otherwise fall back to the
-                # original DEAD-END terminal-update behavior.
+                # If `n` is a chain-end with budget, engage the chain by
+                # anchoring the funnel from both fence walls, then walk the
+                # chain forward; otherwise update the (n, sector) keeper.
                 if n in chain_end_set and num_traversals[(n, n)] < traversals_limit:
-                    self._spawn_chain_walker(
-                        adv_id, n, left, right, traverser, is_triangle_seen
+                    # Two phantom-portal sends place y=n in the funnel from
+                    # both fence walls; the second send anchors pn_n on the
+                    # contour apex via standard funnel narrowing.
+                    traverser.send(((left, n), 1))
+                    next(traverser)
+                    traverser.send(((n, right), 0))
+                    next(traverser)
+                    num_traversals[(n, n)] += 1
+                    self._walk_chain(
+                        n, left, self.paths.last_added, is_triangle_seen.copy()
                     )
                 elif 0 <= n <= T:
-                    # there is a (node, sector) to update inside the dead-end
                     prio, is_promising = traverser.send(((left, n), 1))
-                    # no need to yield, but make sure the last path pnode is added
                     next(traverser)
                 debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
                 return
             # process  portal
             portal, side = portals[0]
-            #  trace('{%d} advancer sending (portal, side)', adv_id)
             prio, is_promising = traverser.send((portal, side))
             yield prio, portal, is_promising
             next(traverser)
-            # Trigger B: just-processed endpoint is a chain-end → spawn twin
-            # advancer, but only if the entry cone isn't the chain's own
-            # subtree (per user's rule).
+            # Trigger B: just-processed endpoint is a chain-end and the
+            # cone we entered through is NOT bounded entirely by fences on
+            # the chain's own terminal-terminal link (otherwise the path
+            # doesn't need to detour through the chain).
             y = portal[side]
             x = portal[1 - side]
             if (
                 y in chain_end_set
                 and num_traversals[(y, y)] < traversals_limit
-                and not self._cone_is_chain_subtree(x, y)
+                and not self._cone_inside_chain_link(x, y)
             ):
-                self._spawn_chain(adv_id, y, side, x, traverser, is_triangle_seen)
+                # Reuse the parent's just-narrowed pseudonode for y as the
+                # chain entry (an additional send would produce a same-prime
+                # self-link).
+                num_traversals[(y, y)] += 1
+                self._walk_chain(
+                    y, x, self.paths.last_added, is_triangle_seen.copy()
+                )
 
-    def _cone_is_chain_subtree(self, x: int, y: int) -> bool:
-        """True iff the cone at chain-end y containing x is bounded by fences
-        that are both on the chain's own terminal-terminal link (so the
-        path doesn't actually need to cross through the chain).
+    def _cone_inside_chain_link(self, x: int, y: int) -> bool:
+        """True iff at chain-end y, both fences flanking x in cw order belong
+        to y's own contour terminal-terminal link.
         """
         chain_link = self.link_of_prime.get(y)
         if not chain_link:
@@ -471,227 +475,121 @@ class PathFinder:
         cw_nbrs = list(self.P.neighbors_cw_order(y))
         if x not in cw_nbrs:
             return False
-        idx_x = cw_nbrs.index(x)
-        n_nbrs = len(cw_nbrs)
         fence_set = self.g_fence.get(y, set()) | self.border_fence.get(y, set())
-        f_cw = None
-        for off in range(1, n_nbrs):
-            cand = cw_nbrs[(idx_x + off) % n_nbrs]
-            if cand in fence_set:
-                f_cw = cand
-                break
-        f_ccw = None
-        for off in range(1, n_nbrs):
-            cand = cw_nbrs[(idx_x - off) % n_nbrs]
-            if cand in fence_set:
-                f_ccw = cand
-                break
+        n = len(cw_nbrs)
+        i = cw_nbrs.index(x)
+        f_cw = next(
+            (cw_nbrs[(i + k) % n] for k in range(1, n) if cw_nbrs[(i + k) % n] in fence_set),
+            None,
+        )
+        f_ccw = next(
+            (cw_nbrs[(i - k) % n] for k in range(1, n) if cw_nbrs[(i - k) % n] in fence_set),
+            None,
+        )
         if f_cw is None or f_ccw is None:
             return False
-        return (
-            self.link_of_prime.get(f_cw) == chain_link
-            and self.link_of_prime.get(f_ccw) == chain_link
-        )
+        link = self.link_of_prime.get
+        return link(f_cw) == chain_link and link(f_ccw) == chain_link
 
-    def _spawn_chain(
-        self,
-        parent_adv_id: int,
-        y: int,
-        parent_side: int,
-        x: int,
-        traverser,
-        is_triangle_seen: bitarray,
-    ):
-        """Trigger B helper: y was already processed in the parent's regular
-        portal send (which created pn_y with the funnel-narrowed apex).
-        Reuse that pseudonode directly as the chain's entry without doing
-        an additional twin-portal send (which would just produce a same-
-        prime self-link in the path tree).
-        """
-        chain_pn = self.paths.last_added
-        self.num_traversals[(y, y)] += 1
-        self._walk_chain_and_spawn_exit(y, x, chain_pn, is_triangle_seen.copy())
-
-    def _spawn_chain_walker(
-        self,
-        parent_adv_id: int,
-        y: int,
-        left: int,
-        right: int,
-        traverser,
-        is_triangle_seen: bitarray,
-    ):
-        """Trigger A helper: y is the third vertex of the entry triangle
-        (left, right, y) — not yet in the parent's funnel. Two phantom-
-        portal sends through each fence side place y in the funnel from
-        both walls; the second send anchors pn_y on the natural contour
-        apex via the funnel's standard narrowing.
-        """
-        traverser.send(((left, y), 1))
-        next(traverser)
-        traverser.send(((y, right), 0))
-        next(traverser)
-        chain_pn = self.paths.last_added
-        self.num_traversals[(y, y)] += 1
-        self._walk_chain_and_spawn_exit(y, left, chain_pn, is_triangle_seen.copy())
-
-    def _advance_chain(
-        self,
-        adv_id: int,
-        y_entry: int,
-        side_entry: int,
-        x_entry: int,
-        traverser_args: tuple,
-        is_triangle_seen: bitarray,
-        do_first_send: bool = True,
-    ):
-        """Chain advancer (generator, used for Trigger B): does the twin-portal
-        first-send through the inherited traverser, yields, then walks the
-        chain and spawns end-spoke advancers at the exit.
-        """
-        # First step: regular funnel update on the twin portal (y, y).
-        traverser = self._traverse_channel(adv_id, *traverser_args)
-        next(traverser)
-        portal = (y_entry, y_entry)
-        prio, is_promising = traverser.send((portal, side_entry))
-        yield prio, portal, is_promising
-        next(traverser)
-
-        # The just-added pseudonode for y_entry is the chain's first parent.
-        self._walk_chain_and_spawn_exit(
-            y_entry, x_entry, self.paths.last_added, is_triangle_seen
-        )
-
-    def _walk_chain_and_spawn_exit(
+    def _walk_chain(
         self,
         y_entry: int,
         x_entry: int,
         entry_pn: int,
         is_triangle_seen: bitarray,
-    ):
-        """Walk the chain forward from y_entry and spawn exit advancers.
+    ) -> None:
+        """Walk the chain forward from `y_entry`, registering a pseudonode
+        at each visited chain vertex (parented by the previous one). At the
+        exit chain-end, enumerate all cones and spawn an advancer into each
+        non-entry, non-outside, non-same-link cone.
 
-        `entry_pn` is the pseudonode just registered for y_entry. After
-        walking until the fences diverge, end-spoke + intermediate-pair
-        advancers are spawned at the exit chain-end with apex = pn_w.
+        `entry_pn` is the pseudonode for `y_entry` (created by the caller's
+        funnel narrowing). `x_entry` is the path's entry-side neighbor at
+        `y_entry`, used to identify the entry cone in the length-1 case.
         """
         P = self.P
         paths = self.paths
-        #  prioqueue = self.prioqueue
-        #  portal_set = self.portal_set
         g_fence = self.g_fence
         border_fence = self.border_fence
-        #  triangles = P.graph['triangles']
+        link_of_prime = self.link_of_prime
         VertexC = self.VertexC
+
+        # ── walk forward through the chain ────────────────────────────────
         parent_pn = entry_pn
-        # Walk forward through the chain.
-        c = y_entry
-        c_prev = None
-        chain_visited = {y_entry}
+        c, c_prev = y_entry, None
+        visited = {y_entry}
         while True:
-            if c_prev is None:
-                forward = g_fence.get(c, set()) & border_fence.get(c, set())
-            else:
-                g_fwd = g_fence.get(c, set()) - {c_prev}
-                b_fwd = border_fence.get(c, set()) - {c_prev}
-                forward = g_fwd & b_fwd
+            forward = (
+                g_fence.get(c, set()) & border_fence.get(c, set())
+            ) - {c_prev}
             if len(forward) != 1:
                 break
             c_next = next(iter(forward))
-            if c_next in chain_visited:
+            if c_next in visited:
                 break
-            chain_visited.add(c_next)
+            visited.add(c_next)
             d_hop = float(np.hypot(*(VertexC[c] - VertexC[c_next])))
-            pn_parent_obj = paths[parent_pn]
-            d_total = pn_parent_obj.dist + d_hop
-            # Sector convention for chain pseudonode (per user feedback (2)):
-            # use the lower of the two candidate fence-direction vertices.
-            # Chain pseudonodes aren't used as hooks but we still register
-            # them coherently for best_paths_overlay.
-            g_fwd_set = g_fence.get(c_next, set()) - {c}
-            b_fwd_set = border_fence.get(c_next, set()) - {c}
-            cand_fwd = g_fwd_set | b_fwd_set
-            sector = min(cand_fwd | {c}) if cand_fwd else c
-            new_pn = paths.add(
-                c_next, sector, parent_pn, d_total, d_hop, pn_parent_obj.cum_turn
+            pn_parent = paths[parent_pn]
+            cand_fwd = (g_fence.get(c_next, set()) | border_fence.get(c_next, set())) - {c}
+            sector = min(cand_fwd | {c})
+            parent_pn = paths.add(
+                c_next, sector, parent_pn,
+                pn_parent.dist + d_hop, d_hop, pn_parent.cum_turn,
             )
-            c_prev = c
-            c = c_next
-            parent_pn = new_pn
+            c_prev, c = c, c_next
 
-        # `c` is now the exit chain-end. Enumerate all cones at c (consecutive
-        # fence pairs in cw order). Skip the entry cone, b-b outside cones,
-        # and same-link cones. For each remaining cone, spawn end-spoke and
-        # intermediate-pair advancers.
+        # ── enumerate cones at the exit chain-end `c` ─────────────────────
         cw_nbrs = list(P.neighbors_cw_order(c))
         n_nbrs = len(cw_nbrs)
-        gset = g_fence.get(c, set())
-        bset = border_fence.get(c, set())
-        fence_set = gset | bset
-        chain_link = self.link_of_prime.get(c, frozenset())
-        # Fence positions in cyclic order
+        fence_set = g_fence.get(c, set()) | border_fence.get(c, set())
         fence_positions = [i for i, v in enumerate(cw_nbrs) if v in fence_set]
         if len(fence_positions) < 2:
             debug('chain: fewer than 2 fences at %d', c)
             return
+        n_cones = len(fence_positions)
+        chain_link = link_of_prime.get(c, frozenset())
 
-        # Identify entry cones. For a multi-step chain (c_prev set), the
-        # chain came through c_prev which is a fence position at c — both
-        # adjacent cones (cw and ccw of c_prev) are entry-side. For a
-        # length-1 chain (c_prev is None), the entry cone is the cone
-        # containing x_entry (or, if x_entry is itself a fence, the cone
-        # ending at x_entry).
-        entry_cones: set[int] = set()
-        if c_prev is not None and c_prev in cw_nbrs:
-            idx_prev = cw_nbrs.index(c_prev)
-            # find which fence_position this is and mark cones k and k-1
-            for k, fp in enumerate(fence_positions):
-                if fp == idx_prev:
-                    entry_cones.add(k)
-                    entry_cones.add((k - 1) % len(fence_positions))
-                    break
+        # Entry vertex is c_prev for multi-step chains (a fence at c) or
+        # x_entry for length-1 chains (typically not a fence). Either way,
+        # find which cone(s) it occupies.
+        entry_vertex = c_prev if c_prev is not None else x_entry
+        if entry_vertex not in cw_nbrs:
+            debug('chain: entry vertex %d not in cw_nbrs of %d', entry_vertex, c)
+            return
+        idx_e = cw_nbrs.index(entry_vertex)
+        if idx_e in fence_positions:
+            # Entry vertex IS a fence: both cw and ccw cones are entry-side.
+            k_at = fence_positions.index(idx_e)
+            entry_cones = {k_at, (k_at - 1) % n_cones}
         else:
-            try:
-                idx_x = cw_nbrs.index(x_entry)
-            except ValueError:
-                debug('chain: x_entry %d not in cw_nbrs of %d', x_entry, c)
-                return
+            entry_cones = set()
             for k, fp in enumerate(fence_positions):
-                next_fp = fence_positions[(k + 1) % len(fence_positions)]
+                next_fp = fence_positions[(k + 1) % n_cones]
                 cur = (fp + 1) % n_nbrs
-                hit = False
                 while cur != next_fp:
-                    if cur == idx_x:
-                        entry_cones.add(k)
-                        hit = True
+                    if cur == idx_e:
+                        entry_cones = {k}
                         break
                     cur = (cur + 1) % n_nbrs
-                if hit:
-                    break
-                if idx_x == fp:
-                    entry_cones.add((k - 1) % len(fence_positions))
+                if entry_cones:
                     break
 
-        # Spawn advancers for each non-entry, non-outside, non-same-link cone.
         for k, fp in enumerate(fence_positions):
             if k in entry_cones:
                 continue
-            f_a = cw_nbrs[fp]
-            f_b = cw_nbrs[fence_positions[(k + 1) % len(fence_positions)]]
-            link_a = self.link_of_prime.get(f_a, frozenset())
-            link_b = self.link_of_prime.get(f_b, frozenset())
-            # Skip outside cones (both fences are border vertices not on any
-            # contour link).
+            next_fp = fence_positions[(k + 1) % n_cones]
+            f_a, f_b = cw_nbrs[fp], cw_nbrs[next_fp]
+            link_a = link_of_prime.get(f_a, frozenset())
+            link_b = link_of_prime.get(f_b, frozenset())
+            # Skip outside cones (neither fence is on any contour link) and
+            # same-link cones (both fences on the chain's own link).
             if not link_a and not link_b:
                 continue
-            # Skip same-link cones (both fences in the chain's terminal-
-            # terminal link).
             if link_a == chain_link and link_b == chain_link:
                 continue
-            # Build cw_spokes between f_a and f_b going cw.
-            cw_spokes: list[int] = []
+            cw_spokes = []
             cur = (fp + 1) % n_nbrs
-            while cur != fence_positions[(k + 1) % len(fence_positions)]:
+            while cur != next_fp:
                 v = cw_nbrs[cur]
                 if v not in fence_set and v >= 0:
                     cw_spokes.append(v)
@@ -708,8 +606,8 @@ class PathFinder:
         is_triangle_seen: bitarray,
     ) -> None:
         """Spawn end-spoke and intermediate-pair advancers covering one exit
-        cone at the chain-end w. spoke_left and spoke_right are the cone's
-        bounding fences (in cw order), cw_spokes are non-fence spokes inside.
+        cone at chain-end `w`. `spoke_left` and `spoke_right` are the cone's
+        bounding fences in cw order; `cw_spokes` are non-fence spokes inside.
         """
         P = self.P
         paths = self.paths
@@ -721,64 +619,50 @@ class PathFinder:
         pn_w = paths[pn_w_id]
         cum_turn_w = pn_w.cum_turn
 
-        def _dist_from_w(v: int) -> float:
-            return float(np.hypot(*(VertexC[w] - VertexC[v])))
-
-        def _wedge(v: int) -> tuple[int, float, float]:
+        def _wedge(v: int) -> tuple[int, float]:
+            """Pseudonode at `v` parented by pn_w; returns (pn_id, d_hop)."""
             if v == w:
-                return pn_w_id, pn_w.dist, 0.0
-            d_hop = _dist_from_w(v)
+                return pn_w_id, 0.0
+            d_hop = float(np.hypot(*(VertexC[w] - VertexC[v])))
             d_total = pn_w.dist + d_hop
             sec_v = self._get_sector(v, (v, w)) if v >= 0 else NULL
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
             keeper = I_path[v].get(sec_v)
             if keeper is None or d_total < paths[keeper].dist:
                 I_path[v][sec_v] = pn_v
-            return pn_v, d_total, d_hop
+            return pn_v, d_hop
 
-        def _launch(left: int, right: int, side_init: int | None = None) -> None:
-            wl, _d_left, d_hop_left = _wedge(left)
-            wr, _d_right, d_hop_right = _wedge(right)
-            wedge_end = [wl, wr]
+        def _launch(left: int, right: int, side_init: int) -> None:
+            wl, d_hop_left = _wedge(left)
+            wr, d_hop_right = _wedge(right)
             hops = [h for h in (d_hop_left, d_hop_right) if h > 0]
             d_hop_min = min(hops) if hops else 0.0
             sub_prio = (pn_w.dist + d_hop_min, 0.0, 1.0)
-            traverser_pack = (sub_prio, w, pn_w_id, [left, right], wedge_end, 0)
+            traverser_pack = (sub_prio, w, pn_w_id, [left, right], [wl, wr], 0)
             sub_advancer = self._advance_portal(
-                self.adv_counter,
-                (left, right),
-                traverser_pack,
-                bitarray(len(triangles)),
-                side_init,
+                self.adv_counter, (left, right), traverser_pack,
+                bitarray(len(triangles)), side_init,
             )
             heapq.heappush(prioqueue, (sub_prio, self.adv_counter, sub_advancer))
             self.adv_counter += 1
 
-        if not cw_spokes:
-            # Single-triangle exit: spoke_left and spoke_right are cw-adjacent
-            # at w. Spawn an advancer through their connecting portal if it is
-            # one. Avoid recursion into the chain via the same chain-end:
-            # skip if the connecting portal's third vertex would be w again.
-            edge = (spoke_left, spoke_right)
-            edge_sorted = edge if edge[0] < edge[1] else (edge[1], edge[0])
-            if edge_sorted in portal_set or edge in portal_set:
-                # Check the third vertex of the new triangle would not be w.
-                if (
-                    spoke_right in P[spoke_left]
-                    and P[spoke_left][spoke_right].get('ccw') != w
-                ):
-                    _launch(spoke_left, spoke_right, 1)
-        else:
-            x_1 = cw_spokes[0]
-            x_k = cw_spokes[-1]
+        if cw_spokes:
+            x_1, x_k = cw_spokes[0], cw_spokes[-1]
             _launch(w, x_1, 1)
             _launch(x_k, w, 0)
-            for i in range(len(cw_spokes) - 1):
-                xi, xj = cw_spokes[i], cw_spokes[i + 1]
-                edge = (xi, xj)
-                edge_sorted = edge if edge[0] < edge[1] else (edge[1], edge[0])
-                if edge_sorted in portal_set or edge in portal_set:
+            for xi, xj in zip(cw_spokes, cw_spokes[1:]):
+                if (xi, xj) in portal_set:
                     _launch(xi, xj, 1)
+        else:
+            # Single-triangle exit: only the connecting portal between the
+            # two bounding fences. Skip if it would re-engage the same
+            # chain-end (third vertex of the new triangle is w).
+            if (
+                (spoke_left, spoke_right) in portal_set
+                and spoke_right in P[spoke_left]
+                and P[spoke_left][spoke_right].get('ccw') != w
+            ):
+                _launch(spoke_left, spoke_right, 1)
 
     def _traverse_channel(
         self,
