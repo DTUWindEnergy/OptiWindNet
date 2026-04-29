@@ -25,9 +25,19 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
 PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop cum_turn'.split())
+# Terminology used by PathFinder internals:
+#   wall: one non-traversable mesh segment; route_walls come from contour route
+#     edges, border_walls come from planar constraint edges.
+#   fence: a sequence of connected walls.
+#   chain: the overlap of two fences; chain walking handles these explicitly.
+#   portal: a traversable mesh edge between adjacent triangles.
+#   channel: the triangle corridor explored through portals.
+#   funnel: shortest-path state maintained while advancing along a channel.
+#   fan: the full cyclic neighborhood around a vertex, especially a root.
+#   cone: one angular region in a fan, bounded by wall-neighbor vertices.
 # Static per-chain-end topology; built once and looked up during exploration.
 #   walk: list of (vertex, sector) — forward chain steps; last is the sister end.
-#   cones: list of (f_a, f_b, cw_spokes) — cyclic in cw order.
+#   cones: list of (cone_left_wall, cone_right_wall, cone_spokes) — cyclic in cw order.
 #   always_skip: cone indices to never spawn into (outside or same-link).
 #   entry_cones: dict v → frozenset of cone indices to skip given entry through v.
 #   same_link_neighbors: cw-neighbors v whose entry cones are all on the chain's
@@ -171,11 +181,11 @@ class PathFinder:
             tentative = []
             hooks2check = []
             for r in range(-R, 0):
-                gates = set(
+                feeders = set(
                     n for n in G.neighbors(r) if G[r][n].get('kind') == 'tentative'
                 )
-                tentative.extend((r, n) for n in gates)
-                hooks2check.append(gates)
+                tentative.extend((r, n) for n in feeders)
+                hooks2check.append(feeders)
         else:
             hooks2check = [set() for _ in range(R)]
             for r, n in tentative:
@@ -432,11 +442,11 @@ class PathFinder:
             elif not portals:
                 # DEAD-END: both triangle sides are not portals.
                 # If `n` is a chain-end with budget, engage the chain by
-                # anchoring the funnel from both fence walls, then walk the
+                # anchoring the funnel from both chain boundary walls, then walk the
                 # chain forward; otherwise update the (n, sector) keeper.
                 if n in chain_end_set and num_traversals[(n, n)] < traversals_limit:
                     # Two phantom-portal sends place y=n in the funnel from
-                    # both fence walls; the second send anchors pn_n on the
+                    # both chain boundary walls; the second send anchors pn_n on the
                     # contour apex via standard funnel narrowing.
                     traverser.send(((left, n), 1))
                     next(traverser)
@@ -457,7 +467,7 @@ class PathFinder:
             yield prio, portal, is_promising
             next(traverser)
             # Trigger B: just-processed endpoint is a chain-end and the
-            # cone we entered through is NOT bounded entirely by fences on
+            # cone we entered through is NOT bounded entirely by route walls on
             # the chain's own terminal-terminal link (otherwise the path
             # doesn't need to detour through the chain).
             y = portal[side]
@@ -514,52 +524,59 @@ class PathFinder:
             debug('chain: exit %d has no usable cone topology', cur)
             return
         skip = topo.always_skip | topo.entry_cones.get(prev, frozenset())
-        for k, (f_a, f_b, cw_spokes) in enumerate(topo.cones):
+        for k, (left_wall, right_wall, cone_spokes) in enumerate(topo.cones):
             if k in skip:
                 continue
-            self._spawn_exit_cone(cur, f_a, f_b, cw_spokes, parent_pn, is_triangle_seen)
+            self._spawn_exit_cone(
+                cur,
+                left_wall,
+                right_wall,
+                cone_spokes,
+                parent_pn,
+                is_triangle_seen,
+            )
 
     def _precompute_chain_topology(
         self, chain_end_set: set[int]
     ) -> dict[int, ChainTopo]:
         """Build the static cone-and-walk registry for every chain-end with
-        at least two fences. Skipped chain-ends (degenerate) are absent from
+        at least two incident walls. Skipped chain-ends (degenerate) are absent from
         the result and won't trigger chain engagement.
         """
         P = self.P
-        g_fence = self.g_fence
-        border_fence = self.border_fence
+        route_walls = self.route_walls
+        border_walls = self.border_walls
         link_of_prime = self.link_of_prime
         topo: dict[int, ChainTopo] = {}
 
         for c in chain_end_set:
             cw_nbrs = list(P.neighbors_cw_order(c))
             n = len(cw_nbrs)
-            fence_set = g_fence.get(c, set()) | border_fence.get(c, set())
-            fence_positions = [i for i, v in enumerate(cw_nbrs) if v in fence_set]
-            if len(fence_positions) < 2:
+            wall_neighbors = route_walls.get(c, set()) | border_walls.get(c, set())
+            wall_positions = [i for i, v in enumerate(cw_nbrs) if v in wall_neighbors]
+            if len(wall_positions) < 2:
                 continue
-            n_cones = len(fence_positions)
+            n_cones = len(wall_positions)
             chain_link = link_of_prime.get(c, frozenset())
 
             cones: list[tuple[int, int, list[int]]] = []
             always_skip: set[int] = set()
             same_link_cones: set[int] = set()
             cone_of_idx: dict[int, int] = {}  # cw-index → cone idx (interior only)
-            for k, fp in enumerate(fence_positions):
-                next_fp = fence_positions[(k + 1) % n_cones]
-                cw_spokes: list[int] = []
-                cur = (fp + 1) % n
-                while cur != next_fp:
+            for k, wall_pos in enumerate(wall_positions):
+                next_wall_pos = wall_positions[(k + 1) % n_cones]
+                cone_spokes: list[int] = []
+                cur = (wall_pos + 1) % n
+                while cur != next_wall_pos:
                     v = cw_nbrs[cur]
                     cone_of_idx[cur] = k
-                    if v not in fence_set and v >= 0:
-                        cw_spokes.append(v)
+                    if v not in wall_neighbors and v >= 0:
+                        cone_spokes.append(v)
                     cur = (cur + 1) % n
-                f_a, f_b = cw_nbrs[fp], cw_nbrs[next_fp]
-                cones.append((f_a, f_b, cw_spokes))
-                link_a = link_of_prime.get(f_a, frozenset())
-                link_b = link_of_prime.get(f_b, frozenset())
+                left_wall, right_wall = cw_nbrs[wall_pos], cw_nbrs[next_wall_pos]
+                cones.append((left_wall, right_wall, cone_spokes))
+                link_a = link_of_prime.get(left_wall, frozenset())
+                link_b = link_of_prime.get(right_wall, frozenset())
                 if not link_a and not link_b:
                     always_skip.add(k)
                 if link_a == chain_link and link_b == chain_link:
@@ -568,8 +585,8 @@ class PathFinder:
 
             entry_cones: dict[int, frozenset[int]] = {}
             for i, v in enumerate(cw_nbrs):
-                if v in fence_set:
-                    k_at = fence_positions.index(i)
+                if v in wall_neighbors:
+                    k_at = wall_positions.index(i)
                     entry_cones[v] = frozenset({k_at, (k_at - 1) % n_cones})
                 else:
                     entry_cones[v] = frozenset({cone_of_idx[i]})
@@ -581,13 +598,13 @@ class PathFinder:
             )
 
             # Forward walk from c through the chain, precomputing each step's
-            # sector. Stops when forward fences disagree or branch.
+            # sector. Stops when forward wall overlap disagrees or branches.
             walk: list[tuple[int, int]] = []
             c_prev, c_cur = None, c
             visited = {c}
             while True:
                 forward = (
-                    g_fence.get(c_cur, set()) & border_fence.get(c_cur, set())
+                    route_walls.get(c_cur, set()) & border_walls.get(c_cur, set())
                 ) - {c_prev}
                 if len(forward) != 1:
                     break
@@ -596,7 +613,7 @@ class PathFinder:
                     break
                 visited.add(c_next)
                 cand_fwd = (
-                    g_fence.get(c_next, set()) | border_fence.get(c_next, set())
+                    route_walls.get(c_next, set()) | border_walls.get(c_next, set())
                 ) - {c_cur}
                 sector = min(cand_fwd | {c_cur})
                 walk.append((c_next, sector))
@@ -614,15 +631,16 @@ class PathFinder:
     def _spawn_exit_cone(
         self,
         w: int,
-        spoke_left: int,
-        spoke_right: int,
-        cw_spokes: list[int],
+        cone_left_wall: int,
+        cone_right_wall: int,
+        cone_spokes: list[int],
         pn_w_id: int,
         is_triangle_seen: bitarray,
     ) -> None:
         """Spawn end-spoke and intermediate-pair advancers covering one exit
-        cone at chain-end `w`. `spoke_left` and `spoke_right` are the cone's
-        bounding fences in cw order; `cw_spokes` are non-fence spokes inside.
+        cone at chain-end `w`. `cone_left_wall` and `cone_right_wall` are the
+        cone's bounding wall-neighbor vertices in cw order; `cone_spokes` are
+        non-wall spokes inside.
         """
         P = self.P
         paths = self.paths
@@ -634,7 +652,7 @@ class PathFinder:
         pn_w = paths[pn_w_id]
         cum_turn_w = pn_w.cum_turn
 
-        def _wedge(v: int) -> tuple[int, float]:
+        def _add_cone_exit_pn(v: int) -> tuple[int, float]:
             """Pseudonode at `v` parented by pn_w; returns (pn_id, d_hop)."""
             if v == w:
                 return pn_w_id, 0.0
@@ -648,8 +666,8 @@ class PathFinder:
             return pn_v, d_hop
 
         def _launch(left: int, right: int, side_init: int) -> None:
-            wl, d_hop_left = _wedge(left)
-            wr, d_hop_right = _wedge(right)
+            wl, d_hop_left = _add_cone_exit_pn(left)
+            wr, d_hop_right = _add_cone_exit_pn(right)
             hops = [h for h in (d_hop_left, d_hop_right) if h > 0]
             d_hop_min = min(hops) if hops else 0.0
             sub_prio = (pn_w.dist + d_hop_min, 0.0, 1.0)
@@ -664,23 +682,23 @@ class PathFinder:
             heapq.heappush(prioqueue, (sub_prio, self.adv_counter, sub_advancer))
             self.adv_counter += 1
 
-        if cw_spokes:
-            x_1, x_k = cw_spokes[0], cw_spokes[-1]
+        if cone_spokes:
+            x_1, x_k = cone_spokes[0], cone_spokes[-1]
             _launch(w, x_1, 1)
             _launch(x_k, w, 0)
-            for xi, xj in zip(cw_spokes, cw_spokes[1:]):
+            for xi, xj in zip(cone_spokes, cone_spokes[1:]):
                 if (xi, xj) in portal_set:
                     _launch(xi, xj, 1)
         else:
             # Single-triangle exit: only the connecting portal between the
-            # two bounding fences. Skip if it would re-engage the same
+            # two bounding wall-neighbor vertices. Skip if it would re-engage the same
             # chain-end (third vertex of the new triangle is w).
             if (
-                (spoke_left, spoke_right) in portal_set
-                and spoke_right in P[spoke_left]
-                and P[spoke_left][spoke_right].get('ccw') != w
+                (cone_left_wall, cone_right_wall) in portal_set
+                and cone_right_wall in P[cone_left_wall]
+                and P[cone_left_wall][cone_right_wall].get('ccw') != w
             ):
-                _launch(spoke_left, spoke_right, 1)
+                _launch(cone_left_wall, cone_right_wall, 1)
 
     def _traverse_channel(
         self,
@@ -916,12 +934,10 @@ class PathFinder:
         portal_set = (edges_P - edges_G_primed) - constraint_edges
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
 
-        # Chain-sleeve pre-processing: a chain is a sleeve segment whose two
-        # delimiting fences overlap on a polyline of nodes. Chain-end primes
-        # are border-vertex primes touched by a kind='contour' G-edge AND on
-        # the border (constraint edges). Walking the chain in prime space
-        # uses g_fence (terminal-terminal contour links mapped to primes)
-        # together with border_fence (P's constraint_edges).
+        # Chain pre-processing: chain-end primes are border-vertex primes touched
+        # by a kind='contour' G-edge AND on the border (constraint edges).
+        # Walking the chain in prime space uses route_walls together with
+        # border_walls.
         T_, B_ = self.T, self.B
         clone_offset = T_ + B_
 
@@ -932,24 +948,24 @@ class PathFinder:
                 return int(fnT[n])
             return n
 
-        g_fence: dict[int, set[int]] = defaultdict(set)
+        route_walls: dict[int, set[int]] = defaultdict(set)
         for u, v, d in G.edges(data=True):
             if d.get('kind') != 'contour':
                 continue
             pu, pv = _prime(u), _prime(v)
             if pu == pv:
                 continue
-            g_fence[pu].add(pv)
-            g_fence[pv].add(pu)
-        border_fence: dict[int, set[int]] = defaultdict(set)
+            route_walls[pu].add(pv)
+            route_walls[pv].add(pu)
+        border_walls: dict[int, set[int]] = defaultdict(set)
         for u, v in constraint_edges:
-            border_fence[u].add(v)
-            border_fence[v].add(u)
+            border_walls[u].add(v)
+            border_walls[v].add(u)
         chain_end_set = {
-            p for p in g_fence if T_ <= p < clone_offset and p in border_fence
+            p for p in route_walls if T_ <= p < clone_offset and p in border_walls
         }
-        self.g_fence = g_fence
-        self.border_fence = border_fence
+        self.route_walls = route_walls
+        self.border_walls = border_walls
 
         # For each prime on a kind='contour' G-edge polyline, determine its
         # terminal-terminal link = the frozenset of terminals at the polyline's
@@ -957,7 +973,7 @@ class PathFinder:
         # spawnability classification.
         link_of_prime: dict[int, frozenset] = {}
         seen: set[int] = set()
-        for start in g_fence:
+        for start in route_walls:
             if start in seen:
                 continue
             comp: set[int] = set()
@@ -967,7 +983,7 @@ class PathFinder:
                 if u in comp:
                     continue
                 comp.add(u)
-                stack.extend(v for v in g_fence[u] if v not in comp)
+                stack.extend(v for v in route_walls[u] if v not in comp)
             terminals = frozenset(p for p in comp if 0 <= p < T_)
             for p in comp:
                 link_of_prime[p] = terminals
@@ -981,7 +997,7 @@ class PathFinder:
         self.chain_topo: dict[int, ChainTopo] = self._precompute_chain_topology(
             chain_end_set
         )
-        # Set of chain-ends with usable topology (used as Trigger gate).
+        # Set of chain-ends with usable topology (used as Trigger guard).
         self.chain_end_set = set(self.chain_topo)
 
         # launch channel traversers around the roots to the prioqueue
@@ -1003,7 +1019,7 @@ class PathFinder:
                 # NULL, so this matches the entry pn that Triggers A/B
                 # produce via funnel narrowing and lets `paths.add` dedupe
                 # against them). Done BEFORE the portal-validity `continue`
-                # because a chain-end may be boxed in by fences (no valid
+                # because a chain-end may be boxed in by walls (no valid
                 # fan portal touches it), which would otherwise leave it
                 # unengaged. Each chain-end neighbor of `r` becomes `left`
                 # exactly once over the fan iteration, so checking `left`
@@ -1113,7 +1129,7 @@ class PathFinder:
     def best_paths_overlay(self) -> nx.Graph:
         """Merges the shortest paths for all nodes with `G`.
 
-        The output includes `G`'s edges, excluding its gates.
+        The output includes `G`'s edges, excluding its feeders.
 
         Returns:
           Merged graph (pass to `plotting.gplot()` or 'svg.svgplot()`).
@@ -1133,7 +1149,7 @@ class PathFinder:
         return scaffolded(self.G, P=self.P)
 
     def create_detours(self) -> nx.Graph:
-        """Reroute all gate edges in G with crossings using detour paths.
+        """Reroute all feeder edges in G with crossings using detour paths.
 
         Returns:
             New networkx.Graph (shallow copy of G, with detours).
@@ -1176,12 +1192,12 @@ class PathFinder:
             subtree = subtree_from_subtree_id[subtree_id]
             subtree_load = G.nodes[n]['load']
             # set of nodes to examine is different depending on `branched`
-            hookchoices = (
+            hook_candidates = (
                 [n for n in subtree if n < T]
                 if self.branched
                 else [n, next(h for h in subtree if len(G._adj[h]) == 1)]
             )
-            debug('hookchoices: %s', hookchoices)
+            debug('hook_candidates: %s', hook_candidates)
 
             path_options = list(
                 chain.from_iterable(
@@ -1189,13 +1205,13 @@ class PathFinder:
                         (paths[id].dist, id, hook, sec)
                         for sec, id in I_path[hook].items()
                     )
-                    for hook in hookchoices
+                    for hook in hook_candidates
                 )
             )
             if not path_options:
                 error(
                     'subtree of node %d has no non-crossing paths to '
-                    'any root: leaving gate as-is',
+                    'any root: leaving feeder as-is',
                     n,
                 )
                 # unable to fix this crossing
@@ -1244,12 +1260,12 @@ class PathFinder:
                 )
             )
             if [n, r] != path:
-                # TODO: adapt this for contoured gates
+                # TODO: adapt this for contoured feeders
                 #       maybe that's the place to prune contour clones
                 G.remove_edge(r, n)
                 if r != path[-1]:
                     debug(
-                        'root changed from %d to %d for subtree of gate %d, '
+                        'root changed from %d to %d for subtree of feeder %d, '
                         'now hooked to %d',
                         r,
                         path[-1],
@@ -1272,7 +1288,7 @@ class PathFinder:
             else:
                 del G[n][r]['kind']
                 debug(
-                    'gate %d–%d touches a node (touched node does not become'
+                    'feeder %d–%d touches a node (touched node does not become'
                     ' a detour).',
                     n,
                     r,
@@ -1298,7 +1314,7 @@ class PathFinder:
                     f'({total_parent_load}) != expected load ({ref_load})'
                 )
 
-        # former tentative gates that were not in Xings cease to be tentative
+        # former tentative feeders that were not in Xings cease to be tentative
         for r, n in tentative:
             del G[r][n]['kind']
 
