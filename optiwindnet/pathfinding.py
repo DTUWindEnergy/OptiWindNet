@@ -217,7 +217,7 @@ class PathFinder:
         hooks_ = [np.fromiter(h2c, count=len(h2c), dtype=int) for h2c in hooks2check]
 
         Xings = [feeder for _, feeder in gateXing_iter(G, hooks=hooks_)]
-        # add also the feeders that are not in a straight line due to borders
+        # Add also feeders whose straight line crosses constraint geometry.
         Xings.extend(
             (r, n)
             for r in range(-R, 0)
@@ -285,7 +285,7 @@ class PathFinder:
                     else []
                 )
                 if expanded_shortpath:
-                    # there may be more than one edge cloning same border vertex
+                    # there may be more than one edge cloning the same constraint vertex
                     choices = [
                         v
                         for v in G[u]
@@ -313,7 +313,7 @@ class PathFinder:
                 helper_edges = []
                 u = s
                 for v in midpath:
-                    # this will use border nodes, watchout!
+                    # this will use constraint vertices
                     G.add_node(v)
                     helper_edges.append((u, v))
                     edges_to_add.append((u, v))
@@ -361,29 +361,18 @@ class PathFinder:
         `dists` contains the lengths of the segments defined by `paths`.
         """
         paths = self.paths
-        best_pn_by_prime_sector = self.best_pn_by_prime_sector
+        best_pn_by_pair_id = self.best_pn_by_pair_id
+        pair_ids_by_prime = self.pair_ids_by_prime
         try:
             _, pn_id = min(
                 (paths[pn_id].dist, pn_id)
-                for pn_id in best_pn_by_prime_sector[n].values()
+                for pair_id in pair_ids_by_prime.get(n, ())
+                if (pn_id := best_pn_by_pair_id[pair_id]) is not None
             )
         except ValueError:
             info('Path not found for «%d»', n)
             return [], []
         return self._trace_path(n, pn_id)
-
-    def _get_sector(self, prime: int, portal: tuple[int, int]):
-        """
-        Given a `prime` and a `portal` containing it, visit the neighbors of
-        `prime` starting from the opposite portal endpoint and rotating in the
-        counter-clockwise direction.
-
-        The first neighbor that forms one of G's edges with `prime` is the
-        sector. The sector identifies from which side of a non-traversable wall
-        the path reaches `prime`.
-        """
-        opposite = portal[0] if prime == portal[1] else portal[1]
-        return self._get_sector_from_opposite(prime, opposite)
 
     def _scan_sector_from_opposite(self, prime: int, opposite: int) -> int:
         """Uncached sector scan for one `(prime, opposite)` pair."""
@@ -392,7 +381,7 @@ class PathFinder:
         P = self.P
         tentative = self.tentative
         if prime >= T:
-            # `prime` is on a border/obstacle wall or is a supertriangle vertex,
+            # `prime` is on a constraint wall or is a supertriangle vertex,
             # hence it is only reachable from one side -> arbitrary sector id
             return NULL
         if opposite in G._adj.get(prime, {}):
@@ -427,6 +416,7 @@ class PathFinder:
             pair_id = len(self.prime_sector_by_pair_id)
             self.pair_id_by_prime_sector[pair] = pair_id
             self.prime_sector_by_pair_id.append(pair)
+            self.pair_ids_by_prime[prime].append(pair_id)
             self.best_pn_by_pair_id.append(None)
         return pair_id
 
@@ -440,12 +430,15 @@ class PathFinder:
         sector_by_prime_opposite: dict[int, dict[int, int]] = {}
         pair_id_by_prime_sector: dict[tuple[int, int], int] = {}
         prime_sector_by_pair_id: list[tuple[int, int]] = []
+        pair_ids_by_prime: defaultdict[int, list[int]] = defaultdict(list)
 
         def add_pair(prime: int, sector: int) -> None:
             pair = (prime, sector)
             if pair not in pair_id_by_prime_sector:
-                pair_id_by_prime_sector[pair] = len(prime_sector_by_pair_id)
+                pair_id = len(prime_sector_by_pair_id)
+                pair_id_by_prime_sector[pair] = pair_id
                 prime_sector_by_pair_id.append(pair)
+                pair_ids_by_prime[prime].append(pair_id)
 
         for prime in P:
             if prime < 0:
@@ -488,6 +481,7 @@ class PathFinder:
         self.sector_by_prime_opposite = sector_by_prime_opposite
         self.pair_id_by_prime_sector = pair_id_by_prime_sector
         self.prime_sector_by_pair_id = prime_sector_by_pair_id
+        self.pair_ids_by_prime = pair_ids_by_prime
 
     def _advance_portal(
         self,
@@ -765,7 +759,6 @@ class PathFinder:
         prioqueue = self.prioqueue
         portal_set = self.portal_set
         VertexC = self.VertexC
-        best_pn_by_prime_sector = self.best_pn_by_prime_sector
         best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
         ensure_pair_id = self._ensure_pair_id
@@ -786,7 +779,6 @@ class PathFinder:
             best_pn_id = best_pn_by_pair_id[pair_id]
             if best_pn_id is None or d_total < paths[best_pn_id].dist:
                 best_pn_by_pair_id[pair_id] = pn_v
-                best_pn_by_prime_sector[v][sec_v] = pn_v
             return pn_v, d_hop
 
         def _launch(left: int, right: int, side_init: int) -> None:
@@ -846,7 +838,6 @@ class PathFinder:
         EPS_COLLINEAR = 1e-17
 
         paths = self.paths
-        best_pn_by_prime_sector = self.best_pn_by_prime_sector
         best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
         sector_by_prime_opposite = self.sector_by_prime_opposite
@@ -1025,7 +1016,6 @@ class PathFinder:
             best_pn_id = best_pn_by_pair_id[pair_id]
             if best_pn_id is None or d_new < paths[best_pn_id].dist:
                 best_pn_by_pair_id[pair_id] = new_pn_id
-                best_pn_by_prime_sector[_new][sector_new] = new_pn_id
                 debug(
                     '<%d> new best pn for (%d, %d) via %d: d_path = %.2f',
                     adv_id,
@@ -1052,8 +1042,6 @@ class PathFinder:
         traversals_limit = self.traversals_limit
         paths = self.paths = PathNodes()
         triangles = P.graph['triangles']
-        best_pn_by_prime_sector = defaultdict(dict)
-        self.best_pn_by_prime_sector = best_pn_by_prime_sector
 
         # set of portals (i.e. edges of P that are not used in G)
         fnT = G.graph.get('fnT')
@@ -1156,7 +1144,7 @@ class PathFinder:
                 # vertex `n`, never on `left`/`right`), so engage the chain
                 # directly here. A chain entrance from root is a single
                 # straight hop — one distance, and sector = NULL (chain-ends are
-                # constraint-wall vertices, for which `_get_sector` always returns
+                # constraint-wall vertices, for which sector lookup always returns
                 # NULL, so this matches the entry pn that Triggers A/B produce via
                 # funnel narrowing and lets `paths.add` dedupe against them). Done
                 # BEFORE the portal-validity `continue`
@@ -1211,8 +1199,6 @@ class PathFinder:
                 # shortest paths for roots' P.neighbors is a straight line
                 best_pn_by_pair_id[ensure_pair_id(left, sec_left)] = wedge_end[0]
                 best_pn_by_pair_id[ensure_pair_id(right, sec_right)] = wedge_end[1]
-                best_pn_by_prime_sector[left][sec_left] = wedge_end[0]
-                best_pn_by_prime_sector[right][sec_right] = wedge_end[1]
 
                 # prioritize by distance to the closest node of the portal
                 d_closest = (
@@ -1319,7 +1305,9 @@ class PathFinder:
         R, T, B, C = self.R, self.T, self.B, self.C
         clone2prime = self.clone2prime.copy()
         paths = self.paths
-        best_pn_by_prime_sector = self.best_pn_by_prime_sector
+        best_pn_by_pair_id = self.best_pn_by_pair_id
+        pair_ids_by_prime = self.pair_ids_by_prime
+        prime_sector_by_pair_id = self.prime_sector_by_pair_id
         clone_idx = T + B + C
         failed_detours = []
 
@@ -1344,10 +1332,11 @@ class PathFinder:
             debug('hook_candidates: %s', hook_candidates)
 
             try:
-                dist, pn_id, hook, sect = min(
-                    (paths[pn_id].dist, pn_id, hook, sec)
+                dist, pn_id, hook, pair_id = min(
+                    (paths[pn_id].dist, pn_id, hook, pair_id)
                     for hook in hook_candidates
-                    for sec, pn_id in best_pn_by_prime_sector[hook].items()
+                    for pair_id in pair_ids_by_prime.get(hook, ())
+                    if (pn_id := best_pn_by_pair_id[pair_id]) is not None
                 )
             except ValueError:
                 error(
@@ -1358,6 +1347,7 @@ class PathFinder:
                 # unable to fix this crossing
                 failed_detours.append((r, n))
                 continue
+            _, sect = prime_sector_by_pair_id[pair_id]
             debug('best: hook = %d, sector = %d, dist = %.2f', hook, sect, dist)
 
             path, dists = self._trace_path(hook, pn_id)
