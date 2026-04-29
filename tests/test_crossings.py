@@ -3,7 +3,7 @@ import pytest
 import networkx as nx
 from .helpers import tiny_wfn
 from optiwindnet.crossings import (
-    full_geometric_crossings,
+    find_geometric_crossings,
     get_interferences_list,
     validate_routeset,
 )
@@ -91,7 +91,93 @@ def test_validate_routeset():
     assert validate_routeset(G2) == []
 
 
-def test_full_geometric_crossings_detects_clone_overlap():
+def test_find_geometric_crossings_detects_simple_cross():
+    """Two feeders from a single root cross once at a non-vertex point."""
+    G = nx.Graph(
+        T=4,
+        B=0,
+        C=0,
+        D=0,
+        R=1,
+        VertexC=np.array(
+            [
+                [0.0, 0.0],
+                [2.0, 2.0],
+                [0.0, 2.0],
+                [2.0, 0.0],
+                [-3.0, 0.0],
+            ]
+        ),
+    )
+    G.add_node(-1, kind='oss')
+    G.add_nodes_from(range(4), kind='wtg')
+    G.add_edges_from([(-1, 0), (0, 1), (-1, 2), (2, 3)])
+
+    crossings = find_geometric_crossings(G)
+    assert len(crossings) == 1
+    finding = crossings[0]
+    assert finding['kind'] == 'cross'
+    assert finding['path_a'] == (1, 0)
+    assert finding['path_b'] == (3, 2)
+    assert finding['geometry'] == 'POINT (1 1)'
+
+
+def test_find_geometric_crossings_multi_root():
+    """Crossings between feeders rooted at different substations are detected."""
+    G = nx.Graph(
+        T=4,
+        B=0,
+        C=0,
+        D=0,
+        R=2,
+        VertexC=np.array(
+            [
+                [1.0, 1.0],
+                [1.0, -1.0],
+                [-1.0, 1.0],
+                [-1.0, -1.0],
+                [-2.0, 0.0],
+                [2.0, 0.0],
+            ]
+        ),
+    )
+    G.add_nodes_from([-2, -1], kind='oss')
+    G.add_nodes_from(range(4), kind='wtg')
+    G.add_edges_from([(-2, 0), (-2, 1), (-1, 2), (-1, 3)])
+
+    crossings = find_geometric_crossings(G)
+    kinds = sorted(c['kind'] for c in crossings)
+    assert kinds == ['cross', 'cross']
+
+
+def test_find_geometric_crossings_include_touches_clean_case():
+    """A clean routeset returns no findings even with include_touches=True."""
+    wfn = tiny_wfn()
+    G = wfn.G
+    assert find_geometric_crossings(G) == []
+    assert find_geometric_crossings(G, include_touches=True) == []
+
+
+def test_find_geometric_crossings_clean_tiny_wfn():
+    """An optimized tiny_wfn (with and without detours) is crossing-free."""
+    wfn = tiny_wfn()
+    assert find_geometric_crossings(wfn.G) == []
+    wfn_with_detours = tiny_wfn(cables=1)
+    assert find_geometric_crossings(wfn_with_detours.G) == []
+
+
+def test_find_geometric_crossings_detects_broken_routeset():
+    """Adding a feeder that crosses an existing edge is reported as 'cross'."""
+    wfn = tiny_wfn()
+    G = wfn.G
+    G.add_edge(-1, 11)
+    crossings = find_geometric_crossings(G)
+    # validate_routeset reports the same edge crossing
+    assert validate_routeset(G)
+    assert any(c['kind'] == 'cross' for c in crossings)
+
+
+def test_find_geometric_crossings_detects_clone_overlap():
     T, B, C, D, R = 4, 3, 3, 3, 1
     VertexC = np.array(
         [
@@ -116,7 +202,7 @@ def test_full_geometric_crossings_detects_clone_overlap():
     G.add_edge(-1, 3)
     G.graph['fnT'] = np.array([0, 1, 2, 3, 4, 5, 6, 4, 5, 6, 6, 5, 4, -1])
 
-    crossings = full_geometric_crossings(G)
+    crossings = find_geometric_crossings(G)
 
     assert any(
         crossing['kind'] == 'overlap_cross'
@@ -126,7 +212,7 @@ def test_full_geometric_crossings_detects_clone_overlap():
     )
 
 
-def test_full_geometric_crossings_ignores_common_trunk_overlap():
+def test_find_geometric_crossings_ignores_common_trunk_overlap():
     G = nx.Graph(
         T=4,
         B=0,
@@ -141,10 +227,10 @@ def test_full_geometric_crossings_ignores_common_trunk_overlap():
     G.add_nodes_from(range(4), kind='wtg')
     G.add_edges_from([(-1, 0), (0, 1), (1, 2), (1, 3)])
 
-    assert full_geometric_crossings(G) == []
+    assert find_geometric_crossings(G) == []
 
 
-def test_full_geometric_crossings_ignores_endpoint_touch():
+def test_find_geometric_crossings_ignores_endpoint_touch():
     G = nx.Graph(
         T=4,
         B=0,
@@ -159,10 +245,10 @@ def test_full_geometric_crossings_ignores_endpoint_touch():
     G.add_nodes_from(range(4), kind='wtg')
     G.add_edges_from([(-1, 0), (0, 1), (2, 3)])
 
-    assert full_geometric_crossings(G) == []
+    assert find_geometric_crossings(G) == []
 
 
-def test_full_geometric_crossings_detects_detour_branch_split():
+def test_find_geometric_crossings_detects_detour_branch_split():
     # Real terminal 1 has branch rays toward 2 and 3.  Detour clone 5 maps to
     # terminal 1 and its route passes through that coordinate, splitting them.
     G = _graph_with_clones(
@@ -189,7 +275,7 @@ def test_full_geometric_crossings_detects_detour_branch_split():
     )
     G.graph['fnT'] = np.array([0, 1, 2, 3, 4, 1, -1])
 
-    crossings = full_geometric_crossings(G)
+    crossings = find_geometric_crossings(G)
 
     assert [
         (crossing['kind'], crossing['path_a'], crossing['path_b'])
