@@ -1038,7 +1038,10 @@ class PathFinder:
                 # unengaged. Each chain-end neighbor of `r` becomes `left`
                 # exactly once over the fan iteration, so checking `left`
                 # alone covers every chain-end in the fan.
-                if left in self.chain_end_set:
+                if (
+                    left in self.chain_end_set
+                    and r not in self.chain_topo[left].same_link_neighbors
+                ):
                     d_c = d2roots[left, r].item()
                     pn_c = paths.add(left, NULL, r, d_c, d_c)
                     num_traversals[(left, left)] = traversals_limit
