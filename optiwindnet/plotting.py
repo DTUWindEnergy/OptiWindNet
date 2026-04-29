@@ -309,7 +309,6 @@ def gplot(
     if tag_border:
         border_ = border if border is not None else []
         obstacles_ = obstacles if obstacles is not None else [()]
-        print(VertexC.shape)
         for b in chain(border_, *(obstacles_)):
             ax.text(*VertexC[b], str(b), color=c.fg_color, size=FONTSIZE_ROOT_LABEL)
     if hide_ST and VertexC.shape[0] > R + T + B:
