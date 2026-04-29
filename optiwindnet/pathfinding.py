@@ -60,6 +60,13 @@ def _sorted3(a: int, b: int, c: int) -> tuple[int, int, int]:
     return a, b, c
 
 
+def _node_dist(VertexC: np.ndarray, u: int, v: int) -> float:
+    """Euclidean distance between two indexed coordinate rows."""
+    ux, uy = VertexC[u]
+    vx, vy = VertexC[v]
+    return math.hypot(ux - vx, uy - vy)
+
+
 class PathNodes(dict):
     """Tree of pseudonodes for shortest-path candidates.
 
@@ -436,13 +443,11 @@ class PathFinder:
                 return
             is_triangle_seen[triangle_idx] = 1
             # check whether the other two sides of the triangle are portals
-            portals = [
-                (portal, side)
-                for portal, side in (((left, n), 1), ((n, right), 0))
-                if portal in portal_set
-            ]
-            if len(portals) == 2:
-                portal_bif, side_bif = portals[1]
+            portal_left = (left, n)
+            portal_right = (n, right)
+            has_left_portal = portal_left in portal_set
+            has_right_portal = portal_right in portal_set
+            if has_left_portal and has_right_portal:
                 # channel bifurcation, spawn new advancer
                 #  trace('{%d} advancer asking for funnel_state', adv_id)
                 # get traverser state
@@ -455,16 +460,16 @@ class PathFinder:
                         self.adv_counter,
                         self._advance_portal(
                             self.adv_counter,
-                            portal_bif,
+                            portal_right,
                             funnel_state,
                             is_triangle_seen.copy(),
-                            side_bif,
+                            0,
                         ),
                     ),
                 )
                 self.adv_counter += 1
                 next(traverser)
-            elif not portals:
+            elif not has_left_portal and not has_right_portal:
                 # DEAD-END: both triangle sides are not portals.
                 # If `n` is a chain-end with budget, engage the chain by
                 # anchoring the funnel from both chain boundary walls, then walk the
@@ -487,7 +492,10 @@ class PathFinder:
                 debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
                 return
             # process  portal
-            portal, side = portals[0]
+            if has_left_portal:
+                portal, side = portal_left, 1
+            else:
+                portal, side = portal_right, 0
             prio, is_promising = traverser.send((portal, side))
             yield prio, portal, is_promising
             next(traverser)
@@ -531,7 +539,7 @@ class PathFinder:
         prev, cur = x_entry, y_entry
         parent_pn = entry_pn
         for c_next, sector in self.chain_topo[y_entry].walk:
-            d_hop = float(np.hypot(*(VertexC[cur] - VertexC[c_next])))
+            d_hop = _node_dist(VertexC, cur, c_next)
             pn_parent = paths[parent_pn]
             parent_pn = paths.add(
                 c_next,
@@ -679,7 +687,7 @@ class PathFinder:
             """Pseudonode at `v` parented by pn_w; returns (pn_id, d_hop)."""
             if v == w:
                 return pn_w_id, 0.0
-            d_hop = float(np.hypot(*(VertexC[w] - VertexC[v])))
+            d_hop = _node_dist(VertexC, w, v)
             d_total = pn_w.dist + d_hop
             sec_v = self._get_sector(v, (v, w)) if v >= 0 else NULL
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
@@ -866,7 +874,7 @@ class PathFinder:
                 _apex_eff, apex_eff = _current_wapex, current_wapex
 
             # rate, wait, add
-            d_hop = np.hypot(*(self.VertexC[_apex_eff] - self.VertexC[_new]).T).item()
+            d_hop = _node_dist(self.VertexC, _apex_eff, _new)
             apex_pn = paths[apex_eff]
             d_new = apex_pn.dist + d_hop
             best_pn_id = best_pn_by_prime_sector[_new].get(sector_new)
