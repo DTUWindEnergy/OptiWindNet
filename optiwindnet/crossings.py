@@ -1,12 +1,26 @@
 import math
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
+from typing import Any
 
 import networkx as nx
 import numpy as np
 from bidict import bidict
+import shapely as shp
 
-from .geometric import angle_helpers, is_bunch_split_by_corner, is_same_side
+from .geometric import (
+    angle_helpers,
+    is_bunch_split_by_corner,
+    is_same_side,
+    polylines_cross_at_point,
+)
 from .interarraylib import calcload
+
+
+@dataclass(frozen=True)
+class _RoutePolyline:
+    nodes: tuple[int, ...]
+    non_root_end: int | None = None
 
 
 def get_interferences_list(
@@ -328,6 +342,449 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
         #     f'inside: {[bunch[i] for i in insideI]}; ' \
         #     f'outside: {[bunch[i] for i in outsideI]}'
     return Xings
+
+
+def _routeset_fnT(G: nx.Graph) -> np.ndarray:
+    """Identity translation table (clones → primes); synthesized when G has none."""
+    R, T, B = (G.graph[k] for k in 'RTB')
+    C, D = (G.graph.get(k, 0) for k in 'CD')
+    if C > 0 or D > 0:
+        return G.graph['fnT']
+    fnT = np.arange(T + B + R)
+    fnT[-R:] = range(-R, 0)
+    return fnT
+
+
+def _canonical_prime_path(
+    G: nx.Graph, path: tuple[int, ...], fnT: np.ndarray
+) -> tuple[int, ...]:
+    """Translate a polyline to primes, drop bordering roots, canonicalize direction."""
+    prime_path = tuple(int(fnT[n]) for n in path)
+    R = G.graph['R']
+    trimmed = prime_path
+    while len(trimmed) > 1 and -R <= trimmed[0] < 0:
+        trimmed = trimmed[1:]
+    while len(trimmed) > 1 and -R <= trimmed[-1] < 0:
+        trimmed = trimmed[:-1]
+    if len(trimmed) > 1:
+        prime_path = trimmed
+    if len(prime_path) > 1 and prime_path[0] < prime_path[-1]:
+        prime_path = prime_path[::-1]
+    return prime_path
+
+
+def _routeset_polylines(G: nx.Graph) -> list[_RoutePolyline]:
+    """Walk G into one polyline per feeder plus one per inter-junction link.
+
+    A feeder runs from a root through a degree-2 chain to the first leaf or
+    branching node. A link runs between two non-degree-2 nodes that are not
+    roots. Together these cover every edge exactly once.
+    """
+    R = G.graph['R']
+    roots = set(range(-R, 0))
+    visited = set()
+    polylines: list[_RoutePolyline] = []
+
+    def edge_key(u: int, v: int) -> tuple[int, int]:
+        return (u, v) if u < v else (v, u)
+
+    def walk(prev: int, node: int) -> tuple[int, ...]:
+        path = [prev, node]
+        visited.add(edge_key(prev, node))
+        while node not in roots and G.degree[node] == 2:
+            candidates = [nb for nb in G[node] if nb != prev]
+            if len(candidates) != 1:
+                break
+            nxt = candidates[0]
+            key = edge_key(node, nxt)
+            if key in visited:
+                break
+            prev, node = node, nxt
+            path.append(node)
+            visited.add(key)
+        return tuple(path)
+
+    for root in sorted(roots):
+        for nb in G[root]:
+            path = walk(root, nb)
+            polylines.append(_RoutePolyline(path, non_root_end=path[-1]))
+
+    starts = [n for n in G if n not in roots and G.degree[n] != 2]
+    for start in starts:
+        for nb in G[start]:
+            if nb in roots:
+                continue
+            if edge_key(start, nb) in visited:
+                continue
+            path = walk(start, nb)
+            polylines.append(_RoutePolyline(path))
+
+    return polylines
+
+
+def _polyline_coords(
+    VertexC: np.ndarray, fnT: np.ndarray, path: tuple[int, ...]
+) -> np.ndarray:
+    """(N, 2) coords of a path's primes, with consecutive duplicates collapsed."""
+    raw = VertexC[fnT[list(path)]]
+    if len(raw) <= 1:
+        return raw
+    keep = np.empty(len(raw), dtype=bool)
+    keep[0] = True
+    keep[1:] = np.any(raw[1:] != raw[:-1], axis=1)
+    return raw[keep]
+
+
+def _shared_run_swaps_sides(
+    path_a: tuple[int, ...], path_b: tuple[int, ...], VertexC: np.ndarray
+) -> bool:
+    """True iff two paths share an interior run and exit on the same side at each end.
+
+    When two prime paths overlap on a shared sub-sequence, an actual *cross* requires
+    the two paths to enter the overlap from opposite half-planes and exit to opposite
+    half-planes — equivalently, the orientation (cross-product sign) of the two
+    approach vectors equals that of the two separation vectors.
+    """
+    # locate the longest shared run (try both orientations of path_b)
+    best = None
+    best_len = 1
+    for candidate_b in (path_b, path_b[::-1]):
+        for i, node_a in enumerate(path_a):
+            for j, node_b in enumerate(candidate_b):
+                if node_a != node_b:
+                    continue
+                length = 1
+                while (
+                    i + length < len(path_a)
+                    and j + length < len(candidate_b)
+                    and path_a[i + length] == candidate_b[j + length]
+                ):
+                    length += 1
+                if length > best_len:
+                    best_len = length
+                    best = i, i + length, j, j + length, candidate_b
+    if best is None:
+        return False
+
+    start_a, end_a, start_b, end_b, oriented_b = best
+    # require at least one segment of context on each side of the shared run
+    if not (0 < start_a and end_a < len(path_a)
+            and 0 < start_b and end_b < len(oriented_b)):
+        return False
+
+    shared_start = path_a[start_a]
+    shared_end = path_a[end_a - 1]
+    approach_a = VertexC[shared_start] - VertexC[path_a[start_a - 1]]
+    approach_b = VertexC[shared_start] - VertexC[oriented_b[start_b - 1]]
+    separation_a = VertexC[path_a[end_a]] - VertexC[shared_end]
+    separation_b = VertexC[oriented_b[end_b]] - VertexC[shared_end]
+
+    EPS = 1e-15
+
+    def _cross_sign(u, v):
+        c = u[0] * v[1] - u[1] * v[0]
+        return 0 if abs(c) <= EPS else (1 if c > 0 else -1)
+
+    approach_sign = _cross_sign(approach_a, approach_b)
+    separation_sign = _cross_sign(separation_a, separation_b)
+    return approach_sign != 0 and approach_sign == separation_sign
+
+
+def _detour_splits(
+    G: nx.Graph, fnT: np.ndarray, VertexC: np.ndarray
+) -> dict[int, tuple[int, tuple[int, int]]]:
+    """Map each detour clone whose route splits its prime's branch.
+
+    Returns ``{detour_node: (prime, (inside_neighbor, outside_neighbor))}``. A
+    detour clone splits a branch when its incoming/outgoing rays put the prime's
+    other neighbours on opposite sides of the corner the detour cuts.
+    """
+    T, B = (G.graph[k] for k in 'TB')
+    C, D = (G.graph.get(k, 0) for k in 'CD')
+    if D == 0:
+        return {}
+    splits: dict[int, tuple[int, tuple[int, int]]] = {}
+    for d in range(T + B + C, T + B + C + D):
+        prime = int(fnT[d])
+        if prime not in G or not 0 <= prime < T:
+            continue
+        if G.degree[prime] == 1 or G.degree[d] != 2:
+            continue
+        dA, dB = (int(fnT[nb]) for nb in G[d])
+        bunch = [int(fnT[nb]) for nb in G[prime]]
+        is_split, insideI, outsideI = is_bunch_split_by_corner(
+            VertexC[bunch], *VertexC[[dA, prime, dB]]
+        )
+        if is_split:
+            splits[d] = (prime, (bunch[insideI[0]], bunch[outsideI[0]]))
+    return splits
+
+
+def _branch_split_findings(
+    splits: dict[int, tuple[int, tuple[int, int]]],
+    polylines: list[_RoutePolyline],
+    prime_paths: list[tuple[int, ...]],
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+) -> list[dict[str, Any]]:
+    """Emit one finding per polyline that traverses a detour-split prime."""
+    if not splits:
+        return []
+    findings: list[dict[str, Any]] = []
+    for polyline, prime_path in zip(polylines, prime_paths):
+        non_root_end = (
+            int(fnT[polyline.non_root_end])
+            if polyline.non_root_end is not None
+            else None
+        )
+        seen_primes: set[int] = set()
+        for node in polyline.nodes[1:-1]:
+            split = splits.get(node)
+            if split is None:
+                continue
+            prime, split_nodes = split
+            if prime in seen_primes or prime == non_root_end:
+                continue
+            seen_primes.add(prime)
+            findings.append(
+                {
+                    'kind': 'branch_split',
+                    'path_nodes_a': polyline.nodes,
+                    'path_nodes_b': split_nodes,
+                    'path_a': prime_path,
+                    'path_b': (prime, prime, *split_nodes),
+                    'split_node': prime,
+                    'geometry': shp.Point(VertexC[prime].tolist()),
+                }
+            )
+    return findings
+
+
+def _exclusion_coords(
+    path_a: tuple[int, ...],
+    path_b: tuple[int, ...],
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+    splits: dict[int, tuple[int, tuple[int, int]]],
+) -> np.ndarray:
+    """Coordinates where intersections are not crossings: shared nodes,
+    endpoints of either polyline, and detour-split primes that both paths visit."""
+    primes: set[int] = (
+        {int(fnT[n]) for n in path_a} & {int(fnT[n]) for n in path_b}
+    )
+    primes |= {
+        int(fnT[path_a[0]]), int(fnT[path_a[-1]]),
+        int(fnT[path_b[0]]), int(fnT[path_b[-1]]),
+    }
+    for path in (path_a, path_b):
+        for node in path[1:-1]:
+            split = splits.get(node)
+            if split is not None:
+                primes.add(split[0])
+    return VertexC[sorted(primes)]
+
+
+def _iter_points(geometry) -> Iterator[tuple[float, float]]:
+    """Yield (x, y) for each Point inside ``geometry``; line parts are skipped."""
+    if geometry.geom_type == 'Point':
+        yield geometry.x, geometry.y
+    elif geometry.geom_type == 'MultiPoint':
+        for point in geometry.geoms:
+            yield point.x, point.y
+    elif geometry.geom_type == 'GeometryCollection':
+        for part in geometry.geoms:
+            yield from _iter_points(part)
+
+
+def _intersection_only_at_excluded(
+    intersection,
+    excluded: np.ndarray,
+    *,
+    endpoint_tol: float,
+) -> bool:
+    """True if every Point of a length-0 intersection lies at an excluded coord."""
+    if intersection.length > 0:
+        return False
+    points = list(_iter_points(intersection))
+    if not points:
+        return False
+    P = np.asarray(points)
+    # distance from each intersection point to each excluded coord
+    diffs = P[:, None, :] - excluded[None, :, :]
+    dists = np.hypot(diffs[..., 0], diffs[..., 1])
+    return bool(np.all(np.any(dists <= endpoint_tol, axis=1)))
+
+
+def find_geometric_crossings(
+    G: nx.Graph,
+    *,
+    include_touches: bool = False,
+    length_tol: float = 1e-12,
+    angle_tol: float = 1e-10,
+    endpoint_tol: float = 1e-9,
+) -> list[dict]:
+    """Find route intersections in a routeset using Shapely geometries.
+
+    Geometry-first diagnostic complement to :func:`validate_routeset` and
+    :func:`list_edge_crossings`. Unlike :func:`list_edge_crossings`, which only
+    detects crossings between extended-Delaunay edges (i.e. it requires a
+    routeset built from ``A``, OptiWindNet's available-edges graph), this
+    routine works on **any** routeset graph that exposes ``VertexC`` (and
+    ``fnT`` if it carries contour or detour clones). It can therefore validate
+    routes produced by external tools, hand-built test graphs, or post-edited
+    OptiWindNet results — at the cost of a heavier geometry-based check.
+
+    Polylines are extracted from ``G`` (one per feeder, plus one per
+    junction-to-junction link) and translated through ``fnT`` so that contour
+    and detour clones are tested at their prime coordinates.
+
+    Args:
+      G: routeset graph. Must have graph attributes ``T``, ``R``, ``B``, and
+        ``VertexC``; ``fnT`` is required iff ``C > 0`` or ``D > 0``.
+      include_touches: also report point contacts that are not proper crossings
+        (otherwise touches are silently dropped).
+      length_tol: collinear overlaps shorter than this are not classified.
+      angle_tol: minimum cross-product magnitude used to deduplicate co-directional
+        rays in the local crossing test.
+      endpoint_tol: distance below which an intersection point is treated as
+        coincident with a path endpoint, shared node, or detour-split prime.
+
+    Returns:
+      One dict per finding, with keys:
+
+      - ``kind``: one of
+          - ``'cross'``: two polylines cross at one or more isolated points;
+          - ``'overlap_cross'``: two polylines share a sub-run and exit the
+            overlap on opposite sides at both ends (a true cross expressed as
+            a coincident segment);
+          - ``'branch_split'``: a detour-clone whose prime is a real terminal
+            cuts that terminal's subtree into pieces;
+          - ``'touch'`` (only when ``include_touches=True``): point contact
+            that is not classified as a cross (e.g. tangent kiss).
+      - ``path_nodes_a``, ``path_nodes_b``: the raw polyline node sequences.
+      - ``path_a``, ``path_b``: canonical prime-path tuples (sorted so that
+        ``path_a < path_b`` lexicographically).
+      - ``geometry``: WKT string of the offending Shapely geometry (Point,
+        MultiPoint, LineString, MultiLineString, …).
+    """
+    VertexC = G.graph['VertexC']
+    fnT = _routeset_fnT(G)
+    polylines = _routeset_polylines(G)
+    paths = [polyline.nodes for polyline in polylines]
+    prime_paths = [_canonical_prime_path(G, path, fnT) for path in paths]
+    path_coords = [_polyline_coords(VertexC, fnT, path) for path in paths]
+    splits = _detour_splits(G, fnT, VertexC)
+
+    findings = _branch_split_findings(
+        splits, polylines, prime_paths, fnT, VertexC
+    )
+
+    lines = [shp.LineString(coords) for coords in path_coords]
+    tree = shp.STRtree(lines)
+
+    for i, line_a in enumerate(lines):
+        for j in tree.query(line_a, predicate='intersects').tolist():
+            if j <= i:
+                continue
+            intersection = line_a.intersection(lines[j])
+            if intersection.is_empty:
+                continue
+            excluded = _exclusion_coords(paths[i], paths[j], fnT, VertexC, splits)
+            if _intersection_only_at_excluded(
+                intersection, excluded, endpoint_tol=endpoint_tol
+            ):
+                continue
+
+            path_a, path_b = prime_paths[i], prime_paths[j]
+            kind: str | None = None
+            geometry = intersection
+
+            if intersection.length > length_tol and _shared_run_swaps_sides(
+                path_a, path_b, VertexC
+            ):
+                kind = 'overlap_cross'
+
+            if kind is None:
+                crossings = _filter_crossing_points(
+                    intersection,
+                    excluded,
+                    path_coords[i],
+                    path_coords[j],
+                    angle_tol=angle_tol,
+                    endpoint_tol=endpoint_tol,
+                )
+                if crossings:
+                    kind = 'cross'
+                    geometry = (
+                        shp.Point(crossings[0])
+                        if len(crossings) == 1
+                        else shp.MultiPoint(crossings)
+                    )
+                elif include_touches:
+                    kind = 'touch'
+                else:
+                    continue
+
+            path_nodes_a, path_nodes_b = paths[i], paths[j]
+            if path_b < path_a:
+                path_nodes_a, path_nodes_b = path_nodes_b, path_nodes_a
+                path_a, path_b = path_b, path_a
+            findings.append(
+                {
+                    'kind': kind,
+                    'path_nodes_a': path_nodes_a,
+                    'path_nodes_b': path_nodes_b,
+                    'path_a': path_a,
+                    'path_b': path_b,
+                    'geometry': geometry,
+                }
+            )
+
+    return [
+        {**finding, 'geometry': finding['geometry'].wkt}
+        for finding in findings
+    ]
+
+
+def _filter_crossing_points(
+    intersection,
+    excluded: np.ndarray,
+    coords_a: np.ndarray,
+    coords_b: np.ndarray,
+    *,
+    angle_tol: float,
+    endpoint_tol: float,
+) -> list[np.ndarray]:
+    """Return point-intersections that are genuine X-crossings.
+
+    Drops points near any excluded coord (shared nodes, polyline endpoints,
+    detour-split primes) and points where local rays don't alternate.
+    """
+    P = np.asarray(list(_iter_points(intersection)))
+    if len(P) == 0:
+        return []
+    if len(excluded):
+        diffs = P[:, None, :] - excluded[None, :, :]
+        near_excluded = np.any(
+            np.hypot(diffs[..., 0], diffs[..., 1]) <= endpoint_tol, axis=1
+        )
+    else:
+        near_excluded = np.zeros(len(P), dtype=bool)
+    # tolerance scales with the largest segment among either polyline
+    scale = max(
+        np.linalg.norm(np.diff(coords_a, axis=0), axis=1).max(initial=1.0),
+        np.linalg.norm(np.diff(coords_b, axis=0), axis=1).max(initial=1.0),
+    )
+    tol = endpoint_tol * scale
+    return [
+        P[k]
+        for k in range(len(P))
+        if not near_excluded[k]
+        and polylines_cross_at_point(
+            coords_a, coords_b, P[k],
+            tol=tol, angle_tol=angle_tol,
+        )
+    ]
 
 
 def list_edge_crossings(
