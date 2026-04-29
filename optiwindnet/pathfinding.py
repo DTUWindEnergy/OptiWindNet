@@ -756,32 +756,26 @@ class PathFinder:
                     _funnel[not side] = _current_wapex
                     contender_wapex = paths[current_wapex].parent
                     _contender_wapex = paths.prime_from_id[contender_wapex]
-                    #  print(f"{'RIGHT' if side else 'LEFT '} "
-                    #        f'current_wapex({_current_wapex}) '
-                    #        f'contender_wapex({_contender_wapex})')
+                    # Loop continues while the current wapex doesn't yet hit
+                    # the farside wall and the test predicate passes. The
+                    # `== _new` clause forces one more step whenever the
+                    # narrowing parks at a pseudonode whose prime matches
+                    # `_new` (chain-anchor case: cross(new, new, contender)=0
+                    # would otherwise exit the loop and leave a degenerate
+                    # apex that paths.add would turn into a self-link).
                     while (
                         _current_wapex != _farside
                         and _contender_wapex >= 0
-                        and test(_new, _current_wapex, _contender_wapex)
+                        and (
+                            _current_wapex == _new
+                            or test(_new, _current_wapex, _contender_wapex)
+                        )
                     ):
                         _funnel[not side] = _current_wapex
-                        #  wedge_end[not side] = current_wapex
                         current_wapex = contender_wapex
                         _current_wapex = _contender_wapex
                         contender_wapex = paths[current_wapex].parent
                         _contender_wapex = paths.prime_from_id[contender_wapex]
-                        #  print(f"{'RIGHT' if side else 'LEFT '} "
-                        #        f'current_wapex({_current_wapex}) '
-                        #        f'contender_wapex({_contender_wapex})')
-                    # If narrowing parked at a pseudonode whose prime is
-                    # _new (chain anchor case: cross(new, new, contender)=0
-                    # exits the loop here), advance past it — using it as
-                    # apex would create a same-prime self-link in the path
-                    # tree.
-                    if _current_wapex == _new and _contender_wapex >= 0:
-                        _funnel[not side] = _current_wapex
-                        current_wapex = contender_wapex
-                        _current_wapex = _contender_wapex
                     _apex = _current_wapex
                     apex = current_wapex
                 else:
@@ -794,26 +788,22 @@ class PathFinder:
                 debug('<%d> infranear', trav_id)
                 current_wapex = wedge_end[side]
                 _current_wapex = paths.prime_from_id[current_wapex]
-                #  print(f'{_current_wapex}')
                 contender_wapex = paths[current_wapex].parent
                 _contender_wapex = paths.prime_from_id[contender_wapex]
+                # See ULTRAFAR loop: `== _new` forces one more step past a
+                # chain-anchor degenerate apex.
                 while (
                     _current_wapex != _nearside
                     and _contender_wapex >= 0
-                    and test(_current_wapex, _new, _contender_wapex)
+                    and (
+                        _current_wapex == _new
+                        or test(_current_wapex, _new, _contender_wapex)
+                    )
                 ):
                     current_wapex = contender_wapex
                     _current_wapex = _contender_wapex
-                    #  print(f'{current_wapex}')
                     contender_wapex = paths[current_wapex].parent
                     _contender_wapex = paths.prime_from_id[contender_wapex]
-                # Same chain-anchor degenerate-apex skip as in the ultrafar
-                # branch: if the narrowing parked at a pseudonode whose prime
-                # equals _new, advance once more so paths.add doesn't create
-                # a same-prime self-link.
-                if _current_wapex == _new and _contender_wapex >= 0:
-                    current_wapex = contender_wapex
-                    _current_wapex = _contender_wapex
                 _apex_eff, apex_eff = _current_wapex, current_wapex
 
             # rate, wait, add
