@@ -49,6 +49,17 @@ ChainTopo = namedtuple(
 )
 
 
+def _sorted3(a: int, b: int, c: int) -> tuple[int, int, int]:
+    """Return three integers sorted ascending without allocating a list."""
+    if a > b:
+        a, b = b, a
+    if b > c:
+        b, c = c, b
+    if a > b:
+        a, b = b, a
+    return a, b, c
+
+
 class PathNodes(dict):
     """Tree of pseudonodes for shortest-path candidates.
 
@@ -419,7 +430,7 @@ class PathFinder:
             if n not in P[right] or P[left][n]['ccw'] == right or n < 0:
                 debug('{%d} advancer reached DEAD-END (root or mesh edge)', adv_id)
                 return
-            triangle_idx = bisect_left(triangles, tuple(sorted([left, right, n])))
+            triangle_idx = bisect_left(triangles, _sorted3(left, right, n))
             if is_triangle_seen[triangle_idx]:
                 debug('{%d} advancer revisited triangle', adv_id)
                 return
