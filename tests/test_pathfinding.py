@@ -189,10 +189,12 @@ def test_get_best_path_dist_is_sum_of_hops():
             continue
         total = sum(dists)
         # get the stored total from paths
-        I_path = pf.I_path[n]
-        if I_path:
-            best_id = min((pf.paths[id].dist, id) for id in I_path.values())[1]
-            stored_dist = pf.paths[best_id].dist
+        best_pn_by_sector = pf.best_pn_by_prime_sector[n]
+        if best_pn_by_sector:
+            best_pn_id = min(
+                (pf.paths[pn_id].dist, pn_id) for pn_id in best_pn_by_sector.values()
+            )[1]
+            stored_dist = pf.paths[best_pn_id].dist
             assert math.isclose(total, stored_dist, rel_tol=1e-9), (
                 f'node {n}: sum(dists)={total} != stored dist={stored_dist}'
             )

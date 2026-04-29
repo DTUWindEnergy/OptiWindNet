@@ -24,10 +24,11 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
-PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop cum_turn'.split())
+PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn'.split())
 # Terminology used by PathFinder internals:
 #   wall: one non-traversable mesh segment; route_walls come from contour route
-#     edges, border_walls come from planar constraint edges.
+#     edges, constraint_walls come from planar constraint edges (borders and
+#     obstacles).
 #   fence: a sequence of connected walls.
 #   chain: the overlap of two fences; chain walking handles these explicitly.
 #   portal: a traversable mesh edge between adjacent triangles.
@@ -35,6 +36,7 @@ PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop cum_turn'.s
 #   funnel: shortest-path state maintained while advancing along a channel.
 #   fan: the full cyclic neighborhood around a vertex, especially a root.
 #   cone: one angular region in a fan, bounded by wall-neighbor vertices.
+#   prime: a geometry vertex id; pn_id: a pseudonode id in the PathNodes tree.
 # Static per-chain-end topology; built once and looked up during exploration.
 #   walk: list of (vertex, sector) — forward chain steps; last is the sister end.
 #   cones: list of (cone_left_wall, cone_right_wall, cone_spokes) — cyclic in cw order.
@@ -48,48 +50,52 @@ ChainTopo = namedtuple(
 
 
 class PathNodes(dict):
-    """Helper class to build a tree that uses clones of prime nodes
-    (i.e. where the same prime node can appear as more than one node)."""
+    """Tree of pseudonodes for shortest-path candidates.
+
+    A prime is a geometry vertex id. A pseudonode id (`pn_id`) identifies one
+    occurrence of a prime in the path tree, since the same prime can be reached
+    from different sectors or parents.
+    """
 
     count: int
-    prime_from_id: dict
-    ids_from_prime_sector: defaultdict
-    last_added: int
+    prime_from_pn: dict
+    pn_ids_from_prime_sector: defaultdict
+    last_added_pn: int
 
     def __init__(self):
         super().__init__()
         self.count = 0
-        self.prime_from_id = {}
-        self.ids_from_prime_sector = defaultdict(list)
-        self.last_added = NULL
+        self.prime_from_pn = {}
+        self.pn_ids_from_prime_sector = defaultdict(list)
+        self.last_added_pn = NULL
 
     def add(
         self,
-        _source: int,
+        prime: int,
         sector: int,
-        parent: int,
+        parent_pn: int,
         dist: float,
         d_hop: float,
         cum_turn: float = 0.0,
     ) -> int:
-        if parent not in self:
+        if parent_pn not in self:
             error(
                 'attempted to add an edge in `PathNodes` to nonexistent parent (%d)',
-                parent,
+                parent_pn,
             )
-        _parent = self.prime_from_id[parent]
-        for prev_id in self.ids_from_prime_sector[_source, sector]:
-            if self[prev_id].parent == parent:
-                self.last_added = prev_id
-                return prev_id
-        id = self.count
+        parent_prime = self.prime_from_pn[parent_pn]
+        for prev_pn_id in self.pn_ids_from_prime_sector[prime, sector]:
+            if self[prev_pn_id].parent == parent_pn:
+                self.last_added_pn = prev_pn_id
+                return prev_pn_id
+        pn_id = self.count
         self.count += 1
-        self[id] = PseudoNode(_source, sector, parent, dist, d_hop, cum_turn)
-        self.ids_from_prime_sector[_source, sector].append(id)
-        self.prime_from_id[id] = _source
-        debug('pseudoedge «%d->%d» added', _source, _parent)
-        self.last_added = id
-        return id
+        self[pn_id] = PseudoNode(prime, sector, parent_pn, dist, d_hop, cum_turn)
+        self.pn_ids_from_prime_sector[prime, sector].append(pn_id)
+        self.prime_from_pn[pn_id] = prime
+        debug('pseudoedge «%d->%d» added', prime, parent_prime)
+        self.last_added_pn = pn_id
+        return pn_id
 
 
 class PathFinder:
@@ -325,57 +331,61 @@ class PathFinder:
         `dists` contains the lengths of the segments defined by `paths`.
         """
         paths = self.paths
-        paths_available = tuple((paths[id].dist, id) for id in self.I_path[n].values())
-        if paths_available:
-            _, id = min(paths_available)
+        best_pn_by_prime_sector = self.best_pn_by_prime_sector
+        candidate_pn_ids = tuple(
+            (paths[pn_id].dist, pn_id) for pn_id in best_pn_by_prime_sector[n].values()
+        )
+        if candidate_pn_ids:
+            _, pn_id = min(candidate_pn_ids)
             path = [n]
             dists = []
-            pseudonode = paths[id]
-            while id >= 0:
-                dists.append(pseudonode.d_hop)
-                id = pseudonode.parent
-                path.append(paths.prime_from_id[id])
-                pseudonode = paths[id]
+            pn = paths[pn_id]
+            while pn_id >= 0:
+                dists.append(pn.d_hop)
+                pn_id = pn.parent
+                path.append(paths.prime_from_pn[pn_id])
+                pn = paths[pn_id]
             return path, dists
         else:
             info('Path not found for «%d»', n)
             return [], []
 
-    def _get_sector(self, _node: int, portal: tuple[int, int]):
+    def _get_sector(self, prime: int, portal: tuple[int, int]):
         """
-        Given a `_node` and a `portal` to which `_node` belongs, visit the
-        neighbors of `_node` starting from from the opposite node in `portal`
-        and rotating in the counter-clockwise direction.
-        The first neighbor that forms one of G's edges with `_node` is the
-        sector. The sector is a way of identifying from which side of a
-        non-traversable barrier the path is reaching `_node`.
+        Given a `prime` and a `portal` containing it, visit the neighbors of
+        `prime` starting from the opposite portal endpoint and rotating in the
+        counter-clockwise direction.
+
+        The first neighbor that forms one of G's edges with `prime` is the
+        sector. The sector identifies from which side of a non-traversable wall
+        the path reaches `prime`.
         """
         T = self.T
         G = self.G
         P = self.P
         tentative = self.tentative
-        if _node >= T:
-            # _node is in a constraint edge, is a contour or is in the supertriangle,
+        if prime >= T:
+            # `prime` is on a border/obstacle wall or is a supertriangle vertex,
             # hence it is only reachable from one side -> arbitrary sector id
             return NULL
-        _opposite = portal[0] if _node == portal[1] else portal[1]
-        if _opposite in G._adj[_node]:
+        opposite = portal[0] if prime == portal[1] else portal[1]
+        if opposite in G._adj[prime]:
             # special case: visiting a DEAD-END
-            return _opposite
-        _nbr = P[_node][_opposite]['ccw']
-        for _ in range(len(P._adj[_node])):
-            if _nbr < T and _nbr in G[_node]:
-                if _nbr >= 0 or (_nbr, _node) not in tentative:
-                    return _nbr
-            _nbr = P[_node][_nbr]['ccw']
-        # could not find a non-tentative G edge around _node
+            return opposite
+        nbr = P[prime][opposite]['ccw']
+        for _ in range(len(P._adj[prime])):
+            if nbr < T and nbr in G[prime]:
+                if nbr >= 0 or (nbr, prime) not in tentative:
+                    return nbr
+            nbr = P[prime][nbr]['ccw']
+        # could not find a non-tentative G edge around prime
         return NULL
 
     def _advance_portal(
         self,
         adv_id: int,
         portal: tuple[int, int],
-        traverser_args: tuple,
+        funnel_state: tuple,
         is_triangle_seen: bitarray,
         side: int | None = None,
     ):
@@ -387,7 +397,7 @@ class PathFinder:
         traversals_limit = self.traversals_limit
         num_traversals = self.num_traversals
         triangles = P.graph['triangles']
-        traverser = self._traverse_channel(adv_id, *traverser_args)
+        traverser = self._traverse_channel(adv_id, *funnel_state)
         next(traverser)
         if side is not None:
             prio, is_promising = traverser.send((portal, side))
@@ -419,10 +429,10 @@ class PathFinder:
             if len(portals) == 2:
                 portal_bif, side_bif = portals[1]
                 # channel bifurcation, spawn new advancer
-                #  trace('{%d} advancer asking for traverser_args', adv_id)
+                #  trace('{%d} advancer asking for funnel_state', adv_id)
                 # get traverser state
-                traverser_args = next(traverser)
-                prio = traverser_args[0]
+                funnel_state = next(traverser)
+                prio = funnel_state[0]
                 heapq.heappush(
                     prioqueue,
                     (
@@ -431,7 +441,7 @@ class PathFinder:
                         self._advance_portal(
                             self.adv_counter,
                             portal_bif,
-                            traverser_args,
+                            funnel_state,
                             is_triangle_seen.copy(),
                             side_bif,
                         ),
@@ -443,7 +453,7 @@ class PathFinder:
                 # DEAD-END: both triangle sides are not portals.
                 # If `n` is a chain-end with budget, engage the chain by
                 # anchoring the funnel from both chain boundary walls, then walk the
-                # chain forward; otherwise update the (n, sector) keeper.
+                # chain forward; otherwise update the (n, sector) best pn.
                 if n in chain_end_set and num_traversals[(n, n)] < traversals_limit:
                     # Two phantom-portal sends place y=n in the funnel from
                     # both chain boundary walls; the second send anchors pn_n on the
@@ -454,7 +464,7 @@ class PathFinder:
                     next(traverser)
                     num_traversals[(n, n)] += 1
                     self._walk_chain(
-                        n, left, self.paths.last_added, is_triangle_seen.copy()
+                        n, left, self.paths.last_added_pn, is_triangle_seen.copy()
                     )
                 elif 0 <= n <= T:
                     prio, is_promising = traverser.send(((left, n), 1))
@@ -483,7 +493,9 @@ class PathFinder:
                 # chain entry (an additional send would produce a same-prime
                 # self-link).
                 num_traversals[(y, y)] += 1
-                self._walk_chain(y, x, self.paths.last_added, is_triangle_seen.copy())
+                self._walk_chain(
+                    y, x, self.paths.last_added_pn, is_triangle_seen.copy()
+                )
 
     def _walk_chain(
         self,
@@ -545,14 +557,14 @@ class PathFinder:
         """
         P = self.P
         route_walls = self.route_walls
-        border_walls = self.border_walls
+        constraint_walls = self.constraint_walls
         link_of_prime = self.link_of_prime
         topo: dict[int, ChainTopo] = {}
 
         for c in chain_end_set:
             cw_nbrs = list(P.neighbors_cw_order(c))
             n = len(cw_nbrs)
-            wall_neighbors = route_walls.get(c, set()) | border_walls.get(c, set())
+            wall_neighbors = route_walls.get(c, set()) | constraint_walls.get(c, set())
             wall_positions = [i for i, v in enumerate(cw_nbrs) if v in wall_neighbors]
             if len(wall_positions) < 2:
                 continue
@@ -604,7 +616,7 @@ class PathFinder:
             visited = {c}
             while True:
                 forward = (
-                    route_walls.get(c_cur, set()) & border_walls.get(c_cur, set())
+                    route_walls.get(c_cur, set()) & constraint_walls.get(c_cur, set())
                 ) - {c_prev}
                 if len(forward) != 1:
                     break
@@ -613,7 +625,7 @@ class PathFinder:
                     break
                 visited.add(c_next)
                 cand_fwd = (
-                    route_walls.get(c_next, set()) | border_walls.get(c_next, set())
+                    route_walls.get(c_next, set()) | constraint_walls.get(c_next, set())
                 ) - {c_cur}
                 sector = min(cand_fwd | {c_cur})
                 walk.append((c_next, sector))
@@ -648,7 +660,7 @@ class PathFinder:
         portal_set = self.portal_set
         triangles = P.graph['triangles']
         VertexC = self.VertexC
-        I_path = self.I_path
+        best_pn_by_prime_sector = self.best_pn_by_prime_sector
         pn_w = paths[pn_w_id]
         cum_turn_w = pn_w.cum_turn
 
@@ -660,9 +672,9 @@ class PathFinder:
             d_total = pn_w.dist + d_hop
             sec_v = self._get_sector(v, (v, w)) if v >= 0 else NULL
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
-            keeper = I_path[v].get(sec_v)
-            if keeper is None or d_total < paths[keeper].dist:
-                I_path[v][sec_v] = pn_v
+            best_pn_id = best_pn_by_prime_sector[v].get(sec_v)
+            if best_pn_id is None or d_total < paths[best_pn_id].dist:
+                best_pn_by_prime_sector[v][sec_v] = pn_v
             return pn_v, d_hop
 
         def _launch(left: int, right: int, side_init: int) -> None:
@@ -671,11 +683,11 @@ class PathFinder:
             hops = [h for h in (d_hop_left, d_hop_right) if h > 0]
             d_hop_min = min(hops) if hops else 0.0
             sub_prio = (pn_w.dist + d_hop_min, 0.0, 1.0)
-            traverser_pack = (sub_prio, w, pn_w_id, [left, right], [wl, wr], 0)
+            funnel_state = (sub_prio, w, pn_w_id, [left, right], [wl, wr], 0)
             sub_advancer = self._advance_portal(
                 self.adv_counter,
                 (left, right),
-                traverser_pack,
+                funnel_state,
                 bitarray(len(triangles)),
                 side_init,
             )
@@ -702,7 +714,7 @@ class PathFinder:
 
     def _traverse_channel(
         self,
-        trav_id,
+        adv_id,
         prio: tuple,
         _apex: int,
         apex: int,
@@ -713,8 +725,8 @@ class PathFinder:
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
         #     - _node: the index it contains maps to a coordinate in VertexC
-        #     - node: contains a pseudonode index (i.e. an index in self.paths)
-        #             translation: _node = paths.prime_from_id[node]
+        #     - pn_id: pseudonode index in self.paths
+        #             translation: _node = paths.prime_from_pn[pn_id]
         cw, ccw, cross = rotation_checkers_factory(self.VertexC)
         # Tolerance for treating a numerically-zero cross product as collinear:
         # apex/wall/_new line-of-sight should not flip funnel branches due to
@@ -722,7 +734,7 @@ class PathFinder:
         EPS_COLLINEAR = 1e-17
 
         paths = self.paths
-        I_path = self.I_path
+        best_pn_by_prime_sector = self.best_pn_by_prime_sector
         ST = self.ST
         num_traversals = self.num_traversals
         bad_streak_limit = self.bad_streak_limit
@@ -730,10 +742,10 @@ class PathFinder:
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         while True:
-            #  trace('<%d> traverser before first yield', trav_id)
-            adv_msg = yield
-            if adv_msg is None:
-                #  trace('<%d> new traverser sent for evaluation', trav_id)
+            #  trace('<%d> traverser before first yield', adv_id)
+            portal_step = yield
+            if portal_step is None:
+                #  trace('<%d> new traverser sent for evaluation', adv_id)
                 yield (
                     prio,
                     _apex,
@@ -744,8 +756,8 @@ class PathFinder:
                 )
                 continue
             else:
-                portal, side = adv_msg
-            #  trace('<%d> got (portal, side)', trav_id)
+                portal, side = portal_step
+            #  trace('<%d> got (portal, side)', adv_id)
 
             _new = portal[side]
             sector_new = self._get_sector(_new, portal)
@@ -763,14 +775,14 @@ class PathFinder:
             #            f'nearside({_nearside}) == apex({_apex})')
             debug(
                 '<%d> %s _new(%d) _nearside(%d) _farside(%d) _apex(%d), _wedge_end: %d %d, _funnel: %s',
-                trav_id,
+                adv_id,
                 'RIGHT' if side else 'LEFT ',
                 _new,
                 _nearside,
                 _farside,
                 _apex,
-                paths.prime_from_id[wedge_end[0]],
-                paths.prime_from_id[wedge_end[1]],
+                paths.prime_from_pn[wedge_end[0]],
+                paths.prime_from_pn[wedge_end[1]],
                 _funnel,
             )
 
@@ -786,12 +798,12 @@ class PathFinder:
                 if orient_far < -EPS_COLLINEAR:
                     # ultrafar (⟨new, apex⟩ strictly cuts farside; collinear
                     # with apex→farside is line-of-sight, apex stays put)
-                    debug('<%d> ultrafar', trav_id)
+                    debug('<%d> ultrafar', adv_id)
                     current_wapex = wedge_end[not side]
-                    _current_wapex = paths.prime_from_id[current_wapex]
+                    _current_wapex = paths.prime_from_pn[current_wapex]
                     _funnel[not side] = _current_wapex
                     contender_wapex = paths[current_wapex].parent
-                    _contender_wapex = paths.prime_from_id[contender_wapex]
+                    _contender_wapex = paths.prime_from_pn[contender_wapex]
                     # Loop continues while the current wapex doesn't yet hit
                     # the farside wall and the test predicate passes. The
                     # `== _new` clause forces one more step whenever the
@@ -811,21 +823,21 @@ class PathFinder:
                         current_wapex = contender_wapex
                         _current_wapex = _contender_wapex
                         contender_wapex = paths[current_wapex].parent
-                        _contender_wapex = paths.prime_from_id[contender_wapex]
+                        _contender_wapex = paths.prime_from_pn[contender_wapex]
                     _apex = _current_wapex
                     apex = current_wapex
                 else:
                     # not ultrafar nor infranear (⟨new, apex⟩ in line-of-sight)
-                    debug('<%d> inside', trav_id)
+                    debug('<%d> inside', adv_id)
                 _apex_eff, apex_eff = _apex, apex
                 _funnel[side] = _new
             else:
                 # infranear (⟨new, apex⟩ cuts nearside)
-                debug('<%d> infranear', trav_id)
+                debug('<%d> infranear', adv_id)
                 current_wapex = wedge_end[side]
-                _current_wapex = paths.prime_from_id[current_wapex]
+                _current_wapex = paths.prime_from_pn[current_wapex]
                 contender_wapex = paths[current_wapex].parent
-                _contender_wapex = paths.prime_from_id[contender_wapex]
+                _contender_wapex = paths.prime_from_pn[contender_wapex]
                 # See ULTRAFAR loop: `== _new` forces one more step past a
                 # chain-anchor degenerate apex.
                 while (
@@ -839,33 +851,33 @@ class PathFinder:
                     current_wapex = contender_wapex
                     _current_wapex = _contender_wapex
                     contender_wapex = paths[current_wapex].parent
-                    _contender_wapex = paths.prime_from_id[contender_wapex]
+                    _contender_wapex = paths.prime_from_pn[contender_wapex]
                 _apex_eff, apex_eff = _current_wapex, current_wapex
 
             # rate, wait, add
             d_hop = np.hypot(*(self.VertexC[_apex_eff] - self.VertexC[_new]).T).item()
-            pseudoapex = paths[apex_eff]
-            d_new = pseudoapex.dist + d_hop
-            keeper = I_path[_new].get(sector_new)
-            unseen = keeper is None
+            apex_pn = paths[apex_eff]
+            d_new = apex_pn.dist + d_hop
+            best_pn_id = best_pn_by_prime_sector[_new].get(sector_new)
+            unseen = best_pn_id is None
             # signed turn at apex_eff: angle from (grandparent -> apex_eff)
             # segment to (apex_eff -> _new) segment.
-            gp_id = pseudoapex.parent
-            if gp_id is None:
+            gp_pn_id = apex_pn.parent
+            if gp_pn_id is None:
                 step_turn = 0.0
             else:
-                _gp = paths.prime_from_id[gp_id]
+                _gp = paths.prime_from_pn[gp_pn_id]
                 ax = self.VertexC[_apex_eff]
                 gp = self.VertexC[_gp]
                 nv = self.VertexC[_new]
                 v1x, v1y = ax[0] - gp[0], ax[1] - gp[1]
                 v2x, v2y = nv[0] - ax[0], nv[1] - ax[1]
                 step_turn = math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y)
-            cum_turn = pseudoapex.cum_turn + step_turn
+            cum_turn = apex_pn.cum_turn + step_turn
             d_prio = d_new if _new < ST else prio[0]
             score_0 = d_prio
             score_1 = bad_streak + 0.5 if unseen else bad_streak
-            score_2 = 1.0 if unseen else (d_new / paths[keeper].dist)
+            score_2 = 1.0 if unseen else (d_new / paths[best_pn_id].dist)
             # Path-cumulative turn cap: total winding from path root to the
             # candidate pseudonode beyond the threshold marks the advancer
             # as unpromising. bad_streak <= 1 waives the drop — a recently-
@@ -875,29 +887,31 @@ class PathFinder:
             )
             prio = (score_0, score_1, score_2)
             yield prio, is_promising
-            #  trace('<%d> traverser after second yield', trav_id)
+            #  trace('<%d> traverser after second yield', adv_id)
             _count_before = self.paths.count
-            new = self.paths.add(_new, sector_new, apex_eff, d_new, d_hop, cum_turn)
+            new_pn_id = self.paths.add(
+                _new, sector_new, apex_eff, d_new, d_hop, cum_turn
+            )
             if self.paths.count > _count_before:
-                self.adv_pnodes.setdefault(trav_id, set()).add(new)
-            wedge_end[side] = new
+                self.adv_pnodes.setdefault(adv_id, set()).add(new_pn_id)
+            wedge_end[side] = new_pn_id
             num_traversals[portal] += 1
-            # get keeper again, as the situation may have changed
-            keeper = I_path[_new].get(sector_new)
-            if keeper is None or d_new < paths[keeper].dist:
-                self.I_path[_new][sector_new] = new
+            # get best_pn_id again, as the situation may have changed
+            best_pn_id = best_pn_by_prime_sector[_new].get(sector_new)
+            if best_pn_id is None or d_new < paths[best_pn_id].dist:
+                self.best_pn_by_prime_sector[_new][sector_new] = new_pn_id
                 debug(
-                    '<%d> new keeper for (%d, %d) via %d: d_path = %.2f',
-                    trav_id,
+                    '<%d> new best pn for (%d, %d) via %d: d_path = %.2f',
+                    adv_id,
                     _new,
                     sector_new,
                     _apex_eff,
                     d_new,
                 )
                 # first arrival at (_new, sector_new) discounts the bad_streak
-                #   but finding a new keeper resets the bad_streak
-                bad_streak = max(0, bad_streak - 1) if keeper is None else 0
-            elif not math.isclose(d_new, paths[keeper].dist):
+                #   but finding a new best_pn_id resets the bad_streak
+                bad_streak = max(0, bad_streak - 1) if best_pn_id is None else 0
+            elif not math.isclose(d_new, paths[best_pn_id].dist):
                 bad_streak += 1
 
     def _find_paths(self):
@@ -913,9 +927,9 @@ class PathFinder:
         paths = self.paths = PathNodes()
         triangles = P.graph['triangles']
         self.bifurcation = None
-        I_path = defaultdict(dict)
-        self.I_path = I_path
-        # advancer (trav_id) -> set of pseudonode ids it was the first to add
+        best_pn_by_prime_sector = defaultdict(dict)
+        self.best_pn_by_prime_sector = best_pn_by_prime_sector
+        # advancer id -> set of pseudonode ids it was the first to add
         self.adv_pnodes: dict = {}
 
         # set of portals (i.e. edges of P that are not used in G)
@@ -934,10 +948,10 @@ class PathFinder:
         portal_set = (edges_P - edges_G_primed) - constraint_edges
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
 
-        # Chain pre-processing: chain-end primes are border-vertex primes touched
-        # by a kind='contour' G-edge AND on the border (constraint edges).
+        # Chain pre-processing: chain-end primes are constraint-wall primes touched
+        # by a kind='contour' G-edge AND on a constraint wall.
         # Walking the chain in prime space uses route_walls together with
-        # border_walls.
+        # constraint_walls.
         T_, B_ = self.T, self.B
         clone_offset = T_ + B_
 
@@ -957,15 +971,15 @@ class PathFinder:
                 continue
             route_walls[pu].add(pv)
             route_walls[pv].add(pu)
-        border_walls: dict[int, set[int]] = defaultdict(set)
+        constraint_walls: dict[int, set[int]] = defaultdict(set)
         for u, v in constraint_edges:
-            border_walls[u].add(v)
-            border_walls[v].add(u)
+            constraint_walls[u].add(v)
+            constraint_walls[v].add(u)
         chain_end_set = {
-            p for p in route_walls if T_ <= p < clone_offset and p in border_walls
+            p for p in route_walls if T_ <= p < clone_offset and p in constraint_walls
         }
         self.route_walls = route_walls
-        self.border_walls = border_walls
+        self.constraint_walls = constraint_walls
 
         # For each prime on a kind='contour' G-edge polyline, determine its
         # terminal-terminal link = the frozenset of terminals at the polyline's
@@ -1003,8 +1017,8 @@ class PathFinder:
         # launch channel traversers around the roots to the prioqueue
         for r in range(-R, 0):
             paths[r] = PseudoNode(r, r, None, 0.0, 0.0, 0.0)
-            paths.prime_from_id[r] = r
-            paths.ids_from_prime_sector[r, r] = [r]
+            paths.prime_from_pn[r] = r
+            paths.pn_ids_from_prime_sector[r, r] = [r]
             for left in P.neighbors(r):
                 right = P[r][left]['cw']
                 portal = (left, right)
@@ -1065,18 +1079,19 @@ class PathFinder:
                 ]
 
                 # shortest paths for roots' P.neighbors is a straight line
-                I_path[left][sec_left], I_path[right][sec_right] = wedge_end
+                best_pn_by_prime_sector[left][sec_left] = wedge_end[0]
+                best_pn_by_prime_sector[right][sec_right] = wedge_end[1]
 
                 # prioritize by distance to the closest node of the portal
                 d_closest = (
                     d_left if d2rootsRank[left, r] <= d2rootsRank[right, r] else d_right
                 )
                 prio = (d_closest, 0.0, 1.0)
-                traverser_pack = (prio, r, r, [left, right], wedge_end, 0)
+                funnel_state = (prio, r, r, [left, right], wedge_end, 0)
                 advancer = self._advance_portal(
                     self.adv_counter,
                     (left, right),
-                    traverser_pack,
+                    funnel_state,
                     bitarray(len(triangles)),
                 )
                 heapq.heappush(prioqueue, (prio, self.adv_counter, advancer))
@@ -1119,8 +1134,8 @@ class PathFinder:
         """
         get_best_path = self.get_best_path
         for n in range(self.T):
-            for id in self.I_path[n].values():
-                if id < 0:
+            for pn_id in self.best_pn_by_prime_sector[n].values():
+                if pn_id < 0:
                     # n is a root's neighbor
                     continue
             path, dists = get_best_path(n)
@@ -1175,7 +1190,8 @@ class PathFinder:
 
         R, T, B, C = self.R, self.T, self.B, self.C
         clone2prime = self.clone2prime.copy()
-        paths, I_path = self.paths, self.I_path
+        paths = self.paths
+        best_pn_by_prime_sector = self.best_pn_by_prime_sector
         clone_idx = T + B + C
         failed_detours = []
 
@@ -1199,16 +1215,16 @@ class PathFinder:
             )
             debug('hook_candidates: %s', hook_candidates)
 
-            path_options = list(
+            detour_candidates = list(
                 chain.from_iterable(
                     (
-                        (paths[id].dist, id, hook, sec)
-                        for sec, id in I_path[hook].items()
+                        (paths[pn_id].dist, pn_id, hook, sec)
+                        for sec, pn_id in best_pn_by_prime_sector[hook].items()
                     )
                     for hook in hook_candidates
                 )
             )
-            if not path_options:
+            if not detour_candidates:
                 error(
                     'subtree of node %d has no non-crossing paths to '
                     'any root: leaving feeder as-is',
@@ -1217,17 +1233,17 @@ class PathFinder:
                 # unable to fix this crossing
                 failed_detours.append((r, n))
                 continue
-            dist, id, hook, sect = min(path_options)
+            dist, pn_id, hook, sect = min(detour_candidates)
             debug('best: hook = %d, sector = %d, dist = %.2f', hook, sect, dist)
 
             path = [hook]
             dists = []
-            pseudonode = paths[id]
-            while id >= 0:
-                dists.append(pseudonode.d_hop)
-                id = pseudonode.parent
-                path.append(paths.prime_from_id[id])
-                pseudonode = paths[id]
+            pn = paths[pn_id]
+            while pn_id >= 0:
+                dists.append(pn.d_hop)
+                pn_id = pn.parent
+                path.append(paths.prime_from_pn[pn_id])
+                pn = paths[pn_id]
             if not math.isclose(sum(dists), dist):
                 error(
                     'distance sum (%.1f) != best distance (%.1f), hook = %d, path: %s',
