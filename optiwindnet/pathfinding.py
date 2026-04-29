@@ -473,9 +473,7 @@ class PathFinder:
                 # chain entry (an additional send would produce a same-prime
                 # self-link).
                 num_traversals[(y, y)] += 1
-                self._walk_chain(
-                    y, x, self.paths.last_added, is_triangle_seen.copy()
-                )
+                self._walk_chain(y, x, self.paths.last_added, is_triangle_seen.copy())
 
     def _walk_chain(
         self,
@@ -502,8 +500,12 @@ class PathFinder:
             d_hop = float(np.hypot(*(VertexC[cur] - VertexC[c_next])))
             pn_parent = paths[parent_pn]
             parent_pn = paths.add(
-                c_next, sector, parent_pn,
-                pn_parent.dist + d_hop, d_hop, pn_parent.cum_turn,
+                c_next,
+                sector,
+                parent_pn,
+                pn_parent.dist + d_hop,
+                d_hop,
+                pn_parent.cum_turn,
             )
             prev, cur = cur, c_next
 
@@ -572,10 +574,11 @@ class PathFinder:
                 else:
                     entry_cones[v] = frozenset({cone_of_idx[i]})
 
-            same_link_neighbors = {
-                v for v, ec in entry_cones.items()
-                if ec.issubset(same_link_cones)
-            } if same_link_cones else set()
+            same_link_neighbors = (
+                {v for v, ec in entry_cones.items() if ec.issubset(same_link_cones)}
+                if same_link_cones
+                else set()
+            )
 
             # Forward walk from c through the chain, precomputing each step's
             # sector. Stops when forward fences disagree or branch.
@@ -652,8 +655,11 @@ class PathFinder:
             sub_prio = (pn_w.dist + d_hop_min, 0.0, 1.0)
             traverser_pack = (sub_prio, w, pn_w_id, [left, right], [wl, wr], 0)
             sub_advancer = self._advance_portal(
-                self.adv_counter, (left, right), traverser_pack,
-                bitarray(len(triangles)), side_init,
+                self.adv_counter,
+                (left, right),
+                traverser_pack,
+                bitarray(len(triangles)),
+                side_init,
             )
             heapq.heappush(prioqueue, (sub_prio, self.adv_counter, sub_advancer))
             self.adv_counter += 1
@@ -987,6 +993,27 @@ class PathFinder:
                 right = P[r][left]['cw']
                 portal = (left, right)
                 portal_sorted = (right, left) if right < left else portal
+
+                # Chain-ends adjacent to root in the fan are stepped over by
+                # the regular init advancer (Trigger A/B fires on the far
+                # vertex `n`, never on `left`/`right`), so engage the chain
+                # directly here. A chain entrance from root is a single
+                # straight hop — one distance, and sector = NULL (chain-ends
+                # are border vertices, for which `_get_sector` always returns
+                # NULL, so this matches the entry pn that Triggers A/B
+                # produce via funnel narrowing and lets `paths.add` dedupe
+                # against them). Done BEFORE the portal-validity `continue`
+                # because a chain-end may be boxed in by fences (no valid
+                # fan portal touches it), which would otherwise leave it
+                # unengaged. Each chain-end neighbor of `r` becomes `left`
+                # exactly once over the fan iteration, so checking `left`
+                # alone covers every chain-end in the fan.
+                if left in self.chain_end_set:
+                    d_c = d2roots[left, r].item()
+                    pn_c = paths.add(left, NULL, r, d_c, d_c)
+                    num_traversals[(left, left)] = traversals_limit
+                    self._walk_chain(left, r, pn_c, bitarray(len(triangles)))
+
                 if right not in P[r] or portal_sorted not in portal_set:
                     # (left, right, root) not a triangle
                     # or (left, right) is not a portal
