@@ -382,6 +382,11 @@ class PathFinder:
         sector. The sector identifies from which side of a non-traversable wall
         the path reaches `prime`.
         """
+        opposite = portal[0] if prime == portal[1] else portal[1]
+        return self._get_sector_from_opposite(prime, opposite)
+
+    def _scan_sector_from_opposite(self, prime: int, opposite: int) -> int:
+        """Uncached sector scan for one `(prime, opposite)` pair."""
         T = self.T
         G = self.G
         P = self.P
@@ -390,18 +395,99 @@ class PathFinder:
             # `prime` is on a border/obstacle wall or is a supertriangle vertex,
             # hence it is only reachable from one side -> arbitrary sector id
             return NULL
-        opposite = portal[0] if prime == portal[1] else portal[1]
-        if opposite in G._adj[prime]:
+        if opposite in G._adj.get(prime, {}):
             # special case: visiting a DEAD-END
             return opposite
+        prime_adj = G._adj.get(prime, {})
         nbr = P[prime][opposite]['ccw']
         for _ in range(len(P._adj[prime])):
-            if nbr < T and nbr in G[prime]:
+            if nbr < T and nbr in prime_adj:
                 if nbr >= 0 or (nbr, prime) not in tentative:
                     return nbr
             nbr = P[prime][nbr]['ccw']
         # could not find a non-tentative G edge around prime
         return NULL
+
+    def _get_sector_from_opposite(self, prime: int, opposite: int) -> int:
+        """Return the cached sector for reaching `prime` from `opposite`."""
+        if prime >= self.T:
+            return NULL
+        try:
+            return self.sector_by_prime_opposite[prime][opposite]
+        except AttributeError:
+            return self._scan_sector_from_opposite(prime, opposite)
+        except KeyError:
+            return self._scan_sector_from_opposite(prime, opposite)
+
+    def _ensure_pair_id(self, prime: int, sector: int) -> int:
+        """Return a dense id for a `(prime, sector)` best-path bucket."""
+        pair = (prime, sector)
+        pair_id = self.pair_id_by_prime_sector.get(pair)
+        if pair_id is None:
+            pair_id = len(self.prime_sector_by_pair_id)
+            self.pair_id_by_prime_sector[pair] = pair_id
+            self.prime_sector_by_pair_id.append(pair)
+            self.best_pn_by_pair_id.append(None)
+        return pair_id
+
+    def _precompute_sector_lookup(self) -> None:
+        """Precompute sector and dense `(prime, sector)` ids for pathfinding."""
+        P = self.P
+        T = self.T
+        G = self.G
+        tentative = self.tentative
+
+        sector_by_prime_opposite: dict[int, dict[int, int]] = {}
+        pair_id_by_prime_sector: dict[tuple[int, int], int] = {}
+        prime_sector_by_pair_id: list[tuple[int, int]] = []
+
+        def add_pair(prime: int, sector: int) -> None:
+            pair = (prime, sector)
+            if pair not in pair_id_by_prime_sector:
+                pair_id_by_prime_sector[pair] = len(prime_sector_by_pair_id)
+                prime_sector_by_pair_id.append(pair)
+
+        for prime in P:
+            if prime < 0:
+                add_pair(prime, prime)
+            elif prime >= T:
+                add_pair(prime, NULL)
+
+        for prime in range(T):
+            if prime not in P:
+                add_pair(prime, NULL)
+                continue
+            cw_nbrs = list(P.neighbors_cw_order(prime))
+            valid_sector = {
+                nbr
+                for nbr in cw_nbrs
+                if (
+                    nbr < T
+                    and nbr in G._adj.get(prime, {})
+                    and (nbr >= 0 or (nbr, prime) not in tentative)
+                )
+            }
+            by_opposite: dict[int, int] = {}
+            for opposite in cw_nbrs:
+                if opposite in G._adj.get(prime, {}):
+                    sector = opposite
+                else:
+                    nbr = P[prime][opposite]['ccw']
+                    for _ in range(len(cw_nbrs)):
+                        if nbr in valid_sector:
+                            sector = nbr
+                            break
+                        nbr = P[prime][nbr]['ccw']
+                    else:
+                        sector = NULL
+                by_opposite[opposite] = sector
+                add_pair(prime, sector)
+            add_pair(prime, NULL)
+            sector_by_prime_opposite[prime] = by_opposite
+
+        self.sector_by_prime_opposite = sector_by_prime_opposite
+        self.pair_id_by_prime_sector = pair_id_by_prime_sector
+        self.prime_sector_by_pair_id = prime_sector_by_pair_id
 
     def _advance_portal(
         self,
@@ -680,6 +766,9 @@ class PathFinder:
         portal_set = self.portal_set
         VertexC = self.VertexC
         best_pn_by_prime_sector = self.best_pn_by_prime_sector
+        best_pn_by_pair_id = self.best_pn_by_pair_id
+        pair_id_by_prime_sector = self.pair_id_by_prime_sector
+        ensure_pair_id = self._ensure_pair_id
         pn_w = paths[pn_w_id]
         cum_turn_w = pn_w.cum_turn
 
@@ -689,10 +778,14 @@ class PathFinder:
                 return pn_w_id, 0.0
             d_hop = _node_dist(VertexC, w, v)
             d_total = pn_w.dist + d_hop
-            sec_v = self._get_sector(v, (v, w)) if v >= 0 else NULL
+            sec_v = self._get_sector_from_opposite(v, w) if v >= 0 else NULL
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
-            best_pn_id = best_pn_by_prime_sector[v].get(sec_v)
+            pair_id = pair_id_by_prime_sector.get((v, sec_v))
+            if pair_id is None:
+                pair_id = ensure_pair_id(v, sec_v)
+            best_pn_id = best_pn_by_pair_id[pair_id]
             if best_pn_id is None or d_total < paths[best_pn_id].dist:
+                best_pn_by_pair_id[pair_id] = pn_v
                 best_pn_by_prime_sector[v][sec_v] = pn_v
             return pn_v, d_hop
 
@@ -754,7 +847,13 @@ class PathFinder:
 
         paths = self.paths
         best_pn_by_prime_sector = self.best_pn_by_prime_sector
+        best_pn_by_pair_id = self.best_pn_by_pair_id
+        pair_id_by_prime_sector = self.pair_id_by_prime_sector
+        sector_by_prime_opposite = self.sector_by_prime_opposite
+        ensure_pair_id = self._ensure_pair_id
+        scan_sector = self._scan_sector_from_opposite
         ST = self.ST
+        T = self.T
         num_traversals = self.num_traversals
         bad_streak_limit = self.bad_streak_limit
         turn_limit = self.turn_limit
@@ -779,7 +878,17 @@ class PathFinder:
             #  trace('<%d> got (portal, side)', adv_id)
 
             _new = portal[side]
-            sector_new = self._get_sector(_new, portal)
+            if 0 <= _new < T:
+                opposite = portal[1 - side]
+                try:
+                    sector_new = sector_by_prime_opposite[_new][opposite]
+                except KeyError:
+                    sector_new = scan_sector(_new, opposite)
+            else:
+                sector_new = NULL
+            pair_id = pair_id_by_prime_sector.get((_new, sector_new))
+            if pair_id is None:
+                pair_id = ensure_pair_id(_new, sector_new)
             _nearside = _funnel[side]
             _farside = _funnel[not side]
             test = ccw if side else cw
@@ -877,7 +986,7 @@ class PathFinder:
             d_hop = _node_dist(self.VertexC, _apex_eff, _new)
             apex_pn = paths[apex_eff]
             d_new = apex_pn.dist + d_hop
-            best_pn_id = best_pn_by_prime_sector[_new].get(sector_new)
+            best_pn_id = best_pn_by_pair_id[pair_id]
             unseen = best_pn_id is None
             # signed turn at apex_eff: angle from (grandparent -> apex_eff)
             # segment to (apex_eff -> _new) segment.
@@ -913,9 +1022,10 @@ class PathFinder:
             wedge_end[side] = new_pn_id
             num_traversals[portal] += 1
             # get best_pn_id again, as the situation may have changed
-            best_pn_id = best_pn_by_prime_sector[_new].get(sector_new)
+            best_pn_id = best_pn_by_pair_id[pair_id]
             if best_pn_id is None or d_new < paths[best_pn_id].dist:
-                self.best_pn_by_prime_sector[_new][sector_new] = new_pn_id
+                best_pn_by_pair_id[pair_id] = new_pn_id
+                best_pn_by_prime_sector[_new][sector_new] = new_pn_id
                 debug(
                     '<%d> new best pn for (%d, %d) via %d: d_path = %.2f',
                     adv_id,
@@ -960,6 +1070,8 @@ class PathFinder:
         constraint_edges = P.graph['constraint_edges']
         portal_set = (edges_P - edges_G_primed) - constraint_edges
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
+        self._precompute_sector_lookup()
+        self.best_pn_by_pair_id = [None] * len(self.prime_sector_by_pair_id)
 
         # Chain pre-processing: chain-end primes are constraint-wall primes touched
         # by a kind='contour' G-edge AND on a constraint wall.
@@ -1028,6 +1140,8 @@ class PathFinder:
         self.chain_end_set = set(self.chain_topo)
 
         # launch channel traversers around the roots to the prioqueue
+        best_pn_by_pair_id = self.best_pn_by_pair_id
+        ensure_pair_id = self._ensure_pair_id
         for r in range(-R, 0):
             paths[r] = PseudoNode(r, r, None, 0.0, 0.0, 0.0)
             paths.prime_from_pn[r] = r
@@ -1095,6 +1209,8 @@ class PathFinder:
                 ]
 
                 # shortest paths for roots' P.neighbors is a straight line
+                best_pn_by_pair_id[ensure_pair_id(left, sec_left)] = wedge_end[0]
+                best_pn_by_pair_id[ensure_pair_id(right, sec_right)] = wedge_end[1]
                 best_pn_by_prime_sector[left][sec_left] = wedge_end[0]
                 best_pn_by_prime_sector[right][sec_right] = wedge_end[1]
 
