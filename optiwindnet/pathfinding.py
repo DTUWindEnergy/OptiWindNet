@@ -25,6 +25,16 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
 PseudoNode = namedtuple('PseudoNode', 'node sector parent dist d_hop cum_turn'.split())
+# Static per-chain-end topology; built once and looked up during exploration.
+#   walk: list of (vertex, sector) — forward chain steps; last is the sister end.
+#   cones: list of (f_a, f_b, cw_spokes) — cyclic in cw order.
+#   always_skip: cone indices to never spawn into (outside or same-link).
+#   entry_cones: dict v → frozenset of cone indices to skip given entry through v.
+#   same_link_neighbors: cw-neighbors v whose entry cones are all on the chain's
+#     own terminal-terminal link (path doesn't need to detour through this end).
+ChainTopo = namedtuple(
+    'ChainTopo', 'walk cones always_skip entry_cones same_link_neighbors'.split()
+)
 
 
 class PathNodes(dict):
@@ -452,10 +462,12 @@ class PathFinder:
             # doesn't need to detour through the chain).
             y = portal[side]
             x = portal[1 - side]
+            chain_topo = self.chain_topo
             if (
                 y in chain_end_set
                 and num_traversals[(y, y)] < traversals_limit
-                and not self._cone_inside_chain_link(x, y)
+                and y in chain_topo
+                and x not in chain_topo[y].same_link_neighbors
             ):
                 # Reuse the parent's just-narrowed pseudonode for y as the
                 # chain entry (an additional send would produce a same-prime
@@ -465,32 +477,6 @@ class PathFinder:
                     y, x, self.paths.last_added, is_triangle_seen.copy()
                 )
 
-    def _cone_inside_chain_link(self, x: int, y: int) -> bool:
-        """True iff at chain-end y, both fences flanking x in cw order belong
-        to y's own contour terminal-terminal link.
-        """
-        chain_link = self.link_of_prime.get(y)
-        if not chain_link:
-            return False
-        cw_nbrs = list(self.P.neighbors_cw_order(y))
-        if x not in cw_nbrs:
-            return False
-        fence_set = self.g_fence.get(y, set()) | self.border_fence.get(y, set())
-        n = len(cw_nbrs)
-        i = cw_nbrs.index(x)
-        f_cw = next(
-            (cw_nbrs[(i + k) % n] for k in range(1, n) if cw_nbrs[(i + k) % n] in fence_set),
-            None,
-        )
-        f_ccw = next(
-            (cw_nbrs[(i - k) % n] for k in range(1, n) if cw_nbrs[(i - k) % n] in fence_set),
-            None,
-        )
-        if f_cw is None or f_ccw is None:
-            return False
-        link = self.link_of_prime.get
-        return link(f_cw) == chain_link and link(f_ccw) == chain_link
-
     def _walk_chain(
         self,
         y_entry: int,
@@ -498,103 +484,129 @@ class PathFinder:
         entry_pn: int,
         is_triangle_seen: bitarray,
     ) -> None:
-        """Walk the chain forward from `y_entry`, registering a pseudonode
-        at each visited chain vertex (parented by the previous one). At the
-        exit chain-end, enumerate all cones and spawn an advancer into each
-        non-entry, non-outside, non-same-link cone.
+        """Walk the chain forward from `y_entry` along the precomputed sequence,
+        registering a pseudonode at each visited chain vertex (parented by the
+        previous one). At the exit chain-end, spawn an advancer into each
+        cone that is neither entry-side, outside, nor on the chain's own link.
 
         `entry_pn` is the pseudonode for `y_entry` (created by the caller's
         funnel narrowing). `x_entry` is the path's entry-side neighbor at
-        `y_entry`, used to identify the entry cone in the length-1 case.
+        `y_entry`, used as the entry vertex in the zero-walk case.
         """
-        P = self.P
         paths = self.paths
-        g_fence = self.g_fence
-        border_fence = self.border_fence
-        link_of_prime = self.link_of_prime
         VertexC = self.VertexC
 
-        # ── walk forward through the chain ────────────────────────────────
+        prev, cur = x_entry, y_entry
         parent_pn = entry_pn
-        c, c_prev = y_entry, None
-        visited = {y_entry}
-        while True:
-            forward = (
-                g_fence.get(c, set()) & border_fence.get(c, set())
-            ) - {c_prev}
-            if len(forward) != 1:
-                break
-            c_next = next(iter(forward))
-            if c_next in visited:
-                break
-            visited.add(c_next)
-            d_hop = float(np.hypot(*(VertexC[c] - VertexC[c_next])))
+        for c_next, sector in self.chain_topo[y_entry].walk:
+            d_hop = float(np.hypot(*(VertexC[cur] - VertexC[c_next])))
             pn_parent = paths[parent_pn]
-            cand_fwd = (g_fence.get(c_next, set()) | border_fence.get(c_next, set())) - {c}
-            sector = min(cand_fwd | {c})
             parent_pn = paths.add(
                 c_next, sector, parent_pn,
                 pn_parent.dist + d_hop, d_hop, pn_parent.cum_turn,
             )
-            c_prev, c = c, c_next
+            prev, cur = cur, c_next
 
-        # ── enumerate cones at the exit chain-end `c` ─────────────────────
-        cw_nbrs = list(P.neighbors_cw_order(c))
-        n_nbrs = len(cw_nbrs)
-        fence_set = g_fence.get(c, set()) | border_fence.get(c, set())
-        fence_positions = [i for i, v in enumerate(cw_nbrs) if v in fence_set]
-        if len(fence_positions) < 2:
-            debug('chain: fewer than 2 fences at %d', c)
+        topo = self.chain_topo.get(cur)
+        if topo is None:
+            debug('chain: exit %d has no usable cone topology', cur)
             return
-        n_cones = len(fence_positions)
-        chain_link = link_of_prime.get(c, frozenset())
+        skip = topo.always_skip | topo.entry_cones.get(prev, frozenset())
+        for k, (f_a, f_b, cw_spokes) in enumerate(topo.cones):
+            if k in skip:
+                continue
+            self._spawn_exit_cone(cur, f_a, f_b, cw_spokes, parent_pn, is_triangle_seen)
 
-        # Entry vertex is c_prev for multi-step chains (a fence at c) or
-        # x_entry for length-1 chains (typically not a fence). Either way,
-        # find which cone(s) it occupies.
-        entry_vertex = c_prev if c_prev is not None else x_entry
-        if entry_vertex not in cw_nbrs:
-            debug('chain: entry vertex %d not in cw_nbrs of %d', entry_vertex, c)
-            return
-        idx_e = cw_nbrs.index(entry_vertex)
-        if idx_e in fence_positions:
-            # Entry vertex IS a fence: both cw and ccw cones are entry-side.
-            k_at = fence_positions.index(idx_e)
-            entry_cones = {k_at, (k_at - 1) % n_cones}
-        else:
-            entry_cones = set()
+    def _precompute_chain_topology(
+        self, chain_end_set: set[int]
+    ) -> dict[int, ChainTopo]:
+        """Build the static cone-and-walk registry for every chain-end with
+        at least two fences. Skipped chain-ends (degenerate) are absent from
+        the result and won't trigger chain engagement.
+        """
+        P = self.P
+        g_fence = self.g_fence
+        border_fence = self.border_fence
+        link_of_prime = self.link_of_prime
+        topo: dict[int, ChainTopo] = {}
+
+        for c in chain_end_set:
+            cw_nbrs = list(P.neighbors_cw_order(c))
+            n = len(cw_nbrs)
+            fence_set = g_fence.get(c, set()) | border_fence.get(c, set())
+            fence_positions = [i for i, v in enumerate(cw_nbrs) if v in fence_set]
+            if len(fence_positions) < 2:
+                continue
+            n_cones = len(fence_positions)
+            chain_link = link_of_prime.get(c, frozenset())
+
+            cones: list[tuple[int, int, list[int]]] = []
+            always_skip: set[int] = set()
+            same_link_cones: set[int] = set()
+            cone_of_idx: dict[int, int] = {}  # cw-index → cone idx (interior only)
             for k, fp in enumerate(fence_positions):
                 next_fp = fence_positions[(k + 1) % n_cones]
-                cur = (fp + 1) % n_nbrs
+                cw_spokes: list[int] = []
+                cur = (fp + 1) % n
                 while cur != next_fp:
-                    if cur == idx_e:
-                        entry_cones = {k}
-                        break
-                    cur = (cur + 1) % n_nbrs
-                if entry_cones:
-                    break
+                    v = cw_nbrs[cur]
+                    cone_of_idx[cur] = k
+                    if v not in fence_set and v >= 0:
+                        cw_spokes.append(v)
+                    cur = (cur + 1) % n
+                f_a, f_b = cw_nbrs[fp], cw_nbrs[next_fp]
+                cones.append((f_a, f_b, cw_spokes))
+                link_a = link_of_prime.get(f_a, frozenset())
+                link_b = link_of_prime.get(f_b, frozenset())
+                if not link_a and not link_b:
+                    always_skip.add(k)
+                if link_a == chain_link and link_b == chain_link:
+                    always_skip.add(k)
+                    same_link_cones.add(k)
 
-        for k, fp in enumerate(fence_positions):
-            if k in entry_cones:
-                continue
-            next_fp = fence_positions[(k + 1) % n_cones]
-            f_a, f_b = cw_nbrs[fp], cw_nbrs[next_fp]
-            link_a = link_of_prime.get(f_a, frozenset())
-            link_b = link_of_prime.get(f_b, frozenset())
-            # Skip outside cones (neither fence is on any contour link) and
-            # same-link cones (both fences on the chain's own link).
-            if not link_a and not link_b:
-                continue
-            if link_a == chain_link and link_b == chain_link:
-                continue
-            cw_spokes = []
-            cur = (fp + 1) % n_nbrs
-            while cur != next_fp:
-                v = cw_nbrs[cur]
-                if v not in fence_set and v >= 0:
-                    cw_spokes.append(v)
-                cur = (cur + 1) % n_nbrs
-            self._spawn_exit_cone(c, f_a, f_b, cw_spokes, parent_pn, is_triangle_seen)
+            entry_cones: dict[int, frozenset[int]] = {}
+            for i, v in enumerate(cw_nbrs):
+                if v in fence_set:
+                    k_at = fence_positions.index(i)
+                    entry_cones[v] = frozenset({k_at, (k_at - 1) % n_cones})
+                else:
+                    entry_cones[v] = frozenset({cone_of_idx[i]})
+
+            same_link_neighbors = {
+                v for v, ec in entry_cones.items()
+                if ec.issubset(same_link_cones)
+            } if same_link_cones else set()
+
+            # Forward walk from c through the chain, precomputing each step's
+            # sector. Stops when forward fences disagree or branch.
+            walk: list[tuple[int, int]] = []
+            c_prev, c_cur = None, c
+            visited = {c}
+            while True:
+                forward = (
+                    g_fence.get(c_cur, set()) & border_fence.get(c_cur, set())
+                ) - {c_prev}
+                if len(forward) != 1:
+                    break
+                c_next = next(iter(forward))
+                if c_next in visited:
+                    break
+                visited.add(c_next)
+                cand_fwd = (
+                    g_fence.get(c_next, set()) | border_fence.get(c_next, set())
+                ) - {c_cur}
+                sector = min(cand_fwd | {c_cur})
+                walk.append((c_next, sector))
+                c_prev, c_cur = c_cur, c_next
+
+            topo[c] = ChainTopo(
+                walk=walk,
+                cones=cones,
+                always_skip=frozenset(always_skip),
+                entry_cones=entry_cones,
+                same_link_neighbors=same_link_neighbors,
+            )
+        return topo
 
     def _spawn_exit_cone(
         self,
@@ -932,16 +944,12 @@ class PathFinder:
         }
         self.g_fence = g_fence
         self.border_fence = border_fence
-        self.chain_end_set = chain_end_set
 
-        # For each prime that's on a kind='contour' G-edge polyline (a chain-
-        # end OR a terminal endpoint of the chain), determine its "link" =
-        # the frozenset of terminal endpoints of that contour helper. Trigger
-        # B fires only when the entry cone is NOT in the same terminal-
-        # terminal link as the chain-end y.
+        # For each prime on a kind='contour' G-edge polyline, determine its
+        # terminal-terminal link = the frozenset of terminals at the polyline's
+        # endpoints. Used by chain-engagement gating (Trigger B) and exit-cone
+        # spawnability classification.
         link_of_prime: dict[int, frozenset] = {}
-        # Connected-components walk on g_fence (which is the kind='contour'
-        # G-edge graph in prime space).
         seen: set[int] = set()
         for start in g_fence:
             if start in seen:
@@ -953,14 +961,22 @@ class PathFinder:
                 if u in comp:
                     continue
                 comp.add(u)
-                for v in g_fence[u]:
-                    if v not in comp:
-                        stack.append(v)
+                stack.extend(v for v in g_fence[u] if v not in comp)
             terminals = frozenset(p for p in comp if 0 <= p < T_)
             for p in comp:
                 link_of_prime[p] = terminals
             seen.update(comp)
         self.link_of_prime = link_of_prime
+
+        # Per-chain-end static topology: cone partition, entry-cone lookup,
+        # forward chain-walk sequence. Built once, queried by Triggers A/B
+        # and `_walk_chain` instead of recomputing degree-bounded scans on
+        # every chain engagement.
+        self.chain_topo: dict[int, ChainTopo] = self._precompute_chain_topology(
+            chain_end_set
+        )
+        # Set of chain-ends with usable topology (used as Trigger gate).
+        self.chain_end_set = set(self.chain_topo)
 
         # launch channel traversers around the roots to the prioqueue
         for r in range(-R, 0):
