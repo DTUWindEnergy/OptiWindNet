@@ -189,10 +189,6 @@ class PathFinder:
         assert not G.graph.get('D'), 'Gʹ has already has detours.'
         self.ST = T + B
 
-        # Block for facilitating the printing of debug messages.
-        allnodes = np.arange(T + R + B + 3)
-        allnodes[-R:] = range(-R, 0)
-
         debug(
             '>PathFinder: "%s" (T = %d)',
             G.graph.get('name') or G.graph.get('handle') or 'unnamed',
@@ -203,20 +199,25 @@ class PathFinder:
         tentative = G.graph.get('tentative')
         if tentative is None:
             tentative = []
-            hooks2check = []
+            hooks_by_root = []
             for r in range(-R, 0):
                 feeders = set(
                     n for n in G.neighbors(r) if G[r][n].get('kind') == 'tentative'
                 )
                 tentative.extend((r, n) for n in feeders)
-                hooks2check.append(feeders)
+                hooks_by_root.append(
+                    np.fromiter(feeders, count=len(feeders), dtype=int)
+                )
         else:
-            hooks2check = [set() for _ in range(R)]
+            hooks_by_root = [set() for _ in range(R)]
             for r, n in tentative:
-                hooks2check[r].add(n)
-        hooks_ = [np.fromiter(h2c, count=len(h2c), dtype=int) for h2c in hooks2check]
+                hooks_by_root[r].add(n)
+            hooks_by_root = [
+                np.fromiter(hooks, count=len(hooks), dtype=int)
+                for hooks in hooks_by_root
+            ]
 
-        Xings = [feeder for _, feeder in gateXing_iter(G, hooks=hooks_)]
+        Xings = [feeder for _, feeder in gateXing_iter(G, hooks=hooks_by_root)]
         # Add also feeders whose straight line crosses constraint geometry.
         Xings.extend(
             (r, n)
@@ -336,7 +337,6 @@ class PathFinder:
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.stunts_primes = A.graph.get('stunts_primes')
-        self.hooks2check = hooks2check
         self.adv_counter = 0
         self._find_paths()
 
@@ -413,9 +413,8 @@ class PathFinder:
         pair = (prime, sector)
         pair_id = self.pair_id_by_prime_sector.get(pair)
         if pair_id is None:
-            pair_id = len(self.prime_sector_by_pair_id)
+            pair_id = len(self.best_pn_by_pair_id)
             self.pair_id_by_prime_sector[pair] = pair_id
-            self.prime_sector_by_pair_id.append(pair)
             self.pair_ids_by_prime[prime].append(pair_id)
             self.best_pn_by_pair_id.append(None)
         return pair_id
@@ -429,15 +428,13 @@ class PathFinder:
 
         sector_by_prime_opposite: dict[int, dict[int, int]] = {}
         pair_id_by_prime_sector: dict[tuple[int, int], int] = {}
-        prime_sector_by_pair_id: list[tuple[int, int]] = []
         pair_ids_by_prime: defaultdict[int, list[int]] = defaultdict(list)
 
         def add_pair(prime: int, sector: int) -> None:
             pair = (prime, sector)
             if pair not in pair_id_by_prime_sector:
-                pair_id = len(prime_sector_by_pair_id)
+                pair_id = len(pair_id_by_prime_sector)
                 pair_id_by_prime_sector[pair] = pair_id
-                prime_sector_by_pair_id.append(pair)
                 pair_ids_by_prime[prime].append(pair_id)
 
         for prime in P:
@@ -480,7 +477,6 @@ class PathFinder:
 
         self.sector_by_prime_opposite = sector_by_prime_opposite
         self.pair_id_by_prime_sector = pair_id_by_prime_sector
-        self.prime_sector_by_pair_id = prime_sector_by_pair_id
         self.pair_ids_by_prime = pair_ids_by_prime
 
     def _advance_portal(
@@ -1059,7 +1055,7 @@ class PathFinder:
         portal_set = (edges_P - edges_G_primed) - constraint_edges
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
         self._precompute_sector_lookup()
-        self.best_pn_by_pair_id = [None] * len(self.prime_sector_by_pair_id)
+        self.best_pn_by_pair_id = [None] * len(self.pair_id_by_prime_sector)
 
         # Chain pre-processing: chain-end primes are constraint-wall primes touched
         # by a kind='contour' G-edge AND on a constraint wall.
@@ -1307,7 +1303,6 @@ class PathFinder:
         paths = self.paths
         best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_ids_by_prime = self.pair_ids_by_prime
-        prime_sector_by_pair_id = self.prime_sector_by_pair_id
         clone_idx = T + B + C
         failed_detours = []
 
@@ -1332,8 +1327,8 @@ class PathFinder:
             debug('hook_candidates: %s', hook_candidates)
 
             try:
-                dist, pn_id, hook, pair_id = min(
-                    (paths[pn_id].dist, pn_id, hook, pair_id)
+                dist, pn_id, hook = min(
+                    (paths[pn_id].dist, pn_id, hook)
                     for hook in hook_candidates
                     for pair_id in pair_ids_by_prime.get(hook, ())
                     if (pn_id := best_pn_by_pair_id[pair_id]) is not None
@@ -1347,8 +1342,7 @@ class PathFinder:
                 # unable to fix this crossing
                 failed_detours.append((r, n))
                 continue
-            _, sect = prime_sector_by_pair_id[pair_id]
-            debug('best: hook = %d, sector = %d, dist = %.2f', hook, sect, dist)
+            debug('best: hook = %d, dist = %.2f', hook, dist)
 
             path, dists = self._trace_path(hook, pn_id)
             if not math.isclose(sum(dists), dist):
