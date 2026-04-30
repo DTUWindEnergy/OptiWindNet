@@ -435,49 +435,53 @@ def _polyline_coords(
     return raw[keep]
 
 
-def _shared_run_swaps_sides(
-    path_a: tuple[int, ...], path_b: tuple[int, ...], VertexC: np.ndarray
-) -> bool:
-    """True iff two paths share an interior run and exit on the same side at each end.
+def _shared_run_swaps_sides(coords_a: np.ndarray, coords_b: np.ndarray) -> bool:
+    """True iff two polylines share an interior run and exit on the same side at each end.
 
-    When two prime paths overlap on a shared sub-sequence, an actual *cross* requires
-    the two paths to enter the overlap from opposite half-planes and exit to opposite
-    half-planes — equivalently, the orientation (cross-product sign) of the two
-    approach vectors equals that of the two separation vectors.
+    When two polylines overlap on a shared sub-sequence of vertices, an actual *cross*
+    requires the two paths to enter the overlap from opposite half-planes and exit to
+    opposite half-planes — equivalently, the orientation (cross-product sign) of the
+    two approach vectors equals that of the two separation vectors.
+
+    Operates on raw polyline coords (with consecutive duplicates collapsed) rather
+    than canonical prime paths, so root-leg context preserved in the geometry —
+    but trimmed from canonical prime paths — remains available here.
     """
-    # locate the longest shared run (try both orientations of path_b)
+    Na, Nb = len(coords_a), len(coords_b)
+    if Na < 2 or Nb < 2:
+        return False
+
     best = None
     best_len = 1
-    for candidate_b in (path_b, path_b[::-1]):
-        for i, node_a in enumerate(path_a):
-            for j, node_b in enumerate(candidate_b):
-                if node_a != node_b:
+    for cb in (coords_b, coords_b[::-1]):
+        for i in range(Na):
+            for j in range(Nb):
+                if not np.array_equal(coords_a[i], cb[j]):
                     continue
                 length = 1
                 while (
-                    i + length < len(path_a)
-                    and j + length < len(candidate_b)
-                    and path_a[i + length] == candidate_b[j + length]
+                    i + length < Na
+                    and j + length < Nb
+                    and np.array_equal(coords_a[i + length], cb[j + length])
                 ):
                     length += 1
                 if length > best_len:
                     best_len = length
-                    best = i, i + length, j, j + length, candidate_b
+                    best = (i, i + length, j, j + length, cb)
     if best is None:
         return False
 
     start_a, end_a, start_b, end_b, oriented_b = best
     # require at least one segment of context on each side of the shared run
-    if not (0 < start_a and end_a < len(path_a)
-            and 0 < start_b and end_b < len(oriented_b)):
+    if not (0 < start_a and end_a < Na and 0 < start_b and end_b < Nb):
         return False
 
-    shared_start = path_a[start_a]
-    shared_end = path_a[end_a - 1]
-    approach_a = VertexC[shared_start] - VertexC[path_a[start_a - 1]]
-    approach_b = VertexC[shared_start] - VertexC[oriented_b[start_b - 1]]
-    separation_a = VertexC[path_a[end_a]] - VertexC[shared_end]
-    separation_b = VertexC[oriented_b[end_b]] - VertexC[shared_end]
+    shared_start = coords_a[start_a]
+    shared_end = coords_a[end_a - 1]
+    approach_a = shared_start - coords_a[start_a - 1]
+    approach_b = shared_start - oriented_b[start_b - 1]
+    separation_a = coords_a[end_a] - shared_end
+    separation_b = oriented_b[end_b] - shared_end
 
     EPS = 1e-15
 
@@ -569,12 +573,12 @@ def _exclusion_coords(
 ) -> np.ndarray:
     """Coordinates where intersections are not crossings: shared nodes,
     endpoints of either polyline, and detour-split primes that both paths visit."""
-    primes: set[int] = (
-        {int(fnT[n]) for n in path_a} & {int(fnT[n]) for n in path_b}
-    )
+    primes: set[int] = {int(fnT[n]) for n in path_a} & {int(fnT[n]) for n in path_b}
     primes |= {
-        int(fnT[path_a[0]]), int(fnT[path_a[-1]]),
-        int(fnT[path_b[0]]), int(fnT[path_b[-1]]),
+        int(fnT[path_a[0]]),
+        int(fnT[path_a[-1]]),
+        int(fnT[path_b[0]]),
+        int(fnT[path_b[-1]]),
     }
     for path in (path_a, path_b):
         for node in path[1:-1]:
@@ -675,9 +679,7 @@ def find_geometric_crossings(
     path_coords = [_polyline_coords(VertexC, fnT, path) for path in paths]
     splits = _detour_splits(G, fnT, VertexC)
 
-    findings = _branch_split_findings(
-        splits, polylines, prime_paths, fnT, VertexC
-    )
+    findings = _branch_split_findings(splits, polylines, prime_paths, fnT, VertexC)
 
     lines = [shp.LineString(coords) for coords in path_coords]
     tree = shp.STRtree(lines)
@@ -700,7 +702,7 @@ def find_geometric_crossings(
             geometry = intersection
 
             if intersection.length > length_tol and _shared_run_swaps_sides(
-                path_a, path_b, VertexC
+                path_coords[i], path_coords[j]
             ):
                 kind = 'overlap_cross'
 
@@ -740,10 +742,7 @@ def find_geometric_crossings(
                 }
             )
 
-    return [
-        {**finding, 'geometry': finding['geometry'].wkt}
-        for finding in findings
-    ]
+    return [{**finding, 'geometry': finding['geometry'].wkt} for finding in findings]
 
 
 def _filter_crossing_points(
@@ -781,8 +780,11 @@ def _filter_crossing_points(
         for k in range(len(P))
         if not near_excluded[k]
         and polylines_cross_at_point(
-            coords_a, coords_b, P[k],
-            tol=tol, angle_tol=angle_tol,
+            coords_a,
+            coords_b,
+            P[k],
+            tol=tol,
+            angle_tol=angle_tol,
         )
     ]
 
