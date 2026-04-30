@@ -149,96 +149,6 @@ def _expand_P_paths_path(
     return expanded
 
 
-def _undo_P_paths_expansion(G: nx.Graph, A: nx.Graph) -> None:
-    """Reverse `G_from_S`'s expansion of P_paths shortcuts in contour chains.
-
-    Each contour A-edge chain in G follows the fully P-edge-expanded shortpath.
-    For the final routeset every prime sub-sequence that matches an entry of
-    `P_paths_shortcuts` collapses back into a single shortcut edge.
-    """
-    P = A.graph.get('P_paths_shortcuts')
-    if not P or G.graph.get('C', 0) == 0:
-        return
-    fnT, VertexC = G.graph['fnT'], G.graph['VertexC']
-    T, B, R = (G.graph[k] for k in 'TBR')
-    chains: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-    for u, v, d in G.edges(data=True):
-        if d.get('kind') == 'contour' and 'A_edge' in d:
-            chains[d['A_edge']].append((u, v))
-    aux_nodes, drop, add = set(), [], []
-    for (s, t), edges in chains.items():
-        adj: dict[int, list[int]] = defaultdict(list)
-        for u, v in edges:
-            adj[u].append(v)
-            adj[v].append(u)
-        nodes, prev, curr = [s], None, s
-        while curr != t:
-            nxt = next(n for n in adj[curr] if n != prev)
-            nodes.append(nxt)
-            prev, curr = curr, nxt
-        primes = [int(fnT[n]) for n in nodes]
-        keep, i = [0], 0
-        while i < len(primes) - 1:
-            j = i + 1
-            for k in range(len(primes) - 1, i + 1, -1):
-                a, b = primes[i], primes[k]
-                key = (a, b) if a < b else (b, a)
-                sc = P.get(key)
-                if (
-                    sc is not None
-                    and (list(sc) if a < b else list(sc[::-1])) == primes[i : k + 1]
-                ):
-                    j = k
-                    break
-            keep.append(j)
-            i = j
-        if len(keep) == len(nodes):
-            continue
-        drop.extend(edges)
-        load = G[edges[0][0]][edges[0][1]].get('load')
-        keep_set = set(keep)
-        for k in range(len(nodes)):
-            if k not in keep_set:
-                aux_nodes.add(nodes[k])
-        for ki, kj in zip(keep[:-1], keep[1:]):
-            length = float(np.hypot(*(VertexC[primes[ki]] - VertexC[primes[kj]])))
-            add.append(
-                (
-                    nodes[ki],
-                    nodes[kj],
-                    dict(
-                        length=length,
-                        load=load,
-                        kind='contour',
-                        A_edge=(s, t),
-                        reverse=nodes[ki] < nodes[kj],
-                    ),
-                )
-            )
-    if not aux_nodes:
-        return
-    G.remove_edges_from(drop)
-    G.remove_nodes_from(aux_nodes)
-    for u, v, attrs in add:
-        G.add_edge(u, v, **attrs)
-    contour = sorted(n for n, d in G.nodes(data=True) if d.get('kind') == 'contour')
-    detour = sorted(n for n, d in G.nodes(data=True) if d.get('kind') == 'detour')
-    Cn, Dn = len(contour), len(detour)
-    mapping, nl = {}, T + B
-    for n in contour + detour:
-        if n != nl:
-            mapping[n] = nl
-        nl += 1
-    inv = {v: k for k, v in mapping.items()}
-    new_fnT = np.arange(R + T + B + Cn + Dn)
-    new_fnT[-R:] = range(-R, 0)
-    for nl in range(T + B, T + B + Cn + Dn):
-        new_fnT[nl] = int(fnT[inv.get(nl, nl)])
-    if mapping:
-        nx.relabel_nodes(G, mapping, copy=False)
-    G.graph.update(fnT=new_fnT, C=Cn, D=Dn)
-
-
 class PathNodes(dict):
     """Tree of pseudonodes for shortest-path candidates.
 
@@ -416,115 +326,55 @@ class PathFinder:
         d2roots = A.graph['d2roots']
         Rank = A.graph.get('d2rootsRank')
         diagonals = A.graph['diagonals']
-        self.saved_shortened_contours = saved_shortened_contours = []
-        shortened_contours = G.graph.get('shortened_contours')
-        if shortened_contours is not None:
-            # G has edges that shortcut some longer paths along P edges.
-            # We need to put these paths back in G to flip some of P's edges.
-            # The changes made here are undone in `create_detours()`.
-            P_paths_shortcuts = A.graph.get('P_paths_shortcuts', {})
 
-            edges_to_remove = []
-            clone_offset = T + B
-            # New clones added here are auxiliary: they are not appended to
-            # `self.clone2prime` nor counted in `self.C`, so `create_detours`
-            # sees the original C when it computes `clone_idx = T + B + C`.
-            # They are removed from G in `create_detours` along with the
-            # helper edges, before any detour clone is allocated.
-            aux_clone_idx = T + B + C
-            aux_clone2prime = []
-            for (s, t), (midpath, shortpath) in shortened_contours.items():
-                # G follows shortpath, but we want it to follow midpath
-                subtree_id = G.nodes[t]['subtree']
-                stored_edges = []
-                u = s
-                # G's contour clones follow the expanded shortpath (see
-                # G_from_S), so expand here before locating clones by prime id.
-                expanded_shortpath = (
-                    _expand_P_paths_path([s] + shortpath + [t], P_paths_shortcuts)[1:-1]
-                    if shortpath
-                    else []
-                )
-                if expanded_shortpath:
-                    # there may be more than one edge cloning the same constraint vertex
-                    choices = [
-                        v
-                        for v in G[u]
-                        if v >= clone_offset and fnT[v] == expanded_shortpath[0]
-                    ]
-                    if len(choices) > 1:
-                        # checks just one more hop -> bizarre cases may lead to error
-                        nb = (
-                            t if len(expanded_shortpath) <= 1 else expanded_shortpath[1]
-                        )
-                        for v in choices:
-                            if (G._adj[v].keys() - {u}).pop() == nb:
-                                break
-                    else:
-                        v = choices[0]
-                else:
-                    v = t
-                midpath = _expand_P_paths_path([s] + midpath + [t], P_paths_shortcuts)[
-                    1:-1
-                ]
-                while v != t:
-                    stored_edges.append((u, v, G[u][v]))
-                    edges_to_remove.append((u, v))
-                    u, v = v, (G._adj[v].keys() - {u}).pop()
-                stored_edges.append((u, v, G[u][v]))
-                edges_to_remove.append((u, v))
-                # load is shared along the original (pre-shortening) chain
-                load = stored_edges[0][2]['load']
-                helper_edges = []
-                helper_nodes = []
-                u, u_prime = s, s
-                for prime in midpath:
-                    clone = aux_clone_idx
-                    aux_clone_idx += 1
-                    aux_clone2prime.append(prime)
-                    G.add_node(clone, kind='contour', load=load, subtree=subtree_id)
-                    length = float(np.hypot(*(VertexC[u_prime] - VertexC[prime])))
-                    G.add_edge(
-                        u,
-                        clone,
-                        length=length,
-                        load=load,
-                        kind='contour',
-                        A_edge=(s, t),
-                    )
-                    helper_edges.append((u, clone))
-                    helper_nodes.append(clone)
-                    u, u_prime = clone, prime
-                length = float(np.hypot(*(VertexC[u_prime] - VertexC[t])))
-                G.add_edge(
-                    u,
-                    t,
-                    length=length,
-                    load=load,
-                    kind='contour',
-                    A_edge=(s, t),
-                )
-                helper_edges.append((u, t))
-                saved_shortened_contours.append(
-                    (stored_edges, helper_edges, helper_nodes)
-                )
-            G.remove_edges_from(edges_to_remove)
-            # Extend fnT so `_find_paths` can map the new clone ids back to
-            # their primes. `self.C` and `self.clone2prime` are intentionally
-            # NOT bumped — the extension is reverted in `create_detours` by
-            # removing the aux clone nodes (G.graph['fnT'] is rebuilt there).
-            if aux_clone2prime:
-                extended_fnT = np.empty(
-                    R + T + B + C + len(aux_clone2prime), dtype=fnT.dtype
-                )
-                extended_fnT[: T + B + C] = fnT[: T + B + C]
-                extended_fnT[T + B + C : -R] = aux_clone2prime
-                extended_fnT[-R:] = range(-R, 0)
-                fnT = extended_fnT
-                G.graph['fnT'] = fnT
-                self.fnT = fnT
+        # Single pass over G.edges: non-contour edges contribute their
+        # prime pair to `edges_G_primes` directly; contour edges register
+        # their A-edge for later fence emission. G's contour clones may
+        # follow a synthetic (shortcut) prime sequence, so the fence-side
+        # loop below substitutes the fully P-edge-expanded chain for what
+        # those clones would naively project to.
+        shortened = G.graph.get('shortened_contours') or {}
+        contour_A_edges: dict[tuple[int, int], int] = {
+            ae: G.nodes[ae[1]]['subtree'] for ae in shortened
+        }
+        edges_G_primes: set[tuple[int, int]] = set()
+        for u, v, d in G.edges(data=True):
+            if d.get('kind') == 'contour':
+                ae = d.get('A_edge')
+                if ae is not None and ae not in contour_A_edges:
+                    contour_A_edges[ae] = G.nodes[ae[1]]['subtree']
+                continue
+            pu, pv = int(fnT[u]), int(fnT[v])
+            edges_G_primes.add((pu, pv) if pu < pv else (pv, pu))
+
+        # Build fences from the discovered contour A-edges. The midpath
+        # source is `shortened` for shortened contours and `A[s][t]['midpath']`
+        # otherwise; both store the bidirectional_dijkstra path on `P_paths`,
+        # which we expand to a real P-edge sequence. Fence endpoints (s, t)
+        # are tree members of S — root-endpoint A-edges with midpath are
+        # routed to kind='tentative' by G_from_S and never appear here.
+        shortcuts = A.graph.get('P_paths_shortcuts', {})
+        fences: list[Fence] = []
+        for ae, subtree in contour_A_edges.items():
+            midpath = (
+                shortened[ae][0] if ae in shortened else A[ae[0]][ae[1]].get('midpath')
+            )
+            if not midpath:
+                continue
+            expanded = _expand_P_paths_path([ae[0], *midpath, ae[1]], shortcuts)[1:-1]
+            fences.append(Fence(ae, expanded, subtree))
+            chain_seq = (ae[0], *expanded, ae[1])
+            for a, b in zip(chain_seq[:-1], chain_seq[1:]):
+                edges_G_primes.add((a, b) if a < b else (b, a))
+        self.fences = fences
+        self.edges_G_primes = edges_G_primes
+
         P = planar_flipped_by_routeset(
-            G, planar=planar, VertexC=VertexC, diagonals=diagonals
+            edges_G_primes,
+            planar=planar,
+            VertexC=VertexC,
+            ST=self.ST,
+            diagonals=diagonals,
         )
         self.d2roots = d2roots
         self.d2rootsRank = (
@@ -533,9 +383,45 @@ class PathFinder:
         self.predetour_length = Gʹ.size(weight='length')
         self.branched = branched
         self.R, self.T, self.B, self.C = R, T, B, C
-        self.P, self.A, self.VertexC, self.clone2prime = P, A, VertexC, clone2prime
+        self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.stunts_primes = A.graph.get('stunts_primes')
         self.adv_counter = 0
+
+        # Precompute everything that depends only on (P, edges_G_primes,
+        # fences). `_find_paths` then runs the fan-init / main loop with
+        # plain dict / set lookups.
+        ST = self.ST
+        constraint_edges = P.graph['constraint_edges']
+        edges_P = {
+            ((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST or v < ST
+        }
+        portal_set = (edges_P - edges_G_primes) - constraint_edges
+        self.portal_set = portal_set | {(v, u) for u, v in portal_set}
+
+        self._precompute_sector_lookup(fences)
+        self.best_pn_by_pair_id = [None] * len(self.pair_id_by_prime_sector)
+
+        # constraint_bounds[c] = the cone-bounding neighbors of c that come
+        # from constraint walls (= the other endpoints of constraint walls
+        # incident to c). Used by `_precompute_chains` to identify each
+        # chain-end's constraint cone bounds.
+        constraint_bounds: dict[int, set[int]] = defaultdict(set)
+        for u, v in constraint_edges:
+            constraint_bounds[u].add(v)
+            constraint_bounds[v].add(u)
+        self.constraint_bounds = constraint_bounds
+
+        # Build the chain topology: one Chain per route fence (or two for
+        # the demoted-one-end corner case), with chain_access mapping
+        # (chain-end vertex, parent-portal-pair) -> (Chain, side). The
+        # trigger sites in `_advance_portal` consult this to decide
+        # whether to engage a chain — non-chain wedges (the void on the
+        # far side of the constraint, and navigable wedges that don't
+        # separate two fences) are not registered, so the trigger
+        # silently no-ops there and the per-vertex traversal budget is
+        # spent only on actual chain walks.
+        self.chain_access, self.chain_end_set = self._precompute_chains(fences)
+
         self._find_paths()
 
     def _trace_path(self, start_prime: int, pn_id: int):
@@ -606,21 +492,12 @@ class PathFinder:
         except KeyError:
             return self._scan_sector_from_opposite(prime, opposite)
 
-    def _ensure_pair_id(self, prime: int, sector: int) -> int:
-        """Return a dense id for a `(prime, sector)` best-path bucket."""
-        pair = (prime, sector)
-        pair_id = self.pair_id_by_prime_sector.get(pair)
-        if pair_id is None:
-            pair_id = len(self.best_pn_by_pair_id)
-            self.pair_id_by_prime_sector[pair] = pair_id
-            self.pair_ids_by_prime[prime].append(pair_id)
-            self.best_pn_by_pair_id.append(None)
-        return pair_id
-
     def _precompute_sector_lookup(self, fences: list[Fence]) -> None:
         """Precompute sector and dense `(prime, sector)` ids for pathfinding."""
         P = self.P
         T = self.T
+        ST = self.ST
+        R = self.R
         G = self.G
         tentative = self.tentative
 
@@ -637,7 +514,11 @@ class PathFinder:
 
         for prime in P:
             if prime < 0:
+                # Roots get `(r, r)` (canonical root pseudonode anchor) and
+                # `(r, NULL)` (path arriving at a root from an advance, or a
+                # root appearing as a cone exit prime).
                 add_pair(prime, prime)
+                add_pair(prime, NULL)
             elif prime >= T:
                 add_pair(prime, NULL)
 
@@ -681,9 +562,63 @@ class PathFinder:
             for prime in fence.primes_on_constraint:
                 add_pair(prime, fence.subtree)
 
+        # Fan-init pseudonode buckets: at the start of `_find_paths`, each
+        # root's planar fan picks a (prime, sector) where `sector` is the
+        # first cyclic neighbor of `prime` (CCW from the parent triangle's
+        # opposite vertex) reached via a barrier — a G-edge prime-pair or a
+        # constraint edge. The sector can be a constraint vertex / root /
+        # supertriangle vertex, none of which the per-terminal scan above
+        # would record. We register them here so `_find_paths` can do a
+        # plain dict lookup.
+        # Only valid portals matter: `_find_paths` skips `(r, left)` when
+        # `(left, right)` is not in `portal_set`, and `_fan_init_sector`'s
+        # walk requires `right` to be a P-neighbor of `left` (true for
+        # P-edges, but `(left, right)` need not be a P-edge in general).
+        portal_set = self.portal_set
+        fan_sectors: dict[tuple[int, int], tuple[int, int]] = {}
+        for r in range(-R, 0):
+            if r not in P:
+                continue
+            for left in P.neighbors(r):
+                right = P[r][left]['cw']
+                if (left, right) not in portal_set:
+                    continue
+                sec_left = self._fan_init_sector(left, right) if left < ST else NULL
+                if right >= ST or (right in G.nodes and len(G._adj[right]) == 0):
+                    sec_right = NULL
+                else:
+                    sec_right = r
+                fan_sectors[(r, left)] = (sec_left, sec_right)
+                add_pair(left, sec_left)
+                add_pair(right, sec_right)
+
         self.sector_by_prime_opposite = sector_by_prime_opposite
         self.pair_id_by_prime_sector = pair_id_by_prime_sector
         self.pair_ids_by_prime = pair_ids_by_prime
+        self.fan_sectors = fan_sectors
+
+    def _fan_init_sector(self, prime: int, opposite: int) -> int:
+        """Sector for a fan-init pseudonode at `prime` reached from `opposite`.
+
+        Walks `prime`'s P-cyclic neighbors CCW from `opposite` and returns
+        the first one whose edge from `prime` is a barrier (a G-edge in
+        prime form, or a constraint edge). Falls back to NULL when the
+        barrier-incident neighbor cannot be identified (boxed-in or
+        inconsistent G).
+        """
+        P = self.P
+        G = self.G
+        edges_G_primes = self.edges_G_primes
+        constraint_edges = P.graph['constraint_edges']
+        if prime in G.nodes and len(G._adj[prime]) == 0:
+            return NULL
+        sector = opposite
+        for _ in P[prime]:
+            sector = P[prime][sector]['ccw']
+            incr_edge = (sector, prime) if sector < prime else (prime, sector)
+            if incr_edge in edges_G_primes or incr_edge in constraint_edges:
+                return sector
+        return NULL
 
     def _advance_portal(
         self,
@@ -854,61 +789,6 @@ class PathFinder:
             cur = c_next
 
         self._spawn_exit_cone(exit_cone, parent_pn, is_triangle_seen)
-
-    def _extract_fences(self) -> list[Fence]:
-        """Collect route fences used in G, one per unique A-edge contour.
-
-        Each route fence corresponds to an A-edge whose `midpath` attribute
-        lists the constraint vertices it routes through. Shortened contours
-        hold their (longer) midpath on `G.graph['shortened_contours']` keyed
-        by the same A-edge; the regular case reads `midpath` from
-        `self.A[s][t]`. Only fences with a non-empty on-constraint segment
-        are emitted.
-
-        Both midpath sources are stored in P_paths shortcut form (the
-        bidirectional_dijkstra path on `P_paths`). They are expanded here so
-        consecutive entries of `[s, *primes_on_constraint, t]` are P-edges,
-        matching the expansion already applied in `G_from_S` (regular
-        contours) and earlier in this `__init__` (shortened contours) — the
-        expanded edges are precisely what drove `planar_flipped_by_routeset`,
-        so the result is consistent with `self.P`.
-        """
-        G = self.G
-        A = self.A
-        shortcuts = A.graph.get('P_paths_shortcuts', {})
-        fences: list[Fence] = []
-        shortened = G.graph.get('shortened_contours') or {}
-
-        # Fence endpoints (s, t) are tree members of S — they're the endpoints
-        # of a cable edge — so both carry the 'subtree' attribute. Root-
-        # endpoint A-edges with midpath are routed to kind='tentative' by
-        # G_from_S and never reach this loop.
-        # Shortened contours (PathFinder restored their midpaths into G).
-        for endpoints, (midpath, _) in shortened.items():
-            if midpath:
-                expanded = _expand_P_paths_path(
-                    [endpoints[0], *midpath, endpoints[1]], shortcuts
-                )[1:-1]
-                fences.append(
-                    Fence(endpoints, expanded, G.nodes[endpoints[1]]['subtree'])
-                )
-
-        # Clone-based contours: dedup by A_edge attribute on contour edges.
-        seen: set[tuple[int, int]] = set(shortened)
-        for _, _, d in G.edges(data=True):
-            if d.get('kind') != 'contour':
-                continue
-            ae = d.get('A_edge')
-            if ae is None or ae in seen:
-                continue
-            seen.add(ae)
-            midpath = A[ae[0]][ae[1]].get('midpath') or []
-            if midpath:
-                expanded = _expand_P_paths_path([ae[0], *midpath, ae[1]], shortcuts)[
-                    1:-1
-                ]
-                fences.append(Fence(ae, expanded, G.nodes[ae[1]]['subtree']))
-        return fences
 
     def _partition_into_cones(
         self, c: int, cone_bounds: set[int], rotated: list[int]
@@ -1413,7 +1293,6 @@ class PathFinder:
         VertexC = self.VertexC
         best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
-        ensure_pair_id = self._ensure_pair_id
         w = cone.vertex
         pn_w = paths[pn_w_id]
         cum_turn_w = pn_w.cum_turn
@@ -1426,9 +1305,7 @@ class PathFinder:
             d_total = pn_w.dist + d_hop
             sec_v = self._get_sector_from_opposite(v, w) if v >= 0 else NULL
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
-            pair_id = pair_id_by_prime_sector.get((v, sec_v))
-            if pair_id is None:
-                pair_id = ensure_pair_id(v, sec_v)
+            pair_id = pair_id_by_prime_sector[(v, sec_v)]
             best_pn_id = best_pn_by_pair_id[pair_id]
             if best_pn_id is None or d_total < paths[best_pn_id].dist:
                 best_pn_by_pair_id[pair_id] = pn_v
@@ -1526,7 +1403,6 @@ class PathFinder:
         best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
         sector_by_prime_opposite = self.sector_by_prime_opposite
-        ensure_pair_id = self._ensure_pair_id
         scan_sector = self._scan_sector_from_opposite
         chain_end_set = self.chain_end_set
         chain_end_sector = self._chain_end_sector
@@ -1565,9 +1441,7 @@ class PathFinder:
                 sector_new = chain_end_sector(_new, opposite)
             else:
                 sector_new = NULL
-            pair_id = pair_id_by_prime_sector.get((_new, sector_new))
-            if pair_id is None:
-                pair_id = ensure_pair_id(_new, sector_new)
+            pair_id = pair_id_by_prime_sector[(_new, sector_new)]
             _nearside = _funnel[side]
             _farside = _funnel[not side]
             test = ccw if side else cw
@@ -1723,9 +1597,8 @@ class PathFinder:
 
     def _find_paths(self):
         #  print('[exp] starting _explore()')
-        G, P, R = self.G, self.P, self.R
+        P, R = self.P, self.R
         d2roots, d2rootsRank = self.d2roots, self.d2rootsRank
-        ST = self.ST
         iterations_limit = self.iterations_limit
         self.prioqueue = prioqueue = []
         num_traversals = defaultdict(lambda: 0)
@@ -1733,54 +1606,12 @@ class PathFinder:
         traversals_limit = self.traversals_limit
         paths = self.paths = PathNodes()
         triangles = P.graph['triangles']
-
-        # set of portals (i.e. edges of P that are not used in G)
-        fnT = G.graph.get('fnT')
-        if fnT is not None:
-            edges_G_primed = {
-                ((u, v) if u < v else (v, u))
-                for u, v in (fnT[edge,] for edge in G.edges)
-            }
-        else:
-            edges_G_primed = {((u, v) if u < v else (v, u)) for u, v in G.edges}
-        edges_P = {
-            ((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST or v < ST
-        }
-        constraint_edges = P.graph['constraint_edges']
-        portal_set = (edges_P - edges_G_primed) - constraint_edges
-        self.portal_set = portal_set | {(v, u) for u, v in portal_set}
-
-        # Route fences are needed before sector lookup so each on-constraint
-        # prime can be registered in `pair_id_by_prime_sector` under its
-        # fence's subtree id.
-        fences = self._extract_fences()
-        self._precompute_sector_lookup(fences)
-        self.best_pn_by_pair_id = [None] * len(self.pair_id_by_prime_sector)
-
-        # constraint_bounds[c] = the cone-bounding neighbors of c that come
-        # from constraint walls (= the other endpoints of constraint walls
-        # incident to c). Used by `_precompute_chains` to identify each
-        # chain-end's constraint cone bounds.
-        constraint_bounds: dict[int, set[int]] = defaultdict(set)
-        for u, v in constraint_edges:
-            constraint_bounds[u].add(v)
-            constraint_bounds[v].add(u)
-        self.constraint_bounds = constraint_bounds
-
-        # Build the chain topology: one Chain per route fence (or two for
-        # the demoted-one-end corner case), with chain_access mapping
-        # (chain-end vertex, parent-portal-pair) -> (Chain, side). The
-        # trigger sites in `_advance_portal` consult this to decide
-        # whether to engage a chain — non-chain wedges (the void on the
-        # far side of the constraint, and navigable wedges that don't
-        # separate two fences) are not registered, so the trigger
-        # silently no-ops there and the per-vertex traversal budget is
-        # spent only on actual chain walks.
-        self.chain_access, self.chain_end_set = self._precompute_chains(fences)
+        portal_set = self.portal_set
 
         # launch channel traversers around the roots to the prioqueue
         best_pn_by_pair_id = self.best_pn_by_pair_id
-        ensure_pair_id = self._ensure_pair_id
+        pair_id_by_prime_sector = self.pair_id_by_prime_sector
+        fan_sectors = self.fan_sectors
         for r in range(-R, 0):
             paths[r] = PseudoNode(r, r, None, 0.0, 0.0, 0.0)
             paths.prime_from_pn[r] = r
@@ -1806,11 +1637,11 @@ class PathFinder:
                         chain, c_side = access
                         d_c = d2roots[left, r].item()
                         pn_c = paths.add(left, chain.subtree, r, d_c, d_c)
-                        pair_id = self.pair_id_by_prime_sector.get(
-                            (left, chain.subtree)
-                        )
-                        if pair_id is None:
-                            pair_id = self._ensure_pair_id(left, chain.subtree)
+                        # `(left, chain.subtree)` is always pre-registered by
+                        # `_precompute_sector_lookup` (left is a chain-end =
+                        # member of fence.primes_on_constraint with the same
+                        # subtree id).
+                        pair_id = pair_id_by_prime_sector[(left, chain.subtree)]
                         if (
                             best_pn_by_pair_id[pair_id] is None
                             or d_c < paths[best_pn_by_pair_id[pair_id]].dist
@@ -1828,25 +1659,9 @@ class PathFinder:
                 # flag initial portal as visited
                 num_traversals[right, left] = traversals_limit
 
-                if left >= ST or (left in G.nodes and len(G._adj[left]) == 0):
-                    sec_left = NULL
-                else:
-                    sec_left = right
-                    for _ in P[left]:
-                        sec_left = P[left][sec_left]['ccw']
-                        incr_edge = (
-                            (sec_left, left) if sec_left < left else (left, sec_left)
-                        )
-                        if incr_edge in edges_G_primed or incr_edge in constraint_edges:
-                            break
-                    else:
-                        # G is inconsistent, unable to identify sec_left
-                        sec_left = NULL
-
-                if right >= ST or (right in G.nodes and len(G._adj[right]) == 0):
-                    sec_right = NULL
-                else:
-                    sec_right = r
+                # `_precompute_sector_lookup` already resolved & registered
+                # the fan sectors for (r, left); both pairs always exist.
+                sec_left, sec_right = fan_sectors[(r, left)]
                 d_left = d2roots[left, r].item()
                 d_right = d2roots[right, r].item()
                 # add the first pseudo-nodes to paths
@@ -1856,8 +1671,12 @@ class PathFinder:
                 ]
 
                 # shortest paths for roots' P.neighbors is a straight line
-                best_pn_by_pair_id[ensure_pair_id(left, sec_left)] = wedge_end[0]
-                best_pn_by_pair_id[ensure_pair_id(right, sec_right)] = wedge_end[1]
+                best_pn_by_pair_id[pair_id_by_prime_sector[(left, sec_left)]] = (
+                    wedge_end[0]
+                )
+                best_pn_by_pair_id[pair_id_by_prime_sector[(right, sec_right)]] = (
+                    wedge_end[1]
+                )
 
                 # prioritize by distance to the closest node of the portal
                 d_closest = (
@@ -1952,23 +1771,8 @@ class PathFinder:
                     del G[r][n]['kind']
             if 'tentative' in G.graph:
                 del G.graph['tentative']
-            _undo_P_paths_expansion(G, self.A)
             debug('<PathFinder: no crossings, detagged all tentative edges.')
             return G
-
-        if self.saved_shortened_contours is not None:
-            # Restore shortcut contours as they were before finding paths.
-            # Removing `helper_nodes` strips the auxiliary contour clones
-            # added during unshortening, returning G to the state expected
-            # by detour-clone allocation (which uses `clone_idx = T+B+C`).
-            for (
-                stored_edges,
-                helper_edges,
-                helper_nodes,
-            ) in self.saved_shortened_contours:
-                G.remove_edges_from(helper_edges)
-                G.remove_nodes_from(helper_nodes)
-                G.add_edges_from(stored_edges)
 
         R, T, B, C = self.R, self.T, self.B, self.C
         clone2prime = self.clone2prime.copy()
@@ -2143,10 +1947,9 @@ class PathFinder:
             detextra=detextra,
             iterations_pfinder=self.iterations,
         )
-        _undo_P_paths_expansion(G, self.A)
         debug(
             '<PathFinder: created %d detour vertices, total length changed by %.2f%%',
-            G.graph['D'],
+            D,
             100 * detextra,
         )
         # TODO: there might be some lost contour clones that could be prunned
