@@ -1706,41 +1706,35 @@ def _deprecated_planar_flipped_by_routeset(
 
 
 def planar_flipped_by_routeset(
-    G: nx.Graph,
+    edges_G: set[tuple[int, int]],
     *,
     planar: nx.PlanarEmbedding,
     VertexC: CoordPairs,
+    ST: int,
     diagonals: bidict | None = None,
 ) -> nx.PlanarEmbedding:
-    """Ajust `planar` to include the edges actually used by routeset `G`.
+    """Ajust `planar` to include the edges actually used by a routeset.
 
     Copies `planar` and flips the edges to their diagonal if the latter is an
-    edge of `G`. Ideally, the returned PlanarEmbedding includes all `G` edges
-    (an expected discrepancy are `G`'s gates).
+    edge in `edges_G`. Ideally, the returned PlanarEmbedding includes all
+    `edges_G` (an expected discrepancy are gates).
+
+    `edges_G` is the set of routeset edges in prime-id form (i.e. clones
+    already mapped through `fnT`), each as a normalized `(u, v)` pair with
+    `u < v`. Gate edges have `u < 0`. `ST` is `T + B` (the boundary above
+    which constraint vertices live).
 
     If `diagonals` is provided, some diagonal gates may become `planar`'s edges
-    if they are not crossing any edge in `G`. Otherwise gates are ignored.
+    if they are not crossing any edge in `edges_G`. Otherwise gates are ignored.
 
-    Important: `G` must be free of edge×edge crossings.
+    Important: the routeset must be free of edge×edge crossings.
     """
-    R, T, B, C = (G.graph.get(k, 0) for k in 'RTBC')
-    fnT = G.graph.get('fnT')
-    if fnT is None:
-        fnT = np.arange(R + T + B + 3 + C)
-        fnT[-R:] = range(-R, 0)
-
     P = planar.copy()
     triangles = P.graph['triangles']
     if diagonals is not None:
         diags = diagonals.copy()
     else:
         diags = ()
-    # get G's edges in terms of node range -R : T + B
-    edges_G = {
-        ((u, v) if u < v else (v, u))
-        for u, v in (fnT[edge,].tolist() for edge in G.edges)
-    }
-    ST = T + B
     edges_P = {((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST and v < ST}
     stack = list(edges_G - edges_P)
     # gates to the bottom of the stack

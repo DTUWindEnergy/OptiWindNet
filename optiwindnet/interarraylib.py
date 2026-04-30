@@ -363,26 +363,6 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     non_A_edges = S.edges - A.edges
     # TA_source, TA_target = np.array(S.edges - non_A_edges).T
     common_TA = S.edges - non_A_edges
-    P_paths_shortcuts = A.graph.get('P_paths_shortcuts', {})
-
-    def expand_P_paths_edge(s, t):
-        key = (s, t) if s < t else (t, s)
-        path = P_paths_shortcuts.get(key)
-        if path is None:
-            return [s, t]
-        if path[0] != s:
-            path = path[::-1]
-        expanded = [path[0]]
-        for u, v in pairwise(path):
-            expanded.extend(expand_P_paths_edge(u, v)[1:])
-        return expanded
-
-    def expand_P_paths_path(path):
-        expanded = [path[0]]
-        for s, t in pairwise(path):
-            expanded.extend(expand_P_paths_edge(s, t)[1:])
-        return expanded
-
     iC = T + B
     clone2prime = []
     tentative = []
@@ -477,8 +457,6 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                 shortpath.remove(short)
             shortened_contours[(s, t)] = midpath, shortpath
             midpath = shortpath
-        if midpath:
-            midpath = expand_P_paths_path([s] + midpath + [t])[1:-1]
         path = [s] + midpath + [t]
         lengths = np.hypot(*(VertexC[path[1:]] - VertexC[path[:-1]]).T)
         u = s
