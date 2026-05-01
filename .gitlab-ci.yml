@@ -31,7 +31,7 @@ variables:
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   before_script:
     - export DEBIAN_FRONTEND=noninteractive
-    - echo 'deb http://ftp.dk.debian.org/debian testing main contrib' | tee /etc/apt/sources.list.d/debian-testing.list
+    - echo 'deb http://debian.lth.se/debian testing main contrib' | tee /etc/apt/sources.list.d/debian-testing.list
     - |
       printf 'Package: *\nPin: release a=testing\nPin-Priority: 100\n' | tee /etc/apt/preferences.d/99-testing-low-priority
     - apt-get update

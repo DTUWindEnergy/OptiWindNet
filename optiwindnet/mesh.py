@@ -1783,7 +1783,7 @@ def planar_flipped_by_routeset(
         #  if (s, t) not in planar:
         #      print(f'{s}~{t} is not in planar')
         #      continue
-        if (s, t) in unflippables:
+        if ((s, t) if s < t else (t, s)) in unflippables:
             warn(
                 'Navigation mesh inconsistency: edge %d-%d is unflippable due to a previous flip nearby',
                 s,
