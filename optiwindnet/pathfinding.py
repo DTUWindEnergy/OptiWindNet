@@ -89,10 +89,12 @@ AccessCone = namedtuple('AccessCone', 'vertex left right spokes')
 # for single-vertex/touching chains). Either cone may serve as entry, with
 # the other as exit — what's forbidden is entering and exiting through the
 # same cone.
-#   subtree: route-fence subtree id; doubles as the chain identifier (each
-#     route fence labels exactly one chain) and as the `sector` label for
-#     chain-walk pseudonodes so overlapping chains keep distinct
-#     (prime, sector) buckets.
+#   subtree: route-fence subtree id, used as the `sector` label for chain-
+#     walk pseudonodes so overlapping chains keep distinct (prime, sector)
+#     buckets. A route fence whose mp has interior non-constraint hops is
+#     split into one sub-fence per contiguous-walls segment; sub-segments
+#     share `subtree`, and chain pairing uses `(subtree, mp[0], mp[-1])`
+#     to keep the per-segment chains separate.
 #   cones: 2-tuple of AccessCone.
 #   walks: 2-tuple of prime sequences. walks[i] steps from cones[i].vertex
 #     (exclusive) to cones[1 - i].vertex (inclusive). Empty for single-vertex
@@ -353,6 +355,16 @@ class PathFinder:
         # which we expand to a real P-edge sequence. Fence endpoints (s, t)
         # are tree members of S — root-endpoint A-edges with midpath are
         # routed to kind='tentative' by G_from_S and never appear here.
+        # Interior non-constraint hops in the expanded mp (P_paths chose a
+        # diagonal cutting between disjoint constraint chains) split the
+        # fence into one sub-fence per contiguous-walls segment, each with
+        # synthesized endpoints at the break primes; sub-fences share the
+        # original `subtree`. `edges_G_primes` records the full chain_seq
+        # union as barriers regardless of the split.
+        constraint_bounds_init: dict[int, set[int]] = defaultdict(set)
+        for u, v in planar.graph['constraint_edges']:
+            constraint_bounds_init[u].add(v)
+            constraint_bounds_init[v].add(u)
         shortcuts = A.graph.get('P_paths_shortcuts', {})
         fences: list[Fence] = []
         for ae, subtree in contour_A_edges.items():
@@ -362,10 +374,29 @@ class PathFinder:
             if not midpath:
                 continue
             expanded = _expand_P_paths_path([ae[0], *midpath, ae[1]], shortcuts)[1:-1]
-            fences.append(Fence(ae, expanded, subtree))
             chain_seq = (ae[0], *expanded, ae[1])
             for a, b in zip(chain_seq[:-1], chain_seq[1:]):
                 edges_G_primes.add((a, b) if a < b else (b, a))
+            mp = expanded
+            breaks = [
+                i
+                for i in range(len(mp) - 1)
+                if mp[i + 1] not in constraint_bounds_init.get(mp[i], ())
+            ]
+            if not breaks:
+                fences.append(Fence(ae, mp, subtree))
+                continue
+            s, t = ae
+            segments: list[tuple[int, int]] = []
+            start = 0
+            for b in breaks:
+                segments.append((start, b + 1))
+                start = b + 1
+            segments.append((start, len(mp)))
+            for k, (lo, hi) in enumerate(segments):
+                sub_s = s if k == 0 else mp[lo - 1]
+                sub_t = t if k == len(segments) - 1 else mp[hi]
+                fences.append(Fence((sub_s, sub_t), list(mp[lo:hi]), subtree))
         self.fences = fences
         self.edges_G_primes = edges_G_primes
 
@@ -1177,9 +1208,14 @@ class PathFinder:
                 chain_access[(v, pa, pb)] = (chain, side)
                 chain_access[(v, pb, pa)] = (chain, side)
 
-        # Build spanning access cones per chain-end vertex.
-        spanning_by_subtree: dict[
-            int, list[tuple[int, AccessCone, list[tuple[int, int]], list[int]]]
+        # Build spanning access cones per chain-end vertex. Group by
+        # (subtree, mp[0], mp[-1]) so split sub-fences sharing a subtree
+        # produce one chain each — `mp` is identical across both end-entries
+        # of a given fence, and sub-fences from one A-edge split have
+        # disjoint mp-end pairs by construction.
+        spanning_by_chain: dict[
+            tuple[int, int, int],
+            list[tuple[int, AccessCone, list[tuple[int, int]], list[int]]],
         ] = defaultdict(list)
         for c, endings in spanning_at.items():
             result = self._spanning_access_cones_at(c, endings)
@@ -1187,14 +1223,18 @@ class PathFinder:
                 continue
             chain_end_set.add(c)
             for subtree, cone, pair_keys, mp in result:
-                spanning_by_subtree[subtree].append((c, cone, pair_keys, mp))
+                spanning_by_chain[(subtree, mp[0], mp[-1])].append(
+                    (c, cone, pair_keys, mp)
+                )
 
-        # Pair fully-spanning chains (both ends OK -> 2 entries per subtree).
+        # Pair fully-spanning chains (both ends OK -> 2 entries per chain).
         # Demoted-one-end fences contribute only 1 entry and are deferred.
         deferred_spanning: dict[
-            int, tuple[int, AccessCone, list[tuple[int, int]], list[int]]
+            tuple[int, int, int],
+            tuple[int, AccessCone, list[tuple[int, int]], list[int]],
         ] = {}
-        for subtree, entries in spanning_by_subtree.items():
+        for chain_key, entries in spanning_by_chain.items():
+            subtree = chain_key[0]
             if len(entries) == 2:
                 (c0, cone0, keys0, mp), (c1, cone1, keys1, _) = entries
                 if cone0.vertex == mp[0] and cone1.vertex == mp[-1]:
@@ -1213,11 +1253,11 @@ class PathFinder:
                 register(c0, keys0, chain, 0)
                 register(c1, keys1, chain, 1)
             elif len(entries) == 1:
-                deferred_spanning[subtree] = entries[0]
+                deferred_spanning[chain_key] = entries[0]
             else:
                 error(
-                    'spanning chain subtree %d has %d access cones (expected 1 or 2)',
-                    subtree,
+                    'spanning chain %s has %d access cones (expected 1 or 2)',
+                    chain_key,
                     len(entries),
                 )
 
@@ -1244,7 +1284,8 @@ class PathFinder:
 
         # Wire deferred (one-end-demoted) spanning chains to the demoted
         # end's touching counterpart.
-        for subtree, (c, cone, pair_keys, mp) in deferred_spanning.items():
+        for chain_key, (c, cone, pair_keys, mp) in deferred_spanning.items():
+            subtree = chain_key[0]
             demoted_end = mp[-1] if cone.vertex == mp[0] else mp[0]
             partners = touching_chains_by_vertex_subtree.get((demoted_end, subtree), [])
             if len(partners) != 1:
