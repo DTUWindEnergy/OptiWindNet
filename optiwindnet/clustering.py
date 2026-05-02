@@ -29,8 +29,7 @@ def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
     cluster_ = [set() for _ in range(R)]
 
     # initialize mainheap
-    closest_root = -R + d2roots[:T].argmin(axis=1)
-    for n, r in enumerate(closest_root):
+    for n, r in enumerate(A.graph['closest_root']):
         d = d2roots[n, r]
         heappush(mainheap, (d, n, r))
 
