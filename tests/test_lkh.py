@@ -54,17 +54,65 @@ def _fake_output(routes, *, cost=1.0, vehicles=2):
     )
 
 
-def test_initial_tour_from_solution_preserves_max_load():
-    S = _make_routeset([[0, 1, 2], [3]])
-    initial_tour = lkh_mod._initial_tour_from_solution(S, vehicles=2)
-    assert initial_tour == [1, 2, 3, 4, 6, 5]
-
-
-def test_split_warmstart_per_root_single_root():
+def test_initial_tours_from_warmstart_walked_in_branch_order():
     warmstart = _make_routeset([[0, 1], [2, 3]])
-    tours = lkh_mod._split_warmstart_per_root(warmstart, vehicles_=[2])
-    # 4 terminals walked in branch order, plus 1 depot clone, then depot at the end
+    # R=1 with sorted terminals == node ids; walk order [0,1,2,3] → ids [1,2,3,4]
+    tours = lkh_mod._initial_tours_from_warmstart(
+        warmstart, terminals_=[[0, 1, 2, 3]], vehicles_=[2]
+    )
+    # 4 customer ids, then 1 depot clone (vehicles - 1), then depot at the end
     assert tours == [[1, 2, 3, 4, 6, 5]]
+
+
+def test_initial_tours_from_warmstart_uses_matrix_index_not_walk_order():
+    # Walk order [3, 1, 2, 0] differs from sorted-terminal order. The LKH
+    # initial tour must reference each customer by its matrix index + 1
+    # (i.e. its position in the sorted `terminals` list), NOT by walk
+    # rank — otherwise LKH starts from a permutation unrelated to the
+    # warmstart structure.
+    warmstart = _make_routeset([[3, 1, 2, 0]])
+    tours = lkh_mod._initial_tours_from_warmstart(
+        warmstart, terminals_=[[0, 1, 2, 3]], vehicles_=[1]
+    )
+    # nodes 3,1,2,0 → matrix indices 3,1,2,0 → LKH ids 4,2,3,1; depot at T+1=5.
+    assert tours == [[4, 2, 3, 1, 5]]
+
+
+def test_initial_tours_from_warmstart_multi_root_uses_per_cluster_indices():
+    # Two roots, each with two terminals. Cluster -2 has terminals {10, 11};
+    # cluster -1 has terminals {20, 21}. Each cluster is indexed independently:
+    # node 10 → id 1, node 11 → id 2 within cluster -2; etc.
+    warmstart = nx.Graph(T=4, R=2)
+    for r in (-2, -1):
+        warmstart.add_node(r, load=2)
+    # Branch under -2: walk 11, 10
+    warmstart.add_node(11, load=2, subtree=0)
+    warmstart.add_node(10, load=1, subtree=0)
+    warmstart.add_edge(-2, 11, load=2)
+    warmstart.add_edge(11, 10, load=1)
+    # Branch under -1: walk 20, 21
+    warmstart.add_node(20, load=2, subtree=1)
+    warmstart.add_node(21, load=1, subtree=1)
+    warmstart.add_edge(-1, 20, load=2)
+    warmstart.add_edge(20, 21, load=1)
+
+    tours = lkh_mod._initial_tours_from_warmstart(
+        warmstart,
+        terminals_=[[10, 11], [20, 21]],
+        vehicles_=[1, 1],
+    )
+    # Cluster -2 walks 11→10 → ids 2,1; depot=3 (T_c+1).
+    # Cluster -1 walks 20→21 → ids 1,2; depot=3.
+    assert tours == [[2, 1, 3], [1, 2, 3]]
+
+
+def test_initial_tours_from_warmstart_empty_root_returns_none():
+    warmstart = _make_routeset([[0, 1, 2, 3]], R=2)  # all branches under -1
+    tours = lkh_mod._initial_tours_from_warmstart(
+        warmstart, terminals_=[[], [0, 1, 2, 3]], vehicles_=[1, 2]
+    )
+    assert tours[0] is None
+    assert tours[1] == [1, 2, 3, 4, 6, 5]
 
 
 def test_lkh3_single_root_calls_do_lkh_with_expected_args(monkeypatch):

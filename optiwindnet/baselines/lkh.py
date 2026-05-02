@@ -306,7 +306,7 @@ def _add_branches(S, branches, root, subtree_id_start):
     return max_load, subtree_id
 
 
-def _solve_one_cluster(
+def _solve_cluster(
     A: nx.Graph,
     *,
     terminals: list[int],
@@ -323,10 +323,11 @@ def _solve_one_cluster(
     seed: int,
     initial_tour_nodes: list[int] | None,
     name: str,
-) -> tuple[dict, list[int]]:
+) -> dict:
     """Build the LKH weight matrix for a cluster and run LKH-3 on it.
 
-    Returns the LKH output dict and the matrix-index-to-node-id mapping.
+    Returns the LKH output dict (the matrix-index-to-node-id mapping is the
+    `terminals` argument the caller already holds).
     """
     w_clip = np.iinfo(np.int32).max // (2 * precision)
     L = _build_weight_matrix(
@@ -339,7 +340,7 @@ def _solve_one_cluster(
         min_route_size = (T_c % capacity) or capacity
     else:
         min_route_size = 0
-    output = _do_lkh(
+    return _do_lkh(
         L,
         capacity=capacity,
         vehicles=vehicles,
@@ -353,28 +354,54 @@ def _solve_one_cluster(
         initial_tour_nodes=initial_tour_nodes,
         name=name,
     )
-    return output, terminals
 
 
-def _initial_tour_from_solution(S: nx.Graph, vehicles: int) -> list[int]:
-    """Build an LKH initial tour (1-indexed) from a single-root solution graph."""
-    R = S.graph['R']
-    T = S.graph['T']
-    ordered_nodes: list[int] = []
-    for root in range(-R, 0):
-        for cur in S.neighbors(root):
-            rev = root
+def _initial_tours_from_warmstart(
+    warmstart: nx.Graph,
+    terminals_: list[list[int]],
+    vehicles_: list[int],
+) -> list[list[int] | None]:
+    """Per-root LKH initial tours derived from a warmstart solution graph.
+
+    For each root, walks the warmstart's branches in order. Each visited
+    terminal `n` becomes the LKH customer id `i + 1`, where `i` is `n`'s
+    position in the cluster's sorted `terminals` list (i.e., its row index
+    in the LKH weight matrix). The depot clones (`vehicles - 1` of them)
+    and the final depot id are appended, as required by LKH-3 for OVRP.
+
+    The walked tour is purely a hint about the *order* in which customers
+    should be visited; LKH evaluates segment costs from the weight matrix.
+    Therefore the warmstart's edges should still be present in `A_iter`
+    when this tour is fed back to LKH (or those segments will be charged
+    the `w_clip` sentinel weight).
+
+    Roots whose warmstart cluster is empty get `None`.
+
+    Raises:
+        KeyError: a walked terminal is not in the corresponding cluster's
+            `terminals` list (i.e., warmstart and clustering disagree).
+    """
+    R = warmstart.graph['R']
+    out: list[list[int] | None] = []
+    for r, terminals, vehicles in zip(range(-R, 0), terminals_, vehicles_):
+        idx_from_node = {n: i + 1 for i, n in enumerate(terminals)}
+        ordered_ids: list[int] = []
+        for cur in warmstart.neighbors(r):
+            rev = r
             while True:
-                ordered_nodes.append(cur + 1)
-                nb = S[cur]
+                ordered_ids.append(idx_from_node[cur])
+                nb = warmstart[cur]
                 if len(nb) == 1:
                     break  # leaf
                 a, b = nb
                 rev, cur = cur, a if b == rev else b
-    # LKH expects each customer id [1, ..., R + T - 1] exactly once.
-    # For CVRP/OVRP, LKH transforms to TSP by appending `vehicles - 1` depot clones.
-    depot_clones = range(R + T + 1, R + T + vehicles)
-    return ordered_nodes + list(depot_clones) + [R + T]
+        if not ordered_ids:
+            out.append(None)
+            continue
+        T_c = len(terminals)
+        depot_clones = range(T_c + 2, T_c + vehicles + 1)
+        out.append(ordered_ids + list(depot_clones) + [T_c + 1])
+    return out
 
 
 def _build_solution(
@@ -382,7 +409,7 @@ def _build_solution(
     *,
     capacity: int,
     outputs_: list[dict],
-    indices_: list[list[int]],
+    terminals_: list[list[int]],
     keep_log: bool,
     method_options: dict,
     solver_details_extra: dict,
@@ -425,7 +452,7 @@ def _build_solution(
     S.add_nodes_from(range(-R, 0))
     subtree_id = 0
     max_load = 0
-    for r, (output, terminals) in zip(range(-R, 0), zip(outputs_, indices_)):
+    for r, output, terminals in zip(range(-R, 0), outputs_, terminals_):
         # output['routes'] uses matrix indices (0..T_c-1) for terminals
         branches = [[terminals[i] for i in route] for route in output['routes']]
         branch_max_load, subtree_id = _add_branches(
@@ -496,9 +523,10 @@ def _lkh(
         balanced = False
     seed_for_lkh = 0 if seed is None else seed
 
-    output, terminals = _solve_one_cluster(
+    terminals = list(range(T))
+    output = _solve_cluster(
         A,
-        terminals=list(range(T)),
+        terminals=terminals,
         root=-1,
         capacity=capacity,
         vehicles=vehicles,
@@ -527,7 +555,7 @@ def _lkh(
         A,
         capacity=capacity,
         outputs_=[output],
-        indices_=[terminals],
+        terminals_=[terminals],
         keep_log=keep_log,
         method_options=method_options,
         solver_details_extra=dict(seed=seed),
@@ -556,46 +584,7 @@ def lkh(*args, **kwargs) -> nx.Graph:
     return _lkh(*args, **kwargs)
 
 
-def _split_warmstart_per_root(
-    warmstart: nx.Graph, vehicles_: list[int]
-) -> list[list[int] | None]:
-    """Per-root LKH initial tours derived from a warmstart solution graph.
-
-    Returns a list (one entry per root) of 1-indexed node-id sequences suitable
-    for `_do_lkh()`'s `initial_tour_nodes`. The matrix indexing convention is
-    matrix-index 0..T_c-1 for terminals (in walked order), then depot clones,
-    then the depot at the last index.
-    """
-    R = warmstart.graph['R']
-    out: list[list[int] | None] = []
-    for r, vehicles in zip(range(-R, 0), vehicles_):
-        ordered_terminals: list[int] = []  # 1-indexed within the cluster
-        # Walk the warmstart from each subtree rooted at r; collect terminals
-        # in branch order.
-        terminal_to_idx: dict[int, int] = {}
-        idx = 0
-        for cur in warmstart.neighbors(r):
-            rev = r
-            while True:
-                if cur not in terminal_to_idx:
-                    idx += 1
-                    terminal_to_idx[cur] = idx
-                    ordered_terminals.append(idx)
-                nb = warmstart[cur]
-                if len(nb) == 1:
-                    break
-                a, b = nb
-                rev, cur = cur, a if b == rev else b
-        if not ordered_terminals:
-            out.append(None)
-            continue
-        T_c = len(ordered_terminals)
-        depot_clones = range(T_c + 2, T_c + vehicles + 1)
-        out.append(ordered_terminals + list(depot_clones) + [T_c + 1])
-    return out
-
-
-def _solve_lkh3(
+def _run_lkh_per_cluster(
     A: nx.Graph,
     *,
     capacity: int,
@@ -610,48 +599,57 @@ def _solve_lkh3(
     precision: int,
     complete: bool,
     seed: int,
-) -> tuple[list[dict], list[list[int]]]:
-    """Run LKH-3 on every root of A and return per-root (outputs, terminal indices)."""
+) -> list[dict]:
+    """Solve every root cluster of A with LKH-3, sequentially or in parallel.
+
+    Single-root (R == 1) is solved synchronously; multi-root dispatches one
+    `_solve_cluster` per root through a ThreadPoolExecutor (one thread per
+    root). Returns one LKH output dict per root, in root order (-R..-1).
+    """
     R = A.graph['R']
     name = A.graph.get('name', 'unnamed')
-    job_args = []
-    for r, terminals, vehicles_c, init_tour in zip(
-        range(-R, 0), terminals_, vehicles_, warmstart_tours
-    ):
-        cluster_name = name if R == 1 else f'{name}_root{r}'
-        job_args.append(
-            dict(
-                A=A,
-                terminals=terminals,
-                root=r,
-                capacity=capacity,
-                vehicles=vehicles_c,
-                balanced=balanced,
-                time_limit=time_limit,
-                scale=scale,
-                runs=runs,
-                per_run_limit=per_run_limit,
-                precision=precision,
-                complete=complete,
-                seed=seed,
-                initial_tour_nodes=init_tour,
-                name=cluster_name,
-            )
+    job_kwargs_ = [
+        dict(
+            A=A,
+            terminals=terminals,
+            root=r,
+            capacity=capacity,
+            vehicles=vehicles_c,
+            balanced=balanced,
+            time_limit=time_limit,
+            scale=scale,
+            runs=runs,
+            per_run_limit=per_run_limit,
+            precision=precision,
+            complete=complete,
+            seed=seed,
+            initial_tour_nodes=init_tour,
+            name=name if R == 1 else f'{name}_root{r}',
         )
+        for r, terminals, vehicles_c, init_tour in zip(
+            range(-R, 0), terminals_, vehicles_, warmstart_tours
+        )
+    ]
     if R == 1:
-        results = [_solve_one_cluster(**job_args[0])]
-    else:
-        with ThreadPoolExecutor(max_workers=R) as executor:
-            results = list(executor.map(lambda kw: _solve_one_cluster(**kw), job_args))
-    outputs_ = [r[0] for r in results]
-    indices_ = [r[1] for r in results]
-    return outputs_, indices_
+        return [_solve_cluster(**job_kwargs_[0])]
+    with ThreadPoolExecutor(max_workers=R) as executor:
+        return list(executor.map(lambda kw: _solve_cluster(**kw), job_kwargs_))
 
 
 def _setup_clusters(
     A: nx.Graph, *, capacity: int, vehicles: int | None
 ) -> tuple[list[list[int]], list[int]]:
-    """Compute per-root terminals and minimum-feasible vehicle counts."""
+    """Compute per-root terminals and minimum-feasible vehicle counts.
+
+    For R == 1 the only cluster is `range(T)`; for R > 1 the terminals are
+    partitioned by `clusterize()` and each cluster's terminal list is sorted
+    so that LKH customer ids `[1..T_c]` correspond to the cluster's nodes in
+    sorted order (and `_initial_tours_from_warmstart` agrees on indexing).
+
+    The returned `vehicles_` list is the per-cluster minimum feasible count,
+    except for R == 1 where a user-supplied `vehicles > vehicles_min` is
+    honoured (this knob is meaningless under multi-root clustering).
+    """
     R, T = A.graph['R'], A.graph['T']
     if R == 1:
         terminals_ = [list(range(T))]
@@ -785,12 +783,14 @@ def lkh3(
         A_iter, capacity=capacity, vehicles=vehicles
     )
     if warmstart is not None:
-        warmstart_tours = _split_warmstart_per_root(warmstart, vehicles_)
+        warmstart_tours = _initial_tours_from_warmstart(
+            warmstart, terminals_, vehicles_
+        )
     else:
         warmstart_tours = [None] * R
 
-    def _solve():
-        outputs_, indices_ = _solve_lkh3(
+    def _solve_and_repair() -> tuple[nx.Graph, list[dict]]:
+        outputs_ = _run_lkh_per_cluster(
             A_iter,
             capacity=capacity,
             time_limit=time_limit,
@@ -809,7 +809,7 @@ def lkh3(
             A_iter,
             capacity=capacity,
             outputs_=outputs_,
-            indices_=indices_,
+            terminals_=terminals_,
             keep_log=keep_log,
             method_options=method_options,
             solver_details_extra=solver_details_extra,
@@ -819,14 +819,14 @@ def lkh3(
         )
         return S, outputs_
 
-    crossings = []
+    crossings: list = []
     over_capacity_clusters: list[int] = []
     i = 0
     if not repair:
-        S, _ = _solve()
+        S, _ = _solve_and_repair()
     else:
         while True:
-            S, outputs_ = _solve()
+            S, outputs_ = _solve_and_repair()
             S = repair_routeset_path(S, A_iter)
             crossings = S.graph.get('outstanding_crossings', [])
             over_capacity_clusters = [
@@ -844,11 +844,18 @@ def lkh3(
                 break
             i += 1
             if over_capacity_clusters:
-                # bump vehicles for the offending clusters and warmstart from S
+                # Bump vehicles for the offending clusters and warmstart from S.
+                # Safe because this branch does not modify A_iter, so every edge
+                # in S is still in A_iter (and the warmstart tour does not refer
+                # to edges with the w_clip sentinel weight).
                 for ic in over_capacity_clusters:
                     vehicles_[ic] += 1
-                warmstart_tours = _split_warmstart_per_root(S, vehicles_)
+                warmstart_tours = _initial_tours_from_warmstart(
+                    S, terminals_, vehicles_
+                )
             else:
+                # remove_offending_crossings shrinks A_iter, so any warmstart
+                # derived from S would now refer to removed edges. Start cold.
                 warmstart_tours = [None] * R
                 remove_offending_crossings(A_iter, diagonals, crossings)
     if i > 0:
