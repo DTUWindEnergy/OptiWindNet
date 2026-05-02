@@ -85,25 +85,50 @@ def _build_weight_matrix(
         scale: factor to scale lengths.
         complete: if True, fill missing edges with Euclidean distances.
         w_clip: integer used for non-existing/clipped edges.
+
+    Raises:
+        OverflowError: a scaled length exceeds `w_clip`. LKH multiplies our
+            stored cost by `PRECISION` internally and works in 32-bit ints,
+            so the budget per entry is `int32_max // (2 * PRECISION)` —
+            which the caller passes here as `w_clip`. Exceeding it usually
+            means the input graph is not normalized (call `as_normalized()`
+            before solving), or that `scale` is too large for the coordinate
+            magnitudes.
     """
     T_c = len(terminals)
+
+    def _check(value: float, source: str) -> None:
+        if value > w_clip:
+            raise OverflowError(
+                f'LKH weight matrix overflows the per-entry budget: scaled '
+                f'{source} reaches {value:.3e} > w_clip={w_clip} (= '
+                f'int32_max // (2 * precision)). Normalize the input graph '
+                f'(`as_normalized()`) or reduce `scale` (currently {scale:g}).'
+            )
+
+    R = A.graph['R']
+    root_col = R + root  # convert negative root id (-R..-1) to d2roots column index
+    d2root_scaled = np.round(A.graph['d2roots'][terminals, root_col] * scale)
+    _check(float(d2root_scaled.max(initial=0.0)), 'depot distance')
+
     if complete:
         VertexC = A.graph['VertexC']
         coords = np.vstack([VertexC[terminals], VertexC[root].reshape(1, -1)])
-        L = squareform(np.round(pdist(coords) * scale).astype(np.int32))
+        pd_scaled = np.round(pdist(coords) * scale)
+        _check(float(pd_scaled.max(initial=0.0)), 'pairwise distance')
+        L = squareform(pd_scaled.astype(np.int32))
     else:
         L = np.full((T_c + 1, T_c + 1), w_clip, dtype=np.int32)
+
     i_from_n = {n: i for i, n in enumerate(terminals)}
     for u, v, length in A.edges(data='length'):
         iu = i_from_n.get(u)
         iv = i_from_n.get(v)
         if iu is not None and iv is not None:
-            L[iu, iv] = L[iv, iu] = round(length * scale)
-    R = A.graph['R']
-    root_col = R + root  # convert negative root id (-R..-1) to d2roots column index
-    L[:-1, -1] = np.round(A.graph['d2roots'][terminals, root_col] * scale).astype(
-        np.int32
-    )
+            scaled = round(length * scale)
+            _check(scaled, 'edge length')
+            L[iu, iv] = L[iv, iu] = scaled
+    L[:-1, -1] = d2root_scaled.astype(np.int32)
     return L
 
 
@@ -306,11 +331,33 @@ def _add_branches(S, branches, root, subtree_id_start):
     return max_load, subtree_id
 
 
-def _solve_cluster(
+def _build_cluster_weight_matrices(
     A: nx.Graph,
+    terminals_: list[list[int]],
     *,
-    terminals: list[int],
-    root: int,
+    scale: float,
+    complete: bool,
+    precision: int,
+) -> list[np.ndarray]:
+    """Build one LKH weight matrix per cluster.
+
+    Computes the `w_clip` sentinel (used for missing/clipped edges) from
+    `precision` once, then calls `_build_weight_matrix` for each
+    (terminals, root) pair in root order (-R..-1).
+    """
+    R = A.graph['R']
+    w_clip = np.iinfo(np.int32).max // (2 * precision)
+    return [
+        _build_weight_matrix(
+            A, terminals, r, scale=scale, complete=complete, w_clip=w_clip
+        )
+        for r, terminals in zip(range(-R, 0), terminals_)
+    ]
+
+
+def _solve_cluster(
+    L: np.ndarray,
+    *,
     capacity: int,
     vehicles: int,
     balanced: bool,
@@ -319,21 +366,19 @@ def _solve_cluster(
     runs: int,
     per_run_limit: float,
     precision: int,
-    complete: bool,
     seed: int,
     initial_tour_nodes: list[int] | None,
     name: str,
 ) -> dict:
-    """Build the LKH weight matrix for a cluster and run LKH-3 on it.
+    """Run LKH-3 on a pre-built cluster weight matrix.
 
-    Returns the LKH output dict (the matrix-index-to-node-id mapping is the
-    `terminals` argument the caller already holds).
+    `L` is shape (T_c+1, T_c+1) with the depot at the last index. Derives
+    `min_route_size` from `vehicles`/`capacity`/`balanced` and dispatches to
+    `_do_lkh`. The matrix is built by `_build_cluster_weight_matrices`,
+    decoupled from this call so it can be reused across iterations that do
+    not mutate the underlying graph.
     """
-    w_clip = np.iinfo(np.int32).max // (2 * precision)
-    L = _build_weight_matrix(
-        A, terminals, root, scale=scale, complete=complete, w_clip=w_clip
-    )
-    T_c = len(terminals)
+    T_c = L.shape[0] - 1
     if balanced:
         min_route_size = T_c // vehicles
     elif vehicles == math.ceil(T_c / capacity):
@@ -524,10 +569,11 @@ def _lkh(
     seed_for_lkh = 0 if seed is None else seed
 
     terminals = list(range(T))
+    [L] = _build_cluster_weight_matrices(
+        A, [terminals], scale=scale, complete=complete, precision=precision
+    )
     output = _solve_cluster(
-        A,
-        terminals=terminals,
-        root=-1,
+        L,
         capacity=capacity,
         vehicles=vehicles,
         balanced=balanced,
@@ -536,7 +582,6 @@ def _lkh(
         runs=runs,
         per_run_limit=per_run_limit,
         precision=precision,
-        complete=complete,
         seed=seed_for_lkh,
         initial_tour_nodes=initial_tour_nodes,
         name=A.graph.get('name', 'unnamed'),
@@ -585,11 +630,11 @@ def lkh(*args, **kwargs) -> nx.Graph:
 
 
 def _run_lkh_per_cluster(
-    A: nx.Graph,
+    L_: list[np.ndarray],
     *,
+    name: str,
     capacity: int,
     time_limit: float,
-    terminals_: list[list[int]],
     vehicles_: list[int],
     warmstart_tours: list[list[int] | None],
     balanced: bool,
@@ -597,22 +642,18 @@ def _run_lkh_per_cluster(
     runs: int,
     per_run_limit: float,
     precision: int,
-    complete: bool,
     seed: int,
 ) -> list[dict]:
-    """Solve every root cluster of A with LKH-3, sequentially or in parallel.
+    """Solve every root cluster with LKH-3, sequentially or in parallel.
 
     Single-root (R == 1) is solved synchronously; multi-root dispatches one
     `_solve_cluster` per root through a ThreadPoolExecutor (one thread per
     root). Returns one LKH output dict per root, in root order (-R..-1).
     """
-    R = A.graph['R']
-    name = A.graph.get('name', 'unnamed')
+    R = len(L_)
     job_kwargs_ = [
         dict(
-            A=A,
-            terminals=terminals,
-            root=r,
+            L=L,
             capacity=capacity,
             vehicles=vehicles_c,
             balanced=balanced,
@@ -621,13 +662,12 @@ def _run_lkh_per_cluster(
             runs=runs,
             per_run_limit=per_run_limit,
             precision=precision,
-            complete=complete,
             seed=seed,
             initial_tour_nodes=init_tour,
             name=name if R == 1 else f'{name}_root{r}',
         )
-        for r, terminals, vehicles_c, init_tour in zip(
-            range(-R, 0), terminals_, vehicles_, warmstart_tours
+        for r, L, vehicles_c, init_tour in zip(
+            range(-R, 0), L_, vehicles_, warmstart_tours
         )
     ]
     if R == 1:
@@ -789,12 +829,20 @@ def lkh3(
     else:
         warmstart_tours = [None] * R
 
+    # Built once outside the retry loop. Rebuilt only after the crossings
+    # branch (which mutates A_iter via remove_offending_crossings); the
+    # over-capacity branch leaves A_iter intact and reuses the same matrices.
+    L_ = _build_cluster_weight_matrices(
+        A_iter, terminals_, scale=scale, complete=complete, precision=precision
+    )
+    name = A_iter.graph.get('name', 'unnamed')
+
     def _solve_and_repair() -> tuple[nx.Graph, list[dict]]:
         outputs_ = _run_lkh_per_cluster(
-            A_iter,
+            L_,
+            name=name,
             capacity=capacity,
             time_limit=time_limit,
-            terminals_=terminals_,
             vehicles_=vehicles_,
             warmstart_tours=warmstart_tours,
             balanced=balanced,
@@ -802,7 +850,6 @@ def lkh3(
             runs=runs,
             per_run_limit=per_run_limit,
             precision=precision,
-            complete=complete,
             seed=seed,
         )
         S = _build_solution(
@@ -845,19 +892,27 @@ def lkh3(
             i += 1
             if over_capacity_clusters:
                 # Bump vehicles for the offending clusters and warmstart from S.
-                # Safe because this branch does not modify A_iter, so every edge
-                # in S is still in A_iter (and the warmstart tour does not refer
-                # to edges with the w_clip sentinel weight).
+                # A_iter is not modified here, so L_ stays valid and the
+                # warmstart tour does not refer to edges with the w_clip
+                # sentinel weight.
                 for ic in over_capacity_clusters:
                     vehicles_[ic] += 1
                 warmstart_tours = _initial_tours_from_warmstart(
                     S, terminals_, vehicles_
                 )
             else:
-                # remove_offending_crossings shrinks A_iter, so any warmstart
-                # derived from S would now refer to removed edges. Start cold.
+                # remove_offending_crossings shrinks A_iter; rebuild L_ so the
+                # removed edges revert to the w_clip sentinel. Start cold (any
+                # warmstart from S would now refer to removed edges).
                 warmstart_tours = [None] * R
                 remove_offending_crossings(A_iter, diagonals, crossings)
+                L_ = _build_cluster_weight_matrices(
+                    A_iter,
+                    terminals_,
+                    scale=scale,
+                    complete=complete,
+                    precision=precision,
+                )
     if i > 0:
         S.graph['retries'] = i
         if crossings or over_capacity_clusters:
@@ -897,14 +952,8 @@ def iterative_lkh(
         DeprecationWarning,
         stacklevel=2,
     )
-    A = Aʹ.copy()
-    diagonals = Aʹ.graph['diagonals'].copy()
-    A.graph['diagonals'] = diagonals
-    nx.set_node_attributes(A, -1, 'root')
-    add_link_blockmap(A)
-    _prune_links(A, math.ceil(2.4 * capacity))
     return lkh3(
-        A,
+        Aʹ,
         capacity=capacity,
         time_limit=time_limit,
         vehicles=vehicles,
