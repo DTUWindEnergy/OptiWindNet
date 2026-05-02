@@ -600,7 +600,9 @@ def _solve_lkh3(
     *,
     capacity: int,
     time_limit: float,
-    vehicles: int | None,
+    terminals_: list[list[int]],
+    vehicles_: list[int],
+    warmstart_tours: list[list[int] | None],
     balanced: bool,
     scale: float,
     runs: int,
@@ -608,34 +610,9 @@ def _solve_lkh3(
     precision: int,
     complete: bool,
     seed: int,
-    warmstart: nx.Graph | None,
 ) -> tuple[list[dict], list[list[int]]]:
     """Run LKH-3 on every root of A and return per-root (outputs, terminal indices)."""
-    R, T = A.graph['R'], A.graph['T']
-
-    if R == 1:
-        terminals_ = [list(range(T))]
-        len_cluster_ = [T]
-    else:
-        cluster_, _num_slack_ = clusterize(A, capacity)
-        terminals_ = [sorted(c) for c in cluster_]
-        len_cluster_ = [len(c) for c in terminals_]
-
-    vehicles_min_ = [math.ceil(n / capacity) for n in len_cluster_]
-    if R == 1:
-        if vehicles is not None and vehicles > vehicles_min_[0]:
-            vehicles_ = [vehicles]
-        else:
-            vehicles_ = vehicles_min_
-    else:
-        # multi-root: always use minimum feasible per cluster
-        vehicles_ = vehicles_min_
-
-    if warmstart is not None:
-        warmstart_tours = _split_warmstart_per_root(warmstart, vehicles_)
-    else:
-        warmstart_tours = [None] * R
-
+    R = A.graph['R']
     name = A.graph.get('name', 'unnamed')
     job_args = []
     for r, terminals, vehicles_c, init_tour in zip(
@@ -669,6 +646,26 @@ def _solve_lkh3(
     outputs_ = [r[0] for r in results]
     indices_ = [r[1] for r in results]
     return outputs_, indices_
+
+
+def _setup_clusters(
+    A: nx.Graph, *, capacity: int, vehicles: int | None
+) -> tuple[list[list[int]], list[int]]:
+    """Compute per-root terminals and minimum-feasible vehicle counts."""
+    R, T = A.graph['R'], A.graph['T']
+    if R == 1:
+        terminals_ = [list(range(T))]
+        len_cluster_ = [T]
+    else:
+        cluster_, _num_slack_ = clusterize(A, capacity)
+        terminals_ = [sorted(c) for c in cluster_]
+        len_cluster_ = [len(c) for c in terminals_]
+    vehicles_min_ = [math.ceil(n / capacity) for n in len_cluster_]
+    if R == 1 and vehicles is not None and vehicles > vehicles_min_[0]:
+        vehicles_ = [vehicles]
+    else:
+        vehicles_ = list(vehicles_min_)
+    return terminals_, vehicles_
 
 
 def lkh3(
@@ -773,12 +770,33 @@ def lkh3(
     )
     solver_details_extra = dict(seed=seed)
 
+    A_iter = A.copy()
+    diagonals = A.graph['diagonals'].copy()
+    A_iter.graph['diagonals'] = diagonals
+    # for clustering() and _prune_links() to index d2roots (-R offset is indifferent):
+    if R > 1:
+        A_iter.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
+    else:
+        A_iter.graph['closest_root'] = np.full((T,), -1, dtype=np.int_)
+    add_link_blockmap(A_iter)
+    _prune_links(A_iter, math.ceil(2.4 * capacity))
+
+    terminals_, vehicles_ = _setup_clusters(
+        A_iter, capacity=capacity, vehicles=vehicles
+    )
+    if warmstart is not None:
+        warmstart_tours = _split_warmstart_per_root(warmstart, vehicles_)
+    else:
+        warmstart_tours = [None] * R
+
     def _solve():
         outputs_, indices_ = _solve_lkh3(
             A_iter,
             capacity=capacity,
             time_limit=time_limit,
-            vehicles=vehicles,
+            terminals_=terminals_,
+            vehicles_=vehicles_,
+            warmstart_tours=warmstart_tours,
             balanced=balanced,
             scale=scale,
             runs=runs,
@@ -786,7 +804,6 @@ def lkh3(
             precision=precision,
             complete=complete,
             seed=seed,
-            warmstart=warmstart,
         )
         S = _build_solution(
             A_iter,
@@ -800,35 +817,44 @@ def lkh3(
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
             'ERROR: root node load does not match T.'
         )
-        return S
+        return S, outputs_
 
-    A_iter = A.copy()
-    diagonals = A.graph['diagonals'].copy()
-    A_iter.graph['diagonals'] = diagonals
-    # for clustering() and _prune_links() to index d2roots (-R offset is indifferent):
-    if R > 1:
-        A_iter.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
-    else:
-        A_iter.graph['closest_root'] = np.full((T,), -1, dtype=np.int_)
-    add_link_blockmap(A_iter)
-    _prune_links(A_iter, math.ceil(2.4 * capacity))
     crossings = []
+    over_capacity_clusters: list[int] = []
     i = 0
     if not repair:
-        S = _solve()
+        S, _ = _solve()
     else:
         while True:
-            S = _solve()
+            S, outputs_ = _solve()
             S = repair_routeset_path(S, A_iter)
             crossings = S.graph.get('outstanding_crossings', [])
-            if not crossings or i == max_retries:
+            over_capacity_clusters = [
+                ic
+                for ic, output in enumerate(outputs_)
+                if max((len(r) for r in output['routes']), default=0) > capacity
+            ]
+            if over_capacity_clusters:
+                warn(
+                    'Capacity violated in LKH solution: '
+                    f'max_load ({S.graph["max_load"]}) > capacity ({capacity}). '
+                    'Retrying with increased vehicles.'
+                )
+            if (not crossings and not over_capacity_clusters) or i == max_retries:
                 break
             i += 1
-            remove_offending_crossings(A_iter, diagonals, crossings)
+            if over_capacity_clusters:
+                # bump vehicles for the offending clusters and warmstart from S
+                for ic in over_capacity_clusters:
+                    vehicles_[ic] += 1
+                warmstart_tours = _split_warmstart_per_root(S, vehicles_)
+            else:
+                warmstart_tours = [None] * R
+                remove_offending_crossings(A_iter, diagonals, crossings)
     if i > 0:
         S.graph['retries'] = i
-        if crossings:
-            warn('Solution contains crossings (max_retries reached)')
+        if crossings or over_capacity_clusters:
+            warn('Solution remains invalid (max_retries reached)')
     return S
 
 
