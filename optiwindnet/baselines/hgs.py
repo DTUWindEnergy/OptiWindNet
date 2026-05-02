@@ -7,7 +7,6 @@ import random
 import warnings
 from typing import Callable
 from typing import Sequence
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 import hybgensea
@@ -17,6 +16,7 @@ import numpy as np
 from ..clustering import clusterize
 from ..interarraylib import fun_fingerprint
 from ..repair import repair_routeset_path
+from ._core import remove_offending_crossings
 
 _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
@@ -350,45 +350,26 @@ def hgs_cvrp(
 
     # iterative repair loop
     diagonals = A.graph['diagonals']
+    if R > 1:
+        # needed in clustering
+        A.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
+    crossings = []
     i = 0
-    while repair:
+    if not repair:
         S = _solve()
-        S = repair_routeset_path(S, A)
-        crossings = S.graph.get('outstanding_crossings', [])
-        if not crossings or i == max_retries:
-            break
-        i += 1
-        if i == 1:
-            A = A.copy()
-            diagonals = diagonals.copy()
-            A.graph['diagonals'] = diagonals
-        crossing_counterparts = defaultdict(list)
-        for uv, st in crossings:
-            crossing_counterparts[uv].append(st)
-            crossing_counterparts[st].append(uv)
-        for uv in sorted(
-            crossing_counterparts,
-            key=lambda k: len(crossing_counterparts[k]),
-            reverse=True,
-        ):
-            counterparts = crossing_counterparts[uv]
-            if counterparts:
-                if (
-                    len(counterparts) == 1
-                    and A.edges[counterparts[0]]['length'] > A.edges[uv]['length']
-                ):
-                    st = counterparts[0]
-                    counterparts = crossing_counterparts[st]
-                    counterparts.remove(uv)
-                    uv = st
-                for st in counterparts:
-                    crossing_counterparts[st].remove(uv)
-                if uv in diagonals:
-                    del diagonals[uv]
-                A.remove_edge(*uv)
     else:
-        # repair was false, while loop skipped
-        S = _solve()
+        while True:
+            S = _solve()
+            S = repair_routeset_path(S, A)
+            crossings = S.graph.get('outstanding_crossings', [])
+            if not crossings or i == max_retries:
+                break
+            i += 1
+            if i == 1:
+                A = A.copy()
+                diagonals = diagonals.copy()
+                A.graph['diagonals'] = diagonals
+            remove_offending_crossings(A, diagonals, crossings)
     if i > 0:
         S.graph['retries'] = i
         if crossings:
