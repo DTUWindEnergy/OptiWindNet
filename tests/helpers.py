@@ -1,5 +1,6 @@
 import copy
 import pickle
+from collections import Counter
 from pathlib import Path
 from typing import Iterable, Any, Dict, Optional
 import numpy as np
@@ -186,6 +187,33 @@ def assert_graph_equal(
             raise AssertionError(
                 f"Graph['{k}'] differs: {G1c.graph[k]!r} != {G2c.graph[k]!r}"
             )
+
+
+def canonical_edges(G: nx.Graph) -> Counter:
+    """Edge multiset of G where detour clones are replaced by their primes.
+
+    Two route sets with equal canonical edge multisets are topologically
+    equivalent even if their detour clones have different numbering.
+
+    Multiplicity matters: two independent feeders touching the same border
+    vertex produce two distinct clones with the same prime, so the canonical
+    edge appears twice.
+    """
+    T = G.graph['T']
+    B = G.graph.get('B', 0)
+    fnT = G.graph.get('fnT')
+
+    def prime(n: int) -> int:
+        n = int(n)
+        if n < 0 or n < T + B:
+            return n
+        return int(fnT[n])
+
+    edges: Counter = Counter()
+    for u, v in G.edges:
+        pu, pv = prime(u), prime(v)
+        edges[(pu, pv) if pu < pv else (pv, pu)] += 1
+    return edges
 
 
 def tiny_wfn(

@@ -10,7 +10,8 @@ from pathlib import Path
 
 from enum import StrEnum, auto
 from itertools import chain
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import networkx as nx
 from makefun import with_signature
@@ -159,17 +160,20 @@ class ModelOptions(dict):
             print(f'{name} [{kind.__name__}] default: {default}\n    {desc}\n')
 
 
+_Link = tuple[int, int]
+
+
 @dataclass(slots=True)
 class ModelMetadata:
     R: int
     T: int
     capacity: int
-    linkset: tuple
-    link_: Mapping
-    flow_: Mapping
-    model_options: dict
+    linkset: tuple[_Link, ...]
+    link_: Mapping[_Link, Any]
+    flow_: Mapping[_Link, Any]
+    model_options: dict[str, Any]
     fun_fingerprint: dict[str, str | bytes]
-    weight_: tuple = ()
+    weight_: tuple[float, ...] = ()
     solution_hint: dict[Any, float] = field(default_factory=dict)
     warmed_by: str = ''
 

@@ -111,6 +111,7 @@ def test_G_from_routeset(tmp_path):
         assert id == 1
 
         rs = RouteSet.get_by_id(id)
+        assert rs.feeders_per_root == [len(G[root]) for root in range(-G.graph['R'], 0)]
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {
@@ -161,6 +162,7 @@ def test_G_from_routeset_detours(tmp_path):
         assert id == 1
 
         rs = RouteSet.get_by_id(id)
+        assert rs.feeders_per_root == [len(G[root]) for root in range(-G.graph['R'], 0)]
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {

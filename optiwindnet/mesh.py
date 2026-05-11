@@ -21,8 +21,6 @@ from .geometric import (
     Indices,
     apply_edge_exemptions,
     complete_graph,
-    find_edges_bbox_overlaps,
-    is_crossing_no_bbox,
     is_triangle_pair_a_convex_quadrilateral,
     rotation_checkers_factory,
     triangle_AR,
@@ -56,6 +54,34 @@ def _index(array: Indices, item: np.int_) -> int:
     # value not found (must not happen, maybe should throw exception)
     # raise ValueError('value not found in array')
     return 0
+
+
+def _build_edge_line_tree(
+    VertexC: CoordPairs, edges: set[tuple[int, int]] | list[tuple[int, int]] | tuple
+) -> tuple[tuple[tuple[int, int], ...], np.ndarray, shp.STRtree | None]:
+    """Build a reusable STRtree for a collection of edges."""
+    edges_ = tuple(sorted(edges))
+    if not edges_:
+        return edges_, np.empty(0, dtype=object), None
+    edge_idx = np.asarray(edges_, dtype=int)
+    lines = shp.linestrings(VertexC[edge_idx])
+    return edges_, lines, shp.STRtree(lines)
+
+
+def _record_nonstraight_root_distance(
+    A: nx.Graph,
+    d2roots: np.ndarray,
+    n: int,
+    r: int,
+    new_length: float,
+) -> None:
+    """Store the original straight-root distance and replace it with a detoured one."""
+    los_d2root = A.nodes[n].get('los_d2root')
+    if los_d2root is None:
+        A.nodes[n]['los_d2root'] = {r: d2roots[n, r].item()}
+    else:
+        los_d2root.update({r: d2roots[n, r].item()})
+    d2roots[n, r] = new_length
 
 
 @nb.njit(cache=True)
@@ -842,6 +868,8 @@ def make_planar_embedding(
     # ##########################################
     debug('PART H')
     constraint_edges = set()
+    obstacle_constraint_edges = ()
+    obstacle_constraint_lines = np.empty(0, dtype=object)
     edgesCDT_obstacles = []
     #  hard_constraints_xy_ = set()
     V2d_holes = []
@@ -885,16 +913,18 @@ def make_planar_embedding(
         # Here we use the changes in CDT triangulation to identify the P_A
         # edges that cross obstacles or lay in their vicinity.
         edges_to_examine = P_A_edges - P_edges
-        edges_check = np.array(list(constraint_edges))
+        (
+            obstacle_constraint_edges,
+            obstacle_constraint_lines,
+            obstacle_constraint_tree,
+        ) = _build_edge_line_tree(VertexS, constraint_edges)
         while edges_to_examine:
             u, v = edges_to_examine.pop()
-            uC, vC = VertexS[[u, v]]
             # if ⟨u, v⟩ does not cross any constraint_edges, add it to edgesCDT
-            ovlap = find_edges_bbox_overlaps(VertexS, u, v, edges_check)
-            if not any(
-                is_crossing_no_bbox(uC, vC, *VertexS[edge])
-                for edge in edges_check[ovlap]
-            ):
+            candidate_idx = obstacle_constraint_tree.query(
+                shp.LineString(VertexS[[u, v]]), predicate='intersects'
+            )
+            if candidate_idx.size == 0:
                 # ⟨u, v⟩ was removed from the triangulation but does not cross
                 soft_constraints.add((u, v))
             else:
@@ -920,6 +950,15 @@ def make_planar_embedding(
                 for u, v in soft_constraints
             ]
             mesh.insert_edges(edgesCDT_soft)
+    elif stuntS:
+        VertexS = np.vstack(
+            (
+                VertexS[:-R],
+                *stuntS,
+                np.array([(v.x, v.y) for v in mesh.vertices[:3]]),
+                VertexS[-R:],
+            )
+        )
 
     # #######################################################
     # I) Insert the hull's and concavities' constraint edges.
@@ -965,6 +1004,24 @@ def make_planar_embedding(
     if edgesCDT_concavities:
         mesh.insert_vertices(V2d_concavities)
         mesh.insert_edges(edgesCDT_concavities)
+
+    extra_constraint_edges = tuple(
+        sorted(constraint_edges - set(obstacle_constraint_edges))
+    )
+    if extra_constraint_edges:
+        extra_constraint_lines = shp.linestrings(
+            VertexS[np.asarray(extra_constraint_edges, dtype=int)]
+        )
+        constraint_los_lines = (
+            np.concatenate((obstacle_constraint_lines, extra_constraint_lines))
+            if obstacle_constraint_lines.size > 0
+            else extra_constraint_lines
+        )
+    else:
+        constraint_los_lines = obstacle_constraint_lines
+    constraint_los_tree = (
+        shp.STRtree(constraint_los_lines) if constraint_los_lines.size > 0 else None
+    )
 
     # ############################################################
     # J) Add coordinates for stunts, supertriangle and scale back.
@@ -1071,6 +1128,19 @@ def make_planar_embedding(
     debug('PART L')
     P_edges.difference_update((u, v) for v in supertriangle for u in P[v])
     P_paths = nx.Graph(P_edges)
+    P_paths_shortcuts = {}
+
+    def expand_P_paths_edge(s, t):
+        key = (s, t) if s < t else (t, s)
+        path = P_paths_shortcuts.get(key)
+        if path is None:
+            return [s, t]
+        if path[0] != s:
+            path = path[::-1]
+        expanded = [path[0]]
+        for u, v in pairwise(path):
+            expanded.extend(expand_P_paths_edge(u, v)[1:])
+        return expanded
 
     # this adds diagonals to P_paths, but not diagonals that cross constraints
     P_diags = bidict()
@@ -1094,7 +1164,7 @@ def make_planar_embedding(
     # ###################################################################
     debug('PART M')
 
-    cw, ccw = rotation_checkers_factory(VertexC)
+    cw, ccw, _ = rotation_checkers_factory(VertexC)
     # auxiliary function for parts M and N
 
     def is_midpoint_shortable(s, b, t):
@@ -1177,6 +1247,12 @@ def make_planar_embedding(
             s, b, t = path[i : i + 3]
             if is_midpoint_shortable(s, b, t):
                 # PERFORM SHORTCUT
+                shortcut_key = (s, t) if s < t else (t, s)
+                shortcut_path = expand_P_paths_edge(s, b)
+                shortcut_path.extend(expand_P_paths_edge(b, t)[1:])
+                P_paths_shortcuts[shortcut_key] = (
+                    shortcut_path if shortcut_key == (s, t) else shortcut_path[::-1]
+                )
                 del path[i + 1]
                 length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
                 shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
@@ -1222,48 +1298,64 @@ def make_planar_embedding(
     P_to_A_candidates = ((P_edges - P_A_edges) - diagonals.keys()) - constraint_edges
 
     # Diagonals in A which have a missing origin Delaunay edge become edges.
-    promoted_diagonal_from_parent_node = {}
+    # First collect candidates and their mutually-exclusive diagonals.  An
+    # extended diagonal can only cross the other extended diagonals of the two
+    # triangles adjacent to its origin Delaunay edge, so this local bookkeeping
+    # is enough to avoid promoting two crossing diagonals into ordinary edges.
+    promotion_candidates = []
     P_A_edges_to_remove = []
     for uv in A_edges_to_revisit:
         st = diagonals.inv.get(uv)
         if st is not None:
-            # delaunay uv was removed, so its entry in diagonals must also be
-            del diagonals.inv[uv]
-            # prevent promotion of two diagonals of the same triangle
-            promote_st = True
-            for n in uv:
-                promoted = promoted_diagonal_from_parent_node.get(n)
-                if promoted is not None:
-                    (w, y), o = promoted
-                    if (
-                        (y, n) in P_A.edges
-                        or (y, o) in P_A.edges
-                        or (w, n) in P_A.edges
-                        or (w, o) in P_A.edges
-                    ) and (w in uv or y in uv):
-                        # st & promoted are diagonals of the same triangle
-                        if (w, y) not in diagonals.inv:
-                            diagonals[st] = w, y
-                        else:
-                            debug(
-                                'Diagonal %s is not promoted to Delaunay because '
-                                'former diagonal «%d–%d» is now its Delaunay edge.',
-                                st,
-                                w,
-                                y,
-                            )
-                        promote_st = False
-            if promote_st:
-                edgeD = A.edges[st]
-                edgeD['kind'] = 'contour_delaunay' if 'midpath' in edgeD else 'delaunay'
-                u, v = uv
-                promoted_diagonal_from_parent_node[u] = st, v
-                promoted_diagonal_from_parent_node[v] = st, u
-                s, t = st
-                w, y = (u, v) if P_A[u][v]['cw'] == s else (v, u)
-                P_A.add_half_edge(s, t, cw=y)
-                P_A.add_half_edge(t, s, cw=w)
+            u, v = uv
+            left, right = P_A[u][v]['cw'], P_A[u][v]['ccw']
+            incompatible = set()
+            for x, y in ((u, left), (v, left), (u, right), (v, right)):
+                xy = (x, y) if x < y else (y, x)
+                diag = diagonals.inv.get(xy)
+                if diag is not None:
+                    incompatible.add(diag if diag[0] < diag[1] else diag[::-1])
+            st = st if st[0] < st[1] else st[::-1]
+            incompatible.discard(st)
+            promotion_candidates.append((uv, st, incompatible))
         P_A_edges_to_remove.append(uv)
+
+    promoted_diagonals = set()
+    for uv, st, incompatible in promotion_candidates:
+        conflicting_promotions = incompatible & promoted_diagonals
+        if conflicting_promotions:
+            # Keep st as an extended edge crossing the already-promoted edge.
+            parent = min(conflicting_promotions)
+            if st in diagonals:
+                del diagonals[st]
+            if parent in diagonals:
+                # `parent` was promoted already, so any stale key mapping would
+                # contradict its new role as an ordinary edge.
+                del diagonals[parent]
+            if parent in diagonals.inv:
+                # `bidict` cannot map multiple losing diagonals to the same
+                # promoted edge.  Keeping st in A without a diagonal relation
+                # would make it look like an ordinary non-crossing edge.
+                A.remove_edge(*st)
+            else:
+                diagonals[st] = parent
+            debug(
+                'Diagonal %s is not promoted to Delaunay because it conflicts '
+                'with already-promoted diagonal %s.',
+                st,
+                parent,
+            )
+            continue
+        # delaunay uv was removed, so its entry in diagonals must also be
+        del diagonals[st]
+        edgeD = A.edges[st]
+        edgeD['kind'] = 'contour_delaunay' if 'midpath' in edgeD else 'delaunay'
+        promoted_diagonals.add(st)
+        u, v = uv
+        s, t = st
+        w, y = (u, v) if P_A[u][v]['cw'] == s else (v, u)
+        P_A.add_half_edge(s, t, cw=y)
+        P_A.add_half_edge(t, s, cw=w)
     for uv in P_A_edges_to_remove:
         P_A.remove_edge(*uv)
 
@@ -1297,32 +1389,83 @@ def make_planar_embedding(
     if concavities or obstacles:
         # Use P_paths to obtain estimates of d2roots taking into consideration
         # the concavities and obstacle zones.
+        # pre-allocate the line-of-sight (LOS) segments index array
+        los_idx = np.empty((T, 2), dtype=int)
+        los_idx[:, 1] = np.arange(T)
         for r in range(-R, 0):
+            los_idx[:, 0] = r
+            crossing_pairs = constraint_los_tree.query(
+                shp.linestrings(VertexS[los_idx]), predicate='crosses'
+            )
+            if crossing_pairs.size == 0:
+                continue
+            los_crossing_nodes = set(crossing_pairs[0].tolist())
             lengths, paths = nx.single_source_dijkstra(P_paths, r, weight='length')
-            for n, path in paths.items():
-                if n >= T or n < 0 or all(p < T for p in path[1:-1]):
-                    # skip border and root vertices and paths without borders
+            for n in los_crossing_nodes:
+                path = paths[n]
+                if all(p < T for p in path[1:-1]):
+                    # no border vertex to do string-pulling: heuristic estimate.
+                    # Remove leading nodes that have LOS to r, keeping only
+                    # the last LOS node before the first non-LOS node.
+                    # n is always in los_crossing_nodes, so next() always finds one.
+                    last_kept = next(p for p in path[1:] if p in los_crossing_nodes)
+                    if last_kept >= 0:
+                        # last_kept is the last LOS node before the first non-LOS
+                        pruned_len = (
+                            d2roots[last_kept, r] + lengths[n] - lengths[last_kept]
+                        )
+                    else:
+                        # no LOS intermediate to shortcut; pruned == original path
+                        pruned_len = lengths[n]
+                    debug(
+                        'd2roots[%d, %d] updated by LOS pruning (path %s prunned at %d)',
+                        n,
+                        r,
+                        path,
+                        last_kept,
+                    )
+                    _record_nonstraight_root_distance(
+                        # empirical weighting of pruned_len and euclidean distance
+                        A,
+                        d2roots,
+                        n,
+                        r,
+                        (3 * d2roots[n, r] + pruned_len) / 4,
+                    )
                     continue
+                # do string pulling to estimate the detour length
                 debug('updating d2root of ⟨%d, %d⟩ (path %s)', r, n, path)
-                b_path = (*(p for p in path[1:-1] if p >= T), n)
-                s = r
-                real_path = [r]
-                for b, t in pairwise(b_path):
-                    if not is_midpoint_shortable(s, b, t):
-                        real_path.append(b)
-                        s = b
-                real_path.append(n)
+                borders = tuple(p for p in path[1:-1] if p >= T)
+                if len(borders) == 1:
+                    # Only one border vertex on the dijkstra path — it is
+                    # the single transit point through the boundary, not a
+                    # corner of a multi-border bend. Skip string-pulling
+                    # and keep it: dropping it would collapse real_path to
+                    # ⟨r, n⟩ even though shapely confirmed obstruction
+                    # (the local `is_midpoint_shortable` test correctly
+                    # finds the vertex shortable on a near-straight border
+                    # stretch, but it cannot see that the resulting
+                    # straight line still crosses other border edges).
+                    real_path = [r, borders[0], n]
+                else:
+                    b_path = (*borders, n)
+                    s = r
+                    real_path = [r]
+                    for b, t in pairwise(b_path):
+                        if not is_midpoint_shortable(s, b, t):
+                            real_path.append(b)
+                            s = b
+                    real_path.append(n)
                 if len(real_path) > 2:
                     debug('d2roots[%d, %d] updated', n, r)
-                    straight2root_ = A.nodes[n].get('straight2root_')
-                    if straight2root_ is None:
-                        A.nodes[n]['straight2root_'] = {r: d2roots[n, r].item()}
-                    else:
-                        straight2root_.update({r: d2roots[n, r].item()})
-                    d2roots[n, r] = (
+                    _record_nonstraight_root_distance(
+                        A,
+                        d2roots,
+                        n,
+                        r,
                         np.hypot(*(VertexC[real_path[1:]] - VertexC[real_path[:-1]]).T)
                         .sum()
-                        .item()
+                        .item(),
                     )
 
     # ##########################################
@@ -1378,6 +1521,8 @@ def make_planar_embedding(
         inter_terminal_clearance_min=inter_terminal_clearance_min,
         inter_terminal_clearance_safe=inter_terminal_clearance_safe,
     )
+    if P_paths_shortcuts:
+        A.graph['P_paths_shortcuts'] = P_paths_shortcuts
     if len(border) > 0:
         A.graph['border'] = border
     if obstacles:
@@ -1560,41 +1705,35 @@ def _deprecated_planar_flipped_by_routeset(
 
 
 def planar_flipped_by_routeset(
-    G: nx.Graph,
+    edges_G: set[tuple[int, int]],
     *,
     planar: nx.PlanarEmbedding,
     VertexC: CoordPairs,
+    ST: int,
     diagonals: bidict | None = None,
 ) -> nx.PlanarEmbedding:
-    """Ajust `planar` to include the edges actually used by routeset `G`.
+    """Ajust `planar` to include the edges actually used by a routeset.
 
     Copies `planar` and flips the edges to their diagonal if the latter is an
-    edge of `G`. Ideally, the returned PlanarEmbedding includes all `G` edges
-    (an expected discrepancy are `G`'s gates).
+    edge in `edges_G`. Ideally, the returned PlanarEmbedding includes all
+    `edges_G` (an expected discrepancy are gates).
+
+    `edges_G` is the set of routeset edges in prime-id form (i.e. clones
+    already mapped through `fnT`), each as a normalized `(u, v)` pair with
+    `u < v`. Gate edges have `u < 0`. `ST` is `T + B` (the boundary above
+    which constraint vertices live).
 
     If `diagonals` is provided, some diagonal gates may become `planar`'s edges
-    if they are not crossing any edge in `G`. Otherwise gates are ignored.
+    if they are not crossing any edge in `edges_G`. Otherwise gates are ignored.
 
-    Important: `G` must be free of edge×edge crossings.
+    Important: the routeset must be free of edge×edge crossings.
     """
-    R, T, B, C = (G.graph.get(k, 0) for k in 'RTBC')
-    fnT = G.graph.get('fnT')
-    if fnT is None:
-        fnT = np.arange(R + T + B + 3 + C)
-        fnT[-R:] = range(-R, 0)
-
     P = planar.copy()
     triangles = P.graph['triangles']
     if diagonals is not None:
         diags = diagonals.copy()
     else:
         diags = ()
-    # get G's edges in terms of node range -R : T + B
-    edges_G = {
-        ((u, v) if u < v else (v, u))
-        for u, v in (fnT[edge,].tolist() for edge in G.edges)
-    }
-    ST = T + B
     edges_P = {((u, v) if u < v else (v, u)) for u, v in P.edges if u < ST and v < ST}
     stack = list(edges_G - edges_P)
     # gates to the bottom of the stack
@@ -1643,7 +1782,7 @@ def planar_flipped_by_routeset(
         #  if (s, t) not in planar:
         #      print(f'{s}~{t} is not in planar')
         #      continue
-        if (s, t) in unflippables:
+        if ((s, t) if s < t else (t, s)) in unflippables:
             warn(
                 'Navigation mesh inconsistency: edge %d-%d is unflippable due to a previous flip nearby',
                 s,

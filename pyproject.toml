@@ -97,7 +97,7 @@ include = ["optiwindnet*"]
 # exclude = []
 
 [tool.setuptools.package-data]
-optiwindnet = ["data/*"]
+optiwindnet = ["data/*", "py.typed", "**/*.pyi"]
 
 [tool.setuptools_scm]
 version_file = "optiwindnet/version.py"

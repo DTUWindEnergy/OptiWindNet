@@ -503,7 +503,7 @@ def make_min_length_model(
     # radial or branched topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
-        # limited by the m.cons_one_out_edge
+        # limited by the m.cons_single_out_link
         m.cons_radial = pyo.Constraint(
             m.T,
             rule=(

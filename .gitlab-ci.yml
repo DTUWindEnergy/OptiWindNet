@@ -31,11 +31,15 @@ variables:
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   before_script:
     - export DEBIAN_FRONTEND=noninteractive
+    - echo 'deb http://debian.lth.se/debian testing main contrib' | tee /etc/apt/sources.list.d/debian-testing.list
+    - |
+      printf 'Package: *\nPin: release a=testing\nPin-Priority: 100\n' | tee /etc/apt/preferences.d/99-testing-low-priority
     - apt-get update
     - apt-get install -yq coinor-cbc
+    - apt install -yq -t testing scip
     # >>> scip/fscip section begin
-    - test -f "downloads/$SCIP_LINUX" || wget --no-verbose -P downloads "https://www.scipopt.org/download/release/$SCIP_LINUX"
-    - apt-get install -yq "./downloads/$SCIP_LINUX"
+    # - test -f "downloads/$SCIP_LINUX" || wget --no-verbose -P downloads "https://www.scipopt.org/download/release/$SCIP_LINUX"
+    # - apt-get install -yq "./downloads/$SCIP_LINUX"
     # <<< scip/fscip section end
     - python3 -m venv tests/venv
     - source tests/venv/bin/activate

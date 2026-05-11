@@ -69,14 +69,14 @@ def test_no_crossings_removes_tentative_tag():
 
 
 def _make_crossing_case():
-    """cables=1 tiny_wfn: gates (-1,1) and (-1,2) cross other edges."""
+    """cables=1 tiny_wfn: feeders (-1,1) and (-1,2) cross other edges."""
     wfn = tiny_wfn(cables=1)
     G_tent = G_from_S(wfn.S, wfn.A)
     return G_tent, wfn.P, wfn.A
 
 
 def test_pathfinder_detects_crossings():
-    """cables=1 produces tentative gates that have crossings."""
+    """cables=1 produces tentative feeders that have crossings."""
     G_tent, P, A = _make_crossing_case()
 
     tentative = G_tent.graph['tentative']
@@ -86,13 +86,13 @@ def test_pathfinder_detects_crossings():
 
     pf = PathFinder(G_tent, planar=P, A=A)
     assert len(pf.Xings) > 0
-    # Xings identify which gates are crossing
+    # Xings identify which feeders are crossing
     assert (-1, 1) in pf.Xings
     assert (-1, 2) in pf.Xings
 
 
 def test_create_detours_adds_detour_nodes():
-    """create_detours() adds detour clone nodes for crossing gates."""
+    """create_detours() adds detour clone nodes for crossing feeders."""
     G_tent, P, A = _make_crossing_case()
     pf = PathFinder(G_tent, planar=P, A=A)
     G_det = pf.create_detours()
@@ -153,11 +153,11 @@ def test_create_detours_fnT_consistent():
     # Root nodes map correctly
     for r in range(-R, 0):
         assert fnT[r] == r
-    # Clone nodes map to primes in the border/obstacle range
+    # Clone nodes map to primes in the constraint-vertex range
     for clone in range(T + B + C, T + B + C + D):
         prime = fnT[clone]
         assert prime < T + B, (
-            f'clone {clone} maps to prime {prime} outside border range'
+            f'clone {clone} maps to prime {prime} outside constraint range'
         )
 
 
@@ -189,10 +189,14 @@ def test_get_best_path_dist_is_sum_of_hops():
             continue
         total = sum(dists)
         # get the stored total from paths
-        I_path = pf.I_path[n]
-        if I_path:
-            best_id = min((pf.paths[id].dist, id) for id in I_path.values())[1]
-            stored_dist = pf.paths[best_id].dist
+        best_pn_ids = [
+            pn_id
+            for pair_id in pf.pair_ids_by_prime.get(n, ())
+            if (pn_id := pf.best_pn_by_pair_id[pair_id]) is not None
+        ]
+        if best_pn_ids:
+            best_pn_id = min((pf.paths[pn_id].dist, pn_id) for pn_id in best_pn_ids)[1]
+            stored_dist = pf.paths[best_pn_id].dist
             assert math.isclose(total, stored_dist, rel_tol=1e-9), (
                 f'node {n}: sum(dists)={total} != stored dist={stored_dist}'
             )
@@ -223,7 +227,7 @@ def test_obstacle_scenario_crossing_free():
     G_tent = G_from_S(wfn.S, wfn.A)
     pf = PathFinder(G_tent, planar=wfn.P, A=wfn.A)
 
-    # All 3 gates should be tentative and have crossings
+    # All 3 feeders should be tentative and have crossings
     assert len(pf.Xings) > 0
 
     G_det = pf.create_detours()
@@ -233,14 +237,14 @@ def test_obstacle_scenario_crossing_free():
 
 
 def test_best_paths_overlay_structure():
-    """best_paths_overlay returns a graph with virtual path edges and no gates."""
+    """best_paths_overlay returns a graph with virtual path edges and no feeders."""
     G_tent, P, A = _make_crossing_case()
     pf = PathFinder(G_tent, planar=P, A=A)
 
     overlay = pf.best_paths_overlay()
-    # overlay should be a subgraph view (no gate edges u<0 or v<0)
+    # overlay should be a subgraph view (no feeder edges u<0 or v<0)
     for u, v in overlay.edges:
-        assert u >= 0 and v >= 0, f'gate edge ({u},{v}) in overlay'
+        assert u >= 0 and v >= 0, f'feeder edge ({u},{v}) in overlay'
     # overlay graph attribute should contain the path graph
     assert 'overlay' in overlay.graph
     J = overlay.graph['overlay']

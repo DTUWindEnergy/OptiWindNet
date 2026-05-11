@@ -3,6 +3,7 @@
 
 from collections import defaultdict
 from itertools import chain
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -20,11 +21,27 @@ class SvgRepr:
     Helper class to get IPython to display the SVG figure encoded in data.
     """
 
-    def __init__(self, data: str):
+    def __init__(self, data: str, metadata: dict[str, Any] | None = None):
         self.data = data
+        self.metadata: dict[str, Any] = metadata or {}
 
     def _repr_svg_(self) -> str:
         return self.data
+
+    def __repr__(self) -> str:
+        m = self.metadata
+        parts = [f'SvgRepr {m["handle"]!r}'] if 'handle' in m else ['SvgRepr']
+        name = m.get('name')
+        if name and name != m.get('handle'):
+            parts.append(f'name={name!r}')
+        if 'T' in m:
+            parts.append(f'T={m["T"]}')
+        if 'R' in m:
+            parts.append(f'R={m["R"]}')
+        if m.get('capacity') is not None:
+            parts.append(f'capacity={m["capacity"]}')
+        parts.append(f'{len(self.data)} chars')
+        return '<' + ' '.join(parts) + '>'
 
     def save(self, filepath: str) -> None:
         """write SVG to file `filepath`"""
@@ -44,6 +61,7 @@ class Drawable:
     nodesE: list[svg.Element]
     infoboxE: list[svg.Element]
     toplevelE: list[svg.Element]
+    metadata: dict[str, Any]
 
     def __init__(
         self,
@@ -63,6 +81,15 @@ class Drawable:
         self.G, self.landscape = G, landscape
         R, T, B = (G.graph[k] for k in 'RTB')
         self.R, self.T, self.B = R, T, B
+        name = G.graph.get('name')
+        handle = G.graph.get('handle', name if name is not None else 'handleless')
+        self.handle = handle
+        self.metadata = {'handle': handle, 'T': T, 'R': R}
+        if name is not None:
+            self.metadata['name'] = name
+        capacity = G.graph.get('capacity')
+        if capacity is not None:
+            self.metadata['capacity'] = capacity
         self.c = c = Colors(dark)
         fnT = G.graph.get('fnT')
         if fnT is None:
@@ -399,12 +426,7 @@ class Drawable:
         self.toplevelE.extend(
             (
                 svg.Defs(elements=self.reusableE),
-                svg.G(
-                    id=self.G.graph.get(
-                        'handle', self.G.graph.get('name', 'handleless')
-                    ),
-                    elements=graphElements,
-                ),
+                svg.G(id=self.handle, elements=graphElements),
                 *self.infoboxE,
             )
         )
@@ -456,4 +478,4 @@ def svgplot(
     if infobox and G.graph.get('has_loads', False):
         drawable.add_box(github_bugfix=github_bugfix)
 
-    return SvgRepr(drawable.to_svg())
+    return SvgRepr(drawable.to_svg(), drawable.metadata)
