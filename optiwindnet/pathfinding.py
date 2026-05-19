@@ -855,207 +855,104 @@ class PathFinder:
             out.append((left, right, spokes, pair_keys))
         return out
 
-    def _build_touching_chains_at(
-        self, v: int, touching: list[Fence]
-    ) -> list[tuple[Chain, list[tuple[int, int]], list[tuple[int, int]]]] | None:
-        """Build the chains hosted at single-vertex chain-end `v`. Each
-        touching route fence merely passes through `v`, contributing two
-        cone bounds (one per fence-wall incident to `v`); with the
-        constraint's two cone bounds, this gives 2 + 2*n_fences cone
-        bounds total. The fence stack at `v` produces n_fences chains
-        (constraint paired with innermost, plus each cyclically-adjacent
-        fence pair in the stack); each chain owns two access cones at
-        `v`, one on each cyclic side of the fence stack. Empty walks —
-        the chain is single-vertex.
+    def _build_chains_at(
+        self,
+        v: int,
+        spanning_endings: list[tuple[Fence, str]],
+        touching: list[Fence],
+    ) -> (
+        tuple[
+            list[tuple[int, AccessCone, list[tuple[int, int]], list[int]]],
+            list[tuple[Chain, list[tuple[int, int]], list[tuple[int, int]]]],
+        ]
+        | None
+    ):
+        """Build chains at chain-end vertex `v` for any mix of spanning and
+        touching fences (including pure spanning, pure touching, and mixed).
+        Single unified cone-partition + label-pair classification.
 
-        Returns: list of (Chain, pair_keys_a, pair_keys_b) per chain at
-        `v`. The caller registers `chain_access` for both cones using
-        these pair keys.
-        """
-        constraint_bounds = self.constraint_bounds.get(v, set())
-        if len(constraint_bounds) != 2:
-            error(
-                'expected 2 constraint bounds at single-vertex chain %d, got %d',
-                v,
-                len(constraint_bounds),
-            )
-            return None
-        # Map each fence wall to its owner subtree. Reject if two fences
-        # share a wall at `v` — the cyclic-stack notion of nesting would
-        # not be well-defined.
-        wall_to_subtree: dict[int, int] = {}
-        for fence in touching:
-            for endpoint in fence.endpoints:
-                if endpoint in wall_to_subtree:
-                    error(
-                        'touching fences share wall %d at chain-end %d',
-                        endpoint,
-                        v,
-                    )
-                    return None
-                wall_to_subtree[endpoint] = fence.subtree
-        cone_bounds = set(wall_to_subtree) | constraint_bounds
-        cw_nbrs = list(self.P.neighbors_cw_order(v))
-        cones = self._partition_into_cones(v, cone_bounds, cw_nbrs)
-        # Sentinel id distinct from any subtree (subtrees are >= 0).
-        C_ID = -1
-        bound_id: dict[int, int] = {cb: C_ID for cb in constraint_bounds}
-        bound_id.update(wall_to_subtree)
-        # Collect chain-interior cones — those whose two bounds belong to
-        # distinct fences (where the constraint counts as a fence). Wedges
-        # bounded by two walls of the same fence (the "outer" wedge of the
-        # stack, navigable but not chain-related) and wedges bounded by
-        # two constraint walls (the void on the far side of the constraint
-        # border) are skipped: the chain mechanism has no business there.
-        chain_cones: dict[tuple[int, int], list[int]] = defaultdict(list)
-        for k, (lb, rb, _, _) in enumerate(cones):
-            a, b = bound_id[lb], bound_id[rb]
-            if a == b:
-                continue
-            chain_cones[(a, b) if a < b else (b, a)].append(k)
-        # Walk the navigable arc between the two constraint walls (the arc
-        # that contains every fence wall) to recover the fence stack from
-        # innermost (closest to constraint) to outermost.
-        nbr_pos = {nb: i for i, nb in enumerate(cw_nbrs)}
-        cb_a, cb_b = constraint_bounds
-        n_cw = len(cw_nbrs)
+        Returns `(spanning_entries, local_chains)` where:
+          spanning_entries: `(subtree, cone, pair_keys, mp)` per cross-mp
+            chain at `v`, in the format consumed by the caller's
+            `spanning_by_chain` pairing pass.
+          local_chains: `(Chain, pair_keys_a, pair_keys_b)` per locally-
+            paired chain at `v`, in the format used by the caller for
+            registration.
 
-        def fence_walls_in_arc(direction: int) -> list[int]:
-            walls: list[int] = []
-            i = (nbr_pos[cb_a] + direction) % n_cw
-            while i != nbr_pos[cb_b]:
-                nb = cw_nbrs[i]
-                if nb in wall_to_subtree:
-                    walls.append(nb)
-                i = (i + direction) % n_cw
-            return walls
-
-        walls_cw = fence_walls_in_arc(+1)
-        walls_ccw = fence_walls_in_arc(-1)
-        nav_walls = walls_cw if len(walls_cw) >= len(walls_ccw) else walls_ccw
-        fence_seq = [wall_to_subtree[w] for w in nav_walls]
-        if len(fence_seq) != 2 * len(touching):
-            error(
-                'fence walls (%d) on navigable arc at %d do not match touching fences (%d)',
-                len(fence_seq),
-                v,
-                len(touching),
-            )
-            return None
-        half = len(fence_seq) // 2
-        if fence_seq[half:] != fence_seq[:half][::-1]:
-            error('touching fences not nested at chain-end %d: %s', v, fence_seq)
-            return None
-        stack = fence_seq[:half]
-        if len(set(stack)) != len(stack):
-            error('repeated subtree id in fence stack at %d: %s', v, stack)
-            return None
-        # Expected chains: constraint paired with the innermost fence, plus
-        # each cyclically-adjacent fence pair in the stack.
-        stack_pos = {sub: i for i, sub in enumerate(stack)}
-        expected_chains: set[tuple[int, int]] = set()
-        innermost = stack[0]
-        expected_chains.add(
-            (C_ID, innermost) if C_ID < innermost else (innermost, C_ID)
-        )
-        for inner, outer in zip(stack, stack[1:]):
-            expected_chains.add((inner, outer) if inner < outer else (outer, inner))
-        if set(chain_cones) != expected_chains:
-            error(
-                'chain cones mismatch at %d: have %s, expected %s',
-                v,
-                set(chain_cones),
-                expected_chains,
-            )
-            return None
-        # Build a Chain per chain-interior pair. Owner subtree convention:
-        # the route fence (when one bound belongs to the constraint), or —
-        # for chains between two route fences — the one farther from the
-        # constraint in the stack (matches the spanning multi-fence
-        # convention so each route fence labels exactly one chain).
-        out: list[tuple[Chain, list[tuple[int, int]], list[tuple[int, int]]]] = []
-        for chain_key, cone_indices in chain_cones.items():
-            if len(cone_indices) != 2:
-                error(
-                    'chain %s at %d has %d cones (expected 2)',
-                    chain_key,
-                    v,
-                    len(cone_indices),
-                )
-                return None
-            a, b = chain_key
-            if a == C_ID:
-                owner = b
-            elif b == C_ID:
-                owner = a
-            else:
-                owner = a if stack_pos[a] > stack_pos[b] else b
-            ki, kj = cone_indices
-            li, ri, si, ki_pairs = cones[ki]
-            lj, rj, sj, kj_pairs = cones[kj]
-            cone_i = AccessCone(v, li, ri, si)
-            cone_j = AccessCone(v, lj, rj, sj)
-            chain = Chain(owner, (cone_i, cone_j), ([], []))
-            out.append((chain, ki_pairs, kj_pairs))
-        return out
-
-    def _spanning_access_cones_at(
-        self, c: int, endings: list[tuple[Fence, str]]
-    ) -> list[tuple[int, AccessCone, list[tuple[int, int]], list[int]]] | None:
-        """Build access cones at chain-end `c` for one or more spanning
-        fences. Each fence at `c` owns one chain (one cone here, paired
-        across-the-mp by the caller); the constraint fence sits as the
-        innermost member of the cyclic stack. With n route fences in
-        the stack there are n_fences = n + 1 wedge bounds and n chains
-        — each between two cyclically-adjacent stack members.
-
-        Returns: list of `(subtree, AccessCone, pair_keys, fence_mp)`,
-        one per chain owned by a route fence at `c`. `fence_mp` is the
-        owning fence's full `primes_on_constraint`, used by the caller
-        to assemble walks.
+        Model: a spanning fence at `v` contributes one wall (its off-
+        constraint endpoint at `v`); its "other wall" is the chain-step
+        constraint edge. A touching fence contributes two walls (both
+        endpoints). Each ray is labelled with a subtree id (C_ID for
+        constraint bounds); chains are read off pairs of consecutive
+        bound-rays in cw order. The chain-step ray (when any spanning
+        fence is present at `v`) has a dual face: C_ID on the void
+        side, innermost spanning subtree on the navigable arc side —
+        this lets the cone immediately inside the chain-step collapse
+        against the spanning subtree when no touching is interposed,
+        and to host the (touching ↔ spanning) cone when one is. With
+        no spanning at `v`, both constraint bounds carry the plain
+        C_ID label and the chain partition reproduces the touching-
+        only stack.
         """
         P = self.P
-        constraint_bounds = self.constraint_bounds
-
-        f0, side0 = endings[0]
-        chain_step_nbr = (
-            f0.primes_on_constraint[1]
-            if side0 == 'start'
-            else f0.primes_on_constraint[-2]
-        )
-        for fence, side in endings[1:]:
-            other = (
-                fence.primes_on_constraint[1]
-                if side == 'start'
-                else fence.primes_on_constraint[-2]
+        constraint_bounds_v = self.constraint_bounds.get(v, set())
+        if len(constraint_bounds_v) != 2:
+            error(
+                'expected 2 constraint bounds at chain-end %d, got %d',
+                v,
+                len(constraint_bounds_v),
             )
-            if other != chain_step_nbr:
-                error(
-                    'fences disagree on chain step at %d: %d vs %d',
-                    c,
-                    chain_step_nbr,
-                    other,
-                )
+            return None
 
-        cw_nbrs = list(P.neighbors_cw_order(c))
+        # Identify chain_step direction (only meaningful when any spanning
+        # fence ends at `v`). All spanning fences at `v` must agree on it.
+        if spanning_endings:
+            f0, side0 = spanning_endings[0]
+            chain_step_nbr: int | None = (
+                f0.primes_on_constraint[1]
+                if side0 == 'start'
+                else f0.primes_on_constraint[-2]
+            )
+            for fence, side in spanning_endings[1:]:
+                other = (
+                    fence.primes_on_constraint[1]
+                    if side == 'start'
+                    else fence.primes_on_constraint[-2]
+                )
+                if other != chain_step_nbr:
+                    error(
+                        'fences disagree on chain step at %d: %d vs %d',
+                        v,
+                        chain_step_nbr,
+                        other,
+                    )
+                    return None
+            if chain_step_nbr not in constraint_bounds_v:
+                error(
+                    'chain_step %d not in constraint_bounds at %d',
+                    chain_step_nbr,
+                    v,
+                )
+                return None
+            cb_others = constraint_bounds_v - {chain_step_nbr}
+            cb_other = next(iter(cb_others))
+        else:
+            # Pure touching at v: pick either cb as "chain_step" — both
+            # constraint bounds behave symmetrically as plain C_ID labels;
+            # this choice only affects which cone is cones[0] (the void
+            # wedge), which is skipped regardless.
+            chain_step_nbr = next(iter(constraint_bounds_v))
+            cb_other = next(iter(constraint_bounds_v - {chain_step_nbr}))
+
+        # cw direction so chain_step is adjacent to cb_other in `rotated`
+        # (matches `_spanning_access_cones_at`'s convention).
+        cw_nbrs = list(P.neighbors_cw_order(v))
         n_cw = len(cw_nbrs)
         nbr_pos = {nb: i for i, nb in enumerate(cw_nbrs)}
         chain_step_pos = nbr_pos[chain_step_nbr]
-
-        candidates = constraint_bounds.get(c, set()) - {chain_step_nbr}
-        if len(candidates) != 1:
-            error('expected exactly 1 constraint bound at %d, got %s', c, candidates)
-            return None
-        constraint_bound = next(iter(candidates))
-
-        # Pick cyclic direction so constraint_bound is closest to chain_step_nbr.
-        # This keeps the fence stack's "outer" direction consistent with the
-        # partner end — needed when multi-fence stacks (mirrored chains, e.g.
-        # RID 26654) want to agree on inner-vs-outer at both ends.
-        cw_offset = (nbr_pos[constraint_bound] - chain_step_pos) % n_cw
-        ccw_offset = (chain_step_pos - nbr_pos[constraint_bound]) % n_cw
+        cw_offset = (nbr_pos[cb_other] - chain_step_pos) % n_cw
+        ccw_offset = (chain_step_pos - nbr_pos[cb_other]) % n_cw
         cw_direction = cw_offset <= ccw_offset
-
         if cw_direction:
             rotated = [cw_nbrs[(chain_step_pos + i) % n_cw] for i in range(n_cw)]
         else:
@@ -1064,100 +961,195 @@ class PathFinder:
             ]
         rotated_pos = {nb: i for i, nb in enumerate(rotated)}
 
-        # Per-fence anchor wall at c, in stack order. The constraint fence is
-        # represented by `constraint_bound` (chain_step_nbr is the rotation
-        # anchor and is appended to cone_bounds separately). Each route fence
-        # is represented by its off-constraint endpoint at `c`. Sorted by
-        # position in `rotated`, the list runs from innermost to outermost.
-        outer_bounds_by_fence: list[int] = [constraint_bound]
-        for fence, side in endings:
-            bound = fence.endpoints[0] if side == 'start' else fence.endpoints[1]
-            outer_bounds_by_fence.append(bound)
-        outer_bounds_by_fence.sort(key=rotated_pos.__getitem__)
+        # Wall labels (ray -> subtree). Spanning contributes one wall (anchor)
+        # per fence; touching contributes two. A wall shared between a
+        # spanning anchor and a touching endpoint is allowed iff their subtrees
+        # match (same physical contour). Different subtrees sharing a wall is
+        # geometrically ambiguous — reject.
+        wall_label: dict[int, int] = {}
+        spanning_by_anchor: dict[int, tuple[int, Fence, str]] = {}
+        for fence, side in spanning_endings:
+            anchor = fence.endpoints[0] if side == 'start' else fence.endpoints[1]
+            if anchor in (chain_step_nbr, cb_other):
+                error(
+                    'spanning anchor %d at %d coincides with a constraint bound',
+                    anchor,
+                    v,
+                )
+                return None
+            if anchor in spanning_by_anchor:
+                error('two spanning fences share anchor %d at %d', anchor, v)
+                return None
+            spanning_by_anchor[anchor] = (fence.subtree, fence, side)
+            existing = wall_label.get(anchor)
+            if existing is not None and existing != fence.subtree:
+                error(
+                    'wall collision at %d, ray %d: subtrees %d vs %d',
+                    v,
+                    anchor,
+                    existing,
+                    fence.subtree,
+                )
+                return None
+            wall_label[anchor] = fence.subtree
+        for fence in touching:
+            for endpoint in fence.endpoints:
+                if endpoint in (chain_step_nbr, cb_other):
+                    error(
+                        'touching wall %d at %d coincides with a constraint bound',
+                        endpoint,
+                        v,
+                    )
+                    return None
+                existing = wall_label.get(endpoint)
+                if existing is not None and existing != fence.subtree:
+                    error(
+                        'wall collision at %d, ray %d: subtrees %d vs %d',
+                        v,
+                        endpoint,
+                        existing,
+                        fence.subtree,
+                    )
+                    return None
+                wall_label[endpoint] = fence.subtree
 
-        cones = self._partition_into_cones(
-            c, {chain_step_nbr, *outer_bounds_by_fence}, rotated
-        )
-
-        n_fences = len(outer_bounds_by_fence)
-        if n_fences < 2:
-            return []
-
-        # Cones in cyclic order from chain_step_nbr (in `rotated` direction):
-        #   cones[0]: void wedge between chain_step_nbr and constraint_bound
-        #     — across the constraint border, not navigable. Skipped.
-        #   cones[1..n_fences-1]: chain interiors, one per stacked fence pair.
-        #   cones[n_fences]: navigable-but-non-chain wedge between the
-        #     outermost fence wall and chain_step_nbr (the cyclic-other side).
-        #     Skipped — an advancer entering it has no chain to walk.
-        out: list[tuple[int, AccessCone, list[tuple[int, int]], list[int]]] = []
-        for k in range(n_fences - 1):
-            # Chain at cones[k+1] is bounded by outer_bounds_by_fence[k]
-            # (inner) and outer_bounds_by_fence[k+1] (outer). Owner is
-            # the route fence whose endpoint at `c` matches the outer
-            # bound — by the cw_direction selection above, constraint_bound
-            # always sorts to outer_bounds_by_fence[0], so the outer bound
-            # of any chain (k+1 >= 1) is a route-fence endpoint.
-            ref_bound = outer_bounds_by_fence[k + 1]
-            ref_ending = next(
-                (
-                    (fence, side)
-                    for fence, side in endings
-                    if (fence.endpoints[0] if side == 'start' else fence.endpoints[1])
-                    == ref_bound
-                ),
-                None,
+        # Innermost spanning subtree = highest rotated_pos among anchors
+        # (closest to chain_step on the navigable arc side). This subtree
+        # labels the chain-step ray's navigable face — i.e., it occupies
+        # the angular slot right beside chain_step on the nav arc. With
+        # no spanning at `v`, this label is unused.
+        C_ID = -1
+        if spanning_by_anchor:
+            innermost_anchor = max(
+                spanning_by_anchor.keys(), key=rotated_pos.__getitem__
             )
-            if ref_ending is None:
-                error('no fence matches cone bound %d at %d', ref_bound, c)
-                continue
-            ref_fence, _ = ref_ending
+            innermost_span_subtree = spanning_by_anchor[innermost_anchor][0]
+        else:
+            innermost_span_subtree = C_ID
 
-            left, right, spokes, pair_keys = cones[k + 1]
+        cone_bounds = set(wall_label.keys()) | {chain_step_nbr, cb_other}
+        cones = self._partition_into_cones(v, cone_bounds, rotated)
+        # By construction cones[0] is the wedge from chain_step (rotated[0])
+        # to cb_other (rotated[1]) — the void wedge across the constraint.
+        if not cones or cones[0][0] != chain_step_nbr or cones[0][1] != cb_other:
+            error('cone partition misalignment at chain-end %d', v)
+            return None
+
+        def label_at(ray: int, on_void_side: bool) -> int:
+            if ray == chain_step_nbr:
+                return C_ID if on_void_side else innermost_span_subtree
+            if ray == cb_other:
+                return C_ID
+            return wall_label[ray]
+
+        # Group cones by label-pair (chain id at v).
+        chain_cones_by_pair: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for k, (left, right, _spokes, _keys) in enumerate(cones):
+            on_void = k == 0
+            ll = label_at(left, on_void)
+            rl = label_at(right, on_void)
+            if ll == rl:
+                continue  # interior of a fence stack OR void
+            if ll == C_ID and rl == C_ID:
+                continue
+            key = (ll, rl) if ll < rl else (rl, ll)
+            chain_cones_by_pair[key].append(k)
+
+        def make_cone(k: int) -> tuple[AccessCone, list[tuple[int, int]]]:
+            left, right, spokes, keys = cones[k]
             if not cw_direction:
-                # Canonicalize bounds to CW around `c`. Consumers
-                # (`_spawn_exit_cone`, `_advance_portal`) assume CW: the
-                # navigable interior of an exit triangle is on the CCW
-                # side of (left, right), and `P[left][right]['ccw']` gives
-                # the next advance vertex. When `rotated` traverses CCW,
-                # the partition emits bounds + spokes in CCW order; flip
-                # them here so the AccessCone records the canonical CW
-                # ordering.
                 left, right = right, left
                 spokes = spokes[::-1]
-            cone = AccessCone(c, left, right, spokes)
-            out.append(
-                (
-                    ref_fence.subtree,
-                    cone,
-                    pair_keys,
-                    list(ref_fence.primes_on_constraint),
+            return AccessCone(v, left, right, spokes), keys
+
+        spanning_entries: list[
+            tuple[int, AccessCone, list[tuple[int, int]], list[int]]
+        ] = []
+        local_chains: list[
+            tuple[Chain, list[tuple[int, int]], list[tuple[int, int]]]
+        ] = []
+
+        for (a, b), cone_indices in chain_cones_by_pair.items():
+            span_anchors_in_pair = [
+                (anchor, sub)
+                for anchor, (sub, _, _) in spanning_by_anchor.items()
+                if sub in (a, b)
+            ]
+            if len(cone_indices) == 1:
+                # Cross-mp chain. Must involve a spanning fence at `v` that
+                # has its chain step on the missing side. Owner convention
+                # (matches the historic `_spanning_access_cones_at`): the
+                # inner-of-the-pair spanning fence — the one whose anchor is
+                # closer to chain_step on the navigable arc (higher
+                # `rotated_pos`). For a (cb_b, span) chain there's only one
+                # spanning fence in the pair; for (span_outer, span_inner)
+                # we pick the inner.
+                if not span_anchors_in_pair:
+                    error(
+                        'singleton chain (%d, %d) at %d with no spanning to cross mp',
+                        a,
+                        b,
+                        v,
+                    )
+                    return None
+                anchor, sub = max(span_anchors_in_pair, key=lambda c: rotated_pos[c[0]])
+                _, fence, _ = spanning_by_anchor[anchor]
+                cone_obj, keys = make_cone(cone_indices[0])
+                spanning_entries.append(
+                    (sub, cone_obj, keys, list(fence.primes_on_constraint))
                 )
-            )
-        return out
+            elif len(cone_indices) == 2:
+                # Locally paired chain (touching-style).
+                # Owner subtree: route fence farther from chain_step in stack
+                # (= smaller rotated_pos among its walls — closer to cb_other).
+                if a == C_ID or b == C_ID:
+                    owner = b if a == C_ID else a
+                else:
+                    walls_a = [w for w, s in wall_label.items() if s == a]
+                    walls_b = [w for w, s in wall_label.items() if s == b]
+                    min_pos_a = min(rotated_pos[w] for w in walls_a)
+                    min_pos_b = min(rotated_pos[w] for w in walls_b)
+                    owner = a if min_pos_a < min_pos_b else b
+                cone_i, keys_i = make_cone(cone_indices[0])
+                cone_j, keys_j = make_cone(cone_indices[1])
+                chain = Chain(owner, (cone_i, cone_j), ([], []))
+                local_chains.append((chain, keys_i, keys_j))
+            else:
+                error(
+                    'chain (%d, %d) at %d has %d cones (expected 1 or 2)',
+                    a,
+                    b,
+                    v,
+                    len(cone_indices),
+                )
+                return None
+
+        return spanning_entries, local_chains
 
     def _precompute_chains(
         self, fences: list[Fence]
     ) -> tuple[dict[tuple[int, int, int], tuple[Chain, int]], set[int]]:
         """Build the chain topology from the route fences.
 
-        Spanning fences (on-constraint segment length >= 2) contribute one
-        access cone at each end; the two are paired (matched by subtree)
-        into one Chain. Touching fences (length 1) contribute two access
-        cones at a single chain-end (one per cyclic side of the fence
-        stack), already paired locally into a Chain by
-        `_build_touching_chains_at`.
+        For every chain-end vertex (any vertex on the on-constraint segment
+        of any fence), `_build_chains_at` partitions the cyclic-neighbor fan
+        into cones, labels each ray by subtree (with the chain-step ray
+        double-faced when any spanning fence ends there), and emits each
+        chain as either a cross-mp spanning entry (one cone at this end,
+        paired with the cone at the other mp end below) or a locally-paired
+        chain (two cones at this end, paired in place).
 
         When a spanning fence has only one end with the next-mp vertex on
-        a constraint edge, the other end is demoted to touching and gets
-        a synthetic single-vertex chain. The full-mp spanning chain is
-        wired separately to one of the demoted end's touching cones (the
-        first by index, matching the prior `cone_subtree.index(subtree)`
-        behavior). The touching chain at the demoted end "owns" entries
-        at its cones — we register the spanning chain's far-side cone
-        first and let the touching chain overwrite, so triggers entering
-        the demoted-end cones dispatch to the local touching chain rather
-        than walking back across the full mp.
+        a constraint edge, the other end is demoted to touching: a
+        synthetic single-vertex fence with walls = `(off-constraint
+        endpoint, mp[1])` is added at the demoted end and the regular
+        full-mp fence stays at the good end. After the per-vertex builder
+        runs, the demoted spanning chain has just 1 entry in
+        `spanning_by_chain` and is wired to one cone of the demoted end's
+        local touching chain (the first by index — matching the prior
+        `cone_subtree.index(subtree)` behavior). The local touching chain
+        already owns its cone entries via `register`; the deferred-spanning
+        wiring touches only the spanning-side cone.
 
         Returns:
           chain_access: dict[(vertex, left, right) -> (Chain, side)]
@@ -1208,24 +1200,40 @@ class PathFinder:
                 chain_access[(v, pa, pb)] = (chain, side)
                 chain_access[(v, pb, pa)] = (chain, side)
 
-        # Build spanning access cones per chain-end vertex. Group by
-        # (subtree, mp[0], mp[-1]) so split sub-fences sharing a subtree
-        # produce one chain each — `mp` is identical across both end-entries
-        # of a given fence, and sub-fences from one A-edge split have
-        # disjoint mp-end pairs by construction.
+        # One unified builder for every chain-end vertex. It emits:
+        #   - cross-mp spanning entries (paired across mp by the loop below)
+        #   - locally-paired chains (registered immediately)
+        # The grouping key (subtree, mp[0], mp[-1]) separates split sub-fences
+        # sharing a subtree — `mp` is identical across both end-entries of a
+        # given fence, and sub-fences from one A-edge split have disjoint
+        # mp-end pairs by construction.
         spanning_by_chain: dict[
             tuple[int, int, int],
             list[tuple[int, AccessCone, list[tuple[int, int]], list[int]]],
         ] = defaultdict(list)
-        for c, endings in spanning_at.items():
-            result = self._spanning_access_cones_at(c, endings)
+        touching_chains_by_vertex_subtree: dict[tuple[int, int], list[Chain]] = (
+            defaultdict(list)
+        )
+        chain_end_vertices = set(spanning_at) | set(touching_at)
+        for v in chain_end_vertices:
+            result = self._build_chains_at(
+                v, spanning_at.get(v, []), touching_at.get(v, [])
+            )
             if result is None:
                 continue
-            chain_end_set.add(c)
-            for subtree, cone, pair_keys, mp in result:
+            chain_end_set.add(v)
+            v_spanning_entries, v_local_chains = result
+            for subtree, cone, pair_keys, mp in v_spanning_entries:
                 spanning_by_chain[(subtree, mp[0], mp[-1])].append(
-                    (c, cone, pair_keys, mp)
+                    (v, cone, pair_keys, mp)
                 )
+            for ch, keys_a, keys_b in v_local_chains:
+                touching_chains_by_vertex_subtree[(v, ch.subtree)].append(ch)
+                # Local chains register here; the deferred-spanning wiring
+                # below will not overwrite their cone entries (it touches
+                # only the spanning-side cone of the deferred chain).
+                register(v, keys_a, ch, 0)
+                register(v, keys_b, ch, 1)
 
         # Pair fully-spanning chains (both ends OK -> 2 entries per chain).
         # Demoted-one-end fences contribute only 1 entry and are deferred.
@@ -1260,27 +1268,6 @@ class PathFinder:
                     chain_key,
                     len(entries),
                 )
-
-        # Build touching chains. Track each (vertex, subtree) -> [Chain, ...]
-        # for wiring deferred spanning chains.
-        touching_chains_by_vertex_subtree: dict[tuple[int, int], list[Chain]] = (
-            defaultdict(list)
-        )
-        for v, touching in touching_at.items():
-            if v in spanning_at:
-                error('mixed spanning + touching fences at %d not supported', v)
-                continue
-            result = self._build_touching_chains_at(v, touching)
-            if result is None:
-                continue
-            chain_end_set.add(v)
-            for chain, keys_a, keys_b in result:
-                touching_chains_by_vertex_subtree[(v, chain.subtree)].append(chain)
-                # Touching chains register AFTER deferred spanning chains
-                # below, so their entries take precedence at any cone shared
-                # with a deferred chain (the demoted-end corner case).
-                register(v, keys_a, chain, 0)
-                register(v, keys_b, chain, 1)
 
         # Wire deferred (one-end-demoted) spanning chains to the demoted
         # end's touching counterpart.
