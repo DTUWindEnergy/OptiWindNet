@@ -8,7 +8,8 @@ from typing import Callable
 import networkx as nx
 from scipy.stats import rankdata
 
-from ..geometric import apply_edge_exemptions, assign_root, complete_graph
+from ..geometric import apply_edge_exemptions, complete_graph
+from ..interarraylib import add_terminal_closest_root
 from ..mesh import delaunay
 from .priorityqueue import PriorityQueue
 
@@ -57,7 +58,7 @@ def ClassicEW(
     else:
         A = complete_graph(L)
 
-    assign_root(A)
+    add_terminal_closest_root(A)
     d2roots = A.graph['d2roots']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
 
@@ -193,7 +194,7 @@ def ClassicEW(
         if not pq:
             # finished
             break
-        sr_u, (u, v) = pq.top()
+        _, sr_u, (u, v) = pq.top()
         debug('<popped> «%d~%d», sr_u: <%d>', u, v, sr_u)
 
         sr_v = subroot_[v]

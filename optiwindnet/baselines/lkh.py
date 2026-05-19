@@ -19,8 +19,7 @@ import numpy as np
 from scipy.spatial.distance import pdist, squareform
 
 from ..clustering import clusterize
-from ..geometric import add_link_blockmap
-from ..interarraylib import fun_fingerprint
+from ..interarraylib import add_link_blockmap, fun_fingerprint
 from ..repair import repair_routeset_path
 from ._core import remove_offending_crossings
 
@@ -169,10 +168,13 @@ def _do_lkh(
     specs = dict(
         NAME=name,
         TYPE='OVRP',
-        DIMENSION=N,
+        DIMENSION=N,  # CVRP number of nodes and depots
+        # For CAPACITY to be enforced, a DEMAND section is required.
+        # MTSP_MAX_SIZE should work for unitary demand, but did not.
         CAPACITY=capacity,
-        # This expression for limiting DISTANCE was empirically obtained.
-        DISTANCE=scale * 16.0 / (math.log(T) + 0.1),
+        # This expression for limiting DISTANCE was empiricaly obtained.
+        # It could be improved by replacing T with the aspect ratio of the border shape
+        DISTANCE=scale * 16.0 / (math.log(T) + 0.1),  # maximum route length
         EDGE_WEIGHT_TYPE='EXPLICIT',
         EDGE_WEIGHT_FORMAT='UPPER_ROW',
     )
@@ -183,11 +185,14 @@ def _do_lkh(
     params = dict(
         SPECIAL=None,  # None -> output only the key
         DEPOT=N,
-        SEED=seed,
-        PRECISION=precision,
+        SEED=seed,  # 0 means pick a random seed
+        PRECISION=precision,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
         TOTAL_TIME_LIMIT=time_limit,
         TIME_LIMIT=per_run_limit,
-        RUNS=runs,
+        RUNS=runs,  # default: 10
+        # MAX_TRIALS=100,  # default: number of nodes (DIMENSION)
+        # TRACE_LEVEL=1,  # default is 1, 0 supresses output
+        #  INITIAL_TOUR_ALGORITHM='GREEDY',  # { … | CVRP | MTSP | SOP } Default: WALK
         VEHICLES=vehicles,
         # FIXME: if TYPE=OVRP, LHK-3 does not apply penalties for MTSP_MIN_SIZE:
         #   MTSP_MIN_SIZE is enforced for TYPE=CVRP, but then an assymetric
@@ -195,8 +200,16 @@ def _do_lkh(
         #   Notably, balanced=True is NOT enforced with the current parameters
         MTSP_MIN_SIZE=min_route_size,
         MTSP_MAX_SIZE=capacity,
-        MTSP_OBJECTIVE='MINSUM',
+        MTSP_OBJECTIVE='MINSUM',  # [ MINMAX | MINMAX_SIZE | MINSUM ]
         MTSP_SOLUTION_FILE=output_fname,
+        #  MOVE_TYPE='5 SPECIAL',  # <integer> [ SPECIAL ]
+        #  GAIN23='NO',
+        #  KICKS=1,
+        #  KICK_TYPE=4,
+        #  MAX_SWAPS=0,
+        #  POPULATION_SIZE=12,  # default 10
+        #  PATCHING_A=
+        #  PATCHING_C=
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:

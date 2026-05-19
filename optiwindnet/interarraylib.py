@@ -8,10 +8,12 @@ import sys
 from hashlib import sha256
 from itertools import pairwise, chain
 
+import numba as nb
 import networkx as nx
 import numpy as np
+from bitarray import bitarray
 
-from .geometric import CoordPair, rotate
+from .geometric import CoordPair, rotate, angle_helpers
 
 _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
@@ -39,6 +41,9 @@ __all__ = (
     'as_hooked_to_nearest',
     'as_hooked_to_head',
     'as_stratified_vertices',
+    'add_terminal_closest_root',
+    'add_link_blockmap',
+    'add_link_cosines',
     'make_remap',
     'scaffolded',
 )
@@ -1147,6 +1152,149 @@ def make_remap(G, refG, H, refH):
         j = np.argmin(np.hypot(*(GvertC - coordH).T))
         remap[j] = i
     return remap
+
+
+def add_terminal_closest_root(A: nx.Graph) -> None:
+    """Add node attribute 'root' to terminals and graph attribute 'rootmap__' to A.
+
+    Changes A in-place.
+    'root' is the index of the root closest to node
+    'rootmap__' is an R-long list of T-long bitarrays.
+
+    Args:
+      A: available-links graph
+    """
+    R = A.graph['R']
+    T = A.graph['T']
+    closest_root_ = np.argmin(A.graph['d2roots'], axis=1) - R
+    nx.set_node_attributes(
+        A, {n: r.item() for n, r in enumerate(closest_root_)}, 'root'
+    )
+    # while 'd2roots' includes border vertices, 'rootmap__' must not
+    A.graph['rootmask__'] = [
+        bitarray((closest_root_[:T] == r).tolist()) for r in range(-R, 0)
+    ]
+
+
+@nb.njit(cache=True)
+def _blockmap_inner(u, v, angle__, angle_rank__, VertexC, R, T):
+    """Compute blockage bitmap for edge (u, v) across all roots.
+
+    Returns an (R, T) boolean array where True means turbine t is blocked
+    by edge (u, v) with respect to root r.
+    """
+    root_offset = VertexC.shape[0] - R
+    blocked = np.zeros((R, T), dtype=np.bool_)
+    uC = VertexC[u]
+    vC = VertexC[v]
+    vec_x = vC[0] - uC[0]
+    vec_y = vC[1] - uC[1]
+    for r in range(R):
+        uR = angle_rank__[u, r]
+        vR = angle_rank__[v, r]
+        uv_angle = angle__[v, r] - angle__[u, r]
+        if uv_angle < 0:
+            uR, vR = vR, uR
+        root_idx = root_offset + r
+        rootC_x = VertexC[root_idx, 0]
+        rootC_y = VertexC[root_idx, 1]
+        root_cross = (rootC_x - uC[0]) * vec_y - (rootC_y - uC[1]) * vec_x
+        is_root_sign_pos = root_cross > 0
+        if abs(uv_angle) <= np.pi:
+            for t in range(T):
+                ar = angle_rank__[t, r]
+                if ar <= uR or ar >= vR:
+                    continue
+                w_cross = (VertexC[t, 0] - uC[0]) * vec_y - (
+                    VertexC[t, 1] - uC[1]
+                ) * vec_x
+                if is_root_sign_pos:
+                    if w_cross <= 0:
+                        blocked[r, t] = True
+                else:
+                    if w_cross >= 0:
+                        blocked[r, t] = True
+        else:
+            for t in range(T):
+                ar = angle_rank__[t, r]
+                if ar >= uR and ar <= vR:
+                    continue
+                w_cross = (VertexC[t, 0] - uC[0]) * vec_y - (
+                    VertexC[t, 1] - uC[1]
+                ) * vec_x
+                if is_root_sign_pos:
+                    if w_cross <= 0:
+                        blocked[r, t] = True
+                else:
+                    if w_cross >= 0:
+                        blocked[r, t] = True
+    return blocked
+
+
+def add_link_blockmap(A: nx.Graph):
+    """Add edge attributes 'blocked__'.
+
+    Edges' attribute 'blocked__' are R-long list of T-long bitarray maps.
+
+    If an edge's ``blocked__[r][t] == 1``, then this edge crosses the line-of-sight t-r.
+
+    Changes `A` in place. `A` should have no feeder edges.
+
+    Notes:
+    - this function neglects borders and countours.
+    - the space taken scales with R × T × num_edges(A)
+    """
+    VertexC = A.graph['VertexC']
+    R, T = A.graph['R'], A.graph['T']
+    angle__, angle_rank__, dups_from_root_rank__ = angle_helpers(
+        A, include_borders=False
+    )
+    # TODO: check if dups_from_root_rank__ has a role here
+    A.graph['angle__'] = angle__
+    A.graph['angle_rank__'] = angle_rank__
+    A.graph['dups_from_root_rank__'] = dups_from_root_rank__
+    for u, v, edgeD in A.edges(data=True):
+        blocked = _blockmap_inner(u, v, angle__, angle_rank__, VertexC, R, T)
+        blocked__ = []
+        for r in range(R):
+            ba = bitarray()
+            ba.frombytes(np.packbits(blocked[r]).tobytes())
+            del ba[T:]
+            blocked__.append(ba)
+        edgeD['blocked__'] = blocked__
+
+
+def add_link_cosines(A: nx.Graph):
+    """Add cosine of the angle wrt each root to all links of A as attribute '_cos'.
+
+    Changes A in-place. The cosine is of the acute angle between the link line and the
+    line that contains the mid-point of the link and the root (for each root).
+    """
+    R = A.graph['R']
+    VertexC = A.graph['VertexC']
+    RootC = VertexC[-R:]
+
+    edge_ = np.fromiter(
+        chain.from_iterable(A.edges()),
+        dtype=int,
+        count=2 * A.number_of_edges(),
+    ).reshape((-1, 2))
+    edgeC = VertexC[edge_]
+    uC = edgeC[:, 0, :]
+    vC = edgeC[:, 1, :]
+    edge_vec_ = vC - uC
+    edge_len_ = np.hypot(*edge_vec_.T)
+    mid_edge_ = 0.5 * (uC + vC)
+    mid_vec_ = mid_edge_[:, None, :] - RootC
+    mid_len_ = np.hypot(mid_vec_[..., 0], mid_vec_[..., 1])
+    cos__ = abs(np.vecdot(edge_vec_[:, None, :], mid_vec_)) / (
+        edge_len_[:, None] * mid_len_
+    )
+    nx.set_edge_attributes(
+        A,
+        {(edge[0], edge[1]): cos_.tolist() for edge, cos_ in zip(edge_, cos__)},
+        name='cos_',
+    )
 
 
 def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:

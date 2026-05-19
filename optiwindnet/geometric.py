@@ -4,14 +4,13 @@
 import math
 import operator
 from collections import defaultdict
-from itertools import combinations, pairwise, product, chain
+from itertools import combinations, pairwise, product
 from math import isclose
 from typing import Callable, Literal, NewType
 
 import networkx as nx
 import numba as nb
 import numpy as np
-from bitarray import bitarray
 from numpy.typing import NDArray
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
@@ -39,15 +38,12 @@ __all__ = (
     'polylines_cross_at_point',
     'is_triangle_pair_a_convex_quadrilateral',
     'perimeter',
-    'assign_root',
     'get_crossings_map',
     'complete_graph',
     'minimum_spanning_forest',
     'rotation_checkers_factory',
     'rotating_calipers',
     'area_from_polygon_vertices',
-    'add_link_blockmap',
-    'add_link_cosines',
 )
 
 NULL = np.iinfo(int).min
@@ -547,9 +543,7 @@ def is_bunch_split_by_corner(bunch, a, o, b, margin=1e-3):
     return split, np.flatnonzero(inside), np.flatnonzero(outside)
 
 
-def point_to_segment_distance(
-    pC: np.ndarray, aC: np.ndarray, bC: np.ndarray
-) -> float:
+def point_to_segment_distance(pC: np.ndarray, aC: np.ndarray, bC: np.ndarray) -> float:
     """Calculate the distance from point `pC` to the closed segment `aC`-`bC`.
 
     The projection of `pC` onto the line through `aC` and `bC` is clamped to
@@ -639,9 +633,7 @@ def polyline_rays_at_point(
     return unique_rays(rays, angle_tol)
 
 
-def rays_alternate(
-    rays_a: list[np.ndarray], rays_b: list[np.ndarray]
-) -> bool:
+def rays_alternate(rays_a: list[np.ndarray], rays_b: list[np.ndarray]) -> bool:
     """Check whether two ray sets interleave cyclically around the origin.
 
     Picks every 2-ray pair from each set, orders the four rays by polar angle,
@@ -698,9 +690,8 @@ def polylines_cross_at_point(
     Returns:
       True when the polylines cross transversely at `pC`.
     """
-    if (
-        np.any(np.hypot(*(pC - coords_a).T) <= tol)
-        or np.any(np.hypot(*(pC - coords_b).T) <= tol)
+    if np.any(np.hypot(*(pC - coords_a).T) <= tol) or np.any(
+        np.hypot(*(pC - coords_b).T) <= tol
     ):
         return False
     rays_a = polyline_rays_at_point(coords_a, pC, tol=tol, angle_tol=angle_tol)
@@ -818,18 +809,6 @@ def perimeter(VertexC, vertices_ordered):
     return np.hypot(*vec.T).sum() + np.hypot(
         *(VertexC[vertices_ordered[-1]] - VertexC[vertices_ordered[0]])
     )
-
-
-def assign_root(A: nx.Graph) -> None:
-    """Add node attribute 'root' with the root closest to each node.
-
-    Changes A in-place.
-
-    Args:
-      A: available-edges graph
-    """
-    closest_root = -A.graph['R'] + np.argmin(A.graph['d2roots'], axis=1)
-    nx.set_node_attributes(A, {n: r.item() for n, r in enumerate(closest_root)}, 'root')
 
 
 # TODO: get new implementation from Xings.ipynb
@@ -1322,81 +1301,4 @@ def area_from_polygon_vertices(X: np.ndarray, Y: np.ndarray) -> float:
     # Shoelace formula for area (https://stackoverflow.com/a/30408825/287217).
     return 0.5 * abs(
         X[-1] * Y[0] - Y[-1] * X[0] + np.dot(X[:-1], Y[1:]) - np.dot(Y[:-1], X[1:])
-    )
-
-
-def add_link_blockmap(A: nx.Graph):
-    """Experimental. Add attribute ``blocked__`` to edges and nodes.
-
-    Edges' ``blocked__`` are R-long list of T-long bitarray maps. A 1-bit in position
-    `t` on the bitarray for root `r` means the edge crosses the line-of-sight t-r.
-
-    Changes `A` in place. `A` should have no feeder edges.
-    """
-    VertexC = A.graph['VertexC']
-    R, T = A.graph['R'], A.graph['T']
-    angle__, angle_rank__, dups_from_root_rank__ = angle_helpers(
-        A, include_borders=False
-    )
-    # TODO: check if dups_from_root_rank__ has a role here
-    A.graph['angle__'] = angle__
-    A.graph['angle_rank__'] = angle_rank__
-    A.graph['dups_from_root_rank__'] = dups_from_root_rank__
-    for u, v, edgeD in A.edges(data=True):
-        blocked__ = []
-        for angle_, angle_rank_, rootC in zip(angle__.T, angle_rank__.T, VertexC[-R:]):
-            blocked_ = bitarray(T)
-            uR, vR = angle_rank_[[u, v]].tolist()
-            uv_angle = (angle_[v] - angle_[u]).item()
-            if uv_angle < 0:
-                uR, vR = vR, uR
-            if abs(uv_angle) <= np.pi:
-                inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
-            else:
-                inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
-            if len(inside_wedge) > 0:
-                vec = VertexC[v] - VertexC[u]
-                wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
-                cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
-                root_vec = rootC - VertexC[u]
-                is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
-                blocked_[
-                    inside_wedge[
-                        (cross <= 0) if is_root_sign_pos else (cross >= 0)
-                    ].tolist()
-                ] = 1
-            blocked__.append(blocked_)
-        edgeD['blocked__'] = blocked__
-
-
-def add_link_cosines(A: nx.Graph):
-    """Add cosine of the angle wrt each root to all links of A as attribute '_cos'.
-
-    Changes A in-place. The cosine is of the acute angle between the link line and the
-    line that contains the mid-point of the link and the root (for each root).
-    """
-    R = A.graph['R']
-    VertexC = A.graph['VertexC']
-    RootC = VertexC[-R:]
-
-    edge_ = np.fromiter(
-        chain.from_iterable(A.edges()),
-        dtype=int,
-        count=2 * A.number_of_edges(),
-    ).reshape((-1, 2))
-    edgeC = VertexC[edge_]
-    uC = edgeC[:, 0, :]
-    vC = edgeC[:, 1, :]
-    edge_vec_ = vC - uC
-    edge_len_ = np.hypot(*edge_vec_.T)
-    mid_edge_ = 0.5 * (uC + vC)
-    mid_vec_ = mid_edge_[:, None, :] - RootC
-    mid_len_ = np.hypot(mid_vec_[..., 0], mid_vec_[..., 1])
-    cos__ = abs(np.vecdot(edge_vec_[:, None, :], mid_vec_)) / (
-        edge_len_[:, None] * mid_len_
-    )
-    nx.set_edge_attributes(
-        A,
-        {(edge[0], edge[1]): cos_.tolist() for edge, cos_ in zip(edge_, cos__)},
-        name='cos_',
     )
