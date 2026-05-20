@@ -9,6 +9,7 @@ from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
 from ..interarraylib import calcload, fun_fingerprint, add_terminal_closest_root
+from ._deprecation import deprecated_heuristic
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -17,6 +18,7 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
+@deprecated_heuristic(migrate_to="constructor(A, capacity, method='biased_EW')")
 def EW_presolver(
     Aʹ: nx.Graph, capacity: int, maxiter: int = 10000, keep_log: bool = False
 ) -> nx.Graph:
