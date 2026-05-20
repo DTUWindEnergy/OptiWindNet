@@ -98,6 +98,7 @@ def constructor(
             'Setting `weigh_detours` to False because `straight_feeder_route=True` '
             'was requested. Set `weigh_detours=False` to suppress this message.'
         )
+        weigh_detours = False
     R, T = (Aʹ.graph[k] for k in 'RT')
     _T = range(T)
     VertexC = Aʹ.graph['VertexC']
