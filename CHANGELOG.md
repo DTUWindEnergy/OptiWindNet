@@ -1,3 +1,45 @@
+# v0.2.2
+
+[Commit history since v0.2.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.1...v0.2.2)
+
+## Breaking Changes
+- Advanced API cleanup: root-assignment and link-blockage helpers moved from `optiwindnet.geometric` to `optiwindnet.interarraylib`. Use `add_terminal_closest_root()`, `add_link_blockmap()`, and `add_link_cosines()` from `optiwindnet.interarraylib`.
+
+## Important Changes
+- **New fused constructive heuristic**: added `heuristics.constructor()` with `esau_williams`, `biased_EW`, `rootlust`, and `radial_EW` methods. The high-level `EWRouter` now uses this constructor path, with detour-aware segmented routing and straight-feeder routing options.
+- **LKH-3 wrapper brought to HGS parity**: added `lkh3()` as the preferred LKH entry point, with single- and multi-root support, per-root clustering, warm starts, crossing repair, capacity-violation retries, and improved solver metadata. The older `lkh()` and `iterative_lkh()` entry points remain as deprecated compatibility aliases.
+- **Route crossing diagnostics expanded**: added Shapely-based `find_geometric_crossings()` for geometry-first validation of arbitrary routesets, including detours, contour clones, shared-run overlap crossings, and branch-split cases.
+- **`PathFinder`**: major robustness improvement for detours around routes that follow borders or exclusion-zone constraints. The router now models constraint-following contour segments as route fences and explicit chain-access regions, allowing it to handle stacked, touching, and overlapping contour chains more reliably.
+
+## Deprecated
+- The standalone EW heuristics `ClassicEW`, `CPEW`, `NBEW`, `OBEW`, and `EW_presolver` now emit a `DeprecationWarning` and will be removed in v0.3. They are superseded by `heuristics.constructor()`: `ClassicEW`/`CPEW` → `method='esau_williams'`, `NBEW` → `method='radial_EW'`, `OBEW` → `method='rootlust'` with `weigh_detours=True`, `EW_presolver` → `method='biased_EW'`. Note that `constructor` takes the available-links graph `A` (from `make_planar_embedding(L)`), not the location graph `L`; the high-level `WindFarmNetwork`/`EWRouter` API builds the mesh for you.
+- The legacy `optiwindnet.interface` module (`heuristic_wrapper()`, `HeuristicFactory`) is deprecated and will be removed in v0.3; use `WindFarmNetwork`/`EWRouter` instead.
+
+## Fixes
+- Fixed LKH warm-start tour construction, including multi-root/per-cluster indexing and route walk order.
+- Fixed LKH repair behavior for remaining crossings and over-capacity routes; offending links are now removed through shared HGS/LKH repair logic, and LKH retries can increase vehicles only for overloaded clusters.
+- Added overflow checks for LKH weight-matrix construction with clearer guidance when inputs need normalization or a smaller scale.
+- Fixed shared-route overlap crossing detection and added geometric handling for route intersections that are not expressible as available-edge crossings.
+- Fixed several PathFinder edge cases involving chain-ends near roots, mixed touching/spanning route fences, and contour paths that include interior non-constraint hops.
+- Prevented same-prime self-links during funnel updates when a chain-anchor coincides with the next portal vertex.
+- Improved handling of shortened contours by deriving barrier and fence topology directly from contour provenance instead of temporarily rewriting the graph during path finding.
+- Fixed `planar_flipped_by_routeset()` handling of normalized unflippable edges and changed it to operate directly on prime-edge sets.
+- Removed a stray `print()` from `gplot(..., tag_border=True)`.
+- Fixed a database test warning caused by leaving a connection open.
+
+## Refactoring & Maintenance
+- Added shared baseline repair helper logic for HGS and LKH.
+- Moved terminal-root assignment and link-blockage/cosine helpers into `interarraylib`, and accelerated link-blockage map construction with a Numba-compiled inner loop.
+- Updated the legacy EW heuristic modules to use the renamed root-assignment helper.
+- Changed `PriorityQueue.top()` to return the priority together with the tag and payload, and made `cancel()` tolerant of missing tags.
+- Precomputed PathFinder sector lookup and `(prime, sector)` bookkeeping to simplify traversal state and reduce repeated fan scans.
+- Cleaned up PathFinder terminology and internal structure around pseudonodes, portals, fences, chains, cones, and funnel state.
+- Updated expected test solutions and expanded coverage for LKH, geometric crossings, PathFinder chain scenarios, database handling, and interarray helper functions.
+
+## Documentation
+- Added a notebook for the new path-insertion/constructor heuristic.
+- Updated LKH and Cazzaro comparison notebooks for the revised solvers and PathFinder behavior.
+
 # v0.2.1
 
 [Commit history since v0.2.0](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.0...v0.2.1)
