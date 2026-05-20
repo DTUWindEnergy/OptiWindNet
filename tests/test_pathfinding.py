@@ -261,3 +261,34 @@ def test_pathfinder_branched_false():
 
     assert _all_turbines_connected(G_det)
     assert _edges_cross(G_det) == []
+
+
+# ---------- route-fence chain scenario (spanning + touching chains) ----------
+
+
+def test_spanning_chain_detours_crossing_free(locations):
+    """A real layout whose routeset runs cables along the border builds chains.
+
+    Yi-2019 at capacity 8 yields a spanning route fence (on-constraint segment
+    of length >= 2) plus a touching fence, exercising both the spanning-chain
+    pairing and the touching-chain construction in `_precompute_chains`. The
+    detoured routeset must be crossing-free with every turbine connected.
+    """
+    from optiwindnet.api import WindFarmNetwork, EWRouter
+
+    wfn = WindFarmNetwork(L=locations.yi_2019, cables=[(8, 1.0)], router=EWRouter())
+    wfn.optimize()
+    G_tent = G_from_S(wfn.S, wfn.A)
+    pf = PathFinder(G_tent, planar=wfn.P, A=wfn.A)
+
+    # Guard that this config still exercises chain topology (it is the point of
+    # the test); if a heuristic change stops producing a spanning fence here,
+    # pick another chain-producing location/capacity rather than weakening this.
+    assert pf.chain_access, 'expected chain topology to be built'
+    assert any(len(f.primes_on_constraint) >= 2 for f in pf.fences), (
+        'expected at least one spanning route fence'
+    )
+
+    G_det = pf.create_detours()
+    assert _all_turbines_connected(G_det)
+    assert _edges_cross(G_det) == []

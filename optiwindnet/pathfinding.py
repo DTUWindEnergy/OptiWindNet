@@ -361,10 +361,18 @@ class PathFinder:
         # synthesized endpoints at the break primes; sub-fences share the
         # original `subtree`. `edges_G_primes` records the full chain_seq
         # union as barriers regardless of the split.
-        constraint_bounds_init: dict[int, set[int]] = defaultdict(set)
+        #
+        # constraint_bounds[c] = the constraint-wall neighbors of c (the other
+        # endpoints of constraint edges incident to c). Built from `planar`,
+        # but valid for the flipped `P` too: `planar_flipped_by_routeset` only
+        # flips non-constraint edges, so it leaves `constraint_edges` (and
+        # hence this adjacency) untouched. Used by the fence-split below and by
+        # the chain-topology helpers (`_precompute_chains` and friends).
+        constraint_bounds: dict[int, set[int]] = defaultdict(set)
         for u, v in planar.graph['constraint_edges']:
-            constraint_bounds_init[u].add(v)
-            constraint_bounds_init[v].add(u)
+            constraint_bounds[u].add(v)
+            constraint_bounds[v].add(u)
+        self.constraint_bounds = constraint_bounds
         shortcuts = A.graph.get('P_paths_shortcuts', {})
         fences: list[Fence] = []
         for ae, subtree in contour_A_edges.items():
@@ -381,7 +389,7 @@ class PathFinder:
             breaks = [
                 i
                 for i in range(len(mp) - 1)
-                if mp[i + 1] not in constraint_bounds_init.get(mp[i], ())
+                if mp[i + 1] not in constraint_bounds.get(mp[i], ())
             ]
             if not breaks:
                 fences.append(Fence(ae, mp, subtree))
@@ -432,18 +440,8 @@ class PathFinder:
         self._precompute_sector_lookup(fences)
         self.best_pn_by_pair_id = [None] * len(self.pair_id_by_prime_sector)
 
-        # constraint_bounds[c] = the cone-bounding neighbors of c that come
-        # from constraint walls (= the other endpoints of constraint walls
-        # incident to c). Used by `_precompute_chains` to identify each
-        # chain-end's constraint cone bounds.
-        constraint_bounds: dict[int, set[int]] = defaultdict(set)
-        for u, v in constraint_edges:
-            constraint_bounds[u].add(v)
-            constraint_bounds[v].add(u)
-        self.constraint_bounds = constraint_bounds
-
-        # Build the chain topology: one Chain per route fence (or two for
-        # the demoted-one-end corner case), with chain_access mapping
+        # Build the chain topology: one Chain per route fence, with
+        # chain_access mapping
         # (chain-end vertex, parent-portal-pair) -> (Chain, side). The
         # trigger sites in `_advance_portal` consult this to decide
         # whether to engage a chain — non-chain wedges (the void on the
@@ -944,8 +942,7 @@ class PathFinder:
             chain_step_nbr = next(iter(constraint_bounds_v))
             cb_other = next(iter(constraint_bounds_v - {chain_step_nbr}))
 
-        # cw direction so chain_step is adjacent to cb_other in `rotated`
-        # (matches `_spanning_access_cones_at`'s convention).
+        # cw direction so chain_step is adjacent to cb_other in `rotated`.
         cw_nbrs = list(P.neighbors_cw_order(v))
         n_cw = len(cw_nbrs)
         nbr_pos = {nb: i for i, nb in enumerate(cw_nbrs)}
@@ -1077,9 +1074,8 @@ class PathFinder:
             ]
             if len(cone_indices) == 1:
                 # Cross-mp chain. Must involve a spanning fence at `v` that
-                # has its chain step on the missing side. Owner convention
-                # (matches the historic `_spanning_access_cones_at`): the
-                # inner-of-the-pair spanning fence — the one whose anchor is
+                # has its chain step on the missing side. Owner convention:
+                # the inner-of-the-pair spanning fence — the one whose anchor is
                 # closer to chain_step on the navigable arc (higher
                 # `rotated_pos`). For a (cb_b, span) chain there's only one
                 # spanning fence in the pair; for (span_outer, span_inner)
@@ -1139,17 +1135,11 @@ class PathFinder:
         paired with the cone at the other mp end below) or a locally-paired
         chain (two cones at this end, paired in place).
 
-        When a spanning fence has only one end with the next-mp vertex on
-        a constraint edge, the other end is demoted to touching: a
-        synthetic single-vertex fence with walls = `(off-constraint
-        endpoint, mp[1])` is added at the demoted end and the regular
-        full-mp fence stays at the good end. After the per-vertex builder
-        runs, the demoted spanning chain has just 1 entry in
-        `spanning_by_chain` and is wired to one cone of the demoted end's
-        local touching chain (the first by index — matching the prior
-        `cone_subtree.index(subtree)` behavior). The local touching chain
-        already owns its cone entries via `register`; the deferred-spanning
-        wiring touches only the spanning-side cone.
+        The fence-split in `__init__` guarantees every spanning fence walks
+        contiguously along constraint edges through `mp` (any non-constraint
+        hop, including one at either end, breaks the fence into separate
+        sub-fences). So both ends of a spanning fence always host spanning
+        topology — there is no one-end "demotion" case to handle here.
 
         Returns:
           chain_access: dict[(vertex, left, right) -> (Chain, side)]
@@ -1158,35 +1148,16 @@ class PathFinder:
             traversal budget.
           chain_end_set: set[int]  # vertices hosting any access cone.
         """
-        constraint_bounds = self.constraint_bounds
-
         spanning_at: dict[int, list[tuple[Fence, str]]] = defaultdict(list)
         touching_at: dict[int, list[Fence]] = defaultdict(list)
         for fence in fences:
             mp = fence.primes_on_constraint
             if len(mp) >= 2:
-                # The spanning model assumes the fence walks contiguously
-                # through `mp` along constraint edges at each end, so each
-                # chain-step neighbor must be a constraint neighbor of its
-                # chain-end. When P_paths' shortest path leaves the
-                # constraint via a non-constraint mesh edge (e.g. a
-                # triangulation diagonal cutting across an obstacle), the
-                # affected end cannot host spanning topology. Demote that
-                # end alone to a touching encounter with synthesized walls
-                # = the off-constraint endpoint and the next mp vertex.
-                s, t = fence.endpoints
-                start_ok = mp[1] in constraint_bounds.get(mp[0], set())
-                end_ok = mp[-2] in constraint_bounds.get(mp[-1], set())
-                if start_ok:
-                    spanning_at[mp[0]].append((fence, 'start'))
-                else:
-                    touching_at[mp[0]].append(Fence((s, mp[1]), [mp[0]], fence.subtree))
-                if end_ok:
-                    spanning_at[mp[-1]].append((fence, 'end'))
-                else:
-                    touching_at[mp[-1]].append(
-                        Fence((mp[-2], t), [mp[-1]], fence.subtree)
-                    )
+                # The split invariant (see docstring) makes both chain-step
+                # neighbors constraint neighbors of their chain-ends, so the
+                # fence spans at both ends.
+                spanning_at[mp[0]].append((fence, 'start'))
+                spanning_at[mp[-1]].append((fence, 'end'))
             else:
                 touching_at[mp[0]].append(fence)
 
@@ -1211,9 +1182,6 @@ class PathFinder:
             tuple[int, int, int],
             list[tuple[int, AccessCone, list[tuple[int, int]], list[int]]],
         ] = defaultdict(list)
-        touching_chains_by_vertex_subtree: dict[tuple[int, int], list[Chain]] = (
-            defaultdict(list)
-        )
         chain_end_vertices = set(spanning_at) | set(touching_at)
         for v in chain_end_vertices:
             result = self._build_chains_at(
@@ -1228,78 +1196,36 @@ class PathFinder:
                     (v, cone, pair_keys, mp)
                 )
             for ch, keys_a, keys_b in v_local_chains:
-                touching_chains_by_vertex_subtree[(v, ch.subtree)].append(ch)
-                # Local chains register here; the deferred-spanning wiring
-                # below will not overwrite their cone entries (it touches
-                # only the spanning-side cone of the deferred chain).
                 register(v, keys_a, ch, 0)
                 register(v, keys_b, ch, 1)
 
-        # Pair fully-spanning chains (both ends OK -> 2 entries per chain).
-        # Demoted-one-end fences contribute only 1 entry and are deferred.
-        deferred_spanning: dict[
-            tuple[int, int, int],
-            tuple[int, AccessCone, list[tuple[int, int]], list[int]],
-        ] = {}
+        # Pair each spanning chain's two end-cones (one per fence end) into a
+        # Chain. By the split invariant every chain_key has exactly 2 entries.
         for chain_key, entries in spanning_by_chain.items():
             subtree = chain_key[0]
-            if len(entries) == 2:
-                (c0, cone0, keys0, mp), (c1, cone1, keys1, _) = entries
-                if cone0.vertex == mp[0] and cone1.vertex == mp[-1]:
-                    walk_0, walk_1 = list(mp[1:]), list(mp[-2::-1])
-                elif cone0.vertex == mp[-1] and cone1.vertex == mp[0]:
-                    walk_0, walk_1 = list(mp[-2::-1]), list(mp[1:])
-                else:
-                    error(
-                        'spanning chain %d: cones at %d, %d do not match mp ends',
-                        subtree,
-                        cone0.vertex,
-                        cone1.vertex,
-                    )
-                    continue
-                chain = Chain(subtree, (cone0, cone1), (walk_0, walk_1))
-                register(c0, keys0, chain, 0)
-                register(c1, keys1, chain, 1)
-            elif len(entries) == 1:
-                deferred_spanning[chain_key] = entries[0]
-            else:
+            if len(entries) != 2:
                 error(
-                    'spanning chain %s has %d access cones (expected 1 or 2)',
+                    'spanning chain %s has %d access cones (expected 2)',
                     chain_key,
                     len(entries),
                 )
-
-        # Wire deferred (one-end-demoted) spanning chains to the demoted
-        # end's touching counterpart.
-        for chain_key, (c, cone, pair_keys, mp) in deferred_spanning.items():
-            subtree = chain_key[0]
-            demoted_end = mp[-1] if cone.vertex == mp[0] else mp[0]
-            partners = touching_chains_by_vertex_subtree.get((demoted_end, subtree), [])
-            if len(partners) != 1:
+                continue
+            (c0, cone0, keys0, mp), (c1, cone1, keys1, _) = entries
+            if cone0.vertex == mp[0] and cone1.vertex == mp[-1]:
+                walk_0, walk_1 = list(mp[1:]), list(mp[-2::-1])
+            elif cone0.vertex == mp[-1] and cone1.vertex == mp[0]:
+                walk_0, walk_1 = list(mp[-2::-1]), list(mp[1:])
+            else:
                 error(
-                    'demoted spanning chain %d at %d: expected 1 touching '
-                    'partner at %d, found %d',
+                    'spanning chain %d: cones at %d, %d do not match mp ends',
                     subtree,
-                    cone.vertex,
-                    demoted_end,
-                    len(partners),
+                    cone0.vertex,
+                    cone1.vertex,
                 )
                 continue
-            # Pair with the touching chain's first cone — preserves the
-            # historic `cone_subtree.index(subtree)` choice. The other
-            # touching cone reaches the spanning side only via this one.
-            partner_cone = partners[0].cones[0]
-            if cone.vertex == mp[0]:
-                walk_0, walk_1 = list(mp[1:]), list(mp[-2::-1])
-            else:
-                walk_0, walk_1 = list(mp[-2::-1]), list(mp[1:])
-            chain = Chain(subtree, (cone, partner_cone), (walk_0, walk_1))
-            # Register only the spanning-side cone for entry. The
-            # demoted-end (partner) cone's entries already belong to the
-            # local touching chain (registered above) — overwriting them
-            # would route incoming touching-cone advancers back across the
-            # full mp, contradicting the touching semantics there.
-            register(c, pair_keys, chain, 0)
+            chain = Chain(subtree, (cone0, cone1), (walk_0, walk_1))
+            register(c0, keys0, chain, 0)
+            register(c1, keys1, chain, 1)
 
         return chain_access, chain_end_set
 
