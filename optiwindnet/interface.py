@@ -1,6 +1,15 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+"""DEPRECATED (v0.3): legacy table/coordinate interface to the old EW heuristics.
+
+This module wraps the deprecated `CPEW`/`NBEW`/`OBEW` heuristics behind a
+table-and-coordinates API. It is scheduled for removal in v0.3. Use the
+high-level `WindFarmNetwork`/`EWRouter` API (or `heuristics.constructor()`
+directly) instead.
+"""
+
+import warnings
 from functools import partial
 
 import networkx as nx
@@ -214,6 +223,12 @@ class HeuristicFactory:
     """
 
     def __init__(self, T, R, rootC, boundaryC, heuristic, cables, name='unnamed'):
+        warnings.warn(
+            '`HeuristicFactory` is deprecated and will be removed in v0.3. Use the '
+            'high-level `WindFarmNetwork`/`EWRouter` API instead.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.T = T
         self.R = R
         self.cables = cables
@@ -265,6 +280,12 @@ def heuristic_wrapper(X, Y, cables, R=1, heuristic='CPEW', return_graph=False):
     Returns:
       Location graph L.
     """
+    warnings.warn(
+        '`heuristic_wrapper()` is deprecated and will be removed in v0.3. Use the '
+        'high-level `WindFarmNetwork`/`EWRouter` API instead.',
+        DeprecationWarning,
+        stacklevel=2,
+    )
     G_base = L_from_XYR(X, Y, R)
     G = heuristics[heuristic](G_base, capacity=cables[-1][1])
     calcload(G)

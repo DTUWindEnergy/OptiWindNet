@@ -413,14 +413,14 @@ def iterative_hgs_cvrp(
 ) -> nx.Graph:
     """DEPRECATED: Backward-compatible alias of `hgs_cvrp()`, use it instead."""
     warnings.warn(
-        '`iterative_hgs_cvrp()` is deprecated and will be removed in a future release. '
+        '`iterative_hgs_cvrp()` is deprecated and will be removed in v0.3. '
         'Use `hgs_cvrp()` instead, as it now iterates and repairs solution by default.',
         DeprecationWarning,
         stacklevel=2,
     )
     if complete:
         warnings.warn(
-            'The `complete` parameter is deprecated and ignored.',
+            'The `complete` parameter is deprecated, ignored, and will be removed in v0.3.',
             DeprecationWarning,
             stacklevel=2,
         )
@@ -451,7 +451,7 @@ def hgs_multiroot(
 ) -> nx.Graph:
     """DEPRECATED: Backward-compatible alias of `hgs_cvrp()`, use it instead."""
     warnings.warn(
-        '`hgs_multiroot()` is deprecated and will be removed in a future release. '
+        '`hgs_multiroot()` is deprecated and will be removed in v0.3. '
         'Use `hgs_cvrp()` instead, as it now also works for multi-root instances.',
         DeprecationWarning,
         stacklevel=2,

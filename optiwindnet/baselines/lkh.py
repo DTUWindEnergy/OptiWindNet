@@ -634,8 +634,7 @@ def lkh(*args, **kwargs) -> nx.Graph:
     `hgs_cvrp()` and supports both single- and multi-root instances).
     """
     warnings.warn(
-        '`lkh()` is deprecated and will be removed in a future release. '
-        'Use `lkh3()` instead.',
+        '`lkh()` is deprecated and will be removed in v0.3. Use `lkh3()` instead.',
         DeprecationWarning,
         stacklevel=2,
     )
@@ -960,8 +959,8 @@ def iterative_lkh(
     instances.
     """
     warnings.warn(
-        '`iterative_lkh()` is deprecated and will be removed in a future '
-        'release. Use `lkh3()` instead.',
+        '`iterative_lkh()` is deprecated and will be removed in v0.3. '
+        'Use `lkh3()` instead.',
         DeprecationWarning,
         stacklevel=2,
     )
