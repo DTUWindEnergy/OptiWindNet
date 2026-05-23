@@ -43,7 +43,7 @@ variables:
     # <<< scip/fscip section end
     - python3 -m venv tests/venv
     - source tests/venv/bin/activate
-    - pip install --progress-bar off -e .[test]
+    - pip install --progress-bar off -e .[test-solvers]
     - python3 --version
   script:
     - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
@@ -74,7 +74,7 @@ variables:
     - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS.zip" -DestinationPath .
     - $env:Path = "$env:Path;$env:SCIP_WINDOWS\bin\"
     # <<< scip/fscip section end
-    - pip install --progress-bar off -e .[test]
+    - pip install --progress-bar off -e .[test-solvers]
     - python --version
   script:
     - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc

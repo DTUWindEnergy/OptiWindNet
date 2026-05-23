@@ -66,12 +66,15 @@ solvers = [
 ]
 test  = [
     "coverage",
-    "pytest",  # for testing
-    "pytest-cov",  # for calculating coverage
-    "pytest-xdist",  # for testing in parallel
-    "psutil",  # memory profiling
-    "memory_profiler",  # memory profiling
-    "line_profiler",  # to check speed
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "psutil",
+    "memory_profiler",
+    "line_profiler",
+]
+test-solvers = [
+    "optiwindnet[test]",
     "optiwindnet[solvers]",
 ]
 docs = [
