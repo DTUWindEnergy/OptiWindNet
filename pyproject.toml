@@ -107,3 +107,7 @@ skip-string-normalization = true
 
 [tool.ruff.format]
 quote-style = "single"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:optiwindnet"]
