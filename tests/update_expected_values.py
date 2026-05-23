@@ -5,11 +5,11 @@ Generate expected graphs for specified sites-routers.
 import pickle
 from typing import Any, Dict, Optional, Sequence
 
-from optiwindnet.api import WindFarmNetwork
-from optiwindnet.importer import L_from_yaml
-
 import paths
 from helpers import router_factory
+
+from optiwindnet.api import WindFarmNetwork
+from optiwindnet.importer import L_from_yaml
 
 # -----------------------
 # Small helpers

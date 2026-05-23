@@ -1,5 +1,6 @@
+from optiwindnet.svg import SvgRepr, svgplot
+
 from .helpers import tiny_wfn
-from optiwindnet.svg import svgplot, SvgRepr
 
 
 def test_svgplot():

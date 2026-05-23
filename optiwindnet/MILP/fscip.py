@@ -13,7 +13,6 @@ import networkx as nx
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from .scip import make_min_length_model, warmup_model
 from ._core import (
     FeederRoute,
     ModelOptions,
@@ -24,6 +23,7 @@ from ._core import (
     Topology,
     physical_core_count,
 )
+from .scip import make_min_length_model, warmup_model
 
 __all__ = ('make_min_length_model', 'warmup_model')
 

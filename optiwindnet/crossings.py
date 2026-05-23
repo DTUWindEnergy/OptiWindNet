@@ -5,8 +5,8 @@ from typing import Any
 
 import networkx as nx
 import numpy as np
-from bidict import bidict
 import shapely as shp
+from bidict import bidict
 
 from .geometric import (
     angle_helpers,

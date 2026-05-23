@@ -143,8 +143,7 @@ def is_warmstart_eligible(
 
     if S_warm is None:
         if verbose_warmstart:
-            print('>>> No solution is available for warmstarting! <<<')
-            print()
+            warning('No solution is available for warmstarting.')
         return False
 
     R = S_warm.graph['R']
@@ -193,19 +192,16 @@ def is_warmstart_eligible(
 
     # Output
     if reasons and verbose_warmstart:
-        print()
-        print(
-            'Warning: No warmstarting (even though a solution is available) due to the following reason(s):'
+        warning(
+            'No warmstarting (even though a solution is available) due to: %s',
+            '; '.join(reasons),
         )
-        for reason in reasons:
-            print(f'    - {reason}')
-        print()
         return False
     elif solver_name != 'scip':
-        msg = 'Using warm start: the model is initialized with the provided solution S.'
         if verbose_warmstart:
-            print(msg)
-            print()
+            info(
+                'Using warm start: the model is initialized with the provided solution S.'
+            )
         return True
     else:
         return False

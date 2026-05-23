@@ -9,8 +9,8 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
-    OWNWarmupFailed,
     OWNSolutionNotFound,
+    OWNWarmupFailed,
     SolutionInfo,
     Solver,
     Topology,
@@ -109,8 +109,9 @@ def solver_factory(solver_name: str) -> Solver:
                 )
         case 'highs':
             if find_spec('highspy'):
-                from .pyomo import SolverPyomoAppsi
                 from pyomo.contrib.appsi.solvers.highs import Highs
+
+                from .pyomo import SolverPyomoAppsi
 
                 return SolverPyomoAppsi(solver_name, Highs)
             raise ModuleNotFoundError(

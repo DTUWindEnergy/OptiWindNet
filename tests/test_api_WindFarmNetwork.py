@@ -1,17 +1,18 @@
 import logging
+
 import numpy as np
 import pytest
 from shapely.geometry import Polygon
 
 import optiwindnet.api_utils as U
+import optiwindnet.plotting as plotting
 from optiwindnet.api import (
     EWRouter,
     HGSRouter,
     WindFarmNetwork,
 )
-import optiwindnet.plotting as plotting
-from .helpers import tiny_wfn
 
+from .helpers import tiny_wfn
 
 # =====================
 # WindFarmNetwork core

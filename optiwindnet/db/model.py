@@ -11,6 +11,7 @@ Tables:
 
 import os
 from contextlib import contextmanager
+
 from peewee import (
     AutoField,
     BlobField,

@@ -13,9 +13,9 @@ import esy.osm.pbf
 import networkx as nx
 import numpy as np
 import shapely as shp
-from scipy.spatial import ConvexHull
 import utm
 import yaml
+from scipy.spatial import ConvexHull
 
 from .geometric import rotating_calipers
 from .interarraylib import L_from_site

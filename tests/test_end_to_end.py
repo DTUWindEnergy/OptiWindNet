@@ -1,8 +1,10 @@
 # test end to end
 import numpy as np
 import pytest
-from optiwindnet.api import WindFarmNetwork, EWRouter, MILPRouter
-from .helpers import tiny_wfn, router_factory, load_instances, canonical_edges
+
+from optiwindnet.api import EWRouter, MILPRouter, WindFarmNetwork
+
+from .helpers import canonical_edges, load_instances, router_factory, tiny_wfn
 from .paths import SOLUTIONS_FILE
 
 

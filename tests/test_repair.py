@@ -3,11 +3,11 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from optiwindnet.api import WindFarmNetwork
 import optiwindnet.repair as repair
+from optiwindnet.api import WindFarmNetwork
 from optiwindnet.interarraylib import calcload
-from .helpers import assert_graph_equal
 
+from .helpers import assert_graph_equal
 
 # =========================
 # Fixtures & tiny helpers

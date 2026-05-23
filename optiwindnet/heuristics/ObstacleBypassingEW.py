@@ -21,7 +21,7 @@ from ..geometric import (
     is_crossing,
     is_same_side,
 )
-from ..interarraylib import L_from_G, fun_fingerprint, add_terminal_closest_root
+from ..interarraylib import L_from_G, add_terminal_closest_root, fun_fingerprint
 from ..mesh import make_planar_embedding
 from ..utils import Alerter
 from ._deprecation import deprecated_heuristic

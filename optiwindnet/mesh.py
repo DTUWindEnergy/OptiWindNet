@@ -15,7 +15,6 @@ import shapely as shp
 from bidict import bidict
 from scipy.spatial.distance import cdist
 
-from .interarraylib import add_terminal_closest_root
 from .geometric import (
     CoordPairs,
     Indices,
@@ -25,6 +24,7 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
+from .interarraylib import add_terminal_closest_root
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
 

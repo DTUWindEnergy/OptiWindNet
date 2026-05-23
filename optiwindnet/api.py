@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Sequence
 
 import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
 import networkx as nx
 import numpy as np
 import shapely as shp
+from matplotlib.axes import Axes
 
 from .api_utils import (
     buffer_border_obs,
@@ -21,7 +21,7 @@ from .api_utils import (
 )
 from .baselines.hgs import hgs_cvrp
 from .heuristics import constructor
-from .importer import L_from_pbf, L_from_site, L_from_yaml, L_from_windIO
+from .importer import L_from_pbf, L_from_site, L_from_windIO, L_from_yaml
 from .importer import load_repository as load_repository
 from .interarraylib import (
     G_from_S,
@@ -32,7 +32,7 @@ from .interarraylib import (
     calcload,
 )
 from .mesh import make_planar_embedding
-from .MILP import ModelOptions, solver_factory, OWNSolutionNotFound, OWNWarmupFailed
+from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot
@@ -340,7 +340,7 @@ class WindFarmNetwork:
                 **kwargs,
             )
         except AttributeError:
-            print('No buffering is performed')
+            _logger.info('No buffering is performed')
 
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):

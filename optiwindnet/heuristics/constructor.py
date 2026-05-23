@@ -3,24 +3,24 @@
 
 import logging
 import time
-from itertools import chain, tee
 from collections import defaultdict
+from itertools import chain, tee
 
-import numpy as np
 import networkx as nx
-from scipy.stats import rankdata
+import numpy as np
 from bitarray import bitarray
 from bitarray.util import ones, zeros
+from scipy.stats import rankdata
 
 from ..crossings import edge_conflicts
 from ..geometric import (
     angle_oracles_factory,
 )
 from ..interarraylib import (
-    fun_fingerprint,
-    calcload,
     add_link_blockmap,
     add_terminal_closest_root,
+    calcload,
+    fun_fingerprint,
 )
 from .priorityqueue import PriorityQueue
 

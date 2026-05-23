@@ -5,12 +5,11 @@ import abc
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
-
 from enum import StrEnum, auto
 from itertools import chain
-from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import networkx as nx

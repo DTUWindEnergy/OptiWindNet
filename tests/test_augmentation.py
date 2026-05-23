@@ -1,8 +1,9 @@
 # tests/test_augmentation.py
-import math
 import logging
-import numpy as np
+import math
+
 import networkx as nx
+import numpy as np
 import pytest
 
 import optiwindnet.augmentation as aug

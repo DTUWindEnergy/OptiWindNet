@@ -83,6 +83,24 @@ variables:
     paths:
       - downloads
 
+# ===== Lint =====
+lint:
+  image: python:3.13
+  tags: [linux]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        compare_to: refs/heads/main
+        paths:
+          - pyproject.toml
+          - optiwindnet/**/*
+          - tests/**/*
+  script:
+    - pip install --progress-bar off ruff
+    - ruff check optiwindnet tests
+    - ruff format --check optiwindnet tests
+
 # ===== Test OptiWindNet on Linux =====
 test_linux:
   extends: .test_linux_base

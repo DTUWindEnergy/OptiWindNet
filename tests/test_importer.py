@@ -11,7 +11,6 @@ from optiwindnet.importer import (
 
 from . import paths
 
-
 # --- _get_entries ---
 
 

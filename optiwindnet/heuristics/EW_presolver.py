@@ -8,7 +8,7 @@ import networkx as nx
 from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
-from ..interarraylib import calcload, fun_fingerprint, add_terminal_closest_root
+from ..interarraylib import add_terminal_closest_root, calcload, fun_fingerprint
 from ._deprecation import deprecated_heuristic
 from .priorityqueue import PriorityQueue
 

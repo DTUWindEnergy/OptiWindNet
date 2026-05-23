@@ -1,5 +1,6 @@
 import copy
 import math
+
 import networkx as nx
 import numpy as np
 import pytest
@@ -10,6 +11,10 @@ from optiwindnet.interarraylib import (
     L_from_site,
     S_from_G,
     S_from_terse_links,
+    add_link_blockmap,
+    add_link_cosines,
+    as_hooked_to_head,
+    as_hooked_to_nearest,
     as_normalized,
     as_rescaled,
     as_single_root,
@@ -17,21 +22,16 @@ from optiwindnet.interarraylib import (
     as_undetoured,
     assign_cables,
     calcload,
+    count_diagonals,
     describe_G,
     fun_fingerprint,
     scaffolded,
     site_fingerprint,
     terse_links_from_S,
     update_lengths,
-    count_diagonals,
-    as_hooked_to_head,
-    as_hooked_to_nearest,
-    add_link_blockmap,
-    add_link_cosines,
 )
 
 from .helpers import assert_graph_equal, tiny_wfn
-
 
 # ----------
 # tests

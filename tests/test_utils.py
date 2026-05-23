@@ -1,5 +1,4 @@
-from optiwindnet.utils import make_handle, namedtuplify, NodeTagger
-
+from optiwindnet.utils import NodeTagger, make_handle, namedtuplify
 
 # --- make_handle ---
 

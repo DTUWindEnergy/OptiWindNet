@@ -5,11 +5,10 @@
 import abc
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 import networkx as nx
-
-from enum import StrEnum
 
 def physical_core_count() -> int: ...
 

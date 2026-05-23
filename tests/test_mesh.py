@@ -1,15 +1,16 @@
-import numpy as np
-import networkx as nx
 import condeltri as cdt
+import networkx as nx
+import numpy as np
 import shapely as shp
 
+from optiwindnet.geometric import is_crossing
 from optiwindnet.mesh import (
+    A_graph,
     _build_edge_line_tree,
     _edges_and_hull_from_cdt,
-    A_graph,
     make_planar_embedding,
 )
-from optiwindnet.geometric import is_crossing
+
 from .helpers import tiny_wfn
 
 

@@ -2,11 +2,12 @@ import copy
 import pickle
 from collections import Counter
 from pathlib import Path
-from typing import Iterable, Any, Dict, Optional
-import numpy as np
+from typing import Any, Dict, Iterable, Optional
+
 import networkx as nx
-from optiwindnet.api import WindFarmNetwork
-from optiwindnet.api import EWRouter, HGSRouter, MILPRouter
+import numpy as np
+
+from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
 from optiwindnet.MILP import ModelOptions
 
 
