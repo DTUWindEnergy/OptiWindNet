@@ -30,7 +30,7 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 @deprecated_heuristic(
-    migrate_to="constructor(A, capacity, method='esau_williams', "
+    migrate_to="constructor(A, capacity, method='biased_EW', "
     'straight_feeder_route=True, weigh_detours=False)'
 )
 def CPEW(
