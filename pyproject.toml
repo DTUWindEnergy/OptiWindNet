@@ -111,3 +111,7 @@ skip-string-normalization = true
 
 [tool.ruff.format]
 quote-style = "single"
+
+[tool.ruff.lint]
+# This keeps all the defaults AND adds your new line-length rules
+extend-select = ["E501", "W505"]
