@@ -3,14 +3,14 @@
 
 import logging
 import math
-from typing import Callable
 from itertools import pairwise
+from typing import Callable
 
 import matplotlib.pyplot as plt
 import networkx as nx
 import numba as nb
-from numba.typed import List
 import numpy as np
+from numba.typed import List
 from scipy.spatial import ConvexHull
 
 from .geometric import (
@@ -18,8 +18,8 @@ from .geometric import (
     CoordPairs,
     IndexPairs,
     area_from_polygon_vertices,
-    rotating_calipers,
     rotate,
+    rotating_calipers,
 )
 from .interarraylib import L_from_site
 

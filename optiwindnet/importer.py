@@ -13,9 +13,9 @@ import esy.osm.pbf
 import networkx as nx
 import numpy as np
 import shapely as shp
-from scipy.spatial import ConvexHull
 import utm
 import yaml
+from scipy.spatial import ConvexHull
 
 from .geometric import rotating_calipers
 from .interarraylib import L_from_site
@@ -315,7 +315,8 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                                             case 'outer':
                                                 if border_raw is not None:
                                                     raise ValueError(
-                                                        'Only a single border is supported.'
+                                                        'Only a single border'
+                                                        ' is supported.'
                                                     )
                                                 border_raw = [
                                                     nodes[nid].lonlat[::-1]
@@ -337,7 +338,8 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     R = len(substations)
     if T == 0 or R == 0:
         raise ValueError(
-            f'Location: "{name}" -> Unable to identify at least one substation and one generator.'
+            f'Location: "{name}" -> Unable to identify at least one'
+            ' substation and one generator.'
         )
 
     #  for i, substation in enumerate(tuple(substations)):
@@ -477,7 +479,8 @@ class IncludeLoader(yaml.SafeLoader):
         if not include_path.is_absolute():
             include_path = self._parent / include_path
         with open(include_path, 'r') as f:
-            # When processing includes, use IncludeLoader to maintain correct directory context
+            # When processing includes, use IncludeLoader to maintain
+            # correct directory context
             return yaml.load(f, Loader=IncludeLoader)
 
 

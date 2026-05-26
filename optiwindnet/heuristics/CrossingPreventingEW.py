@@ -18,7 +18,7 @@ from ..geometric import (
     is_crossing,
     is_same_side,
 )
-from ..interarraylib import fun_fingerprint, add_terminal_closest_root
+from ..interarraylib import add_terminal_closest_root, fun_fingerprint
 from ..mesh import delaunay
 from ._deprecation import deprecated_heuristic
 from .priorityqueue import PriorityQueue

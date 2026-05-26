@@ -6,14 +6,14 @@ import math
 import pickle
 import sys
 from hashlib import sha256
-from itertools import pairwise, chain
+from itertools import chain, pairwise
 
-import numba as nb
 import networkx as nx
+import numba as nb
 import numpy as np
 from bitarray import bitarray
 
-from .geometric import CoordPair, rotate, angle_helpers
+from .geometric import CoordPair, angle_helpers, rotate
 
 _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error

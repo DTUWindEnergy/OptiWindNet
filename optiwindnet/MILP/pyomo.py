@@ -132,7 +132,8 @@ class SolverPyomo(Solver):
         termination = result['Solver'][0]['Termination condition'].name
         if len(result.solution) == 0:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+                f'Unable to find a solution. Solver {self.name} terminated'
+                f' with: {termination}'
             )
         self.result = result
         if self.name != 'scip':
@@ -238,7 +239,8 @@ class SolverPyomoAppsi(Solver):
         termination = result.termination_condition.name
         if objective is None:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+                f'Unable to find a solution. Solver {self.name} terminated'
+                f' with: {termination}'
             )
         bound = result.best_objective_bound
         solution_info = SolutionInfo(

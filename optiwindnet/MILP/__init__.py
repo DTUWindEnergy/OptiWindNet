@@ -9,8 +9,8 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
-    OWNWarmupFailed,
     OWNSolutionNotFound,
+    OWNWarmupFailed,
     SolutionInfo,
     Solver,
     Topology,
@@ -99,8 +99,9 @@ def solver_factory(solver_name: str) -> Solver:
                     return SolverFSCIP()
                 else:
                     raise FileNotFoundError(
-                        "Executable 'fscip' not found. Ensure the system PATH includes the "
-                        "path to 'fscip' (part of scipoptsuite from https://www.scipopt.org)."
+                        "Executable 'fscip' not found. Ensure the system PATH includes"
+                        " the path to 'fscip' (part of scipoptsuite from"
+                        " https://www.scipopt.org)."
                     )
             else:
                 raise ModuleNotFoundError(
@@ -109,8 +110,9 @@ def solver_factory(solver_name: str) -> Solver:
                 )
         case 'highs':
             if find_spec('highspy'):
-                from .pyomo import SolverPyomoAppsi
                 from pyomo.contrib.appsi.solvers.highs import Highs
+
+                from .pyomo import SolverPyomoAppsi
 
                 return SolverPyomoAppsi(solver_name, Highs)
             raise ModuleNotFoundError(

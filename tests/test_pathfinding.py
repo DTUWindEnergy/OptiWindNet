@@ -5,9 +5,9 @@ import numpy as np
 
 from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import G_from_S
+from optiwindnet.pathfinding import PathFinder
 
 from .helpers import tiny_wfn
-from optiwindnet.pathfinding import PathFinder
 
 
 def _edges_cross(G):
@@ -274,7 +274,7 @@ def test_spanning_chain_detours_crossing_free(locations):
     pairing and the touching-chain construction in `_precompute_chains`. The
     detoured routeset must be crossing-free with every turbine connected.
     """
-    from optiwindnet.api import WindFarmNetwork, EWRouter
+    from optiwindnet.api import EWRouter, WindFarmNetwork
 
     wfn = WindFarmNetwork(L=locations.yi_2019, cables=[(8, 1.0)], router=EWRouter())
     wfn.optimize()

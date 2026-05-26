@@ -1659,7 +1659,8 @@ class PathFinder:
             #      print(f"{'RIGHT' if side else 'LEFT '} "
             #            f'nearside({_nearside}) == apex({_apex})')
             debug(
-                '<%d> %s _new(%d) _nearside(%d) _farside(%d) _apex(%d), _wedge_end: %d %d, _funnel: %s',
+                '<%d> %s _new(%d) _nearside(%d) _farside(%d) _apex(%d),'
+                ' _wedge_end: %d %d, _funnel: %s',
                 adv_id,
                 'RIGHT' if side else 'LEFT ',
                 _new,
@@ -1826,7 +1827,8 @@ class PathFinder:
                 portal_sorted = (right, left) if right < left else portal
 
                 # Chain-ends adjacent to root in the fan are stepped over by
-                # the regular init advancer (triangle/portal-side-trigger fires on the far
+                # the regular init advancer (triangle/portal-side-trigger
+                # fires on the far
                 # vertex `n`, never on `left`/`right`), so engage the chain
                 # directly here. The path arrives at `left` from the triangle
                 # (r, left, right), so the cone-at-`left` bounded by (r, right)

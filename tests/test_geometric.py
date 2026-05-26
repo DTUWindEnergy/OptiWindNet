@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from .helpers import tiny_wfn
+
 from optiwindnet.geometric import (
     angle,
     any_pairs_opposite_edge,
@@ -15,6 +15,8 @@ from optiwindnet.geometric import (
     rotate,
     rotating_calipers,
 )
+
+from .helpers import tiny_wfn
 
 
 def test_area_from_polygon_vertices():

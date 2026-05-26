@@ -1,17 +1,18 @@
 import logging
+
 import numpy as np
 import pytest
 from shapely.geometry import Polygon
 
 import optiwindnet.api_utils as U
+import optiwindnet.plotting as plotting
 from optiwindnet.api import (
     EWRouter,
     HGSRouter,
     WindFarmNetwork,
 )
-import optiwindnet.plotting as plotting
-from .helpers import tiny_wfn
 
+from .helpers import tiny_wfn
 
 # =====================
 # WindFarmNetwork core
@@ -317,11 +318,13 @@ def test_polygon_out_of_bounds_raises():
         _ = wfn.P
 
 
-def test_plot_original_vs_buffered_without_prior_buffer_prints_message(capsys):
+def test_plot_original_vs_buffered_without_prior_buffer_logs_message(caplog):
+    import logging
+
     wfn = tiny_wfn()
-    _ = wfn.plot_original_vs_buffered()
-    captured = capsys.readouterr()
-    assert 'No buffering is performed' in captured.out
+    with caplog.at_level(logging.INFO, logger='optiwindnet.api'):
+        _ = wfn.plot_original_vs_buffered()
+    assert 'No buffering is performed' in caplog.text
 
 
 def test_add_buffer_then_plot_original_vs_buffered_returns_axes():

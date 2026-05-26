@@ -15,7 +15,6 @@ import shapely as shp
 from bidict import bidict
 from scipy.spatial.distance import cdist
 
-from .interarraylib import add_terminal_closest_root
 from .geometric import (
     CoordPairs,
     Indices,
@@ -25,6 +24,7 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
+from .interarraylib import add_terminal_closest_root
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
 
@@ -1363,7 +1363,8 @@ def make_planar_embedding(
         P_A.remove_edge(*uv)
 
     # ###################################################################
-    # MN) Add new A edges from P (if concavities or obstacles removed clusters of A triangles)
+    # MN) Add new A edges from P (if concavities or obstacles removed
+    # clusters of A triangles)
     # ###################################################################
     # only locations Cazzaro 2022 G-140 and G-210 are affected by this
     for u, v in P_to_A_candidates:
@@ -1787,7 +1788,8 @@ def planar_flipped_by_routeset(
         #      continue
         if ((s, t) if s < t else (t, s)) in unflippables:
             warn(
-                'Navigation mesh inconsistency: edge %d-%d is unflippable due to a previous flip nearby',
+                'Navigation mesh inconsistency: edge %d-%d is unflippable'
+                ' due to a previous flip nearby',
                 s,
                 t,
             )

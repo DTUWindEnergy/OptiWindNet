@@ -5,9 +5,8 @@ import logging
 import math
 import random
 import warnings
-from typing import Callable
-from typing import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Sequence
 
 import hybgensea
 import networkx as nx
@@ -420,7 +419,8 @@ def iterative_hgs_cvrp(
     )
     if complete:
         warnings.warn(
-            'The `complete` parameter is deprecated, ignored, and will be removed in v0.3.',
+            'The `complete` parameter is deprecated, ignored, and will be'
+            ' removed in v0.3.',
             DeprecationWarning,
             stacklevel=2,
         )

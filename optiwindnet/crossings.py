@@ -5,8 +5,8 @@ from typing import Any
 
 import networkx as nx
 import numpy as np
-from bidict import bidict
 import shapely as shp
+from bidict import bidict
 
 from .geometric import (
     angle_helpers,
@@ -467,7 +467,8 @@ def _polyline_coords(
 
 
 def _shared_run_swaps_sides(coords_a: np.ndarray, coords_b: np.ndarray) -> bool:
-    """True iff two polylines share an interior run and exit on the same side at each end.
+    """True iff two polylines share an interior run and exit on the same side
+    at each end.
 
     When two polylines overlap on a shared sub-sequence of vertices, an actual *cross*
     requires the two paths to enter the overlap from opposite half-planes and exit to

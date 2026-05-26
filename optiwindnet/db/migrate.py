@@ -16,7 +16,7 @@ import os
 import sqlite3
 import sys
 
-from . import open_database, Machine, Method, NodeSet, RouteSet
+from . import Machine, Method, NodeSet, RouteSet, open_database
 from .model import database_proxy
 
 
@@ -28,7 +28,8 @@ def _get_source_table_name(src_conn, candidate_names):
         if name in existing:
             return name
     raise ValueError(
-        f'None of {candidate_names} found in source database. Existing tables: {existing}'
+        f'None of {candidate_names} found in source database.'
+        f' Existing tables: {existing}'
     )
 
 

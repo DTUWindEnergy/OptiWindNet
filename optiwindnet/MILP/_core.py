@@ -5,12 +5,11 @@ import abc
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
-
 from enum import StrEnum, auto
 from itertools import chain
-from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import networkx as nx
@@ -85,7 +84,8 @@ class FeederRoute(StrEnum):
 
 
 class FeederLimit(StrEnum):
-    'Whether to limit the maximum number of feeders, if set to "specified", additional kwarg "max_feeders" must be given.'
+    'Whether to limit the maximum number of feeders, if set to "specified",'
+    ' additional kwarg "max_feeders" must be given.'
 
     UNLIMITED = auto()
     SPECIFIED = auto()

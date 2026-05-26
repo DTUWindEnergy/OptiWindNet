@@ -321,7 +321,10 @@ def _do_lkh(
 
 
 def _add_branches(S, branches, root, subtree_id_start):
-    """Add branches to solution graph S in place. Returns (max_load, next_subtree_id)."""
+    """Add branches to solution graph S in place.
+
+    Returns (max_load, next_subtree_id).
+    """
     max_load = 0
     subtree_id = subtree_id_start
     for branch in branches:

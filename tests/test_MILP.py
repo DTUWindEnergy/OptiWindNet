@@ -1,15 +1,15 @@
-import pytest
-import numpy as np
 import multiprocessing
+
+import numpy as np
+import pytest
 
 import optiwindnet.MILP as MILP
 import optiwindnet.MILP._core as core
 import optiwindnet.MILP.ortools as ortools_milp
-from optiwindnet.synthetic import toyfarm
-from optiwindnet.mesh import make_planar_embedding
-from optiwindnet.MILP import solver_factory, ModelOptions
 from optiwindnet.interarraylib import terse_links_from_S
-
+from optiwindnet.mesh import make_planar_embedding
+from optiwindnet.MILP import ModelOptions, solver_factory
+from optiwindnet.synthetic import toyfarm
 
 # topology in terse links for toy_farm at capacity=5
 _terse_toy_farm_5 = np.array([2, -1, 1, 2, -1, -1, 3, 4, -1, 5, 8, 8])
