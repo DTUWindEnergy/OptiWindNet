@@ -34,7 +34,7 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 @deprecated_heuristic(
-    migrate_to="constructor(A, capacity, method='rootlust', weigh_detours=True)"
+    migrate_to="constructor(A, capacity, method='biased_EW' if OBEW_rootlust is None else 'rootlust', weigh_detours=True)"
 )
 def OBEW(
     L: nx.Graph,

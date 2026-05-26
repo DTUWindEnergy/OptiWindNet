@@ -29,7 +29,10 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
-@deprecated_heuristic(migrate_to="constructor(A, capacity, method='radial_EW')")
+@deprecated_heuristic(
+    migrate_to="constructor(A, capacity, method='radial_EW', "
+    'straight_feeder_route=True, weigh_detours=False)'
+)
 def NBEW(
     L: nx.Graph,
     capacity: int,

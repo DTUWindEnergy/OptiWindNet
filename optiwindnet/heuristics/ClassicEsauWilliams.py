@@ -20,7 +20,9 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
-@deprecated_heuristic(migrate_to="constructor(A, capacity, method='esau_williams')")
+@deprecated_heuristic(
+    migrate_to="constructor(A, capacity, method='esau_williams', weigh_detours=False)"
+)
 def ClassicEW(
     L: nx.Graph,
     capacity: int,

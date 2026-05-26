@@ -442,18 +442,31 @@ def constructor(
         angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
 
+    def drop_target(subroot, payload):
+        """Drop `subroot` from the who_targets_ set of the peer it targets in `payload`.
+
+        `payload` is the queue entry's `(u, v)`; the targeted component is the one
+        holding `v`. Keeps who_targets_ consistent with the queue, so it never
+        retains a subroot whose subtree has already been consumed (set to None).
+        """
+        targeted = who_targets_[subroot_[payload[1]]]
+        if targeted is not None:
+            targeted.discard(subroot)
+
     def enqueue_best_union(subroot):
         _debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
+        # invariant upkeep: clear the previous-target membership before retargeting
+        prev_entry = pq.tags.get(subroot)
+        if prev_entry is not None:
+            drop_target(subroot, prev_entry[-1])
         best_choice, edges2discard = find_union(subroot)
         A.remove_edges_from(edges2discard)
         if best_choice:
             priority, _, u, v = best_choice
             pq.add(priority, subroot, (u, v))
-            if who_targets_ is not None:
-                who_targets_[subroot_[v]].add(subroot)
+            who_targets_[subroot_[v]].add(subroot)
             _debug(
-                '<pushed> sr_u <%d>, «%d~%d», priority = %.3f',
-                subroot, u, v, priority
+                '<pushed> sr_u <%d>, «%d~%d», priority = %.3f', subroot, u, v, priority
             )
         else:
             is_root_nb__[A.nodes[subroot]['root']][subroot] = True
@@ -526,6 +539,9 @@ def constructor(
         # GET union candidate (changes only the queue)
 
         prio, sr_u, (u, v) = pq.top()
+        # sr_u left the queue: keep who_targets_ consistent (covers both the
+        # union-effected path and the discard-after-pop paths below)
+        drop_target(sr_u, (u, v))
         tradeoff = -prio
 
         # ASSESS union (no change in state)
@@ -663,7 +679,7 @@ def constructor(
             _, _, _, (_, t) = sr_v_entry
             sr_kept_target = subroot_[t]
             if sr_kept_target != sr_dropped:
-                who_targets_[sr_kept_target].remove(sr_kept)
+                who_targets_[sr_kept_target].discard(sr_kept)
         who_targets_[sr_kept].discard(sr_dropped)
         who_targets_[sr_dropped].discard(sr_kept)
 
