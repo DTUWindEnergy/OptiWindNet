@@ -56,6 +56,17 @@ class Router(ABC):
     """
 
     _summary_attrs: tuple[str, ...]
+    _repr_attrs: tuple[str, ...] = ()
+
+    def __repr__(self) -> str:
+        # Defensive by design: getattr-guard every field and skip None values so
+        # the repr never raises, even on a partially-initialized instance.
+        parts = [type(self).__name__]
+        for attr in self._repr_attrs:
+            val = getattr(self, attr, None)
+            if val is not None:
+                parts.append(f'{attr}={val!r}')
+        return '<' + ' '.join(parts) + '>'
 
     @abstractmethod
     def route(
@@ -357,6 +368,37 @@ class WindFarmNetwork:
         """Create a WindFarmNetwork instance from WindIO yaml file."""
         return cls(L=L_from_windIO(filepath), **kwargs)
 
+    def __repr__(self) -> str:
+        """Concise one-line summary for console/debugging.
+
+        Defensive by design: instance attributes are getattr-guarded so the repr
+        never raises, even on a partially-initialized instance (e.g. if ``__init__``
+        aborted before ``_T``/``_R`` were set). The solved-network branch is reached
+        only when ``_is_stale_SG`` is ``False``, which guarantees ``_G`` exists.
+        """
+        handle = getattr(self, 'handle', '') or ''
+        parts = [f'WindFarmNetwork {handle!r}'] if handle else ['WindFarmNetwork']
+        name = getattr(self, 'name', '') or ''
+        if name and name != handle:
+            parts.append(f'name={name!r}')
+        T = getattr(self, '_T', None)
+        if T is not None:
+            parts.append(f'T={T}')
+        R = getattr(self, '_R', None)
+        if R is not None:
+            parts.append(f'R={R}')
+        capacity = getattr(self, 'cables_capacity', None)
+        if capacity is not None:
+            parts.append(f'capacity={capacity}')
+        router = getattr(self, '_router', None)
+        if router is not None:
+            parts.append(f'router={type(router).__name__}')
+        if getattr(self, '_is_stale_SG', True):
+            parts.append('unsolved')
+        else:
+            parts.append('length={:_.0f}'.format(self._G.size(weight='length')))
+        return '<' + ' '.join(parts) + '>'
+
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
         return svgplot(self.L if self._is_stale_SG else self.G)._repr_svg_()
@@ -594,6 +636,7 @@ class EWRouter(Router):
     """
 
     _summary_attrs = ('iterations',)
+    _repr_attrs = ('maxiter', 'feeder_route')
 
     def __init__(
         self,
@@ -653,6 +696,7 @@ class HGSRouter(Router):
     """
 
     _summary_attrs = ('runtime',)
+    _repr_attrs = ('time_limit', 'feeder_limit', 'max_retries', 'balanced', 'seed')
 
     def __init__(
         self,
@@ -718,6 +762,7 @@ class MILPRouter(Router):
 
     default_heuristic = 'rootlust'
     _summary_attrs = ('runtime', 'bound', 'objective', 'relgap', 'termination')
+    _repr_attrs = ('solver_name', 'time_limit', 'mip_gap')
 
     def __init__(
         self,
