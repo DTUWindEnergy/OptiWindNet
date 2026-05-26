@@ -1906,5 +1906,5 @@ class PathFinder:
             D,
             100 * detextra,
         )
-        # TODO: there might be some lost contour clones that could be prunned
+        # TODO: there might be some lost contour clones that could be pruned
         return G

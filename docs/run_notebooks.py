@@ -105,10 +105,33 @@ def count_text_lines(cell: nbformat.NotebookNode) -> int:
     return total
 
 
+def merge_adjacent_stream_outputs(cell: nbformat.NotebookNode) -> None:
+    """Coalesce stream chunks split nondeterministically by Jupyter."""
+    outputs = cell.get('outputs')
+    if not outputs:
+        return
+
+    merged = []
+    for out in outputs:
+        if (
+            merged
+            and out.get('output_type') == 'stream'
+            and merged[-1].get('output_type') == 'stream'
+            and out.get('name') == merged[-1].get('name')
+        ):
+            merged[-1]['text'] = ''.join(merged[-1].get('text', '')) + ''.join(
+                out.get('text', '')
+            )
+        else:
+            merged.append(out)
+    cell['outputs'] = merged
+
+
 def clean_notebook(nb: nbformat.NotebookNode, scrolled_threshold: int) -> None:
     """Strip transient metadata in-place; mark long-output cells as scrolled."""
     nb.metadata = nbformat.from_dict({'language_info': {'name': 'python'}})
     for cell in nb.cells:
+        merge_adjacent_stream_outputs(cell)
         meta = cell.get('metadata', {}) or {}
         meta.pop('execution', None)
         if cell.get('cell_type') == 'code':
