@@ -107,7 +107,3 @@ skip-string-normalization = true
 
 [tool.ruff.format]
 quote-style = "single"
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-ignore = ["E501"]
