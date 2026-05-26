@@ -60,11 +60,13 @@ def constructor(
 
     The overall structure of the constructive algorithm is based on:
 
-      Esau, L. R., and K. C. Williams. "On Teleprocessing System Design, Part II: A Method
-        for Approximating the Optimal Network." IBM Systems Journal 5, no. 3 (1966):
+      Esau, L. R., and K. C. Williams. "On Teleprocessing System Design,
+        Part II: A Method for Approximating the Optimal Network."
+        IBM Systems Journal 5, no. 3 (1966):
         142–47. https://doi.org/10.1147/sj.53.0142.
 
-    However, this implementation uses the extended Delaunay triangulation (given in A) as
+    However, this implementation uses the extended Delaunay triangulation
+    (given in A) as
     the base connectivity, and implements terminal-terminal crossing prevention. This
     means that even the method named 'esau_williams' does not match exactly the paper's
     description, but the similarities are still substantial.
@@ -83,9 +85,12 @@ def constructor(
       Aʹ: available links graph
       capacity: max number of terminals in a subtree
       method: choice of method (see Methods)
-      bias_margin: (biased_EW | radial_EW) fractional margin within with edges are equivalent
-      weigh_detours: (!= esau_williams) only add edges whose tradeoff is not outweighted by detours
-      straight_feeder_route: prevent crossings of feeders (incompatible with `weigh_detours=True`)
+      bias_margin: (biased_EW | radial_EW) fractional margin within with edges
+        are equivalent
+      weigh_detours: (!= esau_williams) only add edges whose tradeoff is not
+        outweighted by detours
+      straight_feeder_route: prevent crossings of feeders
+        (incompatible with `weigh_detours=True`)
       maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
@@ -145,7 +150,8 @@ def constructor(
     is_stale_ = zeros(T)
     # <is_extendable_>: mask of subroots with spare capacity
     is_extendable_ = ones(T)
-    # <is_root_nb__>: mask of node coordinates that are the last hop of a full feeder route (weigh_detours)
+    # <is_root_nb__>: mask of node coordinates that are the last hop of a full
+    #   feeder route (weigh_detours)
     is_root_nb__ = tuple(zeros(T) for _ in roots)
     # <is_corner_>: mask of node coordinates that are detour corners (weigh_detours)
     is_corner_ = zeros(T)
@@ -158,7 +164,8 @@ def constructor(
     subtree_span__ = [[(t, t) for _ in roots] for t in _T]
     # <subtree_blocked__>: sets of blocked terminals from other components wrt each root
     #  subtree_blocked__ = [[bitarray(T) for _ in _T] for _ in roots]
-    # <detours_via_prime_>: holds the detour segment upstream from corner (weigh_detours)
+    # <detours_via_prime_>: holds the detour segment upstream from corner
+    #   (weigh_detours)
     detours_via_prime_ = defaultdict(list)
 
     # mappings from components (identified by their subroots)
@@ -205,8 +212,10 @@ def constructor(
         produce better topologies on average.
         """
         # Esau, L. R., and K. C. Williams.
-        # "On Teleprocessing System Design, Part II: A Method for Approximating the Optimal Network."
-        # IBM Systems Journal 5, no. 3 (1966): 142–47. https://doi.org/10.1147/sj.53.0142.
+        # "On Teleprocessing System Design, Part II: A Method for Approximating
+        # the Optimal Network."
+        # IBM Systems Journal 5, no. 3 (1966): 142–47.
+        # https://doi.org/10.1147/sj.53.0142.
         subtree = subtree_[subroot]
         capacity_left = capacity - subtree.count()
         choices = []
@@ -443,7 +452,8 @@ def constructor(
             if who_targets_ is not None:
                 who_targets_[subroot_[v]].add(subroot)
             _debug(
-                '<pushed> sr_u <%d>, «%d~%d», priority = %.3f', subroot, u, v, priority
+                '<pushed> sr_u <%d>, «%d~%d», priority = %.3f',
+                subroot, u, v, priority
             )
         else:
             is_root_nb__[A.nodes[subroot]['root']][subroot] = True
@@ -544,7 +554,8 @@ def constructor(
                 A.remove_edge((sr_u if is_insertion else u), v)
                 is_stale_[sr_u] = True
                 _debug(
-                    '<discard> «%d~%d»: tradeoff (%.3f) smaller than growth in detours (%.3f)',
+                    '<discard> «%d~%d»: tradeoff (%.3f) smaller than'
+                    ' growth in detours (%.3f)',
                     u,
                     v,
                     tradeoff,

@@ -19,7 +19,8 @@ def pytest_generate_tests(metafunc):
                         marks=pytest.mark.skip(
                             reason=(
                                 f'Missing expected test data: {SOLUTIONS_FILE}\n'
-                                'To (re)generate run: python update_expected_values.py\n'
+                                'To (re)generate run:'
+                                ' python update_expected_values.py\n'
                                 'Or run pytest with --regen-expected.'
                             ),
                         ),

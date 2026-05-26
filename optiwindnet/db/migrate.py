@@ -28,7 +28,8 @@ def _get_source_table_name(src_conn, candidate_names):
         if name in existing:
             return name
     raise ValueError(
-        f'None of {candidate_names} found in source database. Existing tables: {existing}'
+        f'None of {candidate_names} found in source database.'
+        f' Existing tables: {existing}'
     )
 
 

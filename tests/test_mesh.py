@@ -49,7 +49,8 @@ def test_A_graph_all(monkeypatch):
     assert A_c.number_of_edges() > 0
     assert all(d.get('cost') == 42.0 for _, _, d in A_c.edges(data=True))
 
-    # When weightfun is provided on the Delaunay path, apply_edge_exemptions should be called.
+    # When weightfun is provided on the Delaunay path,
+    # apply_edge_exemptions should be called.
     calls = {'n': 0}
     import optiwindnet.mesh as mesh_mod
 

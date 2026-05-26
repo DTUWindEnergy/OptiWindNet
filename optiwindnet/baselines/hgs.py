@@ -419,7 +419,8 @@ def iterative_hgs_cvrp(
     )
     if complete:
         warnings.warn(
-            'The `complete` parameter is deprecated, ignored, and will be removed in v0.3.',
+            'The `complete` parameter is deprecated, ignored, and will be'
+            ' removed in v0.3.',
             DeprecationWarning,
             stacklevel=2,
         )

@@ -99,8 +99,9 @@ def solver_factory(solver_name: str) -> Solver:
                     return SolverFSCIP()
                 else:
                     raise FileNotFoundError(
-                        "Executable 'fscip' not found. Ensure the system PATH includes the "
-                        "path to 'fscip' (part of scipoptsuite from https://www.scipopt.org)."
+                        "Executable 'fscip' not found. Ensure the system PATH includes"
+                        " the path to 'fscip' (part of scipoptsuite from"
+                        " https://www.scipopt.org)."
                     )
             else:
                 raise ModuleNotFoundError(

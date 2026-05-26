@@ -1360,7 +1360,8 @@ def make_planar_embedding(
         P_A.remove_edge(*uv)
 
     # ###################################################################
-    # MN) Add new A edges from P (if concavities or obstacles removed clusters of A triangles)
+    # MN) Add new A edges from P (if concavities or obstacles removed
+    # clusters of A triangles)
     # ###################################################################
     # only locations Cazzaro 2022 G-140 and G-210 are affected by this
     for u, v in P_to_A_candidates:
@@ -1418,7 +1419,8 @@ def make_planar_embedding(
                         # no LOS intermediate to shortcut; pruned == original path
                         pruned_len = lengths[n]
                     debug(
-                        'd2roots[%d, %d] updated by LOS pruning (path %s prunned at %d)',
+                        'd2roots[%d, %d] updated by LOS pruning'
+                        ' (path %s prunned at %d)',
                         n,
                         r,
                         path,
@@ -1784,7 +1786,8 @@ def planar_flipped_by_routeset(
         #      continue
         if ((s, t) if s < t else (t, s)) in unflippables:
             warn(
-                'Navigation mesh inconsistency: edge %d-%d is unflippable due to a previous flip nearby',
+                'Navigation mesh inconsistency: edge %d-%d is unflippable'
+                ' due to a previous flip nearby',
                 s,
                 t,
             )

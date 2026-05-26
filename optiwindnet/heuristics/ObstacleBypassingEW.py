@@ -788,7 +788,8 @@ def OBEW(
                     #          subfarL = np.hypot(*(cornerC - subcornerC))
                     #          subnearL = subaddedL - subfarL + nearL
                     #          dc_addedL += subnearL
-                    #      # print(f'[{i}] CONCAVE:', fnT[hook], fnT[corner_], fnT[goal_])
+                    #      # print(f'[{i}] CONCAVE:', fnT[hook], fnT[corner_],
+                    #      #       fnT[goal_])
                     #      dcX = get_crossings(subcorner_, corner_,
                     #                          detour_waiver=True)
                     #      if not dcX:

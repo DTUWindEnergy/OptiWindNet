@@ -202,7 +202,8 @@ class SolverFSCIP(Solver, PoolHandler):
             num_solutions = model.getNSols()
             if num_solutions == 0:
                 raise OWNSolutionNotFound(
-                    f'Unable to find a solution. Solver {self.name} terminated with: {model.getStatus()}'
+                    f'Unable to find a solution. Solver {self.name} terminated'
+                    f' with: {model.getStatus()}'
                 )
             termination = 'unknown'
             solving_time = float('nan')

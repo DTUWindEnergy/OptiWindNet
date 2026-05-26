@@ -118,7 +118,8 @@ def test_poisson_disc_filler_respects_repeller_radius():
 
 def test_poisson_disc_filler_efficiency_guard_raises_when_partial_false():
     # Border area = 100. With d=5, area_demand per point ~ 19.635.
-    # For T=6 => demand ~117.8 > 0.9069 * 100 => should raise if partial_fulfilment=False.
+    # For T=6 => demand ~117.8 > 0.9069 * 100 => should raise if
+    # partial_fulfilment=False.
     BorderC = _square(10, 10)
     with pytest.raises(ValueError):
         aug.poisson_disc_filler(

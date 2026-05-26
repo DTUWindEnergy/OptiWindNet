@@ -124,12 +124,14 @@ class WindFarmNetwork:
           turbinesC: Turbine coordinates (T, 2): [(x, y), ...].
           substationsC: Substation coordinates (R, 2): [(x, y), ...].
           borderC: Polygonal border coordinates (_, 2): [(x, y), ...].
-          obstacleC_: One or more polygons for exclusion zones list of (_, 2): [[(x, y), ...], ...].
+          obstacleC_: One or more polygons for exclusion zones list of (_, 2):
+            [[(x, y), ...], ...].
           name: Human-readable instance name. Defaults to "".
           handle: Short instance identifier. Defaults to "".
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to `EWRouter`.
-          buffer_dist: Buffer distance to dilate borders / erode obstacles. Defaults to 0.
+          buffer_dist: Buffer distance to dilate borders / erode obstacles.
+            Defaults to 0.
 
         Notes:
           * If both `L` and coordinates are provided, `L` takes precedence.
@@ -161,7 +163,8 @@ class WindFarmNetwork:
         if L is not None:
             if turbinesC is not None or substationsC is not None:
                 _warning(
-                    'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
+                    'Both coordinates and L are given, OptiWindNet prioritizes'
+                    ' L over coordinates.'
                 )
             L = as_stratified_vertices(L)
             T = L.graph['T']
@@ -188,7 +191,8 @@ class WindFarmNetwork:
             )
         else:
             raise TypeError(
-                'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
+                'Both turbinesC and substationsC must be provided!'
+                ' Alternatively, L should be given.'
             )
         self._L = L
         self._VertexC = L.graph['VertexC']
@@ -570,7 +574,8 @@ class WindFarmNetwork:
         return terse_links
 
     def solution_info(self):
-        """Get model and solver information of the latest solution (runtime, objective, gap, etc.)."""
+        """Get model and solver information of the latest solution
+        (runtime, objective, gap, etc.)."""
         info = {
             'router': self.router.__class__.__name__,
             'capacity': self.cables_capacity,
@@ -627,7 +632,8 @@ class EWRouter(Router):
             constructor_args.update(weigh_detours=False, straight_feeder_route=True)
         else:
             raise ValueError(
-                f'{self.feeder_route} is not among the valid feeder_route values. Choose among: ("segmented", "straight").'
+                f'{self.feeder_route} is not among the valid feeder_route values.'
+                ' Choose among: ("segmented", "straight").'
             )
 
         S = constructor(A, capacity=cables_capacity, **constructor_args)
@@ -668,7 +674,8 @@ class HGSRouter(Router):
 
         Args:
             time_limit: Maximum runtime for a single HGS run (in seconds).
-            feeder_limit: Maximum number of feeders allowed (ignored if multiple substations).
+            feeder_limit: Maximum number of feeders allowed
+                (ignored if multiple substations).
             max_retries: Maximum number of retries if a feasible solution is not found.
             balanced: Whether to balance turbines/loads across feeders.
             seed: Set the seed of the pseudo-random number generator (reproducibility).
@@ -732,7 +739,8 @@ class MILPRouter(Router):
         """Create a MILP-based router.
 
         Args:
-            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools", "cplex", "highs", "scip").
+            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools",
+                "cplex", "highs", "scip").
             time_limit: Maximum runtime (seconds).
             mip_gap: Relative MIP optimality gap tolerance.
             solver_options: Extra solver-specific options.
@@ -835,7 +843,8 @@ class MILPRouter(Router):
                 continue
         else:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution to the MILP model after {num_retries} retries'
+                f'Unable to find a solution to the MILP model'
+                f' after {num_retries} retries'
             )
 
         S, G = solver.get_solution()

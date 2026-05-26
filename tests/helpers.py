@@ -12,7 +12,8 @@ from optiwindnet.MILP import ModelOptions
 
 
 def load_instances(path: Path) -> Any:
-    """Load a pickled instance file; raise FileNotFoundError with regeneration hint if missing."""
+    """Load a pickled instance file; raise FileNotFoundError with
+    regeneration hint if missing."""
     if not path.exists():
         raise FileNotFoundError(
             f'Missing expected test data file: {path}\n\n'
@@ -24,7 +25,8 @@ def load_instances(path: Path) -> Any:
 
 
 def router_factory(spec: Optional[Dict[str, Any]]):
-    """Create an instantiated router from a spec dict (same semantics as your generators)."""
+    """Create an instantiated router from a spec dict
+    (same semantics as your generators)."""
     if spec is None:
         return None
     clsname = spec.get('class')
@@ -57,7 +59,8 @@ def assert_graph_equal(
     Compare two NetworkX graphs with tolerant numeric checks and simple diffs.
     Raises AssertionError on any mismatch.
 
-    - `ignored_graph_keys` can contain dotted paths like "method_options.fun_fingerprint.funhash"
+    - `ignored_graph_keys` can contain dotted paths like
+      "method_options.fun_fingerprint.funhash"
       or top-level keys like "runtime". Dotted paths are removed from both graphs
       before comparison.
     """
@@ -74,7 +77,8 @@ def assert_graph_equal(
         cur.pop(parts[-1], None)
 
     def _deep_clean(G: nx.Graph, dotted_paths: Iterable[str]) -> nx.Graph:
-        """Return a deep copy with specified dotted paths removed from graph attr dict."""
+        """Return a deep copy with specified dotted paths removed
+        from graph attr dict."""
         H = copy.deepcopy(G)
         for p in dotted_paths:
             _pop_nested(H.graph, p)
@@ -232,7 +236,8 @@ def tiny_wfn(
     - turbinesC : (N,2) array-like of turbine coordinates (default four turbines).
     - substationsC : (M,2) array-like of substations (default one at left).
     - borderC : (B,2) array-like polygon coordinates for border (default rectangle).
-    - obstacleC_ : list of (k,2) arrays (rings) or a single 2D array (default one small obstacle).
+    - obstacleC_ : list of (k,2) arrays (rings) or a single 2D array
+      (default one small obstacle).
     - cables : cables argument passed to WindFarmNetwork (default 4).
     - optimize : if True, call wfn.optimize() before returning (default False).
     """

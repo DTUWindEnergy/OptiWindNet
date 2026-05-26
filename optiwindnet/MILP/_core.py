@@ -84,7 +84,8 @@ class FeederRoute(StrEnum):
 
 
 class FeederLimit(StrEnum):
-    'Whether to limit the maximum number of feeders, if set to "specified", additional kwarg "max_feeders" must be given.'
+    'Whether to limit the maximum number of feeders, if set to "specified",'
+    ' additional kwarg "max_feeders" must be given.'
 
     UNLIMITED = auto()
     SPECIFIED = auto()

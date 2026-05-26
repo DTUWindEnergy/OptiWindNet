@@ -75,7 +75,8 @@ def test_assign_cables():
 
             # Check cable type
             assert expectedD['cable'] == actualD['cable'], (
-                f'Edge {u, v} cable mismatch: {expectedD["cable"]} != {actualD["cable"]}'
+                f'Edge {u, v} cable mismatch:'
+                f' {expectedD["cable"]} != {actualD["cable"]}'
             )
 
             # Check cost (approximate)
