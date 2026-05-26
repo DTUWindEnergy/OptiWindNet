@@ -28,12 +28,12 @@ def deprecated_heuristic(*, migrate_to: str) -> Callable:
 
     def decorator(fn: Callable) -> Callable:
         message = (
-            f'`{fn.__name__}()` is deprecated and will be removed in '
-            f'{_REMOVAL_VERSION}. Use `heuristics.constructor()` instead: '
-            f'{migrate_to}. Note that `constructor` takes the available-links '
-            'graph A (from `make_planar_embedding(L)`), not the location graph L; '
-            'alternatively use the high-level `WindFarmNetwork`/`EWRouter` API, '
-            'which builds the mesh for you.'
+            f'`{fn.__name__}()` is deprecated and will be removed in {_REMOVAL_VERSION}'
+            '; use `heuristics.constructor()` instead. A similar solution can be '
+            f'obtained using the following call: {migrate_to}. Note that `constructor`'
+            'takes the available-links graph A (from `make_planar_embedding(L)`), not '
+            'the location graph L; alternatively use the high-level `WindFarmNetwork`/'
+            '`EWRouter` API, which builds the mesh for you.'
         )
 
         @functools.wraps(fn)
