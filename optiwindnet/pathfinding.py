@@ -374,7 +374,20 @@ class PathFinder:
             constraint_bounds[v].add(u)
         self.constraint_bounds = constraint_bounds
         shortcuts = A.graph.get('P_paths_shortcuts', {})
-        fences: list[Fence] = []
+        # `edges_G_primes` already holds the routeset edges; contour hops are
+        # added per (re)build below. A contour hop absent from the base
+        # embedding is a P-diagonal the flip must realize; when two requested
+        # diagonals' flips interfere the flip silently leaves one unrealized.
+        # Rather than predict crossings, use the flip as the oracle: realize,
+        # find any contour diagonal it dropped, de-shortcut that hop (or its
+        # blocking partner) onto the constraint mesh, and re-flip. Routeset
+        # diagonals are never touched — an unrealized route edge is a tolerated
+        # discrepancy (gates, etc.), not a fence break.
+        edges_routeset = set(edges_G_primes)
+
+        # Expand every contour's midpath to its interior P-edge / P-diagonal hop
+        # sequence (mutated in place by the de-shortcut resolver).
+        contour_mps: dict[tuple[int, int], tuple[int, list[int]]] = {}
         for ae, subtree in contour_A_edges.items():
             midpath = (
                 shortened[ae][0] if ae in shortened else A[ae[0]][ae[1]].get('midpath')
@@ -382,39 +395,153 @@ class PathFinder:
             if not midpath:
                 continue
             expanded = _expand_P_paths_path([ae[0], *midpath, ae[1]], shortcuts)[1:-1]
-            chain_seq = (ae[0], *expanded, ae[1])
+            contour_mps[ae] = (subtree, list(expanded))
+
+        def build_fences() -> tuple[
+            set[tuple[int, int]],
+            list[Fence],
+            dict[tuple[int, int], list[tuple[tuple[int, int], int]]],
+        ]:
+            # (Re)build the G-prime edge set and the route fences from the
+            # current contour midpaths; also map each contour P-diagonal hop to
+            # the fence location(s) that walk through it.
+            egp = set(edges_routeset)
+            flist: list[Fence] = []
+            diag_locs: dict[tuple[int, int], list[tuple[tuple[int, int], int]]] = (
+                defaultdict(list)
+            )
+            for ae, (subtree, mp) in contour_mps.items():
+                chain_seq = (ae[0], *mp, ae[1])
+                for pos, (a, b) in enumerate(zip(chain_seq[:-1], chain_seq[1:])):
+                    egp.add((a, b) if a < b else (b, a))
+                    if not planar.has_edge(a, b):
+                        diag_locs[(a, b) if a < b else (b, a)].append((ae, pos))
+                breaks = [
+                    i
+                    for i in range(len(mp) - 1)
+                    if mp[i + 1] not in constraint_bounds.get(mp[i], ())
+                ]
+                if not breaks:
+                    flist.append(Fence(ae, mp, subtree))
+                    continue
+                s, t = ae
+                segments: list[tuple[int, int]] = []
+                start = 0
+                for b in breaks:
+                    segments.append((start, b + 1))
+                    start = b + 1
+                segments.append((start, len(mp)))
+                for k, (lo, hi) in enumerate(segments):
+                    sub_s = s if k == 0 else mp[lo - 1]
+                    sub_t = t if k == len(segments) - 1 else mp[hi]
+                    flist.append(Fence((sub_s, sub_t), list(mp[lo:hi]), subtree))
+            return egp, flist, diag_locs
+
+        def flip(egp: set[tuple[int, int]]) -> nx.PlanarEmbedding:
+            return planar_flipped_by_routeset(
+                egp, planar=planar, VertexC=VertexC, ST=self.ST, diagonals=diagonals
+            )
+
+        # Identify conflicting contour diagonals and resolve them directly in a single pass
+        # 1. Find all contour diagonals (hops that are not in the base planar mesh)
+        contour_diags = set()
+        for ae, (subtree, mp) in contour_mps.items():
+            chain_seq = (ae[0], *mp, ae[1])
             for a, b in zip(chain_seq[:-1], chain_seq[1:]):
-                edges_G_primes.add((a, b) if a < b else (b, a))
-            mp = expanded
-            breaks = [
-                i
-                for i in range(len(mp) - 1)
-                if mp[i + 1] not in constraint_bounds.get(mp[i], ())
-            ]
-            if not breaks:
-                fences.append(Fence(ae, mp, subtree))
+                if not planar.has_edge(a, b):
+                    contour_diags.add((a, b) if a < b else (b, a))
+
+        # 2. Precompute base edge and quad sides for each diagonal in the base planar embedding
+        base_edge = {}
+        quad_sides = {}
+        for d in contour_diags:
+            u, v = d
+            common = [w for w in planar.neighbors(u) if planar.has_edge(v, w)]
+            found = False
+            for s in common:
+                for c in common:
+                    if s < c and planar.has_edge(s, c):
+                        # Verify s-c is the base edge currently present in the triangulation
+                        if {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}:
+                            base_edge[d] = (s, c)
+                            quad_sides[d] = {
+                                (u, s) if u < s else (s, u),
+                                (s, v) if s < v else (v, s),
+                                (v, c) if v < c else (c, v),
+                                (c, u) if c < u else (u, c),
+                            }
+                            found = True
+                            break
+                if found:
+                    break
+
+        # Helper to get the most-anchored constraint-mesh endpoint of an edge
+        def get_mesh_endpoint(edge: tuple[int, int]) -> int | None:
+            s, t = edge
+            s_in = s in constraint_bounds
+            t_in = t in constraint_bounds
+            if s_in and t_in:
+                return (
+                    s if len(constraint_bounds[s]) >= len(constraint_bounds[t]) else t
+                )
+            return s if s_in else (t if t_in else None)
+
+        # 3. Detect conflicting diagonal flips
+        conflicts = set()
+        for d1 in contour_diags:
+            for d2 in contour_diags:
+                if d1 < d2:
+                    b1, b2 = base_edge.get(d1), base_edge.get(d2)
+                    if b1 is not None and b2 is not None:
+                        if (
+                            b1 == b2
+                            or b1 in quad_sides.get(d2, ())
+                            or b2 in quad_sides.get(d1, ())
+                        ):
+                            conflicts.add((d1, d2))
+
+        # 4. Resolve conflicts directly by scheduling de-shortcuts
+        to_deshortcut = {}
+        self.unrealized_contours_resolved = False
+        for d1, d2 in conflicts:
+            if d1 in to_deshortcut or d2 in to_deshortcut:
                 continue
-            s, t = ae
-            segments: list[tuple[int, int]] = []
-            start = 0
-            for b in breaks:
-                segments.append((start, b + 1))
-                start = b + 1
-            segments.append((start, len(mp)))
-            for k, (lo, hi) in enumerate(segments):
-                sub_s = s if k == 0 else mp[lo - 1]
-                sub_t = t if k == len(segments) - 1 else mp[hi]
-                fences.append(Fence((sub_s, sub_t), list(mp[lo:hi]), subtree))
+            b1 = base_edge[d1]
+            b2 = base_edge[d2]
+            w1 = get_mesh_endpoint(b1)
+            w2 = get_mesh_endpoint(b2)
+            if w1 is not None:
+                to_deshortcut[d1] = w1
+            elif w2 is not None:
+                to_deshortcut[d2] = w2
+
+        # 5. Apply de-shortcuts directly to the midpaths
+        if to_deshortcut:
+            self.unrealized_contours_resolved = True
+            # Map each scheduled diagonal to its occurrence positions in the midpaths
+            contour_diag_locs = defaultdict(list)
+            for ae, (subtree, mp) in contour_mps.items():
+                chain_seq = (ae[0], *mp, ae[1])
+                for pos, (a, b) in enumerate(zip(chain_seq[:-1], chain_seq[1:])):
+                    k = (a, b) if a < b else (b, a)
+                    if k in to_deshortcut:
+                        contour_diag_locs[k].append((ae, pos))
+
+            inserts = defaultdict(set)
+            for d, w in to_deshortcut.items():
+                for ae, pos in contour_diag_locs[d]:
+                    inserts[ae].add((pos, w))
+            for ae, items in inserts.items():
+                mp = contour_mps[ae][1]
+                for pos, w in sorted(items, reverse=True):
+                    mp.insert(pos, w)
+
+        # 6. Rebuild and perform planar flips exactly once
+        edges_G_primes, fences, _ = build_fences()
+        P = flip(edges_G_primes)
+
         self.fences = fences
         self.edges_G_primes = edges_G_primes
-
-        P = planar_flipped_by_routeset(
-            edges_G_primes,
-            planar=planar,
-            VertexC=VertexC,
-            ST=self.ST,
-            diagonals=diagonals,
-        )
         self.d2roots = d2roots
         self.d2rootsRank = (
             Rank if Rank is not None else rankdata(d2roots, method='dense', axis=0)
@@ -425,6 +552,20 @@ class PathFinder:
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.stunts_primes = A.graph.get('stunts_primes')
         self.adv_counter = 0
+
+        # Safety net: every fence hop must be an edge of the flipped navigation
+        # mesh. A contour diagonal the resolver could not place surfaces here
+        # clearly, rather than cryptically deep in the chain builder.
+        for fence in fences:
+            seq = (fence.endpoints[0], *fence.primes_on_constraint, fence.endpoints[1])
+            for a, b in zip(seq[:-1], seq[1:]):
+                if not P.has_edge(a, b):
+                    raise ValueError(
+                        'PathFinder: fence for subtree %d (A-edge %s) hop %d-%d '
+                        'is absent from the flipped navigation mesh — an '
+                        'unresolved contour-diagonal conflict.'
+                        % (fence.subtree, fence.endpoints, a, b)
+                    )
 
         # Precompute everything that depends only on (P, edges_G_primes,
         # fences). `_find_paths` then runs the fan-init / main loop with
@@ -452,6 +593,115 @@ class PathFinder:
         self.chain_access, self.chain_end_set = self._precompute_chains(fences)
 
         self._find_paths()
+
+    def _find_quad_and_sides(
+        self, u: int, v: int, planar: nx.PlanarEmbedding
+    ) -> tuple[tuple[int, int], set[tuple[int, int]]] | None:
+        """Find the base edge and the four sides of the quad for diagonal (u, v)."""
+        common = [w for w in planar.neighbors(u) if planar.has_edge(v, w)]
+        for s in common:
+            for c in common:
+                if s < c and planar.has_edge(s, c):
+                    # Verify s-c is the base edge currently present in the triangulation
+                    if {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}:
+                        return (s, c), {
+                            (u, s) if u < s else (s, u),
+                            (s, v) if s < v else (v, s),
+                            (v, c) if v < c else (c, v),
+                            (c, u) if c < u else (u, c),
+                        }
+        return None
+
+    def _get_mesh_endpoint(
+        self, base: tuple[int, int], constraint_bounds: dict[int, set[int]]
+    ) -> int | None:
+        """Return the most-anchored constraint-mesh endpoint of the base edge."""
+        u, v = base
+        u_in = u in constraint_bounds
+        v_in = v in constraint_bounds
+        if u_in and v_in:
+            u_len = len(constraint_bounds[u])
+            v_len = len(constraint_bounds[v])
+            if u_len > v_len:
+                return u
+            elif v_len > u_len:
+                return v
+            return max(u, v)
+        return u if u_in else (v if v_in else None)
+
+    def _deshortcut_unrealized_contours(
+        self,
+        unrealized: list[tuple[int, int]],
+        contour_diag_locs: dict[tuple[int, int], list[tuple[tuple[int, int], int]]],
+        contour_mps: dict[tuple[int, int], tuple[int, list[int]]],
+        planar: nx.PlanarEmbedding,
+        constraint_bounds: dict[int, set[int]],
+    ) -> bool:
+        """De-shortcut contour diagonals the flip failed to realize.
+
+        ``unrealized`` lists contour P-diagonals ``(a, b)`` absent from the
+        just-flipped mesh — each breaks the fence that walks through it. The flip
+        realizes a diagonal by removing the base edge it crosses and locking the
+        four sides of its quad; two such diagonals interfere when the base of one
+        is a side of the other's quad, so only one is realized. Base edge and quad
+        sides are read from the embedding's rotation system (``planar.neighbors``
+        and the ``cw``/``ccw`` half-edge links); no coordinates are consulted.
+
+        A dropped diagonal is de-shortcut by inserting, between ``a`` and ``b``,
+        the endpoint of its crossed base edge that lies on the constraint mesh
+        (so the chain builder can anchor it); the two new sides are base-P edges,
+        needing no flip, and ``create_detours`` reapplies the shortcut. When the
+        dropped diagonal has no constraint-mesh endpoint (its base spans two
+        terminals), the *realized* diagonal whose flip locked its base is
+        de-shortcut instead, freeing the dropped one for the next flip. Returns
+        True if any midpath changed.
+        """
+        # Precompute quads for all contour diagonals to avoid redundant searches
+        quad_cache = {}
+        for d in contour_diag_locs:
+            quad_cache[d] = self._find_quad_and_sides(d[0], d[1], planar)
+
+        # Choose, per conflict, the contour diagonal to de-shortcut and its
+        # constraint-mesh vertex.
+        targets: dict[tuple[int, int], int] = {}
+        for d in unrealized:
+            q = quad_cache.get(d)
+            if q is None:
+                continue
+            base, _ = q
+            w = self._get_mesh_endpoint(base, constraint_bounds)
+            if w is not None:
+                targets[d] = w
+                continue
+            # No own detour: de-shortcut the realized contour diagonal whose flip
+            # locked d's base edge (base(d) is a side of its quad).
+            for e in contour_diag_locs:
+                if e == d or e in unrealized:
+                    continue
+                qe = quad_cache.get(e)
+                if qe is None:
+                    continue
+                base_e, sides_e = qe
+                if base in sides_e:
+                    we = self._get_mesh_endpoint(base_e, constraint_bounds)
+                    if we is not None:
+                        targets[e] = we
+                        break
+
+        if not targets:
+            return False
+
+        # Insert the chosen vertex between each hop's endpoints (descending
+        # position so earlier insertions don't shift later ones).
+        inserts = defaultdict(set)
+        for d, w in targets.items():
+            for ae, pos in contour_diag_locs[d]:
+                inserts[ae].add((pos, w))
+        for ae, items in inserts.items():
+            mp = contour_mps[ae][1]
+            for pos, w in sorted(items, reverse=True):
+                mp.insert(pos, w)
+        return True
 
     def _trace_path(self, start_prime: int, pn_id: int):
         """Return the path and hop distances from `start_prime` to a root."""
