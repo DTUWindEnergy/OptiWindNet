@@ -1143,10 +1143,13 @@ def make_planar_embedding(
         return expanded
 
     # this adds diagonals to P_paths, but not diagonals that cross constraints
+    border_edges = set()
+    if len(border) > 2:
+        for s, t in ((border[-1], border[0]), *zip(border[:-1], border[1:])):
+            border_edges.add((s, t) if s < t else (t, s))
+
     P_diags = bidict()
-    for u, v in P_edges - hull_pruned_edges:
-        if (u, v) in constraint_edges:
-            continue
+    for u, v in P_edges.difference(hull_pruned_edges, constraint_edges, border_edges):
         uvD = P[u][v]
         s, t = uvD['cw'], uvD['ccw']
         if is_triangle_pair_a_convex_quadrilateral(*VertexC[[u, v, s, t]]):
