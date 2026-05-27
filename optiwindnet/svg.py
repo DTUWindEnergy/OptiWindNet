@@ -17,6 +17,11 @@ __all__ = ('SvgRepr', 'svgplot', 'svgpplot')
 
 _NODE_RADII = 12, 20
 _RING_RADII = 23, 28
+_BORDER_WIDTH = 2
+_LINK_WIDTH = 4
+_LINK_TYPE_WIDTH_STEP = 3
+_NODE_EDGE_WIDTH = 2
+_DETOUR_RING_WIDTH = 4
 
 
 class SvgRepr:
@@ -170,7 +175,7 @@ class Drawable:
                     id='border',
                     stroke=c.kind2color['border'],
                     stroke_dasharray=[15, 7],
-                    stroke_width=2,
+                    stroke_width=_BORDER_WIDTH,
                     fill=c.border_face,
                     fill_rule='evenodd',
                     # fill_rule "evenodd" is agnostic to polygon vertices orientation
@@ -194,7 +199,7 @@ class Drawable:
                     id='border',
                     stroke=c.kind2color['border'],
                     stroke_dasharray=[15, 7],
-                    stroke_width=2,
+                    stroke_width=_BORDER_WIDTH,
                     fill=c.border_face,
                     d=draw_obstacles,
                 )
@@ -214,7 +219,8 @@ class Drawable:
         fnT, VertexS = self.fnT, self.VertexS
         w, h = self.w, self.h
         edge_widths = [
-            (3 + 3 * i) for i, _ in enumerate(self.G.graph.get('cables', (0,)))
+            _LINK_TYPE_WIDTH_STEP * (i + 1)
+            for i, _ in enumerate(self.G.graph.get('cables', (0,)))
         ]
         edge_lines_ = [defaultdict(list) for _ in edge_widths]
         for u, v, edgeD in self.G.edges(data=True):
@@ -242,7 +248,7 @@ class Drawable:
             else:
                 # single grouping level
                 edgesE = edges_super_group
-                extra_attrs = dict(stroke_width=4)
+                extra_attrs = dict(stroke_width=_LINK_WIDTH)
             for edge_kind, lines in edge_lines.items():
                 edgesE.append(
                     self._kind_group(
@@ -271,7 +277,7 @@ class Drawable:
                     f'overlay_{kind}',
                     kind,
                     lines,
-                    stroke_width=4,
+                    stroke_width=_LINK_WIDTH,
                     opacity=self.c.kind2alpha[kind],
                 )
                 for kind, lines in overlay_by_kind.items()
@@ -290,7 +296,7 @@ class Drawable:
                 fill='none',
                 stroke_opacity=0.3,
                 stroke=c.detour_ring,
-                stroke_width=4,
+                stroke_width=_DETOUR_RING_WIDTH,
             )
         )
 
@@ -322,7 +328,7 @@ class Drawable:
                 svg.G(
                     id='detours',
                     **common_attr,
-                    stroke_width=4,
+                    stroke_width=_LINK_WIDTH,
                     elements=[svg.Polyline(points=points) for points in points__[None]],
                 ),
             ]
@@ -331,7 +337,7 @@ class Drawable:
                 svg.G(
                     id=f'detours_{cable_type}',
                     **common_attr,
-                    stroke_width=3 + 3 * cable_type,
+                    stroke_width=_LINK_TYPE_WIDTH_STEP * (cable_type + 1),
                     elements=[svg.Polyline(points=points) for points in points_],
                 )
                 for cable_type, points_ in points__.items()
@@ -359,12 +365,17 @@ class Drawable:
         self.root_side = root_side = round(1.77 * node_radius)
         self.reusableE.extend(
             (
-                svg.Circle(id='wtg', stroke=c.term_edge, stroke_width=2, r=node_radius),
+                svg.Circle(
+                    id='wtg',
+                    stroke=c.term_edge,
+                    stroke_width=_NODE_EDGE_WIDTH,
+                    r=node_radius,
+                ),
                 svg.Rect(
                     id='oss',
                     fill=c.root_face,
                     stroke=c.root_edge,
-                    stroke_width=2,
+                    stroke_width=_NODE_EDGE_WIDTH,
                     width=root_side,
                     height=root_side,
                 ),
@@ -586,6 +597,7 @@ class Drawable:
         y_pos = self.h_orig + 40
 
         elements = []
+        labels = []
         for i, item in enumerate(legend_items):
             x_pos = start_x + i * item_width
             item_type = item[0]
@@ -614,27 +626,26 @@ class Drawable:
                     'x2': x_pos + 40,
                     'y2': y_pos,
                     'stroke': color,
-                    'stroke_width': 4,
+                    'stroke_width': _LINK_WIDTH,
                 }
                 if dash:
                     attrs['stroke_dasharray'] = dash
                 elements.append(svg.Line(**attrs))
 
-            # Add text label
-            elements.append(
-                svg.Text(
-                    x=x_pos + 50,
-                    y=y_pos,
-                    text=label,
-                    fill=c.fg_color,
-                    extra={
-                        'font-size': '24',
-                        'font-family': 'sans-serif',
-                        'dominant-baseline': 'central',
-                    },
-                )
-            )
+            labels.append(svg.Text(x=x_pos + 50, y=y_pos, text=label))
 
+        elements.append(
+            svg.G(
+                id='legend_labels',
+                fill=c.fg_color,
+                extra={
+                    'font-size': '24',
+                    'font-family': 'sans-serif',
+                    'dominant-baseline': 'central',
+                },
+                elements=labels,
+            )
+        )
         self.toplevelE.append(svg.G(id='legend', elements=elements))
 
     def to_svg(self) -> str:
