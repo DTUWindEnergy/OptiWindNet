@@ -63,7 +63,9 @@ _essential_graph_attrs = (
 )
 
 
-def assign_cables(G: nx.Graph, cables: list[tuple[int, float]], currency: str = '€'):
+def assign_cables(
+    G: nx.Graph, cables: list[tuple[int, float | int]], currency: str = '€'
+):
     """Assign a cable type to each edge of `G` and update attribute 'cost'.
 
     Each edge is assigned the cheapest cable type that can carry its load. The

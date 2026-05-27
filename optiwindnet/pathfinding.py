@@ -750,12 +750,12 @@ class PathFinder:
             # `prime` is on a constraint wall or is a supertriangle vertex,
             # hence it is only reachable from one side -> arbitrary sector id
             return NULL
-        if opposite in G._adj.get(prime, {}):
+        if opposite in G._adj.get(prime, {}):  # type: ignore
             # special case: visiting a DEAD-END
             return opposite
-        prime_adj = G._adj.get(prime, {})
+        prime_adj = G._adj.get(prime, {})  # type: ignore
         nbr = P[prime][opposite]['ccw']
-        for _ in range(len(P._adj[prime])):
+        for _ in range(len(P._adj[prime])):  # type: ignore
             if nbr < T and nbr in prime_adj:
                 if nbr >= 0 or (nbr, prime) not in tentative:
                     return nbr
@@ -814,13 +814,13 @@ class PathFinder:
                 for nbr in cw_nbrs
                 if (
                     nbr < T
-                    and nbr in G._adj.get(prime, {})
+                    and nbr in G._adj.get(prime, {})  # type: ignore
                     and (nbr >= 0 or (nbr, prime) not in tentative)
                 )
             }
             by_opposite: dict[int, int] = {}
             for opposite in cw_nbrs:
-                if opposite in G._adj.get(prime, {}):
+                if opposite in G._adj.get(prime, {}):  # type: ignore
                     sector = opposite
                 else:
                     nbr = P[prime][opposite]['ccw']
@@ -866,7 +866,7 @@ class PathFinder:
                 if (left, right) not in portal_set:
                     continue
                 sec_left = self._fan_init_sector(left, right) if left < ST else NULL
-                if right >= ST or (right in G.nodes and len(G._adj[right]) == 0):
+                if right >= ST or (right in G.nodes and len(G._adj[right]) == 0):  # type: ignore
                     sec_right = NULL
                 else:
                     sec_right = r
@@ -892,7 +892,7 @@ class PathFinder:
         G = self.G
         edges_G_primes = self.edges_G_primes
         constraint_edges = P.graph['constraint_edges']
-        if prime in G.nodes and len(G._adj[prime]) == 0:
+        if prime in G.nodes and len(G._adj[prime]) == 0:  # type: ignore
             return NULL
         sector = opposite
         for _ in P[prime]:
@@ -2007,7 +2007,7 @@ class PathFinder:
             hook_candidates = (
                 [n for n in subtree if n < T]
                 if self.branched
-                else [n, next(h for h in subtree if len(G._adj[h]) == 1)]
+                else [n, next(h for h in subtree if len(G._adj[h]) == 1)]  # type: ignore
             )
             debug('hook_candidates: %s', hook_candidates)
 

@@ -191,7 +191,7 @@ def gplot(
                 edge_color=c.kind2color[edge_kind],
                 ax=ax,
             )
-            art.set_capstyle(edges_capstyle)
+            art.set_capstyle(edges_capstyle)  # type: ignore
 
     # draw nodes
     arts = nx.draw_networkx_nodes(
