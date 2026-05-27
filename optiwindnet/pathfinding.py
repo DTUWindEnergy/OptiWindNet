@@ -442,7 +442,8 @@ class PathFinder:
                 egp, planar=planar, VertexC=VertexC, ST=self.ST, diagonals=diagonals
             )
 
-        # Identify conflicting contour diagonals and resolve them directly in a single pass
+        # Identify conflicting contour diagonals and resolve them directly
+        # in a single pass
         # 1. Find all contour diagonals (hops that are not in the base planar mesh)
         contour_diags = set()
         for ae, (subtree, mp) in contour_mps.items():
@@ -451,7 +452,8 @@ class PathFinder:
                 if not planar.has_edge(a, b):
                     contour_diags.add((a, b) if a < b else (b, a))
 
-        # 2. Precompute base edge and quad sides for each diagonal in the base planar embedding
+        # 2. Precompute base edge and quad sides for each diagonal in the
+        # base planar embedding
         base_edge = {}
         quad_sides = {}
         for d in contour_diags:
@@ -461,7 +463,8 @@ class PathFinder:
             for s in common:
                 for c in common:
                     if s < c and planar.has_edge(s, c):
-                        # Verify s-c is the base edge currently present in the triangulation
+                        # Verify s-c is the base edge currently present in
+                        # the triangulation
                         if {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}:
                             base_edge[d] = (s, c)
                             quad_sides[d] = {

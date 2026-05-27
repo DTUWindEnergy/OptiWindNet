@@ -6,7 +6,7 @@ import operator
 from collections import defaultdict
 from itertools import combinations, pairwise, product
 from math import isclose
-from typing import Callable, Literal, NewType
+from typing import Callable, Literal
 
 import networkx as nx
 import numba as nb
@@ -48,14 +48,10 @@ __all__ = (
 
 NULL = np.iinfo(int).min
 
-CoordPair = NewType('CoordPair', np.ndarray[tuple[Literal[2]], np.dtype[np.float64]])
-CoordPairs = NewType(
-    'CoordPairs', np.ndarray[tuple[int, Literal[2]], np.dtype[np.float64]]
-)
-IndexPairs = NewType(
-    'IndexPairs', np.ndarray[tuple[int, Literal[2]], np.dtype[np.int_]]
-)
-Indices = NewType('Indices', np.ndarray[tuple[int], np.dtype[np.int_]])
+CoordPair = np.ndarray[tuple[Literal[2]], np.dtype[np.float64]]
+CoordPairs = np.ndarray[tuple[int, Literal[2]], np.dtype[np.float64]]
+IndexPairs = np.ndarray[tuple[int, Literal[2]], np.dtype[np.int_]]
+Indices = np.ndarray[tuple[int], np.dtype[np.int_]]
 
 
 @nb.njit(cache=True)
