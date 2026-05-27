@@ -1,5 +1,6 @@
 import logging
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from shapely.geometry import Polygon
@@ -182,6 +183,20 @@ def test_plots():
         plotting.compare([wfn.plot(), ax])
 
     plotting.compare([wfn.G, wfn.G])
+
+
+def test_plots_matplotlib_backend():
+    """ax=None routes all plot methods to the matplotlib backend."""
+    wfn = tiny_wfn()
+    wfn.optimize()
+    for method in ('plot', 'plot_location', 'plot_available_links'):
+        ax = getattr(wfn, method)(ax=None)
+        assert hasattr(ax, 'figure')
+    ax = wfn.plot_navigation_mesh(ax=None)
+    assert hasattr(ax, 'figure')
+    ax = wfn.plot_selected_links(ax=None)
+    assert hasattr(ax, 'figure')
+    plt.close('all')
 
 
 def test_get_network_returns_array_smoke():

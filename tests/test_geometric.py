@@ -6,14 +6,20 @@ from optiwindnet.geometric import (
     any_pairs_opposite_edge,
     area_from_polygon_vertices,
     complete_graph,
+    is_bunch_split_by_corner,
     is_crossing,
     is_crossing_no_bbox,
     is_crossing_numpy,
+    is_same_side,
     minimum_spanning_forest,
     perimeter,
     point_d2line,
+    point_to_segment_distance,
     rotate,
     rotating_calipers,
+    rotation_checkers_factory,
+    triangle_AR,
+    unique_rays,
 )
 
 from .helpers import tiny_wfn
@@ -325,3 +331,160 @@ def test_rotating_calipers_unknown_metric():
     hull = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
     with pytest.raises(ValueError, match='Unknown metric'):
         rotating_calipers(hull, metric='invalid')
+
+
+# --- triangle_AR ---
+
+
+def test_triangle_AR_basic():
+    base1 = np.array([0.0, 0.0])
+    base2 = np.array([2.0, 0.0])
+    top = np.array([1.0, 1.0])
+    # base_sqr = 4, den = |0*1 - 2*1 + 2*0 - 0*0| = 2 → AR = 2
+    assert np.isclose(triangle_AR(base1, base2, top), 2.0)
+
+
+def test_triangle_AR_collinear():
+    base1 = np.array([0.0, 0.0])
+    base2 = np.array([2.0, 0.0])
+    top = np.array([1.0, 0.0])  # on the baseline
+    assert np.isinf(triangle_AR(base1, base2, top))
+
+
+# --- is_same_side ---
+
+
+def test_is_same_side_opposite():
+    u = np.array([-1.0, 0.0])
+    v = np.array([1.0, 0.0])
+    s = np.array([0.0, 1.0])
+    t = np.array([0.0, -1.0])
+    assert not is_same_side(u, v, s, t, touch_is_cross=False)
+
+
+def test_is_same_side_same():
+    u = np.array([-1.0, 0.0])
+    v = np.array([1.0, 0.0])
+    s = np.array([0.0, 1.0])
+    t = np.array([0.0, 2.0])
+    assert is_same_side(u, v, s, t, touch_is_cross=False)
+
+
+def test_is_same_side_touch_counts():
+    u = np.array([-1.0, 0.0])
+    v = np.array([1.0, 0.0])
+    s = np.array([0.0, 1.0])
+    t = np.array([0.0, 0.0])  # on the line
+    assert is_same_side(u, v, s, t, touch_is_cross=True)
+    assert not is_same_side(u, v, s, t, touch_is_cross=False)
+
+
+def test_is_same_side_vertical_line():
+    # vertical line x=1 → uses the denom==0 branch
+    u = np.array([1.0, -1.0])
+    v = np.array([1.0, 1.0])
+    s = np.array([2.0, 0.0])  # right of x=1
+    t = np.array([0.0, 0.0])  # left of x=1
+    assert not is_same_side(u, v, s, t, touch_is_cross=False)
+
+
+# --- point_to_segment_distance ---
+
+
+def test_point_to_segment_distance_perpendicular():
+    p = np.array([1.0, 1.0])
+    a = np.array([0.0, 0.0])
+    b = np.array([2.0, 0.0])
+    assert np.isclose(point_to_segment_distance(p, a, b), 1.0)
+
+
+def test_point_to_segment_distance_beyond_endpoint():
+    p = np.array([3.0, 0.0])
+    a = np.array([0.0, 0.0])
+    b = np.array([2.0, 0.0])
+    assert np.isclose(point_to_segment_distance(p, a, b), 1.0)
+
+
+def test_point_to_segment_distance_degenerate_segment():
+    p = np.array([3.0, 4.0])
+    a = np.array([0.0, 0.0])
+    b = np.array([0.0, 0.0])  # zero-length segment
+    assert np.isclose(point_to_segment_distance(p, a, b), 5.0)
+
+
+# --- unique_rays ---
+
+
+def test_unique_rays_parallel_same_direction():
+    rays = [np.array([1.0, 0.0]), np.array([2.0, 0.0])]
+    result = unique_rays(rays, angle_tol=1e-6)
+    assert len(result) == 1
+
+
+def test_unique_rays_anti_parallel():
+    rays = [np.array([1.0, 0.0]), np.array([-1.0, 0.0])]
+    result = unique_rays(rays, angle_tol=1e-6)
+    assert len(result) == 2
+
+
+def test_unique_rays_zero_norm_dropped():
+    rays = [np.array([0.0, 0.0]), np.array([1.0, 0.0])]
+    result = unique_rays(rays, angle_tol=1e-6)
+    assert len(result) == 1
+
+
+def test_unique_rays_empty():
+    result = unique_rays([], angle_tol=1e-6)
+    assert result == []
+
+
+# --- rotation_checkers_factory ---
+
+
+def test_rotation_checkers_factory():
+    # CCW triangle: 0=(0,0), 1=(1,0), 2=(0,1)
+    VertexC = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    cw, ccw, cross = rotation_checkers_factory(VertexC)
+
+    assert ccw(0, 1, 2)
+    assert not cw(0, 1, 2)
+    assert cross(0, 1, 2) > 0
+
+    # Reverse order → CW
+    assert cw(0, 2, 1)
+    assert not ccw(0, 2, 1)
+    assert cross(0, 2, 1) < 0
+
+
+def test_rotation_checkers_factory_collinear():
+    VertexC = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    cw, ccw, cross = rotation_checkers_factory(VertexC)
+
+    assert not cw(0, 1, 2)
+    assert not ccw(0, 1, 2)
+    assert cross(0, 1, 2) == 0.0
+
+
+# --- is_bunch_split_by_corner ---
+
+
+def test_is_bunch_split_by_corner_true():
+    o = np.array([0.0, 0.0])
+    a = np.array([1.0, 1.0])
+    b = np.array([1.0, -1.0])
+    # points: one inside the cone (right), one outside (left)
+    bunch = np.array([[0.5, 0.0], [-1.0, 0.0]])
+    split, inside, outside = is_bunch_split_by_corner(bunch, a, o, b)
+    assert split
+    assert len(inside) > 0
+    assert len(outside) > 0
+
+
+def test_is_bunch_split_by_corner_false():
+    o = np.array([0.0, 0.0])
+    a = np.array([1.0, 1.0])
+    b = np.array([1.0, -1.0])
+    # both points outside the rightward cone
+    bunch = np.array([[-1.0, 0.5], [-1.0, -0.5]])
+    split, inside, outside = is_bunch_split_by_corner(bunch, a, o, b)
+    assert not split

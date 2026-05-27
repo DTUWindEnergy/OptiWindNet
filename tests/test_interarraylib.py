@@ -13,9 +13,11 @@ from optiwindnet.interarraylib import (
     S_from_terse_links,
     add_link_blockmap,
     add_link_cosines,
+    add_terminal_closest_root,
     as_hooked_to_head,
     as_hooked_to_nearest,
     as_normalized,
+    as_obstacle_free,
     as_rescaled,
     as_single_root,
     as_stratified_vertices,
@@ -25,6 +27,8 @@ from optiwindnet.interarraylib import (
     count_diagonals,
     describe_G,
     fun_fingerprint,
+    make_remap,
+    pathdist,
     scaffolded,
     site_fingerprint,
     terse_links_from_S,
@@ -774,3 +778,99 @@ def test_add_link_cosines():
     for _, _, d in A.edges(data=True):
         assert 'cos_' in d
         assert len(d['cos_']) == A.graph['R']
+
+
+# --- pathdist ---
+
+
+def test_pathdist_simple():
+    wfn = tiny_wfn()
+    G = wfn.G
+    # turbines 0=(1,0), 1=(2,0), 2=(2,1) in tiny_wfn
+    # path 0→1: distance = 1.0; 1→2: distance = 1.0; total = 2.0
+    dist = pathdist(G, [0, 1, 2])
+    assert np.isclose(dist, 2.0)
+
+
+def test_pathdist_single_step():
+    wfn = tiny_wfn()
+    G = wfn.G
+    # just two nodes
+    VertexC = G.graph['VertexC']
+    expected = np.hypot(*(VertexC[0] - VertexC[1]))
+    assert np.isclose(pathdist(G, [0, 1]), expected)
+
+
+# --- as_obstacle_free ---
+
+
+def test_as_obstacle_free_no_obstacles():
+    """When L has no obstacles the function returns early with a copy."""
+    wfn = tiny_wfn(optimize=False)
+    L = wfn.L.copy()
+    L.graph['obstacles'] = None
+    L_out = as_obstacle_free(L)
+    assert L_out.graph.get('obstacles') is None
+    assert np.array_equal(L_out.graph['VertexC'], L.graph['VertexC'])
+
+
+def test_as_obstacle_free_removes_obstacles():
+    """With obstacles present, vertex count and obstacle key are cleaned up."""
+    wfn = tiny_wfn(optimize=False)
+    L = wfn.L
+    assert L.graph.get('obstacles') is not None
+    L_out = as_obstacle_free(L)
+    assert 'obstacles' not in L_out.graph
+    # VertexC shrinks: obstacle-only border vertices are removed
+    assert L_out.graph['VertexC'].shape[0] <= L.graph['VertexC'].shape[0]
+    assert L_out.graph['B'] <= L.graph['B']
+
+
+# --- as_single_root: no roots referenced by border ---
+
+
+def test_as_single_root_no_root_in_border():
+    """Border has no negative-index entries → B stays the same, no vertex transfer."""
+    wfn = tiny_wfn(optimize=False)
+    L = wfn.L.copy()
+    T, R = L.graph['T'], L.graph['R']
+    # replace border with indices all in [T, T+B) range (no root refs)
+    B = L.graph['B']
+    if B > 0:
+        L.graph['border'] = np.arange(T, T + min(B, 3), dtype=int)
+    else:
+        L.graph['border'] = np.array([0, 1], dtype=int)  # turbine indices, also fine
+    L_out = as_single_root(L)
+    assert L_out.graph['R'] == 1
+
+
+# --- add_terminal_closest_root ---
+
+
+def test_add_terminal_closest_root():
+    wfn = tiny_wfn()
+    A = wfn.A.copy()
+    add_terminal_closest_root(A)
+    T, R = A.graph['T'], A.graph['R']
+    # every terminal gets a 'root' attribute
+    for n in range(T):
+        assert 'root' in A.nodes[n]
+        assert -R <= A.nodes[n]['root'] < 0
+    # rootmask__ is a list of R bitarrays, each of length T
+    assert 'rootmask__' in A.graph
+    assert len(A.graph['rootmask__']) == R
+    assert all(len(bm) == T for bm in A.graph['rootmask__'])
+
+
+# --- make_remap ---
+
+
+def test_make_remap_identity():
+    """Remapping a graph to itself should produce an identity map."""
+    wfn = tiny_wfn()
+    G = wfn.G
+    T = G.graph['T']
+    remap = make_remap(G, [0, 1], G, [0, 1])
+    # Every terminal maps to itself (within floating-point alignment)
+    for i in range(T):
+        assert remap[i] == i
