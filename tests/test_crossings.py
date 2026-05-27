@@ -1,12 +1,14 @@
+import networkx as nx
 import numpy as np
 import pytest
-import networkx as nx
-from .helpers import tiny_wfn
+
 from optiwindnet.crossings import (
     find_geometric_crossings,
     get_interferences_list,
     validate_routeset,
 )
+
+from .helpers import tiny_wfn
 
 
 def _graph_with_clones(T, B, C, D, VertexC, edges):
@@ -219,9 +221,7 @@ def test_find_geometric_crossings_ignores_common_trunk_overlap():
         C=0,
         D=0,
         R=1,
-        VertexC=np.array(
-            [[0.0, 1.0], [1.0, 1.0], [0.0, 2.0], [1.0, 2.0], [0.5, 0.0]]
-        ),
+        VertexC=np.array([[0.0, 1.0], [1.0, 1.0], [0.0, 2.0], [1.0, 2.0], [0.5, 0.0]]),
     )
     G.add_node(-1, kind='oss')
     G.add_nodes_from(range(4), kind='wtg')

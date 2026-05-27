@@ -100,7 +100,8 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         termination = result['Solver'][0]['Termination condition'].name
         if num_solutions == 0:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver gurobi terminated with: {termination}'
+                f'Unable to find a solution. Solver gurobi terminated'
+                f' with: {termination}'
             )
         self.result = result
         objective = result['Problem'][0]['Upper bound']

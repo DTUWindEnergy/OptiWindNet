@@ -49,6 +49,8 @@ class Colors:
             extended='18 15',
             contour_extended='18 15',
             scaffold='10 10',
+            planar='23 2 5 2',  # dash-dot, mirroring kind2style['planar']
+            detour='18 15',
         )
         if dark:
             self.kind2color = {

@@ -3,11 +3,11 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from optiwindnet.api import WindFarmNetwork
 import optiwindnet.repair as repair
+from optiwindnet.api import WindFarmNetwork
 from optiwindnet.interarraylib import calcload
-from .helpers import assert_graph_equal
 
+from .helpers import assert_graph_equal
 
 # =========================
 # Fixtures & tiny helpers
@@ -77,7 +77,8 @@ def assert_repair(L, A, edges_in, edges_expected, ignored_graph_keys):
 def test_repair_routeset_path(LA, edges_in, edges_expected):
     """
     Case 1 should be repaired to edges_expected.
-    Case 2 should remain unchanged (unrepairable for current version of repair function).
+    Case 2 should remain unchanged (unrepairable for current version of
+    repair function).
     """
     L, A = LA
     ignored_graph_keys = {'solution_time', 'runtime', 'repaired'}

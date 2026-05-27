@@ -15,7 +15,6 @@ import shapely as shp
 from bidict import bidict
 from scipy.spatial.distance import cdist
 
-from .interarraylib import add_terminal_closest_root
 from .geometric import (
     CoordPairs,
     Indices,
@@ -25,6 +24,7 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
+from .interarraylib import add_terminal_closest_root
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
 
@@ -767,13 +767,13 @@ def make_planar_embedding(
     P_A.remove_nodes_from(supertriangle)
 
     # Prune flat triangles from P_A (criterion is aspect_ratio > `max_tri_AR`).
-    # Also create a `hull_prunned`, a hull without the triangles (ccw order)
-    # and a set of prunned hull edges.
+    # Also create a `hull_pruned`, a hull without the triangles (ccw order)
+    # and a set of pruned hull edges.
     queue = list(
         zip(convex_hull_A[::-1], chain(convex_hull_A[0:1], convex_hull_A[:0:-1]))
     )
-    hull_prunned = []
-    hull_prunned_edges = set()
+    hull_pruned = []
+    hull_pruned_edges = set()
     while queue:
         u, v = queue.pop()
         n = P_A[u][v]['ccw']
@@ -788,14 +788,14 @@ def make_planar_embedding(
             uv = (u, v) if u < v else (v, u)
             P_A_edges.remove(uv)
             continue
-        hull_prunned.append(u)
+        hull_pruned.append(u)
         uv = (u, v) if u < v else (v, u)
-        hull_prunned_edges.add(uv)
-    u, v = hull_prunned[0], hull_prunned[-1]
+        hull_pruned_edges.add(uv)
+    u, v = hull_pruned[0], hull_pruned[-1]
     uv = (u, v) if u < v else (v, u)
-    hull_prunned_edges.add(uv)
-    debug('hull_prunned: %s', hull_prunned)
-    debug('hull_prunned_edges: %s', hull_prunned_edges)
+    hull_pruned_edges.add(uv)
+    debug('hull_pruned: %s', hull_pruned)
+    debug('hull_pruned_edges: %s', hull_pruned_edges)
 
     A = nx.Graph()
     A.add_nodes_from(L.nodes(data=True))
@@ -804,7 +804,7 @@ def make_planar_embedding(
 
     # Extend A with diagonals.
     diagonals = bidict()
-    for u, v in P_A_edges - hull_prunned_edges:
+    for u, v in P_A_edges - hull_pruned_edges:
         uvD = P_A[u][v]
         s, t = uvD['cw'], uvD['ccw']
 
@@ -822,13 +822,13 @@ def make_planar_embedding(
     # ##########################
     debug('PART G')
     if concavities:
-        hull_prunned_poly = shp.Polygon(shell=VertexS[hull_prunned])
-        shp.prepare(hull_prunned_poly)
+        hull_pruned_poly = shp.Polygon(shell=VertexS[hull_pruned])
+        shp.prepare(hull_pruned_poly)
         shp.prepare(border_poly)
-        if not border_poly.covers(hull_prunned_poly):
+        if not border_poly.covers(hull_pruned_poly):
             hull_concave = []
             i = 2
-            u, v = hull_prunned[:i]
+            u, v = hull_pruned[:i]
             end = u
             for _ in range(P_A.number_of_edges()):
                 edge_line = shp.LineString(VertexS[[u, v]])
@@ -836,11 +836,11 @@ def make_planar_embedding(
                     hull_concave.append(v)
                     if v == end:
                         # TODO: make this test more robust
-                        if len(hull_concave) < len(hull_prunned):
+                        if len(hull_concave) < len(hull_pruned):
                             # this likely means an islanded subgraph was found
                             debug('islanded hull_concave', hull_concave)
                             hull_concave.clear()
-                            u, v = v, hull_prunned[i]
+                            u, v = v, hull_pruned[i]
                             end = u
                             i += 1
                             continue
@@ -849,18 +849,18 @@ def make_planar_embedding(
                     continue
                 else:
                     v = P_A[u][v]['ccw']
-                    if not hull_concave and v == hull_prunned[i - 1]:
+                    if not hull_concave and v == hull_pruned[i - 1]:
                         # not able to start with this ⟨u, v⟩ link
                         debug('failed start', u, v)
-                        u, v = v, hull_prunned[i]
+                        u, v = v, hull_pruned[i]
                         end = u
                         i += 1
             else:
                 warn('Too many iterations building hull_concave: %s', hull_concave)
         else:
-            hull_concave = hull_prunned
+            hull_concave = hull_pruned
     else:
-        hull_concave = hull_prunned
+        hull_concave = hull_pruned
     debug('hull_concave: %s', hull_concave)
 
     # ##########################################
@@ -1143,10 +1143,13 @@ def make_planar_embedding(
         return expanded
 
     # this adds diagonals to P_paths, but not diagonals that cross constraints
+    border_edges = set()
+    if len(border) > 2:
+        for s, t in ((border[-1], border[0]), *zip(border[:-1], border[1:])):
+            border_edges.add((s, t) if s < t else (t, s))
+
     P_diags = bidict()
-    for u, v in P_edges - hull_prunned_edges:
-        if (u, v) in constraint_edges:
-            continue
+    for u, v in P_edges.difference(hull_pruned_edges, constraint_edges, border_edges):
         uvD = P[u][v]
         s, t = uvD['cw'], uvD['ccw']
         if is_triangle_pair_a_convex_quadrilateral(*VertexC[[u, v, s, t]]):
@@ -1360,11 +1363,12 @@ def make_planar_embedding(
         P_A.remove_edge(*uv)
 
     # ###################################################################
-    # MN) Add new A edges from P (if concavities or obstacles removed clusters of A triangles)
+    # MN) Add new A edges from P (if concavities or obstacles removed
+    # clusters of A triangles)
     # ###################################################################
     # only locations Cazzaro 2022 G-140 and G-210 are affected by this
     for u, v in P_to_A_candidates:
-        if u < T and v < T and not (u in hull_prunned and v in hull_prunned):
+        if u < T and v < T and not (u in hull_pruned and v in hull_pruned):
             for s in P_A[u].keys() & P_A[v].keys():
                 suv_cw = (P_A[s][u]['cw'] == v) and cw(s, u, v)
                 suv_ccw = (P_A[s][u]['ccw'] == v) and ccw(s, u, v)
@@ -1418,7 +1422,7 @@ def make_planar_embedding(
                         # no LOS intermediate to shortcut; pruned == original path
                         pruned_len = lengths[n]
                     debug(
-                        'd2roots[%d, %d] updated by LOS pruning (path %s prunned at %d)',
+                        'd2roots[%d, %d] updated by LOS pruning (path %s pruned at %d)',
                         n,
                         r,
                         path,
@@ -1513,7 +1517,7 @@ def make_planar_embedding(
         corner_to_A_edges=corner_to_A_edges,
         # TODO: make these 2 attribute names consistent across the code
         hull=convex_hull_A,
-        hull_prunned=hull_prunned,
+        hull_pruned=hull_pruned,
         hull_concave=hull_concave,
         # experimental attr
         norm_offset=norm_offset,
@@ -1784,7 +1788,8 @@ def planar_flipped_by_routeset(
         #      continue
         if ((s, t) if s < t else (t, s)) in unflippables:
             warn(
-                'Navigation mesh inconsistency: edge %d-%d is unflippable due to a previous flip nearby',
+                'Navigation mesh inconsistency: edge %d-%d is unflippable'
+                ' due to a previous flip nearby',
                 s,
                 t,
             )

@@ -185,7 +185,8 @@ class SolverORTools(Solver, PoolHandler):
         termination = result.termination.reason.name
         if num_solutions == 0:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+                f'Unable to find a solution. Solver {self.name} terminated'
+                f' with: {termination}'
             )
         storer.solutions.reverse()
         self._solution_pool = storer.solutions

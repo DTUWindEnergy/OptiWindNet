@@ -18,7 +18,7 @@ from ..geometric import (
     is_crossing,
     is_same_side,
 )
-from ..interarraylib import fun_fingerprint, add_terminal_closest_root
+from ..interarraylib import add_terminal_closest_root, fun_fingerprint
 from ..mesh import delaunay
 from ._deprecation import deprecated_heuristic
 from .priorityqueue import PriorityQueue
@@ -29,7 +29,10 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
-@deprecated_heuristic(migrate_to="constructor(A, capacity, method='esau_williams')")
+@deprecated_heuristic(
+    migrate_to="constructor(A, capacity, method='biased_EW', "
+    'straight_feeder_route=True, weigh_detours=False)'
+)
 def CPEW(
     L: nx.Graph,
     capacity: int,

@@ -5,7 +5,8 @@
 __author__ = 'Mauricio Souza de Alencar'
 
 __doc__ = """
-Tool for designing and optimizing the electrical cable network (collection system) for offshore wind power plants.
+Tool for designing and optimizing the electrical cable network (collection system)
+for offshore wind power plants.
 
 https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 """

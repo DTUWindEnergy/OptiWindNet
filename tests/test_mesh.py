@@ -1,15 +1,16 @@
-import numpy as np
-import networkx as nx
 import condeltri as cdt
+import networkx as nx
+import numpy as np
 import shapely as shp
 
+from optiwindnet.geometric import is_crossing
 from optiwindnet.mesh import (
+    A_graph,
     _build_edge_line_tree,
     _edges_and_hull_from_cdt,
-    A_graph,
     make_planar_embedding,
 )
-from optiwindnet.geometric import is_crossing
+
 from .helpers import tiny_wfn
 
 
@@ -48,7 +49,8 @@ def test_A_graph_all(monkeypatch):
     assert A_c.number_of_edges() > 0
     assert all(d.get('cost') == 42.0 for _, _, d in A_c.edges(data=True))
 
-    # When weightfun is provided on the Delaunay path, apply_edge_exemptions should be called.
+    # When weightfun is provided on the Delaunay path,
+    # apply_edge_exemptions should be called.
     calls = {'n': 0}
     import optiwindnet.mesh as mesh_mod
 

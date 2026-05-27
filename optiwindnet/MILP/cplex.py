@@ -9,7 +9,7 @@ import pyomo.environ as pyo
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from ._core import FeederRoute, PoolHandler, Topology, ModelOptions
+from ._core import FeederRoute, ModelOptions, PoolHandler, Topology
 from .pyomo import SolverPyomo
 
 __all__ = ()

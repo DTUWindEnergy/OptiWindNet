@@ -18,6 +18,10 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering",
@@ -38,7 +42,7 @@ dependencies = [
     "networkx >=3.6",
     "numba >=0.62.1",
     "numpy >=2.0",
-    "ortools >=9.12.4544",
+    "ortools >=9.14.6206",
     "peewee >=3.17",
     "Pyomo >=6.9.5",
     "PyYAML >=6.0.2",
@@ -102,8 +106,16 @@ optiwindnet = ["data/*", "py.typed", "**/*.pyi"]
 [tool.setuptools_scm]
 version_file = "optiwindnet/version.py"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:optiwindnet"]
+
 [tool.black]
 skip-string-normalization = true
 
 [tool.ruff.format]
 quote-style = "single"
+
+[tool.ruff.lint]
+# This keeps all the defaults AND adds your new line-length rules
+extend-select = ["E501", "W505"]

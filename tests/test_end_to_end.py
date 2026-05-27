@@ -1,8 +1,10 @@
 # test end to end
 import numpy as np
 import pytest
-from optiwindnet.api import WindFarmNetwork, EWRouter, MILPRouter
-from .helpers import tiny_wfn, router_factory, load_instances, canonical_edges
+
+from optiwindnet.api import EWRouter, MILPRouter, WindFarmNetwork
+
+from .helpers import canonical_edges, load_instances, router_factory, tiny_wfn
 from .paths import SOLUTIONS_FILE
 
 
@@ -17,7 +19,8 @@ def pytest_generate_tests(metafunc):
                         marks=pytest.mark.skip(
                             reason=(
                                 f'Missing expected test data: {SOLUTIONS_FILE}\n'
-                                'To (re)generate run: python update_expected_values.py\n'
+                                'To (re)generate run:'
+                                ' python update_expected_values.py\n'
                                 'Or run pytest with --regen-expected.'
                             ),
                         ),

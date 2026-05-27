@@ -1,5 +1,4 @@
 from optiwindnet.themes import Colors
-import pytest
 
 
 def test_themes():

@@ -11,8 +11,8 @@ Responsibilities:
 """
 
 import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -57,7 +57,8 @@ def pytest_addoption(parser):
         action='store_true',
         default=False,
         help=(
-            'If set, pytest will attempt to regenerate missing expected instances files '
+            'If set, pytest will attempt to regenerate missing expected'
+            ' instances files '
             'by running the repository generator scripts. Use with care (generators '
             'may be slow or require external solvers).'
         ),
@@ -70,7 +71,8 @@ def pytest_sessionstart(session):
     if not regen:
         return
 
-    # Attempt to regenerate missing expected files (best-effort; fail loudly if generator fails)
+    # Attempt to regenerate missing expected files
+    # (best-effort; fail loudly if generator fails)
     if not SOLUTIONS_FILE.exists() and GEN_END2END_SCRIPT.exists():
         session.config.warn(
             'optiwindnet',

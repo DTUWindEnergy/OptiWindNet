@@ -5,11 +5,11 @@ Generate expected graphs for specified sites-routers.
 import pickle
 from typing import Any, Dict, Optional, Sequence
 
-from optiwindnet.api import WindFarmNetwork
-from optiwindnet.importer import L_from_yaml
-
 import paths
 from helpers import router_factory
+
+from optiwindnet.api import WindFarmNetwork
+from optiwindnet.importer import L_from_yaml
 
 # -----------------------
 # Small helpers
@@ -235,7 +235,8 @@ def generate_expected_values_end_to_end_tests():
         if not batch_sites or not batch_routers:
             return
         print_header(
-            f'Running {label} ({len(batch_sites)} locations x {len(batch_routers)} routers)'
+            f'Running {label} ({len(batch_sites)} locations'
+            f' x {len(batch_routers)} routers)'
         )
         for si, site_name in enumerate(batch_sites, 1):
             L = getattr(locations, site_name)
@@ -245,7 +246,8 @@ def generate_expected_values_end_to_end_tests():
                 router = router_factory(spec)
                 cables = int(spec['cables'])
                 print(
-                    f'[{si}/{len(batch_sites)}] [{ri}/{len(batch_routers)}]: {key} (cables={cables})'
+                    f'[{si}/{len(batch_sites)}] [{ri}/{len(batch_routers)}]:'
+                    f' {key} (cables={cables})'
                 )
 
                 wfn = WindFarmNetwork(L=L, cables=cables)

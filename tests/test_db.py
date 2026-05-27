@@ -1,23 +1,23 @@
-import pytest
 import numpy as np
+import pytest
 
 from optiwindnet.api import HGSRouter
 from optiwindnet.db import (
-    open_database,
-    database_connection,
     G_from_routeset,
     L_from_nodeset,
     NodeSet,
     RouteSet,
+    database_connection,
+    open_database,
     store_G,
 )
 from optiwindnet.db.storage import (
-    packnodes,
     add_if_absent,
     get_machine_pk,
+    packnodes,
 )
-from .helpers import tiny_wfn, assert_graph_equal
 
+from .helpers import assert_graph_equal, tiny_wfn
 
 # ---------------------------
 # Test model

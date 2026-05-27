@@ -14,14 +14,14 @@ from typing import Any, Mapping
 import networkx as nx
 import numpy as np
 
+from ..interarraylib import calcload
+from ..utils import make_handle
 from .model import (
     Machine,
     Method,
     NodeSet,
     RouteSet,
 )
-from ..interarraylib import calcload
-from ..utils import make_handle
 
 __all__ = ()
 

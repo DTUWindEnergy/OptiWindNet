@@ -13,7 +13,6 @@ import networkx as nx
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from .scip import make_min_length_model, warmup_model
 from ._core import (
     FeederRoute,
     ModelOptions,
@@ -24,6 +23,7 @@ from ._core import (
     Topology,
     physical_core_count,
 )
+from .scip import make_min_length_model, warmup_model
 
 __all__ = ('make_min_length_model', 'warmup_model')
 
@@ -202,7 +202,8 @@ class SolverFSCIP(Solver, PoolHandler):
             num_solutions = model.getNSols()
             if num_solutions == 0:
                 raise OWNSolutionNotFound(
-                    f'Unable to find a solution. Solver {self.name} terminated with: {model.getStatus()}'
+                    f'Unable to find a solution. Solver {self.name} terminated'
+                    f' with: {model.getStatus()}'
                 )
             termination = 'unknown'
             solving_time = float('nan')

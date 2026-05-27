@@ -21,7 +21,7 @@ from ..geometric import (
     is_crossing,
     is_same_side,
 )
-from ..interarraylib import L_from_G, fun_fingerprint, add_terminal_closest_root
+from ..interarraylib import L_from_G, add_terminal_closest_root, fun_fingerprint
 from ..mesh import make_planar_embedding
 from ..utils import Alerter
 from ._deprecation import deprecated_heuristic
@@ -34,7 +34,7 @@ debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
 @deprecated_heuristic(
-    migrate_to="constructor(A, capacity, method='rootlust', weigh_detours=True)"
+    migrate_to="constructor(A, capacity, method='biased_EW' if OBEW_rootlust is None else 'rootlust', weigh_detours=True)"
 )
 def OBEW(
     L: nx.Graph,
@@ -788,7 +788,8 @@ def OBEW(
                     #          subfarL = np.hypot(*(cornerC - subcornerC))
                     #          subnearL = subaddedL - subfarL + nearL
                     #          dc_addedL += subnearL
-                    #      # print(f'[{i}] CONCAVE:', fnT[hook], fnT[corner_], fnT[goal_])
+                    #      # print(f'[{i}] CONCAVE:', fnT[hook], fnT[corner_],
+                    #      #       fnT[goal_])
                     #      dcX = get_crossings(subcorner_, corner_,
                     #                          detour_waiver=True)
                     #      if not dcX:
