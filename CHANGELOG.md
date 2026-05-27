@@ -3,42 +3,36 @@
 [Commit history since v0.2.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.1...v0.2.2)
 
 ## Breaking Changes
-- Advanced API cleanup: root-assignment and link-blockage helpers moved from `optiwindnet.geometric` to `optiwindnet.interarraylib`. Use `add_terminal_closest_root()`, `add_link_blockmap()`, and `add_link_cosines()` from `optiwindnet.interarraylib`.
+- **Advanced API Cleanups**: Helper functions for root-assignment and link-blockage moved from `optiwindnet.geometric` to `optiwindnet.interarraylib`. Users should import `add_terminal_closest_root()`, `add_link_blockmap()`, and `add_link_cosines()` from `optiwindnet.interarraylib`.
 
 ## Important Changes
-- **New fused constructive heuristic**: added `heuristics.constructor()` with `esau_williams`, `biased_EW`, `rootlust`, and `radial_EW` methods. The high-level `EWRouter` now uses this constructor path, with detour-aware segmented routing and straight-feeder routing options.
-- **LKH-3 wrapper brought to HGS parity**: added `lkh3()` as the preferred LKH entry point, with single- and multi-root support, per-root clustering, warm starts, crossing repair, capacity-violation retries, and improved solver metadata. The older `lkh()` and `iterative_lkh()` entry points remain as deprecated compatibility aliases.
-- **Route crossing diagnostics expanded**: added Shapely-based `find_geometric_crossings()` for geometry-first validation of arbitrary routesets, including detours, contour clones, shared-run overlap crossings, and branch-split cases.
-- **`PathFinder`**: major robustness improvement for detours around routes that follow borders or exclusion-zone constraints. The router now models constraint-following contour segments as route fences and explicit chain-access regions, allowing it to handle stacked, touching, and overlapping contour chains more reliably.
+- **Default Vector SVG Plotting**: High-level `WindFarmNetwork` plotting methods (`plot()`, `plot_location()`, `plot_available_links()`, `plot_navigation_mesh()`, and `plot_selected_links()`) now use a modern, interactive vector SVG plotting backend (`svgplot`/`svgpplot`) by default. This delivers clean, high-resolution inline displays in Jupyter notebooks. The legacy Matplotlib-based backend remains fully accessible by passing an explicit `ax` argument (including `ax=None` to dynamically instantiate Matplotlib figures).
+- **svgplot() matches gplot()'s features**: SVG plots now support node labeling, boundary/obstacle vertex tagging, and figure legend.
+- **Informative String Representations**: Added descriptive, debugger-safe string representations (`__repr__`) for `WindFarmNetwork` and `Router` subclasses (`EWRouter`, `HGSRouter`, `MILPRouter`) displaying key configuration parameters and solved network metrics.
+- **Shorter Substation Labels**: Pre-packaged offshore wind farm datasets (.osm.pbf format) have been updated with short, human-readable substation abbreviations (such as "Alpha", "Beta", "OSS") to fit cleanly in visualization labels.
+- **New Fused Heuristic**: Added `heuristics.constructor()` with `esau_williams`, `biased_EW`, `rootlust`, and `radial_EW` methods, unifying the constructive routing heuristics. The high-level `EWRouter` now uses this path, offering radial topology and the performant rootlust method.
+- **LKH-3 Solver Parity**: Added `lkh3()` as the preferred LKH entry point, bringing it to feature parity with the HGS solver. It supports single- and multi-root configurations, per-root clustering, warm starts, capacity-violation retries, crossing repair, and improved solver metadata.
+- **Expanded Crossing Diagnostics**: Added Shapely-based `find_geometric_crossings()` for geometry-first validation of arbitrary routesets, including detours, contour clones, shared-run overlap crossings, and branch-split cases.
+- **Robust PathFinder Detours**: Major robustness improvements when routing detours among cable routes that follow boundaries or exclusion zones, significantly reducing cable use on sites with many obstacles.
 
 ## Deprecated
-- The standalone EW heuristics `ClassicEW`, `CPEW`, `NBEW`, `OBEW`, and `EW_presolver` now emit a `DeprecationWarning` and will be removed in v0.3. They are superseded by `heuristics.constructor()`: `ClassicEW`/`CPEW` → `method='esau_williams'`, `NBEW` → `method='radial_EW'`, `OBEW` → `method='rootlust'` with `weigh_detours=True`, `EW_presolver` → `method='biased_EW'`. Note that `constructor` takes the available-links graph `A` (from `make_planar_embedding(L)`), not the location graph `L`; the high-level `WindFarmNetwork`/`EWRouter` API builds the mesh for you.
+- Standalone EW heuristics (`ClassicEW`, `CPEW`, `NBEW`, `OBEW`, and `EW_presolver`) are deprecated and will be removed in v0.3. They are superseded by the new unified `heuristics.constructor()`. Note that `constructor` expects the available-links graph `A`, not the location graph `L`.
 - The legacy `optiwindnet.interface` module (`heuristic_wrapper()`, `HeuristicFactory`) is deprecated and will be removed in v0.3; use `WindFarmNetwork`/`EWRouter` instead.
 
 ## Fixes
-- Fixed LKH warm-start tour construction, including multi-root/per-cluster indexing and route walk order.
-- Fixed LKH repair behavior for remaining crossings and over-capacity routes; offending links are now removed through shared HGS/LKH repair logic, and LKH retries can increase vehicles only for overloaded clusters.
-- Added overflow checks for LKH weight-matrix construction with clearer guidance when inputs need normalization or a smaller scale.
-- Fixed shared-route overlap crossing detection and added geometric handling for route intersections that are not expressible as available-edge crossings.
-- Fixed several PathFinder edge cases involving chain-ends near roots, mixed touching/spanning route fences, and contour paths that include interior non-constraint hops.
-- Prevented same-prime self-links during funnel updates when a chain-anchor coincides with the next portal vertex.
-- Improved handling of shortened contours by deriving barrier and fence topology directly from contour provenance instead of temporarily rewriting the graph during path finding.
-- Fixed `planar_flipped_by_routeset()` handling of normalized unflippable edges and changed it to operate directly on prime-edge sets.
-- Removed a stray `print()` from `gplot(..., tag_border=True)`.
-- Fixed a database test warning caused by leaving a connection open.
+- **Pathfinder Robustness**: Resolved fatal crashes (`KeyError` and triangulation flip failures) when constructing detours.
+- **Diagonal Mesh Exclusion**: Prevented invalid diagonal paths by skipping edges in the site's boundary polygon during navigation mesh generation.
+- **Logging & Diagnostics**: Replaced all remaining raw `print()` statements across the API and utility modules with standard Python logging.
+- **LKH and Heuristic Repairs**: Fixed LKH warm-start tour construction (indexing, walk order within clusters) and aligned HGS/LKH repair behavior for capacity-violating and crossing routes.
+- **Overflow Prevention**: Added checks for LKH weight-matrix construction with clear guidance when inputs need normalization.
+- **Crossing Detection**: Fixed shared-route overlap crossing detection and added geometric handling for route intersections not expressible as available-edge crossings.
 
 ## Refactoring & Maintenance
-- Added shared baseline repair helper logic for HGS and LKH.
-- Moved terminal-root assignment and link-blockage/cosine helpers into `interarraylib`, and accelerated link-blockage map construction with a Numba-compiled inner loop.
-- Updated the legacy EW heuristic modules to use the renamed root-assignment helper.
-- Changed `PriorityQueue.top()` to return the priority together with the tag and payload, and made `cancel()` tolerant of missing tags.
-- Precomputed PathFinder sector lookup and `(prime, sector)` bookkeeping to simplify traversal state and reduce repeated fan scans.
-- Cleaned up PathFinder terminology and internal structure around pseudonodes, portals, fences, chains, cones, and funnel state.
-- Updated expected test solutions and expanded coverage for LKH, geometric crossings, PathFinder chain scenarios, database handling, and interarray helper functions.
-
-## Documentation
-- Added a notebook for the new path-insertion/constructor heuristic.
-- Updated LKH and Cazzaro comparison notebooks for the revised solvers and PathFinder behavior.
+- **Python 3.11–3.14 Support**: Explicitly declared support for Python 3.11 through 3.14 with standard Trove classifiers on PyPI.
+- **Updated OR-Tools Floor**: Aligned OR-Tools requirements in `pyproject.toml` to `>=9.14.6206` for consistency across development and production environments.
+- **Strict Deprecation Testing**: Test suite configured to treat `DeprecationWarning` as errors to guarantee API health.
+- **Linting & Code Quality**: Enforced strict Ruff linting and formatting rules via continuous integration.
+- **Performance Optimizations**: Optimized pathfinding sector lookups and precomputed chain-end topologies to speed up execution.
 
 # v0.2.1
 
