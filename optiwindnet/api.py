@@ -35,7 +35,7 @@ from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
-from .svg import svgplot
+from .svg import svgplot, svgpplot
 
 ##################################
 # OptiWindNet Network/Router API #
@@ -408,26 +408,50 @@ class WindFarmNetwork:
         return svgplot(self.L if self._is_stale_SG else self.G)._repr_svg_()
 
     def plot(self, *args, **kwargs):
-        """Plot the optimized network."""
-        return gplot(self.G, *args, **kwargs)
+        """Plot the optimized network.
+
+        By default, this method utilizes the modern vector SVG-based plotting
+        backend (`svgplot`) which returns an `SvgRepr` suitable for clean
+        interactive inline displays in Jupyter notebooks.
+
+        To switch to the Matplotlib-based plotting backend (`gplot`), specify the
+        `ax` parameter as a keyword argument.
+
+        Note:
+            Passing `ax=None` explicitly routes to the Matplotlib backend and
+            automatically instantiates a new figure and axes on the fly, allowing
+            Matplotlib figures to be created without importing `matplotlib` or
+            `pyplot` directly in the user code.
+        """
+        if 'ax' in kwargs:
+            return gplot(self.G, *args, **kwargs)
+        return svgplot(self.G, *args, **kwargs)
 
     def plot_location(self, **kwargs):
         """Plot the original location geometry."""
-        return gplot(self.L, **kwargs)
+        if 'ax' in kwargs:
+            return gplot(self.L, **kwargs)
+        return svgplot(self.L, **kwargs)
 
     def plot_available_links(self, **kwargs):
         """Plot available links from planar embedding."""
-        return gplot(self.A, **kwargs)
+        if 'ax' in kwargs:
+            return gplot(self.A, **kwargs)
+        return svgplot(self.A, **kwargs)
 
     def plot_navigation_mesh(self, **kwargs):
         """Plot navigation mesh (planar graph and adjacency)."""
-        return pplot(self.P, self.A, **kwargs)
+        if 'ax' in kwargs:
+            return pplot(self.P, self.A, **kwargs)
+        return svgpplot(self.P, self.A, **kwargs)
 
     def plot_selected_links(self, **kwargs):
         """Plot tentative link selection."""
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
-        return gplot(G_tentative, **kwargs)
+        if 'ax' in kwargs:
+            return gplot(G_tentative, **kwargs)
+        return svgplot(G_tentative, **kwargs)
 
     def terse_links(self):
         """Get a compact representation of the solution topology."""
