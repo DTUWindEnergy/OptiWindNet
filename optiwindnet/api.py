@@ -73,7 +73,7 @@ class Router(ABC):
         self,
         P: nx.PlanarEmbedding,
         A: nx.Graph,
-        cables: list[tuple[int, float]],
+        cables: list[tuple[int, float | int]],
         cables_capacity: int,
         verbose: bool,
         **kwargs,
@@ -113,7 +113,7 @@ class WindFarmNetwork:
 
     def __init__(
         self,
-        cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
+        cables: int | list[int] | list[tuple[int, float | int]] | np.ndarray,
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
         borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
@@ -293,7 +293,7 @@ class WindFarmNetwork:
         return self._G
 
     @property
-    def cables(self) -> list[tuple[int, float]]:
+    def cables(self) -> list[tuple[int, float | int]]:
         "Set of cable specifications as [(capacity, linear_cost), ...]."
         return self._cables
 
