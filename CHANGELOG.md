@@ -1,3 +1,39 @@
+# v0.2.2
+
+[Commit history since v0.2.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.1...v0.2.2)
+
+## Breaking Changes
+- **Advanced API Cleanups**: Helper functions for root-assignment and link-blockage moved from `optiwindnet.geometric` to `optiwindnet.interarraylib`. Users should import `add_terminal_closest_root()`, `add_link_blockmap()`, and `add_link_cosines()` from `optiwindnet.interarraylib`.
+
+## Important Changes
+- **Default Vector SVG Plotting**: High-level `WindFarmNetwork` plotting methods (`plot()`, `plot_location()`, `plot_available_links()`, `plot_navigation_mesh()`, and `plot_selected_links()`) now use a modern, interactive vector SVG plotting backend (`svgplot`/`svgpplot`) by default. This delivers clean, high-resolution inline displays in Jupyter notebooks. The legacy Matplotlib-based backend remains fully accessible by passing an explicit `ax` argument (including `ax=None` to dynamically instantiate Matplotlib figures).
+- **svgplot() matches gplot()'s features**: SVG plots now support node labeling, boundary/obstacle vertex tagging, and figure legend.
+- **Informative String Representations**: Added descriptive, debugger-safe string representations (`__repr__`) for `WindFarmNetwork` and `Router` subclasses (`EWRouter`, `HGSRouter`, `MILPRouter`) displaying key configuration parameters and solved network metrics.
+- **Shorter Substation Labels**: Pre-packaged offshore wind farm datasets (.osm.pbf format) have been updated with short, human-readable substation abbreviations (such as "Alpha", "Beta", "OSS") to fit cleanly in visualization labels.
+- **New Fused Heuristic**: Added `heuristics.constructor()` with `esau_williams`, `biased_EW`, `rootlust`, and `radial_EW` methods, unifying the constructive routing heuristics. The high-level `EWRouter` now uses this path, offering radial topology and the performant rootlust method.
+- **LKH-3 Solver Parity**: Added `lkh3()` as the preferred LKH entry point, bringing it to feature parity with the HGS solver. It supports single- and multi-root configurations, per-root clustering, warm starts, capacity-violation retries, crossing repair, and improved solver metadata.
+- **Expanded Crossing Diagnostics**: Added Shapely-based `find_geometric_crossings()` for geometry-first validation of arbitrary routesets, including detours, contour clones, shared-run overlap crossings, and branch-split cases.
+- **Robust PathFinder Detours**: Major robustness improvements when routing detours among cable routes that follow boundaries or exclusion zones, significantly reducing cable use on sites with many obstacles.
+
+## Deprecated
+- Standalone EW heuristics (`ClassicEW`, `CPEW`, `NBEW`, `OBEW`, and `EW_presolver`) are deprecated and will be removed in v0.3. They are superseded by the new unified `heuristics.constructor()`. Note that `constructor` expects the available-links graph `A`, not the location graph `L`.
+- The legacy `optiwindnet.interface` module (`heuristic_wrapper()`, `HeuristicFactory`) is deprecated and will be removed in v0.3; use `WindFarmNetwork`/`EWRouter` instead.
+
+## Fixes
+- **Pathfinder Robustness**: Resolved fatal crashes (`KeyError` and triangulation flip failures) when constructing detours.
+- **Diagonal Mesh Exclusion**: Prevented invalid diagonal paths by skipping edges in the site's boundary polygon during navigation mesh generation.
+- **Logging & Diagnostics**: Replaced all remaining raw `print()` statements across the API and utility modules with standard Python logging.
+- **LKH and Heuristic Repairs**: Fixed LKH warm-start tour construction (indexing, walk order within clusters) and aligned HGS/LKH repair behavior for capacity-violating and crossing routes.
+- **Overflow Prevention**: Added checks for LKH weight-matrix construction with clear guidance when inputs need normalization.
+- **Crossing Detection**: Fixed shared-route overlap crossing detection and added geometric handling for route intersections not expressible as available-edge crossings.
+
+## Refactoring & Maintenance
+- **Python 3.11–3.14 Support**: Explicitly declared support for Python 3.11 through 3.14 with standard Trove classifiers on PyPI.
+- **Updated OR-Tools Floor**: Aligned OR-Tools requirements in `pyproject.toml` to `>=9.14.6206` for consistency across development and production environments.
+- **Strict Deprecation Testing**: Test suite configured to treat `DeprecationWarning` as errors to guarantee API health.
+- **Linting & Code Quality**: Enforced strict Ruff linting and formatting rules via continuous integration.
+- **Performance Optimizations**: Optimized pathfinding sector lookups and precomputed chain-end topologies to speed up execution.
+
 # v0.2.1
 
 [Commit history since v0.2.0](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.0...v0.2.1)

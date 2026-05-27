@@ -601,6 +601,7 @@ class Drawable:
         for i, item in enumerate(legend_items):
             x_pos = start_x + i * item_width
             item_type = item[0]
+            label = ''
 
             if item_type == 'node':
                 _, name, label, color, shape = item

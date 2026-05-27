@@ -153,6 +153,8 @@ def gplot(
     # setup
     roots = range(-R, 0)
     pos = dict(enumerate(VertexC[:-R])) | dict(enumerate(VertexC[-R:], start=-R))
+    contour = range(0)
+    detour = range(0)
     if C > 0 or D > 0:
         fnT = G.graph['fnT']
         contour = range(T + B, T + B + C)
