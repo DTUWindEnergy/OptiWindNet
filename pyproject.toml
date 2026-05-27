@@ -106,6 +106,10 @@ optiwindnet = ["data/*", "py.typed", "**/*.pyi"]
 [tool.setuptools_scm]
 version_file = "optiwindnet/version.py"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:optiwindnet"]
+
 [tool.black]
 skip-string-normalization = true
 
