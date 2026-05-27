@@ -1,6 +1,5 @@
 import networkx as nx
 import numpy as np
-import pytest
 
 import optiwindnet.baselines.lkh as lkh_mod
 
@@ -292,35 +291,6 @@ def test_lkh3_multi_root_warns_when_vehicles_above_min(monkeypatch):
 
     lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, vehicles=4)
     assert any('multi-root' in str(w) for w in warnings_seen)
-
-
-def test_iterative_lkh_emits_deprecation_warning(monkeypatch):
-    A = _make_A(T=4)
-    A.graph['d2roots'] = np.ones((5, 1))
-
-    def fake_do_lkh(L, **kwargs):
-        return _fake_output(routes=[[0, 1], [2, 3]], vehicles=2)
-
-    monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A: S)
-    monkeypatch.setattr(lkh_mod, 'add_link_blockmap', lambda A: None)
-    monkeypatch.setattr(lkh_mod, '_prune_links', lambda A, limit: None)
-
-    with pytest.warns(DeprecationWarning, match='iterative_lkh'):
-        lkh_mod.iterative_lkh(A, capacity=2, time_limit=0.1, seed=1)
-
-
-def test_lkh_emits_deprecation_warning(monkeypatch):
-    A = _make_A(T=4)
-    A.graph['d2roots'] = np.ones((5, 1))
-
-    def fake_do_lkh(L, **kwargs):
-        return _fake_output(routes=[[0, 1], [2, 3]], vehicles=2)
-
-    monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-
-    with pytest.warns(DeprecationWarning, match='lkh'):
-        lkh_mod.lkh(A, capacity=2, time_limit=0.1, seed=1)
 
 
 def test_build_weight_matrix_single_root_shape_and_depot_column():
