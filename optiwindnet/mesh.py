@@ -921,7 +921,7 @@ def make_planar_embedding(
         while edges_to_examine:
             u, v = edges_to_examine.pop()
             # if ⟨u, v⟩ does not cross any constraint_edges, add it to edgesCDT
-            candidate_idx = obstacle_constraint_tree.query(
+            candidate_idx = obstacle_constraint_tree.query(  # type: ignore
                 shp.LineString(VertexS[[u, v]]), predicate='intersects'
             )
             if candidate_idx.size == 0:
@@ -1020,7 +1020,7 @@ def make_planar_embedding(
     else:
         constraint_los_lines = obstacle_constraint_lines
     constraint_los_tree = (
-        shp.STRtree(constraint_los_lines) if constraint_los_lines.size > 0 else None
+        shp.STRtree(constraint_los_lines) if constraint_los_lines.size > 0 else None  # type: ignore
     )
 
     # ############################################################
@@ -1398,7 +1398,7 @@ def make_planar_embedding(
         los_idx[:, 1] = np.arange(T)
         for r in range(-R, 0):
             los_idx[:, 0] = r
-            crossing_pairs = constraint_los_tree.query(
+            crossing_pairs = constraint_los_tree.query(  # type: ignore
                 shp.linestrings(VertexS[los_idx]), predicate='crosses'
             )
             if crossing_pairs.size == 0:
