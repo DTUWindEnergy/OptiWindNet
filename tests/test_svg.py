@@ -210,3 +210,181 @@ def test_svgplot_legend_detour_dasharray():
     assert (
         'stroke_dasharray="18 15"' in svg.data or 'stroke-dasharray="18 15"' in svg.data
     )
+
+
+# ─────────────────────────────────────────────
+# SvgRepr.__repr__  (lines 39-52)
+# ─────────────────────────────────────────────
+
+
+def test_svgrepr_repr_no_metadata():
+    r = repr(SvgRepr('abc'))
+    assert r == '<SvgRepr 3 chars>'
+
+
+def test_svgrepr_repr_with_handle_only():
+    r = repr(SvgRepr('ab', {'handle': 'myfarm'}))
+    assert "'myfarm'" in r
+    assert 'name=' not in r
+
+
+def test_svgrepr_repr_name_differs_from_handle():
+    r = repr(SvgRepr('x', {'handle': 'h', 'name': 'Full Name', 'T': 5, 'R': 2, 'capacity': 9}))
+    assert "name='Full Name'" in r
+    assert 'T=5' in r
+    assert 'R=2' in r
+    assert 'capacity=9' in r
+
+
+def test_svgrepr_repr_name_equals_handle():
+    """When name == handle the name field must NOT appear in repr."""
+    r = repr(SvgRepr('x', {'handle': 'same', 'name': 'same'}))
+    assert 'name=' not in r
+
+
+def test_svgrepr_repr_capacity_none():
+    """capacity=None must not appear in repr."""
+    r = repr(SvgRepr('x', {'capacity': None}))
+    assert 'capacity' not in r
+
+
+# ─────────────────────────────────────────────
+# SvgRepr.save  (lines 54-57)
+# ─────────────────────────────────────────────
+
+
+def test_svgrepr_save(tmp_path):
+    wfn = tiny_wfn()
+    svg = svgplot(wfn.G)
+    out = tmp_path / 'test.svg'
+    svg.save(str(out))
+    assert out.exists()
+    assert out.read_text(encoding='utf-8') == svg.data
+
+
+# ─────────────────────────────────────────────
+# Drawable.__init__  landscape angle + aspect
+# ─────────────────────────────────────────────
+
+
+def test_svgplot_landscape_angle_rotation():
+    """landscape_angle rotates VertexC before scaling (line 123)."""
+    wfn = tiny_wfn()
+    G = wfn.G.copy()
+    G.graph['landscape_angle'] = 45
+    svg = svgplot(G, landscape=True)
+    assert isinstance(svg, SvgRepr)
+
+
+def test_svgplot_wide_aspect_ratio():
+    """Wide geometry uses width-based scale and recomputes h (lines 139-140)."""
+    wfn = tiny_wfn()
+    G = wfn.G.copy()
+    VertexC = G.graph['VertexC'].copy()
+    VertexC[:, 0] *= 20   # stretch x → W/H >> 1.78 (viewport ratio)
+    G.graph['VertexC'] = VertexC
+    svg = svgplot(G)
+    assert isinstance(svg, SvgRepr)
+
+
+# ─────────────────────────────────────────────
+# Drawable.__init__  obstacles without border  (lines 195-197)
+# ─────────────────────────────────────────────
+
+
+def test_svgplot_obstacles_only_no_border():
+    """border=None but obstacles present hits the elif draw_obstacles branch."""
+    wfn = tiny_wfn()
+    G = wfn.G.copy()
+    G.graph['border'] = None
+    # obstacles remain non-None
+    svg = svgplot(G)
+    assert isinstance(svg, SvgRepr)
+
+
+# ─────────────────────────────────────────────
+# Drawable  transparent=False  (line 160)
+# ─────────────────────────────────────────────
+
+
+def test_svgplot_transparent_false():
+    wfn = tiny_wfn()
+    svg = svgplot(wfn.G, transparent=False)
+    assert isinstance(svg, SvgRepr)
+
+
+# ─────────────────────────────────────────────
+# Drawable.add_edges  multiple cable types  (lines 244-266)
+# ─────────────────────────────────────────────
+
+
+def test_svgplot_multiple_cable_types():
+    """Two cable types → len(edge_widths) > 1 → two-level grouping."""
+    wfn = tiny_wfn(cables=[(2, 5.0), (4, 10.0)])
+    assert len(wfn.G.graph.get('cables', [])) == 2
+    svg = svgplot(wfn.G)
+    assert 'cable_0' in svg.data
+    assert 'cable_1' in svg.data
+
+
+# ─────────────────────────────────────────────
+# Drawable.add_nodes  node_tag as generic string attr  (lines 427-430, 445)
+# ─────────────────────────────────────────────
+
+
+def test_svgplot_node_tag_generic_string():
+    """node_tag='label' hits the isinstance(node_tag, str) branch."""
+    wfn = tiny_wfn()
+    svg = svgplot(wfn.G, node_tag='label')
+    assert isinstance(svg, SvgRepr)
+
+
+# ─────────────────────────────────────────────
+# Drawable.add_box  github_bugfix=False  (lines 521-529)
+# ─────────────────────────────────────────────
+
+
+def test_svgplot_github_bugfix_false():
+    wfn = tiny_wfn()
+    svg = svgplot(wfn.G, infobox=True, github_bugfix=False)
+    assert 'bg_textbox' in svg.data
+
+
+# ─────────────────────────────────────────────
+# Drawable.add_legend  D>0 corner + overlay  (lines 561, 573-577, 619-620)
+# ─────────────────────────────────────────────
+
+
+def test_svgplot_legend_detour_corner():
+    """D>0 in G adds a 'corner' entry and shape=='ring' branch to the legend."""
+    wfn = tiny_wfn()
+    G = wfn.G.copy()
+    G.graph['D'] = 1   # pretend there are detour clones
+    svg = svgplot(G, legend=True)
+    assert 'corner' in svg.data
+
+
+def test_svgplot_legend_with_overlay():
+    """overlay graph edges appear in the legend (lines 573-577)."""
+    wfn = tiny_wfn()
+    G = wfn.G.copy()
+    overlay = nx.Graph()
+    overlay.add_nodes_from(G.nodes)
+    overlay.add_edge(0, 1, kind='virtual')
+    G.graph['overlay'] = overlay
+    svg = svgplot(G, legend=True)
+    assert 'virtual' in svg.data
+
+
+# ─────────────────────────────────────────────
+# svgpplot  has_loads branch  (line 746)
+# ─────────────────────────────────────────────
+
+
+def test_svgpplot_has_loads_removed():
+    """If A has has_loads, svgpplot removes it before building the SVG."""
+    wfn = tiny_wfn()
+    A = wfn.A.copy()
+    A.graph['has_loads'] = True   # artificially inject
+    svg = svgpplot(wfn.P, A)
+    assert isinstance(svg, SvgRepr)
