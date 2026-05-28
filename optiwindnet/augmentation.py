@@ -44,7 +44,7 @@ def _get_border_scale_offset(
 def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> bool:
     """Check if there is a minimum distance between a point and all repellers.
 
-    The point must be at least sqrt(repel_radius_sq) apart from repellers.
+    The point must be at least ``sqrt(repel_radius_sq)`` apart from repellers.
 
     Args:
       RepellerC: coordinates (R, 2) of repellers
@@ -52,7 +52,7 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
       point: coordinate (2,) of point to test
 
     Returns:
-      True if `point` clears all discs centered on `RepellerC`.
+      ``True`` if ``point`` clears all discs centered on ``RepellerC``.
     """
     return (
         ((point[np.newaxis, :] - RepellerC) ** 2).sum(axis=1) >= repel_radius_sq
@@ -65,8 +65,9 @@ def _walk_along_perimeter(
 ) -> tuple[list[tuple[int, int]], list[tuple[float, float]]]:
     """Find crossings of the polygons' perimeter with the unit grid.
 
-    Auxiliar function to poisson_disc_filler(). Used for identifying unit cells that
-    cover the polygon's shell. The polygon's vertices are also included in the lists.
+    Auxiliar function to :func:`poisson_disc_filler`. Used for identifying unit cells
+    that cover the polygon's shell. The polygon's vertices are also included in the
+    lists.
 
     Args:
       polygonC: N×2 coordinates that define the polygon (unique vertices)
@@ -114,14 +115,14 @@ def _walk_along_perimeter(
 def _contains_np(
     polyC: CoordPairs, pts: CoordPairs
 ) -> np.ndarray[tuple[int], np.dtype[np.bool_]]:
-    """Evaluate if `polygon` (N, 2) covers points in `pts` (M, 2).
+    """Evaluate if ``polygon`` (N, 2) covers points in ``pts`` (M, 2).
 
     Args:
       polyC: coordinates of polygon vertices (N, 2).
       pts: coordinates of points to test (M, 2).
 
     Returns:
-      boolean array shaped (M,) (True if pts[i] inside `polygon`).
+      boolean array shaped (M,) (``True`` if ``pts[i]`` inside ``polygon``).
     """
     polyC_rolled = np.roll(polyC, -1, axis=0)
     vectors = polyC_rolled - polyC
@@ -141,14 +142,14 @@ def _contains_np(
 
 @nb.njit(cache=True)
 def _contains(polyC: CoordPairs, point: CoordPair) -> bool:
-    """Evaluate if polygon (N, 2) covers `point` (2,).
+    """Evaluate if polygon (N, 2) covers ``point`` (2,).
 
     Args:
       polyC: coordinates of polygon vertices (N, 2).
       point: coordinates of point to test (2,).
 
     Returns:
-      True if `point` inside polygon, False otherwise
+      ``True`` if ``point`` inside polygon, ``False`` otherwise
     """
     intersections = 0
     dx2, dy2 = point - polyC[-1]
@@ -182,7 +183,7 @@ def _poisson_disc_filler_core(
     RepellerS: CoordPairs | None,
     rng: np.random.Generator,
 ) -> CoordPairs:
-    """This is the numba-compilable core called by `poisson_disc_filler()`."""
+    """This is the numba-compilable core called by :func:`poisson_disc_filler`."""
     # [Poisson-Disc Sampling](https://www.jasondavies.com/poisson-disc/)
 
     # mask for the 20 neighbors
@@ -212,7 +213,7 @@ def _poisson_disc_filler_core(
           point: numpy array shaped (2,) with the point's coordinates
 
         Returns:
-          True if point does not conflict, False otherwise.
+          ``True`` if ``point`` does not conflict, ``False`` otherwise.
         """
         p_min, p_max = max(0, p - 2), min(i_len, p + 3)
         q_min, q_max = max(0, q - 2), min(j_len, q + 3)
@@ -305,9 +306,9 @@ def poisson_disc_filler(
 ) -> CoordPairs:
     """Randomly place points inside an area respecting a minimum separation.
 
-    Fills the area delimited by `BorderC` with `T` randomly
-    placed points that are at least `min_dist` apart and that
-    don't fall inside any of the `RepellerC` discs or `obstacles` areas.
+    Fills the area delimited by ``BorderC`` with ``T`` randomly
+    placed points that are at least ``min_dist`` apart and that
+    don't fall inside any of the ``RepellerC`` discs or ``obstacles`` areas.
 
     Args:
       T: number of points to place.
@@ -316,11 +317,11 @@ def poisson_disc_filler(
       RepellerC: coordinates (R × 2) of the centers of forbidden discs.
       repel_radius: the radius of the forbidden discs.
       obstacleC__: sequence of coordinate arrays (X × 2).
-      iter_max_factor: factor to multiply by `T` to limit the number of
+      iter_max_factor: factor to multiply by ``T`` to limit the number of
         iterations.
-      rounds: number of times to start from empty while `T` is not reached.
-      partial_fulfilment: whether to return less than `T` points (True) or
-        to raise exception (False) if unable to fulfill request.
+      rounds: number of times to start from empty while ``T`` is not reached.
+      partial_fulfilment: whether to return less than ``T`` points (``True``) or
+        to raise exception (``False``) if unable to fulfill request.
 
     Returns:
       coordinates (T, 2) of placed points
@@ -485,20 +486,20 @@ def turbinate(
     max_iter: int = 100_000,
     rounds: int = 5,
 ) -> nx.Graph:
-    """Fills the location `L` with `T` turbines spaced at least `d` apart.
+    """Fills the location ``L`` with ``T`` turbines spaced at least ``d`` apart.
 
-    Only the border and root locations from `L` are used.
+    Only the border and root locations from ``L`` are used.
 
-    The placement of turbines is random and some combinations of `T` and `d`
-    will result in fewer placements than requested. Increase `max_iter` and
-    `rounds` to apply more effort before aborting.
+    The placement of turbines is random and some combinations of ``T`` and ``d``
+    will result in fewer placements than requested. Increase ``max_iter`` and
+    ``rounds`` to apply more effort before aborting.
 
     Args:
       L: reference location (only borders, obstacles and substations are used)
       T: desired number of turbines to place
       d: minimum spacing between turbines
       root_clearance: minimum spacing from turbine to substation (if not given,
-        `d` is used)
+        ``d`` is used)
       max_iter: maximum number of turbine placement attempts per empty field.
       rounds: how many times to start from an empty field before aborting.
 
@@ -559,26 +560,27 @@ def turbinate(
 def iCDF_factory(
     T_min: int, T_max: int, η: float, d_lb: float
 ) -> Callable[[float], int]:
-    """Helper for producing inverted cummulative ditribution function (CDF).
+    """Helper for producing inverted cumulative distribution function (CDF).
 
-    Goal: randomly sample the number of turbines `T` and the minimum clearance
-    distance `d` between any two turbines.
+    Goal: randomly sample the number of turbines ``T`` and the minimum clearance
+    distance ``d`` between any two turbines.
 
-    iCDF = iCDF_factory(...)
+    ``iCDF = iCDF_factory(...)``
 
-    Sample the number of turbines: T~iCDF(uniform(0, 1))
+    Sample the number of turbines: ``T ~ iCDF(uniform(0, 1))``
 
-    Calculate the feasible range for `d`: d_ub(T) = 2*sqrt(η/π/T)
+    Calculate the feasible range for ``d``: ``d_ub(T) = 2*sqrt(η/π/T)``
 
-    Sample the minimum distance: d~uniform(d_lb, d_ub)
+    Sample the minimum distance: ``d ~ uniform(d_lb, d_ub)``
 
-    This exists because increasing both `T` and `d` may result in unfeasible
+    This exists because increasing both ``T`` and ``d`` may result in unfeasible
     combinations. One way to randomize both parameters is to first pick one
-    and then limit the range for picking the other. This approach picks `T`
+    and then limit the range for picking the other. This approach picks ``T``
     first, but from a non-uniform distribution. The non-uniformity is such that
-    the parameter space `T`×`d` is uniformly sampled within the feasible area.
+    the parameter space ``T``×``d`` is uniformly sampled within the feasible area.
 
-    The parameter `η` defines the curve for the upper bound of d_min: d_ub(T).
+    The parameter ``η`` defines the curve for the upper bound of ``d_min``:
+    ``d_ub(T)``.
     The theoretical optimum packing efficiency for circles is 0.9069, but when
     they are randomly placed, a more realistic feasible value is close to 0.6.
 
@@ -619,7 +621,7 @@ def iCDF_factory(
     def iCDF(u: float) -> int:
         """Inverted CDF.
 
-        Maps from u ~ uniform(0, 1) to random variable T ~ custom_PDF().
+        Maps from ``u ~ uniform(0, 1)`` to random variable ``T ~ custom_PDF()``.
         """
         return int(round(integral_inv(u * area_under_curve + offset)))
 

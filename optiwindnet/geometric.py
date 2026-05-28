@@ -83,7 +83,7 @@ def triangle_AR(base1C: CoordPair, base2C: CoordPair, topC: CoordPair) -> float:
 
 @nb.njit(cache=True)
 def point_d2line(pC: CoordPair, uC: CoordPair, vC: CoordPair) -> np.float64:
-    """Calculate the distance from point `pC` to the `uC`-`vC` line."""
+    """Calculate the distance from point ``pC`` to the ``uC``-``vC`` line."""
     x0, y0 = pC
     x1, y1 = uC
     x2, y2 = vC
@@ -100,11 +100,11 @@ def is_same_side(
     tC: CoordPair,
     touch_is_cross: bool = True,
 ) -> bool:
-    """Check if points `sC` an `tC` are on the same side of the line defined
-    by points `uC` and `vC`.
+    """Check if points ``sC`` and ``tC`` are on the same side of the line defined
+    by points ``uC`` and ``vC``.
 
     Note: often used to check crossings with feeder links, where the feeder link
-    `sC`-`tC` is already known to be on a line that crosses the edge `uC`–`vC`
+    ``sC``-``tC`` is already known to be on a line that crosses the edge ``uC``–``vC``
     (using the angle rank).
     """
 
@@ -136,7 +136,7 @@ def any_pairs_opposite_edge(
       uC, vC: (2,) array of coordinates of edge ends
 
     Returns:
-      True if any two of `nodesC` are on opposite sides of the edge.
+      ``True`` if any two of ``nodesC`` are on opposite sides of the edge.
     """
     maxidx = len(nodesC) - 1
     if maxidx <= 0:
@@ -161,7 +161,7 @@ def any_pairs_opposite_edge(
 
 @nb.njit(cache=True)
 def rotate(coords: CoordPairs, angle: float) -> CoordPairs:
-    """Rotates `coords` (numpy array T×2) by `angle` (degrees)"""
+    """Rotate ``coords`` (numpy array T×2) by ``angle`` (degrees)."""
     rotation = np.deg2rad(angle)
     c, s = np.cos(rotation), np.sin(rotation)
     return np.dot(coords, np.array([[c, s], [-s, c]]))
@@ -251,14 +251,14 @@ def angle_oracles_factory(
 ]:
     """Make functions to answer queries about relative angles.
 
-    Inputs are the outputs of `angle_helpers()`.
+    Inputs are the outputs of :func:`angle_helpers`.
 
     Args:
       ``angle__``: (T, R)-array of angles wrt root (+-pi)
       ``angle_rank__``: (T, R)-array of the relative placement of angles
 
     Returns:
-      union_limits() and angle_ccw()
+      ``union_limits()`` and ``angle_ccw()``
     """
 
     def is_within(pR: int, lR: int, hR: int) -> bool:
@@ -314,7 +314,7 @@ def angle_oracles_factory(
 def find_edges_bbox_overlaps(
     VertexC: CoordPairs, u: int, v: int, edges: IndexPairs
 ) -> NDArray[np.int_]:
-    """Find which `edges` have a bounding box overlap with ⟨u, v⟩.
+    """Find which ``edges`` have a bounding box overlap with ⟨u, v⟩.
 
     This is a preliminary filter for crossing checks. Enables avoiding the more
     costly geometric crossing calculations for segments that are clearly
@@ -326,7 +326,7 @@ def find_edges_bbox_overlaps(
       edges: list of index pairs representing edges to check against
 
     Returns:
-      numpy array with the indices of overlaps in `edges`
+      numpy array with the indices of overlaps in ``edges``
     """
     uC, vC = VertexC[u], VertexC[v]
     edgesC = VertexC[edges]
@@ -346,7 +346,7 @@ def is_crossing_numpy(u, v, s, t):
     crossings.
 
     Returns:
-      True in case of crossing.
+      ``True`` in case of crossing.
     """
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
@@ -398,9 +398,9 @@ def _cross_prod_2d(P: CoordPair, Q: CoordPair) -> np.float64:
 def is_crossing_no_bbox(
     uC: CoordPair, vC: CoordPair, sC: CoordPair, tC: CoordPair
 ) -> bool:
-    """Checks if (uC, vC) crosses (sC, tC).
+    """Checks if (``uC``, ``vC``) crosses (``sC``, ``tC``).
 
-    Does not check for bounding-box overlap. Use `find_edges_bbox_overlap()`
+    Does not check for bounding-box overlap. Use :func:`find_edges_bbox_overlaps`
     first to filter out edges with disjoint bounding boxes (cheaper than the
     calculations here).
 
@@ -409,7 +409,7 @@ def is_crossing_no_bbox(
     crossings.
 
     Returns:
-      True in case of crossing.
+      ``True`` in case of crossing.
     """
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
@@ -453,14 +453,14 @@ def is_crossing(
 
     Parallel or collinear segments (including superposition) are not considered
     crossings. For non-parallel segments, behavior for touching points
-    (including common endpoints) is determined by `touch_is_cross`.
+    (including common endpoints) is determined by ``touch_is_cross``.
 
     Args:
       uC, vC, sC, tC: (2,) numpy array coordinates of edge ends
       touch_is_cross: whether to consider any common point as a crossing
 
     Returns:
-      True in case of crossing.
+      ``True`` in case of crossing.
     """
     # choices for `less`:
     # -> operator.lt counts touching as crossing
@@ -519,7 +519,7 @@ def is_bunch_split_by_corner(bunch, a, o, b, margin=1e-3):
       a, o, b: points that define the cone's angle
 
     Returns:
-      True if points in bunch are both inside and outside cone a-o-b
+      ``True`` if points in ``bunch`` are both inside and outside cone ``a-o-b``
     """
     AngleA = angle_numpy(a, o, bunch)
     AngleB = angle_numpy(b, o, bunch)
@@ -540,9 +540,9 @@ def is_bunch_split_by_corner(bunch, a, o, b, margin=1e-3):
 
 
 def point_to_segment_distance(pC: np.ndarray, aC: np.ndarray, bC: np.ndarray) -> float:
-    """Calculate the distance from point `pC` to the closed segment `aC`-`bC`.
+    """Calculate the distance from point ``pC`` to the closed segment ``aC``-``bC``.
 
-    The projection of `pC` onto the line through `aC` and `bC` is clamped to
+    The projection of ``pC`` onto the line through ``aC`` and ``bC`` is clamped to
     the segment, so the result is the distance to the nearest endpoint when
     the foot of the perpendicular lies outside the segment. For an unclamped
     line distance, see :func:`point_d2line`.
@@ -552,7 +552,7 @@ def point_to_segment_distance(pC: np.ndarray, aC: np.ndarray, bC: np.ndarray) ->
       aC, bC: segment endpoint coordinates as (2,) numpy arrays
 
     Returns:
-      Euclidean distance from `pC` to the closest point on the segment.
+      Euclidean distance from ``pC`` to the closest point on the segment.
     """
     ab = bC - aC
     denom = np.dot(ab, ab)
@@ -567,7 +567,7 @@ def unique_rays(rays: list[np.ndarray], angle_tol: float) -> list[np.ndarray]:
     """Deduplicate 2D rays by direction; anti-parallel rays are kept distinct.
 
     Two rays are considered duplicates when their unit vectors are parallel
-    *and* point the same way: cross-product magnitude ≤ `angle_tol` and dot
+    *and* point the same way: cross-product magnitude ≤ ``angle_tol`` and dot
     product ≥ 0. Rays with zero norm are dropped.
 
     Args:
@@ -601,22 +601,22 @@ def polyline_rays_at_point(
 ) -> list[np.ndarray]:
     """Get the local rays of a polyline at a point lying on (or near) it.
 
-    For each segment whose perpendicular distance to `pC` is at most `tol`,
-    rays from `pC` toward each segment endpoint that sits farther than `tol`
-    from `pC` are collected, then deduplicated by direction via
-    :func:`unique_rays`. The result is empty if `pC` is far from every
-    segment, has at most one ray when `pC` is at an endpoint of an extreme
-    segment, or two anti-parallel rays when `pC` is interior to a segment.
+    For each segment whose perpendicular distance to ``pC`` is at most ``tol``,
+    rays from ``pC`` toward each segment endpoint that sits farther than ``tol``
+    from ``pC`` are collected, then deduplicated by direction via
+    :func:`unique_rays`. The result is empty if ``pC`` is far from every
+    segment, has at most one ray when ``pC`` is at an endpoint of an extreme
+    segment, or two anti-parallel rays when ``pC`` is interior to a segment.
 
     Args:
       coords: polyline vertices as an (N, 2) numpy array
       pC: query point coordinates as a (2,) numpy array
-      tol: distance threshold for treating `pC` as on a segment or at an endpoint
+      tol: distance threshold for treating ``pC`` as on a segment or at an endpoint
       angle_tol: passed through to :func:`unique_rays` for direction dedup
 
     Returns:
-      List of unit-length (2,) numpy arrays, the directions from `pC` along
-      the polyline at `pC`.
+      List of unit-length (2,) numpy arrays, the directions from ``pC`` along
+      the polyline at ``pC``.
     """
     rays = []
     for aC, bC in zip(coords[:-1], coords[1:]):
@@ -634,15 +634,15 @@ def rays_alternate(rays_a: list[np.ndarray], rays_b: list[np.ndarray]) -> bool:
 
     Picks every 2-ray pair from each set, orders the four rays by polar angle,
     and checks for the cyclic label pattern ABAB (or BABA). When found, set
-    `a` and set `b` separate one another — the geometric definition of a
-    crossing at the shared origin. Returns False when either set has fewer
+    ``a`` and set ``b`` separate one another — the geometric definition of a
+    crossing at the shared origin. Returns ``False`` when either set has fewer
     than 2 rays.
 
     Args:
       rays_a, rays_b: 2D rays from a shared origin, each a (2,) numpy array
 
     Returns:
-      True if some 2-ray pairs from `rays_a` and `rays_b` alternate around the
+      ``True`` if some 2-ray pairs from ``rays_a`` and ``rays_b`` alternate around the
       origin in cyclic order.
     """
     if len(rays_a) < 2 or len(rays_b) < 2:
@@ -670,10 +670,10 @@ def polylines_cross_at_point(
 ) -> bool:
     """Check whether two polylines cross each other at a given point.
 
-    Returns False when `pC` is within `tol` of any vertex of either polyline
+    Returns ``False`` when ``pC`` is within ``tol`` of any vertex of either polyline
     — those cases are ambiguous and the caller is expected to classify them
     separately (e.g. via shared-node or endpoint filters). Otherwise extracts
-    the local rays at `pC` for each polyline (via :func:`polyline_rays_at_point`)
+    the local rays at ``pC`` for each polyline (via :func:`polyline_rays_at_point`)
     and tests whether they alternate (via :func:`rays_alternate`).
 
     Args:
@@ -684,7 +684,7 @@ def polylines_cross_at_point(
       angle_tol: minimum unit cross-product magnitude used during ray dedup
 
     Returns:
-      True when the polylines cross transversely at `pC`.
+      ``True`` when the polylines cross transversely at ``pC``.
     """
     if np.any(np.hypot(*(pC - coords_a).T) <= tol) or np.any(
         np.hypot(*(pC - coords_b).T) <= tol
@@ -705,7 +705,7 @@ def is_triangle_pair_a_convex_quadrilateral(
     only works if ⟨s, t⟩ crosses the line defined by ⟨u, v⟩
 
     Returns:
-      True if the quadrilateral is convex and is not a triangle
+      ``True`` if the quadrilateral is convex and is not a triangle
     """
     # this used to be called `is_quadrilateral_convex()`
     # us × ut
@@ -719,10 +719,10 @@ def is_triangle_pair_a_convex_quadrilateral(
 
 
 def perimeter(VertexC, vertices_ordered):
-    """Calculate the perimeter of the polygon defined by `vertices_ordered`.
+    """Calculate the perimeter of the polygon defined by ``vertices_ordered``.
 
     Args:
-      vertices_ordered: indices of `VertexC` in clockwise or counter-clockwise
+      vertices_ordered: indices of ``VertexC`` in clockwise or counter-clockwise
         orientation.
 
     Return:
@@ -761,7 +761,7 @@ def complete_graph(
     prune: bool = True,
     map_crossings: bool = False,
 ) -> nx.Graph:
-    """Create a complete graph based on G_base.
+    """Create a complete graph based on ``G_base``.
 
     Produces a networkx Graph connecting all non-root nodes to every
     other non-root node. Edges with an arc > pi/2 around root are discarded
@@ -824,7 +824,7 @@ def complete_graph(
 
 
 def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
-    """Create the minimum spanning forest from the Delaunay edges of `A`.
+    """Create the minimum spanning forest from the Delaunay edges of ``A``.
 
     There is one tree for each root and exactly one root per tree.
     If the graph has more than one root, the minimum spanning tree of the
@@ -897,8 +897,8 @@ def rotation_checkers_factory(
     def cross(A: int, B: int, C: int) -> float:
         """Signed twice-area of triangle ABC.
 
-        > 0: A->B->C is counter-clockwise
-        < 0: A->B->C is clockwise
+        > 0: A→B→C is counter-clockwise
+        < 0: A→B→C is clockwise
         == 0: A, B, C are collinear (use a tolerance for float input)
         """
         Ax, Ay = VertexC[A]
@@ -907,11 +907,11 @@ def rotation_checkers_factory(
         return (Bx - Ax) * (Cy - Ay) - (By - Ay) * (Cx - Ax)
 
     def cw(A: int, B: int, C: int) -> bool:
-        """True if A->B->C traverses the triangle ABC clockwise."""
+        """``True`` if ``A→B→C`` traverses the triangle ``ABC`` clockwise."""
         return cross(A, B, C) < 0
 
     def ccw(A: int, B: int, C: int) -> bool:
-        """True if A->B->C traverses the triangle ABC counter-clockwise."""
+        """``True`` if ``A→B→C`` traverses the triangle ``ABC`` counter-clockwise."""
         return cross(A, B, C) > 0
 
     return cw, ccw, cross
@@ -936,7 +936,7 @@ def rotating_calipers(
       metric: what should be minimized, one of {'height', 'area'}
 
     Returns:
-      best_calipers, best_caliper_angle, best_metric, bbox
+      ``best_calipers``, ``best_caliper_angle``, ``best_metric``, ``bbox``
     """
     best_metric = np.inf
     H = convex_hull.shape[0]

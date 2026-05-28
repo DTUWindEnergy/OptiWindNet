@@ -7,12 +7,12 @@ from collections import defaultdict
 
 
 def remove_offending_crossings(A, diagonals, crossings):
-    """Remove edges from `A` (and `diagonals`) responsible for the given crossings.
+    """Remove edges from ``A`` (and ``diagonals``) responsible for the given crossings.
 
-    Each entry in `crossings` is a pair ``(uv, st)`` of crossing edges. Edges with
+    Each entry in ``crossings`` is a pair ``(uv, st)`` of crossing edges. Edges with
     more crossings are removed first. When an edge ``uv`` crosses a single
     longer edge ``st``, ``st`` is removed instead of ``uv`` (preferring to keep
-    the shorter alternative). `A` and `diagonals` are mutated in place.
+    the shorter alternative). ``A`` and ``diagonals`` are mutated in place.
     """
     crossing_counterparts = defaultdict(list)
     for uv, st in crossings:

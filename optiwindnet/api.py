@@ -52,7 +52,7 @@ _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 class Router(ABC):
     """Abstract base class for routing algorithms in OptiWindNet.
 
-    Each Router implementation must define a `route` method.
+    Each Router implementation must define a :meth:`route` method.
     """
 
     _summary_attrs: tuple[str, ...]
@@ -102,7 +102,7 @@ class WindFarmNetwork:
 
     An instance represents a wind farm location, which initially contains the number
     and positions of wind turbines and substations, the delimited area and eventual
-    obstacles. A cable network may be provided or a ``Router`` instance may be used
+    obstacles. A cable network may be provided or a :class:`Router` instance may be used
     to create an optimized network.
     """
 
@@ -127,27 +127,33 @@ class WindFarmNetwork:
         """Initialize a wind farm electrical network.
 
         Args:
-          cables: Multiple formats are accepted (capacity is in number of turbines):
-
-            * Set of cable specifications as: [(capacity, linear_cost), ...].
-            * Sequence of maximum capacity per cable type: [capacity_0, capacity_1, ...]
-            * Maximum capacity of all available cables: capacity
-          turbinesC: Turbine coordinates (T, 2): [(x, y), ...].
-          substationsC: Substation coordinates (R, 2): [(x, y), ...].
-          borderC: Polygonal border coordinates (_, 2): [(x, y), ...].
-          obstacleC_: One or more polygons for exclusion zones list of (_, 2):
-            [[(x, y), ...], ...].
+          cables: properties of the available cable types (see Cable Specs below)
+          turbinesC: Turbine coordinates (T, 2): ``[(x, y), ...]``.
+          substationsC: Substation coordinates (R, 2): ``[(x, y), ...]``.
+          borderC: Polygonal border coordinates (_, 2): ``[(x, y), ...]``.
+          obstacleC_: One or more polygons for exclusion zones list of
+            (_, 2): ``[[(x, y), ...], ...]``.
           name: Human-readable instance name. Defaults to "".
           handle: Short instance identifier. Defaults to "".
           L: Location geometry (takes precedence over coordinate inputs).
-          router: Routing algorithm instance. Defaults to `EWRouter`.
+          router: Routing algorithm instance. Defaults to :class:`EWRouter`.
           buffer_dist: Buffer distance to dilate borders / erode obstacles.
             Defaults to 0.
 
-        Notes:
-          * If both `L` and coordinates are provided, `L` takes precedence.
-          * Changing coordinate data after creation (`turbinesC` and/or `substationsC`)
-              rebuilds `L` and refreshes the navigation mesh and available links.
+        **Cable Specs** (``capacity`` is in number of turbines):
+            * List of 2-tuple cable specifications:
+              ``[(capacity, linear_cost), ...]``.
+
+            * List of capacity per cable type:
+              ``[capacity, ...]``.
+
+            * Maximum capacity of all available cables (single value): ``capacity``.
+
+        Note:
+          * If both ``L`` and coordinates are provided, ``L`` takes precedence.
+          * Changing coordinate data after creation (``turbinesC`` and/or
+            ``substationsC``) rebuilds ``L`` and refreshes the navigation mesh
+            and available links.
 
         Example::
 
@@ -266,7 +272,7 @@ class WindFarmNetwork:
 
     @property
     def P(self) -> nx.PlanarEmbedding:
-        "Triangular mesh over `L` (navigation mesh)."
+        "Triangular mesh over ``L`` (navigation mesh)."
         if self._is_stale_PA:
             self._refresh_planar()
         return self._P
@@ -294,7 +300,7 @@ class WindFarmNetwork:
 
     @property
     def cables(self) -> list[tuple[int, float | int]]:
-        "Set of cable specifications as [(capacity, linear_cost), ...]."
+        "Set of cable specifications as ``[(capacity, linear_cost), ...]``."
         return self._cables
 
     @cables.setter
@@ -376,7 +382,7 @@ class WindFarmNetwork:
         """Concise one-line summary for console/debugging.
 
         Defensive by design: instance attributes are getattr-guarded so the repr
-        never raises, even on a partially-initialized instance (e.g. if ``__init__``
+        never raises, even on a partially-initialized instance (e.g. if :meth:`__init__`
         aborted before ``_T``/``_R`` were set). The solved-network branch is reached
         only when ``_is_stale_SG`` is ``False``, which guarantees ``_G`` exists.
         """
@@ -411,17 +417,17 @@ class WindFarmNetwork:
         """Plot the optimized network.
 
         By default, this method utilizes the modern vector SVG-based plotting
-        backend (`svgplot`) which returns an `SvgRepr` suitable for clean
+        backend (:func:`svgplot`) which returns an :class:`SvgRepr` suitable for clean
         interactive inline displays in Jupyter notebooks.
 
-        To switch to the Matplotlib-based plotting backend (`gplot`), specify the
-        `ax` parameter as a keyword argument.
+        To switch to the Matplotlib-based plotting backend (:func:`gplot`), specify the
+        ``ax`` parameter as a keyword argument.
 
         Note:
-            Passing `ax=None` explicitly routes to the Matplotlib backend and
-            automatically instantiates a new figure and axes on the fly, allowing
-            Matplotlib figures to be created without importing `matplotlib` or
-            `pyplot` directly in the user code.
+          Passing ``ax=None`` explicitly routes to the Matplotlib backend and
+          automatically instantiates a new figure and axes on the fly, allowing
+          Matplotlib figures to be created without importing ``matplotlib`` or
+          ``pyplot`` directly in the user code.
         """
         if 'ax' in kwargs:
             return gplot(self.G, *args, **kwargs)
@@ -446,7 +452,7 @@ class WindFarmNetwork:
         return svgpplot(self.P, self.A, **kwargs)
 
     def plot_selected_links(self, **kwargs):
-        """Plot tentative link selection."""
+        """Plot link selection (tentative feeder routes)."""
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
         if 'ax' in kwargs:
@@ -532,12 +538,13 @@ class WindFarmNetwork:
         self._is_stale_PA = True
 
     def add_buffer(self, buffer_dist):
-        """Dilate the cable-laying area by `buffer_dist`.
+        """Dilate the cable-laying area by ``buffer_dist``.
 
         Useful if boundaries are not strictly enforced during optimization. This may
         happen if boundary compliance is achieved through the application of penalties
         for violations. OptiWindNet will fail if turbines are outside the border, so
-        choose a `buffer_dist` that is greater than the maximum single step in position.
+        choose a ``buffer_dist`` that is greater than the maximum single step in
+        position.
 
         Args:
           buffer_dist: Buffer distance to dilate borders / erode obstacles.
@@ -741,17 +748,17 @@ class HGSRouter(Router):
         """Create an HGS-based router.
 
         Args:
-            time_limit: Maximum runtime for a single HGS run (in seconds).
-            feeder_limit: Maximum number of feeders allowed
-                (ignored if multiple substations).
-            max_retries: Maximum number of retries if a feasible solution is not found.
-            balanced: Whether to balance turbines/loads across feeders.
-            seed: Set the seed of the pseudo-random number generator (reproducibility).
-            verbose: Enable verbose logging.
+          time_limit: Maximum runtime for a single HGS run (in seconds).
+          feeder_limit: Maximum number of feeders allowed
+              (ignored if multiple substations).
+          max_retries: Maximum number of retries if a feasible solution is not found.
+          balanced: Whether to balance turbines/loads across feeders.
+          seed: Set the seed of the pseudo-random number generator (reproducibility).
+          verbose: Enable verbose logging.
 
-        Notes:
-            * The total runtime may reach up to `(max_retries + 1) * time_limit` in the
-              worst case.
+        Note:
+          The total runtime may reach up to ``(max_retries + 1) * time_limit`` in the
+          worst case.
         """
         # Call the base class initialization
         super().__init__(**kwargs)

@@ -109,9 +109,9 @@ coordinate_parser = dict(
 def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     """Import wind farm data from .yaml file.
 
-    Two options available for COORDINATE_FORMAT: "planar" and "latlon".
+    Two options available for ``COORDINATE_FORMAT``: ``"planar"`` and ``"latlon"``.
 
-    Format "planar" is: [label] easting northing. Example::
+    Format ``"planar"`` is: ``[label] easting northing``. Example::
 
       LABEL 234.2 5212.5
 
@@ -129,7 +129,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
       LABEL [234.2, 5212.5]
 
     Args:
-      filepath: path to `.yaml` file to read.
+      filepath: path to ``.yaml`` file to read.
       handle: Short moniker for the site.
 
     Returns:
@@ -234,7 +234,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     """Import wind farm data from .osm.pbf file.
 
     Args:
-        filepath: path to `.osm.pbf` file to read.
+        filepath: path to ``.osm.pbf`` file to read.
         handle: Short moniker for the site.
 
     Returns:
@@ -488,7 +488,7 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     """Import wind farm data from a windIO .yaml file.
 
     Args:
-      filepath: path to windIO `.yaml` file to read.
+      filepath: path to windIO ``.yaml`` file to read.
       handle: Short moniker for the site.
 
     Returns:
@@ -528,8 +528,8 @@ def load_repository(path: Path | str | None = None) -> tuple[nx.Graph, ...]:
 
     Each file (.yaml or .osm.pbf) is translated into a location graph and
     included as an attribute in the returned namedtuple. The attribute name
-    can be specified in the .yaml with the field `HANDLE` or in the .osm.pbf
-    file with the tag `handle` applied to the power plant object.
+    can be specified in the .yaml with the field ``HANDLE`` or in the .osm.pbf
+    file with the tag ``handle`` applied to the power plant object.
 
     Args:
       path: Path to look for location files (non-recursive). If omited, the

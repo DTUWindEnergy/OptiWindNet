@@ -15,9 +15,11 @@ class PriorityQueue(list):
         self.counter = itertools.count()
 
     def add(self, priority, tag, payload):
-        """lowest priority pops first, payload cannot be None.
-        an addition with an already existing tag will cancel the
-        previous entry."""
+        """Add a payload to the queue.
+
+        Lowest priority pops first. Payload cannot be ``None``. Adding with an
+        existing tag cancels the previous entry.
+        """
         if payload is None:
             raise ValueError('payload cannot be None.')
         self.cancel(tag)
@@ -26,7 +28,7 @@ class PriorityQueue(list):
         heappush(self, entry)
 
     def strip(self):
-        """removes all cancelled entries from the queue top"""
+        """Remove all cancelled entries from the queue top."""
         while self:
             if self[0][-1] is None:
                 heappop(self)
@@ -40,7 +42,7 @@ class PriorityQueue(list):
             self.strip()
 
     def top(self):
-        "returns the payload with lowest priority"
+        "Return the payload with lowest priority."
         priority, count, tag, payload = heappop(self)
         del self.tags[tag]
         self.strip()

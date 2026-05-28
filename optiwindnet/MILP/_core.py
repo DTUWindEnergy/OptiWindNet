@@ -242,11 +242,11 @@ class Solver(abc.ABC):
         Args:
           time_limit: maximum time (s) the solver is allowed to run.
           mip_gap: relative difference from incumbent solution to lower bound
-            at which the search may be stopped before time_limit is reached.
+            at which the search may be stopped before ``time_limit`` is reached.
           options: additional options to pass to solver (see solver manual).
 
         Returns:
-          General information about the solution search (use get_solution() for
+          General information about the solution search (use ``get_solution()`` for
             the actual solution).
         """
         pass
@@ -289,7 +289,7 @@ class Solver(abc.ABC):
         """Create a topology graph from the solution to the MILP model.
 
         Returns:
-          Graph topology `S` from the solution.
+          Graph topology ``S`` from the solution.
         """
         metadata = self.metadata
         S = nx.Graph(R=metadata.R, T=metadata.T)
@@ -342,7 +342,7 @@ class PoolHandler(abc.ABC):
 
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
-        "Get objective value from solution pool at position `index`"
+        "Get objective value from solution pool at position ``index``"
         pass
 
     @abc.abstractmethod

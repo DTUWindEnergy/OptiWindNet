@@ -68,29 +68,34 @@ def constructor(
     However, this implementation uses the extended Delaunay triangulation
     (given in A) as
     the base connectivity, and implements terminal-terminal crossing prevention. This
-    means that even the method named 'esau_williams' does not match exactly the paper's
-    description, but the similarities are still substantial.
+    means that even the method named ``'esau_williams'`` does not match exactly
+    the paper's description, but the similarities are still substantial.
 
     Note that constructor cannot be constrained in the number of feeders and that only
-    method 'radial_EW' is constrained to producing radial topologies (i.e. subtrees are
-    always simple paths) as opposed to the branched topologies produced by the others.
+    method ``'radial_EW'`` is constrained to producing radial topologies (i.e.
+    subtrees are always simple paths) as opposed to the branched topologies
+    produced by the others.
 
-    Methods:
-    - 'esau_williams': Esau-Williams C-MST heuristic modified to avoid crossings (EW).
-    - 'biased_EW': EW with a bias towards moving radially (root-ward) on quasi-ties.
-    - 'rootlust': EW with a tunable root-ward bias that increases as capacity decreases.
-    - 'radial_EW': EW variant that produces radial subtrees (simple paths from root).
+    Available Methods:
+      ``'esau_williams'``
+        Esau-Williams C-MST heuristic modified to avoid crossings (EW).
+      ``'biased_EW'``
+        EW with a bias towards moving radially (root-ward) on quasi-ties.
+      ``'rootlust'``
+        EW with a tunable root-ward bias that increases as capacity decreases.
+      ``'radial_EW'``
+        EW variant that produces radial subtrees (simple paths from root).
 
     Args:
       Aʹ: available links graph
       capacity: max number of terminals in a subtree
-      method: choice of method (see Methods)
-      bias_margin: (biased_EW | radial_EW) fractional margin within with edges
+      method: choice of method (see Available Methods)
+      bias_margin: (biased_EW | radial_EW) fractional margin within which edges
         are equivalent
       weigh_detours: (!= esau_williams) only add edges whose tradeoff is not
         outweighted by detours
       straight_feeder_route: prevent crossings of feeders
-        (incompatible with `weigh_detours=True`)
+        (incompatible with ``weigh_detours=True``)
       maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
@@ -208,7 +213,7 @@ def constructor(
     def find_union_esau_williams_tradeoff(subroot):
         """Straightforward implementation of the Esau-Williams trade-off.
 
-        Included for educational purposes, since both 'biased_EW' and 'rootlust'
+        Included for educational purposes, since both ``'biased_EW'`` and ``'rootlust'``
         produce better topologies on average.
         """
         # Esau, L. R., and K. C. Williams.
@@ -372,7 +377,7 @@ def constructor(
         return feeders
 
     def estimate_detours(u, v, sr_dropped, sr_kept):
-        """Note: the detour_increase calculated here is an estimate."""
+        """Note: the ``detour_increase`` calculated here is an estimate."""
         # assess the union's angle span
         union_span_ = [
             union_limits(
@@ -443,11 +448,12 @@ def constructor(
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
 
     def drop_target(subroot, payload):
-        """Drop `subroot` from the who_targets_ set of the peer it targets in `payload`.
+        """Drop ``subroot`` from the ``who_targets_`` set of the peer it targets in
+        ``payload``.
 
-        `payload` is the queue entry's `(u, v)`; the targeted component is the one
-        holding `v`. Keeps who_targets_ consistent with the queue, so it never
-        retains a subroot whose subtree has already been consumed (set to None).
+        ``payload`` is the queue entry's ``(u, v)``; the targeted component is the one
+        holding ``v``. Keeps ``who_targets_`` consistent with the queue, so it never
+        retains a subroot whose subtree has already been consumed (set to ``None``).
         """
         targeted = who_targets_[subroot_[payload[1]]]
         if targeted is not None:
@@ -476,13 +482,13 @@ def constructor(
     def reassign_subroot(subroot_from, subroot_to, root_to):
         """Change the subroot of a subtree to another node of that subtree.
 
-        This is only relevant to the 'radial_EW' method. Any unions that need a
-        subroot that is different from the sr_kept one may need this reassignment.
+        This is only relevant to the ``'radial_EW'`` method. Any unions that need a
+        subroot that is different from the ``sr_kept`` one may need this reassignment.
 
         Subroots are used in multiple data structures, a call to this function must
         effect the change across all of them. One additional change is the possible
-        root reassignment if `subroot_to` is closer to a different root than that of
-        `subroot_from`.
+        root reassignment if ``subroot_to`` is closer to a different root than that of
+        ``subroot_from``.
         """
         _debug(
             'reassigning subroot %d to %d via root %d',

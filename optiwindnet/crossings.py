@@ -26,19 +26,19 @@ class _RoutePolyline:
 def get_interferences_list(
     Edge: np.ndarray, VertexC: np.ndarray, fnT: np.ndarray | None = None, EPSILON=1e-15
 ) -> list[tuple[tuple[int, int, int, int], int | None]]:
-    """List all crossings between edges in the `Edge` (E×2) numpy array.
+    """List all crossings between edges in the ``Edge`` (E×2) numpy array.
 
-    Coordinates must be provided in the `VertexC` (V×2) array.
+    Coordinates must be provided in the ``VertexC`` (V×2) array.
 
-    `Edge` contains indices to VertexC. If `Edge` includes detour nodes
-    (i.e. indices go beyond `VertexC`'s length), `fnT` translation table
+    ``Edge`` contains indices to VertexC. If ``Edge`` includes detour nodes
+    (i.e. indices go beyond ``VertexC``'s length), ``fnT`` translation table
     must be provided.
 
     Should be used when edges are not limited to the expanded Delaunay set.
 
     Returns:
       list of interferences, where each interference is:
-        ((4 vertices of the two edges involved), one of the vertices or None)
+        ((4 vertices of the two edges involved), one of the vertices or ``None``)
         the last tuple element indicates the index (0..3) of the vertex that
         lays exactly on the edge in cases of touching (not crossing)
     """
@@ -126,12 +126,12 @@ def get_interferences_list(
 
 
 def edge_conflicts(u: int, v: int, diagonals: bidict) -> Iterator[tuple[int, int]]:
-    """Iterate over edges conflicting with (u, v).
+    """Iterate over edges conflicting with ``(u, v)``.
 
     Args:
       u: node
       v: node
-      diagonals: map of crossings Delaunay<->diagonals
+      diagonals: map of crossings Delaunay↔diagonals
     """
     u, v = (u, v) if u < v else (v, u)
     st = diagonals.get((u, v))
@@ -185,7 +185,7 @@ def edge_crossings(
 
 
 def edgeset_edgeXing_iter(diagonals: bidict) -> Iterator[list[tuple[int, int]]]:
-    """Iterator over all edge crossings in an expanded Delaunay edge set `A`.
+    """Iterator over all edge crossings in an expanded Delaunay edge set ``A``.
 
     Each crossing is a 2 or 3-tuple of (u, v) edges. Does not include gates.
     """
@@ -224,15 +224,15 @@ def gateXing_iter(
 ) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
     """Iterate over all crossings between gates and edges/borders in G.
 
-    If `hooks` is `None`, all nodes that are not a root neighbor are
+    If ``hooks`` is ``None``, all nodes that are not a root neighbor are
     considered. Used in constraint generation for ILP model.
 
     Args:
       G: Routeset or edgeset (A) to examine.
-      hooks: Nodes to check, grouped by root in sub-sequences from root `-R`
-        to `-1`. If `None`, all non-root nodes are checked using `'root'`
+      hooks: Nodes to check, grouped by root in subsequences from root ``-R``
+        to ``-1``. If ``None``, all non-root nodes are checked using ``'root'``
         node attribute.
-      touch_is_cross: If `True`, count as crossing a gate going over a node.
+      touch_is_cross: If ``True``, count as crossing a gate going over a node.
 
     Yields:
       Pair of (edge, gate) that cross (each a 2-tuple of nodes).
@@ -467,7 +467,7 @@ def _polyline_coords(
 
 
 def _shared_run_swaps_sides(coords_a: np.ndarray, coords_b: np.ndarray) -> bool:
-    """True iff two polylines share an interior run and exit on the same side
+    """``True`` iff two polylines share an interior run and exit on the same side
     at each end.
 
     When two polylines overlap on a shared sub-sequence of vertices, an actual *cross*
@@ -638,7 +638,7 @@ def _intersection_only_at_excluded(
     *,
     endpoint_tol: float,
 ) -> bool:
-    """True if every Point of a length-0 intersection lies at an excluded coord."""
+    """``True`` if every Point of a length-0 intersection lies at an excluded coord."""
     if intersection.length > 0:
         return False
     points = list(_iter_points(intersection))
@@ -675,8 +675,8 @@ def find_geometric_crossings(
     and detour clones are tested at their prime coordinates.
 
     Args:
-      G: routeset graph. Must have graph attributes ``T``, ``R``, ``B``, and
-        ``VertexC``; ``fnT`` is required iff ``C > 0`` or ``D > 0``.
+      G: routeset graph. Must have graph attributes ``'T'``, ``'R'``, ``'B'``, and
+        ``'VertexC'``; ``'fnT'`` is required iff ``C > 0`` or ``D > 0``.
       include_touches: also report point contacts that are not proper crossings
         (otherwise touches are silently dropped).
       length_tol: collinear overlaps shorter than this are not classified.
@@ -826,12 +826,12 @@ def list_edge_crossings(
 ) -> list[tuple[tuple[int, int], tuple[int, int]]]:
     """List edge×edge crossings for the network topology in S.
 
-    `S` must only use extended Delaunay edges. It will not detect crossings
+    ``S`` must only use extended Delaunay edges. It will not detect crossings
     of non-extDelaunay gates or detours.
 
     Args:
       S: solution topology
-      A: available edges used in creating `S`
+      A: available edges used in creating ``S``
 
     Returns:
       list of 2-tuple (crossing) of 2-tuple (edge, ordered)

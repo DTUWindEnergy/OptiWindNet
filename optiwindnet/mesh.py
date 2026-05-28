@@ -38,9 +38,9 @@ IndexTrios = NewType(
 
 @nb.njit(cache=True)
 def _index(array: Indices, item: np.int_) -> int:
-    """Find the index of first occurrence of `item` in `array`.
+    """Find the index of first occurrence of ``item`` in ``array``.
 
-    Equivalent of the method `index()` of Python lists for numpy arrays.
+    Equivalent of the method ``index()`` of Python lists for numpy arrays.
 
     Returns:
       index
@@ -90,15 +90,15 @@ def _halfedges_from_triangulation(
 ) -> None:
     """Lists the neighbor-aware half-edges that represent a triangulation.
 
-    Meant to be called from `mesh._planar_from_cdt_triangles()`. Inputs are
-    derived from `PythonCDT.Triangulation().triangles`.
+    Meant to be called from :func:`_planar_from_cdt_triangles`. Inputs are
+    derived from ``PythonCDT.Triangulation().triangles``.
 
     Args:
         triangles: array of triangle.vertices for triangle in triangles
         neighbors: array of triangle.neighbors for triangle in triangles
 
     Returns:
-        3 lists of half-edges to be passed to `networkx.PlanarEmbedding`
+        3 lists of half-edges to be passed to ``networkx.PlanarEmbedding``
     """
     NULL_ = nb.int_(NULL)
     nodes_done = set()
@@ -161,13 +161,13 @@ def _edges_and_hull_from_cdt(
 
     THIS FUNCTION MAY BE IRRELEVANT, AS WE TYPICALLY NEED THE
     NetworkX.PlanarEmbedding ANYWAY, SO IT IS BETTER TO USE
-    `_planar_from_cdt_triangles()` DIRECTLY, followed by `_hull_processor()`.
+    :func:`_planar_from_cdt_triangles` DIRECTLY, followed by :func:`_hull_processor`.
 
     Produces all the edges and a the convex hull (nodes) from a constrained
     Delaunay triangulation (via PythonCDT).
 
     Args:
-      triangles: is a `PythonCDT.Triangulation().triangles` list
+      triangles: is a ``PythonCDT.Triangulation().triangles`` list
       vertmap: is a node number translation table, from CDT numbers to NetworkX
 
     Returns:
@@ -236,11 +236,11 @@ def _planar_from_cdt_triangles(
 ]:
     """Convert from a PythonCDT.Triangulation to NetworkX.PlanarEmbedding.
 
-    For use within `make_planar_embedding()`. Wraps the numba-compiled
-    `_halfedges_from_triangulation()`, which does the intensive work.
+    For use within :func:`make_planar_embedding`. Wraps the numba-compiled
+    :func:`_halfedges_from_triangulation`, which does the intensive work.
 
     Args:
-      triangles: `PythonCDT.Triangulation().triangles` list
+      triangles: ``PythonCDT.Triangulation().triangles`` list
       vertmap: node number translation table, from CDT numbers to NetworkX
 
     Returns:
@@ -281,7 +281,7 @@ def _P_from_halfedge_pack(
 ) -> nx.PlanarEmbedding:
     """Build a nx.PlanarEmbedding from a pack of half-edges.
 
-    For use within `make_planar_embedding()`.
+    For use within :func:`make_planar_embedding`.
     """
     halfedges, ref_is_cw_ = halfedge_pack
     P = nx.PlanarEmbedding()
@@ -1549,19 +1549,19 @@ def planar_flipped_by_routeset(
     ST: int,
     diagonals: bidict | None = None,
 ) -> nx.PlanarEmbedding:
-    """Ajust `planar` to include the edges actually used by a routeset.
+    """Adjust ``planar`` to include the edges actually used by a routeset.
 
-    Copies `planar` and flips the edges to their diagonal if the latter is an
-    edge in `edges_G`. Ideally, the returned PlanarEmbedding includes all
-    `edges_G` (an expected discrepancy are gates).
+    Copies ``planar`` and flips the edges to their diagonal if the latter is an
+    edge in ``edges_G``. Ideally, the returned PlanarEmbedding includes all
+    ``edges_G`` (an expected discrepancy are gates).
 
-    `edges_G` is the set of routeset edges in prime-id form (i.e. clones
-    already mapped through `fnT`), each as a normalized `(u, v)` pair with
-    `u < v`. Gate edges have `u < 0`. `ST` is `T + B` (the boundary above
+    ``edges_G`` is the set of routeset edges in prime-id form (i.e. clones
+    already mapped through ``fnT``), each as a normalized ``(u, v)`` pair with
+    ``u < v``. Gate edges have ``u < 0``. ``ST`` is ``T + B`` (the boundary above
     which constraint vertices live).
 
-    If `diagonals` is provided, some diagonal gates may become `planar`'s edges
-    if they are not crossing any edge in `edges_G`. Otherwise gates are ignored.
+    If ``diagonals`` is provided, some diagonal gates may become ``planar``'s edges
+    if they are not crossing any edge in ``edges_G``. Otherwise gates are ignored.
 
     Important: the routeset must be free of edge×edge crossings.
     """

@@ -11,19 +11,21 @@ def length_matrix_single_depot_from_G(
 ) -> tuple[np.ndarray, float]:
     """Edge length matrix for VRP-based solvers.
     It is assumed that the problem has been pre-scaled, such that multiplying
-    all lengths by `scale` will place them within a numerically stable range.
+    all lengths by ``scale`` will place them within a numerically stable range.
     Length of return to depot from all nodes is set to 0 (i.e. Open-VRP).
     Order of nodes in the returned matrix is depot, clients (required by some
-    VRP methods), which differs from optiwindnet order (i.e clients, depot).
+    VRP methods), which differs from OptiWindNet order (i.e., clients, depot).
 
     Args:
-      A: Must contain graph attributes `R`, 'T', `VertexC` and 'd2roots'. A's edges
-        must have the 'length' attribute.
+      A: Must contain graph attributes ``'R'``, ``'T'``, ``'VertexC'`` and
+        ``'d2roots'``.
+        A's edges must have the ``'length'`` attribute.
       scale: Factor to multiply all lengths by.
       complete: make the full graph over A available (links not in A assumed direct)
 
     Returns:
-      L, len_max: Matrix of lengths and maximum length value (below +inf).
+      ``L`` and ``len_max``: matrix of lengths and maximum length value
+        (below ``+inf``).
     """
     R, T, d2roots = (A.graph[k] for k in ('R', 'T', 'd2roots'))
     assert R == 1, 'ERROR: only single depot supported'

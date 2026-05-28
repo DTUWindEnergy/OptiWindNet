@@ -39,72 +39,134 @@ class BaseModel(Model):
 
 
 class NodeSet(BaseModel):
-    # hashlib.sha256(VertexC + boundary).digest()
     digest = BlobField(primary_key=True)
+    """SHA256 hash of `VertexC` coordinates array in `.npy` format."""
+
     name = CharField(unique=True)
-    T = IntegerField()  # # of non-root nodes
-    R = IntegerField()  # # of root nodes
-    B = IntegerField()  # num_border_vertices
-    # vertices (nodes + roots) coordinates (UTM)
-    # np.lib.format.write_array(io, np.empty((R + T + B, 2), dtype=float))
+    """Unique name of the wind farm location."""
+
+    T = IntegerField()
+    """Number of non-root nodes (wind turbines)."""
+
+    R = IntegerField()
+    """Number of root nodes (substations)."""
+
+    B = IntegerField()
+    """Number of border-only vertices."""
+
     VertexC = BlobField()
-    # the first group is the border (ccw), then obstacles (cw)
-    # B is sum(constraint_groups)
+    """2D coordinates array in UTM, shape (T + B + R, 2)."""
+
     constraint_groups = JSONField()
-    # indices to VertexC, concatenation of the groups' ordered vertices
+    """Sizes of each polygon group (first boundary CCW, then obstacles CW)."""
+
     constraint_vertices = JSONField()
+    """Concatenated indices into VertexC for constraint polygons."""
+
     landscape_angle = FloatField(null=True)
+    """Rotation angle of the landscape layout in radians."""
 
 
 class Method(BaseModel):
-    # hashlib.sha256(funhash + pickle(options)).digest()
     digest = BlobField(primary_key=True)
+    """SHA256 hash of funhash and JSON-serialized options."""
+
     solver_name = CharField()
+    """Name of the solver/algorithm family."""
+
     funname = CharField()
-    # options is a dict of function parameters
+    """Name of the optimization function."""
+
     options = JSONField()
+    """Dictionary of function parameters."""
+
     timestamp = DateTimeField(default=_naive_utc_now)
+    """UTC timestamp of creation."""
+
     funfile = CharField()
-    # hashlib.sha256(fun.__code__.co_code)
+    """Source filename containing the optimization function."""
+
     funhash = BlobField()
+    """SHA256 hash of the function bytecode."""
 
 
 class Machine(BaseModel):
     id = AutoField()
+    """Primary key."""
+
     name = CharField(unique=True)
+    """Unique hostname/FQDN of the generating machine."""
+
     attrs = JSONField(null=True)
+    """System attributes and specifications dictionary."""
 
 
 class RouteSet(BaseModel):
     id = AutoField()
+    """Primary key."""
+
     handle = CharField()
-    T = IntegerField()  # num_nodes
-    R = IntegerField()  # num_roots
+    """Standardized wind farm location identifier."""
+
+    T = IntegerField()
+    """Number of non-root nodes (turbines)."""
+
+    R = IntegerField()
+    """Number of root nodes (substations)."""
+
     capacity = IntegerField()
+    """Cable capacity (maximum turbine load)."""
+
     length = FloatField()
-    # runtime always in [s]
+    """Total cable network length."""
+
     runtime = FloatField(null=True)
+    """Optimization runtime in seconds."""
+
     feeders_per_root = JSONField()
-    # number of contour nodes
+    """List specifying number of feeders per root substation."""
+
     C = IntegerField(default=0)
-    # number of detour nodes
+    """Number of contour nodes."""
+
     D = IntegerField(default=0)
-    # short identifier of routeset origin (redundant with Method)
+    """Number of detour nodes."""
+
     creator = CharField(null=True)
-    # relative increase from undetoured routeset to the detoured one
-    # detoured_length = (1 + detextra)*undetoured_length
+    """Short identifier of the routeset origin."""
+
     detextra = FloatField(null=True)
+    """Relative length increase due to detour: length = (1+detextra)*undetoured."""
+
     num_diagonals = IntegerField(null=True)
+    """Number of diagonal crossing structures."""
+
     tentative = JSONField(null=True)
+    """List of vertex pairs representing tentative edges."""
+
     rogue = JSONField(null=True)
+    """List of vertex pairs representing rogue/invalid edges."""
+
     timestamp = DateTimeField(null=True, default=_naive_utc_now)
-    misc = JSONField(default=dict)  # never NULL, defaults to {}
-    # len(clone2prime) == C + D
+    """UTC timestamp of creation."""
+
+    misc = JSONField(default=dict)
+    """Dictionary of extra metadata and solver metrics."""
+
     clone2prime = JSONField(null=True)
+    """List of length C + D mapping cloned nodes back to original nodes."""
+
     edges = JSONField()
+    """Terse tree encoding where edges[i] is the target of node i."""
+
     nodes = ForeignKeyField(NodeSet, backref='routesets')
+    """Foreign key link to the layout NodeSet."""
+
     method = ForeignKeyField(Method, backref='routesets')
+    """Foreign key link to the Method used."""
+
     machine = ForeignKeyField(Machine, backref='routesets', null=True)
+    """Foreign key link to the generating Machine."""
 
 
 _ALL_MODELS = [NodeSet, Method, Machine, RouteSet]
@@ -114,11 +176,11 @@ _DEFAULT_SQLITE_TIMEOUT = 15
 def open_database(
     filepath: str, create_db: bool = False, timeout: int = _DEFAULT_SQLITE_TIMEOUT
 ) -> SqliteDatabase:
-    """Opens the sqlite database v3 file specified in `filepath`.
+    """Opens the sqlite database v3 file specified in ``filepath``.
 
     Args:
       filepath: path to database file
-      create_db: True -> create a new file if it does not exist
+      create_db: True → create a new file if it does not exist
       timeout: seconds to wait for a locked database to be released
 
     Returns:
@@ -146,7 +208,7 @@ def database_connection(
 
     Args:
       filepath: path to database file
-      create_db: True -> create a new file if it does not exist
+      create_db: True → create a new file if it does not exist
       timeout: seconds to wait for a locked database to be released
 
     Yields:

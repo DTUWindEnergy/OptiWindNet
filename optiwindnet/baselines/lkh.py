@@ -74,7 +74,9 @@ def _build_weight_matrix(
     complete: bool,
     w_clip: int,
 ) -> np.ndarray:
-    """Build LKH weight matrix L of shape (T_c+1, T_c+1) with depot at last index.
+    """Build LKH weight matrix ``L`` with depot at last index.
+
+    The matrix has shape ``(T_c+1, T_c+1)``.
 
     Args:
         A: source graph (provides edge lengths, VertexC, d2roots).
@@ -85,12 +87,12 @@ def _build_weight_matrix(
         w_clip: integer used for non-existing/clipped edges.
 
     Raises:
-        OverflowError: a scaled length exceeds `w_clip`. LKH multiplies our
-            stored cost by `PRECISION` internally and works in 32-bit ints,
-            so the budget per entry is `int32_max // (2 * PRECISION)` —
-            which the caller passes here as `w_clip`. Exceeding it usually
-            means the input graph is not normalized (call `as_normalized()`
-            before solving), or that `scale` is too large for the coordinate
+        OverflowError: a scaled length exceeds ``w_clip``. LKH multiplies our
+            stored cost by ``PRECISION`` internally and works in 32-bit ints,
+            so the budget per entry is ``int32_max // (2 * PRECISION)`` —
+            which the caller passes here as ``w_clip``. Exceeding it usually
+            means the input graph is not normalized (call :func:`as_normalized`
+            before solving), or that ``scale`` is too large for the coordinate
             magnitudes.
     """
     T_c = len(terminals)
@@ -147,10 +149,10 @@ def _do_lkh(
 ) -> dict:
     """Run LKH-3 on a precomputed weight matrix.
 
-    L has shape (T+1, T+1) with the depot at the last index.
+    ``L`` has shape ``(T+1, T+1)`` with the depot at the last index.
 
     Returns a dict containing routes (list of lists of 0-based terminal indices
-    in the matrix), penalty, minimum, log, elapsed_time, solution_time, plus
+    in the matrix), penalty, minimum, log, ``elapsed_time``, ``solution_time``, plus
     parsed run statistics.
     """
     T = L.shape[0] - 1
@@ -322,7 +324,7 @@ def _do_lkh(
 def _add_branches(S, branches, root, subtree_id_start):
     """Add branches to solution graph S in place.
 
-    Returns (max_load, next_subtree_id).
+    Returns ``(max_load, next_subtree_id)``.
     """
     max_load = 0
     subtree_id = subtree_id_start
@@ -356,8 +358,8 @@ def _build_cluster_weight_matrices(
 ) -> list[np.ndarray]:
     """Build one LKH weight matrix per cluster.
 
-    Computes the `w_clip` sentinel (used for missing/clipped edges) from
-    `precision` once, then calls `_build_weight_matrix` for each
+    Computes the ``w_clip`` sentinel (used for missing/clipped edges) from
+    ``precision`` once, then calls :func:`_build_weight_matrix` for each
     (terminals, root) pair in root order (-R..-1).
     """
     R = A.graph['R']
@@ -387,9 +389,9 @@ def _solve_cluster(
 ) -> dict:
     """Run LKH-3 on a pre-built cluster weight matrix.
 
-    `L` is shape (T_c+1, T_c+1) with the depot at the last index. Derives
-    `min_route_size` from `vehicles`/`capacity`/`balanced` and dispatches to
-    `_do_lkh`. The matrix is built by `_build_cluster_weight_matrices`,
+    ``L`` is shape ``(T_c+1, T_c+1)`` with the depot at the last index. Derives
+    ``min_route_size`` from ``vehicles``/``capacity``/``balanced`` and dispatches to
+    :func:`_do_lkh`. The matrix is built by :func:`_build_cluster_weight_matrices`,
     decoupled from this call so it can be reused across iterations that do
     not mutate the underlying graph.
     """
@@ -424,22 +426,22 @@ def _initial_tours_from_warmstart(
     """Per-root LKH initial tours derived from a warmstart solution graph.
 
     For each root, walks the warmstart's branches in order. Each visited
-    terminal `n` becomes the LKH customer id `i + 1`, where `i` is `n`'s
-    position in the cluster's sorted `terminals` list (i.e., its row index
-    in the LKH weight matrix). The depot clones (`vehicles - 1` of them)
+    terminal ``n`` becomes the LKH customer id ``i + 1``, where ``i`` is ``n``'s
+    position in the cluster's sorted ``terminals`` list (i.e., its row index
+    in the LKH weight matrix). The depot clones (``vehicles - 1`` of them)
     and the final depot id are appended, as required by LKH-3 for OVRP.
 
     The walked tour is purely a hint about the *order* in which customers
     should be visited; LKH evaluates segment costs from the weight matrix.
-    Therefore the warmstart's edges should still be present in `A_iter`
+    Therefore the warmstart's edges should still be present in ``A_iter``
     when this tour is fed back to LKH (or those segments will be charged
-    the `w_clip` sentinel weight).
+    the ``w_clip`` sentinel weight).
 
-    Roots whose warmstart cluster is empty get `None`.
+    Roots whose warmstart cluster is empty get ``None``.
 
     Raises:
         KeyError: a walked terminal is not in the corresponding cluster's
-            `terminals` list (i.e., warmstart and clustering disagree).
+            ``terminals`` list (i.e., warmstart and clustering disagree).
     """
     R = warmstart.graph['R']
     out: list[list[int] | None] = []
@@ -543,15 +545,15 @@ def _lkh(
 ) -> nx.Graph:
     """Low-level single-root Lin-Kernighan-Helsgaun (LKH-3) solver.
 
-    Open Capacitated Vehicle Routing Problem on a single depot. `A` must be
-    normalized (use `as_normalized()` before calling) and have R == 1. For
-    multi-root instances, use `lkh3()` instead.
+    Open Capacitated Vehicle Routing Problem on a single depot. ``A`` must be
+    normalized (use :func:`as_normalized` before calling) and have R == 1. For
+    multi-root instances, use :func:`lkh3` instead.
 
-    See `lkh3()` for a higher-level wrapper that handles multi-root,
+    See :func:`lkh3` for a higher-level wrapper that handles multi-root,
     iterative repair, and parameter validation.
 
     Args:
-      A: graph with allowed edges (if it has 0 edges, use `complete=True`)
+      A: graph with allowed edges (if it has 0 edges, use ``complete=True``)
       capacity: maximum vehicle capacity
       time_limit: [s] solver run time limit
       scale: factor to scale lengths (should be < 1e6)
@@ -645,7 +647,7 @@ def _run_lkh_per_cluster(
     """Solve every root cluster with LKH-3, sequentially or in parallel.
 
     Single-root (R == 1) is solved synchronously; multi-root dispatches one
-    `_solve_cluster` per root through a ThreadPoolExecutor (one thread per
+    :func:`_solve_cluster` per root through a ThreadPoolExecutor (one thread per
     root). Returns one LKH output dict per root, in root order (-R..-1).
     """
     R = len(L_)
@@ -679,13 +681,13 @@ def _setup_clusters(
 ) -> tuple[list[list[int]], list[int]]:
     """Compute per-root terminals and minimum-feasible vehicle counts.
 
-    For R == 1 the only cluster is `range(T)`; for R > 1 the terminals are
-    partitioned by `clusterize()` and each cluster's terminal list is sorted
-    so that LKH customer ids `[1..T_c]` correspond to the cluster's nodes in
-    sorted order (and `_initial_tours_from_warmstart` agrees on indexing).
+    For R == 1 the only cluster is ``range(T)``; for R > 1 the terminals are
+    partitioned by :func:`clusterize` and each cluster's terminal list is sorted
+    so that LKH customer ids ``[1..T_c]`` correspond to the cluster's nodes in
+    sorted order (and :func:`_initial_tours_from_warmstart` agrees on indexing).
 
-    The returned `vehicles_` list is the per-cluster minimum feasible count,
-    except for R == 1 where a user-supplied `vehicles > vehicles_min` is
+    The returned ``vehicles_`` list is the per-cluster minimum feasible count,
+    except for R == 1 where a user-supplied ``vehicles > vehicles_min`` is
     honoured (this knob is meaningless under multi-root clustering).
     """
     R, T = A.graph['R'], A.graph['T']
@@ -722,7 +724,7 @@ def lkh3(
     complete: bool = False,
     warmstart: nx.Graph | None = None,
 ) -> nx.Graph:
-    """Solve the OCVRP using LKH-3 with links from `A`.
+    """Solve the OCVRP using LKH-3 with links from ``A``.
 
     Wraps the LKH-3 executable, which is not distributed with OptiWindNet.
     Get it from http://akira.ruc.dk/~keld/research/LKH-3/ and make sure the
@@ -730,7 +732,7 @@ def lkh3(
 
     Uses the Lin-Kernighan-Helsgaun meta-heuristic to solve an Open-CVRP
     (i.e., vehicles do not return to the depot). Normalization of input graph
-    is recommended before calling this function (use `as_normalized()`).
+    is recommended before calling this function (use :func:`as_normalized`).
 
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered (one cluster per root) and each cluster is
@@ -742,11 +744,11 @@ def lkh3(
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause
-    the actual runtime to be up to (max_retries + 1) times the given
+    the actual runtime to be up to ``(max_retries + 1)`` times the given
     ``time_limit``.
 
     Args:
-        A: graph with allowed edges (if it has 0 edges, use `complete=True`).
+        A: graph with allowed edges (if it has 0 edges, use ``complete=True``).
         capacity: maximum vehicle capacity.
         time_limit: [s] solver run time limit (per cluster).
         vehicles: number of vehicles (if None or at the minimum, use the

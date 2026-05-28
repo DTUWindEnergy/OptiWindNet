@@ -3,8 +3,8 @@
 """Migrate a v2 (Pony ORM) or v3 (Peewee) database to v4 (Peewee, slim RouteSet schema).
 
 Uses sqlite3 to read the source file (no Pony dependency), writes v4 with
-Peewee. The RouteSet field `num_gates` is renamed to `feeders_per_root`,
-and the columns dropped in v4 (`valid`, `is_normalized`, `stuntC`) are
+Peewee. The RouteSet field ``num_gates`` is renamed to ``feeders_per_root``,
+and the columns dropped in v4 (``valid``, ``is_normalized``, ``stuntC``) are
 discarded.
 
 Usage:

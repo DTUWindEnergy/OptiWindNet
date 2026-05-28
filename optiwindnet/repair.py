@@ -16,7 +16,7 @@ info, warn = _lggr.info, _lggr.warning
 
 def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
     """
-    `S` has loads, is a rootless subgraph_view and non-branching
+    ``S`` has loads, is a rootless ``subgraph_view`` and non-branching
     """
     # non-branching graphs only, gates and detours removed
     if S.degree[n] == 2:
@@ -48,20 +48,22 @@ def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
         return gate_leaf
 
 
-def list_path(S: nx.Graph, n: int) -> list[int]:
+def list_path(S_subtrees: nx.Graph, n: int) -> list[int]:
     """
-    `S` has loads, no gate or detour edges
-    all subtrees of `S` are paths
-    `n` must be an extremity of the path
+    All subtrees of ``S_subtrees`` are paths (radial topology only).
+
+    Args:
+      S_subtrees: topology graph without feeders
+      n: must be a path extreme (subroot or tail)
     """
     path = [n]
-    (far,) = S[n]
-    while S.degree[far] == 2:
-        s, t = S[far]
+    (far,) = S_subtrees[n]
+    while S_subtrees.degree[far] == 2:
+        s, t = S_subtrees[far]
         far, n = (s, far) if t == n else (t, far)
         path.append(n)
     path.append(far)
-    return path if S.nodes[far]['load'] == 1 else path[::-1]
+    return path if S_subtrees.nodes[far]['load'] == 1 else path[::-1]
 
 
 def _find_fix_choices_path(
@@ -70,12 +72,12 @@ def _find_fix_choices_path(
     # this is named «...»_path because we could make a version that allows
     # branching and call it «...»_tree.
     """
-    Swap node `swapS` with one of the nodes of `dst_path`. For each swap, try
-    all possible point of insertion of `swapS` into `dst_path`.
+    Swap node ``swapS`` with one of the nodes of ``dst_path``. For each swap, try
+    all possible point of insertion of ``swapS`` into ``dst_path``.
 
-    how it works:
-    - Several node swapping choices are examined within the edges in `A`.
-    - A list where each item is a feasible modification package is returned.
+    How it works:
+      * Several node swapping choices are examined within the edges in ``A``.
+      * A list where each item is a feasible modification package is returned.
     """
     i_end = len(dst_path)
     choices = []
@@ -254,10 +256,10 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
 
     Args:
         Sʹ: solution topology that contains non-branching rooted tree(s)
-        A: available edges used in creating `Sʹ`
+        A: available edges used in creating ``Sʹ``
 
     Returns:
-        Topology without the crossing in a shallow copy of `Sʹ`.
+        Topology without the crossing in a shallow copy of ``Sʹ``.
     """
 
     if 'C' in Sʹ.graph or 'D' in Sʹ.graph:

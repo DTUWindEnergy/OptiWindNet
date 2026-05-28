@@ -72,7 +72,8 @@ class SolverORTools(Solver, PoolHandler):
     """OR-Tools MathOpt wrapper using the selected backend.
 
     This class wraps and changes the behavior of MathOpt in order to save all
-    solutions found to a pool. Meant to be used with `investigate_pool()`.
+    solutions found to a pool. Meant to be used with
+    :meth:`.PoolHandler._investigate_pool`.
     """
 
     name: str
@@ -120,8 +121,8 @@ class SolverORTools(Solver, PoolHandler):
     ) -> SolutionInfo:
         """Wrapper for MathOpt solve() that saves all solutions.
 
-        This method uses a MIP_SOLUTION callback to fill a solution pool stored
-        in the attribute self.solutions.
+        This method uses a ``MIP_SOLUTION`` callback to fill a solution pool stored
+        in the attribute ``self.solutions``.
         """
         try:
             model = self.model
@@ -317,11 +318,11 @@ def make_min_length_model(
       capacity: maximum link flow capacity
       topology: one of Topology.{BRANCHED, RADIAL}
       feeder_route:
-        FeederRoute.SEGMENTED -> feeder routes may be detoured around subtrees;
-        FeederRoute.STRAIGHT -> feeder routes must be straight, direct lines
+        ``FeederRoute.SEGMENTED`` → feeder routes may be detoured around subtrees;
+        ``FeederRoute.STRAIGHT`` → feeder routes must be straight, direct lines
       feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
-        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}
-      max_feeders: only used if feeder_limit is FeederLimit.SPECIFIED
+        ``MIN_PLUS1``, ``MIN_PLUS2``, ``MIN_PLUS3``}
+      max_feeders: only used if ``feeder_limit`` is ``FeederLimit.SPECIFIED``
     """
     R = A.graph['R']
     T = A.graph['T']
@@ -552,9 +553,9 @@ _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 def warmup_model(
     model: mathopt.Model, metadata: ModelMetadata, S: nx.Graph
 ) -> mathopt.Model:
-    """Set initial solution into `model`.
+    """Set initial solution into ``model``.
 
-    Changes `model` and `metadata` in-place.
+    Changes ``model`` and ``metadata`` in-place.
 
     Args:
       model: CP-SAT model to apply the solution to.
