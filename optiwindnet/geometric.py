@@ -897,8 +897,8 @@ def rotation_checkers_factory(
     def cross(A: int, B: int, C: int) -> float:
         """Signed twice-area of triangle ABC.
 
-        > 0: A->B->C is counter-clockwise
-        < 0: A->B->C is clockwise
+        > 0: A→B→C is counter-clockwise
+        < 0: A→B→C is clockwise
         == 0: A, B, C are collinear (use a tolerance for float input)
         """
         Ax, Ay = VertexC[A]
@@ -907,11 +907,11 @@ def rotation_checkers_factory(
         return (Bx - Ax) * (Cy - Ay) - (By - Ay) * (Cx - Ax)
 
     def cw(A: int, B: int, C: int) -> bool:
-        """True if A->B->C traverses the triangle ABC clockwise."""
+        """True if A→B→C traverses the triangle ABC clockwise."""
         return cross(A, B, C) < 0
 
     def ccw(A: int, B: int, C: int) -> bool:
-        """True if A->B->C traverses the triangle ABC counter-clockwise."""
+        """True if A→B→C traverses the triangle ABC counter-clockwise."""
         return cross(A, B, C) > 0
 
     return cw, ccw, cross

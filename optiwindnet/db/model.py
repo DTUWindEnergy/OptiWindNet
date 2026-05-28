@@ -180,7 +180,7 @@ def open_database(
 
     Args:
       filepath: path to database file
-      create_db: True -> create a new file if it does not exist
+      create_db: True → create a new file if it does not exist
       timeout: seconds to wait for a locked database to be released
 
     Returns:
@@ -208,7 +208,7 @@ def database_connection(
 
     Args:
       filepath: path to database file
-      create_db: True -> create a new file if it does not exist
+      create_db: True → create a new file if it does not exist
       timeout: seconds to wait for a locked database to be released
 
     Yields:

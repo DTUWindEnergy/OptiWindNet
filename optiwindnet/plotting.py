@@ -63,7 +63,7 @@ def gplot(
       node_tag: text tag inside each node (e.g. 'load', 'label' or any of
         the nodes' attributes). If ``True``, tags the nodes with their numbers.
       tag_border: if True, all border and obstacle vertices get a number tag.
-      landscape: True -> rotate the plot by G's attribute 'landscape_angle'.
+      landscape: True → rotate the plot by G's attribute 'landscape_angle'.
       infobox: Draw text box with summary of G's main properties: capacity,
         number of turbines, number of feeders, total cable length.
       scalebar: (span_in_data_units, label) add a small bar to indicate the

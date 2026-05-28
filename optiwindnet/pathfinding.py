@@ -1395,7 +1395,7 @@ class PathFinder:
         topology — there is no one-end "demotion" case to handle here.
 
         Returns:
-          chain_access: dict[(vertex, left, right) -> (Chain, side)]
+          chain_access: dict[(vertex, left, right) → (Chain, side)]
             Both pair orientations registered; lookup miss == "not a
             chain entry" — the trigger then does nothing and consumes no
             traversal budget.

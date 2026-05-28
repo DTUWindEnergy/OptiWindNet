@@ -695,7 +695,7 @@ def S_from_terse_links(terse_links, **kwargs):
     Inverse function of :func:`terse_links_from_S`.
 
     Args:
-      terse_links: tree links encoded as 1D array (edges are: i->terse_links[i])
+      terse_links: tree links encoded as 1D array (edges are: i→terse_links[i])
 
     Returns:
       Solution topology S.

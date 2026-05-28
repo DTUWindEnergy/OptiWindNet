@@ -131,7 +131,7 @@ def edge_conflicts(u: int, v: int, diagonals: bidict) -> Iterator[tuple[int, int
     Args:
       u: node
       v: node
-      diagonals: map of crossings Delaunay<->diagonals
+      diagonals: map of crossings Delaunay↔diagonals
     """
     u, v = (u, v) if u < v else (v, u)
     st = diagonals.get((u, v))

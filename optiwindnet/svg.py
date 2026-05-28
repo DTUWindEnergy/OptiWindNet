@@ -702,8 +702,8 @@ def svgplot(
       infobox: add(?) text box with summary of G's main properties: capacity,
         number of turbines, excess feeders, total feeders, total cable length.
       legend: if True, add a legend strip at the bottom of the SVG plot.
-      dark: color theme to use: True -> dark; False: light; None -> guess
-      transparent: background color: True -> transparent; False -> theme-based
+      dark: color theme to use: True → dark; False: light; None → guess
+      transparent: background color: True → transparent; False → theme-based
 
     Returns:
       SvgRepr object containing the SVG markup in its 'data' attribute
