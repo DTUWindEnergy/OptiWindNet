@@ -300,7 +300,7 @@ class WindFarmNetwork:
 
     @property
     def cables(self) -> list[tuple[int, float | int]]:
-        "Set of cable specifications as [(capacity, linear_cost), ...]."
+        "Set of cable specifications as ``[(capacity, linear_cost), ...]``."
         return self._cables
 
     @cables.setter

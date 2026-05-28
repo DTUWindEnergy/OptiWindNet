@@ -123,10 +123,10 @@ def _node_dist(VertexC: np.ndarray, u: int, v: int) -> float:
 def _expand_P_paths_edge(
     s: int, t: int, shortcuts: dict[tuple[int, int], list[int]]
 ) -> list[int]:
-    """Recursively expand a P_paths shortcut hop into the full P-edge sequence.
+    """Recursively expand a ``P_paths`` shortcut hop into the full P-edge sequence.
 
-    ``shortcuts`` maps a normalized (u_lo, v_hi) pair to the list of vertices
-    along the underlying P-path. Returns [s, t] verbatim when (s, t) is not
+    ``shortcuts`` maps a normalized ``(u_lo, v_hi)`` pair to the list of vertices
+    along the underlying P-path. Returns ``[s, t]`` verbatim when ``(s, t)`` is not
     a shortcut.
     """
     key = (s, t) if s < t else (t, s)
@@ -208,8 +208,8 @@ class PathFinder:
     path-finding is performed when the instance is initialized, but a route set is
     returned only with a call to method :meth:`create_detours`.
 
-    Only edges in graph attribute 'tentative' or, lacking that, edges with the
-    attribute 'kind' == 'tentative' are checked for crossings.
+    Only edges in graph attribute ``'tentative'`` or, lacking that, edges with the
+    attribute ``'kind'`` with value ``'tentative'`` are checked for crossings.
 
     Args:
       G: the route set without detours
@@ -657,7 +657,7 @@ class PathFinder:
         dropped diagonal has no constraint-mesh endpoint (its base spans two
         terminals), the *realized* diagonal whose flip locked its base is
         de-shortcut instead, freeing the dropped one for the next flip. Returns
-        True if any midpath changed.
+        ``True`` if any midpath changed.
         """
         # Precompute quads for all contour diagonals to avoid redundant searches
         quad_cache = {}
@@ -723,7 +723,7 @@ class PathFinder:
         """
         ``_.get_best_path(«node»)`` produces a ``tuple(path, dists)``.
         ``path`` contains a sequence of nodes from the original
-        ``networkx.Graph`` ``G``, from ``node`` to the closest root.
+        ``networkx.Graph`` ``G``, from ``«node»`` to the closest root.
         ``dists`` contains the lengths of the segments defined by ``paths``.
         """
         paths = self.paths
@@ -1043,9 +1043,9 @@ class PathFinder:
         advancers from the partner cone.
 
         ``entry_pn`` is the pseudonode for ``y_entry`` (the chain-end the
-        funnel just landed on); for spanning chains `y_entry ==
-        chain.cones[side].vertex`, for single-vertex chains both cones
-        share that vertex.
+        funnel just landed on); for spanning chains, ``y_entry`` is
+        ``chain.cones[side].vertex``; for single-vertex chains, both cones share
+        that vertex.
         """
         walk = chain.walks[side]
         exit_cone = chain.cones[1 - side]
@@ -1133,16 +1133,16 @@ class PathFinder:
         Model: a spanning fence at ``v`` contributes one wall (its off-
         constraint endpoint at ``v``); its "other wall" is the chain-step
         constraint edge. A touching fence contributes two walls (both
-        endpoints). Each ray is labelled with a subtree id (C_ID for
+        endpoints). Each ray is labelled with a subtree id (``C_ID`` for
         constraint bounds); chains are read off pairs of consecutive
         bound-rays in cw order. The chain-step ray (when any spanning
-        fence is present at ``v``) has a dual face: C_ID on the void
+        fence is present at ``v``) has a dual face: ``C_ID`` on the void
         side, innermost spanning subtree on the navigable arc side —
         this lets the cone immediately inside the chain-step collapse
         against the spanning subtree when no touching is interposed,
         and to host the (touching ↔ spanning) cone when one is. With
         no spanning at ``v``, both constraint bounds carry the plain
-        C_ID label and the chain partition reproduces the touching-
+        ``C_ID`` label and the chain partition reproduces the touching-
         only stack.
         """
         P = self.P
@@ -1505,7 +1505,7 @@ class PathFinder:
         cum_turn_w = pn_w.cum_turn
 
         def _add_cone_exit_pn(v: int) -> tuple[int, float]:
-            """Pseudonode at ``v`` parented by pn_w; returns (pn_id, d_hop)."""
+            """Pseudonode at ``v`` parented by ``pn_w``; returns ``(pn_id, d_hop)``."""
             if v == w:
                 return pn_w_id, 0.0
             d_hop = _node_dist(VertexC, w, v)

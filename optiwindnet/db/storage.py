@@ -256,13 +256,13 @@ def nodeset_from_G(G: nx.Graph) -> bytes:
 def terse_pack_from_G(G: nx.Graph) -> PackType:
     """Convert ``G``'s edges to a format suitable for storing in the database.
 
-    Although graph ``G`` in undirected, the edge attribute ``'reverse'`` and its
+    Although graph ``G`` is undirected, the edge attribute ``'reverse'`` and its
     nodes' numbers encode the direction of power flow. The terse
     representation uses that and the fact that ``G`` is a tree.
 
     Returns:
         dict with keys:
-            edges: where <i, edges[i]> is a directed edge of ``G``
+            edges: where ``(i, edges[i])`` is a directed edge of ``G``
             clone2prime: mapping the above-T clones to below-T nodes
     """
     R, T, B = (G.graph[k] for k in 'RTB')
@@ -420,7 +420,8 @@ def get_machine_pk() -> int:
 
 def G_by_method(G: nx.Graph, method: Method) -> nx.Graph:
     """Fetch from the database a layout for ``G`` by ``method``.
-    ``G`` must be a layout solution with the necessary info in the G.graph dict.
+
+    ``G`` must be a layout solution with the necessary info in the ``G.graph`` dict.
     ``method`` is a Method.
     """
     farmname = G.name
@@ -445,9 +446,9 @@ def Gs_from_attrs(
     methods: Method | Sequence[object],
     capacities: int | Sequence[int],
 ) -> list[tuple[nx.Graph]]:
-    """
-    Fetch from the database a list (one per capacity) of tuples (one per
+    """Fetch from the database a list (one per capacity) of tuples (one per
     method) of layouts.
+
     ``farm`` must have the desired NodeSet name in the ``name`` attribute.
     ``methods`` is a (sequence of) Method instance(s).
     ``capacities`` is a (sequence of) int(s).

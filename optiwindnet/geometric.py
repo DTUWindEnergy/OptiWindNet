@@ -136,7 +136,7 @@ def any_pairs_opposite_edge(
       uC, vC: (2,) array of coordinates of edge ends
 
     Returns:
-      True if any two of ``nodesC`` are on opposite sides of the edge.
+      ``True`` if any two of ``nodesC`` are on opposite sides of the edge.
     """
     maxidx = len(nodesC) - 1
     if maxidx <= 0:
@@ -258,7 +258,7 @@ def angle_oracles_factory(
       ``angle_rank__``: (T, R)-array of the relative placement of angles
 
     Returns:
-      union_limits() and angle_ccw()
+      ``union_limits()`` and ``angle_ccw()``
     """
 
     def is_within(pR: int, lR: int, hR: int) -> bool:
@@ -346,7 +346,7 @@ def is_crossing_numpy(u, v, s, t):
     crossings.
 
     Returns:
-      True in case of crossing.
+      ``True`` in case of crossing.
     """
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
@@ -409,7 +409,7 @@ def is_crossing_no_bbox(
     crossings.
 
     Returns:
-      True in case of crossing.
+      ``True`` in case of crossing.
     """
 
     # adapted from Franklin Antonio's insectc.c lines_intersect()
@@ -460,7 +460,7 @@ def is_crossing(
       touch_is_cross: whether to consider any common point as a crossing
 
     Returns:
-      True in case of crossing.
+      ``True`` in case of crossing.
     """
     # choices for `less`:
     # -> operator.lt counts touching as crossing
@@ -519,7 +519,7 @@ def is_bunch_split_by_corner(bunch, a, o, b, margin=1e-3):
       a, o, b: points that define the cone's angle
 
     Returns:
-      True if points in bunch are both inside and outside cone a-o-b
+      ``True`` if points in ``bunch`` are both inside and outside cone ``a-o-b``
     """
     AngleA = angle_numpy(a, o, bunch)
     AngleB = angle_numpy(b, o, bunch)
@@ -635,14 +635,14 @@ def rays_alternate(rays_a: list[np.ndarray], rays_b: list[np.ndarray]) -> bool:
     Picks every 2-ray pair from each set, orders the four rays by polar angle,
     and checks for the cyclic label pattern ABAB (or BABA). When found, set
     ``a`` and set ``b`` separate one another — the geometric definition of a
-    crossing at the shared origin. Returns False when either set has fewer
+    crossing at the shared origin. Returns ``False`` when either set has fewer
     than 2 rays.
 
     Args:
       rays_a, rays_b: 2D rays from a shared origin, each a (2,) numpy array
 
     Returns:
-      True if some 2-ray pairs from ``rays_a`` and ``rays_b`` alternate around the
+      ``True`` if some 2-ray pairs from ``rays_a`` and ``rays_b`` alternate around the
       origin in cyclic order.
     """
     if len(rays_a) < 2 or len(rays_b) < 2:
@@ -670,7 +670,7 @@ def polylines_cross_at_point(
 ) -> bool:
     """Check whether two polylines cross each other at a given point.
 
-    Returns False when ``pC`` is within ``tol`` of any vertex of either polyline
+    Returns ``False`` when ``pC`` is within ``tol`` of any vertex of either polyline
     — those cases are ambiguous and the caller is expected to classify them
     separately (e.g. via shared-node or endpoint filters). Otherwise extracts
     the local rays at ``pC`` for each polyline (via :func:`polyline_rays_at_point`)
@@ -684,7 +684,7 @@ def polylines_cross_at_point(
       angle_tol: minimum unit cross-product magnitude used during ray dedup
 
     Returns:
-      True when the polylines cross transversely at ``pC``.
+      ``True`` when the polylines cross transversely at ``pC``.
     """
     if np.any(np.hypot(*(pC - coords_a).T) <= tol) or np.any(
         np.hypot(*(pC - coords_b).T) <= tol
@@ -705,7 +705,7 @@ def is_triangle_pair_a_convex_quadrilateral(
     only works if ⟨s, t⟩ crosses the line defined by ⟨u, v⟩
 
     Returns:
-      True if the quadrilateral is convex and is not a triangle
+      ``True`` if the quadrilateral is convex and is not a triangle
     """
     # this used to be called `is_quadrilateral_convex()`
     # us × ut
@@ -761,7 +761,7 @@ def complete_graph(
     prune: bool = True,
     map_crossings: bool = False,
 ) -> nx.Graph:
-    """Create a complete graph based on G_base.
+    """Create a complete graph based on ``G_base``.
 
     Produces a networkx Graph connecting all non-root nodes to every
     other non-root node. Edges with an arc > pi/2 around root are discarded
@@ -907,11 +907,11 @@ def rotation_checkers_factory(
         return (Bx - Ax) * (Cy - Ay) - (By - Ay) * (Cx - Ax)
 
     def cw(A: int, B: int, C: int) -> bool:
-        """True if A→B→C traverses the triangle ABC clockwise."""
+        """``True`` if ``A→B→C`` traverses the triangle ``ABC`` clockwise."""
         return cross(A, B, C) < 0
 
     def ccw(A: int, B: int, C: int) -> bool:
-        """True if A→B→C traverses the triangle ABC counter-clockwise."""
+        """``True`` if ``A→B→C`` traverses the triangle ``ABC`` counter-clockwise."""
         return cross(A, B, C) > 0
 
     return cw, ccw, cross
@@ -936,7 +936,7 @@ def rotating_calipers(
       metric: what should be minimized, one of {'height', 'area'}
 
     Returns:
-      best_calipers, best_caliper_angle, best_metric, bbox
+      ``best_calipers``, ``best_caliper_angle``, ``best_metric``, ``bbox``
     """
     best_metric = np.inf
     H = convex_hull.shape[0]

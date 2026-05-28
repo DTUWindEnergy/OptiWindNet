@@ -66,15 +66,15 @@ _essential_graph_attrs = (
 def assign_cables(
     G: nx.Graph, cables: list[tuple[int, float | int]], currency: str = '€'
 ):
-    """Assign a cable type to each edge of ``G`` and update attribute 'cost'.
+    """Assign a cable type to each edge of ``G`` and update attribute ``'cost'``.
 
     Each edge is assigned the cheapest cable type that can carry its load. The
-    edge attribute 'cable' is the index in ``cables`` of the type chosen.
+    edge attribute ``'cable'`` is the index in ``cables`` of the type chosen.
 
     Changes ``G`` in place.
 
     Args:
-      G: networkx graph with edges having a 'load' attribute (use calcload(G))
+      G: networkx graph with edges having a ``'load'`` attribute (use ``calcload(G)``)
       cables: [(«capacity», «cost»), ...] in increasing capacity order (each
         cable entry must be a tuple)
       currency: symbol representing the unit of the cost
@@ -101,8 +101,8 @@ def assign_cables(
 def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     """Create a 3-4 line summary of G's properties.
 
-    significant_digits applies only to total length and is enforced only when the
-    integer part has fewer significant digits than significant_digits
+    ``significant_digits`` applies only to total length and is enforced only when the
+    integer part has fewer significant digits than ``significant_digits``.
 
     Args:
       G: route set instance
@@ -171,8 +171,8 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
       A: available edges used in creating ``S``
 
     Returns:
-      number of non-gate edges of ``S`` that are of kind 'extended' or
-        'contour_extended' (kind is read from ``A``).
+      number of non-gate edges of ``S`` that are of kind ``'extended'`` or
+        ``'contour_extended'`` (kind is read from ``A``).
 
     Raises:
       ValueError: if an edge of unknown kind is found.
@@ -202,7 +202,7 @@ def bfs_subtree_loads(G, parent, children, subtree):
     """Recurse down the subtree, updating edge and node attributes.
 
     Meant to be called by :func:`calcload`, but can be used independently (e.g.
-    from PathFinder). Nodes must not have a 'load' attribute.
+    from PathFinder). Nodes must not have a ``'load'`` attribute.
 
     Returns:
       Total number of descendant nodes
@@ -230,8 +230,8 @@ def calcload(G):
 
     Perform a breadth-first-traversal of each root's subtree. As each node is
     visited, its subtree id and the load leaving it are stored as its
-    attribute (keys 'subtree' and 'load', respectively). Also the edges'
-    'load' attributes are updated accordingly.
+    attribute (keys ``'subtree'`` and ``'load'``, respectively). Also the edges'
+    ``'load'`` attributes are updated accordingly.
     """
     R, T = (G.graph[k] for k in 'RT')
     roots = range(-R, 0)
@@ -304,7 +304,8 @@ def L_from_site(
       handle: site identifier
 
     Returns:
-      Graph containing N = R + T nodes and no edges (all args become graph attributes).
+      Graph containing ``N = R + T`` nodes and no edges (all args become graph
+      attributes).
     """
     L = nx.Graph(T=T, R=R, B=B, VertexC=VertexC, name=name, handle=handle)
     if border is not None:
@@ -784,7 +785,8 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
     """Make a shallow copy of an instance and reduce its roots to one.
 
     The output's root is the centroid of the input's roots.
-    This may not work well for locations with obstacles, use as_obstacle_free() first.
+    This may not work well for locations with obstacles, use
+    ``as_obstacle_free()`` first.
 
     Args:
       Lʹ: input location
@@ -835,10 +837,11 @@ def as_normalized(
 ) -> nx.Graph:
     """Make a shallow copy of an instance and shift and scale its geometry.
 
-    Coordinates are subtracted by graph attribute 'norm_offset'.
-    All lengths and coordinates are multiplied by graph attribute 'norm_scale'.
-    Graph attribute 'is_normalized' is set to ``True``.
-    Affected linear attributes: 'VertexC', 'd2roots' (graph); 'length' (edge).
+    Coordinates are subtracted by graph attribute ``'norm_offset'``.
+    All lengths and coordinates are multiplied by graph attribute ``'norm_scale'``.
+    Graph attribute ``'is_normalized'`` is set to ``True``.
+    Affected linear attributes: ``'VertexC'``, ``'d2roots'`` (graph);
+    ``'length'`` (edge).
 
     Args:
         Aʹ: (or Gʹ) any instance that has inherited 'scale' from an
@@ -1184,8 +1187,8 @@ def add_terminal_closest_root(A: nx.Graph) -> None:
 def _blockmap_inner(u, v, angle__, angle_rank__, VertexC, R, T):
     """Compute blockage bitmap for edge (u, v) across all roots.
 
-    Returns an (R, T) boolean array where True means turbine t is blocked
-    by edge (u, v) with respect to root r.
+    Returns an ``(R, T)`` boolean array where ``True`` means turbine ``t`` is blocked
+    by edge ``(u, v)`` with respect to root ``r``.
     """
     root_offset = VertexC.shape[0] - R
     blocked = np.zeros((R, T), dtype=np.bool_)
@@ -1246,7 +1249,7 @@ def add_link_blockmap(A: nx.Graph):
 
     Note:
       * this function neglects borders and contours.
-      * the space taken scales with R × T × num_edges(A)
+      * the space taken scales with ``R × T × num_edges(A)``
     """
     VertexC = A.graph['VertexC']
     R, T = A.graph['R'], A.graph['T']

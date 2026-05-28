@@ -38,7 +38,7 @@ def get_interferences_list(
 
     Returns:
       list of interferences, where each interference is:
-        ((4 vertices of the two edges involved), one of the vertices or None)
+        ((4 vertices of the two edges involved), one of the vertices or ``None``)
         the last tuple element indicates the index (0..3) of the vertex that
         lays exactly on the edge in cases of touching (not crossing)
     """
@@ -126,7 +126,7 @@ def get_interferences_list(
 
 
 def edge_conflicts(u: int, v: int, diagonals: bidict) -> Iterator[tuple[int, int]]:
-    """Iterate over edges conflicting with (u, v).
+    """Iterate over edges conflicting with ``(u, v)``.
 
     Args:
       u: node
@@ -229,7 +229,7 @@ def gateXing_iter(
 
     Args:
       G: Routeset or edgeset (A) to examine.
-      hooks: Nodes to check, grouped by root in sub-sequences from root ``-R``
+      hooks: Nodes to check, grouped by root in subsequences from root ``-R``
         to ``-1``. If ``None``, all non-root nodes are checked using ``'root'``
         node attribute.
       touch_is_cross: If ``True``, count as crossing a gate going over a node.
@@ -467,7 +467,7 @@ def _polyline_coords(
 
 
 def _shared_run_swaps_sides(coords_a: np.ndarray, coords_b: np.ndarray) -> bool:
-    """True iff two polylines share an interior run and exit on the same side
+    """``True`` iff two polylines share an interior run and exit on the same side
     at each end.
 
     When two polylines overlap on a shared sub-sequence of vertices, an actual *cross*
@@ -638,7 +638,7 @@ def _intersection_only_at_excluded(
     *,
     endpoint_tol: float,
 ) -> bool:
-    """True if every Point of a length-0 intersection lies at an excluded coord."""
+    """``True`` if every Point of a length-0 intersection lies at an excluded coord."""
     if intersection.length > 0:
         return False
     points = list(_iter_points(intersection))
@@ -675,8 +675,8 @@ def find_geometric_crossings(
     and detour clones are tested at their prime coordinates.
 
     Args:
-      G: routeset graph. Must have graph attributes ``T``, ``R``, ``B``, and
-        ``VertexC``; ``fnT`` is required iff ``C > 0`` or ``D > 0``.
+      G: routeset graph. Must have graph attributes ``'T'``, ``'R'``, ``'B'``, and
+        ``'VertexC'``; ``'fnT'`` is required iff ``C > 0`` or ``D > 0``.
       include_touches: also report point contacts that are not proper crossings
         (otherwise touches are silently dropped).
       length_tol: collinear overlaps shorter than this are not classified.

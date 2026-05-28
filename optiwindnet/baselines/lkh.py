@@ -74,7 +74,9 @@ def _build_weight_matrix(
     complete: bool,
     w_clip: int,
 ) -> np.ndarray:
-    """Build LKH weight matrix L of shape (T_c+1, T_c+1) with depot at last index.
+    """Build LKH weight matrix ``L`` with depot at last index.
+
+    The matrix has shape ``(T_c+1, T_c+1)``.
 
     Args:
         A: source graph (provides edge lengths, VertexC, d2roots).
@@ -147,10 +149,10 @@ def _do_lkh(
 ) -> dict:
     """Run LKH-3 on a precomputed weight matrix.
 
-    L has shape (T+1, T+1) with the depot at the last index.
+    ``L`` has shape ``(T+1, T+1)`` with the depot at the last index.
 
     Returns a dict containing routes (list of lists of 0-based terminal indices
-    in the matrix), penalty, minimum, log, elapsed_time, solution_time, plus
+    in the matrix), penalty, minimum, log, ``elapsed_time``, ``solution_time``, plus
     parsed run statistics.
     """
     T = L.shape[0] - 1
@@ -322,7 +324,7 @@ def _do_lkh(
 def _add_branches(S, branches, root, subtree_id_start):
     """Add branches to solution graph S in place.
 
-    Returns (max_load, next_subtree_id).
+    Returns ``(max_load, next_subtree_id)``.
     """
     max_load = 0
     subtree_id = subtree_id_start
@@ -387,7 +389,7 @@ def _solve_cluster(
 ) -> dict:
     """Run LKH-3 on a pre-built cluster weight matrix.
 
-    ``L`` is shape (T_c+1, T_c+1) with the depot at the last index. Derives
+    ``L`` is shape ``(T_c+1, T_c+1)`` with the depot at the last index. Derives
     ``min_route_size`` from ``vehicles``/``capacity``/``balanced`` and dispatches to
     :func:`_do_lkh`. The matrix is built by :func:`_build_cluster_weight_matrices`,
     decoupled from this call so it can be reused across iterations that do
@@ -742,7 +744,7 @@ def lkh3(
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause
-    the actual runtime to be up to (max_retries + 1) times the given
+    the actual runtime to be up to ``(max_retries + 1)`` times the given
     ``time_limit``.
 
     Args:

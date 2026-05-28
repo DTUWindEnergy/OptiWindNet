@@ -16,7 +16,7 @@ info, warn = _lggr.info, _lggr.warning
 
 def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
     """
-    ``S`` has loads, is a rootless subgraph_view and non-branching
+    ``S`` has loads, is a rootless ``subgraph_view`` and non-branching
     """
     # non-branching graphs only, gates and detours removed
     if S.degree[n] == 2:

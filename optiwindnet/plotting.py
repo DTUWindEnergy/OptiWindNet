@@ -60,10 +60,10 @@ def gplot(
 
     Args:
       ax: Axes instance to plot into. If ``None``, opens a new figure.
-      node_tag: text tag inside each node (e.g. 'load', 'label' or any of
+      node_tag: text tag inside each node (e.g. ``'load'``, ``'label'`` or any of
         the nodes' attributes). If ``True``, tags the nodes with their numbers.
-      tag_border: if True, all border and obstacle vertices get a number tag.
-      landscape: True → rotate the plot by G's attribute 'landscape_angle'.
+      tag_border: if ``True``, all border and obstacle vertices get a number tag.
+      landscape: ``True`` → rotate the plot by G's attribute ``'landscape_angle'``.
       infobox: Draw text box with summary of G's main properties: capacity,
         number of turbines, number of feeders, total cable length.
       scalebar: (span_in_data_units, label) add a small bar to indicate the
@@ -331,7 +331,7 @@ def pplot(P: nx.PlanarEmbedding, A: nx.Graph, **kwargs) -> Axes:
 
     Wrapper for :func:`gplot`. Performs what one would expect
     from ``gplot(P, ...)`` - which does not work because P lacks coordinates and
-    node 'kind' attribute. The source needs to be ``A`` (as opposed to ``G`` or
+    node ``'kind'`` attribute. The source needs to be ``A`` (as opposed to ``G`` or
     ``L``) because only ``A`` has the supertriangle's vertices coordinates.
 
     Args:

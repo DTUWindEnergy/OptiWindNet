@@ -10,16 +10,16 @@ __all__ = ('clusterize',)
 
 
 def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
-    """Partition the terminals of A into one cluster per root.
+    """Partition the terminals of ``A`` into one cluster per root.
 
     For the moment, it enforces the minimum number of feeders, i.e.
-    ceil(T/capacity).
+    ``ceil(T/capacity)``.
 
     The algorithm guarantees that the number of feeders for the entire location
     is not increased by the clustering. This means only one partition may have
     a subtree with capacity slack. It does not attempt to make uniform-sized
     clusters, terminals tend to be allocated to the closest root (distance
-    measured in ``P_paths`` - see :func:`make_planar_embedding`).
+    measured in ``P_paths`` - see :func:`.mesh.make_planar_embedding`).
     """
     R, T = (A.graph[k] for k in 'RT')
     d2roots = A.graph['d2roots']

@@ -100,7 +100,7 @@ def _add_branches(S, branches, root, subtree_id_start):
         subtree_id_start: starting subtree_id for numbering
 
     Returns:
-        (max_load, next_subtree_id)
+        ``(max_load, next_subtree_id)``
     """
     max_load = 0
     subtree_id = subtree_id_start
@@ -283,7 +283,7 @@ def hgs_cvrp(
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause the
-    actual runtime to be up to (max_retries + 1) times the given time_limit.
+    actual runtime to be up to ``(max_retries + 1)`` times the given ``time_limit``.
 
     Args:
         A: graph with allowed edges (if it has 0 edges, use complete graph)
