@@ -265,7 +265,7 @@ def hgs_cvrp(
     balanced: bool = False,
     log_callback: Callable | None = None,
 ) -> nx.Graph:
-    """Solves the OCVRP using HGS-CVRP with links from `A`.
+    """Solves the OCVRP using HGS-CVRP with links from ``A``.
 
     Wraps HybGenSea, which provides bindings to the HGS-CVRP library (Hybrid
     Genetic Search solver for Capacitated Vehicle Routing Problems). This

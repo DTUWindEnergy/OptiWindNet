@@ -26,12 +26,12 @@ class _RoutePolyline:
 def get_interferences_list(
     Edge: np.ndarray, VertexC: np.ndarray, fnT: np.ndarray | None = None, EPSILON=1e-15
 ) -> list[tuple[tuple[int, int, int, int], int | None]]:
-    """List all crossings between edges in the `Edge` (E×2) numpy array.
+    """List all crossings between edges in the ``Edge`` (E×2) numpy array.
 
-    Coordinates must be provided in the `VertexC` (V×2) array.
+    Coordinates must be provided in the ``VertexC`` (V×2) array.
 
-    `Edge` contains indices to VertexC. If `Edge` includes detour nodes
-    (i.e. indices go beyond `VertexC`'s length), `fnT` translation table
+    ``Edge`` contains indices to VertexC. If ``Edge`` includes detour nodes
+    (i.e. indices go beyond ``VertexC``'s length), ``fnT`` translation table
     must be provided.
 
     Should be used when edges are not limited to the expanded Delaunay set.
@@ -185,7 +185,7 @@ def edge_crossings(
 
 
 def edgeset_edgeXing_iter(diagonals: bidict) -> Iterator[list[tuple[int, int]]]:
-    """Iterator over all edge crossings in an expanded Delaunay edge set `A`.
+    """Iterator over all edge crossings in an expanded Delaunay edge set ``A``.
 
     Each crossing is a 2 or 3-tuple of (u, v) edges. Does not include gates.
     """
@@ -224,15 +224,15 @@ def gateXing_iter(
 ) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
     """Iterate over all crossings between gates and edges/borders in G.
 
-    If `hooks` is `None`, all nodes that are not a root neighbor are
+    If ``hooks`` is ``None``, all nodes that are not a root neighbor are
     considered. Used in constraint generation for ILP model.
 
     Args:
       G: Routeset or edgeset (A) to examine.
-      hooks: Nodes to check, grouped by root in sub-sequences from root `-R`
-        to `-1`. If `None`, all non-root nodes are checked using `'root'`
+      hooks: Nodes to check, grouped by root in sub-sequences from root ``-R``
+        to ``-1``. If ``None``, all non-root nodes are checked using ``'root'``
         node attribute.
-      touch_is_cross: If `True`, count as crossing a gate going over a node.
+      touch_is_cross: If ``True``, count as crossing a gate going over a node.
 
     Yields:
       Pair of (edge, gate) that cross (each a 2-tuple of nodes).
@@ -826,12 +826,12 @@ def list_edge_crossings(
 ) -> list[tuple[tuple[int, int], tuple[int, int]]]:
     """List edge×edge crossings for the network topology in S.
 
-    `S` must only use extended Delaunay edges. It will not detect crossings
+    ``S`` must only use extended Delaunay edges. It will not detect crossings
     of non-extDelaunay gates or detours.
 
     Args:
       S: solution topology
-      A: available edges used in creating `S`
+      A: available edges used in creating ``S``
 
     Returns:
       list of 2-tuple (crossing) of 2-tuple (edge, ordered)

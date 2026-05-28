@@ -52,7 +52,7 @@ class SvgRepr:
         return '<' + ' '.join(parts) + '>'
 
     def save(self, filepath: str) -> None:
-        """write SVG to file `filepath`"""
+        """write SVG to file ``filepath``"""
         with open(filepath, 'w', encoding='utf-8') as file:
             file.write(self.data)
 
@@ -730,17 +730,17 @@ def svgplot(
 
 
 def svgpplot(P: nx.PlanarEmbedding, A: nx.Graph, **kwargs) -> SvgRepr:
-    """Plot PlanarEmbedding `P` using coordinates from `A` as SVG markup.
+    """Plot PlanarEmbedding ``P`` using coordinates from ``A`` as SVG markup.
 
-    SVG equivalent of `plotting.pplot()`. Accepts the same keyword arguments
-    as `svgplot()`.
+    SVG equivalent of :func:`.plotting.pplot`. Accepts the same keyword arguments
+    as :func:`svgplot`.
 
     Args:
       P: planar embedding to plot.
       A: source of vertex coordinates and node attributes.
 
     Returns:
-      SvgRepr object containing the SVG markup in its 'data' attribute
+      SvgRepr object containing the SVG markup in its ``'data'`` attribute
     """
     H = nx.create_empty_copy(A)
     if 'has_loads' in H.graph:

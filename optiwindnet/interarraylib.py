@@ -66,12 +66,12 @@ _essential_graph_attrs = (
 def assign_cables(
     G: nx.Graph, cables: list[tuple[int, float | int]], currency: str = '€'
 ):
-    """Assign a cable type to each edge of `G` and update attribute 'cost'.
+    """Assign a cable type to each edge of ``G`` and update attribute 'cost'.
 
     Each edge is assigned the cheapest cable type that can carry its load. The
-    edge attribute 'cable' is the index in `cables` of the type chosen.
+    edge attribute 'cable' is the index in ``cables`` of the type chosen.
 
-    Changes `G` in place.
+    Changes ``G`` in place.
 
     Args:
       G: networkx graph with edges having a 'load' attribute (use calcload(G))
@@ -150,7 +150,7 @@ def update_lengths(G):
 
 
 def pathdist(G, path):
-    """Calculate the total length of a `path` of nodes in `G`.
+    """Calculate the total length of a ``path`` of nodes in ``G``.
 
     Uses the nodes' coordinates (does not rely on edge attributes).
     """
@@ -164,15 +164,15 @@ def pathdist(G, path):
 
 
 def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
-    """Count the number of Delaunay diagonals (extended edges) of `A` in `S`.
+    """Count the number of Delaunay diagonals (extended edges) of ``A`` in ``S``.
 
     Args:
       S: solution topology
-      A: available edges used in creating `S`
+      A: available edges used in creating ``S``
 
     Returns:
-      number of non-gate edges of `S` that are of kind 'extended' or
-        'contour_extended' (kind is read from `A`).
+      number of non-gate edges of ``S`` that are of kind 'extended' or
+        'contour_extended' (kind is read from ``A``).
 
     Raises:
       ValueError: if an edge of unknown kind is found.
@@ -201,7 +201,7 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 def bfs_subtree_loads(G, parent, children, subtree):
     """Recurse down the subtree, updating edge and node attributes.
 
-    Meant to be called by `calcload()`, but can be used independently (e.g.
+    Meant to be called by :func:`calcload`, but can be used independently (e.g.
     from PathFinder). Nodes must not have a 'load' attribute.
 
     Returns:
@@ -321,9 +321,9 @@ def L_from_site(
 def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     """Create G from S and A.
 
-    Graph `S` contains the topology of a routeset network (nodes only, no
-    contours or detours). `S` must have been created from the available edges
-    in `A`, whose contour information is used to obtain a routeset `G`
+    Graph ``S`` contains the topology of a routeset network (nodes only, no
+    contours or detours). ``S`` must have been created from the available edges
+    in ``A``, whose contour information is used to obtain a routeset ``G``
     (possibly with contours, but not with detours – use PathFinder afterward).
     """
     R, T, B = (A.graph[k] for k in 'RTB')
@@ -588,20 +588,20 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
 
 
 def S_from_G(G: nx.Graph) -> nx.Graph:
-    """Get `G`'s topology (contours, detours, lengths, coords are dropped).
+    """Get ``G``'s topology (contours, detours, lengths, coords are dropped).
 
-    If using S to warm-start a MILP model, call after `S_from_G()`:
-    * `as_hooked_to_nearest()`: for branching (tree) models
-    * `as_hooked_to_head()`: for non-branching (path) models
+    If using S to warm-start a MILP model, call after :func:`S_from_G`:
+      * :func:`as_hooked_to_nearest`: if the model uses ``topology='branched'``
+      * :func:`as_hooked_to_head`: if the model uses ``topology='radial'``
 
-    This ensures that topology S is feasible (if non-branching) and not
-    trivially suboptimal (if branching).
+    This ensures that topology ``S`` is feasible (if radial) and not
+    trivially suboptimal (if branched).
 
     Args:
         G: must contain a feasible solution (either tree or path)
 
     Returns:
-        topology of `G`
+        Topology of ``G``
     """
     R, T = (G.graph[k] for k in 'RT')
     capacity = G.graph['capacity']
@@ -651,8 +651,8 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
 def L_from_G(G: nx.Graph) -> nx.Graph:
     """Return new location with nodes and site attributes from G.
 
-    The returned location graph `L` retains only roots, nodes and basic graph
-    attributes. All edges and remaining attributes are not carried from `G`.
+    The returned location graph ``L`` retains only roots, nodes and basic graph
+    attributes. All edges and remaining attributes are not carried from ``G``.
 
     Args:
       G: routeset graph to extract site data from.
@@ -690,12 +690,13 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
 
 
 def S_from_terse_links(terse_links, **kwargs):
-    """Create a solution topology graph `S` from its `terse_links` encoding.
+    """Create a solution topology graph ``S`` from its ``terse_links`` encoding.
 
-    Inverse function of `terse_links_from_S()`.
+    Inverse function of :func:`terse_links_from_S`.
 
     Args:
       terse_links: tree links encoded as 1D array (edges are: i->terse_links[i])
+
     Returns:
       Solution topology S.
     """
@@ -709,14 +710,15 @@ def S_from_terse_links(terse_links, **kwargs):
 
 
 def terse_links_from_S(S):
-    """Make a terse representation of the topology `S` as a 1D array.
+    """Make a terse representation of the topology ``S`` as a 1D array.
 
-    Inverse function of `S_from_terse_links()`.
+    Inverse function of :func:`S_from_terse_links`.
 
     Args:
       S: solution topology (must be a tree)
+
     Returns:
-      1D array representing the links of S (edges are: i->terse_links[i])
+      1D array ``terse``, where ``(i, terse[i])`` are links of ``S``
     """
     T = S.graph['T']
     terse_links = np.zeros((T,), dtype=np.int_)
@@ -835,12 +837,12 @@ def as_normalized(
 
     Coordinates are subtracted by graph attribute 'norm_offset'.
     All lengths and coordinates are multiplied by graph attribute 'norm_scale'.
-    Graph attribute 'is_normalized' is set to `True`.
+    Graph attribute 'is_normalized' is set to ``True``.
     Affected linear attributes: 'VertexC', 'd2roots' (graph); 'length' (edge).
 
     Args:
         Aʹ: (or Gʹ) any instance that has inherited 'scale' from an
-            edgeset `Aʹ`.
+            edgeset ``Aʹ``.
         offset: coordinates (2,) offset to override graph's 'norm_offset'
         scale: multiplicative scaling factor to override graph's 'norm_scale'
 
@@ -867,7 +869,7 @@ def as_normalized(
 
 
 def as_rescaled(Gʹ: nx.Graph, L: nx.Graph) -> nx.Graph:
-    """Revert normalization done by `as_normalized()`.
+    """Revert normalization done by :func:`as_normalized`.
 
     Args:
       Gʹ: routeset to rescale to pre-normalization size.
@@ -900,10 +902,10 @@ def as_rescaled(Gʹ: nx.Graph, L: nx.Graph) -> nx.Graph:
 def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
     """Create an undetoured version of Gʹ.
 
-    Creates a shallow copy of `Gʹ` without detour nodes (and possibly *with*
+    Creates a shallow copy of ``Gʹ`` without detour nodes (and possibly *with*
     the resulting crossings). Changed links' 'kind' become 'tentative'.
 
-    This is to be applyed to a routeset that already has detours. It serves to
+    This is to be applied to a routeset that already has detours. It serves to
     re-run PathFinder on a detoured routeset, but it is not the best solution
     to prepare a routeset to be used as warmstart (re-hooking is missing).
     """
@@ -947,9 +949,9 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     Output may be branched (use with care with path routesets).
 
     Sifts through all 'tentative' gates' subtrees and choose the hook closest
-    to the respective root according to `d2roots`.
+    to the respective root according to ``d2roots``.
 
-    Should be called after `as_undetoured()` if the goal is to use G as a
+    Should be called after :func:`as_undetoured` if the goal is to use G as a
     warmstart for MILP models.
 
     Args:
@@ -1013,11 +1015,10 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
     Only works with solutions where subtrees are paths (radial topology).
 
-    Sifts through all 'tentative' gates' subtrees and re-hook that path to
-    the one of its end-nodes that is neares to the respective root according
-    to `d2roots`.
+    Sifts through the subtrees of 'tentative' feeders and re-hook the subtree via
+    the end-node that is nearest to the respective root according to ``d2roots``.
 
-    Should be called after `as_undetoured()` if the goal is to use S as a
+    Should be called after :func:`as_undetoured` if the goal is to use S as a
     warmstart for MILP models.
 
     Args:
@@ -1125,16 +1126,16 @@ def make_remap(G, refG, H, refH):
 
     CAUTION: only WTG node remapping is implemented.
 
-    If the nodes in `G` and in `H` represent the same site, but have different
+    If the nodes in ``G`` and in ``H`` represent the same site, but have different
     orientation, scale and node order, the mapping produced here can be used
-    with `NetworkX.relabel_nodes(G, remap)` to translate a routeset in G to a
+    with ``NetworkX.relabel_nodes(G, remap)`` to translate a routeset in G to a
     routeset in H.
 
     Args:
       G: routeset with obsolete representation.
       refG: two nodes to used as references.
       H: routeset with valid representation.
-      refH: two nodes corresponding to `refG`
+      refH: two nodes corresponding to ``refG``
     """
     T = G.graph['T']
     VertexC = G.graph['VertexC'][:T]
@@ -1157,11 +1158,12 @@ def make_remap(G, refG, H, refH):
 
 
 def add_terminal_closest_root(A: nx.Graph) -> None:
-    """Add node attribute 'root' to terminals and graph attribute 'rootmap__' to A.
+    """Add attributes ``'root'`` to terminals and ``'rootmap__'`` to ``A``.
 
     Changes A in-place.
-    'root' is the index of the root closest to node
-    'rootmap__' is an R-long list of T-long bitarrays.
+
+    * node attribute ``'root'`` is the index of the root closest to node.
+    * graph attribute ``'rootmap__'`` is an R-long list of T-long bitarrays.
 
     Args:
       A: available-links graph
@@ -1234,17 +1236,17 @@ def _blockmap_inner(u, v, angle__, angle_rank__, VertexC, R, T):
 
 
 def add_link_blockmap(A: nx.Graph):
-    """Add edge attributes 'blocked__'.
+    """Add edge attributes ``'blocked__'``.
 
-    Edges' attribute 'blocked__' are R-long list of T-long bitarray maps.
+    Edges' attribute ``'blocked__'`` are R-long list of T-long bitarray maps.
 
     If an edge's ``blocked__[r][t] == 1``, then this edge crosses the line-of-sight t-r.
 
-    Changes `A` in place. `A` should have no feeder edges.
+    Changes ``A`` in place. ``A`` should have no feeder edges.
 
-    Notes:
-    - this function neglects borders and countours.
-    - the space taken scales with R × T × num_edges(A)
+    Note:
+      * this function neglects borders and contours.
+      * the space taken scales with R × T × num_edges(A)
     """
     VertexC = A.graph['VertexC']
     R, T = A.graph['R'], A.graph['T']
@@ -1267,7 +1269,7 @@ def add_link_blockmap(A: nx.Graph):
 
 
 def add_link_cosines(A: nx.Graph):
-    """Add cosine of the angle wrt each root to all links of A as attribute '_cos'.
+    """Add cosine of the angle wrt each root to all links of A as attribute ``'cos_'``.
 
     Changes A in-place. The cosine is of the acute angle between the link line and the
     line that contains the mid-point of the link and the root (for each root).
@@ -1302,15 +1304,15 @@ def add_link_cosines(A: nx.Graph):
 def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
     """Create a new graph merging G and P.
 
-    Useful for visualizing the funnels explored by `pathfinding.PathFinder`.
-    `G` must have been created using `P`.
+    Useful for visualizing the funnels explored by :class:`.pathfinding.PathFinder`.
+    ``G`` must have been created using ``P``.
 
     Args:
       G: network graph for location
       P: planar embedding of location
 
     Returns:
-      Merged graph (pass to `plotting.gplot()` or 'svg.svgplot()`).
+      Merged graph (pass to :func:`.plotting.gplot` or :func:`.svg.svgplot`).
     """
     scaff = P.to_undirected()
     scaff.graph.update(G.graph)

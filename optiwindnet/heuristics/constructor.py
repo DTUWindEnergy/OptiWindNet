@@ -94,7 +94,7 @@ def constructor(
       weigh_detours: (!= esau_williams) only add edges whose tradeoff is not
         outweighted by detours
       straight_feeder_route: prevent crossings of feeders
-        (incompatible with `weigh_detours=True`)
+        (incompatible with ``weigh_detours=True``)
       maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
@@ -447,10 +447,11 @@ def constructor(
         union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
 
     def drop_target(subroot, payload):
-        """Drop `subroot` from the who_targets_ set of the peer it targets in `payload`.
+        """Drop ``subroot`` from the who_targets_ set of the peer it targets in
+        ``payload``.
 
-        `payload` is the queue entry's `(u, v)`; the targeted component is the one
-        holding `v`. Keeps who_targets_ consistent with the queue, so it never
+        ``payload`` is the queue entry's ``(u, v)``; the targeted component is the one
+        holding ``v``. Keeps who_targets_ consistent with the queue, so it never
         retains a subroot whose subtree has already been consumed (set to None).
         """
         targeted = who_targets_[subroot_[payload[1]]]
@@ -485,8 +486,8 @@ def constructor(
 
         Subroots are used in multiple data structures, a call to this function must
         effect the change across all of them. One additional change is the possible
-        root reassignment if `subroot_to` is closer to a different root than that of
-        `subroot_from`.
+        root reassignment if ``subroot_to`` is closer to a different root than that of
+        ``subroot_from``.
         """
         _debug(
             'reassigning subroot %d to %d via root %d',

@@ -581,9 +581,9 @@ _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 def warmup_model(
     model: pyo.ConcreteModel, metadata: ModelMetadata, S: nx.Graph
 ) -> pyo.ConcreteModel:
-    """Set initial solution into `model`.
+    """Set initial solution into ``model``.
 
-    Changes `model` and `metadata` in-place.
+    Changes ``model`` and ``metadata`` in-place.
 
     Args:
       model: pyomo model to apply the solution to.

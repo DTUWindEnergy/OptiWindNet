@@ -28,10 +28,11 @@ error, info = _lggr.error, _lggr.info
 
 class SolverGurobi(SolverPyomo, PoolHandler):
     """
-    For setting `threadlimit`, the SolverGurobi instance must have this option in
-    its `options` attribute before the call to .set_problem().
+    For setting ``threadlimit``, the SolverGurobi instance must have this option in
+    its ``options`` attribute before the call to :meth:`set_problem`.
 
-    Example:
+    Example::
+
       solver.options.update(threadlimit=8)
       solver.set_problem(...)
       solver.solve(...)
@@ -62,7 +63,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         warmstart: nx.Graph | None = None,
     ):
         """
-        This will keep the Gurobi license in use until a call to `get_solution()`.
+        This will keep the Gurobi license in use until a call to :meth:`get_solution`.
         """
         solver = pyo.SolverFactory(
             'gurobi_persistent',

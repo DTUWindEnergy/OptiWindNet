@@ -72,7 +72,8 @@ class SolverORTools(Solver, PoolHandler):
     """OR-Tools MathOpt wrapper using the selected backend.
 
     This class wraps and changes the behavior of MathOpt in order to save all
-    solutions found to a pool. Meant to be used with `investigate_pool()`.
+    solutions found to a pool. Meant to be used with
+    :meth:`.PoolHandler._investigate_pool`.
     """
 
     name: str
@@ -552,9 +553,9 @@ _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 def warmup_model(
     model: mathopt.Model, metadata: ModelMetadata, S: nx.Graph
 ) -> mathopt.Model:
-    """Set initial solution into `model`.
+    """Set initial solution into ``model``.
 
-    Changes `model` and `metadata` in-place.
+    Changes ``model`` and ``metadata`` in-place.
 
     Args:
       model: CP-SAT model to apply the solution to.

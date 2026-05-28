@@ -114,7 +114,7 @@ _DEFAULT_SQLITE_TIMEOUT = 15
 def open_database(
     filepath: str, create_db: bool = False, timeout: int = _DEFAULT_SQLITE_TIMEOUT
 ) -> SqliteDatabase:
-    """Opens the sqlite database v3 file specified in `filepath`.
+    """Opens the sqlite database v3 file specified in ``filepath``.
 
     Args:
       filepath: path to database file

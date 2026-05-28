@@ -19,7 +19,7 @@ def clusterize(A: nx.Graph, capacity: int) -> tuple[list[set[int]], list[int]]:
     is not increased by the clustering. This means only one partition may have
     a subtree with capacity slack. It does not attempt to make uniform-sized
     clusters, terminals tend to be allocated to the closest root (distance
-    measured in `P_paths` - see `make_planar_embedding()`).
+    measured in ``P_paths`` - see :func:`make_planar_embedding`).
     """
     R, T = (A.graph[k] for k in 'RT')
     d2roots = A.graph['d2roots']
