@@ -75,17 +75,21 @@ def constructor(
     method 'radial_EW' is constrained to producing radial topologies (i.e. subtrees are
     always simple paths) as opposed to the branched topologies produced by the others.
 
-    Methods:
-    - 'esau_williams': Esau-Williams C-MST heuristic modified to avoid crossings (EW).
-    - 'biased_EW': EW with a bias towards moving radially (root-ward) on quasi-ties.
-    - 'rootlust': EW with a tunable root-ward bias that increases as capacity decreases.
-    - 'radial_EW': EW variant that produces radial subtrees (simple paths from root).
+    Available Methods:
+      ``'esau_williams'``
+        Esau-Williams C-MST heuristic modified to avoid crossings (EW).
+      ``'biased_EW'``
+        EW with a bias towards moving radially (root-ward) on quasi-ties.
+      ``'rootlust'``
+        EW with a tunable root-ward bias that increases as capacity decreases.
+      ``'radial_EW'``
+        EW variant that produces radial subtrees (simple paths from root).
 
     Args:
       Aʹ: available links graph
       capacity: max number of terminals in a subtree
-      method: choice of method (see Methods)
-      bias_margin: (biased_EW | radial_EW) fractional margin within with edges
+      method: choice of method (see Available Methods)
+      bias_margin: (biased_EW | radial_EW) fractional margin within which edges
         are equivalent
       weigh_detours: (!= esau_williams) only add edges whose tradeoff is not
         outweighted by detours
