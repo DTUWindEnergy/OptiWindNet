@@ -364,9 +364,21 @@ class WindFarmNetwork:
             _logger.info('No buffering is performed')
 
     @classmethod
-    def from_yaml(cls, filepath: str, **kwargs):
-        """Create a WindFarmNetwork instance from a YAML file."""
+    def from_site_yaml(cls, filepath: str, **kwargs):
+        """Create a WindFarmNetwork instance from a site YAML file."""
         return cls(L=L_from_yaml(filepath), **kwargs)
+
+    @classmethod
+    def from_yaml(cls, filepath: str, **kwargs):
+        """Deprecated: use :meth:`from_site_yaml` instead."""
+        import warnings
+
+        warnings.warn(
+            'from_yaml() is deprecated, use from_site_yaml() instead.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return cls.from_site_yaml(filepath, **kwargs)
 
     @classmethod
     def from_pbf(cls, filepath: Path | str, **kwargs):
