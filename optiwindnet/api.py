@@ -1,6 +1,8 @@
 import logging
 from abc import ABC, abstractmethod
+from fractions import Fraction
 from itertools import pairwise
+from math import lcm
 from pathlib import Path
 from typing import Sequence
 
@@ -47,6 +49,40 @@ plt.rcParams['svg.fonttype'] = 'none'
 # Set up a logger and create shortcuts for error, warning, and info logging methods
 _logger = logging.getLogger(__name__)
 _error, _warning, _info = _logger.error, _logger.warning, _logger.info
+
+
+def _normalize_turbine_power(
+    turbine_power: Sequence[float], T: int
+) -> tuple[list[int], int]:
+    """Convert per-turbine power values to integers via LCM scaling.
+
+    Args:
+      turbine_power: per-turbine power weights (floats allowed).
+      T: expected number of turbines.
+
+    Returns:
+      Tuple of (integer power list, scale factor).
+
+    Raises:
+      ValueError: if length does not match T or any value is non-positive.
+    """
+    if len(turbine_power) != T:
+        raise ValueError(
+            f'turbine_power has {len(turbine_power)} entries but T={T} turbines.'
+        )
+    if any(p <= 0 for p in turbine_power):
+        raise ValueError('All turbine_power values must be positive.')
+    fracs = [Fraction(p).limit_denominator(100) for p in turbine_power]
+    scale = 1
+    for f in fracs:
+        scale = lcm(scale, f.denominator)
+    if scale > 10:
+        _warning(
+            'turbine_power normalization scale factor is %d. '
+            'Large scale factors may slow down MILP optimization.',
+            scale,
+        )
+    return [int(f * scale) for f in fracs], scale
 
 
 class Router(ABC):
@@ -118,6 +154,7 @@ class WindFarmNetwork:
         substationsC: np.ndarray | None = None,
         borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
         obstacleC_: Sequence[np.ndarray] = [],
+        turbine_power: Sequence[float] | np.ndarray | None = None,
         name: str = '',
         handle: str = '',
         L: nx.Graph | None = None,
@@ -135,6 +172,29 @@ class WindFarmNetwork:
             (_, 2): ``[[(x, y), ...], ...]``.
           name: Human-readable instance name. Defaults to "".
           handle: Short instance identifier. Defaults to "".
+          turbine_power: Per-turbine power weights as a sequence of length T.
+            Values are relative to a **nominal unit**: ``[1.0, 1.5, 2.0]``
+            means the second turbine produces 1.5× and the third 2× the
+            nominal power. Only ratios matter — ``[1.0, 2.0]`` and
+            ``[3.0, 6.0]`` are equivalent.
+
+            The ``cables`` capacity is always in **nominal power units**: a
+            cable with capacity ``k`` can carry any group of turbines whose
+            total power sums to at most ``k``. It is not tied to the lowest
+            or highest rated turbine — it is tied to whatever the user
+            defines as ``1.0``.
+
+            Only respected by :class:`MILPRouter` — heuristic routers
+            (:class:`EWRouter`, :class:`HGSRouter`) will emit a warning and
+            treat all turbines as having equal power.
+
+            .. note::
+              The feeder lower-bound constraint inside the MILP solvers uses
+              ``ceil(T / k)`` rather than ``ceil(W / k)`` (where W is total
+              power and k is cable capacity). With non-uniform power this
+              bound may be slightly loose, which can marginally widen the
+              solver search space without affecting solution correctness.
+
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to :class:`EWRouter`.
           buffer_dist: Buffer distance to dilate borders / erode obstacles.
@@ -214,6 +274,13 @@ class WindFarmNetwork:
         self._L = L
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], T
+
+        self._power_scale = 1
+        if turbine_power is not None:
+            int_powers, scale = _normalize_turbine_power(turbine_power, T)
+            self._power_scale = scale
+            for i, p in enumerate(int_powers):
+                L.nodes[i]['power'] = p
 
     # -------- helpers --------
     def _refresh_planar(self):
@@ -633,14 +700,31 @@ class WindFarmNetwork:
         else:
             warmstart = {}
 
+        if self._power_scale > 1:
+            scaled_cables = [
+                (cap * self._power_scale, cost) for cap, cost in self._cables
+            ]
+            scaled_capacity = self.cables_capacity * self._power_scale
+        else:
+            scaled_cables = self._cables
+            scaled_capacity = self.cables_capacity
+
         self._S, self._G = router.route(
             P=self.P,
             A=self.A,
-            cables=self.cables,
-            cables_capacity=self.cables_capacity,
+            cables=scaled_cables,
+            cables_capacity=scaled_capacity,
             verbose=verbose,
             **warmstart,
         )
+
+        if self._power_scale > 1:
+            for _, _, data in self._G.edges(data=True):
+                if 'load' in data:
+                    data['load'] /= self._power_scale
+            for _, data in self._G.nodes(data=True):
+                if 'power' in data:
+                    data['power'] = data['power'] / self._power_scale
         self._is_stale_SG = False
 
         terse_links = self.terse_links()
@@ -697,8 +781,12 @@ class EWRouter(Router):
         self.feeder_route = feeder_route
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        # optimizing
-        #  constructor_args=dict(method='rootlust', maxiter=self.maxiter)
+        T = A.graph['T']
+        if any(A.nodes[t].get('power', 1) != 1 for t in range(T)):
+            raise TypeError(
+                'EWRouter does not support non-uniform turbine_power. '
+                'Use MILPRouter for weighted power optimization.'
+            )
         constructor_args = dict(method='biased_EW', maxiter=self.maxiter)
         if self.feeder_route == 'segmented':
             constructor_args.update(weigh_detours=True, straight_feeder_route=False)
@@ -770,7 +858,12 @@ class HGSRouter(Router):
         self.seed = seed
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        # optimizing
+        T = A.graph['T']
+        if any(A.nodes[t].get('power', 1) != 1 for t in range(T)):
+            raise TypeError(
+                'HGSRouter does not support non-uniform turbine_power. '
+                'Use MILPRouter for weighted power optimization.'
+            )
         S = hgs_cvrp(
             as_normalized(A),
             capacity=cables_capacity,
