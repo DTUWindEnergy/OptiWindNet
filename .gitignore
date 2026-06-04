@@ -1,3 +1,10 @@
+# specific project files
+docs/notebooks/mplstyles/
+docs/notebooks/*.sqlite
+docs/notebooks/XML/
+.numba_cache/
+.mplconfig/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -26,6 +33,15 @@ share/python-wheels/
 *.egg
 MANIFEST
 optiwindnet/version.py
+
+# AI agents
+scripts/
+artifacts/
+AGENTS.md
+.codex
+.claude/
+.antigravitycli/
+.agents/
 
 # auto-generated backup files
 *.backup
@@ -147,8 +163,9 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-# pyright
+# checkers configuration
 pyrightconfig.json
+pyrefly.toml
 
 # Pyre type checker
 .pyre/

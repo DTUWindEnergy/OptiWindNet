@@ -9,8 +9,8 @@ from ._core import (
     FeederRoute,
     ModelMetadata,
     ModelOptions,
-    OWNWarmupFailed,
     OWNSolutionNotFound,
+    OWNWarmupFailed,
     SolutionInfo,
     Solver,
     Topology,
@@ -36,18 +36,22 @@ def solver_factory(solver_name: str) -> Solver:
     Note that the only solver that is a dependency of OptiWindNet is 'ortools'.
     Check OptiWindNet's documentation on how to install optional solvers.
 
+    Legacy compatibility: if solver_name == 'ortools' then the CP-SAT backend is used.
+
     Args:
-      solver_name: one of 'ortools', 'cplex', 'gurobi', 'cbc', 'scip', 'highs'.
+      solver_name: one of 'ortools.cp_sat', 'ortools.gscip',
+        'ortools.highs', 'cplex', 'gurobi', 'cbc', 'scip', 'highs'.
 
     Returns:
       Solver instance that can produce solutions for the cable routing problem.
     """
+    solver_name, *backend = solver_name.split('.', maxsplit=1)
     match solver_name:
         case 'ortools':
             if find_spec('ortools'):
                 from .ortools import SolverORTools
 
-                return SolverORTools()
+                return SolverORTools(backend[0] if backend else 'cp_sat')
             raise ModuleNotFoundError(
                 "Package 'ortools' not found. Try 'pip install ortools'."
             )
@@ -95,8 +99,9 @@ def solver_factory(solver_name: str) -> Solver:
                     return SolverFSCIP()
                 else:
                     raise FileNotFoundError(
-                        "Executable 'fscip' not found. Ensure the system PATH includes the "
-                        "path to 'fscip' (part of scipoptsuite from https://www.scipopt.org)."
+                        "Executable 'fscip' not found. Ensure the system PATH includes"
+                        " the path to 'fscip' (part of scipoptsuite from"
+                        ' https://www.scipopt.org).'
                     )
             else:
                 raise ModuleNotFoundError(
@@ -105,8 +110,9 @@ def solver_factory(solver_name: str) -> Solver:
                 )
         case 'highs':
             if find_spec('highspy'):
-                from .pyomo import SolverPyomoAppsi
                 from pyomo.contrib.appsi.solvers.highs import Highs
+
+                from .pyomo import SolverPyomoAppsi
 
                 return SolverPyomoAppsi(solver_name, Highs)
             raise ModuleNotFoundError(

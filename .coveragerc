@@ -8,6 +8,7 @@ omit =
     optiwindnet/db/modelv1.py
     optiwindnet/db/storagev0.py
     optiwindnet/db/storagev1.py
+    optiwindnet/db/migrate.py
     optiwindnet/weighting.py
     optiwindnet/synthetic.py
     optiwindnet/baselines/lkh.py

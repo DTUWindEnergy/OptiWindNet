@@ -14,14 +14,14 @@ from typing import Any, Mapping
 import networkx as nx
 import numpy as np
 
+from ..interarraylib import calcload
+from ..utils import make_handle
 from .model import (
     Machine,
     Method,
     NodeSet,
     RouteSet,
 )
-from ..interarraylib import calcload
-from ..utils import make_handle
 
 __all__ = ()
 
@@ -96,7 +96,7 @@ _misc_not = {
 }
 
 
-def L_from_nodeset(nodeset: object, handle: str | None = None) -> nx.Graph:
+def L_from_nodeset(nodeset: NodeSet, handle: str | None = None) -> nx.Graph:
     """Translate a NodeSet database entry to a location graph.
 
     Args:
@@ -136,7 +136,7 @@ def L_from_nodeset(nodeset: object, handle: str | None = None) -> nx.Graph:
     return L
 
 
-def G_from_routeset(routeset: object) -> nx.Graph:
+def G_from_routeset(routeset: RouteSet) -> nx.Graph:
     """Translate a RouteSet database entry to a routeset graph.
 
     Args:
@@ -146,7 +146,6 @@ def G_from_routeset(routeset: object) -> nx.Graph:
       Graph G containing the routeset.
     """
     nodeset = routeset.nodes
-    R = nodeset.R
     G = L_from_nodeset(nodeset)
     misc = routeset.misc if routeset.misc is not None else {}
     G.graph.update(
@@ -170,13 +169,6 @@ def G_from_routeset(routeset: object) -> nx.Graph:
     if routeset.detextra is not None:
         G.graph['detextra'] = routeset.detextra
 
-    if routeset.stuntC:
-        stuntC = np.lib.format.read_array(io.BytesIO(routeset.stuntC))
-        num_stunts = len(stuntC)
-        G.graph['num_stunts'] = num_stunts
-        G.graph['B'] += num_stunts
-        VertexC = G.graph['VertexC']
-        G.graph['VertexC'] = np.vstack((VertexC[:-R], stuntC, VertexC[-R:]))
     untersify_to_G(G, terse=routeset.edges, clone2prime=routeset.clone2prime)
     calc_length = G.size(weight='length')
     if abs(calc_length / routeset.length - 1) > 1e-5:
@@ -193,10 +185,7 @@ def G_from_routeset(routeset: object) -> nx.Graph:
 def packnodes(G: nx.Graph) -> PackType:
     R, T, B = (G.graph[k] for k in 'RTB')
     VertexC = G.graph['VertexC']
-    num_stunts = G.graph.get('num_stunts')
-    if num_stunts:
-        B -= num_stunts
-        VertexC = np.vstack((VertexC[: T + B], VertexC[-R:]))
+
     VertexC_npy_io = io.BytesIO()
     np.lib.format.write_array(VertexC_npy_io, VertexC, version=(3, 0))
     VertexC_npy = VertexC_npy_io.getvalue()
@@ -242,7 +231,7 @@ def packmethod(method_options: dict) -> PackType:
     return pack
 
 
-def add_if_absent(entity: object, pack: PackType) -> bytes:
+def add_if_absent(entity: type, pack: PackType) -> bytes:
     digest = pack['digest']
     if not entity.select().where(entity.digest == digest).exists():
         entity.create(**pack)
@@ -366,27 +355,18 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
         capacity=G.graph['capacity'],
         length=length,
         creator=G.graph['creator'],
-        is_normalized=G.graph.get('is_normalized', False),
         runtime=G.graph['runtime'],
-        num_gates=[len(G[root]) for root in range(-R, 0)],
+        feeders_per_root=[len(G[root]) for root in range(-R, 0)],
         misc=misc,
         **terse_pack,
     )
     # Optional fields
-    num_stunts = G.graph.get('num_stunts')
-    if num_stunts:
-        VertexC = G.graph['VertexC']
-        stuntC = VertexC[T + B - num_stunts : T + B].copy()
-        stuntC_npy_io = io.BytesIO()
-        np.lib.format.write_array(stuntC_npy_io, stuntC, version=(3, 0))
-        packed_G['stuntC'] = stuntC_npy_io.getvalue()
     if C + D > 0:
         packed_G['clone2prime'] = G.graph['fnT'][-C - D - R : -R].tolist()
     concatenate_tuples = partial(sum, start=())
     pack_if_given = (  # key, function to prepare data
         ('detextra', None),
         ('num_diagonals', None),
-        ('valid', None),
         ('tentative', concatenate_tuples),
         ('rogue', concatenate_tuples),
     )
@@ -438,7 +418,7 @@ def get_machine_pk() -> int:
     return m.id
 
 
-def G_by_method(G: nx.Graph, method: object) -> nx.Graph:
+def G_by_method(G: nx.Graph, method: Method) -> nx.Graph:
     """Fetch from the database a layout for `G` by `method`.
     `G` must be a layout solution with the necessary info in the G.graph dict.
     `method` is a Method.
@@ -462,7 +442,7 @@ def G_by_method(G: nx.Graph, method: object) -> nx.Graph:
 
 def Gs_from_attrs(
     farm: object,
-    methods: object | Sequence[object],
+    methods: Method | Sequence[object],
     capacities: int | Sequence[int],
 ) -> list[tuple[nx.Graph]]:
     """

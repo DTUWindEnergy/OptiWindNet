@@ -5,10 +5,8 @@ import logging
 import math
 import random
 import warnings
-from typing import Callable
-from typing import Sequence
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Sequence
 
 import hybgensea
 import networkx as nx
@@ -17,6 +15,7 @@ import numpy as np
 from ..clustering import clusterize
 from ..interarraylib import fun_fingerprint
 from ..repair import repair_routeset_path
+from ._core import remove_offending_crossings
 
 _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
@@ -281,7 +280,7 @@ def hgs_cvrp(
 
     For multi-root instances, the vehicles (feeders) parameter can only be left
     undefined (meaning unlimited) or set to the minimum feasible value. Attempting
-    to set other values will result in a warning and the minimum being used. 
+    to set other values will result in a warning and the minimum being used.
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause the
@@ -350,45 +349,26 @@ def hgs_cvrp(
 
     # iterative repair loop
     diagonals = A.graph['diagonals']
+    if R > 1:
+        # needed in clustering
+        A.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
+    crossings = []
     i = 0
-    while repair:
+    if not repair:
         S = _solve()
-        S = repair_routeset_path(S, A)
-        crossings = S.graph.get('outstanding_crossings', [])
-        if not crossings or i == max_retries:
-            break
-        i += 1
-        if i == 1:
-            A = A.copy()
-            diagonals = diagonals.copy()
-            A.graph['diagonals'] = diagonals
-        crossing_counterparts = defaultdict(list)
-        for uv, st in crossings:
-            crossing_counterparts[uv].append(st)
-            crossing_counterparts[st].append(uv)
-        for uv in sorted(
-            crossing_counterparts,
-            key=lambda k: len(crossing_counterparts[k]),
-            reverse=True,
-        ):
-            counterparts = crossing_counterparts[uv]
-            if counterparts:
-                if (
-                    len(counterparts) == 1
-                    and A.edges[counterparts[0]]['length'] > A.edges[uv]['length']
-                ):
-                    st = counterparts[0]
-                    counterparts = crossing_counterparts[st]
-                    counterparts.remove(uv)
-                    uv = st
-                for st in counterparts:
-                    crossing_counterparts[st].remove(uv)
-                if uv in diagonals:
-                    del diagonals[uv]
-                A.remove_edge(*uv)
     else:
-        # repair was false, while loop skipped
-        S = _solve()
+        while True:
+            S = _solve()
+            S = repair_routeset_path(S, A)
+            crossings = S.graph.get('outstanding_crossings', [])
+            if not crossings or i == max_retries:
+                break
+            i += 1
+            if i == 1:
+                A = A.copy()
+                diagonals = diagonals.copy()
+                A.graph['diagonals'] = diagonals
+            remove_offending_crossings(A, diagonals, crossings)
     if i > 0:
         S.graph['retries'] = i
         if crossings:
@@ -432,14 +412,15 @@ def iterative_hgs_cvrp(
 ) -> nx.Graph:
     """DEPRECATED: Backward-compatible alias of `hgs_cvrp()`, use it instead."""
     warnings.warn(
-        '`iterative_hgs_cvrp()` is deprecated and will be removed in a future release. '
+        '`iterative_hgs_cvrp()` is deprecated and will be removed in v0.3. '
         'Use `hgs_cvrp()` instead, as it now iterates and repairs solution by default.',
         DeprecationWarning,
         stacklevel=2,
     )
     if complete:
         warnings.warn(
-            'The `complete` parameter is deprecated and ignored.',
+            'The `complete` parameter is deprecated, ignored, and will be'
+            ' removed in v0.3.',
             DeprecationWarning,
             stacklevel=2,
         )
@@ -470,7 +451,7 @@ def hgs_multiroot(
 ) -> nx.Graph:
     """DEPRECATED: Backward-compatible alias of `hgs_cvrp()`, use it instead."""
     warnings.warn(
-        '`hgs_multiroot()` is deprecated and will be removed in a future release. '
+        '`hgs_multiroot()` is deprecated and will be removed in v0.3. '
         'Use `hgs_cvrp()` instead, as it now also works for multi-root instances.',
         DeprecationWarning,
         stacklevel=2,

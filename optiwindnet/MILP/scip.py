@@ -23,6 +23,7 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    physical_core_count,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -37,9 +38,7 @@ class SolverSCIP(Solver, PoolHandler):
 
     def __init__(self):
         self.options = {
-            # SCIP's concurrent solver uses min(8, cpu_count()) by default
-            # but it may use a lower number if RAM usage is huge
-            # 'parallel/maxnthreads': 16,
+            'parallel/maxnthreads': physical_core_count(),
             'concurrent/scip-feas/prefprio': 0.6,
             'concurrent/scip/prefprio': 0.3,
             'concurrent/scip-cpsolver/prefprio': 0,
@@ -97,7 +96,8 @@ class SolverSCIP(Solver, PoolHandler):
         num_solutions = model.getNSols()
         if num_solutions == 0:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {model.getStatus()}'
+                f'Unable to find a solution. Solver {self.name} terminated'
+                f' with: {model.getStatus()}'
             )
         bound = model.getDualbound()
         objective = model.getObjVal()

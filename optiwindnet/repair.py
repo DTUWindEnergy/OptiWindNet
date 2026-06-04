@@ -36,6 +36,7 @@ def gate_and_leaf_path(S: nx.Graph, n: int) -> tuple[int, int]:
             gate = None
         else:
             gate = back = n
+            leaf = n
         (fwd,) = S[n]
         while S.degree[fwd] == 2:
             s, t = S[fwd]

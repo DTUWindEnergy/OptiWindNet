@@ -6,14 +6,14 @@ import math
 import pickle
 import sys
 from hashlib import sha256
-from itertools import pairwise, chain
+from itertools import chain, pairwise
 
 import networkx as nx
+import numba as nb
 import numpy as np
 from bitarray import bitarray
-from bitarray.util import zeros
 
-from .geometric import CoordPair, rotate, angle_helpers
+from .geometric import CoordPair, angle_helpers, rotate
 
 _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
@@ -63,7 +63,9 @@ _essential_graph_attrs = (
 )
 
 
-def assign_cables(G: nx.Graph, cables: list[tuple[int, float]], currency: str = '€'):
+def assign_cables(
+    G: nx.Graph, cables: list[tuple[int, float | int]], currency: str = '€'
+):
     """Assign a cable type to each edge of `G` and update attribute 'cost'.
 
     Each edge is assigned the cheapest cable type that can carry its load. The
@@ -343,6 +345,16 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         value = A.graph.get(k)
         if value is not None:
             G.graph[k] = value
+
+    stunts_primes = A.graph.get('stunts_primes')
+    if stunts_primes:
+        num_stunts = len(stunts_primes)
+        G.graph['B'] -= num_stunts
+    else:
+        num_stunts = 0
+    # remove supertriangle and stunts coordinates from VertexC
+    G.graph['VertexC'] = np.vstack((VertexC[: -R - 3 - num_stunts], VertexC[-R:]))
+
     nx.set_node_attributes(
         G,
         {n: label for n, label in A.nodes(data='label') if label is not None},
@@ -353,8 +365,6 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         G.nodes[r]['kind'] = 'oss'
     if 'is_normalized' in A.graph:
         G.graph['is_normalized'] = True
-    # remove supertriangle coordinates from VertexC
-    G.graph['VertexC'] = np.vstack((VertexC[: -R - 3], VertexC[-R:]))
     # non_A_edges are the far-reaching gates and ocasionally the result of
     # a poor solver (e.g. LKH-3)
     non_A_edges = S.edges - A.edges
@@ -652,13 +662,24 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     """
     R, T = (G.graph[k] for k in 'RT')
     L = nx.Graph(**{k: G.graph[k] for k in _essential_graph_attrs if k in G.graph})
+
+    # TODO: remove this entire legacy compatibility block after a couple of releases.
+    # BEGIN: Legacy compatibility block for graphs whose VertexC/B still reflect stunts
+    num_stunts = G.graph.get('num_stunts')
+    if num_stunts:
+        VertexC = G.graph['VertexC']
+        base_B = G.graph['B'] - num_stunts
+        L.graph['VertexC'] = np.vstack((VertexC[: T + base_B], VertexC[-R:]))
+        L.graph['B'] = base_B
     stunts_primes = G.graph.get('stunts_primes')
     if stunts_primes:
-        VertexC = G.graph['VertexC']
+        VertexC = L.graph['VertexC']
         L.graph['VertexC'] = np.vstack(
             (VertexC[: -R - len(stunts_primes)], VertexC[-R:])
         )
         L.graph['B'] -= len(stunts_primes)
+    # END: Legacy compatibility block
+
     L.add_nodes_from(
         ((n, {'label': label}) for n, label in G.nodes(data='label') if 0 <= n < T),
         kind='wtg',
@@ -1146,18 +1167,84 @@ def add_terminal_closest_root(A: nx.Graph) -> None:
       A: available-links graph
     """
     R = A.graph['R']
+    T = A.graph['T']
     closest_root_ = np.argmin(A.graph['d2roots'], axis=1) - R
-    nx.set_node_attributes(A, {n: r.item() for n, r in enumerate(closest_root_)}, 'root')
-    A.graph['rootmap__'] = [bitarray((closest_root_ == r).tolist()) for r in range(-R, 0)]
+    nx.set_node_attributes(
+        A, {n: r.item() for n, r in enumerate(closest_root_)}, 'root'
+    )
+    # while 'd2roots' includes border vertices, 'rootmap__' must not
+    A.graph['rootmask__'] = [
+        bitarray((closest_root_[:T] == r).tolist()) for r in range(-R, 0)
+    ]
+
+
+@nb.njit(cache=True)
+def _blockmap_inner(u, v, angle__, angle_rank__, VertexC, R, T):
+    """Compute blockage bitmap for edge (u, v) across all roots.
+
+    Returns an (R, T) boolean array where True means turbine t is blocked
+    by edge (u, v) with respect to root r.
+    """
+    root_offset = VertexC.shape[0] - R
+    blocked = np.zeros((R, T), dtype=np.bool_)
+    uC = VertexC[u]
+    vC = VertexC[v]
+    vec_x = vC[0] - uC[0]
+    vec_y = vC[1] - uC[1]
+    for r in range(R):
+        uR = angle_rank__[u, r]
+        vR = angle_rank__[v, r]
+        uv_angle = angle__[v, r] - angle__[u, r]
+        if uv_angle < 0:
+            uR, vR = vR, uR
+        root_idx = root_offset + r
+        rootC_x = VertexC[root_idx, 0]
+        rootC_y = VertexC[root_idx, 1]
+        root_cross = (rootC_x - uC[0]) * vec_y - (rootC_y - uC[1]) * vec_x
+        is_root_sign_pos = root_cross > 0
+        if abs(uv_angle) <= np.pi:
+            for t in range(T):
+                ar = angle_rank__[t, r]
+                if ar <= uR or ar >= vR:
+                    continue
+                w_cross = (VertexC[t, 0] - uC[0]) * vec_y - (
+                    VertexC[t, 1] - uC[1]
+                ) * vec_x
+                if is_root_sign_pos:
+                    if w_cross <= 0:
+                        blocked[r, t] = True
+                else:
+                    if w_cross >= 0:
+                        blocked[r, t] = True
+        else:
+            for t in range(T):
+                ar = angle_rank__[t, r]
+                if ar >= uR and ar <= vR:
+                    continue
+                w_cross = (VertexC[t, 0] - uC[0]) * vec_y - (
+                    VertexC[t, 1] - uC[1]
+                ) * vec_x
+                if is_root_sign_pos:
+                    if w_cross <= 0:
+                        blocked[r, t] = True
+                else:
+                    if w_cross >= 0:
+                        blocked[r, t] = True
+    return blocked
 
 
 def add_link_blockmap(A: nx.Graph):
-    """Experimental. Add edge attributes 'blocked__'.
+    """Add edge attributes 'blocked__'.
 
-    Edges' 'blocked__' are R-long list of T-long bitarray maps. A 1-bit in position
-    `t` on the bitarray for root `r` means the edge crosses the line-of-sight t-r.
-    
+    Edges' attribute 'blocked__' are R-long list of T-long bitarray maps.
+
+    If an edge's ``blocked__[r][t] == 1``, then this edge crosses the line-of-sight t-r.
+
     Changes `A` in place. `A` should have no feeder edges.
+
+    Notes:
+    - this function neglects borders and countours.
+    - the space taken scales with R × T × num_edges(A)
     """
     VertexC = A.graph['VertexC']
     R, T = A.graph['R'], A.graph['T']
@@ -1169,29 +1256,13 @@ def add_link_blockmap(A: nx.Graph):
     A.graph['angle_rank__'] = angle_rank__
     A.graph['dups_from_root_rank__'] = dups_from_root_rank__
     for u, v, edgeD in A.edges(data=True):
+        blocked = _blockmap_inner(u, v, angle__, angle_rank__, VertexC, R, T)
         blocked__ = []
-        for angle_, angle_rank_, rootC in zip(angle__.T, angle_rank__.T, VertexC[-R:]):
-            blocked_ = zeros(T)
-            uR, vR = angle_rank_[[u, v]].tolist()
-            uv_angle = (angle_[v] - angle_[u]).item()
-            if uv_angle < 0:
-                uR, vR = vR, uR
-            if abs(uv_angle) <= np.pi:
-                inside_wedge = np.flatnonzero((uR < angle_rank_) & (angle_rank_ < vR))
-            else:
-                inside_wedge = np.flatnonzero((angle_rank_ < uR) | (vR < angle_rank_))
-            if len(inside_wedge) > 0:
-                vec = VertexC[v] - VertexC[u]
-                wedge_vec_ = VertexC[inside_wedge] - VertexC[u]
-                cross = wedge_vec_[:, 0] * vec[1] - wedge_vec_[:, 1] * vec[0]
-                root_vec = rootC - VertexC[u]
-                is_root_sign_pos = (root_vec[0] * vec[1] - root_vec[1] * vec[0]) > 0
-                blocked_[
-                    inside_wedge[
-                        (cross <= 0) if is_root_sign_pos else (cross >= 0)
-                    ].tolist()
-                ] = 1
-            blocked__.append(blocked_)
+        for r in range(R):
+            ba = bitarray()
+            ba.frombytes(np.packbits(blocked[r]).tobytes())
+            del ba[T:]
+            blocked__.append(ba)
         edgeD['blocked__'] = blocked__
 
 

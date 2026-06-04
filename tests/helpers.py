@@ -1,30 +1,32 @@
 import copy
+import pickle
+from collections import Counter
 from pathlib import Path
-from typing import Iterable, Any, Dict, Optional
-import dill
-import numpy as np
+from typing import Any, Dict, Iterable, Optional
+
 import networkx as nx
-from optiwindnet.api import WindFarmNetwork
-from optiwindnet.api import EWRouter, HGSRouter, MILPRouter
+import numpy as np
+
+from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
 from optiwindnet.MILP import ModelOptions
 
 
-def load_dill(path: Path) -> Any:
-    """Load a dill file; raise FileNotFoundError with regeneration hint if missing."""
+def load_instances(path: Path) -> Any:
+    """Load a pickled instance file; raise FileNotFoundError with
+    regeneration hint if missing."""
     if not path.exists():
         raise FileNotFoundError(
             f'Missing expected test data file: {path}\n\n'
-            'To (re)generate this file run the appropriate generator script, e.g.:\n'
-            'update_expected_values.py\n'
-            'Or run pytest with --regen-expected to attempt regeneration automatically '
-            '(only if you really want that behavior).'
+            'To (re)generate run: python update_expected_values.py\n'
+            'Or run pytest with --regen-expected.'
         )
     with path.open('rb') as fh:
-        return dill.load(fh)
+        return pickle.load(fh)
 
 
 def router_factory(spec: Optional[Dict[str, Any]]):
-    """Create an instantiated router from a spec dict (same semantics as your generators)."""
+    """Create an instantiated router from a spec dict
+    (same semantics as your generators)."""
     if spec is None:
         return None
     clsname = spec.get('class')
@@ -57,7 +59,8 @@ def assert_graph_equal(
     Compare two NetworkX graphs with tolerant numeric checks and simple diffs.
     Raises AssertionError on any mismatch.
 
-    - `ignored_graph_keys` can contain dotted paths like "method_options.fun_fingerprint.funhash"
+    - `ignored_graph_keys` can contain dotted paths like
+      "method_options.fun_fingerprint.funhash"
       or top-level keys like "runtime". Dotted paths are removed from both graphs
       before comparison.
     """
@@ -74,7 +77,8 @@ def assert_graph_equal(
         cur.pop(parts[-1], None)
 
     def _deep_clean(G: nx.Graph, dotted_paths: Iterable[str]) -> nx.Graph:
-        """Return a deep copy with specified dotted paths removed from graph attr dict."""
+        """Return a deep copy with specified dotted paths removed
+        from graph attr dict."""
         H = copy.deepcopy(G)
         for p in dotted_paths:
             _pop_nested(H.graph, p)
@@ -190,12 +194,39 @@ def assert_graph_equal(
             )
 
 
+def canonical_edges(G: nx.Graph) -> Counter:
+    """Edge multiset of G where detour clones are replaced by their primes.
+
+    Two route sets with equal canonical edge multisets are topologically
+    equivalent even if their detour clones have different numbering.
+
+    Multiplicity matters: two independent feeders touching the same border
+    vertex produce two distinct clones with the same prime, so the canonical
+    edge appears twice.
+    """
+    T = G.graph['T']
+    B = G.graph.get('B', 0)
+    fnT = G.graph.get('fnT')
+
+    def prime(n: int) -> int:
+        n = int(n)
+        if n < 0 or n < T + B:
+            return n
+        return int(fnT[n])
+
+    edges: Counter = Counter()
+    for u, v in G.edges:
+        pu, pv = prime(u), prime(v)
+        edges[(pu, pv) if pu < pv else (pv, pu)] += 1
+    return edges
+
+
 def tiny_wfn(
     turbinesC=None,
     substationsC=None,
     borderC=None,
     obstacleC_=None,
-    cables=[(4, 10)],
+    cables=[(4, 10.0)],
     optimize=True,
     router=None,
 ):
@@ -205,7 +236,8 @@ def tiny_wfn(
     - turbinesC : (N,2) array-like of turbine coordinates (default four turbines).
     - substationsC : (M,2) array-like of substations (default one at left).
     - borderC : (B,2) array-like polygon coordinates for border (default rectangle).
-    - obstacleC_ : list of (k,2) arrays (rings) or a single 2D array (default one small obstacle).
+    - obstacleC_ : list of (k,2) arrays (rings) or a single 2D array
+      (default one small obstacle).
     - cables : cables argument passed to WindFarmNetwork (default 4).
     - optimize : if True, call wfn.optimize() before returning (default False).
     """

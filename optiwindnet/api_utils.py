@@ -19,7 +19,9 @@ def expand_polygon_safely(polygon, buffer_dist):
         max_buffer_dist = polygon.exterior.minimum_clearance / 2
         if buffer_dist >= max_buffer_dist:
             warning(
-                'The defined border is non-convex and buffering may introduce unexpected changes. For visual comparison use plot_original_vs_buffered().'
+                'The defined border is non-convex and buffering may introduce'
+                ' unexpected changes. For visual comparison use'
+                ' plot_original_vs_buffered().'
             )
     return polygon.buffer(buffer_dist, quad_segs=2)
 
@@ -30,7 +32,8 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
 
     if shrunk_polygon.is_empty:
         warning(
-            'Buffering by %.2f completely removed the obstacle at index %d. For visual comparison use plot_original_vs_buffered().',
+            'Buffering by %.2f completely removed the obstacle at index %d.'
+            ' For visual comparison use plot_original_vs_buffered().',
             shrink_dist,
             indx,
         )
@@ -38,7 +41,8 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
 
     elif shrunk_polygon.geom_type == 'MultiPolygon':
         warning(
-            'Shrinking by %.2f split the obstacle at index %d into %d pieces. For visual comparison use plot_original_vs_buffered().',
+            'Shrinking by %.2f split the obstacle at index %d into %d pieces.'
+            ' For visual comparison use plot_original_vs_buffered().',
             shrink_dist,
             indx,
             len(shrunk_polygon.geoms),
@@ -50,7 +54,9 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
 
     else:
         warning(
-            'Unexpected geometry type %s after shrinking obstacle at index %d. The obstacle is totally removed. For visual comparison use plot_original_vs_buffered().',
+            'Unexpected geometry type %s after shrinking obstacle at index %d.'
+            ' The obstacle is totally removed.'
+            ' For visual comparison use plot_original_vs_buffered().',
             shrunk_polygon.geom_type,
             indx,
         )
@@ -143,8 +149,7 @@ def is_warmstart_eligible(
 
     if S_warm is None:
         if verbose_warmstart:
-            print('>>> No solution is available for warmstarting! <<<')
-            print()
+            warning('No solution is available for warmstarting.')
         return False
 
     R = S_warm.graph['R']
@@ -175,13 +180,15 @@ def is_warmstart_eligible(
 
     if feeder_counts[0] > feeder_limit:
         reasons.append(
-            f'number of feeders ({feeder_counts[0]}) exceeds feeder limit ({feeder_limit})'
+            f'number of feeders ({feeder_counts[0]}) exceeds feeder limit'
+            f' ({feeder_limit})'
         )
 
     # Detour constraint
     if S_warm_has_detour and model_options.get('feeder_route') == 'straight':
         reasons.append(
-            'segmented feeders are incompatible with model option: feeder_route="straight"'
+            'segmented feeders are incompatible with model option:'
+            ' feeder_route="straight"'
         )
 
     # Topology constraint
@@ -193,27 +200,25 @@ def is_warmstart_eligible(
 
     # Output
     if reasons and verbose_warmstart:
-        print()
-        print(
-            'Warning: No warmstarting (even though a solution is available) due to the following reason(s):'
+        warning(
+            'No warmstarting (even though a solution is available) due to: %s',
+            '; '.join(reasons),
         )
-        for reason in reasons:
-            print(f'    - {reason}')
-        print()
         return False
     elif solver_name != 'scip':
-        msg = 'Using warm start: the model is initialized with the provided solution S.'
         if verbose_warmstart:
-            print(msg)
-            print()
+            info(
+                'Using warm start: the model is initialized with the'
+                ' provided solution S.'
+            )
         return True
     else:
         return False
 
 
 def parse_cables_input(
-    cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
-) -> list[tuple[int, float]]:
+    cables: int | list[int] | list[tuple[int, float | int]] | np.ndarray,
+) -> list[tuple[int, float | int]]:
     # If input is numpy array, convert to list for uniform processing
     if isinstance(cables, np.ndarray):
         cables = cables.tolist()
@@ -241,7 +246,7 @@ def enable_ortools_logging_if_jupyter(solver):
         pass
     else:
         if shell == 'ZMQInteractiveShell':  # Jupyter notebook or lab
-            solver.solver.log_callback = print
+            solver.log_callback = print
 
 
 def extract_network_as_array(G):
@@ -316,32 +321,37 @@ def merge_obs_into_border(L):
             not border_polygon.intersects(obs_poly)
         ):
             warning(
-                'Obstacle at index %d is completely outside the border and is neglected.',
+                'Obstacle at index %d is completely outside the border'
+                ' and is neglected.',
                 i,
             )
         else:
             # Subtract this obstacle from the border
             warning(
-                'Obstacle at index %d intersects with the exteriour border and is merged into the exterior border.',
+                'Obstacle at index %d intersects with the exteriour border'
+                ' and is merged into the exterior border.',
                 i,
             )
             new_border_polygon = border_polygon.difference(obs_poly)
 
             if new_border_polygon.is_empty:
                 raise ValueError(
-                    'Obstacle subtraction resulted in an empty border — check your geometry.'
+                    'Obstacle subtraction resulted in an empty border'
+                    ' — check your geometry.'
                 )
 
             if border_subtraction_verbose:
                 info(
-                    'At least one obstacle intersects/touches the border. The border is redefined to exclude those obstacles.'
+                    'At least one obstacle intersects/touches the border.'
+                    ' The border is redefined to exclude those obstacles.'
                 )
                 border_subtraction_verbose = False
 
             # If the subtraction results in multiple pieces (MultiPolygon), raise error
             if isinstance(new_border_polygon, MultiPolygon):
                 raise ValueError(
-                    'Obstacle subtraction resulted in multiple pieces (MultiPolygon) — check your geometry.'
+                    'Obstacle subtraction resulted in multiple pieces'
+                    ' (MultiPolygon) — check your geometry.'
                 )
             else:
                 border_polygon = new_border_polygon

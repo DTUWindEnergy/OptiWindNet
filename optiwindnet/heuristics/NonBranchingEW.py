@@ -20,6 +20,7 @@ from ..geometric import (
 )
 from ..interarraylib import add_terminal_closest_root
 from ..mesh import delaunay
+from ._deprecation import deprecated_heuristic
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -28,6 +29,10 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
+@deprecated_heuristic(
+    migrate_to="constructor(A, capacity, method='radial_EW', "
+    'straight_feeder_route=True, weigh_detours=False)'
+)
 def NBEW(
     L: nx.Graph,
     capacity: int,
@@ -429,7 +434,7 @@ def NBEW(
         if not pq:
             # finished
             break
-        sr_u, (u, v) = pq.top()
+        _, sr_u, (u, v) = pq.top()
         debug('<popped> «%d~%d», sr_u: <%d>', u, v, sr_u)
 
         # TODO: main loop should do only

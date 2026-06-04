@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Sequence
 
 import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
 import networkx as nx
 import numpy as np
 import shapely as shp
+from matplotlib.axes import Axes
 
 from .api_utils import (
     buffer_border_obs,
@@ -20,8 +20,8 @@ from .api_utils import (
     plot_org_buff,
 )
 from .baselines.hgs import hgs_cvrp
-from .heuristics import CPEW, EW_presolver
-from .importer import L_from_pbf, L_from_site, L_from_yaml, L_from_windIO
+from .heuristics import constructor
+from .importer import L_from_pbf, L_from_site, L_from_windIO, L_from_yaml
 from .importer import load_repository as load_repository
 from .interarraylib import (
     G_from_S,
@@ -32,10 +32,10 @@ from .interarraylib import (
     calcload,
 )
 from .mesh import make_planar_embedding
-from .MILP import ModelOptions, solver_factory, OWNSolutionNotFound, OWNWarmupFailed
+from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
-from .svg import svgplot
+from .svg import svgplot, svgpplot
 
 ##################################
 # OptiWindNet Network/Router API #
@@ -56,13 +56,24 @@ class Router(ABC):
     """
 
     _summary_attrs: tuple[str, ...]
+    _repr_attrs: tuple[str, ...] = ()
+
+    def __repr__(self) -> str:
+        # Defensive by design: getattr-guard every field and skip None values so
+        # the repr never raises, even on a partially-initialized instance.
+        parts = [type(self).__name__]
+        for attr in self._repr_attrs:
+            val = getattr(self, attr, None)
+            if val is not None:
+                parts.append(f'{attr}={val!r}')
+        return '<' + ' '.join(parts) + '>'
 
     @abstractmethod
     def route(
         self,
         P: nx.PlanarEmbedding,
         A: nx.Graph,
-        cables: list[tuple[int, float]],
+        cables: list[tuple[int, float | int]],
         cables_capacity: int,
         verbose: bool,
         **kwargs,
@@ -102,7 +113,7 @@ class WindFarmNetwork:
 
     def __init__(
         self,
-        cables: int | list[int] | list[tuple[int, float]] | np.ndarray,
+        cables: int | list[int] | list[tuple[int, float | int]] | np.ndarray,
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
         borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
@@ -124,12 +135,14 @@ class WindFarmNetwork:
           turbinesC: Turbine coordinates (T, 2): [(x, y), ...].
           substationsC: Substation coordinates (R, 2): [(x, y), ...].
           borderC: Polygonal border coordinates (_, 2): [(x, y), ...].
-          obstacleC_: One or more polygons for exclusion zones list of (_, 2): [[(x, y), ...], ...].
+          obstacleC_: One or more polygons for exclusion zones list of (_, 2):
+            [[(x, y), ...], ...].
           name: Human-readable instance name. Defaults to "".
           handle: Short instance identifier. Defaults to "".
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to `EWRouter`.
-          buffer_dist: Buffer distance to dilate borders / erode obstacles. Defaults to 0.
+          buffer_dist: Buffer distance to dilate borders / erode obstacles.
+            Defaults to 0.
 
         Notes:
           * If both `L` and coordinates are provided, `L` takes precedence.
@@ -161,7 +174,8 @@ class WindFarmNetwork:
         if L is not None:
             if turbinesC is not None or substationsC is not None:
                 _warning(
-                    'Both coordinates and L are given, OptiWindNet prioritizes L over coordinates.'
+                    'Both coordinates and L are given, OptiWindNet prioritizes'
+                    ' L over coordinates.'
                 )
             L = as_stratified_vertices(L)
             T = L.graph['T']
@@ -188,7 +202,8 @@ class WindFarmNetwork:
             )
         else:
             raise TypeError(
-                'Both turbinesC and substationsC must be provided! Alternatively, L should be given.'
+                'Both turbinesC and substationsC must be provided!'
+                ' Alternatively, L should be given.'
             )
         self._L = L
         self._VertexC = L.graph['VertexC']
@@ -229,7 +244,6 @@ class WindFarmNetwork:
             L = self._L
             T = L.graph['T']
             border_sizes = np.array(
-                #  [len(L.graph['border'])] + [len(obs) for obs in L.graph['obstacles']],
                 [len(L.graph.get('border', []))]
                 + [len(obs) for obs in L.graph.get('obstacles', [])],
                 dtype=np.int_,
@@ -279,7 +293,7 @@ class WindFarmNetwork:
         return self._G
 
     @property
-    def cables(self) -> list[tuple[int, float]]:
+    def cables(self) -> list[tuple[int, float | int]]:
         "Set of cable specifications as [(capacity, linear_cost), ...]."
         return self._cables
 
@@ -341,7 +355,7 @@ class WindFarmNetwork:
                 **kwargs,
             )
         except AttributeError:
-            print('No buffering is performed')
+            _logger.info('No buffering is performed')
 
     @classmethod
     def from_yaml(cls, filepath: str, **kwargs):
@@ -358,31 +372,86 @@ class WindFarmNetwork:
         """Create a WindFarmNetwork instance from WindIO yaml file."""
         return cls(L=L_from_windIO(filepath), **kwargs)
 
+    def __repr__(self) -> str:
+        """Concise one-line summary for console/debugging.
+
+        Defensive by design: instance attributes are getattr-guarded so the repr
+        never raises, even on a partially-initialized instance (e.g. if ``__init__``
+        aborted before ``_T``/``_R`` were set). The solved-network branch is reached
+        only when ``_is_stale_SG`` is ``False``, which guarantees ``_G`` exists.
+        """
+        handle = getattr(self, 'handle', '') or ''
+        parts = [f'WindFarmNetwork {handle!r}'] if handle else ['WindFarmNetwork']
+        name = getattr(self, 'name', '') or ''
+        if name and name != handle:
+            parts.append(f'name={name!r}')
+        T = getattr(self, '_T', None)
+        if T is not None:
+            parts.append(f'T={T}')
+        R = getattr(self, '_R', None)
+        if R is not None:
+            parts.append(f'R={R}')
+        capacity = getattr(self, 'cables_capacity', None)
+        if capacity is not None:
+            parts.append(f'capacity={capacity}')
+        router = getattr(self, '_router', None)
+        if router is not None:
+            parts.append(f'router={type(router).__name__}')
+        if getattr(self, '_is_stale_SG', True):
+            parts.append('unsolved')
+        else:
+            parts.append('length={:_.0f}'.format(self._G.size(weight='length')))
+        return '<' + ' '.join(parts) + '>'
+
     def _repr_svg_(self):
         """IPython hook for rendering the graph as SVG in notebooks."""
         return svgplot(self.L if self._is_stale_SG else self.G)._repr_svg_()
 
     def plot(self, *args, **kwargs):
-        """Plot the optimized network."""
-        return gplot(self.G, *args, **kwargs)
+        """Plot the optimized network.
+
+        By default, this method utilizes the modern vector SVG-based plotting
+        backend (`svgplot`) which returns an `SvgRepr` suitable for clean
+        interactive inline displays in Jupyter notebooks.
+
+        To switch to the Matplotlib-based plotting backend (`gplot`), specify the
+        `ax` parameter as a keyword argument.
+
+        Note:
+            Passing `ax=None` explicitly routes to the Matplotlib backend and
+            automatically instantiates a new figure and axes on the fly, allowing
+            Matplotlib figures to be created without importing `matplotlib` or
+            `pyplot` directly in the user code.
+        """
+        if 'ax' in kwargs:
+            return gplot(self.G, *args, **kwargs)
+        return svgplot(self.G, *args, **kwargs)
 
     def plot_location(self, **kwargs):
         """Plot the original location geometry."""
-        return gplot(self.L, **kwargs)
+        if 'ax' in kwargs:
+            return gplot(self.L, **kwargs)
+        return svgplot(self.L, **kwargs)
 
     def plot_available_links(self, **kwargs):
         """Plot available links from planar embedding."""
-        return gplot(self.A, **kwargs)
+        if 'ax' in kwargs:
+            return gplot(self.A, **kwargs)
+        return svgplot(self.A, **kwargs)
 
     def plot_navigation_mesh(self, **kwargs):
         """Plot navigation mesh (planar graph and adjacency)."""
-        return pplot(self.P, self.A, **kwargs)
+        if 'ax' in kwargs:
+            return pplot(self.P, self.A, **kwargs)
+        return svgpplot(self.P, self.A, **kwargs)
 
     def plot_selected_links(self, **kwargs):
         """Plot tentative link selection."""
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
-        return gplot(G_tentative, **kwargs)
+        if 'ax' in kwargs:
+            return gplot(G_tentative, **kwargs)
+        return svgplot(G_tentative, **kwargs)
 
     def terse_links(self):
         """Get a compact representation of the solution topology."""
@@ -571,7 +640,8 @@ class WindFarmNetwork:
         return terse_links
 
     def solution_info(self):
-        """Get model and solver information of the latest solution (runtime, objective, gap, etc.)."""
+        """Get model and solver information of the latest solution
+        (runtime, objective, gap, etc.)."""
         info = {
             'router': self.router.__class__.__name__,
             'capacity': self.cables_capacity,
@@ -595,6 +665,7 @@ class EWRouter(Router):
     """
 
     _summary_attrs = ('iterations',)
+    _repr_attrs = ('maxiter', 'feeder_route')
 
     def __init__(
         self,
@@ -620,16 +691,19 @@ class EWRouter(Router):
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
         # optimizing
+        #  constructor_args=dict(method='rootlust', maxiter=self.maxiter)
+        constructor_args = dict(method='biased_EW', maxiter=self.maxiter)
         if self.feeder_route == 'segmented':
-            S = EW_presolver(A, capacity=cables_capacity, maxiter=self.maxiter)
+            constructor_args.update(weigh_detours=True, straight_feeder_route=False)
         elif self.feeder_route == 'straight':
-            G_cpew = CPEW(A, capacity=cables_capacity, maxiter=self.maxiter)
-            S = S_from_G(G_cpew)
+            constructor_args.update(weigh_detours=False, straight_feeder_route=True)
         else:
             raise ValueError(
-                f'{self.feeder_route} is not among the valid feeder_route values. Choose among: ("segmented", "straight").'
+                f'{self.feeder_route} is not among the valid feeder_route values.'
+                ' Choose among: ("segmented", "straight").'
             )
 
+        S = constructor(A, capacity=cables_capacity, **constructor_args)
         G_tentative = G_from_S(S, A)
 
         G = PathFinder(G_tentative, planar=P, A=A).create_detours()
@@ -652,6 +726,7 @@ class HGSRouter(Router):
     """
 
     _summary_attrs = ('runtime',)
+    _repr_attrs = ('time_limit', 'feeder_limit', 'max_retries', 'balanced', 'seed')
 
     def __init__(
         self,
@@ -667,14 +742,16 @@ class HGSRouter(Router):
 
         Args:
             time_limit: Maximum runtime for a single HGS run (in seconds).
-            feeder_limit: Maximum number of feeders allowed (ignored if multiple substations).
+            feeder_limit: Maximum number of feeders allowed
+                (ignored if multiple substations).
             max_retries: Maximum number of retries if a feasible solution is not found.
             balanced: Whether to balance turbines/loads across feeders.
             seed: Set the seed of the pseudo-random number generator (reproducibility).
             verbose: Enable verbose logging.
 
         Notes:
-            * The total runtime may reach up to `max_retries * time_limit` in the worst case.
+            * The total runtime may reach up to `(max_retries + 1) * time_limit` in the
+              worst case.
         """
         # Call the base class initialization
         super().__init__(**kwargs)
@@ -714,7 +791,9 @@ class MILPRouter(Router):
     * Requires a longer runtime than heuristics- and meta-heuristics-based routers.
     """
 
+    default_heuristic = 'rootlust'
     _summary_attrs = ('runtime', 'bound', 'objective', 'relgap', 'termination')
+    _repr_attrs = ('solver_name', 'time_limit', 'mip_gap')
 
     def __init__(
         self,
@@ -729,7 +808,8 @@ class MILPRouter(Router):
         """Create a MILP-based router.
 
         Args:
-            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools", "cplex", "highs", "scip").
+            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools",
+                "cplex", "highs", "scip").
             time_limit: Maximum runtime (seconds).
             mip_gap: Relative MIP optimality gap tolerance.
             solver_options: Extra solver-specific options.
@@ -794,9 +874,20 @@ class MILPRouter(Router):
                 if self.model_options['topology'] == 'branched':
                     feeder_route = self.model_options['feeder_route']
                     if feeder_route == 'segmented':
-                        S_warm = EW_presolver(A, capacity=cables_capacity)
+                        constructor_args = dict(
+                            method=self.default_heuristic,
+                            weigh_detours=True,
+                            straight_feeder_route=False,
+                        )
                     elif feeder_route == 'straight':
-                        S_warm = S_from_G(CPEW(A, capacity=cables_capacity))
+                        constructor_args = dict(
+                            method=self.default_heuristic,
+                            weigh_detours=False,
+                            straight_feeder_route=True,
+                        )
+                    S_warm = S_from_G(
+                        constructor(A, capacity=cables_capacity, **constructor_args)
+                    )
                 else:
                     S_warm = hgs_cvrp(
                         as_normalized(A),
@@ -821,7 +912,8 @@ class MILPRouter(Router):
                 continue
         else:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution to the MILP model after {num_retries} retries'
+                f'Unable to find a solution to the MILP model'
+                f' after {num_retries} retries'
             )
 
         S, G = solver.get_solution()

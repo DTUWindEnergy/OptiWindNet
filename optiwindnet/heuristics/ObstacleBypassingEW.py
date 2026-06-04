@@ -21,9 +21,10 @@ from ..geometric import (
     is_crossing,
     is_same_side,
 )
-from ..interarraylib import L_from_G, fun_fingerprint, add_terminal_closest_root
+from ..interarraylib import L_from_G, add_terminal_closest_root, fun_fingerprint
 from ..mesh import make_planar_embedding
 from ..utils import Alerter
+from ._deprecation import deprecated_heuristic
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -32,6 +33,13 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
+@deprecated_heuristic(
+    migrate_to=(
+        'constructor(A, capacity, '
+        "method='biased_EW' if OBEW_rootlust is None else 'rootlust', "
+        'weigh_detours=True)'
+    )
+)
 def OBEW(
     L: nx.Graph,
     capacity: int,
@@ -784,7 +792,8 @@ def OBEW(
                     #          subfarL = np.hypot(*(cornerC - subcornerC))
                     #          subnearL = subaddedL - subfarL + nearL
                     #          dc_addedL += subnearL
-                    #      # print(f'[{i}] CONCAVE:', fnT[hook], fnT[corner_], fnT[goal_])
+                    #      # print(f'[{i}] CONCAVE:', fnT[hook], fnT[corner_],
+                    #      #       fnT[goal_])
                     #      dcX = get_crossings(subcorner_, corner_,
                     #                          detour_waiver=True)
                     #      if not dcX:
@@ -1123,7 +1132,7 @@ def OBEW(
                 return
             tradeoff = pq[0][0]
             debug('[%d] -tradeoff = %.0f', i, -tradeoff)
-            sr_u, (u, v) = pq.top()
+            _, sr_u, (u, v) = pq.top()
             debug('<loop> POPPED «%d~%d», sr_u: <%d>', u, v, sr_u)
             capacity_left = capacity - len(subtree_[u]) - len(subtree_[v])
 

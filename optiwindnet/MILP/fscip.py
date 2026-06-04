@@ -13,7 +13,6 @@ import networkx as nx
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from .scip import make_min_length_model, warmup_model
 from ._core import (
     FeederRoute,
     ModelOptions,
@@ -22,7 +21,9 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    physical_core_count,
 )
+from .scip import make_min_length_model, warmup_model
 
 __all__ = ('make_min_length_model', 'warmup_model')
 
@@ -106,7 +107,7 @@ class SolverFSCIP(Solver, PoolHandler):
                 # instead of setting n_threads for SCIP instances, set it for fscip
                 n_threads = applied_options.pop('parallel/maxnthreads')
             else:
-                n_threads = os.cpu_count()
+                n_threads = physical_core_count()
             if 'ubiquity_generator' in applied_options:
                 ug_params = applied_options.pop('ubiquity_generator')
             else:
@@ -201,7 +202,8 @@ class SolverFSCIP(Solver, PoolHandler):
             num_solutions = model.getNSols()
             if num_solutions == 0:
                 raise OWNSolutionNotFound(
-                    f'Unable to find a solution. Solver {self.name} terminated with: {model.getStatus()}'
+                    f'Unable to find a solution. Solver {self.name} terminated'
+                    f' with: {model.getStatus()}'
                 )
             termination = 'unknown'
             solving_time = float('nan')

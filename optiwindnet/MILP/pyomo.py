@@ -3,7 +3,6 @@
 
 import logging
 import math
-import os
 from collections import namedtuple
 from itertools import chain
 from typing import Any
@@ -25,6 +24,7 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    physical_core_count,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -44,7 +44,7 @@ _optkey = {
 
 _default_options = dict(
     cbc=dict(
-        threads=os.cpu_count(),
+        threads=physical_core_count(),
         timeMode='elapsed',
         # the parameters below and more can be experimented with
         # http://www.decom.ufop.br/haroldo/files/cbcCommandLine.pdf
@@ -132,7 +132,8 @@ class SolverPyomo(Solver):
         termination = result['Solver'][0]['Termination condition'].name
         if len(result.solution) == 0:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+                f'Unable to find a solution. Solver {self.name} terminated'
+                f' with: {termination}'
             )
         self.result = result
         if self.name != 'scip':
@@ -238,7 +239,8 @@ class SolverPyomoAppsi(Solver):
         termination = result.termination_condition.name
         if objective is None:
             raise OWNSolutionNotFound(
-                f'Unable to find a solution. Solver {self.name} terminated with: {termination}'
+                f'Unable to find a solution. Solver {self.name} terminated'
+                f' with: {termination}'
             )
         bound = result.best_objective_bound
         solution_info = SolutionInfo(
@@ -403,8 +405,9 @@ def make_min_length_model(
     m.cons_flow_ub = pyo.Constraint(
         m.linkset,
         rule=(
-            lambda m, u, v: m.flow_[(u, v)]
-            <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
+            lambda m, u, v: (
+                m.flow_[(u, v)] <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
+            )
         ),
         name='flow_ub',
     )
@@ -486,8 +489,9 @@ def make_min_length_model(
                         m.T,
                         m.R,
                         rule=(
-                            lambda m, t, r: m.flow_[t, r]
-                            >= m.link_[t, r] * feeder_min_load
+                            lambda m, t, r: (
+                                m.flow_[t, r] >= m.link_[t, r] * feeder_min_load
+                            )
                         ),
                         name='balanced',
                     )
@@ -501,7 +505,7 @@ def make_min_length_model(
     # radial or branched topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
-        # limited by the m.cons_one_out_edge
+        # limited by the m.cons_single_out_link
         m.cons_radial = pyo.Constraint(
             m.T,
             rule=(
@@ -520,16 +524,19 @@ def make_min_length_model(
     m.cons_inflow_limit = pyo.Constraint(
         m.T,
         rule=(
-            lambda m, u: sum(m.flow_[v, u] for v in A_terminals.neighbors(u))
-            <= m.k - A.nodes[u].get('power', 1)
+            lambda m, u: (
+                sum(m.flow_[v, u] for v in A_terminals.neighbors(u))
+                <= m.k - A.nodes[u].get('power', 1)
+            )
         ),
         name='inflow_limit',
     )
     m.cons_single_out_link = pyo.Constraint(
         m.T,
         rule=(
-            lambda m, u: sum(m.link_[u, v] for v in chain(A_terminals.neighbors(u), _R))
-            == 1
+            lambda m, u: (
+                sum(m.link_[u, v] for v in chain(A_terminals.neighbors(u), _R)) == 1
+            )
         ),
         name='single_out_link',
     )

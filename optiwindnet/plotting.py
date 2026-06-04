@@ -16,6 +16,12 @@ from .geometric import rotate
 from .interarraylib import describe_G
 from .themes import Colors
 
+NODESIZE = 35
+NODESIZE_LABELED = 135
+NODESIZE_LABELED_ROOT = 92
+NODESIZE_DETOUR = 90
+NODESIZE_LABELED_DETOUR = 215
+
 __all__ = ('gplot', 'pplot')
 
 FONTSIZE_LABEL = 5
@@ -23,11 +29,6 @@ FONTSIZE_LOAD = 7
 FONTSIZE_ROOT_LABEL = 4
 FONTSIZE_INFO_BOX = 12
 FONTSIZE_LEGEND_STRIP = 6
-NODESIZE = 35
-NODESIZE_LABELED = 135
-NODESIZE_LABELED_ROOT = 92
-NODESIZE_DETOUR = 90
-NODESIZE_LABELED_DETOUR = 215
 
 
 def _is_ccw(X, Y):
@@ -152,6 +153,8 @@ def gplot(
     # setup
     roots = range(-R, 0)
     pos = dict(enumerate(VertexC[:-R])) | dict(enumerate(VertexC[-R:], start=-R))
+    contour = range(0)
+    detour = range(0)
     if C > 0 or D > 0:
         fnT = G.graph['fnT']
         contour = range(T + B, T + B + C)
@@ -188,7 +191,7 @@ def gplot(
                 edge_color=c.kind2color[edge_kind],
                 ax=ax,
             )
-            art.set_capstyle(edges_capstyle)
+            art.set_capstyle(edges_capstyle)  # type: ignore
 
     # draw nodes
     arts = nx.draw_networkx_nodes(
@@ -309,7 +312,6 @@ def gplot(
     if tag_border:
         border_ = border if border is not None else []
         obstacles_ = obstacles if obstacles is not None else [()]
-        print(VertexC.shape)
         for b in chain(border_, *(obstacles_)):
             ax.text(*VertexC[b], str(b), color=c.fg_color, size=FONTSIZE_ROOT_LABEL)
     if hide_ST and VertexC.shape[0] > R + T + B:

@@ -1,5 +1,6 @@
 import copy
 import math
+
 import networkx as nx
 import numpy as np
 import pytest
@@ -10,6 +11,10 @@ from optiwindnet.interarraylib import (
     L_from_site,
     S_from_G,
     S_from_terse_links,
+    add_link_blockmap,
+    add_link_cosines,
+    as_hooked_to_head,
+    as_hooked_to_nearest,
     as_normalized,
     as_rescaled,
     as_single_root,
@@ -17,19 +22,16 @@ from optiwindnet.interarraylib import (
     as_undetoured,
     assign_cables,
     calcload,
+    count_diagonals,
     describe_G,
     fun_fingerprint,
     scaffolded,
     site_fingerprint,
     terse_links_from_S,
     update_lengths,
-    count_diagonals,
-    as_hooked_to_head,
-    as_hooked_to_nearest,
 )
 
 from .helpers import assert_graph_equal, tiny_wfn
-
 
 # ----------
 # tests
@@ -73,7 +75,8 @@ def test_assign_cables():
 
             # Check cable type
             assert expectedD['cable'] == actualD['cable'], (
-                f'Edge {u, v} cable mismatch: {expectedD["cable"]} != {actualD["cable"]}'
+                f'Edge {u, v} cable mismatch:'
+                f' {expectedD["cable"]} != {actualD["cable"]}'
             )
 
             # Check cost (approximate)
@@ -289,12 +292,14 @@ def test_G_from_S():
     G2 = G_from_S(S, A2)
     assert G2.graph['is_normalized']
 
-    # shortcuts in A
-    A[0][2]['shortcuts'] = [9]
-    A[2][-1]['shortcuts'] = [9]
-    S.add_edge(0, 2, load=1, reverse=False)
-    S.add_edge(2, -1, load=1, reverse=False)
-    G = G_from_S(S, A)
+    # shortcuts in A — work on copies to avoid polluting later sub-tests
+    A_sc = copy.deepcopy(A)
+    S_sc = copy.deepcopy(S)
+    A_sc[0][2]['shortcuts'] = [9]
+    A_sc[2][-1]['shortcuts'] = [9]
+    S_sc.add_edge(0, 2, load=1, reverse=False)
+    S_sc.add_edge(2, -1, load=1, reverse=False)
+    G = G_from_S(S_sc, A_sc)
 
     assert (0, 2) in G.edges
     assert G[0][2]['kind'] == 'contour'
@@ -304,9 +309,9 @@ def test_G_from_S():
     edges_to_test = [(0, 1), (0, 2), (0, 3), (-1, 2)]
 
     for s, t in edges_to_test:
-        # Deep copy A and S to restore originals at each iteration
-        A_copy = copy.deepcopy(A)
-        S_copy = copy.deepcopy(S)
+        # Deep copy from the shortcut-mutated state for each iteration
+        A_copy = copy.deepcopy(A_sc)
+        S_copy = copy.deepcopy(S_sc)
 
         # Add only the current edge
         S_copy.add_edge(s, t, load=1, reverse=False)
@@ -333,9 +338,9 @@ def test_G_from_S():
     edges_to_test = [(1, 3), (-1, 1)]
 
     for s, t in edges_to_test:
-        # Deep copy A and S to restore originals at each iteration
-        A_copy = copy.deepcopy(A)
-        S_copy = copy.deepcopy(S)
+        # Deep copy from the shortcut-mutated state for each iteration
+        A_copy = copy.deepcopy(A_sc)
+        S_copy = copy.deepcopy(S_sc)
 
         # Add only the current edge
         S_copy.add_edge(s, t, load=1, reverse=False)
@@ -375,13 +380,31 @@ def test_L_from_G():
     assert L.number_of_edges() == 0
     assert L.graph['VertexC'].shape[0] == len(G.graph['VertexC'])
 
-    # 2) test stunts_primes
-    G.graph['stunts_primes'] = [100, 101]  # new dummy nodes to simulate stunts/primes
-    L_stunts = L_from_G(G)
+    # 2) test num_stunts
+    original_B = G.graph['B']
+    original_len = len(G.graph['VertexC'])
+    G.graph['num_stunts'] = 2
+    G.graph['B'] = original_B + 2
+    G.graph['VertexC'] = np.vstack(
+        (
+            G.graph['VertexC'][:-R],
+            np.array([[10.0, 10.0], [20.0, 20.0]]),
+            G.graph['VertexC'][-R:],
+        )
+    )
+    L_no_stunts = L_from_G(G)
+    assert L_no_stunts.number_of_edges() == 0
+    assert L_no_stunts.graph['B'] == original_B
+    assert L_no_stunts.graph['VertexC'].shape[0] == original_len
+
+    # 3) test stunts_primes
+    G_stunts = tiny_wfn().G
+    G_stunts.graph['stunts_primes'] = [100, 101]
+    L_stunts = L_from_G(G_stunts)
     assert L_stunts.number_of_edges() == 0
     # Check VertexC adjusted for stunts_primes
-    assert L_stunts.graph['VertexC'].shape[0] == len(G.graph['VertexC']) - len(
-        G.graph['stunts_primes']
+    assert L_stunts.graph['VertexC'].shape[0] == len(G_stunts.graph['VertexC']) - len(
+        G_stunts.graph['stunts_primes']
     )
 
 
@@ -723,3 +746,31 @@ def test_as_hooked_to_nearest():
     G2 = as_hooked_to_nearest(wfn2.S, wfn2.A.graph['d2roots'])
     expected = [(-1, 0), (-1, 1), (-1, 2), (-1, 3)]
     assert G2.graph['tentative'] == expected
+
+
+# --- add_link_blockmap ---
+
+
+def test_add_link_blockmap():
+    wfn = tiny_wfn()
+    A = wfn.A
+    add_link_blockmap(A)
+    # Should add 'blocked__' to edges
+    for _, _, d in A.edges(data=True):
+        assert 'blocked__' in d
+        assert len(d['blocked__']) == A.graph['R']
+    # Should add angle arrays to graph
+    assert 'angle__' in A.graph
+    assert 'angle_rank__' in A.graph
+
+
+# --- add_link_cosines ---
+
+
+def test_add_link_cosines():
+    wfn = tiny_wfn()
+    A = wfn.A
+    add_link_cosines(A)
+    for _, _, d in A.edges(data=True):
+        assert 'cos_' in d
+        assert len(d['cos_']) == A.graph['R']

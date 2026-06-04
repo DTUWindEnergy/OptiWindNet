@@ -8,7 +8,8 @@ import networkx as nx
 from scipy.stats import rankdata
 
 from ..crossings import edge_crossings
-from ..interarraylib import calcload, fun_fingerprint, add_terminal_closest_root
+from ..interarraylib import add_terminal_closest_root, calcload, fun_fingerprint
+from ._deprecation import deprecated_heuristic
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -17,6 +18,9 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 
+@deprecated_heuristic(
+    migrate_to="constructor(A, capacity, method='biased_EW', weigh_detours=False)"
+)
 def EW_presolver(
     Aʹ: nx.Graph, capacity: int, maxiter: int = 10000, keep_log: bool = False
 ) -> nx.Graph:
@@ -89,15 +93,18 @@ def EW_presolver(
     log = []
     # END: helper data structures
 
-    def component_merging_edge(subroot, margin=1.02):
+    def component_merging_edge(subroot, forbidden=None, margin=1.02):
         # gather all the edges leaving the subtree of subroot
+        if forbidden is None:
+            forbidden = set()
+        forbidden.add(subroot)
         capacity_left = capacity - len(subtree_[subroot])
         choices = []
         sr_d2root = d2roots[subroot, A.nodes[subroot]['root']]
         edges2discard = []
         for u in subtree_[subroot]:
             for v in A[u]:
-                if subroot_[v] == subroot or len(subtree_[v]) > capacity_left:
+                if subroot_[v] in forbidden or len(subtree_[v]) > capacity_left:
                     # useless edges
                     edges2discard.append((u, v))
                 else:
@@ -210,7 +217,7 @@ def EW_presolver(
         if not pq:
             # finished
             break
-        sr_u, (u, v) = pq.top()
+        _, sr_u, (u, v) = pq.top()
         debug('<popped> «%d~%d», sr_u: <%d>', u, v, sr_u)
 
         # TODO: main loop should do only
