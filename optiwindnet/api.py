@@ -725,6 +725,8 @@ class WindFarmNetwork:
             for _, data in self._G.nodes(data=True):
                 if 'power' in data:
                     data['power'] = data['power'] / self._power_scale
+            if 'capacity' in self._G.graph:
+                self._G.graph['capacity'] //= self._power_scale
         self._is_stale_SG = False
 
         terse_links = self.terse_links()
