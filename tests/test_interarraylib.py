@@ -128,6 +128,26 @@ def test_assign_cables():
     assert G4.graph['capacity'] == 5
 
 
+def test_assign_cables_accepts_float_loads():
+    G = nx.Graph(R=1, T=1, max_load=1.5)
+    G.add_edge(-1, 0, load=1.5, length=2.0)
+
+    assign_cables(G, [(1, 10.0), (2, 15.0)])
+
+    assert G[-1][0]['cable'] == 1
+    assert G[-1][0]['cost'] == 30.0
+
+
+def test_assign_cables_accepts_tiny_capacity_overshoot():
+    G = nx.Graph(R=1, T=1, max_load=5.0000000000001)
+    G.add_edge(-1, 0, load=5.0000000000001, length=2.0)
+
+    assign_cables(G, [(5, 10.0), (7, 15.0)])
+
+    assert G[-1][0]['cable'] == 0
+    assert G[-1][0]['cost'] == 20.0
+
+
 def test_describe_G():
     wfn = tiny_wfn()
     G = wfn.G
@@ -833,7 +853,7 @@ def test_as_single_root_no_root_in_border():
     """Border has no negative-index entries → B stays the same, no vertex transfer."""
     wfn = tiny_wfn(optimize=False)
     L = wfn.L.copy()
-    T, R = L.graph['T'], L.graph['R']
+    T = L.graph['T']
     # replace border with indices all in [T, T+B) range (no root refs)
     B = L.graph['B']
     if B > 0:

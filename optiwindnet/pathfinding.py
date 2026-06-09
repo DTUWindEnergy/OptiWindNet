@@ -2111,7 +2111,9 @@ class PathFinder:
                     ref_load = G.nodes[parent]['load']
                     G.nodes[parent]['load'] = ref_load - subtree_load
                 total_parent_load = bfs_subtree_loads(G, parent, [path[0]], subtree_id)
-                assert total_parent_load == ref_load, (
+                assert math.isclose(
+                    total_parent_load, ref_load, rel_tol=1e-9, abs_tol=1e-9
+                ), (
                     f'detour {n}–{path[0]}: load calculated '
                     f'({total_parent_load}) != expected load ({ref_load})'
                 )

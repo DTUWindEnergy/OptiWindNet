@@ -59,7 +59,8 @@ class _SolutionStore:
             var.id: round(cb_data.solution[var]) for var in self.metadata.link_.values()
         }
         solution |= {
-            var.id: round(cb_data.solution[var]) for var in self.metadata.flow_.values()
+            var.id: self._flow_solution_value(cb_data.solution[var])
+            for var in self.metadata.flow_.values()
         }
         objective_value = sum(
             weight * solution[var_id]
@@ -67,6 +68,11 @@ class _SolutionStore:
         )
         self.solutions.append((objective_value, solution))
         return mathopt.CallbackResult()
+
+    def _flow_solution_value(self, value: float) -> int | float:
+        if self.metadata.model_options.get('continuous_power_flow', False):
+            return value
+        return round(value)
 
 
 class SolverORTools(Solver, PoolHandler):
@@ -95,7 +101,7 @@ class SolverORTools(Solver, PoolHandler):
     def _link_val(self, var: Any) -> int:
         return self._value_map[var.id]
 
-    def _flow_val(self, var: Any) -> int:
+    def _flow_val(self, var: Any) -> int | float:
         return self._value_map[var.id]
 
     def set_problem(
@@ -108,6 +114,14 @@ class SolverORTools(Solver, PoolHandler):
     ):
         self.P, self.A, self.capacity = P, A, capacity
         self.model_options = model_options
+        if (
+            model_options.get('continuous_power_flow', False)
+            and self.backend == 'cp_sat'
+        ):
+            raise NotImplementedError(
+                'continuous_power_flow requires an OR-Tools backend that supports '
+                'continuous variables, such as "ortools.highs" or "ortools.gscip".'
+            )
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
         self.model, self.metadata = model, metadata
         if warmstart is not None:
@@ -176,8 +190,13 @@ class SolverORTools(Solver, PoolHandler):
         result = mathopt.solve(**solve_kwargs)
         self._solve_result = result
         if len(storer.solutions) == 0 and result.has_primal_feasible_solution():
+            link_var_ids = {var.id for var in self.metadata.link_.values()}
             solution = {
-                var.id: round(value)
+                var.id: (
+                    round(value)
+                    if var.id in link_var_ids
+                    else storer._flow_solution_value(value)
+                )
                 for var, value in zip(
                     tracked_vars, result.variable_values(tracked_vars)
                 )
@@ -309,6 +328,7 @@ def make_min_length_model(
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
     balanced: bool = False,
     max_feeders: int = 0,
+    continuous_power_flow: bool = False,
 ) -> tuple[mathopt.Model, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -324,6 +344,7 @@ def make_min_length_model(
       feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
         ``MIN_PLUS1``, ``MIN_PLUS2``, ``MIN_PLUS3``}
       max_feeders: only used if ``feeder_limit`` is ``FeederLimit.SPECIFIED``
+      continuous_power_flow: use continuous flow variables in nominal power units
     """
     R = A.graph['R']
     T = A.graph['T']
@@ -362,13 +383,25 @@ def make_min_length_model(
         (u, v): m.add_binary_variable(name=f'link_{u}~{v}') for u, v in chain(E, Eʹ)
     }
     link_ |= {(t, r): m.add_binary_variable(name=f'link_{t}~r{-r}') for t, r in stars}
+
+    def terminal_flow_capacity(v: int) -> int | float:
+        if continuous_power_flow:
+            return k - A.nodes[v].get('power', 1)
+        return k - 1
+
+    def add_flow_variable(lb: float, ub: float, name: str) -> mathopt.Variable:
+        if continuous_power_flow:
+            return m.add_variable(lb=lb, ub=ub, is_integer=False, name=name)
+        return m.add_integer_variable(lb=lb, ub=ub, name=name)
+
     flow_ = {
-        (u, v): m.add_integer_variable(lb=0, ub=k - 1, name=f'flow_{u}~{v}')
+        (u, v): add_flow_variable(
+            lb=0, ub=terminal_flow_capacity(v), name=f'flow_{u}~{v}'
+        )
         for u, v in chain(E, Eʹ)
     }
     flow_ |= {
-        (t, r): m.add_integer_variable(lb=0, ub=k, name=f'flow_{t}~r{-r}')
-        for t, r in stars
+        (t, r): add_flow_variable(lb=0, ub=k, name=f'flow_{t}~r{-r}') for t, r in stars
     }
 
     ###############
@@ -408,15 +441,19 @@ def make_min_length_model(
         )
 
     # bind flow to link activation
+    min_active_flow = (
+        min(A.nodes[t].get('power', 1) for t in _T) if continuous_power_flow else 1
+    )
     for t, n in linkset:
         _n = str(n) if n >= 0 else f'r{-n}'
+        max_flow = k if n < 0 else terminal_flow_capacity(n)
         m.add_linear_constraint(
-            expr=flow_[t, n] - (k if n < 0 else (k - 1)) * link_[t, n],
+            expr=flow_[t, n] - max_flow * link_[t, n],
             ub=0,
             name=f'flow_zero_{t}~{_n}',
         )
         m.add_linear_constraint(
-            expr=flow_[t, n] - link_[t, n],
+            expr=flow_[t, n] - min_active_flow * link_[t, n],
             lb=0,
             name=f'flow_nonzero_{t}~{_n}',
         )
@@ -532,6 +569,7 @@ def make_min_length_model(
         feeder_limit=feeder_limit,
         max_feeders=max_feeders,
         balanced=balanced,
+        continuous_power_flow=continuous_power_flow,
     )
     metadata = ModelMetadata(
         R,

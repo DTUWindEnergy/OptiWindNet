@@ -89,11 +89,62 @@ def test_balanced_feeder_min_load_uses_total_power():
     assert core.balanced_feeder_min_load(total_power=33, feeder_count=7) == 4
 
 
+def test_model_options_accepts_continuous_power_flow():
+    assert ModelOptions(continuous_power_flow=True)['continuous_power_flow'] is True
+
+
 @pytest.fixture(scope='module')
 def P_A_toy():
     L = toyfarm()
     P, A = make_planar_embedding(L)
     return P, A
+
+
+def test_ortools_continuous_power_flow_uses_nominal_bounds(P_A_toy):
+    _, A_toy = P_A_toy
+    A = A_toy.copy()
+    A.nodes[0]['power'] = 0.5
+    A.nodes[1]['power'] = 1.5
+
+    _, default_metadata = ortools_milp.make_min_length_model(A, _CAPACITY)
+    assert default_metadata.flow_[0, 1].integer is True
+    assert default_metadata.flow_[0, 1].upper_bound == _CAPACITY - 1
+
+    _, continuous_metadata = ortools_milp.make_min_length_model(
+        A,
+        _CAPACITY,
+        continuous_power_flow=True,
+    )
+    assert continuous_metadata.model_options['continuous_power_flow'] is True
+    assert continuous_metadata.flow_[0, 1].integer is False
+    assert continuous_metadata.flow_[0, 1].upper_bound == _CAPACITY - 1.5
+    assert continuous_metadata.flow_[1, 0].upper_bound == _CAPACITY - 0.5
+    assert continuous_metadata.flow_[0, -1].upper_bound == _CAPACITY
+
+
+def test_ortools_cp_sat_rejects_continuous_power_flow(P_A_toy):
+    P, A = P_A_toy
+    solver = ortools_milp.SolverORTools('cp_sat')
+
+    with pytest.raises(NotImplementedError, match='ortools.highs'):
+        solver.set_problem(
+            P,
+            A,
+            capacity=_CAPACITY,
+            model_options=ModelOptions(continuous_power_flow=True),
+        )
+
+
+def test_pyomo_rejects_continuous_power_flow(P_A_toy):
+    import optiwindnet.MILP.pyomo as pyomo_milp
+
+    _, A = P_A_toy
+    with pytest.raises(NotImplementedError, match='continuous_power_flow'):
+        pyomo_milp.make_min_length_model(
+            A,
+            _CAPACITY,
+            continuous_power_flow=True,
+        )
 
 
 @pytest.mark.parametrize(

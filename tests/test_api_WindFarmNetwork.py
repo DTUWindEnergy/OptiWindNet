@@ -10,8 +10,10 @@ import optiwindnet.plotting as plotting
 from optiwindnet.api import (
     EWRouter,
     HGSRouter,
+    MILPRouter,
     WindFarmNetwork,
 )
+from optiwindnet.MILP import ModelOptions
 
 from .helpers import tiny_wfn
 
@@ -114,6 +116,37 @@ def test_cables_capacity_calculation():
     )
     assert wfn1.cables_capacity == 9
     assert wfn2.cables_capacity == 7
+
+
+def test_turbine_power_default_path_is_integer_scaled():
+    wfn = WindFarmNetwork(
+        cables=5,
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.01],
+    )
+
+    assert wfn._power_scale == 100
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [100, 101]
+
+
+def test_continuous_power_flow_keeps_nominal_turbine_power():
+    router = MILPRouter(
+        'ortools.highs',
+        time_limit=1,
+        mip_gap=0.1,
+        model_options=ModelOptions(continuous_power_flow=True),
+    )
+    wfn = WindFarmNetwork(
+        cables=5,
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.01],
+        router=router,
+    )
+
+    assert wfn._power_scale == 1
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1.0, 1.01]
 
 
 def test_invalid_gradient_type_raises():

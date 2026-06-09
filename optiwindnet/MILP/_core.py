@@ -132,6 +132,12 @@ class ModelOptions(dict):
             0,
             'Maximum number of feeders (used only if <feeder_limit = "specified">)',
         ),
+        continuous_power_flow=(
+            bool,
+            False,
+            'Whether to use continuous nominal-power flow variables. '
+            'Currently implemented only by the OR-Tools backend.',
+        ),
     )
 
     @with_signature(
@@ -216,7 +222,7 @@ class Solver(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def _flow_val(self, var: Any) -> int:
+    def _flow_val(self, var: Any) -> int | float:
         "Get the value of a flow variable from the current solution."
         pass
 

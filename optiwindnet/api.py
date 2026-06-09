@@ -66,13 +66,8 @@ def _normalize_turbine_power(
     Raises:
       ValueError: if length does not match T or any value is non-positive.
     """
-    if len(turbine_power) != T:
-        raise ValueError(
-            f'turbine_power has {len(turbine_power)} entries but T={T} turbines.'
-        )
-    if any(p <= 0 for p in turbine_power):
-        raise ValueError('All turbine_power values must be positive.')
-    fracs = [Fraction(p).limit_denominator(100) for p in turbine_power]
+    powers = _validate_turbine_power(turbine_power, T)
+    fracs = [Fraction(p).limit_denominator(100) for p in powers]
     scale = 1
     for f in fracs:
         scale = lcm(scale, f.denominator)
@@ -83,6 +78,17 @@ def _normalize_turbine_power(
             scale,
         )
     return [int(f * scale) for f in fracs], scale
+
+
+def _validate_turbine_power(turbine_power: Sequence[float], T: int) -> list[float]:
+    if len(turbine_power) != T:
+        raise ValueError(
+            f'turbine_power has {len(turbine_power)} entries but T={T} turbines.'
+        )
+    powers = [float(p) for p in turbine_power]
+    if any(p <= 0 for p in powers):
+        raise ValueError('All turbine_power values must be positive.')
+    return powers
 
 
 class Router(ABC):
@@ -276,9 +282,15 @@ class WindFarmNetwork:
 
         self._power_scale = 1
         if turbine_power is not None:
-            int_powers, scale = _normalize_turbine_power(turbine_power, T)
-            self._power_scale = scale
-            for i, p in enumerate(int_powers):
+            continuous_power_flow = getattr(
+                getattr(self.router, 'model_options', {}), 'get', lambda *_: False
+            )('continuous_power_flow', False)
+            if continuous_power_flow:
+                powers = _validate_turbine_power(turbine_power, T)
+            else:
+                powers, scale = _normalize_turbine_power(turbine_power, T)
+                self._power_scale = scale
+            for i, p in enumerate(powers):
                 L.nodes[i]['power'] = p
 
     # -------- helpers --------

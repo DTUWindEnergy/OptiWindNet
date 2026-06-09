@@ -152,6 +152,7 @@ def make_min_length_model(
     feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
     balanced: bool = False,
     max_feeders: int = 0,
+    continuous_power_flow: bool = False,
 ) -> tuple[Model, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -167,7 +168,14 @@ def make_min_length_model(
       feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
         ``MIN_PLUS1``, ``MIN_PLUS2``, ``MIN_PLUS3``}
       max_feeders: only used if ``feeder_limit`` is ``FeederLimit.SPECIFIED``
+      continuous_power_flow: currently unsupported by SCIP backends
     """
+    if continuous_power_flow:
+        raise NotImplementedError(
+            'continuous_power_flow is currently implemented only by the OR-Tools '
+            'MathOpt backends "ortools.highs" and "ortools.gscip".'
+        )
+
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -351,6 +359,7 @@ def make_min_length_model(
         feeder_limit=feeder_limit,
         max_feeders=max_feeders,
         balanced=balanced,
+        continuous_power_flow=continuous_power_flow,
     )
     metadata = ModelMetadata(
         R,
