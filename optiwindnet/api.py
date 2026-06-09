@@ -189,11 +189,10 @@ class WindFarmNetwork:
             treat all turbines as having equal power.
 
             .. note::
-              The feeder lower-bound constraint inside the MILP solvers uses
-              ``ceil(T / k)`` rather than ``ceil(W / k)`` (where W is total
-              power and k is cable capacity). With non-uniform power this
-              bound may be slightly loose, which can marginally widen the
-              solver search space without affecting solution correctness.
+              The MILP feeder lower-bound constraint uses total power
+              ``ceil(W / k)`` (where W is total power and k is cable
+              capacity), so non-uniform turbine powers tighten the minimum
+              feeder count consistently with the cable capacity.
 
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to :class:`EWRouter`.

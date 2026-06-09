@@ -72,6 +72,23 @@ def _make_solve_params(backend, **kwargs):
     return ortools_milp.SolverORTools(backend)._make_solve_parameters(**kwargs)
 
 
+@pytest.mark.parametrize(
+    ('total_power', 'capacity', 'expected'),
+    [
+        (30, 5, 6),
+        (33, 5, 7),
+        (3015, 500, 7),
+        (1450, 100, 15),
+    ],
+)
+def test_minimum_feeder_count_uses_total_power(total_power, capacity, expected):
+    assert core.minimum_feeder_count(total_power, capacity) == expected
+
+
+def test_balanced_feeder_min_load_uses_total_power():
+    assert core.balanced_feeder_min_load(total_power=33, feeder_count=7) == 4
+
+
 @pytest.fixture(scope='module')
 def P_A_toy():
     L = toyfarm()

@@ -2,7 +2,6 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import math
 from itertools import chain
 from typing import Any
 
@@ -23,6 +22,8 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    balanced_feeder_min_load,
+    minimum_feeder_count,
     physical_core_count,
 )
 
@@ -259,7 +260,7 @@ def make_min_length_model(
         )
 
     # feeder limits
-    min_feeders = math.ceil(T / k)
+    min_feeders = minimum_feeder_count(W, k)
     all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
     if feeder_limit is FeederLimit.UNLIMITED:
         # valid inequality: number of feeders is at least the minimum
@@ -294,7 +295,7 @@ def make_min_length_model(
         # enforce balanced subtrees (subtree loads differ at most by one unit)
         if balanced:
             if is_equal_not_range:
-                feeder_min_load = T // min_feeders
+                feeder_min_load = balanced_feeder_min_load(W, min_feeders)
                 if feeder_min_load < capacity:
                     for t, r in stars:
                         m.addCons(

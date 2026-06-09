@@ -3,6 +3,7 @@
 
 import abc
 import logging
+import math
 import os
 import sys
 from collections.abc import Mapping
@@ -95,6 +96,16 @@ class FeederLimit(StrEnum):
     MIN_PLUS2 = auto()
     MIN_PLUS3 = auto()
     DEFAULT = UNLIMITED
+
+
+def minimum_feeder_count(total_power: int | float, capacity: int | float) -> int:
+    """Minimum feeders needed to carry ``total_power`` through capacity ``capacity``."""
+    return math.ceil(total_power / capacity)
+
+
+def balanced_feeder_min_load(total_power: int | float, feeder_count: int) -> int:
+    """Lower load bound for balanced feeders with possibly weighted turbine power."""
+    return int(total_power // feeder_count)
 
 
 class ModelOptions(dict):
