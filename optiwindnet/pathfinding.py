@@ -1414,6 +1414,36 @@ class PathFinder:
             else:
                 touching_at[mp[0]].append(fence)
 
+        # Detect dead-end spanning chains. When two spanning fences of the
+        # *same* subtree meet at one chain-end vertex, both walls of the
+        # corridor there belong to that subtree, so the corridor leads back
+        # into the same tree — a dead-end pocket with no useful through-route,
+        # not worth routing. (If the two off-constraint walls coincide on a
+        # single node-vertex the corridor pinches to a point; if they are
+        # distinct the inner wall still shadows the outer, so only one fence
+        # could ever own the shared access cone. Both are treated the same: a
+        # genuine through-chain in this configuration would need an extremely
+        # contrived instance.) Mark such chains by key so they are dropped at
+        # *both* mp-ends — dropping only one end would leave the other with a
+        # lone cone that fails the 2-cone pairing below. Spanning fences of
+        # *different* subtrees sharing a wall remain a genuine ambiguity,
+        # handled (rejected) in `_build_chains_at`; chains of other subtrees
+        # along the same border are untouched.
+        dead_chain_keys: set[tuple[int, int, int]] = set()
+        for endings in spanning_at.values():
+            by_subtree: dict[int, list[Fence]] = defaultdict(list)
+            for fence, _side in endings:
+                by_subtree[fence.subtree].append(fence)
+            for shared in by_subtree.values():
+                if len(shared) >= 2:
+                    for fence in shared:
+                        mp = fence.primes_on_constraint
+                        dead_chain_keys.add((fence.subtree, mp[0], mp[-1]))
+
+        def is_dead(fence: Fence) -> bool:
+            mp = fence.primes_on_constraint
+            return (fence.subtree, mp[0], mp[-1]) in dead_chain_keys
+
         chain_access: dict[tuple[int, int, int], tuple[Chain, int]] = {}
         chain_end_set: set[int] = set()
 
@@ -1437,9 +1467,15 @@ class PathFinder:
         ] = defaultdict(list)
         chain_end_vertices = set(spanning_at) | set(touching_at)
         for v in chain_end_vertices:
-            result = self._build_chains_at(
-                v, spanning_at.get(v, []), touching_at.get(v, [])
-            )
+            # Drop dead-end chains' fences at every vertex they touch, so no
+            # half-chain survives. Other fences at `v` still build normally.
+            v_spanning = [
+                (f, side) for f, side in spanning_at.get(v, []) if not is_dead(f)
+            ]
+            v_touching = [f for f in touching_at.get(v, []) if not is_dead(f)]
+            if not v_spanning and not v_touching:
+                continue
+            result = self._build_chains_at(v, v_spanning, v_touching)
             if result is None:
                 continue
             chain_end_set.add(v)
