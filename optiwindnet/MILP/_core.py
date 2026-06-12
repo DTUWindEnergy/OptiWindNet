@@ -98,6 +98,25 @@ class FeederLimit(StrEnum):
     DEFAULT = UNLIMITED
 
 
+NONUNIFORM_POWER_ATTR = 'nonuniform_power'
+
+
+def effective_terminal_powers(A: nx.Graph) -> tuple[int | float, ...]:
+    """Return terminal powers, requiring explicit opt-in for non-uniform values."""
+    T = A.graph['T']
+    if A.graph.get(NONUNIFORM_POWER_ATTR, False):
+        return tuple(A.nodes[t].get('power', 1) for t in range(T))
+
+    powers = tuple(A.nodes[t].get('power', 1) for t in range(T))
+    if len(set(powers)) > 1:
+        raise ValueError(
+            'Non-uniform turbine power attributes were found, but weighted '
+            'power mode is not active. Use WindFarmNetwork(..., '
+            'turbine_power=[...]) to enable weighted turbine power.'
+        )
+    return (1,) * T
+
+
 def minimum_feeder_count(total_power: int | float, capacity: int | float) -> int:
     """Minimum feeders needed to carry ``total_power`` through capacity ``capacity``."""
     return math.ceil(total_power / capacity)

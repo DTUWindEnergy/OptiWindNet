@@ -35,6 +35,7 @@ from .interarraylib import (
 )
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
+from .MILP._core import NONUNIFORM_POWER_ATTR
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot, svgpplot
@@ -175,18 +176,19 @@ class WindFarmNetwork:
           turbine_power: Per-turbine power weights as a sequence of length T.
             Values are relative to a **nominal unit**: ``[1.0, 1.5, 2.0]``
             means the second turbine produces 1.5× and the third 2× the
-            nominal power. Only ratios matter — ``[1.0, 2.0]`` and
-            ``[3.0, 6.0]`` are equivalent.
+            nominal power.
 
             The ``cables`` capacity is always in **nominal power units**: a
             cable with capacity ``k`` can carry any group of turbines whose
             total power sums to at most ``k``. It is not tied to the lowest
             or highest rated turbine — it is tied to whatever the user
-            defines as ``1.0``.
+            defines as ``1.0``. Therefore ``[1.0, 2.0]`` and ``[3.0, 6.0]``
+            represent different absolute demands unless cable capacities are
+            scaled by the same factor.
 
             Only respected by :class:`MILPRouter` — heuristic routers
-            (:class:`EWRouter`, :class:`HGSRouter`) will emit a warning and
-            treat all turbines as having equal power.
+            (:class:`EWRouter`, :class:`HGSRouter`) raise :class:`TypeError`
+            for non-uniform turbine power.
 
             .. note::
               The MILP feeder lower-bound constraint uses total power
@@ -278,6 +280,7 @@ class WindFarmNetwork:
         if turbine_power is not None:
             int_powers, scale = _normalize_turbine_power(turbine_power, T)
             self._power_scale = scale
+            L.graph[NONUNIFORM_POWER_ATTR] = True
             for i, p in enumerate(int_powers):
                 L.nodes[i]['power'] = p
 

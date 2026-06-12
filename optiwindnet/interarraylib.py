@@ -62,6 +62,8 @@ _essential_graph_attrs = (
     'norm_offset',  # optional
 )
 
+NONUNIFORM_POWER_ATTR = 'nonuniform_power'
+
 
 def assign_cables(
     G: nx.Graph, cables: list[tuple[int, float | int]], currency: str = '€'
@@ -82,15 +84,14 @@ def assign_cables(
     capacity = max(cables)[0]
     if G.graph['max_load'] > capacity:
         raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
-    run_len_ = (b[0] - a[0] for a, b in pairwise(chain(((0,),), cables)))
-    kind = [k for k, run_len in enumerate(run_len_) for _ in range(run_len)]
-    cost = [cables[k][1] for k in kind]
+    cost = [cost for _, cost in cables]
     has_cost = sum(cost) > 0
     for _, _, data in G.edges(data=True):
-        k = data['load'] - 1
-        data['cable'] = kind[k]
+        load = data['load']
+        cable = next(k for k, (capacity, _) in enumerate(cables) if load <= capacity)
+        data['cable'] = cable
         if has_cost:
-            data['cost'] = data['length'] * cost[k]
+            data['cost'] = data['length'] * cost[cable]
     G.graph['cables'] = cables
     if has_cost:
         G.graph['currency'] = currency
@@ -119,7 +120,13 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     desc = []
     desc.append(f'κ = {capacity}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
-    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(T / capacity)
+    if G.graph.get(NONUNIFORM_POWER_ATTR, False):
+        total_power = sum(G.nodes[t].get('power', 1) for t in range(T))
+    else:
+        total_power = T
+    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(
+        total_power / capacity
+    )
     desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
     length = G.size(weight='length')
     if length > 0:
@@ -209,7 +216,10 @@ def bfs_subtree_loads(G, parent, children, subtree):
     """
     T = G.graph['T']
     nodeD = G.nodes[parent]
-    default = nodeD.get('power', 1) if parent < T else 0
+    use_power = G.graph.get(NONUNIFORM_POWER_ATTR, False)
+    default = (
+        nodeD.get('power', 1) if use_power and parent < T else 1 if parent < T else 0
+    )
     if not children:
         nodeD['load'] = default
         return default
@@ -249,7 +259,10 @@ def calcload(G):
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
         total_load += G.nodes[root]['load']
-    W = sum(G.nodes[t].get('power', 1) for t in range(T))
+    if G.graph.get(NONUNIFORM_POWER_ATTR, False):
+        W = sum(G.nodes[t].get('power', 1) for t in range(T))
+    else:
+        W = T
     assert total_load == W, f'counted ({total_load}) != total_power({W})'
     G.graph['has_loads'] = True
     G.graph['max_load'] = max_load
@@ -343,6 +356,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         'norm_scale',
         'norm_offset',
         'is_normalized',
+        NONUNIFORM_POWER_ATTR,
     ):
         value = A.graph.get(k)
         if value is not None:
@@ -362,11 +376,12 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         {n: label for n, label in A.nodes(data='label') if label is not None},
         'label',
     )
-    nx.set_node_attributes(
-        G,
-        {n: power for n, power in A.nodes(data='power') if power is not None},
-        'power',
-    )
+    if A.graph.get(NONUNIFORM_POWER_ATTR, False):
+        nx.set_node_attributes(
+            G,
+            {n: power for n, power in A.nodes(data='power') if power is not None},
+            'power',
+        )
     nx.set_node_attributes(G, 'wtg', 'kind')
     for r in range(-R, 0):
         G.nodes[r]['kind'] = 'oss'

@@ -1530,6 +1530,8 @@ def make_planar_embedding(
         A.graph['obstacles'] = obstacles
     if stunts_primes:
         A.graph['stunts_primes'] = stunts_primes
+    if L.graph.get('nonuniform_power', False):
+        A.graph['nonuniform_power'] = True
     landscape_angle = L.graph.get('landscape_angle')
     if landscape_angle is not None:
         A.graph['landscape_angle'] = landscape_angle

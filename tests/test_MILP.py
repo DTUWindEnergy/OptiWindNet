@@ -89,6 +89,74 @@ def test_balanced_feeder_min_load_uses_total_power():
     assert core.balanced_feeder_min_load(total_power=33, feeder_count=7) == 4
 
 
+def test_ortools_flow_lower_bound_uses_source_power(P_A_toy):
+    _, A_toy = P_A_toy
+    A = A_toy.copy()
+    A.graph[core.NONUNIFORM_POWER_ATTR] = True
+    A.nodes[0]['power'] = 3
+
+    model, _ = ortools_milp.make_min_length_model(A, _CAPACITY)
+    constraint = {
+        constraint.name: constraint for constraint in model.linear_constraints()
+    }['flow_nonzero_0~1']
+    coeff_by_var_name = {
+        entry.variable.name: entry.coefficient
+        for entry in model.linear_constraint_matrix_entries()
+        if entry.linear_constraint == constraint
+    }
+
+    assert coeff_by_var_name['flow_0~1'] == 1
+    assert coeff_by_var_name['link_0~1'] == -3
+
+
+def test_pyomo_flow_lower_bound_uses_source_power(P_A_toy):
+    import pyomo.environ as pyo
+
+    import optiwindnet.MILP.pyomo as pyomo_milp
+
+    _, A_toy = P_A_toy
+    A = A_toy.copy()
+    A.graph[core.NONUNIFORM_POWER_ATTR] = True
+    A.nodes[0]['power'] = 3
+
+    model, _ = pyomo_milp.make_min_length_model(A, _CAPACITY)
+    constraint = model.cons_flow_lb[0, 1]
+    model.link_[0, 1].value = 1
+    model.flow_[0, 1].value = 2
+    assert pyo.value(constraint.body) > pyo.value(constraint.upper)
+
+    model.flow_[0, 1].value = 3
+    assert pyo.value(constraint.body) == pyo.value(constraint.upper)
+
+
+def test_milp_rejects_nonuniform_power_without_mode(P_A_toy):
+    _, A_toy = P_A_toy
+    A = A_toy.copy()
+    A.nodes[0]['power'] = 3
+
+    with pytest.raises(ValueError, match='weighted power mode is not active'):
+        ortools_milp.make_min_length_model(A, _CAPACITY)
+
+
+def test_milp_ignores_uniform_power_without_mode(P_A_toy):
+    _, A_toy = P_A_toy
+    A = A_toy.copy()
+    for t in range(A.graph['T']):
+        A.nodes[t]['power'] = 3
+
+    model, _ = ortools_milp.make_min_length_model(A, _CAPACITY)
+    constraint = {
+        constraint.name: constraint for constraint in model.linear_constraints()
+    }['flow_nonzero_0~1']
+    coeff_by_var_name = {
+        entry.variable.name: entry.coefficient
+        for entry in model.linear_constraint_matrix_entries()
+        if entry.linear_constraint == constraint
+    }
+
+    assert coeff_by_var_name['link_0~1'] == -1
+
+
 @pytest.fixture(scope='module')
 def P_A_toy():
     L = toyfarm()

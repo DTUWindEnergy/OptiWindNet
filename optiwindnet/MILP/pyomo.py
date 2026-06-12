@@ -24,6 +24,7 @@ from ._core import (
     Solver,
     Topology,
     balanced_feeder_min_load,
+    effective_terminal_powers,
     minimum_feeder_count,
     physical_core_count,
 )
@@ -303,7 +304,8 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
+    power_ = effective_terminal_powers(A)
+    W = sum(power_)
 
     # Sets
     _T = range(T)
@@ -414,7 +416,7 @@ def make_min_length_model(
     )
     m.cons_flow_lb = pyo.Constraint(
         m.linkset,
-        rule=(lambda m, u, v: m.link_[(u, v)] <= m.flow_[(u, v)]),
+        rule=(lambda m, u, v: m.link_[(u, v)] * power_[u] <= m.flow_[(u, v)]),
         name='flow_lb',
     )
 
@@ -425,7 +427,7 @@ def make_min_length_model(
             lambda m, u: (
                 sum((m.flow_[u, v] - m.flow_[v, u]) for v in A_terminals.neighbors(u))
                 + sum(m.flow_[u, r] for r in _R)
-                == A.nodes[u].get('power', 1)
+                == power_[u]
             )
         ),
         name='flow_conserv',
@@ -526,8 +528,7 @@ def make_min_length_model(
         m.T,
         rule=(
             lambda m, u: (
-                sum(m.flow_[v, u] for v in A_terminals.neighbors(u))
-                <= m.k - A.nodes[u].get('power', 1)
+                sum(m.flow_[v, u] for v in A_terminals.neighbors(u)) <= m.k - power_[u]
             )
         ),
         name='inflow_limit',

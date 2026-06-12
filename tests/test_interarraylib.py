@@ -128,6 +128,22 @@ def test_assign_cables():
     assert G4.graph['capacity'] == 5
 
 
+def test_assign_cables_accepts_fractional_loads():
+    G = nx.Graph(R=1, T=2, max_load=1.5)
+    G.add_node(0)
+    G.add_node(1)
+    G.add_node(-1)
+    G.add_edge(0, -1, load=1.0, length=10.0)
+    G.add_edge(1, -1, load=1.5, length=10.0)
+
+    assign_cables(G, [(1, 100.0), (2, 150.0)])
+
+    assert G[0][-1]['cable'] == 0
+    assert G[0][-1]['cost'] == 1000.0
+    assert G[1][-1]['cable'] == 1
+    assert G[1][-1]['cost'] == 1500.0
+
+
 def test_describe_G():
     wfn = tiny_wfn()
     G = wfn.G
@@ -136,6 +152,19 @@ def test_describe_G():
     expected = ['κ = 4, T = 4', '(+0) [-1]: 1', 'Σλ = 5.5456\u00a0m', '55\u00a0€']
 
     assert desc == expected, f'Output mismatch:\nGot: {desc}\nExpected: {expected}'
+
+
+def test_describe_G_uses_total_power_for_excess_feeders():
+    G = nx.Graph(R=1, T=2, capacity=2, nonuniform_power=True)
+    G.add_node(0, power=1.5)
+    G.add_node(1, power=1.5)
+    G.add_node(-1, label='OSS')
+    G.add_edge(0, -1, length=1.0)
+    G.add_edge(1, -1, length=1.0)
+
+    desc = describe_G(G)
+
+    assert desc[1] == '(+0) OSS: 2'
 
 
 def test_calcload():
@@ -833,7 +862,7 @@ def test_as_single_root_no_root_in_border():
     """Border has no negative-index entries → B stays the same, no vertex transfer."""
     wfn = tiny_wfn(optimize=False)
     L = wfn.L.copy()
-    T, R = L.graph['T'], L.graph['R']
+    T = L.graph['T']
     # replace border with indices all in [T, T+B) range (no root refs)
     B = L.graph['B']
     if B > 0:

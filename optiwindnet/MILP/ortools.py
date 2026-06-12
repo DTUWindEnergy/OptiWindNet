@@ -24,6 +24,7 @@ from ._core import (
     Solver,
     Topology,
     balanced_feeder_min_load,
+    effective_terminal_powers,
     minimum_feeder_count,
     physical_core_count,
 )
@@ -329,7 +330,8 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
+    power_ = effective_terminal_powers(A)
+    W = sum(power_)
 
     # Sets
     _T = range(T)
@@ -416,7 +418,7 @@ def make_min_length_model(
             name=f'flow_zero_{t}~{_n}',
         )
         m.add_linear_constraint(
-            expr=flow_[t, n] - link_[t, n],
+            expr=flow_[t, n] - power_[t] * link_[t, n],
             lb=0,
             name=f'flow_nonzero_{t}~{_n}',
         )
@@ -426,7 +428,7 @@ def make_min_length_model(
         m.add_linear_constraint(
             sum((flow_[t, n] - flow_[n, t]) for n in A_terminals.neighbors(t))
             + sum(flow_[t, r] for r in _R)
-            == A.nodes[t].get('power', 1),
+            == power_[t],
             name=f'flow_conserv_{t}',
         )
 
@@ -507,7 +509,7 @@ def make_min_length_model(
         # incoming flow limit
         m.add_linear_constraint(
             expr=sum(flow_[n, t] for n in A_terminals.neighbors(t)),
-            ub=k - A.nodes[t].get('power', 1),
+            ub=k - power_[t],
             name=f'inflow_limit_{t}',
         )
         # only one out-edge per terminal

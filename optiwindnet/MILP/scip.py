@@ -23,6 +23,7 @@ from ._core import (
     Solver,
     Topology,
     balanced_feeder_min_load,
+    effective_terminal_powers,
     minimum_feeder_count,
     physical_core_count,
 )
@@ -172,7 +173,8 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
+    power_ = effective_terminal_powers(A)
+    W = sum(power_)
 
     # Sets
     _T = range(T)
@@ -248,14 +250,17 @@ def make_min_length_model(
             flow_[t, n] <= link_[t, n] * (k if n < 0 else (k - 1)),
             name=f'flow_ub_{t}~{_n}',
         )
-        m.addCons(flow_[t, n] >= link_[t, n], name=f'flow_lb_{t}~{_n}')
+        m.addCons(
+            flow_[t, n] >= link_[t, n] * power_[t],
+            name=f'flow_lb_{t}~{_n}',
+        )
 
     # flow conservation with possibly non-unitary node power
     for t in _T:
         m.addCons(
             sum((flow_[t, n] - flow_[n, t]) for n in A_terminals.neighbors(t))
             + sum(flow_[t, r] for r in _R)
-            == A.nodes[t].get('power', 1),
+            == power_[t],
             name=f'flow_conserv_{t}',
         )
 
@@ -323,8 +328,7 @@ def make_min_length_model(
     for t in _T:
         # incoming flow limit
         m.addCons(
-            sum(flow_[n, t] for n in A_terminals.neighbors(t))
-            <= k - A.nodes[t].get('power', 1),
+            sum(flow_[n, t] for n in A_terminals.neighbors(t)) <= k - power_[t],
             name=f'inflow_limit_{t}',
         )
         # only one out-edge per terminal
