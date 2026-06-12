@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,6 +15,8 @@ from optiwindnet.api import (
 )
 
 from .helpers import tiny_wfn
+
+_LOCATION_FILE = Path(__file__).parent / 'locations' / 'example_location.yaml'
 
 # =====================
 # WindFarmNetwork core
@@ -122,9 +125,23 @@ def test_invalid_gradient_type_raises():
         wfn.gradient(gradient_type='bad_type')
 
 
-def test_from_yaml_invalid_path():
+def test_from_own_yaml_loads_own_yaml_file():
+    wfn = WindFarmNetwork.from_own_yaml(_LOCATION_FILE, cables=4)
+
+    assert wfn.L.graph['T'] == 12
+    assert wfn.L.graph['R'] == 1
+
+
+def test_deprecated_from_yaml_warns():
+    with pytest.warns(DeprecationWarning, match='from_own_yaml'):
+        wfn = WindFarmNetwork.from_yaml(_LOCATION_FILE, cables=4)
+
+    assert wfn.L.graph['T'] == 12
+
+
+def test_from_own_yaml_invalid_path():
     with pytest.raises(Exception):
-        WindFarmNetwork.from_yaml(r'not>a*path')
+        WindFarmNetwork.from_own_yaml(r'not>a*path')
 
 
 def test_from_pbf_invalid_path():
