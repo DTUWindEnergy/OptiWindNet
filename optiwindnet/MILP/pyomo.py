@@ -83,7 +83,9 @@ class SolverPyomo(Solver):
     def _link_val(self, var: Any) -> int:
         return round(var.value)
 
-    def _flow_val(self, var: Any) -> int:
+    def _flow_val(self, var: Any) -> int | float:
+        if self.metadata.model_options.get('continuous_power_flow', False):
+            return var.value
         return round(var.value)
 
     def set_problem(
@@ -190,7 +192,9 @@ class SolverPyomoAppsi(Solver):
         #   values for link_ variables are floats and may be slightly off of 0
         return round(var.value)
 
-    def _flow_val(self, var: Any) -> int:
+    def _flow_val(self, var: Any) -> int | float:
+        if self.metadata.model_options.get('continuous_power_flow', False):
+            return var.value
         return round(var.value)
 
     def set_problem(
@@ -299,14 +303,8 @@ def make_min_length_model(
       feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
         ``MIN_PLUS1``, ``MIN_PLUS2``, ``MIN_PLUS3``}
       max_feeders: only used if ``feeder_limit`` is ``FeederLimit.SPECIFIED``
-      continuous_power_flow: currently unsupported by Pyomo backends
+      continuous_power_flow: use continuous flow variables in nominal power units
     """
-    if continuous_power_flow:
-        raise NotImplementedError(
-            'continuous_power_flow is currently implemented only by the OR-Tools '
-            'MathOpt backends "ortools.highs" and "ortools.gscip".'
-        )
-
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -318,8 +316,9 @@ def make_min_length_model(
     _R = range(-R, 0)
 
     E = tuple(((u, v) if u < v else (v, u)) for u, v in A_terminals.edges())
-    # using directed node-node links -> create the reversed tuples
-    Eʹ = tuple((v, u) for u, v in E)
+    # The graph edges are undirected, but the MILP chooses a direction for each
+    # cable. Keep both directions available in the model.
+    reversed_edges = tuple((v, u) for u, v in E)
     # set of feeders to all roots
     stars = tuple((t, r) for t in _T for r in _R)
 
@@ -327,13 +326,19 @@ def make_min_length_model(
     m = pyo.ConcreteModel()
     m.T = pyo.RangeSet(0, T - 1)
     m.R = pyo.RangeSet(-R, -1)
-    m.linkset = pyo.Set(initialize=E + Eʹ + stars)
+    m.linkset = pyo.Set(initialize=E + reversed_edges + stars)
 
     ##############
     # Parameters #
     ##############
 
-    m.k = pyo.Param(domain=pyo.PositiveIntegers, name='capacity', default=capacity)
+    if continuous_power_flow:
+        capacity_domain = pyo.PositiveReals
+        flow_domain = pyo.NonNegativeReals
+    else:
+        capacity_domain = pyo.PositiveIntegers
+        flow_domain = pyo.NonNegativeIntegers
+    m.k = pyo.Param(domain=capacity_domain, name='capacity', default=capacity)
     m.weight_ = pyo.Param(
         m.linkset,
         domain=pyo.PositiveReals,
@@ -349,11 +354,21 @@ def make_min_length_model(
 
     m.link_ = pyo.Var(m.linkset, domain=pyo.Binary, initialize=0)
 
+    def terminal_flow_capacity(m, v):
+        # If flows are continuous, a cable entering turbine v must reserve room
+        # for v's own power. In integer mode every turbine has unit demand.
+        if continuous_power_flow:
+            return m.k - A.nodes[v].get('power', 1)
+        return m.k - 1
+
     def flow_bounds(m, u, v):
-        return (0, (m.k if v < 0 else m.k - 1))
+        return (0, (m.k if v < 0 else terminal_flow_capacity(m, v)))
 
     m.flow_ = pyo.Var(
-        m.linkset, domain=pyo.NonNegativeIntegers, bounds=flow_bounds, initialize=0
+        m.linkset,
+        domain=flow_domain,
+        bounds=flow_bounds,
+        initialize=0,
     )
 
     ###############
@@ -411,18 +426,17 @@ def make_min_length_model(
         )
 
     # bind flow to link activation
-    m.cons_flow_ub = pyo.Constraint(
-        m.linkset,
-        rule=(
-            lambda m, u, v: (
-                m.flow_[(u, v)] <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
-            )
-        ),
-        name='flow_ub',
+    def flow_ub_rule(m, u, v):
+        max_flow = m.k if v < 0 else terminal_flow_capacity(m, v)
+        return m.flow_[(u, v)] <= m.link_[(u, v)] * max_flow
+
+    m.cons_flow_ub = pyo.Constraint(m.linkset, rule=flow_ub_rule, name='flow_ub')
+    min_active_flow = (
+        min(A.nodes[t].get('power', 1) for t in _T) if continuous_power_flow else 1
     )
     m.cons_flow_lb = pyo.Constraint(
         m.linkset,
-        rule=(lambda m, u, v: m.link_[(u, v)] <= m.flow_[(u, v)]),
+        rule=(lambda m, u, v: min_active_flow * m.link_[(u, v)] <= m.flow_[(u, v)]),
         name='flow_lb',
     )
 

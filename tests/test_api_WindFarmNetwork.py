@@ -123,7 +123,32 @@ def test_turbine_power_default_path_is_integer_scaled():
         cables=5,
         turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
         substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.5],
+    )
+
+    assert wfn._power_scale == 2
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [2, 3]
+
+
+def test_turbine_power_default_precision_is_scale_factor_ten():
+    wfn = WindFarmNetwork(
+        cables=5,
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.05],
+    )
+
+    assert wfn._power_scale == 10
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [10, 11]
+
+
+def test_turbine_power_precision_scale_factor_can_keep_two_digits():
+    wfn = WindFarmNetwork(
+        cables=5,
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
         turbine_power=[1.0, 1.01],
+        turbine_power_precision=100,
     )
 
     assert wfn._power_scale == 100
@@ -142,11 +167,129 @@ def test_continuous_power_flow_keeps_nominal_turbine_power():
         turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
         substationsC=np.array([[0.0, 1.0]]),
         turbine_power=[1.0, 1.01],
+        turbine_power_precision=100,
         router=router,
     )
 
     assert wfn._power_scale == 1
     assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1.0, 1.01]
+
+
+def test_turbine_power_precision_is_limited_before_integer_scaling(caplog):
+    with caplog.at_level(logging.WARNING):
+        wfn = WindFarmNetwork(
+            cables=5,
+            turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+            substationsC=np.array([[0.0, 1.0]]),
+            turbine_power=[1.0, 1.01],
+            turbine_power_precision=10,
+        )
+
+    assert wfn._power_scale == 1
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1, 1]
+    assert any(
+        'turbine_power values are rounded to the nearest 1/10' in message
+        for message in caplog.messages
+    )
+
+
+def test_turbine_power_precision_is_limited_before_continuous_flow(caplog):
+    router = MILPRouter(
+        'ortools.highs',
+        time_limit=1,
+        mip_gap=0.1,
+        model_options=ModelOptions(continuous_power_flow=True),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        wfn = WindFarmNetwork(
+            cables=5,
+            turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+            substationsC=np.array([[0.0, 1.0]]),
+            turbine_power=[1.0, 1.01],
+            turbine_power_precision=10,
+            router=router,
+        )
+
+    assert wfn._power_scale == 1
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1.0, 1.0]
+    assert any(
+        'turbine_power values are rounded to the nearest 1/10' in message
+        for message in caplog.messages
+    )
+
+
+def test_integer_scaled_solution_graphs_are_rescaled_to_nominal_units():
+    router = MILPRouter(
+        'ortools.highs',
+        time_limit=1,
+        mip_gap=0.1,
+    )
+    wfn = WindFarmNetwork(
+        cables=[(2, 1.0)],
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.5],
+        router=router,
+    )
+
+    wfn.optimize()
+
+    assert sorted(data['load'] for *_, data in wfn.S.edges(data=True)) == [1.0, 1.5]
+    assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [1.0, 1.5]
+    assert wfn.S.graph['max_load'] == 1.5
+    assert wfn.G.graph['max_load'] == 1.5
+    assert wfn.S.graph['capacity'] == 2
+    assert wfn.G.graph['capacity'] == 2
+    assert wfn.G.graph['cables'] == [(2, 1.0)]
+    assert sorted(data['load'] for _, data in wfn.G.nodes(data=True)) == [
+        1.0,
+        1.5,
+        2.5,
+    ]
+
+
+def test_optimize_reapplies_turbine_power_when_router_changes():
+    continuous_router = MILPRouter(
+        'ortools.highs',
+        time_limit=1,
+        mip_gap=0.1,
+        model_options=ModelOptions(continuous_power_flow=True),
+    )
+    integer_router = MILPRouter(
+        'ortools.highs',
+        time_limit=1,
+        mip_gap=0.1,
+    )
+    wfn = WindFarmNetwork(
+        cables=[(2, 1.0)],
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.5],
+        router=continuous_router,
+    )
+
+    wfn.optimize(router=integer_router)
+    assert wfn._power_scale == 2
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [2, 3]
+    assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [1.0, 1.5]
+
+    wfn.optimize(router=continuous_router)
+    assert wfn._power_scale == 1
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1.0, 1.5]
+    assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [1.0, 1.5]
+
+
+@pytest.mark.parametrize('precision', [-1, 0, True, 1.5])
+def test_turbine_power_precision_must_be_positive_integer(precision):
+    with pytest.raises(ValueError, match='turbine_power_precision'):
+        WindFarmNetwork(
+            cables=5,
+            turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+            substationsC=np.array([[0.0, 1.0]]),
+            turbine_power=[1.0, 1.001],
+            turbine_power_precision=precision,
+        )
 
 
 def test_invalid_gradient_type_raises():

@@ -49,10 +49,26 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         self.solver = SimpleNamespace(warm_start_capable=lambda: True)
 
     def _link_val(self, var: Any) -> int:
-        return self._value_map[var.name]
+        return round(self._value_map[var.name])
 
-    def _flow_val(self, var: Any) -> int:
-        return self._value_map[var.name]
+    def _flow_val(self, var: Any) -> int | float:
+        value = self._value_map[var.name]
+        if self.metadata.model_options.get('continuous_power_flow', False):
+            return value
+        return round(value)
+
+    @staticmethod
+    def _stopping_options(time_limit: float, mip_gap: float) -> dict[str, float]:
+        return {
+            'TimeLimit': time_limit,
+            'MIPGap': mip_gap,
+        }
+
+    def _set_stopping_options(self, stopping_options: dict[str, float]) -> None:
+        # Set these directly on the persistent Gurobi model. Passing them only
+        # through Pyomo's options dictionary has proven unreliable for long runs.
+        for name, value in stopping_options.items():
+            self.solver.set_gurobi_param(name, value)
 
     def set_problem(
         self,
@@ -81,19 +97,20 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         options: dict[str, Any] = {},
         verbose: bool = False,
     ) -> SolutionInfo:
-        model, solver = self.model, self.solver
         try:
-            model = self.model
+            model, solver = self.model, self.solver
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        stopping_options = self._stopping_options(time_limit, mip_gap)
+        applied_options = self.options | options | stopping_options
         self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
-        info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
+        self._set_stopping_options(stopping_options)
+        info('>>> %s solver options <<<\n%s\n', self.name, applied_options)
         result = solver.solve(
             model,
             **self.solve_kwargs,
-            options=applied_options | dict(timelimit=time_limit, mipgap=mip_gap),
+            options=applied_options,
             tee=verbose,
             load_solutions=False,
         )
@@ -149,7 +166,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
 
     def _topology_from_mip_pool(self) -> nx.Graph:
         self._value_map = {
-            omovar.name: round(gurvar.Xn)
+            omovar.name: gurvar.Xn
             for omovar, gurvar in self.solver._pyomo_var_to_solver_var_map.items()
         }
         return self._topology_from_mip_sol()

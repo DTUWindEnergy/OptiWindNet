@@ -135,16 +135,131 @@ def test_ortools_cp_sat_rejects_continuous_power_flow(P_A_toy):
         )
 
 
-def test_pyomo_rejects_continuous_power_flow(P_A_toy):
+def test_pyomo_continuous_power_flow_uses_nominal_bounds(P_A_toy):
     import optiwindnet.MILP.pyomo as pyomo_milp
 
     _, A = P_A_toy
-    with pytest.raises(NotImplementedError, match='continuous_power_flow'):
-        pyomo_milp.make_min_length_model(
-            A,
-            _CAPACITY,
-            continuous_power_flow=True,
-        )
+    A = A.copy()
+    A.nodes[0]['power'] = 0.5
+    A.nodes[1]['power'] = 1.5
+
+    _, default_metadata = pyomo_milp.make_min_length_model(A, _CAPACITY)
+    assert default_metadata.flow_[0, 1].domain is pyomo_milp.pyo.NonNegativeIntegers
+    assert default_metadata.flow_[0, 1].bounds == (0, _CAPACITY - 1)
+
+    _, continuous_metadata = pyomo_milp.make_min_length_model(
+        A,
+        _CAPACITY,
+        continuous_power_flow=True,
+    )
+    assert continuous_metadata.model_options['continuous_power_flow'] is True
+    assert continuous_metadata.flow_[0, 1].domain is pyomo_milp.pyo.NonNegativeReals
+    assert continuous_metadata.flow_[0, 1].bounds == (0, _CAPACITY - 1.5)
+    assert continuous_metadata.flow_[1, 0].bounds == (0, _CAPACITY - 0.5)
+    assert continuous_metadata.flow_[0, -1].bounds == (0, _CAPACITY)
+
+
+def test_gurobi_continuous_power_flow_keeps_float_flow_values():
+    from types import SimpleNamespace
+
+    from optiwindnet.MILP._core import ModelMetadata
+    from optiwindnet.MILP.gurobi import SolverGurobi
+
+    solver = SolverGurobi()
+    flow_var = SimpleNamespace(name='flow')
+    solver.metadata = ModelMetadata(
+        R=1,
+        T=1,
+        capacity=5,
+        linkset=(),
+        link_={},
+        flow_={},
+        model_options={'continuous_power_flow': True},
+        fun_fingerprint={},
+    )
+    solver._value_map = {'flow': 1.5}
+
+    assert solver._flow_val(flow_var) == 1.5
+
+
+def test_gurobi_integer_power_flow_rounds_flow_values():
+    from types import SimpleNamespace
+
+    from optiwindnet.MILP._core import ModelMetadata
+    from optiwindnet.MILP.gurobi import SolverGurobi
+
+    solver = SolverGurobi()
+    flow_var = SimpleNamespace(name='flow')
+    solver.metadata = ModelMetadata(
+        R=1,
+        T=1,
+        capacity=5,
+        linkset=(),
+        link_={},
+        flow_={},
+        model_options={'continuous_power_flow': False},
+        fun_fingerprint={},
+    )
+    solver._value_map = {'flow': 1.5000000001}
+
+    assert solver._flow_val(flow_var) == 2
+
+
+def test_gurobi_persistent_solve_sets_canonical_stopping_params():
+    from types import SimpleNamespace
+
+    from optiwindnet.MILP.gurobi import SolverGurobi
+
+    class FakeGurobiModel:
+        def getAttr(self, name):
+            assert name == 'SolCount'
+            return 1
+
+    class FakePersistentSolver:
+        def __init__(self):
+            self.options = {'mipfocus': 1}
+            self._solver_model = FakeGurobiModel()
+            self.params = []
+            self.solve_kwargs = None
+
+        def set_gurobi_param(self, name, value):
+            self.params.append((name, value))
+
+        def solve(self, model, **kwargs):
+            self.solve_kwargs = kwargs
+            return {
+                'Solver': [
+                    {
+                        'Termination condition': SimpleNamespace(name='maxTimeLimit'),
+                        'Wallclock time': 12.0,
+                    }
+                ],
+                'Problem': [{'Upper bound': 100.0, 'Lower bound': 90.0}],
+            }
+
+    fake = FakePersistentSolver()
+    solver = SolverGurobi()
+    solver.model = object()
+    solver.solver = fake
+    solver.solve_kwargs = {}
+
+    solution_info = solver.solve(
+        time_limit=12.5,
+        mip_gap=0.03,
+        options={'Heuristics': 0.2},
+    )
+
+    assert fake.params == [('TimeLimit', 12.5), ('MIPGap', 0.03)]
+    assert fake.solve_kwargs['options'] == {
+        'mipfocus': 1,
+        'Heuristics': 0.2,
+        'TimeLimit': 12.5,
+        'MIPGap': 0.03,
+    }
+    assert solver.applied_options['TimeLimit'] == 12.5
+    assert solver.applied_options['MIPGap'] == 0.03
+    assert solution_info.runtime == 12.0
+    assert solution_info.relgap == pytest.approx(0.1)
 
 
 @pytest.mark.parametrize(
