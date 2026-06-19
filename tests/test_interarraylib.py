@@ -144,6 +144,18 @@ def test_assign_cables_accepts_fractional_loads():
     assert G[1][-1]['cost'] == 1500.0
 
 
+def test_assign_cables_accepts_tiny_capacity_overshoot():
+    G = nx.Graph(R=1, T=1, max_load=5.000000000000001)
+    G.add_node(0)
+    G.add_node(-1)
+    G.add_edge(0, -1, load=5.000000000000001, length=10.0)
+
+    assign_cables(G, [(5, 100.0)])
+
+    assert G[0][-1]['cable'] == 0
+    assert G[0][-1]['cost'] == 1000.0
+
+
 def test_describe_G():
     wfn = tiny_wfn()
     G = wfn.G

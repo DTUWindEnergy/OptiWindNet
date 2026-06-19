@@ -5,6 +5,7 @@ import logging
 import math
 import pickle
 import sys
+from bisect import bisect_left
 from hashlib import sha256
 from itertools import chain, pairwise
 
@@ -82,16 +83,25 @@ def assign_cables(
       currency: symbol representing the unit of the cost
     """
     capacity = max(cables)[0]
-    if G.graph['max_load'] > capacity:
+    if G.graph['max_load'] > capacity and not math.isclose(
+        G.graph['max_load'], capacity, rel_tol=1e-9, abs_tol=1e-9
+    ):
         raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
-    cost = [cost for _, cost in cables]
-    has_cost = sum(cost) > 0
+    capacities = [cable[0] for cable in cables]
+    costs = [cable[1] for cable in cables]
+    has_cost = sum(costs) > 0
     for _, _, data in G.edges(data=True):
         load = data['load']
-        cable = next(k for k, (capacity, _) in enumerate(cables) if load <= capacity)
-        data['cable'] = cable
+        cable_idx = bisect_left(capacities, load)
+        if cable_idx > 0 and math.isclose(
+            load, capacities[cable_idx - 1], rel_tol=1e-9, abs_tol=1e-9
+        ):
+            cable_idx -= 1
+        elif cable_idx == len(capacities):
+            cable_idx -= 1
+        data['cable'] = cable_idx
         if has_cost:
-            data['cost'] = data['length'] * cost[cable]
+            data['cost'] = data['length'] * costs[cable_idx]
     G.graph['cables'] = cables
     if has_cost:
         G.graph['currency'] = currency
@@ -263,7 +273,9 @@ def calcload(G):
         W = sum(G.nodes[t].get('power', 1) for t in range(T))
     else:
         W = T
-    assert total_load == W, f'counted ({total_load}) != total_power({W})'
+    assert math.isclose(total_load, W, rel_tol=1e-9, abs_tol=1e-9), (
+        f'counted ({total_load}) != total_power({W})'
+    )
     G.graph['has_loads'] = True
     G.graph['max_load'] = max_load
 
@@ -1023,9 +1035,9 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
             total_parent_load = bfs_subtree_loads(
                 G, r, [new_hook], G.nodes[new_hook]['subtree']
             )
-            assert total_parent_load == ref_load, (
-                f'parent ({total_parent_load}) != expected load ({ref_load})'
-            )
+            assert math.isclose(
+                total_parent_load, ref_load, rel_tol=1e-9, abs_tol=1e-9
+            ), f'parent ({total_parent_load}) != expected load ({ref_load})'
         else:
             # only necessary if using hook_getter (e.g. Gʹ is a S)
             G[r][new_hook]['kind'] = 'tentative'
@@ -1093,9 +1105,9 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
             total_parent_load = bfs_subtree_loads(
                 S, r, [new_hook], S.nodes[new_hook]['subtree']
             )
-            assert total_parent_load == ref_load, (
-                f'parent ({total_parent_load}) != expected load ({ref_load})'
-            )
+            assert math.isclose(
+                total_parent_load, ref_load, rel_tol=1e-9, abs_tol=1e-9
+            ), f'parent ({total_parent_load}) != expected load ({ref_load})'
         else:
             # only necessary if using hook_getter (e.g. Gʹ is a S)
             S[r][new_hook]['kind'] = 'tentative'
