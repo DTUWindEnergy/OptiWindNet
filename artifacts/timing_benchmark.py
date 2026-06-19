@@ -37,7 +37,7 @@ from optiwindnet.mesh import make_planar_embedding
 DATA_DIR = Path(__file__).parent.parent / 'optiwindnet' / 'data'
 OUTPUT = Path(__file__).parent / 'timing_benchmark_results.json'
 API_LOGGER = logging.getLogger('optiwindnet.api')
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 MODEL_VARIANT = 'continuous_power_flow_v1'
 SOLVER_NAME = 'ortools.highs'
 SOLVER_NAMES = tuple(
@@ -46,8 +46,8 @@ SOLVER_NAMES = tuple(
     if item.strip()
 )
 MODEL_OPTIONS = ModelOptions(continuous_power_flow=True)
-TURBINE_POWER_PRECISION = int(os.environ.get('OWN_BENCH_TURBINE_POWER_PRECISION', 10))
-PRECISION_SEMANTICS = 'scale_factor_v1'
+TURBINE_POWER_DECIMALS = int(os.environ.get('OWN_BENCH_TURBINE_POWER_DECIMALS', 1))
+ROUNDING_SEMANTICS = 'decimal_places_v1'
 
 SITES = [
     'Ormonde',  # T=30
@@ -188,8 +188,8 @@ def benchmark_config():
         'solver': SOLVER_NAMES[0] if len(SOLVER_NAMES) == 1 else None,
         'solvers': SOLVER_NAMES,
         'model_options': dict(MODEL_OPTIONS),
-        'turbine_power_precision': TURBINE_POWER_PRECISION,
-        'precision_semantics': PRECISION_SEMANTICS,
+        'turbine_power_decimals': TURBINE_POWER_DECIMALS,
+        'rounding_semantics': ROUNDING_SEMANTICS,
         'time_limit': TIME_LIMIT,
         'mip_gap': MIP_GAP,
         'sites': sites,
@@ -676,9 +676,9 @@ def should_skip_existing_case(existing_case, solver_name):
         return False
     if existing_case.get('model_options') != dict(MODEL_OPTIONS):
         return False
-    if existing_case.get('turbine_power_precision') != TURBINE_POWER_PRECISION:
+    if existing_case.get('turbine_power_decimals') != TURBINE_POWER_DECIMALS:
         return False
-    if existing_case.get('precision_semantics') != PRECISION_SEMANTICS:
+    if existing_case.get('rounding_semantics') != ROUNDING_SEMANTICS:
         return False
     status = existing_case.get('status', 'completed')
     if status == 'completed':
@@ -718,7 +718,7 @@ def enrich_existing_results():
                         int_powers, scale = _normalize_turbine_power(
                             powers,
                             T,
-                            TURBINE_POWER_PRECISION,
+                            TURBINE_POWER_DECIMALS,
                         )
                 case_result.update(
                     {
@@ -768,7 +768,7 @@ def run_benchmark():
                         int_powers, scale = _normalize_turbine_power(
                             powers,
                             T,
-                            TURBINE_POWER_PRECISION,
+                            TURBINE_POWER_DECIMALS,
                         )
 
                 metrics = diagnostic_metrics(
@@ -784,8 +784,8 @@ def run_benchmark():
                                 'scale': scale,
                                 'case_result_key': result_key,
                                 'status': existing_case.get('status', 'completed'),
-                                'turbine_power_precision': TURBINE_POWER_PRECISION,
-                                'precision_semantics': PRECISION_SEMANTICS,
+                                'turbine_power_decimals': TURBINE_POWER_DECIMALS,
+                                'rounding_semantics': ROUNDING_SEMANTICS,
                                 **metrics,
                             }
                         )
@@ -802,7 +802,7 @@ def run_benchmark():
                                 cables=cables,
                                 L=L_from_yaml(site_path),
                                 turbine_power=powers,
-                                turbine_power_precision=TURBINE_POWER_PRECISION,
+                                turbine_power_decimals=TURBINE_POWER_DECIMALS,
                                 router=MILPRouter(
                                     solver_name,
                                     time_limit=TIME_LIMIT,
@@ -825,8 +825,8 @@ def run_benchmark():
                             'model_variant': MODEL_VARIANT,
                             'solver': solver_name,
                             'model_options': dict(MODEL_OPTIONS),
-                            'turbine_power_precision': TURBINE_POWER_PRECISION,
-                            'precision_semantics': PRECISION_SEMANTICS,
+                            'turbine_power_decimals': TURBINE_POWER_DECIMALS,
+                            'rounding_semantics': ROUNDING_SEMANTICS,
                             'started_at_utc': started_at,
                             'ended_at_utc': datetime.now(timezone.utc).isoformat(),
                             'time_s': elapsed,
@@ -856,8 +856,8 @@ def run_benchmark():
                         'model_variant': MODEL_VARIANT,
                         'solver': solver_name,
                         'model_options': dict(MODEL_OPTIONS),
-                        'turbine_power_precision': TURBINE_POWER_PRECISION,
-                        'precision_semantics': PRECISION_SEMANTICS,
+                        'turbine_power_decimals': TURBINE_POWER_DECIMALS,
+                        'rounding_semantics': ROUNDING_SEMANTICS,
                         'solver_time_s': solver_time,
                         'non_solver_time_s': (
                             round(elapsed - solver_time, 4)

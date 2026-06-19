@@ -172,8 +172,9 @@ def make_min_length_model(
     """
     if continuous_power_flow:
         raise NotImplementedError(
-            'continuous_power_flow is currently implemented only by the OR-Tools '
-            'MathOpt backends "ortools.highs" and "ortools.gscip".'
+            'continuous_power_flow is not supported by the SCIP backend. Use a '
+            'continuous-capable OR-Tools backend such as "ortools.highs" or '
+            '"ortools.gscip", or use the Pyomo/Gurobi backend.'
         )
 
     R = A.graph['R']

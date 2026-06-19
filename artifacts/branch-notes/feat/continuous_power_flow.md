@@ -44,10 +44,9 @@ Verification:
   continuous flow values are preserved as floats.
 - Added high-level API rounding for `turbine_power`: values are rounded before
   optimization and a warning is emitted when inputs are changed.
-- Added configurable `WindFarmNetwork(..., turbine_power_precision=10)` support.
-  The value is a precision scale factor, so the default rounds to the nearest
-  `1/10` (one decimal digit). Use `turbine_power_precision=100` for two decimal
-  digits or `1000` for three.
+- Added configurable `WindFarmNetwork(..., turbine_power_decimals=1)` support.
+  The value is the number of decimal places to keep before optimization. Use
+  `turbine_power_decimals=2` for two decimal digits or `10` for ten.
 - Fixed integer-scaled high-level results so public `S` and `G` graphs are converted
   back to nominal units consistently. This now covers edge loads, node loads,
   node powers, `capacity`, `max_load`, and stored cable capacities.
@@ -55,17 +54,18 @@ Verification:
   now reapplies either nominal powers or integer-scaled powers according to the
   selected router's `continuous_power_flow` option.
 - Added focused tests for Pyomo continuous bounds, Gurobi float flow extraction,
-  API precision limiting, nominal-unit result graphs, and router switching.
+  API turbine-power rounding, nominal-unit result graphs, and router switching.
 - Added and iterated on `artifacts/gurobi_power_flow_compare.py` for paired
   Gurobi benchmarks comparing integer-scaled power flow against continuous
   Pyomo/Gurobi flow. The script records wall/setup/solver timing, supports repeats,
   alternates variant order, and prints paired summaries.
-- Added `OWN_COMPARE_TURBINE_POWER_PRECISION` and
-  `OWN_BENCH_TURBINE_POWER_PRECISION` benchmark controls so benchmark diagnostics
-  and `WindFarmNetwork` construction use the same precision scale factor.
-- Updated benchmark resume metadata after the precision semantic change:
-  `artifacts/gurobi_power_flow_compare.py` now uses schema version 3, and
-  `artifacts/timing_benchmark.py` records `precision_semantics`.
+- Added `OWN_COMPARE_TURBINE_POWER_DECIMALS` and
+  `OWN_BENCH_TURBINE_POWER_DECIMALS` benchmark controls so benchmark diagnostics
+  and `WindFarmNetwork` construction use the same decimal-place setting.
+- Updated benchmark resume metadata after the rounding semantic change:
+  `artifacts/gurobi_power_flow_compare.py` now records
+  `rounding_semantics=decimal_places_v1`, and `artifacts/timing_benchmark.py`
+  records the same metadata.
 - Extended `artifacts/gurobi_power_flow_compare.py` site selection with
   `OWN_COMPARE_SITES=all`, `OWN_COMPARE_SKIP_SITES`, `OWN_COMPARE_SITE_REGEX`,
   `OWN_COMPARE_SITE_LIMIT`, and `OWN_COMPARE_SITE_OFFSET` for broader sampled
@@ -97,8 +97,24 @@ Verification:
 - Tiny solve invariant checks for `ortools.highs` and `gurobi`, each in both
   integer-scaled and continuous modes, confirmed public `S` and `G` expose
   nominal loads/capacity/cables consistently.
-- After clarifying `turbine_power_precision` as a precision scale factor:
+- After clarifying turbine-power rounding as decimal places:
   `pytest -q tests/test_api_WindFarmNetwork.py` passed 63 tests;
   `pytest -q tests/test_MILP.py tests/test_api_WindFarmNetwork.py tests/test_interarraylib.py::test_assign_cables_accepts_float_loads tests/test_interarraylib.py::test_assign_cables_accepts_tiny_capacity_overshoot`
   passed 94 tests with 1 skipped; ruff check/format and py_compile passed for
   the touched API, tests, and benchmark scripts.
+
+## 2026-06-19
+
+- Renamed the high-level turbine-power rounding option from
+  `turbine_power_precision` to `turbine_power_decimals`.
+- Changed the option semantics from a scale factor to decimal places:
+  `turbine_power_decimals=1` keeps one decimal place, while
+  `turbine_power_decimals=10` keeps ten decimal places.
+- Updated benchmark controls and metadata names from `*_TURBINE_POWER_PRECISION`
+  / `precision_semantics` to `*_TURBINE_POWER_DECIMALS` /
+  `rounding_semantics`.
+- Bumped timing benchmark schema metadata for the new decimal-place semantics.
+- Fixed stale `continuous_power_flow` help/error text that still described the
+  feature as OR-Tools-only after Pyomo/Gurobi support was added.
+- Updated the weighted-turbine-power notebook source text/examples to describe
+  `turbine_power_decimals` instead of the old denominator-approximation behavior.

@@ -130,7 +130,7 @@ def test_turbine_power_default_path_is_integer_scaled():
     assert [wfn.L.nodes[i]['power'] for i in range(2)] == [2, 3]
 
 
-def test_turbine_power_default_precision_is_scale_factor_ten():
+def test_turbine_power_default_decimals_is_one():
     wfn = WindFarmNetwork(
         cables=5,
         turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
@@ -142,17 +142,33 @@ def test_turbine_power_default_precision_is_scale_factor_ten():
     assert [wfn.L.nodes[i]['power'] for i in range(2)] == [10, 11]
 
 
-def test_turbine_power_precision_scale_factor_can_keep_two_digits():
+def test_turbine_power_decimals_can_keep_two_digits():
     wfn = WindFarmNetwork(
         cables=5,
         turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
         substationsC=np.array([[0.0, 1.0]]),
         turbine_power=[1.0, 1.01],
-        turbine_power_precision=100,
+        turbine_power_decimals=2,
     )
 
     assert wfn._power_scale == 100
     assert [wfn.L.nodes[i]['power'] for i in range(2)] == [100, 101]
+
+
+def test_turbine_power_decimals_ten_means_ten_decimal_places():
+    wfn = WindFarmNetwork(
+        cables=5,
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.0000000001],
+        turbine_power_decimals=10,
+    )
+
+    assert wfn._power_scale == 10_000_000_000
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [
+        10_000_000_000,
+        10_000_000_001,
+    ]
 
 
 def test_continuous_power_flow_keeps_nominal_turbine_power():
@@ -167,7 +183,7 @@ def test_continuous_power_flow_keeps_nominal_turbine_power():
         turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
         substationsC=np.array([[0.0, 1.0]]),
         turbine_power=[1.0, 1.01],
-        turbine_power_precision=100,
+        turbine_power_decimals=2,
         router=router,
     )
 
@@ -175,25 +191,25 @@ def test_continuous_power_flow_keeps_nominal_turbine_power():
     assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1.0, 1.01]
 
 
-def test_turbine_power_precision_is_limited_before_integer_scaling(caplog):
+def test_turbine_power_decimals_is_limited_before_integer_scaling(caplog):
     with caplog.at_level(logging.WARNING):
         wfn = WindFarmNetwork(
             cables=5,
             turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
             substationsC=np.array([[0.0, 1.0]]),
             turbine_power=[1.0, 1.01],
-            turbine_power_precision=10,
+            turbine_power_decimals=1,
         )
 
     assert wfn._power_scale == 1
     assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1, 1]
     assert any(
-        'turbine_power values are rounded to the nearest 1/10' in message
+        'turbine_power values are rounded to 1 decimal place' in message
         for message in caplog.messages
     )
 
 
-def test_turbine_power_precision_is_limited_before_continuous_flow(caplog):
+def test_turbine_power_decimals_is_limited_before_continuous_flow(caplog):
     router = MILPRouter(
         'ortools.highs',
         time_limit=1,
@@ -207,14 +223,14 @@ def test_turbine_power_precision_is_limited_before_continuous_flow(caplog):
             turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
             substationsC=np.array([[0.0, 1.0]]),
             turbine_power=[1.0, 1.01],
-            turbine_power_precision=10,
+            turbine_power_decimals=1,
             router=router,
         )
 
     assert wfn._power_scale == 1
     assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1.0, 1.0]
     assert any(
-        'turbine_power values are rounded to the nearest 1/10' in message
+        'turbine_power values are rounded to 1 decimal place' in message
         for message in caplog.messages
     )
 
@@ -280,16 +296,29 @@ def test_optimize_reapplies_turbine_power_when_router_changes():
     assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [1.0, 1.5]
 
 
-@pytest.mark.parametrize('precision', [-1, 0, True, 1.5])
-def test_turbine_power_precision_must_be_positive_integer(precision):
-    with pytest.raises(ValueError, match='turbine_power_precision'):
+@pytest.mark.parametrize('decimals', [-1, True, 1.5])
+def test_turbine_power_decimals_must_be_non_negative_integer(decimals):
+    with pytest.raises(ValueError, match='turbine_power_decimals'):
         WindFarmNetwork(
             cables=5,
             turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
             substationsC=np.array([[0.0, 1.0]]),
             turbine_power=[1.0, 1.001],
-            turbine_power_precision=precision,
+            turbine_power_decimals=decimals,
         )
+
+
+def test_turbine_power_decimals_zero_rounds_to_whole_numbers():
+    wfn = WindFarmNetwork(
+        cables=5,
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.4],
+        turbine_power_decimals=0,
+    )
+
+    assert wfn._power_scale == 1
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1, 1]
 
 
 def test_invalid_gradient_type_raises():

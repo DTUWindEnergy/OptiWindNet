@@ -51,21 +51,20 @@ plt.rcParams['svg.fonttype'] = 'none'
 # Set up a logger and create shortcuts for error, warning, and info logging methods
 _logger = logging.getLogger(__name__)
 _error, _warning, _info = _logger.error, _logger.warning, _logger.info
-_DEFAULT_TURBINE_POWER_PRECISION = 10
+_DEFAULT_TURBINE_POWER_DECIMALS = 1
 
 
 def _normalize_turbine_power(
     turbine_power: Sequence[float],
     T: int,
-    turbine_power_precision: int = _DEFAULT_TURBINE_POWER_PRECISION,
+    turbine_power_decimals: int = _DEFAULT_TURBINE_POWER_DECIMALS,
 ) -> tuple[list[int], int]:
     """Round, validate, then convert turbine powers to integer units.
 
     Args:
       turbine_power: per-turbine power weights (floats allowed).
       T: expected number of turbines.
-      turbine_power_precision: positive precision scale factor. Values are
-        rounded to the nearest 1 / turbine_power_precision before scaling.
+      turbine_power_decimals: number of decimal places to keep before scaling.
 
     Returns:
       Tuple of (integer power list, scale factor).
@@ -73,7 +72,7 @@ def _normalize_turbine_power(
     Raises:
       ValueError: if length does not match T or any value is non-positive.
     """
-    powers = _validate_turbine_power(turbine_power, T, turbine_power_precision)
+    powers = _validate_turbine_power(turbine_power, T, turbine_power_decimals)
     return _integerize_turbine_power(powers)
 
 
@@ -94,44 +93,48 @@ def _integerize_turbine_power(powers: Sequence[float]) -> tuple[list[int], int]:
     ], power_scale
 
 
-def _validate_turbine_power_precision(turbine_power_precision: int) -> int:
-    """Validate the precision scale factor used for rounding turbine powers."""
+def _validate_turbine_power_decimals(turbine_power_decimals: int) -> int:
+    """Validate the number of decimal places kept for turbine powers."""
     if (
-        isinstance(turbine_power_precision, bool)
-        or not isinstance(turbine_power_precision, Integral)
-        or turbine_power_precision <= 0
+        isinstance(turbine_power_decimals, bool)
+        or not isinstance(turbine_power_decimals, Integral)
+        or turbine_power_decimals < 0
     ):
-        raise ValueError('turbine_power_precision must be a positive integer.')
-    return int(turbine_power_precision)
+        raise ValueError('turbine_power_decimals must be a non-negative integer.')
+    return int(turbine_power_decimals)
 
 
-def _round_turbine_power(raw_power: Decimal, turbine_power_precision: int) -> Decimal:
-    """Round to the nearest ``1 / turbine_power_precision``."""
-    precision_scale = Decimal(turbine_power_precision)
-    scaled_power = raw_power * precision_scale
-    rounded_scaled_power = scaled_power.quantize(Decimal(1), rounding=ROUND_HALF_UP)
-    return rounded_scaled_power / precision_scale
+def _round_turbine_power(raw_power: Decimal, turbine_power_decimals: int) -> Decimal:
+    """Round to the requested number of decimal places."""
+    quantum = Decimal(1).scaleb(-turbine_power_decimals)
+    return raw_power.quantize(quantum, rounding=ROUND_HALF_UP)
 
 
 def _format_decimal(value: Decimal) -> str:
     return format(value.normalize(), 'f')
 
 
+def _format_decimal_places(turbine_power_decimals: int) -> str:
+    if turbine_power_decimals == 1:
+        return '1 decimal place'
+    return f'{turbine_power_decimals} decimal places'
+
+
 def _validate_turbine_power(
     turbine_power: Sequence[float],
     T: int,
-    turbine_power_precision: int = _DEFAULT_TURBINE_POWER_PRECISION,
+    turbine_power_decimals: int = _DEFAULT_TURBINE_POWER_DECIMALS,
 ) -> list[float]:
     if len(turbine_power) != T:
         raise ValueError(
             f'turbine_power has {len(turbine_power)} entries but T={T} turbines.'
         )
-    turbine_power_precision = _validate_turbine_power_precision(turbine_power_precision)
+    turbine_power_decimals = _validate_turbine_power_decimals(turbine_power_decimals)
     powers = []
     rounded_examples = []
     for raw_power in turbine_power:
         raw_decimal = Decimal(str(raw_power))
-        rounded_power = _round_turbine_power(raw_decimal, turbine_power_precision)
+        rounded_power = _round_turbine_power(raw_decimal, turbine_power_decimals)
         if raw_decimal != rounded_power and len(rounded_examples) < 3:
             rounded_examples.append(f'{raw_power} -> {_format_decimal(rounded_power)}')
         powers.append(float(rounded_power))
@@ -139,9 +142,9 @@ def _validate_turbine_power(
         raise ValueError('All turbine_power values must be positive.')
     if rounded_examples:
         _warning(
-            'turbine_power values are rounded to the nearest 1/%d; values with '
-            'higher precision were rounded (%s).',
-            turbine_power_precision,
+            'turbine_power values are rounded to %s; values with more decimal '
+            'places were rounded (%s).',
+            _format_decimal_places(turbine_power_decimals),
             ', '.join(rounded_examples),
         )
     return powers
@@ -252,7 +255,7 @@ class WindFarmNetwork:
         borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
         obstacleC_: Sequence[np.ndarray] = [],
         turbine_power: Sequence[float] | np.ndarray | None = None,
-        turbine_power_precision: int = _DEFAULT_TURBINE_POWER_PRECISION,
+        turbine_power_decimals: int = _DEFAULT_TURBINE_POWER_DECIMALS,
         name: str = '',
         handle: str = '',
         L: nx.Graph | None = None,
@@ -292,10 +295,9 @@ class WindFarmNetwork:
               capacity), so non-uniform turbine powers tighten the minimum
               feeder count consistently with the cable capacity.
 
-          turbine_power_precision: Positive precision scale factor for
-            ``turbine_power``. Values are rounded to the nearest
-            ``1 / turbine_power_precision`` before optimization. Defaults to
-            10 (one decimal digit); use 100 for two decimal digits.
+          turbine_power_decimals: Number of decimal places to keep in
+            ``turbine_power`` before optimization. Defaults to 1; use 2 for
+            two decimal digits or 10 for ten.
 
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to :class:`EWRouter`.
@@ -378,15 +380,15 @@ class WindFarmNetwork:
         self._R, self._T = L.graph['R'], T
 
         self._nominal_turbine_power = None
-        self._turbine_power_precision = _validate_turbine_power_precision(
-            turbine_power_precision
+        self._turbine_power_decimals = _validate_turbine_power_decimals(
+            turbine_power_decimals
         )
         self._power_scale = 1
         if turbine_power is not None:
             self._nominal_turbine_power = _validate_turbine_power(
                 turbine_power,
                 T,
-                self._turbine_power_precision,
+                self._turbine_power_decimals,
             )
             self._apply_turbine_power_for_router(self.router)
 

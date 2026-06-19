@@ -136,7 +136,8 @@ class ModelOptions(dict):
             bool,
             False,
             'Whether to use continuous nominal-power flow variables. '
-            'Currently implemented only by the OR-Tools backend.',
+            'Supported by continuous-capable OR-Tools backends and by the '
+            'Pyomo/Gurobi backend.',
         ),
     )
 
