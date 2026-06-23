@@ -90,6 +90,8 @@ test_linux:
     matrix:
       - PYTHON_VERSION: *default_python
   rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
@@ -106,6 +108,8 @@ test_windows:
     matrix:
       - PYTHON_VERSION: *default_python
   rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -130,6 +134,8 @@ test_matrix_linux:
   extends: .test_linux_base
   allow_failure: true
   rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: never
     - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -148,6 +154,8 @@ test_matrix_windows:
   extends: .test_windows_base
   allow_failure: true
   rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: never
     - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -170,6 +178,9 @@ make_pages:
   pages: true
   allow_failure: true
   rules:
+    # Manually run via "Run pipeline" in the GitLab UI — no file changes required
+    - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Auto-appear (still manual) on pushes to the default branch that touch docs/source
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
         - docs/**/*
@@ -190,6 +201,8 @@ pypi_deploy:
   image: python:$PYTHON_VERSION_FOR_TOOLS
   tags: [linux]
   rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: never
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   before_script:
     - |
