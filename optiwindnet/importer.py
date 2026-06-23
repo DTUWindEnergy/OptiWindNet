@@ -88,7 +88,12 @@ def _parser_latlon(entry_list):
     # all coordinates must belong to the same UTM zone
     assert all(num == zone_numbers[0] for num in zone_numbers[1:])
     assert all(letter == zone_letters[0] for letter in zone_letters[1:])
-    return np.c_[eastings, northings], (labels if any(labels) else ())
+    # the UTM zone is returned so the projection can be reversed to lat/lon
+    return (
+        np.c_[eastings, northings],
+        (labels if any(labels) else ()),
+        (zone_numbers[0], zone_letters[0]),
+    )
 
 
 def _parser_planar(entry_list):
@@ -97,7 +102,8 @@ def _parser_planar(entry_list):
     for label, easting, northing in _get_entries(entry_list):
         labels.append(label)
         coords.append((float(easting), float(northing)))
-    return np.array(coords, dtype=float), (labels if any(labels) else ())
+    # planar coordinates carry no UTM zone (None: nothing to reverse-project)
+    return np.array(coords, dtype=float), (labels if any(labels) else ()), None
 
 
 coordinate_parser = dict(
@@ -145,9 +151,13 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         handle = make_handle(name)
     # default format is "latlon"
     format = parsed_dict.get('COORDINATE_FORMAT', 'latlon')
-    Border, BorderLabel = coordinate_parser[format](parsed_dict['EXTENTS'])
-    Root, RootLabel = coordinate_parser[format](parsed_dict['SUBSTATIONS'])
-    Terminal, TerminalLabel = coordinate_parser[format](parsed_dict['TURBINES'])
+    Border, BorderLabel, border_zone = coordinate_parser[format](parsed_dict['EXTENTS'])
+    Root, RootLabel, root_zone = coordinate_parser[format](parsed_dict['SUBSTATIONS'])
+    Terminal, TerminalLabel, terminal_zone = coordinate_parser[format](
+        parsed_dict['TURBINES']
+    )
+    # collect the UTM zone(s) so VertexC can later be reverse-projected to lat/lon
+    utm_zones = {z for z in (terminal_zone, root_zone, border_zone) if z is not None}
     T = Terminal.shape[0]
     R = Root.shape[0]
     vertex_xy = {xy: i for i, xy in enumerate(map(tuple, Terminal.tolist()))}
@@ -182,7 +192,11 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         # obstacle has to be a list of arrays, so parsing is a bit different
         indices = []
         for obstacle_entry in parsed_dict['OBSTACLES']:
-            obstacleC, poly_tag = coordinate_parser[format](obstacle_entry)
+            obstacleC, poly_tag, obstacle_zone = coordinate_parser[format](
+                obstacle_entry
+            )
+            if obstacle_zone is not None:
+                utm_zones.add(obstacle_zone)
 
             obstacle_xy_ = []
             obstacle = []
@@ -205,6 +219,16 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     lsangle = parsed_dict.get('LANDSCAPE_ANGLE')
     if lsangle is not None:
         optional['landscape_angle'] = lsangle
+
+    # store the UTM zone needed to reverse-project VertexC back to lat/lon via
+    # utm.to_latlon(easting, northing, utm_zone_number, utm_zone_letter)
+    if utm_zones:
+        assert len(utm_zones) == 1, (
+            f'All coordinates must share a single UTM zone, got: {utm_zones}.'
+        )
+        zone_number, zone_letter = utm_zones.pop()
+        optional['utm_zone_number'] = zone_number
+        optional['utm_zone_letter'] = zone_letter
 
     # create networkx graph
     G = nx.Graph(
@@ -407,7 +431,10 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     # vertices and boundary (bin them in 6° sectors and count). Then insert
     # a dummy coordinate as the first array row, such that utm.from_latlon()
     # will pick the right zone for all points.
-    VertexC = np.c_[utm.from_latlon(*latlon.T)[:2]]
+    # zone_number and zone_letter are retained so the projection can be
+    # reversed via utm.to_latlon(easting, northing, zone_number, zone_letter).
+    eastings, northings, zone_number, zone_letter = utm.from_latlon(*latlon.T)
+    VertexC = np.c_[eastings, northings]
 
     if handle is None:
         handle = make_handle(name)
@@ -447,6 +474,8 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     L.graph['landscape_angle'] = ls_angle
 
     L.graph['B'] = B
+    L.graph['utm_zone_number'] = zone_number
+    L.graph['utm_zone_letter'] = zone_letter
 
     if plant_name is not None:
         L.graph['OSM_name'] = plant_name

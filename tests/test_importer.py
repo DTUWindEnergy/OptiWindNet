@@ -49,16 +49,18 @@ def test_get_entries_list_with_labels():
 
 def test_parser_planar_no_labels():
     entries = [[100.0, 200.0], [300.0, 400.0]]
-    coords, labels = _parser_planar(entries)
+    coords, labels, zone = _parser_planar(entries)
     np.testing.assert_allclose(coords, [[100.0, 200.0], [300.0, 400.0]])
     assert labels == ()
+    assert zone is None
 
 
 def test_parser_planar_with_labels():
     entries = [('T1', '100.0', '200.0'), ('T2', '300.0', '400.0')]
-    coords, labels = _parser_planar(entries)
+    coords, labels, zone = _parser_planar(entries)
     np.testing.assert_allclose(coords, [[100.0, 200.0], [300.0, 400.0]])
     assert labels == ['T1', 'T2']
+    assert zone is None
 
 
 # --- _translate_latlonstr ---
