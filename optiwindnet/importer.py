@@ -52,10 +52,12 @@ def _get_entries(entries):
 
 def _translate_latlonstr(entry_list):
     translated = []
-    min = sec = 0.0
     for label, lat, lon in _get_entries(entry_list):
         latlon = []
         for ll in (lat, lon):
+            # reset per component so minutes/seconds never leak between
+            # coordinates (e.g. a "D°M'S\"" latitude into a "D°" longitude)
+            min = sec = 0.0
             deg, *tail = ll.split('°')
             if tail:
                 min, *tail = tail[0].split("'")

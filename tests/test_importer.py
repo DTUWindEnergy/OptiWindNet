@@ -85,6 +85,16 @@ def test_translate_latlonstr_decimal_deg():
     assert lon == pytest.approx(7.5)
 
 
+def test_translate_latlonstr_no_minsec_leak():
+    # latitude carries seconds, longitude is degrees-only: the longitude must
+    # not inherit the latitude's leftover minutes/seconds
+    entries = '11°0\'30"N 44.5°E'
+    result = _translate_latlonstr(entries)
+    label, lat, lon = result[0]
+    assert lat == pytest.approx(11 + 0.5 / 60)
+    assert lon == pytest.approx(44.5)
+
+
 # --- L_from_yaml ---
 
 
