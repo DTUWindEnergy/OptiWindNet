@@ -1,3 +1,12 @@
+spec:
+  inputs:
+    run:
+      default: ci
+      options: [ci, docs]
+      description: >-
+        Manual-dispatch target shown in the "Run pipeline" form:
+        'ci' runs the normal test suite, 'docs' rebuilds GitLab Pages.
+---
 # stages:
 #   - base
 #   - deploy
@@ -15,6 +24,9 @@ workflow:
 .other_pythons: &other_pythons ["3.11", "3.12", "3.13"]
 
 variables:
+  # Manual-dispatch intent (see spec:inputs above). Defaults to "ci" for every
+  # push/MR/tag pipeline, so normal CI is unaffected; the UI form overrides it.
+  RUN: "$[[ inputs.run ]]"
   # Tools = {
   #     sphinx (publish docs on Gitlab Pages),
   #     twine (publish package on PyPI)
@@ -90,7 +102,7 @@ test_linux:
     matrix:
       - PYTHON_VERSION: *default_python
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $RUN != "ci"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -108,7 +120,7 @@ test_windows:
     matrix:
       - PYTHON_VERSION: *default_python
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $RUN != "ci"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: never
@@ -134,7 +146,7 @@ test_matrix_linux:
   extends: .test_linux_base
   allow_failure: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $RUN != "ci"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: never
@@ -154,7 +166,7 @@ test_matrix_windows:
   extends: .test_windows_base
   allow_failure: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $RUN != "ci"
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: never
@@ -178,8 +190,8 @@ make_pages:
   pages: true
   allow_failure: true
   rules:
-    # Manually run via "Run pipeline" in the GitLab UI — no file changes required
-    - if: $CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Manual dispatch: pick run=docs in the "Run pipeline" form (no file changes required)
+    - if: $RUN == "docs"
     # Auto-appear (still manual) on pushes to the default branch that touch docs/source
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       changes:
@@ -201,7 +213,7 @@ pypi_deploy:
   image: python:$PYTHON_VERSION_FOR_TOOLS
   tags: [linux]
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $RUN != "ci"
       when: never
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   before_script:
