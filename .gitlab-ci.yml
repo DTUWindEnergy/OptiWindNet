@@ -72,7 +72,7 @@ variables:
   before_script:
     - Write-Host "=== Windows CI diag ==="
     - whoami; python --version; python -m pip --version
-    - "USERPROFILE=$env:USERPROFILE"; "TEMP=$env:TEMP"; "TMP=$env:TMP"
+    - '"USERPROFILE=$env:USERPROFILE"; "TEMP=$env:TEMP"; "TMP=$env:TMP"'
     - Write-Host "`n=== Disk ==="
     - |
       Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" |
