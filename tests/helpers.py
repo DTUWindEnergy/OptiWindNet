@@ -48,6 +48,15 @@ def router_factory(spec: Optional[Dict[str, Any]]):
     raise ValueError(f'Unknown router class: {clsname!r}')
 
 
+def needs_process_isolation(router_spec: Dict[str, Any]) -> bool:
+    """'ortools*' solvers bundle a copy of HiGHS/SCIP that collides with the
+    standalone highspy/pyscipopt packages if both load into the same process.
+    Other solvers (cplex, gurobi, 'highs', ...) never touch OR-Tools' native
+    libraries and can run directly in this process."""
+    solver_name = router_spec['params'].get('solver_name', '')
+    return router_spec['class'] == 'MILPRouter' and solver_name.startswith('ortools')
+
+
 def solve_milp_low_level(router_spec: Dict[str, Any], L: nx.Graph):
     """Solve a `MILPRouter` routed_instance spec via the low-level MILP API,
     bypassing `MILPRouter`/`WindFarmNetwork`.

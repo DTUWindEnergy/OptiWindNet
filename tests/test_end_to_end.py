@@ -7,6 +7,7 @@ from optiwindnet.api import WindFarmNetwork
 from .helpers import (
     canonical_edges,
     load_instances,
+    needs_process_isolation,
     router_factory,
     solve_milp_low_level,
 )
@@ -48,17 +49,6 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize('routed_instance', routed_instances, ids=ids)
 
 
-def _needs_process_isolation(router_spec) -> bool:
-    """'ortools*' solvers bundle a copy of HiGHS/SCIP that collides with the
-    standalone highspy/pyscipopt packages if both load into the same process.
-    Other solvers (cplex, gurobi, 'highs', ...) never touch OR-Tools' native
-    libraries and can run directly in this process."""
-    return (
-        router_spec['class'] == 'MILPRouter'
-        and router_spec['params']['solver_name'].startswith('ortools')
-    )
-
-
 def test_expected_router_graphs_match(routed_instance, locations, ortools_worker):
     router_spec = routed_instance['router_spec']
     terse_ref = routed_instance['terse_links']
@@ -66,7 +56,7 @@ def test_expected_router_graphs_match(routed_instance, locations, ortools_worker
     cables = router_spec['cables']
 
     if router_spec['class'] == 'MILPRouter':
-        if _needs_process_isolation(router_spec):
+        if needs_process_isolation(router_spec):
             timeout = router_spec['params'].get('time_limit', 10) + 10
             result = ortools_worker.run(solve_milp_low_level, (router_spec, L), timeout)
         else:
