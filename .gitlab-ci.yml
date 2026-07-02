@@ -32,8 +32,10 @@ variables:
   #     twine (publish package on PyPI)
   # } (all running on linux)
   PYTHON_VERSION_FOR_TOOLS: "3.13"
-  SCIP_LINUX: "scipoptsuite_10.0.0-1+trixie_amd64.deb"
-  SCIP_WINDOWS: "scipoptsuite-10.0.0-win-x64"
+  SCIP_VERSION: "10.0.2"
+  SCIP_RELEASE_BASE_URL: "https://github.com/scipopt/scip/releases/download/v${SCIP_VERSION}"
+  SCIP_LINUX: "scipoptsuite_${SCIP_VERSION}-1+trixie_amd64.deb"
+  SCIP_WINDOWS: "scipoptsuite-${SCIP_VERSION}-win-x64"
 
 # ===== Base templates =====
 .test_linux_base:
@@ -50,7 +52,7 @@ variables:
     - apt-get install -yq coinor-cbc
     - apt install -yq -t testing scip
     # >>> scip/fscip section begin
-    # - test -f "downloads/$SCIP_LINUX" || wget --no-verbose -P downloads "https://www.scipopt.org/download/release/$SCIP_LINUX"
+    # - test -f "downloads/$SCIP_LINUX" || wget --no-verbose -P downloads "$SCIP_RELEASE_BASE_URL/$SCIP_LINUX"
     # - apt-get install -yq "./downloads/$SCIP_LINUX"
     # <<< scip/fscip section end
     - python3 -m venv tests/venv
@@ -100,7 +102,7 @@ variables:
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
     - conda install -y -q coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
     # >>> scip/fscip section begin
-    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS.zip")) { New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null; Invoke-WebRequest -UserAgent curl https://www.scipopt.org/download/release/$env:SCIP_WINDOWS.zip -OutFile "downloads\$env:SCIP_WINDOWS.zip" }
+    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS.zip")) { New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null; Invoke-WebRequest -UserAgent curl "$env:SCIP_RELEASE_BASE_URL/$env:SCIP_WINDOWS.zip" -OutFile "downloads\$env:SCIP_WINDOWS.zip" }
     - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS.zip" -DestinationPath .
     - $env:Path = "$env:Path;$env:SCIP_WINDOWS\bin\"
     # <<< scip/fscip section end
