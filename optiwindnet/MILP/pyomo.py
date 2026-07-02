@@ -68,7 +68,10 @@ _default_options = dict(
         liftAndProjectCuts='off',
         residualCapacityCuts='off',
     ),
-    highs={},
+    highs=dict(
+        parallel='on',
+        # threads=0,  # 0 means automatic and is HiGHS's default
+    ),
     scip={},
 )
 
@@ -223,12 +226,17 @@ class SolverPyomoAppsi(Solver):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = self.options | options
+        for key, value in applied_options.items():
+            if key in solver.config:
+                solver.config[key] = value
+            else:
+                solver._solver_options[key] = value
         stopping = {
             _optkey[name].time_limit: time_limit,
             _optkey[name].mip_gap: mip_gap,
         }
         self.stopping = stopping
-        for k, v in (applied_options | stopping).items():
+        for k, v in stopping.items():
             solver.config[k] = v
         solver.config.load_solution = False
         solver.config.stream_solver = verbose
