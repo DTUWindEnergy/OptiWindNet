@@ -106,7 +106,12 @@ variables:
     - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS.zip" -DestinationPath .
     - $env:Path = "$env:Path;$env:SCIP_WINDOWS\bin\"
     # <<< scip/fscip section end
-    - pip install --progress-bar off -e .[test]
+    # Build deps installed up front + --no-build-isolation below: pip's default
+    # build isolation creates a fresh throwaway venv (freshly-written python.exe
+    # et al.), which on this runner races Windows Defender's real-time scan and
+    # crashes with STATUS_IN_PAGE_ERROR (exit code 3221225478 / 0xC0000006).
+    - pip install --progress-bar off "setuptools>=80" "setuptools-scm>=8"
+    - pip install --progress-bar off --no-build-isolation -e .[test]
     - python --version
   script:
     - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
