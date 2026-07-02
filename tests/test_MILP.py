@@ -83,7 +83,7 @@ def P_A_toy():
 def test_MILP_solvers(P_A_toy, solver_name, ortools_worker):
     P, A = P_A_toy
     if solver_name.startswith('ortools'):
-        result = ortools_worker.run(_solve_toy, (solver_name, P, A), 10 + _RUNTIME)
+        result = ortools_worker.run(_solve_toy, (solver_name, P, A), 30 + _RUNTIME)
     else:
         try:
             result = _solve_toy(solver_name, P, A)
@@ -113,7 +113,7 @@ def _job_solver_factory_name(solver_name):
     ],
 )
 def test_solver_factory_ortools_backends(solver_name, expected_name, ortools_worker):
-    result = ortools_worker.run(_job_solver_factory_name, (solver_name,), 10)
+    result = ortools_worker.run(_job_solver_factory_name, (solver_name,), 30)
     assert result == expected_name
 
 
@@ -202,7 +202,7 @@ def test_make_solve_parameters_thread_defaults(
         verbose=verbose,
     )
     solve_params, applied_options = ortools_worker.run(
-        _job_make_solve_params, (backend, 6, kwargs), 10
+        _job_make_solve_params, (backend, 6, kwargs), 30
     )
 
     assert solve_params.threads is expected_threads
@@ -236,7 +236,7 @@ def test_make_solve_parameters_gscip_routes_native_parameter_types(ortools_worke
     }
 
     solve_params = ortools_worker.run(
-        _job_gscip_native_params, (applied_options,), 10
+        _job_gscip_native_params, (applied_options,), 30
     )
 
     assert solve_params.gscip.int_params['limits/nodes'] == 12
@@ -262,6 +262,6 @@ def _job_gscip_rejects_unsupported():
 def test_make_solve_parameters_gscip_rejects_unsupported_native_param_type(
     ortools_worker,
 ):
-    result = ortools_worker.run(_job_gscip_rejects_unsupported, (), 10)
+    result = ortools_worker.run(_job_gscip_rejects_unsupported, (), 30)
     assert isinstance(result, TypeError)
     assert 'Unsupported type list' in str(result)

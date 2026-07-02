@@ -57,7 +57,7 @@ def test_expected_router_graphs_match(routed_instance, locations, ortools_worker
 
     if router_spec['class'] == 'MILPRouter':
         if needs_process_isolation(router_spec):
-            timeout = router_spec['params'].get('time_limit', 10) + 10
+            timeout = router_spec['params'].get('time_limit', 10) + 30
             result = ortools_worker.run(solve_milp_low_level, (router_spec, L), timeout)
         else:
             try:

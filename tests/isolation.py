@@ -88,6 +88,35 @@ class IsolatedWorker:
                 self.process.join()
 
 
+def _warmup_ortools() -> None:
+    """Force ortools' native libraries to load in the worker process.
+
+    `ortools.math_opt` is a large extension module; importing it cold can
+    take much longer than any individual solve (worse under 'spawn', which
+    re-execs and re-imports the interpreter from scratch, and worse still
+    when several pytest-xdist workers do this at once on a loaded CI
+    runner). Paying that cost once here -- under a generous timeout, before
+    any test's tighter per-call timeout starts ticking -- keeps that cost
+    off of every other `IsolatedWorker.run()` call.
+    """
+    from optiwindnet.MILP import solver_factory
+
+    solver_factory('ortools.cp_sat')
+
+
+# Generous on purpose: covers 'spawn' process creation plus cold import of
+# ortools' bundled native libraries under CI contention, not just a solve.
+_WARMUP_TIMEOUT = 120
+
+
 def ortools_worker_factory() -> IsolatedWorker:
-    """Spawn a fresh `IsolatedWorker` on a 'spawn' multiprocessing context."""
-    return IsolatedWorker(multiprocessing.get_context('spawn'))
+    """Spawn a fresh `IsolatedWorker` on a 'spawn' multiprocessing context,
+    pre-warmed so its first real job isn't also paying import-time cost.
+    """
+    worker = IsolatedWorker(multiprocessing.get_context('spawn'))
+    # Return value ignored: if ortools is simply unavailable this comes back
+    # as a (Module)NotFoundError, not a raise -- individual tests already
+    # handle that and skip. A genuine TimeoutError here does raise, which is
+    # the desired outcome (fail fast in setup rather than once per test).
+    worker.run(_warmup_ortools, (), _WARMUP_TIMEOUT)
+    return worker
