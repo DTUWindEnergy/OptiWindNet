@@ -60,7 +60,7 @@ variables:
   script:
     - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   cache:
-    key: CI_JOB_NAME
+    key: linux-scip-downloads
     paths:
       - downloads
 
@@ -87,7 +87,7 @@ variables:
         try { 'x' > $f; Remove-Item $f -Force; "write/delete: OK" }
         catch { "write/delete: FAILED: $($_.Exception.Message)" }
       }
-    - Write-Host "=== END: Windows CI diag ==="
+    - Write-Host "=== <END> Windows CI diag ==="
     # The next 3 lines install the Miniforge3 conda
     # - Invoke-WebRequest -UserAgent curl https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe -OutFile Miniforge3-Windows-x86_64.exe
     # - Start-Process -Wait -FilePath Miniforge3-Windows-x86_64.exe -ArgumentList "/InstallationType=JustMe","/RegisterPython=0","/S","/D=$($env:UserProfile)\condaforge"
@@ -109,7 +109,7 @@ variables:
   script:
     - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   cache:
-    key: CI_JOB_NAME
+    key: windows-scip-downloads
     paths:
       - downloads
 
