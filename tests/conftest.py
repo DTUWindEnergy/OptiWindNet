@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from . import paths
+from . import isolation, paths
 
 # required env variables for coverage to work with multiprocessing
 os.environ['PYTHONPATH'] = '.'
@@ -45,6 +45,21 @@ def _maybe_run_generator(script_path: Path) -> None:
         raise RuntimeError(
             f'Generator script failed: {script_path} (rc={proc.returncode})'
         )
+
+
+# -----------------------
+# Isolated worker for ortools-touching test code
+# -----------------------
+# See tests/isolation.py for why ortools needs process isolation. This
+# fixture provides ONE persistent worker process (not a fresh spawn per call,
+# which costs ~2-4s of cold interpreter + reimport overhead against
+# sub-second solves) that any test needing to touch `optiwindnet.MILP.ortools`
+# can dispatch work to.
+@pytest.fixture(scope='session')
+def ortools_worker():
+    worker = isolation.ortools_worker_factory()
+    yield worker
+    worker.shutdown()
 
 
 # -----------------------
