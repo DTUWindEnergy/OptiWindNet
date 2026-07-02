@@ -5,8 +5,9 @@ Generate expected graphs for specified sites-routers.
 import pickle
 from typing import Any, Dict, Optional, Sequence
 
+import isolation
 import paths
-from helpers import router_factory
+from helpers import needs_process_isolation, router_factory, solve_milp_low_level
 
 from optiwindnet.api import WindFarmNetwork
 from optiwindnet.importer import L_from_yaml
@@ -229,6 +230,9 @@ def generate_expected_values_end_to_end_tests():
 
     S1, S2, R1, R2 = SITES_1, SITES_2, ROUTERS_1, ROUTERS_2
 
+    # 'ortools*' MILPRouter specs are dispatched to `ortools_worker`, a
+    # subprocess isolated from 'highs'/'gurobi'/'cplex' -- see
+    # tests/isolation.py for why.
     def run_batch(
         batch_sites: Sequence[str], batch_routers: Dict[str, Dict[str, Any]], label: str
     ) -> None:
@@ -243,29 +247,46 @@ def generate_expected_values_end_to_end_tests():
             for ri, (router_name, spec) in enumerate(batch_routers.items(), 1):
                 key = f'{site_name}_{router_name}'
                 cases.append({'key': key, 'location': site_name, 'router': router_name})
-                router = router_factory(spec)
                 cables = int(spec['cables'])
                 print(
                     f'[{si}/{len(batch_sites)}] [{ri}/{len(batch_routers)}]:'
                     f' {key} (cables={cables})'
                 )
 
-                wfn = WindFarmNetwork(L=L, cables=cables)
-                if router is None:
-                    wfn.optimize()
+                if spec.get('class') == 'MILPRouter':
+                    if needs_process_isolation(spec):
+                        timeout = spec['params'].get('time_limit', 10) + 10
+                        result = ortools_worker.run(
+                            solve_milp_low_level, (spec, L), timeout
+                        )
+                        if isinstance(result, BaseException):
+                            raise result
+                    else:
+                        result = solve_milp_low_level(spec, L)
+                    terse_links, _canonical_edges = result
                 else:
-                    wfn.optimize(router=router)
+                    router = router_factory(spec)
+                    wfn = WindFarmNetwork(L=L, cables=cables)
+                    if router is None:
+                        wfn.optimize()
+                    else:
+                        wfn.optimize(router=router)
+                    terse_links = tuple(wfn.terse_links().tolist())
+                    del wfn, router
 
-                router_graphs[key] = tuple(wfn.terse_links().tolist())
-                del wfn, router
+                router_graphs[key] = terse_links
 
     run_plan = [
         ('sites_1 x routers_1', S1, R1),
         ('sites_2 x routers_2', S2, R2),
         ('sites_3 x routers_3', SITES_3, ROUTERS_3),
     ]
-    for label, s, r in run_plan:
-        run_batch(s, r, label)
+    ortools_worker = isolation.ortools_worker_factory()
+    try:
+        for label, s, r in run_plan:
+            run_batch(s, r, label)
+    finally:
+        ortools_worker.shutdown()
 
     print_header('Completed')
     print(f'Cases generated: {len(cases)}; Number of graphs: {len(router_graphs)}')
