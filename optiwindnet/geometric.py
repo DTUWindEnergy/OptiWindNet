@@ -933,7 +933,7 @@ def rotating_calipers(
     Args:
       convex_hull: (H, 2) array of coordinates of the convex hull
         in counter-clockwise order
-      metric: what should be minimized, one of {'height', 'area'}
+      metric: what should be minimized, one of {``'height'``, ``'area'``}
 
     Returns:
       ``best_calipers``, ``best_caliper_angle``, ``best_metric``, ``bbox``

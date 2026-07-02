@@ -697,7 +697,7 @@ class EWRouter(Router):
 
         Args:
           maxiter: Maximum iterations.
-          feeder_route: Feeder routing mode ("segmented" or "straight").
+          feeder_route: Feeder routing mode (``'segmented'`` or ``'straight'``).
           verbose: Enable verbose logging.
         """
 
@@ -827,13 +827,13 @@ class MILPRouter(Router):
         """Create a MILP-based router.
 
         Args:
-            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools",
-                "cplex", "highs", "scip").
-            time_limit: Maximum runtime (seconds).
-            mip_gap: Relative MIP optimality gap tolerance.
-            solver_options: Extra solver-specific options.
-            model_options: Options for the MILP model.
-            verbose: Enable verbose logging.
+          solver_name: Name of solver (e.g., ``'gurobi'``, ``'cbc'``, ``'ortools'``,
+              ``'cplex'``, ``'highs'``, ``'scip'``).
+          time_limit: Maximum runtime (seconds).
+          mip_gap: Relative MIP optimality gap tolerance.
+          solver_options: Extra solver-specific options.
+          model_options: Options for the MILP model.
+          verbose: Enable verbose logging.
         """
         super().__init__(**kwargs)
         self.time_limit = time_limit

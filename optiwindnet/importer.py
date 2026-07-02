@@ -126,13 +126,13 @@ coordinate_parser = dict(
 def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     """Import wind farm data from .yaml file.
 
-    Two options available for ``COORDINATE_FORMAT``: ``"planar"`` and ``"latlon"``.
+    Two options available for ``COORDINATE_FORMAT``: ``'planar'`` and ``'latlon'``.
 
-    Format ``"planar"`` is: ``[label] easting northing``. Example::
+    Format ``'planar'`` is: ``[label] easting northing``. Example::
 
       LABEL 234.2 5212.5
 
-    Format "latlon" is: [label] latitude longitude. Example::
+    Format ``'latlon'`` is: [label] latitude longitude. Example::
 
       LABEL1 11°22.333'N 44°55.666'E
       LABEL2 11.3563°N 44.8903°E
@@ -140,8 +140,8 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     The [label] is optional. Ensure no spaces within a latitude or longitude.
 
-    The coordinate pair may be separated by "," or ";" and may be enclosed in
-    "[]" or "()". Example::
+    The coordinate pair may be separated by ``','`` or ``';'`` and may be enclosed in
+    ``'[]'`` or ``'()'``. Example::
 
       LABEL [234.2, 5212.5]
 

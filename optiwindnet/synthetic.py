@@ -98,7 +98,7 @@ def equidistant(
 
     Args:
       radius: of the circular area to cover
-      center: one of {'centroid', 'vertex'}
+      center: one of {``'centroid'``, ``'vertex'``}
         centroid: The coordinate origin is in the centroid of the central triangle.
         vertex: The coordinate origin a vertex of the tiling.
       spacing: the triangle's side
