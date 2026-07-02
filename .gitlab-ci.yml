@@ -70,6 +70,24 @@ variables:
   tags: [docker-windows]
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   before_script:
+    - Write-Host "=== Windows CI diag ==="
+    - whoami; python --version; python -m pip --version
+    - "USERPROFILE=$env:USERPROFILE"; "TEMP=$env:TEMP"; "TMP=$env:TMP"
+    - Write-Host "`n=== Disk ==="
+    - |
+      Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" |
+        % { "{0}: free {1:n1} GB / {2:n1} GB ({3:n1}%)" -f $_.DeviceID,($_.FreeSpace/1GB),($_.Size/1GB),(100*$_.FreeSpace/$_.Size) }
+    - Write-Host "`n=== Python temp ==="
+    - python -c "import tempfile,os; p=tempfile.gettempdir(); print(p); print('writable=',os.access(p,os.W_OK))"
+    - Write-Host "`n=== Temp ACL + write/delete ==="
+    - |
+      @($env:TEMP,$env:TMP) | Select-Object -Unique | % {
+        "`n$_"; icacls $_
+        $f = Join-Path $_ ("ci-test-" + [guid]::NewGuid())
+        try { 'x' > $f; Remove-Item $f -Force; "write/delete: OK" }
+        catch { "write/delete: FAILED: $($_.Exception.Message)" }
+      }
+    - Write-Host "=== END: Windows CI diag ==="
     # The next 3 lines install the Miniforge3 conda
     # - Invoke-WebRequest -UserAgent curl https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Windows-x86_64.exe -OutFile Miniforge3-Windows-x86_64.exe
     # - Start-Process -Wait -FilePath Miniforge3-Windows-x86_64.exe -ArgumentList "/InstallationType=JustMe","/RegisterPython=0","/S","/D=$($env:UserProfile)\condaforge"
