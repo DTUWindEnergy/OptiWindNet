@@ -100,17 +100,24 @@ variables:
     - conda create -y -q --name own_test python=${PYTHON_VERSION}
     - conda activate own_test
     # the packages beyond the solvers are dependencies that would be pulled later via pip install
-    - conda install -y -q coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow
+    # setuptools/setuptools-scm are here (rather than left to pip's build isolation) because
+    # pip's default build isolation creates a fresh throwaway venv (freshly-written python.exe
+    # et al.), which on this runner races Windows Defender's real-time scan and crashes with
+    # STATUS_IN_PAGE_ERROR (exit code 3221225478 / 0xC0000006); --no-build-isolation below then
+    # reuses this env instead of creating a new one.
+    - conda install -y -q coin-or-cbc numba networkx shapely scipy pyyaml bitarray pandas pillow "setuptools>=80" "setuptools-scm>=8"
     # >>> scip/fscip section begin
-    - if (!(Test-Path "downloads\$env:SCIP_WINDOWS.zip")) { New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null; Invoke-WebRequest -UserAgent curl "$env:SCIP_RELEASE_BASE_URL/$env:SCIP_WINDOWS.zip" -OutFile "downloads\$env:SCIP_WINDOWS.zip" }
+    - |
+      if (Test-Path "downloads\$env:SCIP_WINDOWS.zip") {
+        Write-Host "SCIP archive cache hit: downloads\$env:SCIP_WINDOWS.zip"
+      } else {
+        Write-Host "SCIP archive cache miss, downloading $env:SCIP_RELEASE_BASE_URL/$env:SCIP_WINDOWS.zip"
+        New-Item -Force -Name "downloads" -ItemType "Directory" | Out-Null
+        Invoke-WebRequest -UserAgent curl "$env:SCIP_RELEASE_BASE_URL/$env:SCIP_WINDOWS.zip" -OutFile "downloads\$env:SCIP_WINDOWS.zip"
+      }
     - Expand-Archive -Path "downloads\$env:SCIP_WINDOWS.zip" -DestinationPath .
     - $env:Path = "$env:Path;$env:SCIP_WINDOWS\bin\"
     # <<< scip/fscip section end
-    # Build deps installed up front + --no-build-isolation below: pip's default
-    # build isolation creates a fresh throwaway venv (freshly-written python.exe
-    # et al.), which on this runner races Windows Defender's real-time scan and
-    # crashes with STATUS_IN_PAGE_ERROR (exit code 3221225478 / 0xC0000006).
-    - pip install --progress-bar off "setuptools>=80" "setuptools-scm>=8"
     - pip install --progress-bar off --no-build-isolation -e .[test]
     - python --version
   script:
