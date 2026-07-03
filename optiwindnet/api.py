@@ -679,7 +679,7 @@ class WindFarmNetwork:
 class EWRouter(Router):
     """A lightweight, ultra-fast router for electrical network optimization.
 
-    * Uses a modified Esau-Williams heuristic (segmented or straight feeders).
+    * Uses a modified Esau-Williams (EW) heuristic (segmented or straight feeders).
     * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
     """
 
