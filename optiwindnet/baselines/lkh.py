@@ -562,7 +562,7 @@ def _lkh(
       per_run_limit: [s] consult LKH manual
       precision: consult LKH manual
       complete: make the full graph over A available (links not in A assumed direct)
-      keep_log: save the LKH text output to graph attr 'method_log'
+      keep_log: save the LKH text output to graph attr ``'method_log'``
       seed: for the pseudo-random number generator (None or 0: random seed)
       initial_tour_nodes: optional initial tour for LKH (1-indexed nodes)
 

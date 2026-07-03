@@ -65,16 +65,15 @@ def constructor(
         IBM Systems Journal 5, no. 3 (1966):
         142–47. https://doi.org/10.1147/sj.53.0142.
 
-    However, this implementation uses the extended Delaunay triangulation
-    (given in A) as
-    the base connectivity, and implements terminal-terminal crossing prevention. This
-    means that even the method named ``'esau_williams'`` does not match exactly
+    However, this implementation uses the extended Delaunay triangulation (given in A)
+    as the base connectivity, and implements terminal-terminal crossing prevention.
+    This means that even the method named ``'esau_williams'`` does not match exactly
     the paper's description, but the similarities are still substantial.
 
     Note that constructor cannot be constrained in the number of feeders and that only
-    method ``'radial_EW'`` is constrained to producing radial topologies (i.e.
-    subtrees are always simple paths) as opposed to the branched topologies
-    produced by the others.
+    method ``'radial_EW'`` is constrained to producing radial topologies (i.e. subtrees
+    are always simple paths) as opposed to the branched topologies produced by the
+    others.
 
     Available Methods:
       ``'esau_williams'``
