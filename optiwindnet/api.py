@@ -684,34 +684,51 @@ class EWRouter(Router):
     """
 
     _summary_attrs = ('iterations',)
-    _repr_attrs = ('maxiter', 'feeder_route')
+    _repr_attrs = ('method', 'maxiter', 'feeder_route', 'bias_margin')
 
     def __init__(
         self,
         maxiter: int = 10_000,
         feeder_route: str = 'segmented',
+        method: str = 'biased_EW',
+        bias_margin: float | None = None,
         verbose: bool = False,
         **kwargs,
     ) -> None:
         """Create a Esau-Williams-based router.
 
+        Available Methods:
+          ``'esau_williams'``
+            Esau-Williams C-MST heuristic modified to avoid crossings (EW).
+          ``'biased_EW'``
+            EW with a bias towards moving radially (root-ward) on quasi-ties.
+          ``'rootlust'``
+            EW with a tunable root-ward bias that increases as capacity decreases.
+          ``'radial_EW'``
+            EW variant that produces radial subtrees (simple paths from root).
+
         Args:
           maxiter: Maximum iterations.
           feeder_route: Feeder routing mode (``'segmented'`` or ``'straight'``).
+          method: one of the **Available Methods**, defaults to ``'biased_EW'``).
+          bias_margin: Fractional margin within which edges are considered
+            equivalent (used by ``'biased_EW'`` and ``'radial_EW'``).
+            Defaults to the constructor's built-in default (0.02) when ``None``.
           verbose: Enable verbose logging.
         """
 
         super().__init__(**kwargs)
 
-        # Call the base class initialization
         self.verbose = verbose
         self.maxiter = maxiter
         self.feeder_route = feeder_route
+        self.method = method
+        self.bias_margin = bias_margin
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        # optimizing
-        #  constructor_args=dict(method='rootlust', maxiter=self.maxiter)
-        constructor_args = dict(method='biased_EW', maxiter=self.maxiter)
+        constructor_args = dict(method=self.method, maxiter=self.maxiter)
+        if self.bias_margin is not None:
+            constructor_args['bias_margin'] = self.bias_margin
         if self.feeder_route == 'segmented':
             constructor_args.update(weigh_detours=True, straight_feeder_route=False)
         elif self.feeder_route == 'straight':
@@ -828,7 +845,7 @@ class MILPRouter(Router):
 
         Args:
           solver_name: Name of solver (e.g., ``'gurobi'``, ``'cbc'``, ``'ortools'``,
-              ``'cplex'``, ``'highs'``, ``'scip'``).
+            ``'cplex'``, ``'highs'``, ``'scip'``).
           time_limit: Maximum runtime (seconds).
           mip_gap: Relative MIP optimality gap tolerance.
           solver_options: Extra solver-specific options.
