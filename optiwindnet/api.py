@@ -364,9 +364,21 @@ class WindFarmNetwork:
             _logger.info('No buffering is performed')
 
     @classmethod
-    def from_yaml(cls, filepath: str, **kwargs):
-        """Create a WindFarmNetwork instance from a YAML file."""
+    def from_own_yaml(cls, filepath: str, **kwargs):
+        """Create a WindFarmNetwork instance from an OptiWindNet (OWN) YAML file."""
         return cls(L=L_from_yaml(filepath), **kwargs)
+
+    @classmethod
+    def from_yaml(cls, filepath: str, **kwargs):
+        """Deprecated: use :meth:`from_own_yaml` instead."""
+        import warnings
+
+        warnings.warn(
+            'from_yaml() is deprecated, use from_own_yaml() instead.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return cls.from_own_yaml(filepath, **kwargs)
 
     @classmethod
     def from_pbf(cls, filepath: Path | str, **kwargs):
@@ -667,7 +679,7 @@ class WindFarmNetwork:
 class EWRouter(Router):
     """A lightweight, ultra-fast router for electrical network optimization.
 
-    * Uses a modified Esau-Williams heuristic (segmented or straight feeders).
+    * Uses a modified Esau-Williams (EW) heuristic (segmented or straight feeders).
     * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
     """
 
@@ -685,24 +697,23 @@ class EWRouter(Router):
     ) -> None:
         """Create a Esau-Williams-based router.
 
+        Available Methods:
+          ``'esau_williams'``
+            Esau-Williams C-MST heuristic modified to avoid crossings (EW).
+          ``'biased_EW'``
+            EW with a bias towards moving radially (root-ward) on quasi-ties.
+          ``'rootlust'``
+            EW with a tunable root-ward bias that increases as capacity decreases.
+          ``'radial_EW'``
+            EW variant that produces radial subtrees (simple paths from root).
+
         Args:
           maxiter: Maximum iterations.
-          feeder_route: Feeder routing mode (``"segmented"`` or ``"straight"``).
-          method: Heuristic method to use. One of:
-
-            * ``"biased_EW"`` *(default)* — EW with a bias towards moving
-              radially on quasi-ties.
-            * ``"esau_williams"`` — classic Esau-Williams C-MST heuristic
-              modified to avoid crossings.
-            * ``"rootlust"`` — EW with a tunable root-ward bias that
-              increases as capacity decreases.
-            * ``"radial_EW"`` — EW variant that produces radial subtrees
-              (simple paths from root).
-
+          feeder_route: Feeder routing mode (``'segmented'`` or ``'straight'``).
+          method: one of the **Available Methods**, defaults to ``'biased_EW'``).
           bias_margin: Fractional margin within which edges are considered
-            equivalent (used by ``"biased_EW"`` and ``"radial_EW"``).
-            Defaults to the constructor's built-in default (0.02) when
-            ``None``.
+            equivalent (used by ``'biased_EW'`` and ``'radial_EW'``).
+            Defaults to the constructor's built-in default (0.02) when ``None``.
           verbose: Enable verbose logging.
         """
 
@@ -833,13 +844,13 @@ class MILPRouter(Router):
         """Create a MILP-based router.
 
         Args:
-            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools",
-                "cplex", "highs", "scip").
-            time_limit: Maximum runtime (seconds).
-            mip_gap: Relative MIP optimality gap tolerance.
-            solver_options: Extra solver-specific options.
-            model_options: Options for the MILP model.
-            verbose: Enable verbose logging.
+          solver_name: Name of solver (e.g., ``'gurobi'``, ``'cbc'``, ``'ortools'``,
+            ``'cplex'``, ``'highs'``, ``'scip'``).
+          time_limit: Maximum runtime (seconds).
+          mip_gap: Relative MIP optimality gap tolerance.
+          solver_options: Extra solver-specific options.
+          model_options: Options for the MILP model.
+          verbose: Enable verbose logging.
         """
         super().__init__(**kwargs)
         self.time_limit = time_limit
