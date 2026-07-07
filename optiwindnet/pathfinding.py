@@ -312,7 +312,9 @@ class PathFinder:
 
         self.G, self.Xings, self.tentative, self.A = G, Xings, set(tentative), A
         if not Xings:
-            # no crossings, there is no point in pathfinding
+            # no crossings, there is no point in pathfinding; still set P so
+            # that scaffolded() works even when create_detours() is not called
+            self.P = planar
             return
 
         # clone2prime must be a copy of the one from Gʹ

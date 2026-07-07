@@ -682,9 +682,12 @@ def test_scaffolded():
         for k, v in G.nodes[n].items():
             assert scaff.nodes[n][k] == v
 
-    # fnT should exist and match expected length
+    # fnT should exist and match expected length: G's primes, P's 3
+    # supertriangle placeholders, and R roots (scaff never gains G's clone
+    # nodes, since P has no clone concept and those ids alias supertriangle)
     assert 'fnT' in scaff.graph
-    assert len(scaff.graph['fnT']) == 15
+    T, B, R = (G.graph[k] for k in 'TBR')
+    assert len(scaff.graph['fnT']) == T + B + 3 + R
 
     # VertexC should contain G's VertexC plus P's supertriangle
     R = G.graph.get('R', 0)
