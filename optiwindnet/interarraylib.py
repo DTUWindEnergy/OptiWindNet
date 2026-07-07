@@ -1340,6 +1340,14 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
         st = fnT_G[u], fnT_G[v]
         if st in scaff.edges and 'kind' in scaff.edges[st]:
             del scaff.edges[st]['kind']
+    # a 'shortened_contours' entry collapses a fence onto fewer clones than
+    # mesh hops (sharing clones across contours), so the loop above only
+    # catches its two collapsed endpoints; walk the stored full midpath too.
+    for (s, t), (midpath, _) in G.graph.get('shortened_contours', {}).items():
+        for a, b in zip((s, *midpath), (*midpath, t)):
+            st = (a, b) if a < b else (b, a)
+            if st in scaff.edges and 'kind' in scaff.edges[st]:
+                del scaff.edges[st]['kind']
     VertexC = G.graph['VertexC']
     supertriangleC = P.graph['supertriangleC']
     if G.graph.get('is_normalized'):
