@@ -312,9 +312,13 @@ class PathFinder:
 
         self.G, self.Xings, self.tentative, self.A = G, Xings, set(tentative), A
         if not Xings:
-            # no crossings, there is no point in pathfinding; still set P so
-            # that scaffolded() works even when create_detours() is not called
+            # no crossings, there is no point in pathfinding; still set P and
+            # fences so that scaffolded() works even when create_detours() is
+            # not called. fences stays empty here: even if G has contour
+            # clones from G_from_S, they go unconverted by scaffolded() on
+            # this path, since fences are only built below.
             self.P = planar
+            self.fences = []
             return
 
         # clone2prime must be a copy of the one from Gʹ
@@ -1999,8 +2003,23 @@ class PathFinder:
         return nx.subgraph_view(K, filter_edge=lambda u, v: u >= 0 and v >= 0)
 
     def scaffolded(self) -> nx.Graph:
-        """Wrapper for :func:`.interarraylib.scaffolded`."""
-        return scaffolded(self.G, P=self.P)
+        """Wrapper for :func:`.interarraylib.scaffolded`.
+
+        Also unmarks (as real route, not background mesh) every navigation-mesh
+        hop crossed by a route fence. :func:`.interarraylib.scaffolded` cannot do
+        this on its own: a contour edge in ``G`` may be a ``shortened_contours``
+        shortcut spanning several mesh hops through one shared clone, and only
+        ``self.fences`` (built from ``A``'s midpaths during path-finding) has the
+        fully expanded, conflict-resolved hop sequence.
+        """
+        scaff = scaffolded(self.G, P=self.P)
+        for endpoints, primes_on_constraint, _ in self.fences:
+            chain = (endpoints[0], *primes_on_constraint, endpoints[1])
+            for a, b in zip(chain[:-1], chain[1:]):
+                st = (a, b) if a < b else (b, a)
+                if st in scaff.edges and 'kind' in scaff.edges[st]:
+                    del scaff.edges[st]['kind']
+        return scaff
 
     def create_detours(self) -> nx.Graph:
         """Reroute all feeder edges in G with crossings using detour paths.
