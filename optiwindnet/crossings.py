@@ -688,7 +688,7 @@ def find_geometric_crossings(
     Returns:
       One dict per finding, with keys:
 
-      - ``kind``: one of
+      - ``'kind'``: one of
           - ``'cross'``: two polylines cross at one or more isolated points;
           - ``'overlap_cross'``: two polylines share a sub-run and exit the
             overlap on opposite sides at both ends (a true cross expressed as

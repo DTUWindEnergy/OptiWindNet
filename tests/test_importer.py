@@ -1,5 +1,6 @@
 import networkx as nx
 import numpy as np
+import pytest
 
 from optiwindnet.importer import (
     L_from_yaml,
@@ -68,19 +69,30 @@ def test_translate_latlonstr_dms():
     entries = '55°30\'0"N 7°30\'0"E'
     result = _translate_latlonstr(entries)
     assert len(result) == 1
-    label, easting, northing, zone_num, zone_letter = result[0]
+    label, lat, lon = result[0]
     assert label is None
-    assert isinstance(easting, float)
-    assert isinstance(northing, float)
+    assert lat == pytest.approx(55.5)
+    assert lon == pytest.approx(7.5)
 
 
 def test_translate_latlonstr_decimal_deg():
     entries = '55.5 7.5'
     result = _translate_latlonstr(entries)
     assert len(result) == 1
-    label, easting, northing, zone_num, zone_letter = result[0]
+    label, lat, lon = result[0]
     assert label is None
-    assert isinstance(easting, float)
+    assert lat == pytest.approx(55.5)
+    assert lon == pytest.approx(7.5)
+
+
+def test_translate_latlonstr_no_minsec_leak():
+    # latitude carries seconds, longitude is degrees-only: the longitude must
+    # not inherit the latitude's leftover minutes/seconds
+    entries = '11°0\'30"N 44.5°E'
+    result = _translate_latlonstr(entries)
+    label, lat, lon = result[0]
+    assert lat == pytest.approx(11 + 0.5 / 60)
+    assert lon == pytest.approx(44.5)
 
 
 # --- L_from_yaml ---

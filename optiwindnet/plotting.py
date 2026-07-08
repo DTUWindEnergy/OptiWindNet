@@ -336,7 +336,7 @@ def pplot(P: nx.PlanarEmbedding, A: nx.Graph, **kwargs) -> Axes:
 
     Args:
         P: Planar embedding to plot.
-        A: source of vertex coordinates and 'kind'.
+        A: source of vertex coordinates and ``'kind'``.
 
     Returns:
         Axes instance containing the plot.

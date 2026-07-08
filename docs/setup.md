@@ -70,7 +70,7 @@ Other mathematical optimization backends can also be used, but they must be inst
 The commands suggested here assume that the Python environment for *OptiWindNet* has been already activated and that `conda` is configured for the `conda-forge` channel.
 For packages that are installable with both `pip` and `conda`, **enter only one** of the commands.
 
-Solvers perform a search across the branch-and-bound tree. On multi-core computers, some solvers parallelize the tree search itself, while others run several coordinated searches in parallel. As of Dec/2025, `gurobi`, `cplex`, `cbc`, and `fscip` support multi-threaded tree search in *OptiWindNet*.
+Solvers perform a search across the branch-and-bound tree. On multi-core computers, some solvers parallelize the tree search itself, while others run several coordinated searches in parallel. As of Jul/2026, `gurobi`, `cplex`, `highs`, `cbc`, and `fscip` support multi-threaded tree search in *OptiWindNet*.
 
 The OR-Tools backends and native `scip` can also benefit from multiple cores by running concurrent searches with some information exchange among them. OR-Tools diversifies algorithms and strategies across workers, while SCIP diversifies random seeds and may vary emphasis settings. Both expose user-configurable controls for that behavior.
 
@@ -106,6 +106,8 @@ For the PyPI package, `ortools.highs` is available out of the box. The `highs` b
       pip install highspy
       conda install -c conda-forge highspy
 
+> **Attention**: Avoid loading both `highs` and `ortools*` solvers within the same Python interpreter instance, since `ortools` contains a vendored copy of HiGHS and its version may be different from the one used by **highspy**.
+
 ### CBC
 
 [COIN-OR's Optimization Suite](https://coin-or.github.io/user_introduction.html) is open source software and its MILP solver is [coin-or/Cbc: COIN-OR Branch-and-Cut solver](https://github.com/coin-or/Cbc).
@@ -126,10 +128,10 @@ Users on Windows might find it difficult to get a multi-threaded CBC on that pla
 
 For the PyPI package, `ortools.gscip` is available out of the box. The native `scip` backend requires a separate installation:
 
-> **Attention**: Avoid loading both `scip` and `ortools` solvers within the same Python interpreter instance, since `ortools` contains a SCIP library and its version may be different from the one used by **pyscipopt**.
-
     pip install pyscipopt
     conda install -c conda-forge pyscipopt
+
+> **Attention**: Avoid loading both `scip` and `ortools*` solvers within the same Python interpreter instance, since `ortools` contains a SCIP library and its version may be different from the one used by **pyscipopt**.
 
 If a call to `WindFarmNetwork().optimize()` or to `Solver.solve()` produces the warning:
 > UserWarning: SCIP was compiled without task processing interface. Parallel solve not possible - using optimize() instead of solveConcurrent()

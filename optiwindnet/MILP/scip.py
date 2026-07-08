@@ -161,12 +161,12 @@ def make_min_length_model(
     Args:
       A: graph with the available edges to choose from
       capacity: maximum link flow capacity
-      topology: one of Topology.{BRANCHED, RADIAL}
+      topology: one of ``Topology.{BRANCHED, RADIAL}``
       feeder_route:
         ``FeederRoute.SEGMENTED`` → feeder routes may be detoured around subtrees;
         ``FeederRoute.STRAIGHT`` → feeder routes must be straight, direct lines
-      feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
-        ``MIN_PLUS1``, ``MIN_PLUS2``, ``MIN_PLUS3``}
+      feeder_limit: one of ``FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
+        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}``
       max_feeders: only used if ``feeder_limit`` is ``FeederLimit.SPECIFIED``
     """
     R = A.graph['R']

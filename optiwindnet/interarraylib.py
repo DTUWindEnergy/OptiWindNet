@@ -877,10 +877,10 @@ def as_normalized(
     ``'length'`` (edge).
 
     Args:
-        Aʹ: (or Gʹ) any instance that has inherited 'scale' from an
+        Aʹ: (or Gʹ) any instance that has inherited ``'scale'`` from an
             edgeset ``Aʹ``.
-        offset: coordinates (2,) offset to override graph's 'norm_offset'
-        scale: multiplicative scaling factor to override graph's 'norm_scale'
+        offset: coordinates (2,) offset to override graph's ``'norm_offset'``
+        scale: multiplicative scaling factor to override graph's ``'norm_scale'``
 
     Returns:
         A copy of the instance with changed coordinates and linear metrics.
@@ -909,8 +909,8 @@ def as_rescaled(Gʹ: nx.Graph, L: nx.Graph) -> nx.Graph:
 
     Args:
       Gʹ: routeset to rescale to pre-normalization size.
-      L: (or G or A) locations or routeset to get 'VertexC' from (also
-        'd2roots', if available).
+      L: (or G or A) locations or routeset to get ``'VertexC'`` from (also
+        ``'d2roots'``, if available).
 
     Returns:
       Routeset with coordinates and lengths at site scale.
@@ -939,7 +939,7 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
     """Create an undetoured version of Gʹ.
 
     Creates a shallow copy of ``Gʹ`` without detour nodes (and possibly *with*
-    the resulting crossings). Changed links' 'kind' become 'tentative'.
+    the resulting crossings). Changed links' ``'kind'`` become ``'tentative'``.
 
     This is to be applied to a routeset that already has detours. It serves to
     re-run PathFinder on a detoured routeset, but it is not the best solution
@@ -984,7 +984,7 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
     Output may be branched (use with care with path routesets).
 
-    Sifts through all 'tentative' gates' subtrees and choose the hook closest
+    Sifts through all ``'tentative'`` gates' subtrees and choose the hook closest
     to the respective root according to ``d2roots``.
 
     Should be called after :func:`as_undetoured` if the goal is to use G as a
@@ -992,7 +992,7 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
     Args:
       G: routeset or topology S
-      d2roots: distance from nodes to roots (e.g. A.graph['d2roots'])
+      d2roots: distance from nodes to roots (e.g. ``A.graph['d2roots']``)
     """
     assert Gʹ.graph.get('has_loads')
     G = Gʹ.copy()
@@ -1051,7 +1051,7 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
     Only works with solutions where subtrees are paths (radial topology).
 
-    Sifts through the subtrees of 'tentative' feeders and re-hook the subtree via
+    Sifts through the subtrees of ``'tentative'`` feeders and re-hook the subtree via
     the end-node that is nearest to the respective root according to ``d2roots``.
 
     Should be called after :func:`as_undetoured` if the goal is to use S as a
@@ -1059,7 +1059,7 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
 
     Args:
       S: solution topology
-      d2roots: distance from nodes to roots (e.g. A.graph['d2roots'])
+      d2roots: distance from nodes to roots (e.g. ``A.graph['d2roots']``)
     """
     assert Sʹ.graph.get('has_loads')
     S = Sʹ.copy()

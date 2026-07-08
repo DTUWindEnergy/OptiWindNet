@@ -70,7 +70,10 @@ _default_options = dict(
         liftAndProjectCuts='off',
         residualCapacityCuts='off',
     ),
-    highs={},
+    highs=dict(
+        parallel='on',
+        # threads=0,  # 0 means automatic and is HiGHS's default
+    ),
     scip={},
 )
 
@@ -225,12 +228,17 @@ class SolverPyomoAppsi(Solver):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = self.options | options
+        for key, value in applied_options.items():
+            if key in solver.config:
+                solver.config[key] = value
+            else:
+                solver._solver_options[key] = value
         stopping = {
             _optkey[name].time_limit: time_limit,
             _optkey[name].mip_gap: mip_gap,
         }
         self.stopping = stopping
-        for k, v in (applied_options | stopping).items():
+        for k, v in stopping.items():
             solver.config[k] = v
         solver.config.load_solution = False
         solver.config.stream_solver = verbose
@@ -292,12 +300,12 @@ def make_min_length_model(
     Args:
       A: graph with the available edges to choose from
       capacity: maximum link flow capacity
-      topology: one of Topology.{BRANCHED, RADIAL}
+      topology: one of ``Topology.{BRANCHED, RADIAL}``
       feeder_route:
         ``FeederRoute.SEGMENTED`` → feeder routes may be detoured around subtrees;
         ``FeederRoute.STRAIGHT`` → feeder routes must be straight, direct lines
-      feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
-        ``MIN_PLUS1``, ``MIN_PLUS2``, ``MIN_PLUS3``}
+      feeder_limit: one of ``FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
+        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}``
       max_feeders: only used if ``feeder_limit`` is ``FeederLimit.SPECIFIED``
     """
     R = A.graph['R']

@@ -706,7 +706,7 @@ def svgplot(
       transparent: background color: ``True`` → transparent; ``False`` → theme-based
 
     Returns:
-      SvgRepr object containing the SVG markup in its ``data`` attribute
+      SvgRepr object containing the SVG markup in its ``'data'`` attribute
     """
 
     drawable = Drawable(
