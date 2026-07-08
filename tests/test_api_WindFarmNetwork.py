@@ -19,6 +19,35 @@ from .helpers import tiny_wfn
 
 _LOCATION_FILE = Path(__file__).parent / 'locations' / 'example_location.yaml'
 
+
+def _job_integer_scaled_solution_graph_attrs():
+    router = MILPRouter(
+        'ortools.highs',
+        time_limit=1,
+        mip_gap=0.1,
+    )
+    wfn = WindFarmNetwork(
+        cables=[(2, 1.0)],
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.5],
+        router=router,
+    )
+
+    wfn.optimize()
+
+    return {
+        'S_edge_loads': sorted(data['load'] for *_, data in wfn.S.edges(data=True)),
+        'G_edge_loads': sorted(data['load'] for *_, data in wfn.G.edges(data=True)),
+        'S_max_load': wfn.S.graph['max_load'],
+        'G_max_load': wfn.G.graph['max_load'],
+        'S_capacity': wfn.S.graph['capacity'],
+        'G_capacity': wfn.G.graph['capacity'],
+        'G_cables': wfn.G.graph['cables'],
+        'G_node_loads': sorted(data['load'] for _, data in wfn.G.nodes(data=True)),
+    }
+
+
 # =====================
 # WindFarmNetwork core
 # =====================
@@ -191,34 +220,21 @@ def test_turbine_power_decimals_is_limited_before_integer_scaling(caplog):
     )
 
 
-def test_integer_scaled_solution_graphs_are_rescaled_to_nominal_units():
-    router = MILPRouter(
-        'ortools.highs',
-        time_limit=1,
-        mip_gap=0.1,
-    )
-    wfn = WindFarmNetwork(
-        cables=[(2, 1.0)],
-        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
-        substationsC=np.array([[0.0, 1.0]]),
-        turbine_power=[1.0, 1.5],
-        router=router,
-    )
+def test_integer_scaled_solution_graphs_are_rescaled_to_nominal_units(ortools_worker):
+    result = ortools_worker.run(_job_integer_scaled_solution_graph_attrs, (), 30)
+    if isinstance(result, BaseException):
+        raise result
 
-    wfn.optimize()
-
-    assert sorted(data['load'] for *_, data in wfn.S.edges(data=True)) == [1.0, 1.5]
-    assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [1.0, 1.5]
-    assert wfn.S.graph['max_load'] == 1.5
-    assert wfn.G.graph['max_load'] == 1.5
-    assert wfn.S.graph['capacity'] == 2
-    assert wfn.G.graph['capacity'] == 2
-    assert wfn.G.graph['cables'] == [(2, 1.0)]
-    assert sorted(data['load'] for _, data in wfn.G.nodes(data=True)) == [
-        1.0,
-        1.5,
-        2.5,
-    ]
+    assert result == {
+        'S_edge_loads': [1.0, 1.5],
+        'G_edge_loads': [1.0, 1.5],
+        'S_max_load': 1.5,
+        'G_max_load': 1.5,
+        'S_capacity': 2,
+        'G_capacity': 2,
+        'G_cables': [(2, 1.0)],
+        'G_node_loads': [1.0, 1.5, 2.5],
+    }
 
 
 @pytest.mark.parametrize('decimals', [-1, True, 1.5])
