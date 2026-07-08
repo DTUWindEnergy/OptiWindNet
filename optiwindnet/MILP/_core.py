@@ -16,7 +16,7 @@ from typing import Any
 import networkx as nx
 from makefun import with_signature
 
-from ..interarraylib import G_from_S
+from ..interarraylib import G_from_S, NONUNIFORM_POWER_ATTR
 from ..pathfinding import PathFinder
 
 _lggr = logging.getLogger(__name__)
@@ -98,9 +98,6 @@ class FeederLimit(StrEnum):
     DEFAULT = UNLIMITED
 
 
-NONUNIFORM_POWER_ATTR = 'nonuniform_power'
-
-
 def effective_terminal_powers(A: nx.Graph) -> tuple[int | float, ...]:
     """Return terminal powers, requiring explicit opt-in for non-uniform values."""
     T = A.graph['T']
@@ -118,12 +115,12 @@ def effective_terminal_powers(A: nx.Graph) -> tuple[int | float, ...]:
 
 
 def minimum_feeder_count(total_power: int | float, capacity: int | float) -> int:
-    """Minimum feeders needed to carry ``total_power`` through capacity ``capacity``."""
+    """Minimum feeders needed for the given total power and capacity."""
     return math.ceil(total_power / capacity)
 
 
 def balanced_feeder_min_load(total_power: int | float, feeder_count: int) -> int:
-    """Lower load bound for balanced feeders with possibly weighted turbine power."""
+    """Lower load bound for balanced feeder constraints."""
     return int(total_power // feeder_count)
 
 

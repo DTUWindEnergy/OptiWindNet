@@ -22,6 +22,7 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
+from .interarraylib import NONUNIFORM_POWER_ATTR
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset')
 
@@ -1530,8 +1531,8 @@ def make_planar_embedding(
         A.graph['obstacles'] = obstacles
     if stunts_primes:
         A.graph['stunts_primes'] = stunts_primes
-    if L.graph.get('nonuniform_power', False):
-        A.graph['nonuniform_power'] = True
+    if L.graph.get(NONUNIFORM_POWER_ATTR, False):
+        A.graph[NONUNIFORM_POWER_ATTR] = True
     landscape_angle = L.graph.get('landscape_angle')
     if landscape_angle is not None:
         A.graph['landscape_angle'] = landscape_angle

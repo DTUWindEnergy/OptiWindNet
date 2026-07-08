@@ -428,7 +428,7 @@ def make_min_length_model(
         name='flow_lb',
     )
 
-    # flow conservation with possibly non-unitary node power
+    # flow conservation with terminal power
     m.cons_flow_conserv = pyo.Constraint(
         m.T,
         rule=(

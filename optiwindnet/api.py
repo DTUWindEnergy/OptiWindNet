@@ -29,6 +29,7 @@ from .importer import L_from_pbf, L_from_site, L_from_windIO, L_from_yaml
 from .importer import load_repository as load_repository
 from .interarraylib import (
     G_from_S,
+    NONUNIFORM_POWER_ATTR,
     S_from_G,
     as_normalized,
     as_stratified_vertices,
@@ -37,7 +38,6 @@ from .interarraylib import (
 )
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
-from .MILP._core import NONUNIFORM_POWER_ATTR
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot, svgpplot
@@ -60,25 +60,12 @@ def _normalize_turbine_power(
     T: int,
     turbine_power_decimals: int = _DEFAULT_TURBINE_POWER_DECIMALS,
 ) -> tuple[list[int], int]:
-    """Round, validate, then convert turbine powers to integer units.
-
-    Args:
-      turbine_power: per-turbine power weights (floats allowed).
-      T: expected number of turbines.
-      turbine_power_decimals: number of decimal places to keep before scaling.
-
-    Returns:
-      Tuple of (integer power list, scale factor).
-
-    Raises:
-      ValueError: if length does not match T or any value is non-positive.
-    """
+    """Round, validate, and convert turbine powers to integer units."""
     powers = _validate_turbine_power(turbine_power, T, turbine_power_decimals)
     return _integerize_turbine_power(powers)
 
 
 def _integerize_turbine_power(powers: Sequence[float]) -> tuple[list[int], int]:
-    """Convert already-validated per-turbine powers to integer weights."""
     power_fractions = [Fraction(str(power)) for power in powers]
     power_scale = 1
     for power_fraction in power_fractions:
@@ -95,7 +82,6 @@ def _integerize_turbine_power(powers: Sequence[float]) -> tuple[list[int], int]:
 
 
 def _validate_turbine_power_decimals(turbine_power_decimals: int) -> int:
-    """Validate the number of decimal places kept for turbine powers."""
     if (
         isinstance(turbine_power_decimals, bool)
         or not isinstance(turbine_power_decimals, Integral)
@@ -106,7 +92,6 @@ def _validate_turbine_power_decimals(turbine_power_decimals: int) -> int:
 
 
 def _round_turbine_power(raw_power: Decimal, turbine_power_decimals: int) -> Decimal:
-    """Round to the requested number of decimal places."""
     quantum = Decimal(1).scaleb(-turbine_power_decimals)
     return raw_power.quantize(quantum, rounding=ROUND_HALF_UP)
 
@@ -152,7 +137,6 @@ def _validate_turbine_power(
 
 
 def _scaled_number(value, factor: int | float):
-    """Scale a number and keep integer-looking results as integers."""
     scaled = value * factor
     if isinstance(scaled, float) and scaled.is_integer():
         return int(scaled)
@@ -160,7 +144,6 @@ def _scaled_number(value, factor: int | float):
 
 
 def _scale_graph_power_attrs(G: nx.Graph, factor: int | float) -> None:
-    """Scale graph values that are expressed in turbine-power units."""
     for attr in ('capacity', 'max_load'):
         if attr in G.graph:
             G.graph[attr] = _scaled_number(G.graph[attr], factor)
@@ -266,32 +249,16 @@ class WindFarmNetwork:
             (_, 2): ``[[(x, y), ...], ...]``.
           name: Human-readable instance name. Defaults to "".
           handle: Short instance identifier. Defaults to "".
-          turbine_power: Per-turbine power weights as a sequence of length T.
-            Values are relative to a **nominal unit**: ``[1.0, 1.5, 2.0]``
-            means the second turbine produces 1.5× and the third 2× the
-            nominal power.
-
-            The ``cables`` capacity is always in **nominal power units**: a
-            cable with capacity ``k`` can carry any group of turbines whose
-            total power sums to at most ``k``. It is not tied to the lowest
-            or highest rated turbine — it is tied to whatever the user
-            defines as ``1.0``. Therefore ``[1.0, 2.0]`` and ``[3.0, 6.0]``
-            represent different absolute demands unless cable capacities are
-            scaled by the same factor.
-
-            Only respected by :class:`MILPRouter` — heuristic routers
-            (:class:`EWRouter`, :class:`HGSRouter`) raise :class:`TypeError`
-            for non-uniform turbine power.
+          turbine_power: Per-turbine power values in nominal units. A cable
+            with capacity ``k`` can carry turbines whose total power is at
+            most ``k``. For example, ``[1.0, 2.0]`` and ``[3.0, 6.0]`` are
+            equivalent only if cable capacities are scaled by the same factor.
+            Currently supported by :class:`MILPRouter`; heuristic routers
+            raise :class:`TypeError` for weighted power.
 
           turbine_power_decimals: Number of decimal places to keep in
             ``turbine_power`` before optimization. Defaults to 1; use 2 for
-            two decimal digits or 10 for ten.
-
-            .. note::
-              The MILP feeder lower-bound constraint uses total power
-              ``ceil(W / k)`` (where W is total power and k is cable
-              capacity), so non-uniform turbine powers tighten the minimum
-              feeder count consistently with the cable capacity.
+            two decimal digits or 10 for ten decimal digits.
 
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to :class:`EWRouter`.
@@ -390,7 +357,6 @@ class WindFarmNetwork:
 
     # -------- helpers --------
     def _warmstart_for_current_power_scale(self) -> dict:
-        """Build warmstart arguments using the solver's current power units."""
         if self._is_stale_SG:
             return {}
 
@@ -404,7 +370,6 @@ class WindFarmNetwork:
         )
 
     def _cables_for_current_power_scale(self):
-        """Return cable specs and max capacity in the solver's current units."""
         if self._power_scale == 1:
             return self._cables, self.cables_capacity
         scaled_cables = [
@@ -414,7 +379,6 @@ class WindFarmNetwork:
         return scaled_cables, scaled_capacity
 
     def _restore_solution_graphs_to_nominal_units(self) -> None:
-        """Convert solved graph power values back to user-facing units."""
         if self._power_scale == 1:
             return
         nominal_unit_factor = 1 / self._power_scale
@@ -934,7 +898,7 @@ class EWRouter(Router):
         T = A.graph['T']
         if any(A.nodes[t].get('power', 1) != 1 for t in range(T)):
             raise TypeError(
-                'EWRouter does not support non-uniform turbine_power. '
+                'EWRouter does not support turbine_power values other than 1.0. '
                 'Use MILPRouter for weighted power optimization.'
             )
         if self.feeder_route == 'segmented':
@@ -1010,7 +974,7 @@ class HGSRouter(Router):
         T = A.graph['T']
         if any(A.nodes[t].get('power', 1) != 1 for t in range(T)):
             raise TypeError(
-                'HGSRouter does not support non-uniform turbine_power. '
+                'HGSRouter does not support turbine_power values other than 1.0. '
                 'Use MILPRouter for weighted power optimization.'
             )
         S = hgs_cvrp(

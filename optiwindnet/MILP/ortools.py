@@ -423,7 +423,7 @@ def make_min_length_model(
             name=f'flow_nonzero_{t}~{_n}',
         )
 
-    # flow conservation with possibly non-unitary node power
+    # flow conservation with terminal power
     for t in _T:
         m.add_linear_constraint(
             sum((flow_[t, n] - flow_[n, t]) for n in A_terminals.neighbors(t))
