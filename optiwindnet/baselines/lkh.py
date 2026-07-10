@@ -9,7 +9,6 @@ import re
 import subprocess
 import tempfile
 import time
-import warnings
 from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
 from pathlib import Path
@@ -630,22 +629,6 @@ def _lkh(
 _lkh_fun_fingerprint = fun_fingerprint(_lkh)
 
 
-# TODO: remove deprecated function
-def lkh(*args, **kwargs) -> nx.Graph:
-    """DEPRECATED: backward-compatible alias of `_lkh()`. Use `lkh3()` instead.
-
-    Kept for callers that relied on the previous low-level single-root LKH-3
-    API. New code should use `lkh3()` (the high-level wrapper that mirrors
-    `hgs_cvrp()` and supports both single- and multi-root instances).
-    """
-    warnings.warn(
-        '`lkh()` is deprecated and will be removed in v0.3. Use `lkh3()` instead.',
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return _lkh(*args, **kwargs)
-
-
 def _run_lkh_per_cluster(
     L_: list[np.ndarray],
     *,
@@ -938,51 +921,3 @@ def lkh3(
 
 
 _lkh3_fun_fingerprint = fun_fingerprint(lkh3)
-
-
-# TODO: remove deprecated function
-def iterative_lkh(
-    Aʹ: nx.Graph,
-    *,
-    capacity: int,
-    time_limit: float,
-    scale: float = 1e5,
-    vehicles: int | None = None,
-    warmstart: nx.Graph | None = None,
-    runs: int = 50,
-    per_run_limit: float = 15.0,
-    precision: int = 1000,
-    complete: bool = False,
-    keep_log: bool = False,
-    seed: int | None = None,
-    max_retries: int = 10,
-) -> nx.Graph:
-    """DEPRECATED: backward-compatible alias of `lkh3()`. Use it instead.
-
-    Earlier this function pre-pruned bad links and iterated `lkh()`; this
-    behaviour is now part of `lkh3()`, which also supports multi-root
-    instances.
-    """
-    warnings.warn(
-        '`iterative_lkh()` is deprecated and will be removed in v0.3. '
-        'Use `lkh3()` instead.',
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return lkh3(
-        Aʹ,
-        capacity=capacity,
-        time_limit=time_limit,
-        vehicles=vehicles,
-        seed=seed,
-        keep_log=keep_log,
-        repair=True,
-        max_retries=max_retries,
-        balanced=True,
-        scale=scale,
-        runs=runs,
-        per_run_limit=per_run_limit,
-        precision=precision,
-        complete=complete,
-        warmstart=warmstart,
-    )

@@ -22,9 +22,8 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
-from .interarraylib import add_terminal_closest_root
 
-__all__ = ('make_planar_embedding', 'planar_flipped_by_routeset', 'delaunay')
+__all__ = ('make_planar_embedding', 'planar_flipped_by_routeset')
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn = _lggr.debug, _lggr.info, _lggr.warning
@@ -1540,30 +1539,6 @@ def make_planar_embedding(
     #   P_A: PlanarEmbedding
     #   diagonals: bidict
     return P, A
-
-
-def delaunay(L: nx.Graph, bind2root: bool = False) -> nx.Graph:
-    # TODO: deprecate the use of delaunay()
-    """DEPRECATED. Create the extended-Delaunay-based available-edges graph A.
-
-    Args:
-      L: location
-      bind2root: assign edge attribute 'root' (used by legacy heuristics)
-
-    Returns:
-      A - available-edges graph
-    """
-    _, A = make_planar_embedding(L)
-    if bind2root:
-        add_terminal_closest_root(A)
-        R = L.graph['R']
-        # assign each edge to the root closest to the edge's middle point
-        VertexC = A.graph['VertexC']
-        for u, v, edgeD in A.edges(data=True):
-            edgeD['root'] = -R + np.argmin(
-                cdist(((VertexC[u] + VertexC[v]) / 2)[np.newaxis, :], VertexC[-R:])
-            )
-    return A
 
 
 def planar_flipped_by_routeset(
