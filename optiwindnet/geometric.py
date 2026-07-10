@@ -718,6 +718,79 @@ def is_triangle_pair_a_convex_quadrilateral(
     return (usut > 0.0) == (vtvs > 0.0)
 
 
+def is_blocking(
+    rootC: CoordPair, uC: CoordPair, vC: CoordPair, sC: CoordPair, tC: CoordPair
+) -> bool:
+    """DEPRECATED
+
+    This is used only by apply_edge_exemptions()
+    """
+    # s and t are necessarily on opposite sides of uv
+    # (because of Delaunay – see the triangles construction)
+    # hence, if (root, t) are on the same side, (s, root) are not
+    return (
+        is_triangle_pair_a_convex_quadrilateral(uC, vC, sC, rootC)
+        if is_same_side(uC, vC, rootC, tC)
+        else is_triangle_pair_a_convex_quadrilateral(uC, vC, rootC, tC)
+    )
+
+
+def apply_edge_exemptions(G, allow_edge_deletion=True):
+    """DEPRECATED (depends on 'E_hull' and 'N_hull' graph attributes)
+
+    Exemption is used by weighting functions that take into account the angular
+    sector blocked by each edge w.r.t. the closest root node.
+    """
+    E_hull = G.graph['E_hull']
+    N_hull = G.graph['N_hull']
+    N_inner = set(G.nodes) - N_hull
+    R = G.graph['R']
+    # T = G.number_of_nodes() - R
+    VertexC = G.graph['VertexC']
+    # roots = range(T, T + R)
+    roots = range(-R, 0)
+    triangles = G.graph['triangles']
+    angle__ = G.graph['angle__']
+
+    # set hull edges as exempted
+    for edge in E_hull:
+        G.edges[edge]['exempted'] = True
+
+    # expanded E_hull to contain edges exempted from blockage penalty
+    # (edges that do not block line from nodes to root)
+    E_hull_exp = E_hull.copy()
+
+    # check if edges touching the hull should be exempted from blockage penalty
+    for n_hull in N_hull:
+        for n_inner in N_inner & set([v for _, v in G.edges(n_hull)]):
+            uv = frozenset((n_hull, n_inner))
+            u, v = uv
+            opposites = triangles[uv]
+            if len(opposites) == 2:
+                s, t = triangles[uv]
+                rootC = VertexC[G.edges[u, v]['root']]
+                uvstC = tuple((VertexC[n] for n in (*uv, s, t)))
+                if not is_blocking(rootC, *uvstC):
+                    E_hull_exp.add(uv)
+                    G.edges[uv]['exempted'] = True
+
+    # calculate blockage arc for each edge
+    zeros = np.full((R,), 0.0)
+    for u, v, d in list(G.edges(data=True)):
+        if (frozenset((u, v)) in E_hull_exp) or (u in roots) or (v in roots):
+            angdiff = zeros
+        else:
+            angdiff = abs(angle__[u] - angle__[v])
+        arc = np.empty((R,), dtype=float)
+        for i in range(R):  # TODO: vectorize this loop
+            arc[i] = angdiff[i] if angdiff[i] < np.pi else 2 * np.pi - angdiff[i]
+        d['arc'] = arc
+        # if arc is π/2 or more, remove the edge (it's shorter to go to root)
+        if allow_edge_deletion and any(arc >= np.pi / 2):
+            G.remove_edge(u, v)
+            print(f'angles {arc} removing «{u}~{v}»')
+
+
 def perimeter(VertexC, vertices_ordered):
     """Calculate the perimeter of the polygon defined by ``vertices_ordered``.
 
