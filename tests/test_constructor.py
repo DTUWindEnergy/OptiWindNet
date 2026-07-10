@@ -253,3 +253,19 @@ def test_legacy_heuristic_warns(cazzaro_LA, name):
     arg = A if name == 'EW_presolver' else L
     with pytest.warns(DeprecationWarning, match=name):
         fn(arg, capacity=5)
+
+
+def test_legacy_interface_warns():
+    import numpy as np
+
+    from optiwindnet.interface import HeuristicFactory
+
+    with pytest.warns(DeprecationWarning, match='HeuristicFactory'):
+        HeuristicFactory(
+            T=2,
+            R=1,
+            rootC=np.zeros((1, 2)),
+            boundaryC=np.zeros((4, 2)),
+            heuristic='CPEW',
+            cables=[(1, 4, 1.0)],
+        )
