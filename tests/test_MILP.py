@@ -178,6 +178,16 @@ def test_feeder_and_load_bounds_exactly_validates_terminal_count():
     assert feeders_lb == feeders_ub == 13
 
 
+def test_feeder_and_load_bounds_accepts_legacy_T_keyword():
+    assert core.feeder_and_load_bounds(
+        T=12,
+        capacity=5,
+        feeder_limit=core.FeederLimit.MINIMUM,
+        max_feeders=0,
+        balanced=False,
+    ) == (3, 3, None, None)
+
+
 def _solve_toy_weighted(solver_name, P, A):
     A = A.copy()
     for t in range(3):

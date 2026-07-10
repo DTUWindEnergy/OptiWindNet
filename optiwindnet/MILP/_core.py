@@ -105,13 +105,14 @@ class FeederLimit(StrEnum):
 
 
 def feeder_and_load_bounds(
-    total_power: int,
-    capacity: int,
-    feeder_limit: FeederLimit,
-    max_feeders: int,
-    balanced: bool,
+    total_power: int | None = None,
+    capacity: int | None = None,
+    feeder_limit: FeederLimit | None = None,
+    max_feeders: int = 0,
+    balanced: bool = False,
     *,
     terminal_count: int | None = None,
+    T: int | None = None,
 ) -> tuple[int, int | None, int | None, int | None]:
     """Derive the feeder-count and feeder-load bounds a model must enforce.
 
@@ -132,6 +133,16 @@ def feeder_and_load_bounds(
     Returns:
         ``(feeders_lb, feeders_ub, load_lb, load_ub)``
     """
+    if total_power is None:
+        if T is None:
+            raise TypeError("missing required argument: 'total_power'")
+        total_power = T
+    elif T is not None and terminal_count is None:
+        terminal_count = T
+    if capacity is None:
+        raise TypeError("missing required argument: 'capacity'")
+    if feeder_limit is None:
+        raise TypeError("missing required argument: 'feeder_limit'")
     if terminal_count is None:
         # with power ≥ 1 per terminal, total_power is a valid upper bound
         terminal_count = total_power

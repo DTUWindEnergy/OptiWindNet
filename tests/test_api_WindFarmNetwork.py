@@ -258,6 +258,17 @@ def test_update_from_terse_links_uses_weighted_power():
     assert wfn.G[1][-1]['cable'] == 1
 
 
+def test_plot_selected_links_uses_weighted_power_scale():
+    wfn = WindFarmNetwork(
+        cables=[(1, 100.0), (2, 150.0)],
+        turbine_power=[1.0, 1.5],
+        **_TWO_TURBINES,
+    )
+    wfn.update_from_terse_links(np.array([-1, -1]))
+
+    wfn.plot_selected_links()
+
+
 def test_warmstart_eligibility_uses_total_power():
     # T=2 with power quanta [2, 3]: W=5 at capacity 4 pins 2 feeders, which
     # S_warm has; counting terminals instead would pin ceil(2/4) = 1 feeder

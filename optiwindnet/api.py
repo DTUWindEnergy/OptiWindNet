@@ -582,7 +582,7 @@ class WindFarmNetwork:
     def plot_selected_links(self, **kwargs):
         """Plot link selection (tentative feeder routes)."""
         G_tentative = G_from_S(self.S, self.A)
-        assign_cables(G_tentative, self.cables)
+        assign_cables(G_tentative, self._scaled_cables())
         if 'ax' in kwargs:
             return gplot(G_tentative, **kwargs)
         return svgplot(G_tentative, **kwargs)

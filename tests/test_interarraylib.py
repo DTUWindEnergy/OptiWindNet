@@ -177,6 +177,22 @@ def test_calcload_weighted_power():
     assert [S.nodes[t]['load'] for t in range(3)] == [6, 5, 3]
 
 
+def test_S_from_G_preserves_weighted_power_metadata():
+    G = nx.Graph(R=1, T=2, B=0, capacity=4, has_loads=True, power_scale=2)
+    G.add_node(-1, kind='oss', load=5)
+    G.add_node(0, kind='wtg', power=2, load=2, subtree=0)
+    G.add_node(1, kind='wtg', power=3, load=3, subtree=1)
+    G.add_edge(-1, 0, load=2, reverse=False)
+    G.add_edge(-1, 1, load=3, reverse=False)
+
+    S = S_from_G(G)
+
+    assert S.graph['power_scale'] == 2
+    assert [S.nodes[t]['power'] for t in range(2)] == [2, 3]
+    assert total_power(S) == 5
+    assert sorted(data['load'] for *_, data in S.edges(data=True)) == [2, 3]
+
+
 def test_site_fingerprint():
     VertexC = np.array([[0.0, 0.0], [1.5, -0.5], [10.0, 10.0]])
     boundary = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]])

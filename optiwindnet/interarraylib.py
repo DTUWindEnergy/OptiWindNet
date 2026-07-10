@@ -627,6 +627,8 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
         R=R,
         capacity=capacity,
     )
+    if 'power_scale' in G.graph:
+        S.graph['power_scale'] = G.graph['power_scale']
     # create a topology graph S from the results
     for r in range(-R, 0):
         S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']} if has_loads else {}))
@@ -640,7 +642,12 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
                 u = on_hold
             if has_loads:
                 v_load = G.nodes[v]['load']
-                S.add_node(v, kind='wtg', load=v_load, subtree=G.nodes[v]['subtree'])
+                node_attrs = dict(
+                    kind='wtg', load=v_load, subtree=G.nodes[v]['subtree']
+                )
+                if 'power' in G.nodes[v]:
+                    node_attrs['power'] = G.nodes[v]['power']
+                S.add_node(v, **node_attrs)
                 S.add_edge(
                     u,
                     v,
@@ -648,7 +655,10 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
                     reverse=(G.nodes[u]['load'] < v_load) == (u < v),
                 )
             else:
-                S.add_node(v, kind='wtg')
+                node_attrs = {'kind': 'wtg'}
+                if 'power' in G.nodes[v]:
+                    node_attrs['power'] = G.nodes[v]['power']
+                S.add_node(v, **node_attrs)
                 S.add_edge(u, v)
             on_hold = None
     creator = G.graph.get('creator')
