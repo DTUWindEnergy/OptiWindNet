@@ -230,3 +230,26 @@ def test_maxiter_failsafe_breaks_and_logs(mesh, caplog):
     assert any('maxiter' in r.getMessage() for r in caplog.records)
     assert nx.is_forest(S)
     assert S.number_of_edges() == A.graph['T']
+
+
+# --------------------------------------------------------------------------- #
+# E. deprecation of the standalone heuristics superseded by constructor
+# --------------------------------------------------------------------------- #
+@pytest.fixture(scope='session')
+def cazzaro_LA():
+    """(L, A) for a small data-set location, for exercising the legacy heuristics."""
+    L = L_from_yaml(paths.DATA_DIR / 'Cazzaro-2022.yaml')
+    _, A = make_planar_embedding(L)
+    return L, A
+
+
+@pytest.mark.parametrize('name', ['ClassicEW', 'CPEW', 'NBEW', 'OBEW', 'EW_presolver'])
+def test_legacy_heuristic_warns(cazzaro_LA, name):
+    import optiwindnet.heuristics as heuristics
+
+    L, A = cazzaro_LA
+    fn = getattr(heuristics, name)
+    # constructor and EW_presolver take A; the others take the location graph L
+    arg = A if name == 'EW_presolver' else L
+    with pytest.warns(DeprecationWarning, match=name):
+        fn(arg, capacity=5)
