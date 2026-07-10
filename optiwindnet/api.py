@@ -762,12 +762,20 @@ class HGSRouter(Router):
     """
 
     _summary_attrs = ('runtime',)
-    _repr_attrs = ('time_limit', 'feeder_limit', 'max_retries', 'balanced', 'seed')
+    _repr_attrs = (
+        'time_limit',
+        'feeder_limit',
+        'feeder_exact',
+        'max_retries',
+        'balanced',
+        'seed',
+    )
 
     def __init__(
         self,
         time_limit: float,
         feeder_limit: int | None = None,
+        feeder_exact: bool = False,
         max_retries: int = 10,
         balanced: bool = False,
         seed: int | None = None,
@@ -779,7 +787,10 @@ class HGSRouter(Router):
         Args:
           time_limit: Maximum runtime for a single HGS run (in seconds).
           feeder_limit: Maximum number of feeders allowed
-              (ignored if multiple substations).
+              (ignored if multiple substations); the exact number if ``feeder_exact``.
+          feeder_exact: Whether ``feeder_limit`` is the exact number of feeders,
+              instead of an upper bound (requires ``balanced=True`` and a single
+              substation).
           max_retries: Maximum number of retries if a feasible solution is not found.
           balanced: Whether to balance turbines/loads across feeders.
           seed: Set the seed of the pseudo-random number generator (reproducibility).
@@ -795,6 +806,7 @@ class HGSRouter(Router):
         self.verbose = verbose
         self.max_retries = max_retries
         self.feeder_limit = feeder_limit
+        self.feeder_exact = feeder_exact
         self.balanced = balanced
         self.seed = seed
 
@@ -806,6 +818,7 @@ class HGSRouter(Router):
             time_limit=self.time_limit,
             max_retries=self.max_retries,
             vehicles=self.feeder_limit,
+            vehicles_exact=self.feeder_exact,
             balanced=self.balanced,
             seed=self.seed,
         )
