@@ -32,7 +32,7 @@ variables:
   #     twine (publish package on PyPI)
   # } (all running on linux)
   PYTHON_VERSION_FOR_TOOLS: "3.13"
-  SCIP_VERSION: "10.0.2"
+  SCIP_VERSION: "10.0.3"
   SCIP_RELEASE_BASE_URL: "https://github.com/scipopt/scip/releases/download/v${SCIP_VERSION}"
   SCIP_LINUX: "scipoptsuite_${SCIP_VERSION}-1+trixie_amd64.deb"
   SCIP_WINDOWS: "scipoptsuite-${SCIP_VERSION}-win-x64"
