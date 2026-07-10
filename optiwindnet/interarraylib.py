@@ -21,6 +21,7 @@ debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 __all__ = (
     'assign_cables',
     'describe_G',
+    'total_power',
     'pathdist',
     'count_diagonals',
     'bfs_subtree_loads',
@@ -61,6 +62,11 @@ _essential_graph_attrs = (
     'norm_scale',
     'norm_offset',  # optional
 )
+
+
+def total_power(G: nx.Graph) -> int:
+    """Total power of ``G``'s terminals (nodes' ``'power'`` attribute, default 1)."""
+    return sum(G.nodes[t].get('power', 1) for t in range(G.graph['T']))
 
 
 def assign_cables(
@@ -119,7 +125,9 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     desc = []
     desc.append(f'κ = {capacity}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
-    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(T / capacity)
+    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(
+        total_power(G) / capacity
+    )
     desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
     length = G.size(weight='length')
     if length > 0:
@@ -209,7 +217,8 @@ def bfs_subtree_loads(G, parent, children, subtree):
     """
     T = G.graph['T']
     nodeD = G.nodes[parent]
-    default = 1 if parent < T else 0  # load is 1 for wtg nodes
+    # terminals contribute their 'power' attribute (default 1) to the load
+    default = nodeD.get('power', 1) if parent < T else 0
     if not children:
         nodeD['load'] = default
         return default
@@ -249,7 +258,8 @@ def calcload(G):
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
         total_load += G.nodes[root]['load']
-    assert total_load == T, f'counted ({total_load}) != nonrootnodes({T})'
+    W = total_power(G)
+    assert total_load == W, f'counted ({total_load}) != total power({W})'
     G.graph['has_loads'] = True
     G.graph['max_load'] = max_load
 
@@ -360,6 +370,11 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         G,
         {n: label for n, label in A.nodes(data='label') if label is not None},
         'label',
+    )
+    nx.set_node_attributes(
+        G,
+        {n: power for n, power in A.nodes(data='power') if power is not None},
+        'power',
     )
     nx.set_node_attributes(G, 'wtg', 'kind')
     for r in range(-R, 0):

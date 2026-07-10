@@ -443,7 +443,7 @@ def make_min_length_model(
 
     # feeder limits
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, capacity, feeder_limit, max_feeders, balanced
+        W, capacity, feeder_limit, max_feeders, balanced, terminal_count=T
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata

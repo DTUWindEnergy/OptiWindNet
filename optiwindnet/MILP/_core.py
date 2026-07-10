@@ -105,29 +105,37 @@ class FeederLimit(StrEnum):
 
 
 def feeder_and_load_bounds(
-    T: int,
+    total_power: int,
     capacity: int,
     feeder_limit: FeederLimit,
     max_feeders: int,
     balanced: bool,
+    *,
+    terminal_count: int | None = None,
 ) -> tuple[int, int | None, int | None, int | None]:
     """Derive the feeder-count and feeder-load bounds a model must enforce.
 
-    The feeder count is bounded below by ``min_feeders = ceil(T/capacity)``
-    regardless of ``feeder_limit`` (a valid inequality). ``feeders_ub`` is
-    ``None`` when the count is unbounded above; when it equals ``feeders_lb``,
-    the count is pinned and callers should emit an equality constraint.
+    ``total_power`` is the sum of the terminals' power (equal to the terminal
+    count when powers are uniform). The feeder count is bounded below by
+    ``min_feeders = ceil(total_power/capacity)`` regardless of ``feeder_limit``
+    (a valid inequality). ``feeders_ub`` is ``None`` when the count is unbounded
+    above; when it equals ``feeders_lb``, the count is pinned and callers should
+    emit an equality constraint.
 
     Balanced subtrees (loads differing at most by one unit) are only expressible
     with a pinned feeder count ``F``, in which case the loads must lie in
-    ``{T // F, ceil(T / F)}``. A load bound of ``None`` means "do not emit":
-    either ``balanced`` is off, or it is not enforceable (a warning is issued),
-    or the bound is already implied by the flow variable's own bounds.
+    ``{total_power // F, ceil(total_power / F)}``. A load bound of ``None``
+    means "do not emit": either ``balanced`` is off, or it is not enforceable
+    (a warning is issued), or the bound is already implied by the flow
+    variable's own bounds.
 
     Returns:
         ``(feeders_lb, feeders_ub, load_lb, load_ub)``
     """
-    min_feeders = math.ceil(T / capacity)
+    if terminal_count is None:
+        # with power ≥ 1 per terminal, total_power is a valid upper bound
+        terminal_count = total_power
+    min_feeders = math.ceil(total_power / capacity)
     if feeder_limit is FeederLimit.UNLIMITED:
         feeders_lb, feeders_ub = min_feeders, None
     elif feeder_limit is FeederLimit.MINIMUM:
@@ -135,7 +143,7 @@ def feeder_and_load_bounds(
     elif feeder_limit is FeederLimit.EXACTLY:
         if max_feeders < min_feeders:
             raise ValueError('max_feeders is below the minimum necessary')
-        if max_feeders > T:
+        if max_feeders > terminal_count:
             raise ValueError('max_feeders is above the number of terminals')
         feeders_lb = feeders_ub = max_feeders
     elif feeder_limit is FeederLimit.SPECIFIED:
@@ -162,7 +170,7 @@ def feeder_and_load_bounds(
         )
         return feeders_lb, feeders_ub, None, None
     F = feeders_lb
-    load_lb, load_ub = T // F, math.ceil(T / F)
+    load_lb, load_ub = total_power // F, math.ceil(total_power / F)
     # bounds at the extremes are already implied by the flow variable's bounds
     return (
         feeders_lb,
