@@ -1,3 +1,15 @@
+# v0.2.3
+
+[Commit history since v0.2.2](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.2...v0.2.3)
+
+## Important Changes
+- **Balanced Subtrees Actually Balanced (MILP)**: `ModelOptions(balanced=True)` promises subtree loads differing at most by one unit, but the models only bounded those loads from below, letting a subtree grow up to `capacity`. The upper bound `ceil(T / feeders)` is now enforced as well, across the pyomo, SCIP and OR-Tools model builders.
+- **New `feeder_limit="exactly"`**: pins the feeder count to `max_feeders` (whereas `"specified"` remains an upper bound). Since `balanced` is only expressible when the feeder count is pinned, this makes balanced solutions reachable above the minimum feeder count.
+- **Balanced HGS Solves the Requested Problem**: under `balanced=True`, `hgs_cvrp()` asked for more slack nodes than there were routes whenever `T < feeders * (capacity - 1)`, forcing the surplus through clipped `inf` arcs and inflating the reported objective. The balanced sub-problem is now solved at `capacity_effective = ceil(T / feeders)`, reported in `solver_details`.
+
+## Bug Fixes
+- **Multi-Root Warmstart Eligibility**: `is_warmstart_eligible()` compared only the first root's feeder count against the feeder limit, while the model constrains the total across all roots.
+
 # v0.2.2
 
 [Commit history since v0.2.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.1...v0.2.2)
