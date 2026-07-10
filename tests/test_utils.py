@@ -1,4 +1,4 @@
-from optiwindnet.utils import NodeTagger, make_handle
+from optiwindnet.utils import NodeTagger, make_handle, namedtuplify
 
 # --- make_handle ---
 
@@ -17,6 +17,29 @@ def test_make_handle_special_chars():
 
 def test_make_handle_clean_string():
     assert make_handle('simple') == 'simple'
+
+
+# --- namedtuplify ---
+
+
+def test_namedtuplify_basic():
+    nt = namedtuplify('Params', a=1, b='hello', c=[3, 4])
+    assert nt.a == 1
+    assert nt.b == 'hello'
+    assert nt.c == [3, 4]
+
+
+def test_namedtuplify_with_typename():
+    nt = namedtuplify('MyTuple', x=10, y=20)
+    assert type(nt).__name__ == 'MyTuple'
+    assert nt.x == 10
+    assert nt.y == 20
+
+
+def test_namedtuplify_single_field():
+    nt = namedtuplify('Single', val=42)
+    assert nt.val == 42
+    assert len(nt) == 1
 
 
 # --- NodeTagger ---
