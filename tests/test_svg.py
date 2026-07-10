@@ -32,8 +32,9 @@ def test_svgplot_no_overflow_for_regular_graph():
     assert 'overflow' not in svgplot(wfn.A).data
     # wfn.L has no edges at all
     assert 'overflow' not in svgplot(wfn.L).data
-    # scaffold: fnT remaps supertriangle node IDs back to on-screen positions
-    assert 'overflow' not in svgplot(scaffolded(wfn.G, wfn.P)).data
+    # scaffold: fnT resolves supertriangle placeholders to their real (and
+    # off-screen) corner coordinates, so overflow is expected here too
+    assert 'overflow="hidden"' in svgplot(scaffolded(wfn.G, wfn.P)).data
 
 
 def test_svgpplot_overflow_for_planar_embedding():

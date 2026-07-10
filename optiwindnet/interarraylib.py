@@ -1332,14 +1332,22 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
             continue
         d.update(G.nodes[n])
     if C > 0 or D > 0:
-        fnT = G.graph['fnT']
+        fnT_G = G.graph['fnT']
     else:
-        fnT = np.arange(R + T + B + C + D)
-        fnT[-R:] = range(-R, 0)
+        fnT_G = np.arange(R + T + B + C + D)
+        fnT_G[-R:] = range(-R, 0)
     for u, v in G.edges:
-        st = fnT[u], fnT[v]
+        st = fnT_G[u], fnT_G[v]
         if st in scaff.edges and 'kind' in scaff.edges[st]:
             del scaff.edges[st]['kind']
+    # a 'shortened_contours' entry collapses a fence onto fewer clones than
+    # mesh hops (sharing clones across contours), so the loop above only
+    # catches its two collapsed endpoints; walk the stored full midpath too.
+    for (s, t), (midpath, _) in G.graph.get('shortened_contours', {}).items():
+        for a, b in zip((s, *midpath), (*midpath, t)):
+            st = (a, b) if a < b else (b, a)
+            if st in scaff.edges and 'kind' in scaff.edges[st]:
+                del scaff.edges[st]['kind']
     VertexC = G.graph['VertexC']
     supertriangleC = P.graph['supertriangleC']
     if G.graph.get('is_normalized'):
@@ -1347,6 +1355,12 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
             supertriangleC - G.graph['norm_offset']
         )
     VertexC = np.vstack((VertexC[:-R], supertriangleC, VertexC[-R:]))
+    # scaff's own nodes are G's primes + P's supertriangle + roots (no
+    # clones: G's clone ids alias P's supertriangle ids, so clones never
+    # get added as scaff nodes above). This fnT must address that node
+    # space (not G's, used only for the clone->prime remap loop above).
+    fnT = np.arange(T + B + 3 + R)
+    fnT[-R:] = range(-R, 0)
     scaff.graph.update(VertexC=VertexC, fnT=fnT)
     if 'capacity' in scaff.graph:
         # hack to prevent `gplot()` from showing infobox
