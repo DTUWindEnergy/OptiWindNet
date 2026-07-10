@@ -20,6 +20,31 @@ _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
 
 
+def _balanced_capacity(T: int, capacity: int) -> tuple[int, int, int]:
+    """Derive the slack-node parameters for a balanced solve of ``T`` terminals.
+
+    Slack nodes are depot clones that consume one unit of capacity each, so that
+    every route comes out exactly full (i.e. loads are balanced). They are only
+    reachable from the depot, hence a route may hold at most one of them.
+
+    Using the requested ``capacity`` directly would ask for more slack nodes than
+    there are routes whenever ``T < vehicles * (capacity - 1)``. Shrinking the
+    capacity to the smallest value that still fits ``T`` in ``vehicles`` routes
+    both restores ``num_slack < vehicles`` and makes the loads as even as
+    possible. The vehicle count is unaffected and the effective capacity never
+    exceeds the requested one, so the solution remains valid for ``capacity``.
+
+    Returns:
+        ``(capacity_effective, vehicles, num_slack)``
+    """
+    if T == 0:
+        return capacity, 0, 0
+    vehicles = math.ceil(T / capacity)
+    capacity_effective = math.ceil(T / vehicles)
+    num_slack = vehicles * capacity_effective - T
+    return capacity_effective, vehicles, num_slack
+
+
 def _length_matrix(
     A: nx.Graph,
     r: int,
@@ -166,10 +191,8 @@ def _solve_single_root(
     log_callback,
 ):
     T, VertexC = A.graph['T'], A.graph['VertexC']
-    if balanced and (T % capacity):
-        vehicles_min = math.ceil(T / capacity)
-        num_slack = vehicles_min * capacity - T
-        vehicles = vehicles_min
+    if balanced:
+        capacity, vehicles, num_slack = _balanced_capacity(T, capacity)
     else:
         num_slack = 0
     n_from_i = np.array([-1] + list(range(T)) + [-1] * num_slack, dtype=int)
@@ -181,24 +204,41 @@ def _solve_single_root(
         distance_matrix, coordinates, vehicles, capacity, hgs_options, log_callback
     )
 
-    inputs_ = (vehicles,), (T,), (n_from_i,), (num_slack,)
+    inputs_ = (vehicles,), (T,), (n_from_i,), (num_slack,), (capacity,)
     return inputs_, (outputs,)
 
 
 def _solve_multi_root(A, capacity, hgs_options, vehicles, balanced, log_callback):
     R, VertexC = A.graph['R'], A.graph['VertexC']
-    cluster_, num_slack_ = clusterize(A, capacity)
-    W_, indices_ = _length_matrices(A, cluster_, num_slack_ if balanced else [0] * R)
+    cluster_, _ = clusterize(A, capacity)
     len_cluster_ = tuple(len(cluster) for cluster in cluster_)
-    if not balanced and vehicles is None:
-        vehicles_ = [None] * R
+    if balanced:
+        # each cluster is balanced independently; clusterize() already ensures
+        # that the per-cluster minimum feeder counts sum to the global minimum
+        capacity_, vehicles_, num_slack_ = (
+            list(values)
+            for values in zip(
+                *(
+                    _balanced_capacity(len_cluster, capacity)
+                    for len_cluster in len_cluster_
+                )
+            )
+        )
     else:
-        vehicles_ = [math.ceil(len_cluster / capacity) for len_cluster in len_cluster_]
+        capacity_ = [capacity] * R
+        num_slack_ = [0] * R
+        if vehicles is None:
+            vehicles_ = [None] * R
+        else:
+            vehicles_ = [
+                math.ceil(len_cluster / capacity) for len_cluster in len_cluster_
+            ]
+    W_, indices_ = _length_matrices(A, cluster_, num_slack_)
     cluster_data = zip(
         W_,
         [VertexC[indices].T for indices in indices_],
         vehicles_,
-        [capacity] * R,
+        capacity_,
         [hgs_options] * R,
     )
 
@@ -206,14 +246,14 @@ def _solve_multi_root(A, capacity, hgs_options, vehicles, balanced, log_callback
     with ThreadPoolExecutor(max_workers=R) as executor:
         outputs_ = list(executor.map(lambda x: _do_hgs(*x), cluster_data))
 
-    inputs_ = vehicles_, len_cluster_, indices_, num_slack_
+    inputs_ = vehicles_, len_cluster_, indices_, num_slack_, capacity_
     return inputs_, outputs_
 
 
 def _process_results(A, keep_log, balanced, inputs_, outputs_):
     R = A.graph['R']
     routes_, runtime_, solution_time_, cost_, log_, algo_params = zip(*outputs_)
-    vehicles_, len_cluster_, indices_, num_slack_ = inputs_
+    vehicles_, len_cluster_, indices_, num_slack_, capacity_ = inputs_
 
     if balanced:
         for num_slack, routes, len_cluster in zip(num_slack_, routes_, len_cluster_):
@@ -231,6 +271,11 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
         method_options=algo_params[0],
         solver_details=dict(
             vehicles=vehicles_ if R > 1 else vehicles_[0],
+            **(
+                dict(capacity_effective=capacity_ if R > 1 else capacity_[0])
+                if balanced
+                else {}
+            ),
         ),
     )
     if keep_log:

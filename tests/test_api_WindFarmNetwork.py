@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import pytest
 from shapely.geometry import Polygon
@@ -600,6 +601,45 @@ def test_warmstart_feeder_limit_specified_allows(capfd):
         verbose=True,
     )
     assert ok is True
+
+
+def _eligible(S, cables_capacity, **model_options):
+    return U.is_warmstart_eligible(
+        S_warm=S,
+        cables_capacity=cables_capacity,
+        model_options=dict(
+            topology='radial', feeder_route='segmented', **model_options
+        ),
+        S_warm_has_detour=False,
+        solver_name='ortools.cp_sat',
+        logger=logging.getLogger(U.__name__),
+        verbose=True,
+    )
+
+
+@pytest.mark.parametrize(('max_feeders', 'eligible'), [(1, True), (2, False)])
+def test_warmstart_feeder_limit_exactly(max_feeders, eligible):
+    # tiny_wfn's solution has T=4 terminals under a single feeder
+    S = tiny_wfn().S
+    ok = _eligible(S, 4, feeder_limit='exactly', max_feeders=max_feeders)
+    assert ok is eligible
+
+
+def test_warmstart_blocked_when_loads_are_not_balanced():
+    # 5 terminals over 2 feeders: the model would demand loads within [2, 3],
+    # but this warmstart splits them 4 + 1
+    S = nx.Graph(T=5, R=1)
+    S.add_node(-1, load=5)
+    for subtree, branch in enumerate(([0, 1, 2, 3], [4])):
+        predecessor = -1
+        for load, node in zip(range(len(branch), 0, -1), branch):
+            S.add_node(node, load=load, subtree=subtree)
+            S.add_edge(predecessor, node, load=load)
+            predecessor = node
+
+    assert _eligible(S, 3, feeder_limit='minimum', balanced=True) is False
+    # without `balanced` the same warmstart is fine: 2 feeders is the minimum
+    assert _eligible(S, 3, feeder_limit='minimum') is True
 
 
 def test_parse_cables_input_numpy_ints_and_pairs():

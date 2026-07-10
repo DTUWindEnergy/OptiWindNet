@@ -22,9 +22,8 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
-    balanced_feeder_min_load,
     effective_terminal_powers,
-    minimum_feeder_count,
+    feeder_and_load_bounds,
     physical_core_count,
 )
 
@@ -165,9 +164,12 @@ def make_min_length_model(
       feeder_route:
         ``FeederRoute.SEGMENTED`` → feeder routes may be detoured around subtrees;
         ``FeederRoute.STRAIGHT`` → feeder routes must be straight, direct lines
-      feeder_limit: one of ``FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
+      feeder_limit: one of ``FeederLimit.{MINIMUM, UNLIMITED, EXACTLY, SPECIFIED,
         MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}``
-      max_feeders: only used if ``feeder_limit`` is ``FeederLimit.SPECIFIED``
+      balanced: enforce subtree loads differing at most by one unit (only
+        possible if ``feeder_limit`` pins the feeder count to a single value)
+      max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
+        exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
     """
     R = A.graph['R']
     T = A.graph['T']
@@ -265,54 +267,32 @@ def make_min_length_model(
         )
 
     # feeder limits
-    min_feeders = minimum_feeder_count(W, k)
+    feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
+        W, k, feeder_limit, max_feeders, balanced, terminal_count=T
+    )
+    if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
+        # derived from the minimum: surface it in the solution's metadata
+        max_feeders = feeders_ub
     all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
-    if feeder_limit is FeederLimit.UNLIMITED:
-        # valid inequality: number of feeders is at least the minimum
-        m.addCons(all_feeder_vars_sum >= min_feeders, name='feeder_limit_lb')
-        if balanced:
-            warn(
-                'Model option <balanced = True> is incompatible with <feeder_limit'
-                ' = UNLIMITED>: model will not enforce balanced subtrees.'
-            )
+    if feeders_lb == feeders_ub:
+        m.addCons(all_feeder_vars_sum == feeders_lb, name='feeder_limit_eq')
     else:
-        is_equal_not_range = False
-        if feeder_limit is FeederLimit.SPECIFIED:
-            if max_feeders == min_feeders:
-                is_equal_not_range = True
-            elif max_feeders < min_feeders:
-                raise ValueError('max_feeders is below the minimum necessary')
-        elif feeder_limit is FeederLimit.MINIMUM:
-            is_equal_not_range = True
-        elif feeder_limit is FeederLimit.MIN_PLUS1:
-            max_feeders = min_feeders + 1
-        elif feeder_limit is FeederLimit.MIN_PLUS2:
-            max_feeders = min_feeders + 2
-        elif feeder_limit is FeederLimit.MIN_PLUS3:
-            max_feeders = min_feeders + 3
-        else:
-            raise NotImplementedError('Unknown value:', feeder_limit)
-        if is_equal_not_range:
-            m.addCons(all_feeder_vars_sum == min_feeders, name='feeder_limit_eq')
-        else:
-            m.addCons(all_feeder_vars_sum >= min_feeders, name='feeder_limit_lb')
-            m.addCons(all_feeder_vars_sum <= max_feeders, name='feeder_limit_ub')
-        # enforce balanced subtrees (subtree loads differ at most by one unit)
-        if balanced:
-            if is_equal_not_range:
-                feeder_min_load = balanced_feeder_min_load(W, min_feeders)
-                if feeder_min_load < capacity:
-                    for t, r in stars:
-                        m.addCons(
-                            flow_[t, r] >= link_[t, r] * feeder_min_load,
-                            name=f'balanced_{t}~r{-r}',
-                        )
-            else:
-                warn(
-                    'Model option <balanced = True> is incompatible with '
-                    'having a range of possible feeder counts: model will '
-                    'not enforce balanced subtrees.'
-                )
+        # valid inequality: number of feeders is at least the minimum
+        m.addCons(all_feeder_vars_sum >= feeders_lb, name='feeder_limit_lb')
+        if feeders_ub is not None:
+            m.addCons(all_feeder_vars_sum <= feeders_ub, name='feeder_limit_ub')
+
+    # enforce balanced subtrees (subtree loads differ at most by one unit)
+    if load_lb is not None:
+        for t, r in stars:
+            m.addCons(
+                flow_[t, r] >= link_[t, r] * load_lb, name=f'balanced_lb_{t}~r{-r}'
+            )
+    if load_ub is not None:
+        for t, r in stars:
+            m.addCons(
+                flow_[t, r] <= link_[t, r] * load_ub, name=f'balanced_ub_{t}~r{-r}'
+            )
 
     # radial or branched topology
     if topology is Topology.RADIAL:

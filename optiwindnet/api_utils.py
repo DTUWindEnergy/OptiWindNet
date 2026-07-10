@@ -159,16 +159,23 @@ def is_warmstart_eligible(
     reasons = []
 
     # Feeder constraints
-    feeder_counts = [S_warm.degree[r] for r in range(-R, 0)]
+    # the model constrains the feeder count over all roots, not per root
+    feeder_count = sum(S_warm.degree[r] for r in range(-R, 0))
     feeder_limit_mode = model_options.get('feeder_limit', 'unlimited')
     feeder_minimum = math.ceil(T / capacity)
 
+    # feeder_exact is the pinned feeder count, if the mode pins it
+    feeder_exact = None
     if feeder_limit_mode == 'unlimited':
         feeder_limit = float('inf')
+    elif feeder_limit_mode == 'exactly':
+        feeder_limit = feeder_exact = model_options.get('max_feeders', 0)
     elif feeder_limit_mode == 'specified':
-        feeder_limit = model_options.get('max_feeders')
+        feeder_limit = model_options.get('max_feeders', 0)
+        if feeder_limit == feeder_minimum:
+            feeder_exact = feeder_limit
     elif feeder_limit_mode == 'minimum':
-        feeder_limit = feeder_minimum
+        feeder_limit = feeder_exact = feeder_minimum
     elif feeder_limit_mode == 'min_plus1':
         feeder_limit = feeder_minimum + 1
     elif feeder_limit_mode == 'min_plus2':
@@ -178,11 +185,28 @@ def is_warmstart_eligible(
     else:
         feeder_limit = float('inf')
 
-    if feeder_counts[0] > feeder_limit:
+    if feeder_exact is not None and feeder_count != feeder_exact:
         reasons.append(
-            f'number of feeders ({feeder_counts[0]}) exceeds feeder limit'
-            f' ({feeder_limit})'
+            f'number of feeders ({feeder_count}) differs from the feeder count'
+            f' the model pins ({feeder_exact})'
         )
+    elif feeder_count > feeder_limit:
+        reasons.append(
+            f'number of feeders ({feeder_count}) exceeds feeder limit ({feeder_limit})'
+        )
+
+    # Balanced constraint: only enforced by the model if the feeder count is pinned
+    if model_options.get('balanced') and feeder_exact:
+        load_lb, load_ub = T // feeder_exact, math.ceil(T / feeder_exact)
+        subtree_loads = [
+            S_warm.nodes[t]['load'] for r in range(-R, 0) for t in S_warm.neighbors(r)
+        ]
+        if any(load < load_lb or load > load_ub for load in subtree_loads):
+            reasons.append(
+                f'subtree loads {sorted(subtree_loads)} are not balanced: model'
+                f' option <balanced = True> requires them within'
+                f' [{load_lb}, {load_ub}]'
+            )
 
     # Detour constraint
     if S_warm_has_detour and model_options.get('feeder_route') == 'straight':

@@ -11,6 +11,18 @@ from typing import Any
 import networkx as nx
 
 def physical_core_count() -> int: ...
+def effective_terminal_powers(A: nx.Graph) -> tuple[int | float, ...]: ...
+def minimum_feeder_count(total_power: int | float, capacity: int | float) -> int: ...
+def balanced_feeder_min_load(total_power: int | float, feeder_count: int) -> int: ...
+def feeder_and_load_bounds(
+    total_power: int | float,
+    capacity: int | float,
+    feeder_limit: FeederLimit,
+    max_feeders: int,
+    balanced: bool,
+    *,
+    terminal_count: int | None = ...,
+) -> tuple[int, int | None, int | None, int | None]: ...
 
 class OWNWarmupFailed(Exception): ...
 class OWNSolutionNotFound(Exception): ...
@@ -27,6 +39,7 @@ class FeederRoute(StrEnum):
 
 class FeederLimit(StrEnum):
     UNLIMITED: str
+    EXACTLY: str
     SPECIFIED: str
     MINIMUM: str
     MIN_PLUS1: str
