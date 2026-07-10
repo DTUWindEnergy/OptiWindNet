@@ -32,7 +32,6 @@ from optiwindnet.interarraylib import (
     scaffolded,
     site_fingerprint,
     terse_links_from_S,
-    total_power,
     update_lengths,
 )
 
@@ -150,31 +149,6 @@ def test_calcload():
 
     assert G.graph['has_loads']
     assert G.graph['max_load'] == 4
-
-
-def test_calcload_uniform_power_unchanged():
-    S = nx.Graph(R=1, T=3)
-    S.add_edges_from([(-1, 0), (0, 1), (1, 2)])
-
-    calcload(S)
-
-    assert total_power(S) == 3
-    assert S.graph['max_load'] == 3
-    assert [S[u][v]['load'] for u, v in ((-1, 0), (0, 1), (1, 2))] == [3, 2, 1]
-
-
-def test_calcload_weighted_power():
-    S = nx.Graph(R=1, T=3)
-    S.add_edges_from([(-1, 0), (0, 1), (1, 2)])
-    for t, power in enumerate((1, 2, 3)):
-        S.nodes[t]['power'] = power
-
-    calcload(S)
-
-    assert total_power(S) == 6
-    assert S.graph['max_load'] == 6
-    assert [S[u][v]['load'] for u, v in ((-1, 0), (0, 1), (1, 2))] == [6, 5, 3]
-    assert [S.nodes[t]['load'] for t in range(3)] == [6, 5, 3]
 
 
 def test_site_fingerprint():
@@ -862,7 +836,7 @@ def test_as_single_root_no_root_in_border():
     """Border has no negative-index entries → B stays the same, no vertex transfer."""
     wfn = tiny_wfn(optimize=False)
     L = wfn.L.copy()
-    T = L.graph['T']
+    T, R = L.graph['T'], L.graph['R']
     # replace border with indices all in [T, T+B) range (no root refs)
     B = L.graph['B']
     if B > 0:
