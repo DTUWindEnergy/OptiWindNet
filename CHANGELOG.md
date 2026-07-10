@@ -35,9 +35,6 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 - **Test Coverage**: expanded coverage for `geometric`, `interarraylib`, `plotting`, `svg`, `repair`, `themes` and `baselines.utils`.
 - **CI**: isolated OR-Tools in a shared subprocess to resolve solver DLL conflicts, switched SCIP download to GitHub, bumped SCIPOptSuite, installed python tooling from conda, and added manual-dispatch pipeline targets.
 
-## Documentation
-- **Notebook robustness on newer matplotlib**: example notebooks fall back to the default style when the publication `.mplstyle` files are absent, and the TOPFARM integration example restores `matplotlib.rcsetup.interactive_bk` (moved to the backend registry in matplotlib 3.9) so it runs unchanged.
-
 # v0.2.2
 
 [Commit history since v0.2.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.1...v0.2.2)
