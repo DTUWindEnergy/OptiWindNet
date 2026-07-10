@@ -4,7 +4,7 @@
 import math
 import operator
 from collections import defaultdict
-from itertools import combinations, pairwise
+from itertools import combinations, pairwise, product
 from math import isclose
 from typing import Callable, Literal
 
@@ -718,6 +718,79 @@ def is_triangle_pair_a_convex_quadrilateral(
     return (usut > 0.0) == (vtvs > 0.0)
 
 
+def is_blocking(
+    rootC: CoordPair, uC: CoordPair, vC: CoordPair, sC: CoordPair, tC: CoordPair
+) -> bool:
+    """DEPRECATED
+
+    This is used only by apply_edge_exemptions()
+    """
+    # s and t are necessarily on opposite sides of uv
+    # (because of Delaunay – see the triangles construction)
+    # hence, if (root, t) are on the same side, (s, root) are not
+    return (
+        is_triangle_pair_a_convex_quadrilateral(uC, vC, sC, rootC)
+        if is_same_side(uC, vC, rootC, tC)
+        else is_triangle_pair_a_convex_quadrilateral(uC, vC, rootC, tC)
+    )
+
+
+def apply_edge_exemptions(G, allow_edge_deletion=True):
+    """DEPRECATED (depends on 'E_hull' and 'N_hull' graph attributes)
+
+    Exemption is used by weighting functions that take into account the angular
+    sector blocked by each edge w.r.t. the closest root node.
+    """
+    E_hull = G.graph['E_hull']
+    N_hull = G.graph['N_hull']
+    N_inner = set(G.nodes) - N_hull
+    R = G.graph['R']
+    # T = G.number_of_nodes() - R
+    VertexC = G.graph['VertexC']
+    # roots = range(T, T + R)
+    roots = range(-R, 0)
+    triangles = G.graph['triangles']
+    angle__ = G.graph['angle__']
+
+    # set hull edges as exempted
+    for edge in E_hull:
+        G.edges[edge]['exempted'] = True
+
+    # expanded E_hull to contain edges exempted from blockage penalty
+    # (edges that do not block line from nodes to root)
+    E_hull_exp = E_hull.copy()
+
+    # check if edges touching the hull should be exempted from blockage penalty
+    for n_hull in N_hull:
+        for n_inner in N_inner & set([v for _, v in G.edges(n_hull)]):
+            uv = frozenset((n_hull, n_inner))
+            u, v = uv
+            opposites = triangles[uv]
+            if len(opposites) == 2:
+                s, t = triangles[uv]
+                rootC = VertexC[G.edges[u, v]['root']]
+                uvstC = tuple((VertexC[n] for n in (*uv, s, t)))
+                if not is_blocking(rootC, *uvstC):
+                    E_hull_exp.add(uv)
+                    G.edges[uv]['exempted'] = True
+
+    # calculate blockage arc for each edge
+    zeros = np.full((R,), 0.0)
+    for u, v, d in list(G.edges(data=True)):
+        if (frozenset((u, v)) in E_hull_exp) or (u in roots) or (v in roots):
+            angdiff = zeros
+        else:
+            angdiff = abs(angle__[u] - angle__[v])
+        arc = np.empty((R,), dtype=float)
+        for i in range(R):  # TODO: vectorize this loop
+            arc[i] = angdiff[i] if angdiff[i] < np.pi else 2 * np.pi - angdiff[i]
+        d['arc'] = arc
+        # if arc is π/2 or more, remove the edge (it's shorter to go to root)
+        if allow_edge_deletion and any(arc >= np.pi / 2):
+            G.remove_edge(u, v)
+            print(f'angles {arc} removing «{u}~{v}»')
+
+
 def perimeter(VertexC, vertices_ordered):
     """Calculate the perimeter of the polygon defined by ``vertices_ordered``.
 
@@ -885,6 +958,215 @@ def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
             S.remove_edge(*uv_incumbent)
             removals -= 1
     return S
+
+
+# TODO: MARGIN is ARBITRARY - depends on the scale
+def check_crossings(G, debug=False, MARGIN=0.1):
+    """DEPRECATED. Use functions from module `crossings` instead.
+
+    Checks for crossings (touch/overlap is not considered crossing).
+    This is an independent check on the tree resulting from the heuristic.
+    It is not supposed to be used within the heuristic.
+    MARGIN is how far an edge can advance across another one and still not be
+    considered a crossing.
+    """
+    VertexC = G.graph['VertexC']
+    R, T, B = (G.graph[k] for k in 'RTB')
+    C, D = (G.graph.get(k, 0) for k in 'CD')
+    raise NotImplementedError('CDT requires changes in this function')
+    if C > 0 or D > 0:
+        # detournodes = range(T, T + D)
+        # G.add_nodes_from(((s, {'kind': 'detour'})
+        #                   for s in detournodes))
+        # clone2prime = G.graph['clone2prime']
+        # assert len(clone2prime) == D, \
+        #     'len(clone2prime) != D'
+        # fnT = np.arange(T + D + R)
+        # fnT[T: T + D] = clone2prime
+        # DetourC = VertexC[clone2prime].copy()
+        fnT = G.graph['fnT']
+        AllnodesC = np.vstack((VertexC[:T], VertexC[fnT[T : T + D]], VertexC[-R:]))
+    else:
+        fnT = np.arange(T + R)
+        AllnodesC = VertexC
+    roots = range(-R, 0)
+    fnT[-R:] = roots
+
+    crossings = []
+    pivot_plus_edge = []
+
+    def check_neighbors(neighbors, w, x, pivots):
+        """Neighbors is a bunch of nodes, `pivots` is used only for reporting.
+        (`w`, `x`) is the edge to be checked if it splits neighbors apart.
+        """
+        maxidx = len(neighbors) - 1
+        if maxidx <= 0:
+            return
+        ref = neighbors[0]
+        i = 1
+        while point_d2line(*AllnodesC[[ref, w, x]]) < MARGIN:
+            # ref node is approx. overlapping the edge: get the next one
+            ref = neighbors[i]
+            i += 1
+            if i > maxidx:
+                return
+
+        for n2test in neighbors[i:]:
+            if point_d2line(*AllnodesC[[n2test, w, x]]) < MARGIN:
+                # cmp node is approx. overlapping the edge: skip
+                continue
+            # print(fnT[w], fnT[x], fnT[ref], fnT[cmp])
+            if not is_same_side(*AllnodesC[[w, x, ref, n2test]], touch_is_cross=False):
+                print(
+                    f'ERROR <splitting>: edge «{fnT[w]}~{fnT[x]}» crosses '
+                    f'{[fnT[n] for n in (ref, *pivots, n2test)]}'
+                )
+                # crossings.append(((w,  x), (ref, pivot, cmp)))
+                crossings.append(((w, x), (ref, n2test)))
+                return True
+
+    # TODO: check crossings among edges connected to different roots
+    for root in roots:
+        # edges = list(nx.edge_dfs(G, source=root))
+        edges = list(nx.edge_bfs(G, source=root))
+        # outstr = ', '.join([f'«{fnT[u]}~{fnT[v]}»' for u, v in edges])
+        # print(outstr)
+        potential = []
+        for i, (u, v) in enumerate(edges):
+            u_, v_ = fnT[u], fnT[v]
+            for s, t in edges[(i + 1) :]:
+                s_, t_ = fnT[s], fnT[t]
+                if s_ == u_ or s_ == v_ or t_ == u_ or t_ == v_:
+                    # no crossing if the two edges share a vertex
+                    continue
+                uvst = np.array((u, v, s, t), dtype=int)
+                if is_crossing(*AllnodesC[uvst], touch_is_cross=True):
+                    potential.append(uvst)
+                    distances = np.fromiter(
+                        (
+                            point_d2line(*AllnodesC[[p, w, x]])
+                            for p, w, x in ((u, s, t), (v, s, t), (s, u, v), (t, u, v))
+                        ),
+                        dtype=float,
+                        count=4,
+                    )
+                    # print('distances[' +
+                    #       ', '.join((fnT[n] for n in (u, v, s, t))) +
+                    #       ']: ', distances)
+                    nearmask = distances < MARGIN
+                    close_count = sum(nearmask)
+                    # print('close_count =', close_count)
+                    if close_count == 0:
+                        # (u, v) crosses (s, t) away from nodes
+                        crossings.append(((u, v), (s, t)))
+                        # print(distances)
+                        print(
+                            f'ERROR <edge-edge>: '
+                            f'edge «{fnT[u]}~{fnT[v]}» '
+                            f'crosses «{fnT[s]}~{fnT[t]}»'
+                        )
+                    elif close_count == 1:
+                        # (u, v) and (s, t) touch node-to-edge
+                        (pivotI,) = np.flatnonzero(nearmask)
+                        w, x = (u, v) if pivotI > 1 else (s, t)
+                        pivot = uvst[pivotI]
+                        neighbors = list(G[pivot])
+                        entry = (pivot, w, x)
+                        if entry not in pivot_plus_edge and check_neighbors(
+                            neighbors, w, x, (pivot,)
+                        ):
+                            pivot_plus_edge.append(entry)
+                    elif close_count == 2:
+                        # TODO: This case probably never happens, remove it.
+                        #       This would only happen for coincident vertices,
+                        #       which might have been possible in the past.
+                        print('&&&&& close_count = 2 &&&&&')
+                        # (u, v) and (s, t) touch node-to-node
+                        touch_uv, touch_st = uvst[np.flatnonzero(nearmask)]
+                        free_uv, free_st = uvst[np.flatnonzero(~nearmask)]
+                        # print(
+                        #    f'touch/free u, v :«{fnT[touch_uv]}~'
+                        #    f'{fnT[free_uv]}»; s, t:«{fnT[touch_st]}~'
+                        #    f'{fnT[free_st]}»')
+                        nb_uv, nb_st = list(G[touch_uv]), list(G[touch_st])
+                        # print([fnT[n] for n in nb_uv])
+                        # print([fnT[n] for n in nb_st])
+                        nbNuv, nbNst = len(nb_uv), len(nb_st)
+                        if nbNuv == 1 or nbNst == 1:
+                            # <a leaf node with a clone – not a crossing>
+                            continue
+                        elif nbNuv == 2:
+                            crossing = is_bunch_split_by_corner(
+                                AllnodesC[nb_st],
+                                *AllnodesC[[nb_uv[0], touch_uv, nb_uv[1]]],
+                                margin=MARGIN,
+                            )[0]
+                        elif nbNst == 2:
+                            crossing = is_bunch_split_by_corner(
+                                AllnodesC[nb_uv],
+                                *AllnodesC[[nb_st[0], touch_st, nb_st[1]]],
+                                margin=MARGIN,
+                            )[0]
+                        else:
+                            print('UNEXPECTED case!!! Look into it!')
+                            # mark as crossing just to make sure it is noticed
+                            crossing = True
+                        if crossing:
+                            print(
+                                f'ERROR <split>: edges '
+                                f'«{fnT[u]}~{fnT[v]}» '
+                                f'and «{fnT[s]}–{fnT[t]}» '
+                                f'break a bunch apart at '
+                                f'{fnT[touch_uv]}, {fnT[touch_st]}'
+                            )
+                            crossings.append(((u, v), (s, t)))
+                    else:  # close_count > 2:
+                        # segments (u, v) and (s, t) are almost parallel
+                        # find the two nodes furthest apart
+                        pairs = np.array(
+                            ((u, v), (u, s), (u, t), (s, t), (v, t), (v, s))
+                        )
+                        furthest = np.argmax(
+                            np.hypot(
+                                *(AllnodesC[pairs[:, 0]] - AllnodesC[pairs[:, 1]]).T
+                            )
+                        )
+                        # print('furthest =', furthest)
+                        w, x = pairs[furthest]
+                        q, r = pairs[furthest - 3]
+                        if furthest % 3 == 0:
+                            # (q, r) is contained within (w, x)
+                            neighbors = list(G[q]) + list(G[r])
+                            neighbors.remove(q)
+                            neighbors.remove(r)
+                            check_neighbors(neighbors, w, x, (q, r))
+                        else:
+                            # (u, v) partially overlaps (s, t)
+                            neighbors_q = list(G[q])
+                            neighbors_q.remove(w)
+                            check_neighbors(neighbors_q, s, t, (q,))
+                            # print(crossings)
+                            neighbors_r = list(G[r])
+                            neighbors_r.remove(x)
+                            check_neighbors(neighbors_r, u, v, (r,))
+                            # print(crossings)
+                            if neighbors_q and neighbors_r:
+                                for a, b in product(neighbors_q, neighbors_r):
+                                    if is_same_side(*AllnodesC[[q, r, a, b]]):
+                                        print(
+                                            f'ERROR <partial overlap>: edge '
+                                            f'«{fnT[u]}~{fnT[v]}» '
+                                            f'crosses '
+                                            f'«{fnT[s]}~{fnT[t]}»'
+                                        )
+                                        crossings.append(((u, v), (s, t)))
+    debug and potential and print(
+        'potential crossings: '
+        + ', '.join(
+            [f'«{fnT[u]}~{fnT[v]}» × «{fnT[s]}~{fnT[t]}»' for u, v, s, t in potential]
+        )
+    )
+    return crossings
 
 
 def rotation_checkers_factory(
