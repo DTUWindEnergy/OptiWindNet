@@ -87,8 +87,8 @@ class SolverPyomo(Solver):
     def _link_val(self, var: Any) -> int:
         return round(var.value)
 
-    def _flow_val(self, var: Any) -> int:
-        return round(var.value)
+    def _flow_val(self, var: Any) -> float:
+        return var.value
 
     def set_problem(
         self,
@@ -194,8 +194,8 @@ class SolverPyomoAppsi(Solver):
         #   values for link_ variables are floats and may be slightly off of 0
         return round(var.value)
 
-    def _flow_val(self, var: Any) -> int:
-        return round(var.value)
+    def _flow_val(self, var: Any) -> float:
+        return var.value
 
     def set_problem(
         self,
@@ -335,7 +335,7 @@ def make_min_length_model(
     # Parameters #
     ##############
 
-    m.k = pyo.Param(domain=pyo.PositiveIntegers, name='capacity', default=capacity)
+    m.k = pyo.Param(domain=pyo.PositiveReals, name='capacity', default=capacity)
     m.weight_ = pyo.Param(
         m.linkset,
         domain=pyo.PositiveReals,
@@ -352,10 +352,10 @@ def make_min_length_model(
     m.link_ = pyo.Var(m.linkset, domain=pyo.Binary, initialize=0)
 
     def flow_bounds(m, u, v):
-        return (0, (m.k if v < 0 else m.k - 1))
+        return (0, m.k)
 
     m.flow_ = pyo.Var(
-        m.linkset, domain=pyo.NonNegativeIntegers, bounds=flow_bounds, initialize=0
+        m.linkset, domain=pyo.NonNegativeReals, bounds=flow_bounds, initialize=0
     )
 
     ###############
@@ -415,11 +415,7 @@ def make_min_length_model(
     # bind flow to link activation
     m.cons_flow_ub = pyo.Constraint(
         m.linkset,
-        rule=(
-            lambda m, u, v: (
-                m.flow_[(u, v)] <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
-            )
-        ),
+        rule=(lambda m, u, v: m.flow_[(u, v)] <= m.link_[(u, v)] * m.k),
         name='flow_ub',
     )
     m.cons_flow_lb = pyo.Constraint(

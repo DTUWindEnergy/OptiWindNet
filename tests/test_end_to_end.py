@@ -98,7 +98,7 @@ def _run_ortools_warmstart():
     from .helpers import tiny_wfn
 
     router_ortools = MILPRouter(
-        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
+        solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True
     )
     wfn = tiny_wfn()
     wfn.optimize(router=EWRouter())
@@ -107,7 +107,7 @@ def _run_ortools_warmstart():
     # invalid warmstart
     wfn.G.add_edge(-1, 11)
     router_ortools = MILPRouter(
-        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
+        solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True
     )
     results.append(list(wfn.optimize(router=router_ortools)))
 
@@ -115,7 +115,7 @@ def _run_ortools_warmstart():
     wfn = tiny_wfn(cables=1)
     wfn.optimize(router=EWRouter())
     router_ortools = MILPRouter(
-        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
+        solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True
     )
     results.append(list(wfn.optimize(router=router_ortools)))
 
@@ -124,7 +124,7 @@ def _run_ortools_warmstart():
     wfn.G.add_edge(12, 13)
     wfn.G.remove_edge(0, -1)
     router_ortools = MILPRouter(
-        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
+        solver_name='ortools', time_limit=2, mip_gap=0.005, verbose=True
     )
     results.append(list(wfn.optimize(router=router_ortools)))
     return results
@@ -133,7 +133,7 @@ def _run_ortools_warmstart():
 def test_ortools_with_warmstart(ortools_worker):
     result = ortools_worker.run(_run_ortools_warmstart, (), timeout=30)
     if isinstance(result, (FileNotFoundError, ModuleNotFoundError)):
-        pytest.skip('ortools.cp_sat not available')
+        pytest.skip('ortools not available')
     if isinstance(result, BaseException):
         raise result
 

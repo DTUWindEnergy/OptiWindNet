@@ -66,6 +66,29 @@ _essential_graph_attrs = (
 NONUNIFORM_POWER_ATTR = 'nonuniform_power'
 
 
+def terminal_power(G: nx.Graph, n: int) -> int | float:
+    """Return node ``n``'s terminal power/load contribution."""
+    T = G.graph['T']
+    if 0 <= n < T:
+        if G.graph.get(NONUNIFORM_POWER_ATTR, False):
+            return G.nodes[n].get('power', 1)
+        return 1
+    return 0
+
+
+def terminal_powers(G: nx.Graph) -> tuple[int | float, ...]:
+    """Return the effective terminal powers for graph load accounting."""
+    T = G.graph['T']
+    if G.graph.get(NONUNIFORM_POWER_ATTR, False):
+        return tuple(G.nodes[t].get('power', 1) for t in range(T))
+    return (1,) * T
+
+
+def total_power(G: nx.Graph) -> int | float:
+    """Return total effective terminal power for graph load accounting."""
+    return sum(terminal_powers(G))
+
+
 def assign_cables(
     G: nx.Graph, cables: list[tuple[int, float | int]], currency: str = '€'
 ):
@@ -130,12 +153,8 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     desc = []
     desc.append(f'κ = {capacity}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
-    if G.graph.get(NONUNIFORM_POWER_ATTR, False):
-        total_power = sum(G.nodes[t].get('power', 1) for t in range(T))
-    else:
-        total_power = T
     excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(
-        total_power / capacity
+        total_power(G) / capacity
     )
     desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
     length = G.size(weight='length')
@@ -224,12 +243,8 @@ def bfs_subtree_loads(G, parent, children, subtree):
     Returns:
       Total number of descendant nodes
     """
-    T = G.graph['T']
     nodeD = G.nodes[parent]
-    use_power = G.graph.get(NONUNIFORM_POWER_ATTR, False)
-    default = (
-        nodeD.get('power', 1) if use_power and parent < T else 1 if parent < T else 0
-    )
+    default = terminal_power(G, parent)
     if not children:
         nodeD['load'] = default
         return default
@@ -269,10 +284,7 @@ def calcload(G):
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
         total_load += G.nodes[root]['load']
-    if G.graph.get(NONUNIFORM_POWER_ATTR, False):
-        W = sum(G.nodes[t].get('power', 1) for t in range(T))
-    else:
-        W = T
+    W = total_power(G)
     assert math.isclose(total_load, W, rel_tol=1e-9, abs_tol=1e-9), (
         f'counted ({total_load}) != total_power({W})'
     )

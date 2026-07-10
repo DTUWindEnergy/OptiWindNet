@@ -101,7 +101,7 @@ def _warmup_ortools() -> None:
     """
     from optiwindnet.MILP import solver_factory
 
-    solver_factory('ortools.cp_sat')
+    solver_factory('ortools')
 
 
 # Generous on purpose: covers 'spawn' process creation plus cold import of

@@ -53,8 +53,8 @@ class SolverSCIP(Solver, PoolHandler):
     def _link_val(self, var: Any) -> int:
         return round(self._value_map[var])
 
-    def _flow_val(self, var: Any) -> int:
-        return round(self._value_map[var])
+    def _flow_val(self, var: Any) -> float:
+        return self._value_map[var]
 
     def set_problem(
         self,
@@ -206,7 +206,7 @@ def make_min_length_model(
     link_ = {(u, v): m.addVar(f'link_{u}~{v}', 'B') for u, v in chain(E, Eʹ)}
     link_ |= {(t, r): m.addVar(f'link_{t}~r{-r}', 'B') for t, r in stars}
     flow_ = {
-        (u, v): m.addVar(f'flow_{u}~{v}', 'I', lb=0, ub=k - 1) for u, v in chain(E, Eʹ)
+        (u, v): m.addVar(f'flow_{u}~{v}', 'C', lb=0, ub=k) for u, v in chain(E, Eʹ)
     }
     flow_ |= {(t, r): m.addVar(f'flow_{t}~r{-r}', lb=0, ub=k) for t, r in stars}
 
@@ -247,7 +247,7 @@ def make_min_length_model(
     for t, n in linkset:
         _n = str(n) if n >= 0 else f'r{-n}'
         m.addCons(
-            flow_[t, n] <= link_[t, n] * (k if n < 0 else (k - 1)),
+            flow_[t, n] <= link_[t, n] * k,
             name=f'flow_ub_{t}~{_n}',
         )
         m.addCons(

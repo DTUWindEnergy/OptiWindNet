@@ -51,7 +51,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     def _link_val(self, var: Any) -> int:
         return self._value_map[var.name]
 
-    def _flow_val(self, var: Any) -> int:
+    def _flow_val(self, var: Any) -> float:
         return self._value_map[var.name]
 
     def set_problem(
@@ -148,8 +148,10 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         return solver_model.getAttr('PoolObjVal')
 
     def _topology_from_mip_pool(self) -> nx.Graph:
-        self._value_map = {
-            omovar.name: round(gurvar.Xn)
-            for omovar, gurvar in self.solver._pyomo_var_to_solver_var_map.items()
-        }
+        self._value_map = {}
+        for omovar, gurvar in self.solver._pyomo_var_to_solver_var_map.items():
+            value = gurvar.Xn
+            self._value_map[omovar.name] = (
+                round(value) if omovar.name.startswith('link_') else value
+            )
         return self._topology_from_mip_sol()

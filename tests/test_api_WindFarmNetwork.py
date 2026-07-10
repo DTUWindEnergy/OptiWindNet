@@ -20,7 +20,7 @@ from .helpers import tiny_wfn
 _LOCATION_FILE = Path(__file__).parent / 'locations' / 'example_location.yaml'
 
 
-def _job_integer_scaled_solution_graph_attrs():
+def _job_weighted_solution_graph_attrs():
     router = MILPRouter(
         'ortools.highs',
         time_limit=1,
@@ -149,7 +149,7 @@ def test_cables_capacity_calculation():
     assert wfn2.cables_capacity == 7
 
 
-def test_turbine_power_default_path_is_integer_scaled():
+def test_turbine_power_is_stored_in_nominal_units():
     wfn = WindFarmNetwork(
         cables=5,
         turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
@@ -157,71 +157,11 @@ def test_turbine_power_default_path_is_integer_scaled():
         turbine_power=[1.0, 1.5],
     )
 
-    assert wfn._power_scale == 2
-    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [2, 3]
+    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1.0, 1.5]
 
 
-def test_turbine_power_default_decimals_is_one():
-    wfn = WindFarmNetwork(
-        cables=5,
-        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
-        substationsC=np.array([[0.0, 1.0]]),
-        turbine_power=[1.0, 1.05],
-    )
-
-    assert wfn._power_scale == 10
-    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [10, 11]
-
-
-def test_turbine_power_decimals_can_keep_two_digits():
-    wfn = WindFarmNetwork(
-        cables=5,
-        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
-        substationsC=np.array([[0.0, 1.0]]),
-        turbine_power=[1.0, 1.01],
-        turbine_power_decimals=2,
-    )
-
-    assert wfn._power_scale == 100
-    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [100, 101]
-
-
-def test_turbine_power_decimals_ten_means_ten_decimal_places():
-    wfn = WindFarmNetwork(
-        cables=5,
-        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
-        substationsC=np.array([[0.0, 1.0]]),
-        turbine_power=[1.0, 1.0000000001],
-        turbine_power_decimals=10,
-    )
-
-    assert wfn._power_scale == 10_000_000_000
-    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [
-        10_000_000_000,
-        10_000_000_001,
-    ]
-
-
-def test_turbine_power_decimals_is_limited_before_integer_scaling(caplog):
-    with caplog.at_level(logging.WARNING):
-        wfn = WindFarmNetwork(
-            cables=5,
-            turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
-            substationsC=np.array([[0.0, 1.0]]),
-            turbine_power=[1.0, 1.01],
-            turbine_power_decimals=1,
-        )
-
-    assert wfn._power_scale == 1
-    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1, 1]
-    assert any(
-        'turbine_power values are rounded to 1 decimal place' in message
-        for message in caplog.messages
-    )
-
-
-def test_integer_scaled_solution_graphs_are_rescaled_to_nominal_units(ortools_worker):
-    result = ortools_worker.run(_job_integer_scaled_solution_graph_attrs, (), 30)
+def test_weighted_solution_graphs_keep_nominal_units(ortools_worker):
+    result = ortools_worker.run(_job_weighted_solution_graph_attrs, (), 30)
     if isinstance(result, BaseException):
         raise result
 
@@ -237,29 +177,31 @@ def test_integer_scaled_solution_graphs_are_rescaled_to_nominal_units(ortools_wo
     }
 
 
-@pytest.mark.parametrize('decimals', [-1, True, 1.5])
-def test_turbine_power_decimals_must_be_non_negative_integer(decimals):
-    with pytest.raises(ValueError, match='turbine_power_decimals'):
+def test_update_from_terse_links_uses_weighted_turbine_power():
+    wfn = WindFarmNetwork(
+        cables=[(1, 100.0), (2, 150.0)],
+        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
+        substationsC=np.array([[0.0, 1.0]]),
+        turbine_power=[1.0, 1.5],
+    )
+
+    wfn.update_from_terse_links(np.array([-1, -1]))
+
+    assert [wfn.S.nodes[i]['power'] for i in range(2)] == [1.0, 1.5]
+    assert sorted(data['load'] for *_, data in wfn.S.edges(data=True)) == [1.0, 1.5]
+    assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [1.0, 1.5]
+    assert wfn.G[1][-1]['cable'] == 1
+
+
+@pytest.mark.parametrize('bad_power', [0, -1, float('nan'), 'not-a-number'])
+def test_turbine_power_values_must_be_positive_finite_numbers(bad_power):
+    with pytest.raises(ValueError, match='turbine_power'):
         WindFarmNetwork(
             cables=5,
             turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
             substationsC=np.array([[0.0, 1.0]]),
-            turbine_power=[1.0, 1.001],
-            turbine_power_decimals=decimals,
+            turbine_power=[1.0, bad_power],
         )
-
-
-def test_turbine_power_decimals_zero_rounds_to_whole_numbers():
-    wfn = WindFarmNetwork(
-        cables=5,
-        turbinesC=np.array([[0.0, 0.0], [1.0, 0.0]]),
-        substationsC=np.array([[0.0, 1.0]]),
-        turbine_power=[1.0, 1.4],
-        turbine_power_decimals=0,
-    )
-
-    assert wfn._power_scale == 1
-    assert [wfn.L.nodes[i]['power'] for i in range(2)] == [1, 1]
 
 
 def test_invalid_gradient_type_raises():
@@ -632,7 +574,7 @@ def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
         cables_capacity=4,
         model_options=model_options,
         S_warm_has_detour=False,
-        solver_name='ortools.cp_sat',
+        solver_name='ortools',
         logger=logging.getLogger(U.__name__),
         verbose=True,
     )
@@ -653,7 +595,7 @@ def test_warmstart_feeder_limit_specified_allows(capfd):
         cables_capacity=2,
         model_options=model_options,
         S_warm_has_detour=False,
-        solver_name='ortools.cp_sat',
+        solver_name='ortools',
         logger=logging.getLogger(U.__name__),
         verbose=True,
     )

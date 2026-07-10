@@ -38,7 +38,6 @@ _SOLVER_TYPES = {
     'gscip': mathopt.SolverType.GSCIP,
     'highs': mathopt.SolverType.HIGHS,
 }
-_CALLBACK_BACKENDS = ('cp_sat',)
 
 
 class _SolutionStore:
@@ -50,24 +49,6 @@ class _SolutionStore:
         self.metadata = metadata
         self.weight_by_link_id = weight_by_link_id
         self.solutions = []
-
-    def on_solution_callback(
-        self, cb_data: mathopt.CallbackData
-    ) -> mathopt.CallbackResult:
-        if cb_data.event is not mathopt.Event.MIP_SOLUTION or cb_data.solution is None:
-            return mathopt.CallbackResult()
-        solution = {
-            var.id: round(cb_data.solution[var]) for var in self.metadata.link_.values()
-        }
-        solution |= {
-            var.id: round(cb_data.solution[var]) for var in self.metadata.flow_.values()
-        }
-        objective_value = sum(
-            weight * solution[var_id]
-            for var_id, weight in self.weight_by_link_id.items()
-        )
-        self.solutions.append((objective_value, solution))
-        return mathopt.CallbackResult()
 
 
 class SolverORTools(Solver, PoolHandler):
@@ -96,7 +77,7 @@ class SolverORTools(Solver, PoolHandler):
     def _link_val(self, var: Any) -> int:
         return self._value_map[var.id]
 
-    def _flow_val(self, var: Any) -> int:
+    def _flow_val(self, var: Any) -> float:
         return self._value_map[var.id]
 
     def set_problem(
@@ -107,6 +88,12 @@ class SolverORTools(Solver, PoolHandler):
         model_options: ModelOptions,
         warmstart: nx.Graph | None = None,
     ):
+        if self.backend == 'cp_sat':
+            raise NotImplementedError(
+                'ortools.cp_sat does not support the continuous flow variables '
+                'used by OptiWindNet MILP models. Use ortools.highs or '
+                'ortools.gscip instead.'
+            )
         self.P, self.A, self.capacity = P, A, capacity
         self.model_options = model_options
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
@@ -168,20 +155,18 @@ class SolverORTools(Solver, PoolHandler):
             if self.log_callback is not None and self.backend != 'highs'
             else None,
         )
-        if self.backend in _CALLBACK_BACKENDS:
-            solve_kwargs['callback_reg'] = mathopt.CallbackRegistration(
-                events={mathopt.Event.MIP_SOLUTION},
-                mip_solution_filter=mathopt.VariableFilter(filtered_items=tracked_vars),
-            )
-            solve_kwargs['cb'] = storer.on_solution_callback
         result = mathopt.solve(**solve_kwargs)
         self._solve_result = result
         if len(storer.solutions) == 0 and result.has_primal_feasible_solution():
+            link_vars = tuple(self.metadata.link_.values())
+            flow_vars = tuple(self.metadata.flow_.values())
             solution = {
                 var.id: round(value)
-                for var, value in zip(
-                    tracked_vars, result.variable_values(tracked_vars)
-                )
+                for var, value in zip(link_vars, result.variable_values(link_vars))
+            }
+            solution |= {
+                var.id: value
+                for var, value in zip(flow_vars, result.variable_values(flow_vars))
             }
             storer.solutions.append((result.objective_value(), solution))
         num_solutions = len(storer.solutions)
@@ -313,7 +298,7 @@ def make_min_length_model(
 ) -> tuple[mathopt.Model, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
-    Build OR-tools CP-SAT model for the collector system length minimization.
+    Build an OR-Tools MathOpt model for collector system length minimization.
 
     Args:
       A: graph with the available edges to choose from
@@ -365,12 +350,11 @@ def make_min_length_model(
     }
     link_ |= {(t, r): m.add_binary_variable(name=f'link_{t}~r{-r}') for t, r in stars}
     flow_ = {
-        (u, v): m.add_integer_variable(lb=0, ub=k - 1, name=f'flow_{u}~{v}')
+        (u, v): m.add_variable(lb=0, ub=k, name=f'flow_{u}~{v}')
         for u, v in chain(E, Eʹ)
     }
     flow_ |= {
-        (t, r): m.add_integer_variable(lb=0, ub=k, name=f'flow_{t}~r{-r}')
-        for t, r in stars
+        (t, r): m.add_variable(lb=0, ub=k, name=f'flow_{t}~r{-r}') for t, r in stars
     }
 
     ###############
@@ -413,7 +397,7 @@ def make_min_length_model(
     for t, n in linkset:
         _n = str(n) if n >= 0 else f'r{-n}'
         m.add_linear_constraint(
-            expr=flow_[t, n] - (k if n < 0 else (k - 1)) * link_[t, n],
+            expr=flow_[t, n] - k * link_[t, n],
             ub=0,
             name=f'flow_zero_{t}~{_n}',
         )
@@ -561,7 +545,7 @@ def warmup_model(
     Changes ``model`` and ``metadata`` in-place.
 
     Args:
-      model: CP-SAT model to apply the solution to.
+      model: MathOpt model to apply the solution to.
       metadata: indices to the model's variables.
       S: solution topology
 

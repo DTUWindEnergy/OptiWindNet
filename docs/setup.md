@@ -63,7 +63,7 @@ The **launch|binder** button is an easy way to get started, but a local installa
 
 The installation procedure above enables *OptiWindNet*'s heuristics, meta-heuristic, and mathematical optimization with [Google's OR-Tools](https://developers.google.com/optimization) when installed from PyPI, or with [HiGHS](https://highs.dev/) when installed from conda.
 
-Without installing any extra solver package, a PyPI installation of *OptiWindNet* can use `ortools.cp_sat` for CP-SAT, `ortools.gscip` for SCIP, and `ortools.highs` for HiGHS, while a conda installation can use `highs` for HiGHS. The legacy alias `ortools` is still accepted and maps to `ortools.cp_sat`.
+Without installing any extra solver package, a PyPI installation of *OptiWindNet* can use `ortools.gscip` for SCIP and `ortools.highs` for HiGHS, while a conda installation can use `highs` for HiGHS. The legacy alias `ortools` is still accepted and maps to `ortools.highs`. `ortools.cp_sat` is not supported because OptiWindNet's MILP model uses continuous flow variables.
 
 Other mathematical optimization backends can also be used, but they must be installed separately.
 

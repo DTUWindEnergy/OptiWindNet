@@ -41,8 +41,8 @@ class SolverCplex(SolverPyomo, PoolHandler):
     def _link_val(self, var: Any) -> int:
         return round(self._value_map[var.name])
 
-    def _flow_val(self, var: Any) -> int:
-        return round(self._value_map[var.name])
+    def _flow_val(self, var: Any) -> float:
+        return self._value_map[var.name]
 
     def set_problem(
         self,

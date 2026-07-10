@@ -16,7 +16,7 @@ from typing import Any
 import networkx as nx
 from makefun import with_signature
 
-from ..interarraylib import G_from_S, NONUNIFORM_POWER_ATTR
+from ..interarraylib import G_from_S, NONUNIFORM_POWER_ATTR, terminal_powers
 from ..pathfinding import PathFinder
 
 _lggr = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ def effective_terminal_powers(A: nx.Graph) -> tuple[int | float, ...]:
     """Return terminal powers, requiring explicit opt-in for non-uniform values."""
     T = A.graph['T']
     if A.graph.get(NONUNIFORM_POWER_ATTR, False):
-        return tuple(A.nodes[t].get('power', 1) for t in range(T))
+        return terminal_powers(A)
 
     powers = tuple(A.nodes[t].get('power', 1) for t in range(T))
     if len(set(powers)) > 1:
@@ -232,7 +232,7 @@ class Solver(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def _flow_val(self, var: Any) -> int:
+    def _flow_val(self, var: Any) -> float:
         "Get the value of a flow variable from the current solution."
         pass
 

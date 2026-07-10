@@ -1,10 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from decimal import Decimal, ROUND_HALF_UP
-from fractions import Fraction
 from itertools import pairwise
-from math import lcm
-from numbers import Integral
 from pathlib import Path
 from typing import Sequence
 
@@ -52,113 +48,23 @@ plt.rcParams['svg.fonttype'] = 'none'
 # Set up a logger and create shortcuts for error, warning, and info logging methods
 _logger = logging.getLogger(__name__)
 _error, _warning, _info = _logger.error, _logger.warning, _logger.info
-_DEFAULT_TURBINE_POWER_DECIMALS = 1
 
 
-def _normalize_turbine_power(
-    turbine_power: Sequence[float],
-    T: int,
-    turbine_power_decimals: int = _DEFAULT_TURBINE_POWER_DECIMALS,
-) -> tuple[list[int], int]:
-    """Round, validate, and convert turbine powers to integer units."""
-    powers = _validate_turbine_power(turbine_power, T, turbine_power_decimals)
-    return _integerize_turbine_power(powers)
-
-
-def _integerize_turbine_power(powers: Sequence[float]) -> tuple[list[int], int]:
-    power_fractions = [Fraction(str(power)) for power in powers]
-    power_scale = 1
-    for power_fraction in power_fractions:
-        power_scale = lcm(power_scale, power_fraction.denominator)
-    if power_scale > 10:
-        _warning(
-            'turbine_power normalization scale factor is %d. '
-            'Large scale factors may slow down MILP optimization.',
-            power_scale,
-        )
-    return [
-        int(power_fraction * power_scale) for power_fraction in power_fractions
-    ], power_scale
-
-
-def _validate_turbine_power_decimals(turbine_power_decimals: int) -> int:
-    if (
-        isinstance(turbine_power_decimals, bool)
-        or not isinstance(turbine_power_decimals, Integral)
-        or turbine_power_decimals < 0
-    ):
-        raise ValueError('turbine_power_decimals must be a non-negative integer.')
-    return int(turbine_power_decimals)
-
-
-def _round_turbine_power(raw_power: Decimal, turbine_power_decimals: int) -> Decimal:
-    quantum = Decimal(1).scaleb(-turbine_power_decimals)
-    return raw_power.quantize(quantum, rounding=ROUND_HALF_UP)
-
-
-def _format_decimal(value: Decimal) -> str:
-    return format(value.normalize(), 'f')
-
-
-def _format_decimal_places(turbine_power_decimals: int) -> str:
-    if turbine_power_decimals == 1:
-        return '1 decimal place'
-    return f'{turbine_power_decimals} decimal places'
-
-
-def _validate_turbine_power(
-    turbine_power: Sequence[float],
-    T: int,
-    turbine_power_decimals: int = _DEFAULT_TURBINE_POWER_DECIMALS,
-) -> list[float]:
+def _validate_turbine_power(turbine_power: Sequence[float], T: int) -> list[float]:
     if len(turbine_power) != T:
         raise ValueError(
             f'turbine_power has {len(turbine_power)} entries but T={T} turbines.'
         )
-    turbine_power_decimals = _validate_turbine_power_decimals(turbine_power_decimals)
     powers = []
-    rounded_examples = []
     for raw_power in turbine_power:
-        raw_decimal = Decimal(str(raw_power))
-        rounded_power = _round_turbine_power(raw_decimal, turbine_power_decimals)
-        if raw_decimal != rounded_power and len(rounded_examples) < 3:
-            rounded_examples.append(f'{raw_power} -> {_format_decimal(rounded_power)}')
-        powers.append(float(rounded_power))
-    if any(p <= 0 for p in powers):
+        try:
+            power = float(raw_power)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('All turbine_power values must be numeric.') from exc
+        powers.append(power)
+    if any(not np.isfinite(p) or p <= 0 for p in powers):
         raise ValueError('All turbine_power values must be positive.')
-    if rounded_examples:
-        _warning(
-            'turbine_power values are rounded to %s; values with more decimal '
-            'places were rounded (%s).',
-            _format_decimal_places(turbine_power_decimals),
-            ', '.join(rounded_examples),
-        )
     return powers
-
-
-def _scaled_number(value, factor: int | float):
-    scaled = value * factor
-    if isinstance(scaled, float) and scaled.is_integer():
-        return int(scaled)
-    return scaled
-
-
-def _scale_graph_power_attrs(G: nx.Graph, factor: int | float) -> None:
-    for attr in ('capacity', 'max_load'):
-        if attr in G.graph:
-            G.graph[attr] = _scaled_number(G.graph[attr], factor)
-    if 'cables' in G.graph:
-        G.graph['cables'] = [
-            (_scaled_number(capacity, factor), cost)
-            for capacity, cost in G.graph['cables']
-        ]
-    for _, _, data in G.edges(data=True):
-        if 'load' in data:
-            data['load'] = _scaled_number(data['load'], factor)
-    for _, data in G.nodes(data=True):
-        for attr in ('load', 'power'):
-            if attr in data:
-                data[attr] = _scaled_number(data[attr], factor)
 
 
 class Router(ABC):
@@ -231,7 +137,6 @@ class WindFarmNetwork:
         borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
         obstacleC_: Sequence[np.ndarray] = [],
         turbine_power: Sequence[float] | np.ndarray | None = None,
-        turbine_power_decimals: int = _DEFAULT_TURBINE_POWER_DECIMALS,
         name: str = '',
         handle: str = '',
         L: nx.Graph | None = None,
@@ -252,13 +157,9 @@ class WindFarmNetwork:
           turbine_power: Per-turbine power values in nominal units. A cable
             with capacity ``k`` can carry turbines whose total power is at
             most ``k``. For example, ``[1.0, 2.0]`` and ``[3.0, 6.0]`` are
-            equivalent only if cable capacities are scaled by the same factor.
+            equivalent only when cable capacities use the same nominal units.
             Currently supported by :class:`MILPRouter`; heuristic routers
             raise :class:`TypeError` for weighted power.
-
-          turbine_power_decimals: Number of decimal places to keep in
-            ``turbine_power`` before optimization. Defaults to 1; use 2 for
-            two decimal digits or 10 for ten decimal digits.
 
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to :class:`EWRouter`.
@@ -340,50 +241,31 @@ class WindFarmNetwork:
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], T
 
-        self._turbine_power_decimals = _validate_turbine_power_decimals(
-            turbine_power_decimals
-        )
-        self._power_scale = 1
         if turbine_power is not None:
-            int_powers, scale = _normalize_turbine_power(
-                turbine_power,
-                T,
-                self._turbine_power_decimals,
-            )
-            self._power_scale = scale
+            powers = _validate_turbine_power(turbine_power, T)
             L.graph[NONUNIFORM_POWER_ATTR] = True
-            for i, p in enumerate(int_powers):
+            for i, p in enumerate(powers):
                 L.nodes[i]['power'] = p
 
     # -------- helpers --------
-    def _warmstart_for_current_power_scale(self) -> dict:
+    def _warmstart(self) -> dict:
         if self._is_stale_SG:
             return {}
 
-        warmstart_graph = self._S
-        if self._power_scale > 1:
-            warmstart_graph = self._S.copy()
-            _scale_graph_power_attrs(warmstart_graph, self._power_scale)
         return dict(
-            S_warm=warmstart_graph,
+            S_warm=self._S,
             S_warm_has_detour=self._G.graph.get('D', 0) > 0,
         )
 
-    def _cables_for_current_power_scale(self):
-        if self._power_scale == 1:
-            return self._cables, self.cables_capacity
-        scaled_cables = [
-            (capacity * self._power_scale, cost) for capacity, cost in self._cables
-        ]
-        scaled_capacity = self.cables_capacity * self._power_scale
-        return scaled_cables, scaled_capacity
-
-    def _restore_solution_graphs_to_nominal_units(self) -> None:
-        if self._power_scale == 1:
+    def _copy_location_power_attrs(self, G: nx.Graph) -> None:
+        if not self._L.graph.get(NONUNIFORM_POWER_ATTR, False):
             return
-        nominal_unit_factor = 1 / self._power_scale
-        _scale_graph_power_attrs(self._S, nominal_unit_factor)
-        _scale_graph_power_attrs(self._G, nominal_unit_factor)
+        G.graph[NONUNIFORM_POWER_ATTR] = True
+        nx.set_node_attributes(
+            G,
+            {t: self._L.nodes[t].get('power', 1) for t in range(self._T)},
+            'power',
+        )
 
     def _refresh_planar(self):
         polygon = self.polygon
@@ -679,6 +561,9 @@ class WindFarmNetwork:
             self._is_stale_PA = True
 
         S = nx.Graph(R=R, T=T, creator='from_terse_links')
+        S.add_nodes_from(range(T))
+        S.add_nodes_from(range(-R, 0))
+        self._copy_location_power_attrs(S)
         for i, j in enumerate(terse_links_ints):
             S.add_edge(i, j)
 
@@ -806,19 +691,18 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
-        warmstart = self._warmstart_for_current_power_scale()
-        cables_for_solver, capacity_for_solver = self._cables_for_current_power_scale()
+        warmstart = self._warmstart()
 
         self._S, self._G = router.route(
             P=self.P,
             A=self.A,
-            cables=cables_for_solver,
-            cables_capacity=capacity_for_solver,
+            cables=self.cables,
+            cables_capacity=self.cables_capacity,
             verbose=verbose,
             **warmstart,
         )
 
-        self._restore_solution_graphs_to_nominal_units()
+        self._copy_location_power_attrs(self._S)
         self._is_stale_SG = False
 
         terse_links = self.terse_links()

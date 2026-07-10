@@ -36,12 +36,14 @@ def solver_factory(solver_name: str) -> Solver:
     Note that the only solver that is a dependency of OptiWindNet is ``'ortools'``.
     Check OptiWindNet's documentation on how to install optional solvers.
 
-    Legacy compatibility: if ``solver_name == 'ortools'`` then the CP-SAT backend
+    If ``solver_name == 'ortools'`` then the HiGHS backend bundled with OR-Tools
     is used.
 
     Args:
-      solver_name: one of ``'ortools.cp_sat'``, ``'ortools.gscip'``,
-        ``'ortools.highs'``, ``'cplex'``, ``'gurobi'``, ``'cbc'``, ``'scip'``, ``'highs'``.
+      solver_name: one of ``'ortools'``, ``'ortools.gscip'``,
+        ``'ortools.highs'``, ``'cplex'``, ``'gurobi'``, ``'cbc'``,
+        ``'scip'``, ``'fscip'``, or ``'highs'``. ``'ortools.cp_sat'`` is
+        recognized but unsupported by the current continuous-flow MILP model.
 
     Returns:
       Solver instance that can produce solutions for the cable routing problem.
@@ -52,7 +54,7 @@ def solver_factory(solver_name: str) -> Solver:
             if find_spec('ortools'):
                 from .ortools import SolverORTools
 
-                return SolverORTools(backend[0] if backend else 'cp_sat')
+                return SolverORTools(backend[0] if backend else 'highs')
             raise ModuleNotFoundError(
                 "Package 'ortools' not found. Try 'pip install ortools'."
             )

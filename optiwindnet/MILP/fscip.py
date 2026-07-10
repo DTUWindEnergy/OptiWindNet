@@ -49,7 +49,7 @@ class SolverFSCIP(Solver, PoolHandler):
         #   values for link_ variables are floats and may be slightly off of 0
         return round(self._value_map[var])
 
-    def _flow_val(self, var: Any) -> int:
+    def _flow_val(self, var: Any) -> float:
         return self._value_map[var]
 
     def set_problem(
@@ -188,8 +188,13 @@ class SolverFSCIP(Solver, PoolHandler):
                         m = self._regexp_var_value.match(line)
                         if m is not None:
                             name, value = m.groups()
+                            parsed_value = float(value)
                             model.setSolVal(
-                                solution, var_from_name[name], round(float(value))
+                                solution,
+                                var_from_name[name],
+                                round(parsed_value)
+                                if name.startswith('link_')
+                                else parsed_value,
                             )
                         else:
                             error('Unexpected line in %s:\n%s', sol_path, line)

@@ -191,7 +191,7 @@ def P_A_toy():
 
 @pytest.mark.parametrize(
     'solver_name',
-    ['ortools.cp_sat', 'gurobi', 'cplex', 'highs', 'scip', 'cbc', 'fscip'],
+    ['ortools', 'ortools.highs', 'gurobi', 'cplex', 'highs', 'scip', 'cbc', 'fscip'],
 )
 def test_MILP_solvers(P_A_toy, solver_name, ortools_worker):
     P, A = P_A_toy
@@ -217,17 +217,32 @@ def _job_solver_factory_name(solver_name):
     return solver_factory(solver_name).name
 
 
+def _job_cp_sat_set_problem(P, A):
+    solver = solver_factory('ortools.cp_sat')
+    solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
+
+
 @pytest.mark.parametrize(
     ('solver_name', 'expected_name'),
     [
-        ('ortools', 'ortools.cp_sat'),
+        ('ortools', 'ortools.highs'),
         ('ortools.gscip', 'ortools.gscip'),
         ('ortools.highs', 'ortools.highs'),
+        ('ortools.cp_sat', 'ortools.cp_sat'),
     ],
 )
 def test_solver_factory_ortools_backends(solver_name, expected_name, ortools_worker):
     result = ortools_worker.run(_job_solver_factory_name, (solver_name,), 30)
     assert result == expected_name
+
+
+def test_ortools_cp_sat_is_not_supported(P_A_toy, ortools_worker):
+    P, A = P_A_toy
+    result = ortools_worker.run(_job_cp_sat_set_problem, (P, A), 30)
+
+    assert isinstance(result, NotImplementedError)
+    assert 'continuous flow variables' in str(result)
+    assert 'ortools.highs' in str(result)
 
 
 @pytest.mark.parametrize(
