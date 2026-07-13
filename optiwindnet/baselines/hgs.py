@@ -217,9 +217,19 @@ def _solve_single_root(
     return inputs_, (outputs,)
 
 
+def _no_terminals_output(hgs_options):
+    """Stand-in for the output of a root that got no terminals.
+
+    Such a root is never dispatched (HGS-CVRP cannot handle the resulting 1x1
+    distance matrix) but keeps its place in the per-root lists, so that root ids
+    stay aligned with cluster indices.
+    """
+    return [], 0.0, 0.0, 0.0, '', {**hybgensea.DEFAULT_ALGO_PARAMS, **hgs_options}
+
+
 def _solve_multi_root(A, capacity, hgs_options, vehicles, balanced, log_callback):
     R, VertexC = A.graph['R'], A.graph['VertexC']
-    cluster_, _ = clusterize(A, capacity)
+    cluster_ = clusterize(A, capacity)
     len_cluster_ = tuple(len(cluster) for cluster in cluster_)
     if balanced:
         # each cluster is balanced independently; clusterize() already ensures
@@ -243,17 +253,19 @@ def _solve_multi_root(A, capacity, hgs_options, vehicles, balanced, log_callback
                 math.ceil(len_cluster / capacity) for len_cluster in len_cluster_
             ]
     W_, indices_ = _length_matrices(A, cluster_, num_slack_)
-    cluster_data = zip(
-        W_,
-        [VertexC[indices].T for indices in indices_],
-        vehicles_,
-        capacity_,
-        [hgs_options] * R,
-    )
+    populated_ = [c for c, len_cluster in enumerate(len_cluster_) if len_cluster]
+    cluster_data = [
+        (W_[c], VertexC[indices_[c]].T, vehicles_[c], capacity_[c], hgs_options)
+        for c in populated_
+    ]
 
-    # Launch one parallel HGS-CVRP solver process per root.
-    with ThreadPoolExecutor(max_workers=R) as executor:
-        outputs_ = list(executor.map(lambda x: _do_hgs(*x), cluster_data))
+    # Launch one parallel HGS-CVRP solver process per populated root.
+    with ThreadPoolExecutor(max_workers=len(populated_) or 1) as executor:
+        solved_ = list(executor.map(lambda x: _do_hgs(*x), cluster_data))
+
+    outputs_ = [_no_terminals_output(hgs_options) for _ in range(R)]
+    for c, output in zip(populated_, solved_):
+        outputs_[c] = output
 
     inputs_ = vehicles_, len_cluster_, indices_, num_slack_, capacity_
     return inputs_, outputs_

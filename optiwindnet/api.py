@@ -328,6 +328,7 @@ class WindFarmNetwork:
                 continue
             nx.set_node_attributes(graph, power, 'power')
 
+    # -------- helpers --------
     def _refresh_planar(self):
         polygon = self.polygon
         if polygon is not None:

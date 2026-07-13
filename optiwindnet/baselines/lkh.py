@@ -132,6 +132,64 @@ def _build_weight_matrix(
     return L
 
 
+def _distance_cap(L: np.ndarray, *, capacity: int, scale: float) -> float:
+    """Maximum route length to impose on LKH (in ``L``'s scaled units).
+
+    A route visits at most ``k = min(capacity, T)`` terminals, so its length is
+    the feeder leg plus ``k - 1`` inter-terminal hops. Normalized coordinates
+    put the site's concave hull at unit area, hence the terminal spacing scales
+    as ``1/sqrt(T)`` and the hop total as ``k/sqrt(T)``. The feeder leg is
+    bounded by the longest depot distance, read straight off ``L``'s depot
+    column.
+
+    The coefficients were calibrated against 25453 known-good routesets
+    (HGS-CVRP and LKH-3, both path-shaped) from the bundled instance database:
+    ``0.45`` minimizes the spread of longest-route/predictor (cv 0.063, against
+    0.225 for the previous capacity-blind cap), and ``1.72`` is the smallest
+    margin that still leaves every one of those routesets feasible, with 1.25x
+    to spare on the worst of them.
+    """
+    T = L.shape[0] - 1
+    d2root_max = float(L[:-1, -1].max())
+    hops = scale * 0.45 * min(capacity, T) / math.sqrt(T)
+    return 1.72 * (d2root_max + hops)
+
+
+def _route_from_tour(tour_fpath: str, L: np.ndarray) -> tuple[list[int], int]:
+    """Recover the single open route of a 1-vehicle solution from a TOUR_FILE.
+
+    LKH-3 writes MTSP_SOLUTION_FILE only for two or more salesmen. With
+    ``VEHICLES=1`` it still solves the OVRP, but reports the result as a plain
+    closed tour over all ``T + 1`` nodes, with the depot's closing edge free.
+
+    Cutting the cycle at the depot leaves the route; the cycle can be walked in
+    either direction, which puts the feeder at one end or the other, so both
+    orientations are costed against ``L`` and the cheaper one is returned.
+
+    Returns:
+        (route, cost) with ``route`` a list of 0-based terminal indices.
+    """
+    nodes: list[int] = []
+    in_section = False
+    for line in Path(tour_fpath).read_text().splitlines():
+        line = line.strip()
+        if line.startswith('TOUR_SECTION'):
+            in_section = True
+        elif in_section:
+            if line == '-1' or line.startswith('EOF'):
+                break
+            nodes.append(int(line))
+    depot = L.shape[0]  # 1-based id of the depot (last matrix index + 1)
+    cut = nodes.index(depot)
+    seq = [n - 1 for n in chain(nodes[cut + 1 :], nodes[:cut])]
+    hops = sum(int(L[u, v]) for u, v in zip(seq[:-1], seq[1:]))
+    cost_fwd = int(L[seq[0], -1]) + hops
+    cost_rev = int(L[seq[-1], -1]) + hops
+    if cost_rev < cost_fwd:
+        return seq[::-1], cost_rev
+    return seq, cost_fwd
+
+
 def _do_lkh(
     L: np.ndarray,
     *,
@@ -164,21 +222,24 @@ def _do_lkh(
     problem_fname = 'problem.txt'
     params_fname = 'params.txt'
     output_fname = 'solution.out'
+    tour_fname = 'solution.tour'
     initial_tour_fname = 'initial.tour'
 
-    specs = dict(
+    distance_cap = _distance_cap(L, capacity=capacity, scale=scale)
+    specs: dict[str, str | int | float] = dict(
         NAME=name,
         TYPE='OVRP',
         DIMENSION=N,  # CVRP number of nodes and depots
         # For CAPACITY to be enforced, a DEMAND section is required.
         # MTSP_MAX_SIZE should work for unitary demand, but did not.
         CAPACITY=capacity,
-        # This expression for limiting DISTANCE was empiricaly obtained.
-        # It could be improved by replacing T with the aspect ratio of the border shape
-        DISTANCE=scale * 16.0 / (math.log(T) + 0.1),  # maximum route length
         EDGE_WEIGHT_TYPE='EXPLICIT',
         EDGE_WEIGHT_FORMAT='UPPER_ROW',
     )
+    if not math.isinf(distance_cap):
+        # LKH treats DISTANCE as a hard constraint: too low and it reports the
+        # problem infeasible and returns no solution at all.
+        specs['DISTANCE'] = distance_cap  # maximum route length
     data = dict(
         EDGE_WEIGHT_SECTION=edge_weights,
         DEMAND_SECTION='\n'.join(chain((f'{i + 1} 1' for i in range(T)), (f'{N} 0',))),
@@ -203,6 +264,10 @@ def _do_lkh(
         MTSP_MAX_SIZE=capacity,
         MTSP_OBJECTIVE='MINSUM',  # [ MINMAX | MINMAX_SIZE | MINSUM ]
         MTSP_SOLUTION_FILE=output_fname,
+        # LKH-3 only writes MTSP_SOLUTION_FILE for 2+ salesmen. With a single
+        # vehicle it solves the problem but reports it as a plain tour, so ask
+        # for TOUR_FILE too and recover the lone route from it (see below).
+        TOUR_FILE=tour_fname,
         #  MOVE_TYPE='5 SPECIAL',  # <integer> [ SPECIAL ]
         #  GAIN23='NO',
         #  KICKS=1,
@@ -227,6 +292,7 @@ def _do_lkh(
         params['PROBLEM_FILE'] = problem_fpath
         params_fpath = os.path.join(tmpdir, params_fname)
         params['MTSP_SOLUTION_FILE'] = os.path.join(tmpdir, output_fname)
+        params['TOUR_FILE'] = os.path.join(tmpdir, tour_fname)
         if initial_tour_nodes is not None:
             initial_tour_fpath = os.path.join(tmpdir, initial_tour_fname)
             Path(initial_tour_fpath).write_text(
@@ -250,6 +316,7 @@ def _do_lkh(
         result = subprocess.run(['LKH', params_fpath], capture_output=True)
         elapsed_time = time.perf_counter() - start_time
         output_fpath = os.path.join(tmpdir, output_fname)
+        tour_fpath = os.path.join(tmpdir, tour_fname)
         solution_parsed = Path(output_fpath).is_file()
         if solution_parsed:
             with open(output_fpath, 'r') as f_sol:
@@ -258,6 +325,16 @@ def _do_lkh(
                 routes = [
                     [int(node) - 1 for node in line.split(' ')[1:-5]] for line in f_sol
                 ]
+        elif Path(tour_fpath).is_file():
+            # single-vehicle solve: LKH wrote a plain tour instead (it only
+            # writes MTSP_SOLUTION_FILE for 2+ salesmen). LKH omits the tour
+            # file altogether when it cannot satisfy the constraints, so its
+            # presence means the solution is feasible.
+            route, cost = _route_from_tour(tour_fpath, L)
+            routes = [route]
+            penalty = '0'
+            minimum = str(cost)
+            solution_parsed = True
         else:
             penalty = '0'
             minimum = 'inf'
@@ -629,6 +706,22 @@ def _lkh(
 _lkh_fun_fingerprint = fun_fingerprint(_lkh)
 
 
+def _no_terminals_output(seed: int) -> dict:
+    """Stand-in for :func:`_do_lkh`'s output on a root that got no terminals."""
+    return dict(
+        routes=[],
+        penalty=0,
+        minimum='0',
+        cost=0.0,
+        log='',
+        stderr='',
+        elapsed_time=0.0,
+        solution_time=0.0,
+        vehicles=0,
+        seed=seed,
+    )
+
+
 def _run_lkh_per_cluster(
     L_: list[np.ndarray],
     *,
@@ -649,6 +742,10 @@ def _run_lkh_per_cluster(
     Single-root (R == 1) is solved synchronously; multi-root dispatches one
     :func:`_solve_cluster` per root through a ThreadPoolExecutor (one thread per
     root). Returns one LKH output dict per root, in root order (-R..-1).
+
+    A root with an empty cluster is not dispatched (LKH rejects the resulting 1x1
+    weight matrix) but still gets an entry, so that root ids stay aligned with
+    cluster indices.
     """
     R = len(L_)
     job_kwargs_ = [
@@ -672,37 +769,95 @@ def _run_lkh_per_cluster(
     ]
     if R == 1:
         return [_solve_cluster(**job_kwargs_[0])]
-    with ThreadPoolExecutor(max_workers=R) as executor:
-        return list(executor.map(lambda kw: _solve_cluster(**kw), job_kwargs_))
+    populated_ = [c for c, L in enumerate(L_) if L.shape[0] > 1]
+    with ThreadPoolExecutor(max_workers=len(populated_) or 1) as executor:
+        solved_ = list(
+            executor.map(
+                lambda kw: _solve_cluster(**kw),
+                (job_kwargs_[c] for c in populated_),
+            )
+        )
+    outputs_ = [_no_terminals_output(seed) for _ in range(R)]
+    for c, output in zip(populated_, solved_):
+        outputs_[c] = output
+    return outputs_
+
+
+#: Feeders worth offering a cluster that fits within ``capacity`` — i.e. one whose
+#: capacity constraint is inactive. Says nothing about clusters at large: a cluster
+#: that fills its feeders is bound by ``ceil(T_c / capacity)`` and never comes here.
+#:
+#: With capacity to spare, a second feeder beats extending a subtree by one more
+#: terminal-terminal link only if it leaves the root at a significantly different
+#: angle (upwards of pi/2) — otherwise the shorter move is to stay on the subtree
+#: and join it at the root anyway, which the spare capacity allows. Only about
+#: 2*pi / (pi/2) = 4 such directions fit around a root, so 4 is the practical
+#: ceiling, and it does not grow with the cluster. Of the 85 single-root bundled
+#: locations solved with capacity = T (capacity fully inactive), exactly one
+#: (`horns3`, whose substation sits inside the array) does better with a 5th feeder
+#: — by 0.48%, on a 2-turbine stub next to the root, where the feeder leg is nearly
+#: free — and none does better with a 6th.
+#:
+#: Being generous past this point *hurts*: LKH's mTSP transformation adds
+#: ``vehicles - 1`` depot clones, and the bloated search converges worse in the same
+#: time. Offered T vehicles, `anglia` returns an 8-feeder solution 2.6% *longer*
+#: than the one it finds when held to 4.
+_MAX_FEEDERS_WITHIN_CAPACITY = 5
+
+
+def _vehicles_within_capacity(T_c: int) -> int:
+    """Vehicles to offer LKH for a cluster that fits within ``capacity``.
+
+    Such a cluster needs only one feeder, but one is not a good number to ask for
+    (see :func:`_setup_clusters`), so it gets an allowance instead of a pin. The
+    allowance is only an *upper* bound: LKH-3 ignores ``MTSP_MIN_SIZE`` for
+    ``TYPE=OVRP`` and leaves the surplus routes empty.
+    """
+    return min(T_c, _MAX_FEEDERS_WITHIN_CAPACITY)
 
 
 def _setup_clusters(
     A: nx.Graph, *, capacity: int, vehicles: int | None
 ) -> tuple[list[list[int]], list[int]]:
-    """Compute per-root terminals and minimum-feasible vehicle counts.
+    """Compute per-root terminals and vehicle counts.
 
     For R == 1 the only cluster is ``range(T)``; for R > 1 the terminals are
     partitioned by :func:`clusterize` and each cluster's terminal list is sorted
     so that LKH customer ids ``[1..T_c]`` correspond to the cluster's nodes in
     sorted order (and :func:`_initial_tours_from_warmstart` agrees on indexing).
 
-    The returned ``vehicles_`` list is the per-cluster minimum feasible count,
-    except for R == 1 where a user-supplied ``vehicles > vehicles_min`` is
-    honoured (this knob is meaningless under multi-root clustering).
+    Clusters are given their minimum feasible vehicle count, except:
+
+    - a cluster that fits within ``capacity`` (``T_c <= capacity``) gets
+      :func:`_vehicles_within_capacity` instead of the minimum of 1. Its minimum
+      is one only because the capacity constraint is inactive, and that same spare
+      capacity is what makes extra feeders harmless: any routes LKH returns can be
+      joined into a single subtree at the root without exceeding capacity, so the
+      layout stays radial and no feeder budget is overspent. Pinning it to 1
+      instead demands a single route, which over the sparse (near-planar) link set
+      ``A`` means a Hamiltonian path — and one need not exist, all the more so
+      after :func:`_prune_links` drops the links that would block feeders (a
+      rationale that is vacuous when there is only one feeder to block). LKH then
+      returns nothing at all for the cluster.
+    - for R == 1, a user-supplied ``vehicles > vehicles_min`` is honoured (this
+      knob is meaningless under multi-root clustering).
     """
     R, T = A.graph['R'], A.graph['T']
     if R == 1:
         terminals_ = [list(range(T))]
         len_cluster_ = [T]
     else:
-        cluster_, _num_slack_ = clusterize(A, capacity)
+        cluster_ = clusterize(A, capacity)
         terminals_ = [sorted(c) for c in cluster_]
         len_cluster_ = [len(c) for c in terminals_]
     vehicles_min_ = [math.ceil(n / capacity) for n in len_cluster_]
     if R == 1 and vehicles is not None and vehicles > vehicles_min_[0]:
         vehicles_ = [vehicles]
     else:
-        vehicles_ = list(vehicles_min_)
+        vehicles_ = [
+            _vehicles_within_capacity(T_c) if v_min == 1 else v_min
+            for T_c, v_min in zip(len_cluster_, vehicles_min_)
+        ]
     return terminals_, vehicles_
 
 
@@ -738,9 +893,10 @@ def lkh3(
     problems, the graph is clustered (one cluster per root) and each cluster is
     solved concurrently.
 
-    For multi-root instances, the vehicles (feeders) parameter is forced to the
-    minimum feasible value per cluster (a warning is issued if a different
-    value is requested).
+    For multi-root instances, the vehicles (feeders) parameter is forced per
+    cluster (a warning is issued if a different value is requested): to the
+    minimum feasible value, except for a cluster that fits within ``capacity``,
+    which is offered enough feeders to use as many as lower the cable length.
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause
@@ -752,7 +908,8 @@ def lkh3(
         capacity: maximum vehicle capacity.
         time_limit: [s] solver run time limit (per cluster).
         vehicles: number of vehicles (if None or at the minimum, use the
-            minimum feasible; ignored for multi-root problems).
+            per-cluster default described above; ignored for multi-root
+            problems).
         seed: random seed for reproducibility (if None, picks a random one).
         keep_log: attach solver log to the solution graph.
         repair: iteratively fix crossings (default True).
