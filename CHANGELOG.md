@@ -1,3 +1,12 @@
+# v0.3
+
+## Important Changes
+- **Multi-Root Clustering Rewritten**: `clusterize()` partitions the terminals among the substations before the metaheuristic baselines (`hgs_cvrp()`, `lkh3()`) solve each cluster. Its one requirement is that clustering must not cost the location an extra feeder, but it enforced something stronger — that at most *one* cluster may hold a partly filled feeder — which is sufficient but not necessary. Feeder-minimality actually allows several clusters to hold partly filled feeders, as long as their remainders together need no more feeders than they occupy. The old rule ruled out the obvious partition in such cases and had to drag terminals to a distant substation to satisfy a constraint nothing was asking for, sometimes draining a substation of every terminal (`moraywest` at `capacity=30` came out as `[60, 0]` rather than `[30, 30]`). Clusters now start at the closest substation and shed only the wasted feeders, choosing what to move by exact assignment. Across the 560 bundled multi-root `(location, capacity)` pairs, this leaves the partition unchanged on 156 and improves it on the other 404; the total terminal-to-substation distance now sits 0.45% above the (feeder-blind) closest-substation bound, down from 2.89%.
+- **`clusterize()` Signature**: it now returns just the list of clusters. The second return value (`num_slack_`) was already ignored by both call sites, and cannot be reconstructed from a single global figure now that the slack may be spread over several clusters.
+
+## Bug Fixes
+- **Empty Cluster Crashed the Multi-Root Solvers**: a substation can legitimately end up with no terminals — most often because none is closest to it (`yunlin`'s second substation is farther from every terminal than the first one is), but also when there are simply fewer feeders to hand out than substations (`ceil(T / capacity) < R`). Both baselines dispatched the empty cluster to the solver anyway: `hgs_cvrp()` died inside HGS-CVRP on the resulting 1x1 distance matrix (`SystemError: nanobind::detail::nb_func_error_except()`) and `lkh3()` on LKH's (`ValueError: expected a positive input`). Empty clusters are now skipped, keeping the substation in the solution with no feeders attached. This affected 31 of the 560 bundled multi-root `(location, capacity)` pairs; 28 remain empty-clustered and now solve cleanly, and the other 3 were the degenerate partitions fixed above.
+
 # v0.2.3
 
 [Commit history since v0.2.2](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.2...v0.2.3)

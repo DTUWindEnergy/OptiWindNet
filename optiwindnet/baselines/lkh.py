@@ -629,6 +629,22 @@ def _lkh(
 _lkh_fun_fingerprint = fun_fingerprint(_lkh)
 
 
+def _no_terminals_output(seed: int) -> dict:
+    """Stand-in for :func:`_do_lkh`'s output on a root that got no terminals."""
+    return dict(
+        routes=[],
+        penalty=0,
+        minimum='0',
+        cost=0.0,
+        log='',
+        stderr='',
+        elapsed_time=0.0,
+        solution_time=0.0,
+        vehicles=0,
+        seed=seed,
+    )
+
+
 def _run_lkh_per_cluster(
     L_: list[np.ndarray],
     *,
@@ -649,6 +665,10 @@ def _run_lkh_per_cluster(
     Single-root (R == 1) is solved synchronously; multi-root dispatches one
     :func:`_solve_cluster` per root through a ThreadPoolExecutor (one thread per
     root). Returns one LKH output dict per root, in root order (-R..-1).
+
+    A root with an empty cluster is not dispatched (LKH rejects the resulting 1x1
+    weight matrix) but still gets an entry, so that root ids stay aligned with
+    cluster indices.
     """
     R = len(L_)
     job_kwargs_ = [
@@ -672,8 +692,18 @@ def _run_lkh_per_cluster(
     ]
     if R == 1:
         return [_solve_cluster(**job_kwargs_[0])]
-    with ThreadPoolExecutor(max_workers=R) as executor:
-        return list(executor.map(lambda kw: _solve_cluster(**kw), job_kwargs_))
+    populated_ = [c for c, L in enumerate(L_) if L.shape[0] > 1]
+    with ThreadPoolExecutor(max_workers=len(populated_) or 1) as executor:
+        solved_ = list(
+            executor.map(
+                lambda kw: _solve_cluster(**kw),
+                (job_kwargs_[c] for c in populated_),
+            )
+        )
+    outputs_ = [_no_terminals_output(seed) for _ in range(R)]
+    for c, output in zip(populated_, solved_):
+        outputs_[c] = output
+    return outputs_
 
 
 def _setup_clusters(
@@ -695,7 +725,7 @@ def _setup_clusters(
         terminals_ = [list(range(T))]
         len_cluster_ = [T]
     else:
-        cluster_, _num_slack_ = clusterize(A, capacity)
+        cluster_ = clusterize(A, capacity)
         terminals_ = [sorted(c) for c in cluster_]
         len_cluster_ = [len(c) for c in terminals_]
     vehicles_min_ = [math.ceil(n / capacity) for n in len_cluster_]
