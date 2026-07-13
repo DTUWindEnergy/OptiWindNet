@@ -783,19 +783,64 @@ def _run_lkh_per_cluster(
     return outputs_
 
 
+#: Feeders worth offering a cluster that fits within ``capacity`` — i.e. one whose
+#: capacity constraint is inactive. Says nothing about clusters at large: a cluster
+#: that fills its feeders is bound by ``ceil(T_c / capacity)`` and never comes here.
+#:
+#: With capacity to spare, a second feeder beats extending a subtree by one more
+#: terminal-terminal link only if it leaves the root at a significantly different
+#: angle (upwards of pi/2) — otherwise the shorter move is to stay on the subtree
+#: and join it at the root anyway, which the spare capacity allows. Only about
+#: 2*pi / (pi/2) = 4 such directions fit around a root, so 4 is the practical
+#: ceiling, and it does not grow with the cluster. Of the 85 single-root bundled
+#: locations solved with capacity = T (capacity fully inactive), exactly one
+#: (`horns3`, whose substation sits inside the array) does better with a 5th feeder
+#: — by 0.48%, on a 2-turbine stub next to the root, where the feeder leg is nearly
+#: free — and none does better with a 6th.
+#:
+#: Being generous past this point *hurts*: LKH's mTSP transformation adds
+#: ``vehicles - 1`` depot clones, and the bloated search converges worse in the same
+#: time. Offered T vehicles, `anglia` returns an 8-feeder solution 2.6% *longer*
+#: than the one it finds when held to 4.
+_MAX_FEEDERS_WITHIN_CAPACITY = 5
+
+
+def _vehicles_within_capacity(T_c: int) -> int:
+    """Vehicles to offer LKH for a cluster that fits within ``capacity``.
+
+    Such a cluster needs only one feeder, but one is not a good number to ask for
+    (see :func:`_setup_clusters`), so it gets an allowance instead of a pin. The
+    allowance is only an *upper* bound: LKH-3 ignores ``MTSP_MIN_SIZE`` for
+    ``TYPE=OVRP`` and leaves the surplus routes empty.
+    """
+    return min(T_c, _MAX_FEEDERS_WITHIN_CAPACITY)
+
+
 def _setup_clusters(
     A: nx.Graph, *, capacity: int, vehicles: int | None
 ) -> tuple[list[list[int]], list[int]]:
-    """Compute per-root terminals and minimum-feasible vehicle counts.
+    """Compute per-root terminals and vehicle counts.
 
     For R == 1 the only cluster is ``range(T)``; for R > 1 the terminals are
     partitioned by :func:`clusterize` and each cluster's terminal list is sorted
     so that LKH customer ids ``[1..T_c]`` correspond to the cluster's nodes in
     sorted order (and :func:`_initial_tours_from_warmstart` agrees on indexing).
 
-    The returned ``vehicles_`` list is the per-cluster minimum feasible count,
-    except for R == 1 where a user-supplied ``vehicles > vehicles_min`` is
-    honoured (this knob is meaningless under multi-root clustering).
+    Clusters are given their minimum feasible vehicle count, except:
+
+    - a cluster that fits within ``capacity`` (``T_c <= capacity``) gets
+      :func:`_vehicles_within_capacity` instead of the minimum of 1. Its minimum
+      is one only because the capacity constraint is inactive, and that same spare
+      capacity is what makes extra feeders harmless: any routes LKH returns can be
+      joined into a single subtree at the root without exceeding capacity, so the
+      layout stays radial and no feeder budget is overspent. Pinning it to 1
+      instead demands a single route, which over the sparse (near-planar) link set
+      ``A`` means a Hamiltonian path — and one need not exist, all the more so
+      after :func:`_prune_links` drops the links that would block feeders (a
+      rationale that is vacuous when there is only one feeder to block). LKH then
+      returns nothing at all for the cluster.
+    - for R == 1, a user-supplied ``vehicles > vehicles_min`` is honoured (this
+      knob is meaningless under multi-root clustering).
     """
     R, T = A.graph['R'], A.graph['T']
     if R == 1:
@@ -809,7 +854,10 @@ def _setup_clusters(
     if R == 1 and vehicles is not None and vehicles > vehicles_min_[0]:
         vehicles_ = [vehicles]
     else:
-        vehicles_ = list(vehicles_min_)
+        vehicles_ = [
+            _vehicles_within_capacity(T_c) if v_min == 1 else v_min
+            for T_c, v_min in zip(len_cluster_, vehicles_min_)
+        ]
     return terminals_, vehicles_
 
 
@@ -845,9 +893,10 @@ def lkh3(
     problems, the graph is clustered (one cluster per root) and each cluster is
     solved concurrently.
 
-    For multi-root instances, the vehicles (feeders) parameter is forced to the
-    minimum feasible value per cluster (a warning is issued if a different
-    value is requested).
+    For multi-root instances, the vehicles (feeders) parameter is forced per
+    cluster (a warning is issued if a different value is requested): to the
+    minimum feasible value, except for a cluster that fits within ``capacity``,
+    which is offered enough feeders to use as many as lower the cable length.
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause
@@ -859,7 +908,8 @@ def lkh3(
         capacity: maximum vehicle capacity.
         time_limit: [s] solver run time limit (per cluster).
         vehicles: number of vehicles (if None or at the minimum, use the
-            minimum feasible; ignored for multi-root problems).
+            per-cluster default described above; ignored for multi-root
+            problems).
         seed: random seed for reproducibility (if None, picks a random one).
         keep_log: attach solver log to the solution graph.
         repair: iteratively fix crossings (default True).
