@@ -120,10 +120,11 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     R = G.graph['R']
     T = G.graph['T']
     capacity = G.graph['capacity']
+    power_scale = G.graph.get('power_scale', 1)
     roots = range(1, R + 1)
     RootL = {-r: G.nodes[-r].get('label', f'[{-r}]') for r in roots}
     desc = []
-    desc.append(f'κ = {capacity}, T = {T}')
+    desc.append(f'κ = {capacity / power_scale:g}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
     excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(
         total_power(G) / capacity

@@ -40,6 +40,31 @@ def test_gplot_node_tag_string_attr(wfn):
     plt.close('all')
 
 
+def test_gplot_unscales_power_and_load_labels(wfn):
+    G = wfn.G.copy()
+    G.graph['power_scale'] = 2
+    for turbine in range(G.graph['T']):
+        G.nodes[turbine]['power'] = 2
+    G.nodes[0]['power'] = 3
+    G.nodes[0]['load'] = 3
+
+    power_ax = gplot(G, node_tag='power', infobox=False)
+    assert '1.5' in {text.get_text() for text in power_ax.texts}
+    load_ax = gplot(G, node_tag='load', infobox=False)
+    assert '1.5' in {text.get_text() for text in load_ax.texts}
+    plt.close('all')
+
+
+def test_gplot_infobox_unscales_capacity(wfn):
+    G = wfn.G.copy()
+    G.graph['power_scale'] = 2
+    G.graph['capacity'] = 8
+
+    ax = gplot(G)
+    assert 'κ = 4, T =' in ax.get_legend().get_title().get_text()
+    plt.close('all')
+
+
 def test_gplot_dark_mode(wfn):
     ax = gplot(wfn.G, dark=True)
     assert isinstance(ax, Axes)

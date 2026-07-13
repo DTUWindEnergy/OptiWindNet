@@ -176,7 +176,8 @@ class WindFarmNetwork:
     _is_stale_polygon: bool = True
     _buffer_dist: float = 0.0
     _power_scale: int = 1
-    _turbine_power: list[float] | None = None
+    _has_turbine_power: bool = False
+    _turbine_power_decimals: int = 1
 
     def __init__(
         self,
@@ -212,8 +213,9 @@ class WindFarmNetwork:
             cable capacities: a cable with capacity ``k`` can carry turbines
             whose total power is at most ``k``. Values are rounded to
             ``turbine_power_decimals`` decimal places and handled internally as
-            integer power quanta (see :attr:`power_scale`). Currently supported
-            by :class:`MILPRouter` only; heuristic routers raise
+            integer power quanta (see :attr:`power_scale`). Plots and high-level
+            exports convert these quanta back to nominal units. Currently
+            supported by :class:`MILPRouter` only; heuristic routers raise
             :class:`TypeError` for non-uniform power.
           turbine_power_decimals: Number of decimal places of ``turbine_power``
             to preserve (default 1). Fewer decimals keep the integer power
@@ -294,14 +296,16 @@ class WindFarmNetwork:
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], T
 
+        self._has_turbine_power = turbine_power is not None
         if turbine_power is not None:
-            quanta, scale, nominal = _normalize_turbine_power(
+            quanta, scale, _ = _normalize_turbine_power(
                 turbine_power, T, turbine_power_decimals
             )
             for t, power in enumerate(quanta):
                 L.nodes[t]['power'] = power
             self._power_scale = scale
-            self._turbine_power = nominal
+            self._turbine_power_decimals = turbine_power_decimals
+        L.graph['power_scale'] = self._power_scale
 
     # -------- helpers --------
     def _scaled_cables(self) -> list[tuple[int, float | int]]:
@@ -312,13 +316,17 @@ class WindFarmNetwork:
         return [(capacity * scale, cost) for capacity, cost in self._cables]
 
     def _annotate_power(self, *graphs: nx.Graph) -> None:
-        """Stamp per-terminal power and the power scale on solution graphs."""
-        if self._turbine_power is None:
-            return
-        power_ = {t: self._L.nodes[t]['power'] for t in range(self._T)}
+        """Stamp per-terminal power attributes on solution graphs."""
+        power = (
+            None
+            if not self._has_turbine_power
+            else {t: self._L.nodes[t]['power'] for t in range(self._T)}
+        )
         for graph in graphs:
             graph.graph['power_scale'] = self._power_scale
-            nx.set_node_attributes(graph, power_, 'power')
+            if power is None:
+                continue
+            nx.set_node_attributes(graph, power, 'power')
 
     def _refresh_planar(self):
         polygon = self.polygon
@@ -339,6 +347,7 @@ class WindFarmNetwork:
                 #  print(list(out_of_bounds.geoms))
                 raise ValueError('Turbine out of bounds!')
         self._P, self._A = make_planar_embedding(self._L)
+        self._A.graph['power_scale'] = self._power_scale
         self._is_stale_PA = False
 
     # -------- properties --------
@@ -419,13 +428,22 @@ class WindFarmNetwork:
     @property
     def turbine_power(self) -> list[float] | None:
         """Per-turbine power values (rounded), in nominal units; None if not set."""
-        return None if self._turbine_power is None else list(self._turbine_power)
+        if not self._has_turbine_power:
+            return None
+        return [self._L.nodes[t]['power'] / self._power_scale for t in range(self._T)]
+
+    @property
+    def turbine_power_decimals(self) -> int:
+        """Number of decimal places preserved in ``turbine_power``."""
+        return self._turbine_power_decimals
 
     @property
     def power_scale(self) -> int:
-        """Factor between nominal power units and the integer power quanta used
-        internally: the ``'load'``/``'capacity'`` attributes of ``S`` and ``G``
-        are in quanta, i.e. nominal units times ``power_scale``."""
+        """Factor between nominal units and internal integer power quanta.
+
+        Raw graph ``'power'``, ``'load'``, and ``'capacity'`` values use quanta;
+        plots and high-level exports convert them back to nominal units.
+        """
         return self._power_scale
 
     @property
@@ -644,7 +662,7 @@ class WindFarmNetwork:
         return
 
     def get_network(self):
-        """Export the optimized network as a structured array."""
+        """Export the optimized network with loads in nominal power units."""
         return extract_network_as_array(self.G)
 
     def map_detour_vertex(self):

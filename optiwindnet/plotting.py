@@ -60,8 +60,10 @@ def gplot(
 
     Args:
       ax: Axes instance to plot into. If ``None``, opens a new figure.
-      node_tag: text tag inside each node (e.g. ``'load'``, ``'label'`` or any of
-        the nodes' attributes). If ``True``, tags the nodes with their numbers.
+      node_tag: text tag inside each node (e.g. ``'power'``, ``'load'``,
+        ``'label'`` or any node attribute). Power and load are displayed in
+        nominal units using the graph's ``'power_scale'``. If ``True``, tags the
+        nodes with their numbers.
       tag_border: if ``True``, all border and obstacle vertices get a number tag.
       landscape: ``True`` → rotate the plot by G's attribute ``'landscape_angle'``.
       infobox: Draw text box with summary of G's main properties: capacity,
@@ -91,6 +93,7 @@ def gplot(
         node_size = NODESIZE_LABELED
 
     R, T, B = (G.graph[k] for k in 'RTB')
+    power_scale = G.graph.get('power_scale', 1)
     VertexC = G.graph['VertexC']
     C, D = (G.graph.get(k, 0) for k in 'CD')
     border, obstacles, landscape_angle = (
@@ -237,10 +240,28 @@ def gplot(
     # draw labels
     if 'has_loads' in G.graph and node_tag == 'load':
         label_options = dict(
-            labels={n: G.nodes[n].get('load', '-') for n in range(-R, T)},
+            labels={
+                n: (
+                    '-'
+                    if (load := G.nodes[n].get('load')) is None
+                    else f'{load / power_scale:g}'
+                )
+                for n in range(-R, T)
+            },
             font_size=(
                 {t: FONTSIZE_LOAD for t in range(T)}
                 | {r: FONTSIZE_LABEL for r in range(-R, 0)}
+            ),
+        )
+    elif node_tag == 'power':
+        label_options = dict(
+            labels={
+                n: '' if n < 0 else f'{G.nodes[n].get("power", 1) / power_scale:g}'
+                for n in range(-R, T)
+            },
+            font_size=(
+                {t: FONTSIZE_LABEL for t in range(T)}
+                | {r: FONTSIZE_ROOT_LABEL for r in range(-R, 0)}
             ),
         )
     elif isinstance(node_tag, str):

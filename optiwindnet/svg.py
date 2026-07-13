@@ -47,7 +47,7 @@ class SvgRepr:
         if 'R' in m:
             parts.append(f'R={m["R"]}')
         if m.get('capacity') is not None:
-            parts.append(f'capacity={m["capacity"]}')
+            parts.append(f'capacity={m["capacity"]:g}')
         parts.append(f'{len(self.data)} chars')
         return '<' + ' '.join(parts) + '>'
 
@@ -101,7 +101,7 @@ class Drawable:
             self.metadata['name'] = name
         capacity = G.graph.get('capacity')
         if capacity is not None:
-            self.metadata['capacity'] = capacity
+            self.metadata['capacity'] = capacity / G.graph.get('power_scale', 1)
         self.c = c = Colors(dark)
         fnT = G.graph.get('fnT')
         if fnT is None:
@@ -418,12 +418,18 @@ class Drawable:
         # node labels
         if node_tag is not None:
             has_loads = G.graph.get('has_loads', False)
+            power_scale = G.graph.get('power_scale', 1)
 
             def get_label(n):
                 if node_tag is True:
                     return str(n)
                 if node_tag == 'load' and has_loads:
-                    return str(G.nodes[n].get('load', '-'))
+                    load = G.nodes[n].get('load')
+                    return '-' if load is None else f'{load / power_scale:g}'
+                if node_tag == 'power':
+                    if n < 0:
+                        return ''
+                    return f'{G.nodes[n].get("power", 1) / power_scale:g}'
                 if isinstance(node_tag, str):
                     val = G.nodes[n].get(node_tag, '')
                     return str(val) if val != '' else ''
@@ -695,8 +701,10 @@ def svgplot(
     Args:
       G: graph to plot
       landscape: rotate(?) the plot by G's graph attribute ``'landscape_angle'``.
-      node_tag: text label inside each node. Use ``True`` for node numbers, ``'load'``
-        for power flow values (requires ``has_loads``), or any node attribute name.
+      node_tag: text label inside each node. Use ``True`` for node numbers,
+        ``'power'`` for turbine power, ``'load'`` for power flow values (requires
+        ``has_loads``), or any node attribute name. Power and load are displayed
+        in nominal units using the graph's ``'power_scale'``.
       tag_border: if ``True``, label all border and obstacle vertices with their
         index numbers (useful for geometry debugging).
       infobox: add(?) text box with summary of G's main properties: capacity,

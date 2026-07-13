@@ -149,6 +149,7 @@ def _job_weighted_solution_graph_attrs():
         'S_capacity': wfn.S.graph['capacity'],
         'S_power_scale': wfn.S.graph['power_scale'],
         'S_node_power': [wfn.S.nodes[t]['power'] for t in range(2)],
+        'G_power_scale': wfn.G.graph['power_scale'],
         'G_cables': wfn.G.graph['cables'],
         'wfn_cables': wfn.cables,
         'power_scale': wfn.power_scale,
@@ -156,11 +157,27 @@ def _job_weighted_solution_graph_attrs():
     }
 
 
+def test_turbine_power_public_defaults():
+    wfn = WindFarmNetwork(cables=5, **_TWO_TURBINES)
+
+    assert wfn.turbine_power is None
+    assert wfn.turbine_power_decimals == 1
+    assert wfn.power_scale == 1
+    assert wfn.L.graph['power_scale'] == 1
+
+    wfn.update_from_terse_links(np.array([-1, -1]))
+    assert wfn.S.graph['power_scale'] == 1
+    assert wfn.G.graph['power_scale'] == 1
+
+
 def test_turbine_power_quanta_and_scale():
     wfn = WindFarmNetwork(cables=5, turbine_power=[1.0, 1.5], **_TWO_TURBINES)
 
     # nominal [1.0, 1.5] becomes integer quanta [2, 3] at scale 2
+    assert wfn.turbine_power_decimals == 1
     assert wfn.power_scale == 2
+    assert wfn.L.graph['power_scale'] == 2
+    assert wfn.A.graph['power_scale'] == 2
     assert [wfn.L.nodes[t]['power'] for t in range(2)] == [2, 3]
     assert wfn.turbine_power == [1.0, 1.5]
 
@@ -168,6 +185,7 @@ def test_turbine_power_quanta_and_scale():
 def test_turbine_power_rounding_respects_decimals(caplog):
     # default single decimal place: 1.01 rounds to 1.0 (uniform, scale 1)
     wfn = WindFarmNetwork(cables=5, turbine_power=[1.0, 1.01], **_TWO_TURBINES)
+    assert wfn.turbine_power_decimals == 1
     assert wfn.power_scale == 1
     assert wfn.turbine_power == [1.0, 1.0]
     assert [wfn.L.nodes[t]['power'] for t in range(2)] == [1, 1]
@@ -180,6 +198,7 @@ def test_turbine_power_rounding_respects_decimals(caplog):
             turbine_power_decimals=2,
             **_TWO_TURBINES,
         )
+    assert wfn.turbine_power_decimals == 2
     assert wfn.power_scale == 100
     assert [wfn.L.nodes[t]['power'] for t in range(2)] == [100, 101]
     assert 'scale factor' in caplog.text
@@ -233,6 +252,7 @@ def test_weighted_solution_graphs_use_power_quanta(ortools_worker):
         'S_capacity': 4,
         'S_power_scale': 2,
         'S_node_power': [2, 3],
+        'G_power_scale': 2,
         'G_cables': [(4, 1.0)],
         'wfn_cables': [(2, 1.0)],
         'power_scale': 2,
@@ -427,6 +447,18 @@ def test_get_network_returns_array_smoke():
         assert pair in edges_in_G, (
             f'row {(row["src"], row["tgt"])} not present in wfn.G'
         )
+
+
+def test_get_network_unscales_weighted_loads():
+    wfn = WindFarmNetwork(
+        cables=[(1, 100.0), (2, 150.0)],
+        turbine_power=[1.0, 1.5],
+        **_TWO_TURBINES,
+    )
+    wfn.update_from_terse_links(np.array([-1, -1]))
+
+    assert sorted(wfn.get_network()['load']) == [1.0, 1.5]
+    assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [2, 3]
 
 
 def test_gradient():

@@ -279,6 +279,7 @@ def enable_ortools_logging_if_jupyter(solver):
 def extract_network_as_array(G):
     keys = ['src', 'tgt', 'length', 'load', 'cable']
     types = [int, int, float, float, int]
+    power_scale = G.graph.get('power_scale', 1)
     if 'has_cost' in G.graph:
         keys.append('cost')
         types.append(float)
@@ -286,7 +287,9 @@ def extract_network_as_array(G):
     def iter_edges():
         for s, t, edgeD in G.edges(data=True):
             s, t = (s, t) if ((s < t) == edgeD['reverse']) else (t, s)
-            yield s, t, *(edgeD[key] for key in keys[2:])
+            values = [edgeD[key] for key in keys[2:]]
+            values[1] /= power_scale
+            yield s, t, *values
 
     network = np.fromiter(
         iter_edges(),
