@@ -132,6 +132,64 @@ def _build_weight_matrix(
     return L
 
 
+def _distance_cap(L: np.ndarray, *, capacity: int, scale: float) -> float:
+    """Maximum route length to impose on LKH (in ``L``'s scaled units).
+
+    A route visits at most ``k = min(capacity, T)`` terminals, so its length is
+    the feeder leg plus ``k - 1`` inter-terminal hops. Normalized coordinates
+    put the site's concave hull at unit area, hence the terminal spacing scales
+    as ``1/sqrt(T)`` and the hop total as ``k/sqrt(T)``. The feeder leg is
+    bounded by the longest depot distance, read straight off ``L``'s depot
+    column.
+
+    The coefficients were calibrated against 25453 known-good routesets
+    (HGS-CVRP and LKH-3, both path-shaped) from the bundled instance database:
+    ``0.45`` minimizes the spread of longest-route/predictor (cv 0.063, against
+    0.225 for the previous capacity-blind cap), and ``1.72`` is the smallest
+    margin that still leaves every one of those routesets feasible, with 1.25x
+    to spare on the worst of them.
+    """
+    T = L.shape[0] - 1
+    d2root_max = float(L[:-1, -1].max())
+    hops = scale * 0.45 * min(capacity, T) / math.sqrt(T)
+    return 1.72 * (d2root_max + hops)
+
+
+def _route_from_tour(tour_fpath: str, L: np.ndarray) -> tuple[list[int], int]:
+    """Recover the single open route of a 1-vehicle solution from a TOUR_FILE.
+
+    LKH-3 writes MTSP_SOLUTION_FILE only for two or more salesmen. With
+    ``VEHICLES=1`` it still solves the OVRP, but reports the result as a plain
+    closed tour over all ``T + 1`` nodes, with the depot's closing edge free.
+
+    Cutting the cycle at the depot leaves the route; the cycle can be walked in
+    either direction, which puts the feeder at one end or the other, so both
+    orientations are costed against ``L`` and the cheaper one is returned.
+
+    Returns:
+        (route, cost) with ``route`` a list of 0-based terminal indices.
+    """
+    nodes: list[int] = []
+    in_section = False
+    for line in Path(tour_fpath).read_text().splitlines():
+        line = line.strip()
+        if line.startswith('TOUR_SECTION'):
+            in_section = True
+        elif in_section:
+            if line == '-1' or line.startswith('EOF'):
+                break
+            nodes.append(int(line))
+    depot = L.shape[0]  # 1-based id of the depot (last matrix index + 1)
+    cut = nodes.index(depot)
+    seq = [n - 1 for n in chain(nodes[cut + 1 :], nodes[:cut])]
+    hops = sum(int(L[u, v]) for u, v in zip(seq[:-1], seq[1:]))
+    cost_fwd = int(L[seq[0], -1]) + hops
+    cost_rev = int(L[seq[-1], -1]) + hops
+    if cost_rev < cost_fwd:
+        return seq[::-1], cost_rev
+    return seq, cost_fwd
+
+
 def _do_lkh(
     L: np.ndarray,
     *,
@@ -164,21 +222,24 @@ def _do_lkh(
     problem_fname = 'problem.txt'
     params_fname = 'params.txt'
     output_fname = 'solution.out'
+    tour_fname = 'solution.tour'
     initial_tour_fname = 'initial.tour'
 
-    specs = dict(
+    distance_cap = _distance_cap(L, capacity=capacity, scale=scale)
+    specs: dict[str, str | int | float] = dict(
         NAME=name,
         TYPE='OVRP',
         DIMENSION=N,  # CVRP number of nodes and depots
         # For CAPACITY to be enforced, a DEMAND section is required.
         # MTSP_MAX_SIZE should work for unitary demand, but did not.
         CAPACITY=capacity,
-        # This expression for limiting DISTANCE was empiricaly obtained.
-        # It could be improved by replacing T with the aspect ratio of the border shape
-        DISTANCE=scale * 16.0 / (math.log(T) + 0.1),  # maximum route length
         EDGE_WEIGHT_TYPE='EXPLICIT',
         EDGE_WEIGHT_FORMAT='UPPER_ROW',
     )
+    if not math.isinf(distance_cap):
+        # LKH treats DISTANCE as a hard constraint: too low and it reports the
+        # problem infeasible and returns no solution at all.
+        specs['DISTANCE'] = distance_cap  # maximum route length
     data = dict(
         EDGE_WEIGHT_SECTION=edge_weights,
         DEMAND_SECTION='\n'.join(chain((f'{i + 1} 1' for i in range(T)), (f'{N} 0',))),
@@ -203,6 +264,10 @@ def _do_lkh(
         MTSP_MAX_SIZE=capacity,
         MTSP_OBJECTIVE='MINSUM',  # [ MINMAX | MINMAX_SIZE | MINSUM ]
         MTSP_SOLUTION_FILE=output_fname,
+        # LKH-3 only writes MTSP_SOLUTION_FILE for 2+ salesmen. With a single
+        # vehicle it solves the problem but reports it as a plain tour, so ask
+        # for TOUR_FILE too and recover the lone route from it (see below).
+        TOUR_FILE=tour_fname,
         #  MOVE_TYPE='5 SPECIAL',  # <integer> [ SPECIAL ]
         #  GAIN23='NO',
         #  KICKS=1,
@@ -227,6 +292,7 @@ def _do_lkh(
         params['PROBLEM_FILE'] = problem_fpath
         params_fpath = os.path.join(tmpdir, params_fname)
         params['MTSP_SOLUTION_FILE'] = os.path.join(tmpdir, output_fname)
+        params['TOUR_FILE'] = os.path.join(tmpdir, tour_fname)
         if initial_tour_nodes is not None:
             initial_tour_fpath = os.path.join(tmpdir, initial_tour_fname)
             Path(initial_tour_fpath).write_text(
@@ -250,6 +316,7 @@ def _do_lkh(
         result = subprocess.run(['LKH', params_fpath], capture_output=True)
         elapsed_time = time.perf_counter() - start_time
         output_fpath = os.path.join(tmpdir, output_fname)
+        tour_fpath = os.path.join(tmpdir, tour_fname)
         solution_parsed = Path(output_fpath).is_file()
         if solution_parsed:
             with open(output_fpath, 'r') as f_sol:
@@ -258,6 +325,16 @@ def _do_lkh(
                 routes = [
                     [int(node) - 1 for node in line.split(' ')[1:-5]] for line in f_sol
                 ]
+        elif Path(tour_fpath).is_file():
+            # single-vehicle solve: LKH wrote a plain tour instead (it only
+            # writes MTSP_SOLUTION_FILE for 2+ salesmen). LKH omits the tour
+            # file altogether when it cannot satisfy the constraints, so its
+            # presence means the solution is feasible.
+            route, cost = _route_from_tour(tour_fpath, L)
+            routes = [route]
+            penalty = '0'
+            minimum = str(cost)
+            solution_parsed = True
         else:
             penalty = '0'
             minimum = 'inf'
