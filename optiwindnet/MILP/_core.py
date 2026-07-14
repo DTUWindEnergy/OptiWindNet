@@ -105,23 +105,21 @@ class FeederLimit(StrEnum):
 
 
 def feeder_and_load_bounds(
-    total_power: int | None = None,
-    capacity: int | None = None,
-    feeder_limit: FeederLimit | None = None,
-    max_feeders: int = 0,
-    balanced: bool = False,
+    T: int,
+    capacity: int,
+    feeder_limit: FeederLimit,
+    max_feeders: int,
+    balanced: bool,
     *,
-    terminal_count: int | None = None,
-    T: int | None = None,
+    total_power: int | None = None,
 ) -> tuple[int, int | None, int | None, int | None]:
     """Derive the feeder-count and feeder-load bounds a model must enforce.
 
-    ``total_power`` is the sum of the terminals' power (equal to the terminal
-    count when powers are uniform). The feeder count is bounded below by
-    ``min_feeders = ceil(total_power/capacity)`` regardless of ``feeder_limit``
-    (a valid inequality). ``feeders_ub`` is ``None`` when the count is unbounded
-    above; when it equals ``feeders_lb``, the count is pinned and callers should
-    emit an equality constraint.
+    ``total_power`` defaults to ``T`` for unit-power terminals. The feeder count
+    is bounded below by ``min_feeders = ceil(total_power/capacity)`` regardless
+    of ``feeder_limit`` (a valid inequality). ``feeders_ub`` is ``None`` when
+    the count is unbounded above; when it equals ``feeders_lb``, the count is
+    pinned and callers should emit an equality constraint.
 
     Balanced subtrees (loads differing at most by one unit) are only expressible
     with a pinned feeder count ``F``, in which case the loads must lie in
@@ -133,20 +131,8 @@ def feeder_and_load_bounds(
     Returns:
         ``(feeders_lb, feeders_ub, load_lb, load_ub)``
     """
-    if total_power is None:
-        if T is None:
-            raise TypeError("missing required argument: 'total_power'")
-        total_power = T
-    elif T is not None and terminal_count is None:
-        terminal_count = T
-    if capacity is None:
-        raise TypeError("missing required argument: 'capacity'")
-    if feeder_limit is None:
-        raise TypeError("missing required argument: 'feeder_limit'")
-    if terminal_count is None:
-        # with power ≥ 1 per terminal, total_power is a valid upper bound
-        terminal_count = total_power
-    min_feeders = math.ceil(total_power / capacity)
+    W = T if total_power is None else total_power
+    min_feeders = math.ceil(W / capacity)
     if feeder_limit is FeederLimit.UNLIMITED:
         feeders_lb, feeders_ub = min_feeders, None
     elif feeder_limit is FeederLimit.MINIMUM:
@@ -154,7 +140,7 @@ def feeder_and_load_bounds(
     elif feeder_limit is FeederLimit.EXACTLY:
         if max_feeders < min_feeders:
             raise ValueError('max_feeders is below the minimum necessary')
-        if max_feeders > terminal_count:
+        if max_feeders > T:
             raise ValueError('max_feeders is above the number of terminals')
         feeders_lb = feeders_ub = max_feeders
     elif feeder_limit is FeederLimit.SPECIFIED:
@@ -181,7 +167,7 @@ def feeder_and_load_bounds(
         )
         return feeders_lb, feeders_ub, None, None
     F = feeders_lb
-    load_lb, load_ub = total_power // F, math.ceil(total_power / F)
+    load_lb, load_ub = W // F, math.ceil(W / F)
     # bounds at the extremes are already implied by the flow variable's bounds
     return (
         feeders_lb,
@@ -294,6 +280,7 @@ class Solver(abc.ABC):
     stopping: dict[str, Any]
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
+    A: nx.Graph
 
     @abc.abstractmethod
     def _link_val(self, var: Any) -> int | bool:
@@ -389,6 +376,8 @@ class Solver(abc.ABC):
         """
         metadata = self.metadata
         S = nx.Graph(R=metadata.R, T=metadata.T)
+        if 'power_scale' in self.A.graph:
+            S.graph['power_scale'] = self.A.graph['power_scale']
         # ensure roots are added, even if some are not connected
         S.add_nodes_from(range(-metadata.R, 0))
         # Get active links and if flow is reversed (i.e. from small to big)
@@ -403,6 +392,15 @@ class Solver(abc.ABC):
                 for (u, v) in rev_from_link.keys()
             ),
             weight='load',
+        )
+        nx.set_node_attributes(
+            S,
+            {
+                t: self.A.nodes[t]['power']
+                for t in range(metadata.T)
+                if 'power' in self.A.nodes[t]
+            },
+            'power',
         )
         # set the 'reverse' edge attribute
         nx.set_edge_attributes(S, rev_from_link, name='reverse')

@@ -131,7 +131,7 @@ _TWO_TURBINES = dict(
 )
 
 
-def _job_weighted_solution_graph_attrs():
+def _job_weighted_solution_graphs():
     router = MILPRouter('ortools.highs', time_limit=1, mip_gap=0.1)
     wfn = WindFarmNetwork(
         cables=[(2, 1.0)],
@@ -141,93 +141,78 @@ def _job_weighted_solution_graph_attrs():
     )
 
     wfn.optimize()
-
-    return {
-        'S_edge_loads': sorted(data['load'] for *_, data in wfn.S.edges(data=True)),
-        'G_edge_loads': sorted(data['load'] for *_, data in wfn.G.edges(data=True)),
-        'S_max_load': wfn.S.graph['max_load'],
-        'S_capacity': wfn.S.graph['capacity'],
-        'S_power_scale': wfn.S.graph['power_scale'],
-        'S_node_power': [wfn.S.nodes[t]['power'] for t in range(2)],
-        'G_power_scale': wfn.G.graph['power_scale'],
-        'G_cables': wfn.G.graph['cables'],
-        'wfn_cables': wfn.cables,
-        'power_scale': wfn.power_scale,
-        'turbine_power': wfn.turbine_power,
-    }
+    return wfn.S, wfn.G
 
 
-def test_turbine_power_public_defaults():
-    wfn = WindFarmNetwork(cables=5, **_TWO_TURBINES)
+def test_turbine_power_api_round_trip():
+    source = WindFarmNetwork(
+        cables=[(1, 100.0), (2, 150.0)],
+        turbine_power=[1.001, 1.249],
+        turbine_power_decimals=2,
+        **_TWO_TURBINES,
+    )
 
-    assert wfn.turbine_power is None
-    assert wfn.turbine_power_decimals == 1
-    assert wfn.power_scale == 1
-    assert wfn.L.graph['power_scale'] == 1
+    # Values are rounded, then represented by the smallest integer scale.
+    assert source.turbine_power == [1.0, 1.25]
+    assert source.power_scale == 4
+    assert [source.L.nodes[t]['power'] for t in range(2)] == [4, 5]
 
-    wfn.update_from_terse_links(np.array([-1, -1]))
-    assert wfn.S.graph['power_scale'] == 1
-    assert wfn.G.graph['power_scale'] == 1
+    restored = WindFarmNetwork(cables=source.cables, L=source.L)
+    assert restored.turbine_power == [1.0, 1.25]
+    assert restored.turbine_power_decimals == 2
+    assert restored.power_scale == 4
+    assert restored.L.graph['power_scale'] == 4
+    assert restored.A.graph['power_scale'] == 4
 
+    restored.update_from_terse_links(np.array([-1, -1]))
+    assert restored.S.graph['power_scale'] == 4
+    assert [restored.S.nodes[t]['power'] for t in range(2)] == [4, 5]
+    assert sorted(data['load'] for *_, data in restored.G.edges(data=True)) == [4, 5]
+    assert restored.G[0][-1]['cable'] == 0
+    assert restored.G[1][-1]['cable'] == 1
+    assert sorted(restored.get_network()['load']) == [1.0, 1.25]
 
-def test_turbine_power_quanta_and_scale():
-    wfn = WindFarmNetwork(cables=5, turbine_power=[1.0, 1.5], **_TWO_TURBINES)
-
-    # nominal [1.0, 1.5] becomes integer quanta [2, 3] at scale 2
-    assert wfn.turbine_power_decimals == 1
-    assert wfn.power_scale == 2
-    assert wfn.L.graph['power_scale'] == 2
-    assert wfn.A.graph['power_scale'] == 2
-    assert [wfn.L.nodes[t]['power'] for t in range(2)] == [2, 3]
-    assert wfn.turbine_power == [1.0, 1.5]
-
-
-def test_turbine_power_rounding_respects_decimals(caplog):
-    # default single decimal place: 1.01 rounds to 1.0 (uniform, scale 1)
-    wfn = WindFarmNetwork(cables=5, turbine_power=[1.0, 1.01], **_TWO_TURBINES)
-    assert wfn.turbine_power_decimals == 1
-    assert wfn.power_scale == 1
-    assert wfn.turbine_power == [1.0, 1.0]
-    assert [wfn.L.nodes[t]['power'] for t in range(2)] == [1, 1]
-
-    # two decimal places: scale factor 100, warned about
-    with caplog.at_level(logging.WARNING, logger='optiwindnet.api'):
-        wfn = WindFarmNetwork(
-            cables=5,
-            turbine_power=[1.0, 1.01],
-            turbine_power_decimals=2,
-            **_TWO_TURBINES,
-        )
-    assert wfn.turbine_power_decimals == 2
-    assert wfn.power_scale == 100
-    assert [wfn.L.nodes[t]['power'] for t in range(2)] == [100, 101]
-    assert 'scale factor' in caplog.text
-
-
-def test_turbine_power_length_mismatch_raises():
-    with pytest.raises(ValueError, match='entries but T='):
-        WindFarmNetwork(cables=5, turbine_power=[1.0], **_TWO_TURBINES)
+    # This path assigns cables to a temporary graph and must use scaled capacities.
+    restored.plot_selected_links()
 
 
 @pytest.mark.parametrize(
-    'bad_power',
-    [0, -1, float('nan'), float('inf'), 'not-a-number', 0.04],
+    'overrides, match',
+    [
+        pytest.param({'turbine_power': [1.0]}, 'entries but T=', id='length'),
+        pytest.param({'turbine_power': [1.0, 0]}, 'must be positive', id='zero'),
+        pytest.param({'turbine_power': [1.0, -1]}, 'must be positive', id='negative'),
+        pytest.param(
+            {'turbine_power': [1.0, 0.04]}, 'must be positive', id='rounds-to-zero'
+        ),
+        pytest.param(
+            {'turbine_power': [1.0, float('nan')]}, 'must be finite', id='nan'
+        ),
+        pytest.param(
+            {'turbine_power': [1.0, float('inf')]}, 'must be finite', id='infinity'
+        ),
+        pytest.param(
+            {'turbine_power': [1.0, 'invalid']}, 'must be finite', id='nonnumeric'
+        ),
+        pytest.param(
+            {'turbine_power_decimals': -1},
+            'non-negative integer',
+            id='decimals-negative',
+        ),
+        pytest.param(
+            {'turbine_power_decimals': 0.5}, 'non-negative integer', id='decimals-float'
+        ),
+        pytest.param(
+            {'turbine_power_decimals': True}, 'non-negative integer', id='decimals-bool'
+        ),
+    ],
 )
-def test_turbine_power_values_must_be_positive_finite_numbers(bad_power):
-    # 0.04 rounds to 0.0 with the default single decimal place
-    with pytest.raises(ValueError, match='turbine_power values must be'):
-        WindFarmNetwork(cables=5, turbine_power=[1.0, bad_power], **_TWO_TURBINES)
+def test_turbine_power_validation(overrides, match):
+    kwargs = {'cables': 5, 'turbine_power': [1.0, 1.5], **_TWO_TURBINES}
+    kwargs.update(overrides)
 
-
-@pytest.mark.parametrize('bad_decimals', [-1, 0.5, True])
-def test_turbine_power_decimals_validation(bad_decimals):
-    with pytest.raises(ValueError, match='turbine_power_decimals'):
-        WindFarmNetwork(
-            cables=5,
-            turbine_power=[1.0, 1.5],
-            turbine_power_decimals=bad_decimals,
-            **_TWO_TURBINES,
-        )
+    with pytest.raises(ValueError, match=match):
+        WindFarmNetwork(**kwargs)
 
 
 def test_heuristic_routers_reject_weighted_power():
@@ -240,53 +225,19 @@ def test_heuristic_routers_reject_weighted_power():
 
 
 def test_weighted_solution_graphs_use_power_quanta(ortools_worker):
-    result = ortools_worker.run(_job_weighted_solution_graph_attrs, (), 30)
+    result = ortools_worker.run(_job_weighted_solution_graphs, (), 30)
     if isinstance(result, BaseException):
         raise result
 
     # scale 2: quanta [2, 3], scaled capacity 4 -> one feeder per turbine
-    assert result == {
-        'S_edge_loads': [2, 3],
-        'G_edge_loads': [2, 3],
-        'S_max_load': 3,
-        'S_capacity': 4,
-        'S_power_scale': 2,
-        'S_node_power': [2, 3],
-        'G_power_scale': 2,
-        'G_cables': [(4, 1.0)],
-        'wfn_cables': [(2, 1.0)],
-        'power_scale': 2,
-        'turbine_power': [1.0, 1.5],
-    }
-
-
-def test_update_from_terse_links_uses_weighted_power():
-    wfn = WindFarmNetwork(
-        cables=[(1, 100.0), (2, 150.0)],
-        turbine_power=[1.0, 1.5],
-        **_TWO_TURBINES,
-    )
-
-    wfn.update_from_terse_links(np.array([-1, -1]))
-
-    # scale 2: quanta [2, 3]; scaled cable capacities are [2, 4]
-    assert [wfn.S.nodes[t]['power'] for t in range(2)] == [2, 3]
-    assert wfn.S.graph['power_scale'] == 2
-    assert sorted(data['load'] for *_, data in wfn.S.edges(data=True)) == [2, 3]
-    assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [2, 3]
-    assert wfn.G[0][-1]['cable'] == 0
-    assert wfn.G[1][-1]['cable'] == 1
-
-
-def test_plot_selected_links_uses_weighted_power_scale():
-    wfn = WindFarmNetwork(
-        cables=[(1, 100.0), (2, 150.0)],
-        turbine_power=[1.0, 1.5],
-        **_TWO_TURBINES,
-    )
-    wfn.update_from_terse_links(np.array([-1, -1]))
-
-    wfn.plot_selected_links()
+    S, G = result
+    assert sorted(data['load'] for *_, data in S.edges(data=True)) == [2, 3]
+    assert sorted(data['load'] for *_, data in G.edges(data=True)) == [2, 3]
+    assert S.graph['max_load'] == 3
+    assert S.graph['capacity'] == 4
+    assert S.graph['power_scale'] == G.graph['power_scale'] == 2
+    assert [S.nodes[t]['power'] for t in range(2)] == [2, 3]
+    assert G.graph['cables'] == [(4, 1.0)]
 
 
 def test_warmstart_eligibility_uses_total_power():
@@ -447,18 +398,6 @@ def test_get_network_returns_array_smoke():
         assert pair in edges_in_G, (
             f'row {(row["src"], row["tgt"])} not present in wfn.G'
         )
-
-
-def test_get_network_unscales_weighted_loads():
-    wfn = WindFarmNetwork(
-        cables=[(1, 100.0), (2, 150.0)],
-        turbine_power=[1.0, 1.5],
-        **_TWO_TURBINES,
-    )
-    wfn.update_from_terse_links(np.array([-1, -1]))
-
-    assert sorted(wfn.get_network()['load']) == [1.0, 1.5]
-    assert sorted(data['load'] for *_, data in wfn.G.edges(data=True)) == [2, 3]
 
 
 def test_gradient():

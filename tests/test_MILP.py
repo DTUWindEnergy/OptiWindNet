@@ -154,53 +154,36 @@ def test_balanced_pins_loads_to_floor_and_ceil(
     assert result == expected_loads
 
 
-def test_feeder_and_load_bounds_uses_total_power():
+def test_feeder_and_load_bounds_weighted_power():
     # weighted terminals: W=18 at capacity 5 needs 4 feeders (T=12 would need 3)
     assert core.feeder_and_load_bounds(
-        18, 5, core.FeederLimit.MINIMUM, 0, False, terminal_count=12
+        12, 5, core.FeederLimit.MINIMUM, 0, False, total_power=18
     ) == (4, 4, None, None)
     # balanced bounds derive from W: floor(18/4) = 4; ceil(18/4) = 5 is already
     # implied by the flow variable's upper bound (the capacity), hence None
     assert core.feeder_and_load_bounds(
-        18, 5, core.FeederLimit.MINIMUM, 0, True, terminal_count=12
+        12, 5, core.FeederLimit.MINIMUM, 0, True, total_power=18
     ) == (4, 4, 4, None)
 
-
-def test_feeder_and_load_bounds_exactly_validates_terminal_count():
+    # EXACTLY is constrained by the number of terminals, not their total power.
     with pytest.raises(ValueError, match='above the number of terminals'):
         core.feeder_and_load_bounds(
-            18, 5, core.FeederLimit.EXACTLY, 13, False, terminal_count=12
+            12, 5, core.FeederLimit.EXACTLY, 13, False, total_power=18
         )
-    # without terminal_count, total_power is the fallback upper bound
-    feeders_lb, feeders_ub, *_ = core.feeder_and_load_bounds(
-        18, 5, core.FeederLimit.EXACTLY, 13, False
-    )
-    assert feeders_lb == feeders_ub == 13
-
-
-def test_feeder_and_load_bounds_accepts_legacy_T_keyword():
-    assert core.feeder_and_load_bounds(
-        T=12,
-        capacity=5,
-        feeder_limit=core.FeederLimit.MINIMUM,
-        max_feeders=0,
-        balanced=False,
-    ) == (3, 3, None, None)
 
 
 def _solve_toy_weighted(solver_name, P, A):
     A = A.copy()
+    A.graph['power_scale'] = 2
     for t in range(3):
         A.nodes[t]['power'] = 3
     solver = solver_factory(solver_name)
     solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
     solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
-    S, _ = solver.get_solution()
-    R = S.graph['R']
-    return sorted(S.nodes[t]['load'] for r in range(-R, 0) for t in S.neighbors(r))
+    return solver.get_solution()
 
 
-@pytest.mark.parametrize('solver_name', ['ortools', 'highs'])
+@pytest.mark.parametrize('solver_name', ['ortools.cp_sat', 'highs'])
 def test_weighted_power_solve(P_A_toy, solver_name, ortools_worker):
     # toyfarm with terminals 0-2 at power 3: W = 3*3 + 9*1 = 18, capacity 5
     P, A = P_A_toy
@@ -218,7 +201,17 @@ def test_weighted_power_solve(P_A_toy, solver_name, ortools_worker):
     if isinstance(result, BaseException):
         raise result
 
-    subtree_loads = result
+    S, G = result
+    assert (S.graph.get('power_scale'), G.graph.get('power_scale')) == (2, 2)
+    T = S.graph['T']
+    expected_power = [3, 3, 3] + [1] * 9
+    assert [S.nodes[t].get('power', 1) for t in range(T)] == expected_power
+    assert [G.nodes[t].get('power', 1) for t in range(T)] == expected_power
+
+    R = S.graph['R']
+    subtree_loads = sorted(
+        S.nodes[t]['load'] for r in range(-R, 0) for t in S.neighbors(r)
+    )
     assert sum(subtree_loads) == 18
     assert all(load <= _CAPACITY for load in subtree_loads)
     # the model's feeder lower bound must count power, not terminals:

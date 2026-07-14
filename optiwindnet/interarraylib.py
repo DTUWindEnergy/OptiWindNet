@@ -21,7 +21,6 @@ debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 __all__ = (
     'assign_cables',
     'describe_G',
-    'total_power',
     'pathdist',
     'count_diagonals',
     'bfs_subtree_loads',
@@ -353,6 +352,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         'norm_scale',
         'norm_offset',
         'is_normalized',
+        'power_scale',
     ):
         value = A.graph.get(k)
         if value is not None:
@@ -641,14 +641,14 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
                 continue
             if on_hold is not None:
                 u = on_hold
+            node_attrs = {'kind': 'wtg'}
+            if 'power' in G.nodes[v]:
+                node_attrs['power'] = G.nodes[v]['power']
             if has_loads:
                 v_load = G.nodes[v]['load']
-                node_attrs = dict(
-                    kind='wtg', load=v_load, subtree=G.nodes[v]['subtree']
-                )
-                if 'power' in G.nodes[v]:
-                    node_attrs['power'] = G.nodes[v]['power']
-                S.add_node(v, **node_attrs)
+                node_attrs.update(load=v_load, subtree=G.nodes[v]['subtree'])
+            S.add_node(v, **node_attrs)
+            if has_loads:
                 S.add_edge(
                     u,
                     v,
@@ -656,10 +656,6 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
                     reverse=(G.nodes[u]['load'] < v_load) == (u < v),
                 )
             else:
-                node_attrs = {'kind': 'wtg'}
-                if 'power' in G.nodes[v]:
-                    node_attrs['power'] = G.nodes[v]['power']
-                S.add_node(v, **node_attrs)
                 S.add_edge(u, v)
             on_hold = None
     creator = G.graph.get('creator')

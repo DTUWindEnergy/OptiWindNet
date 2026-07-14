@@ -1,9 +1,8 @@
 import logging
 from abc import ABC, abstractmethod
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from fractions import Fraction
 from itertools import pairwise
-from math import lcm
+from math import gcd
 from pathlib import Path
 from typing import Sequence
 
@@ -54,16 +53,16 @@ _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 
 def _normalize_turbine_power(
     turbine_power: 'Sequence[float] | np.ndarray', T: int, decimals: int
-) -> tuple[list[int], int, list[float]]:
+) -> tuple[list[int], int]:
     """Validate and convert per-turbine power values to integer quanta.
 
     Values are rounded to ``decimals`` decimal places and then multiplied by
-    the smallest common factor that makes them all integers (a power of 10,
-    at most ``10**decimals``).
+    the smallest common factor that makes them all integers (a divisor of
+    ``10**decimals``).
 
     Returns:
-      ``(quanta, scale, nominal)``: integer per-turbine powers, the scale
-      factor (``quanta = nominal * scale``) and the rounded nominal values.
+      Integer per-turbine powers and the scale factor
+      (``quanta = nominal * scale``).
     """
     if len(turbine_power) != T:
         raise ValueError(
@@ -72,37 +71,47 @@ def _normalize_turbine_power(
     if not isinstance(decimals, int) or isinstance(decimals, bool) or decimals < 0:
         raise ValueError('turbine_power_decimals must be a non-negative integer.')
     quantum = Decimal(1).scaleb(-decimals)
-    rounded = []
+    rounded_powers = []
     for raw_power in turbine_power:
         try:
-            power = Decimal(str(raw_power)).quantize(quantum, rounding=ROUND_HALF_UP)
-        except (InvalidOperation, ValueError, TypeError) as exc:
-            raise ValueError(
-                f'All turbine_power values must be finite numbers: got {raw_power!r}.'
-            ) from exc
-        if not power.is_finite():
+            power = Decimal(str(raw_power))
+        except (InvalidOperation, ValueError, TypeError):
+            power = None
+
+        if power is None or not power.is_finite():
             raise ValueError(
                 f'All turbine_power values must be finite numbers: got {raw_power!r}.'
             )
+
+        try:
+            power = power.quantize(quantum, rounding=ROUND_HALF_UP)
+        except InvalidOperation as exc:
+            raise ValueError(
+                f'turbine_power value {raw_power!r} cannot be rounded to '
+                f'{decimals} decimal places.'
+            ) from exc
+
         if power <= 0:
             raise ValueError(
                 'All turbine_power values must be positive (and at least half '
                 f'of the rounding quantum {quantum}): got {raw_power!r}.'
             )
-        rounded.append(power)
-    fraction_ = [Fraction(power) for power in rounded]
-    scale = lcm(*(fraction.denominator for fraction in fraction_))
-    if scale > 10:
+        rounded_powers.append(power)
+    decimal_scale = 10**decimals
+    scaled_powers = [int(power * decimal_scale) for power in rounded_powers]
+    common_divisor = gcd(decimal_scale, *scaled_powers)
+    power_scale = decimal_scale // common_divisor
+    if power_scale > 10:
         _warning(
             'turbine_power values require a scale factor of %d to be treated as'
             ' integer power quanta, which may slow down MILP solvers. Consider'
-            ' fewer decimal places in turbine_power or a lower'
-            ' turbine_power_decimals (currently %d).',
-            scale,
+            ' adjusting the values or decimal precision to obtain a smaller'
+            ' common scale (turbine_power_decimals is currently %d).',
+            power_scale,
             decimals,
         )
-    quanta = [int(fraction * scale) for fraction in fraction_]
-    return quanta, scale, [float(power) for power in rounded]
+    power_quanta = [power // common_divisor for power in scaled_powers]
+    return power_quanta, power_scale
 
 
 def _require_uniform_power(A: nx.Graph, router_name: str) -> None:
@@ -175,9 +184,6 @@ class WindFarmNetwork:
     _is_stale_SG: bool = True
     _is_stale_polygon: bool = True
     _buffer_dist: float = 0.0
-    _power_scale: int = 1
-    _has_turbine_power: bool = False
-    _turbine_power_decimals: int = 1
 
     def __init__(
         self,
@@ -218,10 +224,11 @@ class WindFarmNetwork:
             supported by :class:`MILPRouter` only; heuristic routers raise
             :class:`TypeError` for non-uniform power.
           turbine_power_decimals: Number of decimal places of ``turbine_power``
-            to preserve (default 1). Fewer decimals keep the integer power
-            quanta small, which is easier on the MILP solvers.
+            to preserve (default 1). The resulting integer scale depends on the
+            rounded values; smaller scales are easier on the MILP solvers.
 
-        **Cable Specs** (``capacity`` is in number of turbines):
+        **Cable Specs** (``capacity`` is in turbine count for unit-power networks
+        and in the same nominal units as ``turbine_power`` for weighted networks):
             * List of 2-tuple cable specifications:
               ``[(capacity, linear_cost), ...]``.
 
@@ -296,39 +303,43 @@ class WindFarmNetwork:
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], T
 
-        self._has_turbine_power = turbine_power is not None
+        power_scale = 1
         if turbine_power is not None:
-            quanta, scale, _ = _normalize_turbine_power(
+            power_quanta, power_scale = _normalize_turbine_power(
                 turbine_power, T, turbine_power_decimals
             )
-            for t, power in enumerate(quanta):
+            for t, power in enumerate(power_quanta):
                 L.nodes[t]['power'] = power
-            self._power_scale = scale
-            self._turbine_power_decimals = turbine_power_decimals
-        L.graph['power_scale'] = self._power_scale
+            L.graph['turbine_power_decimals'] = turbine_power_decimals
+        elif any('power' in L.nodes[t] for t in range(T)):
+            for t in range(T):
+                L.nodes[t].setdefault('power', 1)
+            power_scale = L.graph.get('power_scale', 1)
+            L.graph.setdefault('turbine_power_decimals', 1)
+        else:
+            L.graph.pop('turbine_power_decimals', None)
+        L.graph['power_scale'] = power_scale
 
     # -------- helpers --------
     def _scaled_cables(self) -> list[tuple[int, float | int]]:
         """Cable specs with capacities converted to integer power quanta."""
-        scale = self._power_scale
-        if scale == 1:
+        power_scale = self.power_scale
+        if power_scale == 1:
             return self._cables
-        return [(capacity * scale, cost) for capacity, cost in self._cables]
+        return [(capacity * power_scale, cost) for capacity, cost in self._cables]
 
     def _annotate_power(self, *graphs: nx.Graph) -> None:
         """Stamp per-terminal power attributes on solution graphs."""
-        power = (
-            None
-            if not self._has_turbine_power
-            else {t: self._L.nodes[t]['power'] for t in range(self._T)}
-        )
+        turbine_power = {
+            t: self._L.nodes[t]['power']
+            for t in range(self._T)
+            if 'power' in self._L.nodes[t]
+        }
         for graph in graphs:
-            graph.graph['power_scale'] = self._power_scale
-            if power is None:
-                continue
-            nx.set_node_attributes(graph, power, 'power')
+            graph.graph['power_scale'] = self.power_scale
+            if turbine_power:
+                nx.set_node_attributes(graph, turbine_power, 'power')
 
-    # -------- helpers --------
     def _refresh_planar(self):
         polygon = self.polygon
         if polygon is not None:
@@ -348,7 +359,7 @@ class WindFarmNetwork:
                 #  print(list(out_of_bounds.geoms))
                 raise ValueError('Turbine out of bounds!')
         self._P, self._A = make_planar_embedding(self._L)
-        self._A.graph['power_scale'] = self._power_scale
+        self._A.graph['power_scale'] = self.power_scale
         self._is_stale_PA = False
 
     # -------- properties --------
@@ -429,14 +440,14 @@ class WindFarmNetwork:
     @property
     def turbine_power(self) -> list[float] | None:
         """Per-turbine power values (rounded), in nominal units; None if not set."""
-        if not self._has_turbine_power:
+        if not any('power' in self._L.nodes[t] for t in range(self._T)):
             return None
-        return [self._L.nodes[t]['power'] / self._power_scale for t in range(self._T)]
+        return [self._L.nodes[t]['power'] / self.power_scale for t in range(self._T)]
 
     @property
     def turbine_power_decimals(self) -> int:
         """Number of decimal places preserved in ``turbine_power``."""
-        return self._turbine_power_decimals
+        return self._L.graph.get('turbine_power_decimals', 1)
 
     @property
     def power_scale(self) -> int:
@@ -445,7 +456,7 @@ class WindFarmNetwork:
         Raw graph ``'power'``, ``'load'``, and ``'capacity'`` values use quanta;
         plots and high-level exports convert them back to nominal units.
         """
-        return self._power_scale
+        return self._L.graph.get('power_scale', 1)
 
     @property
     def router(self) -> Router:
@@ -786,7 +797,7 @@ class WindFarmNetwork:
             P=self.P,
             A=self.A,
             cables=self._scaled_cables(),
-            cables_capacity=self.cables_capacity * self._power_scale,
+            cables_capacity=self.cables_capacity * self.power_scale,
             verbose=verbose,
             **warmstart,
         )

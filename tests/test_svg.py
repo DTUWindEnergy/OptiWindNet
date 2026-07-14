@@ -59,7 +59,7 @@ def test_svgplot_node_tag_numbers():
 
 
 def test_svgplot_node_tag_attribute():
-    G = tiny_wfn().G
+    G = tiny_wfn().G.copy()
     svg = svgplot(G, node_tag='load')
     assert 'id="WTGlabels"' in svg.data
     texts = _texts(svg.data)
@@ -69,9 +69,6 @@ def test_svgplot_node_tag_attribute():
         if load is not None:
             assert str(load) in texts
 
-
-def test_svgplot_unscales_power_load_and_capacity():
-    G = tiny_wfn().G.copy()
     G.graph['power_scale'] = 2
     G.graph['capacity'] = 8
     for turbine in range(G.graph['T']):

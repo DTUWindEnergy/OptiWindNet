@@ -152,47 +152,6 @@ def test_calcload():
     assert G.graph['max_load'] == 4
 
 
-def test_calcload_uniform_power_unchanged():
-    S = nx.Graph(R=1, T=3)
-    S.add_edges_from([(-1, 0), (0, 1), (1, 2)])
-
-    calcload(S)
-
-    assert total_power(S) == 3
-    assert S.graph['max_load'] == 3
-    assert [S[u][v]['load'] for u, v in ((-1, 0), (0, 1), (1, 2))] == [3, 2, 1]
-
-
-def test_calcload_weighted_power():
-    S = nx.Graph(R=1, T=3)
-    S.add_edges_from([(-1, 0), (0, 1), (1, 2)])
-    for t, power in enumerate((1, 2, 3)):
-        S.nodes[t]['power'] = power
-
-    calcload(S)
-
-    assert total_power(S) == 6
-    assert S.graph['max_load'] == 6
-    assert [S[u][v]['load'] for u, v in ((-1, 0), (0, 1), (1, 2))] == [6, 5, 3]
-    assert [S.nodes[t]['load'] for t in range(3)] == [6, 5, 3]
-
-
-def test_S_from_G_preserves_weighted_power_metadata():
-    G = nx.Graph(R=1, T=2, B=0, capacity=4, has_loads=True, power_scale=2)
-    G.add_node(-1, kind='oss', load=5)
-    G.add_node(0, kind='wtg', power=2, load=2, subtree=0)
-    G.add_node(1, kind='wtg', power=3, load=3, subtree=1)
-    G.add_edge(-1, 0, load=2, reverse=False)
-    G.add_edge(-1, 1, load=3, reverse=False)
-
-    S = S_from_G(G)
-
-    assert S.graph['power_scale'] == 2
-    assert [S.nodes[t]['power'] for t in range(2)] == [2, 3]
-    assert total_power(S) == 5
-    assert sorted(data['load'] for *_, data in S.edges(data=True)) == [2, 3]
-
-
 def test_site_fingerprint():
     VertexC = np.array([[0.0, 0.0], [1.5, -0.5], [10.0, 10.0]])
     boundary = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]])
@@ -313,6 +272,20 @@ def test_S_from_G():
     assert S2.graph['has_loads']
     assert 'creator' not in S2.graph
     assert 'method_options' not in S2.graph
+
+    # Weighted power metadata is preserved and used when loads are calculated.
+    weighted_G = nx.Graph(R=1, T=3, B=0, capacity=6, power_scale=2)
+    weighted_G.add_node(-1, kind='oss')
+    for turbine, power in enumerate((1, 2, 3)):
+        weighted_G.add_node(turbine, kind='wtg', power=power)
+    weighted_G.add_edges_from([(-1, 0), (0, 1), (1, 2)])
+
+    weighted_S = S_from_G(weighted_G)
+    assert weighted_S.graph['power_scale'] == 2
+    assert [weighted_S.nodes[t]['power'] for t in range(3)] == [1, 2, 3]
+    assert total_power(weighted_S) == 6
+    assert weighted_S.graph['max_load'] == 6
+    assert [weighted_S[u][v]['load'] for u, v in ((-1, 0), (0, 1), (1, 2))] == [6, 5, 3]
 
 
 def test_G_from_S():

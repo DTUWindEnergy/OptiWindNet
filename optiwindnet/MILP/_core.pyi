@@ -12,14 +12,13 @@ import networkx as nx
 
 def physical_core_count() -> int: ...
 def feeder_and_load_bounds(
-    total_power: int | None = ...,
-    capacity: int | None = ...,
-    feeder_limit: FeederLimit | None = ...,
-    max_feeders: int = ...,
-    balanced: bool = ...,
+    T: int,
+    capacity: int,
+    feeder_limit: FeederLimit,
+    max_feeders: int,
+    balanced: bool,
     *,
-    terminal_count: int | None = ...,
-    T: int | None = ...,
+    total_power: int | None = ...,
 ) -> tuple[int, int | None, int | None, int | None]: ...
 
 class OWNWarmupFailed(Exception): ...

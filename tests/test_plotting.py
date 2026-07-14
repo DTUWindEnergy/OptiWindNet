@@ -27,9 +27,21 @@ def test_gplot_with_provided_axes(wfn):
 
 
 def test_gplot_node_tag_load(wfn):
-    """node_tag='load' path uses has_loads branch and load-specific font sizes."""
-    ax = gplot(wfn.G, node_tag='load')
-    assert isinstance(ax, Axes)
+    G = wfn.G.copy()
+    G.graph['power_scale'] = 2
+    G.graph['capacity'] = 8
+    for turbine in range(G.graph['T']):
+        G.nodes[turbine]['power'] = 2
+    G.nodes[0]['power'] = 3
+    G.nodes[0]['load'] = 3
+
+    power_ax = gplot(G, node_tag='power')
+    assert isinstance(power_ax, Axes)
+    assert '1.5' in {text.get_text() for text in power_ax.texts}
+    assert 'κ = 4, T =' in power_ax.get_legend().get_title().get_text()
+
+    load_ax = gplot(G, node_tag='load', infobox=False)
+    assert '1.5' in {text.get_text() for text in load_ax.texts}
     plt.close('all')
 
 
@@ -37,31 +49,6 @@ def test_gplot_node_tag_string_attr(wfn):
     """node_tag with any other string falls into the generic attribute branch."""
     ax = gplot(wfn.G, node_tag='label')
     assert isinstance(ax, Axes)
-    plt.close('all')
-
-
-def test_gplot_unscales_power_and_load_labels(wfn):
-    G = wfn.G.copy()
-    G.graph['power_scale'] = 2
-    for turbine in range(G.graph['T']):
-        G.nodes[turbine]['power'] = 2
-    G.nodes[0]['power'] = 3
-    G.nodes[0]['load'] = 3
-
-    power_ax = gplot(G, node_tag='power', infobox=False)
-    assert '1.5' in {text.get_text() for text in power_ax.texts}
-    load_ax = gplot(G, node_tag='load', infobox=False)
-    assert '1.5' in {text.get_text() for text in load_ax.texts}
-    plt.close('all')
-
-
-def test_gplot_infobox_unscales_capacity(wfn):
-    G = wfn.G.copy()
-    G.graph['power_scale'] = 2
-    G.graph['capacity'] = 8
-
-    ax = gplot(G)
-    assert 'κ = 4, T =' in ax.get_legend().get_title().get_text()
     plt.close('all')
 
 
