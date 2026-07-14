@@ -217,6 +217,8 @@ def _poisson_disc_filler_core(
     BorderS: CoordPairs,
     cell_strictly_inside_border: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
     obstacleS__: list[CoordPairs],
+    cell_clear_of_obstacles: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
+    cell_fully_clear: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
     repel_radius_sq: float,
     RepellerS: CoordPairs | None,
     rng: np.random.Generator,
@@ -304,44 +306,55 @@ def _poisson_disc_filler_core(
         fracC = rng.random(2)
         dartC = ij + fracC
 
-        # check border, overlap and repel_radius (skip the border containment
-        # test for cells known to lie entirely within the border)
-        if not cell_strictly_inside_border[i, j] and not _contains(BorderS, dartC):
-            miss_streak += 1
-            continue
-        elif not no_conflict(i, j, dartC):
+        # check border and obstacles; a cell flagged in `cell_fully_clear`
+        # is both entirely inside the border and clear of every obstacle,
+        # so neither containment test is needed for a dart thrown in it.
+        # Otherwise, `cell_strictly_inside_border` and `cell_clear_of_obstacles`
+        # each skip just the one test that does not apply to this cell.
+        if not cell_fully_clear[i, j]:
+            if not cell_strictly_inside_border[i, j] and not _contains(BorderS, dartC):
+                miss_streak += 1
+                continue
+            if not cell_clear_of_obstacles[i, j]:
+                blocked = False
+                for obstacleS_ in obstacleS__:
+                    if _contains(obstacleS_, dartC):
+                        blocked = True
+                        break
+                if blocked:
+                    miss_streak += 1
+                    continue
+
+        # check overlap and repel_radius
+        if not no_conflict(i, j, dartC):
             miss_streak += 1
             continue
         elif RepellerS is not None:
             if not _clears(RepellerS, repel_radius_sq, dartC):
                 miss_streak += 1
                 continue
-        for obstacleS_ in obstacleS__:
-            if _contains(obstacleS_, dartC):
-                miss_streak += 1
-                break
-        else:
-            miss_streak = 0
-            # add new point and remove its cell from the available pool
-            points[out_count] = dartC
-            cells[i, j] = out_count
-            avail_count = discard_cell(i, j, empty_idx, avail_count)
 
-            # a dart landing close enough to a cell's side fully covers the
-            # single neighbor cell across that side with its exclusion
-            # disc; such a neighbor can never host a valid point, so drop
-            # it from the pool too (if it is still in it)
-            di, dj = _fully_covered_neighbor(fracC[0], fracC[1])
-            if di != 0 or dj != 0:
-                ni, nj = i + di, j + dj
-                if 0 <= ni < i_len and 0 <= nj < j_len:
-                    nk = pos_in_list[ni, nj]
-                    if nk >= 0:
-                        avail_count = discard_cell(ni, nj, nk, avail_count)
+        miss_streak = 0
+        # add new point and remove its cell from the available pool
+        points[out_count] = dartC
+        cells[i, j] = out_count
+        avail_count = discard_cell(i, j, empty_idx, avail_count)
 
-            out_count += 1
-            if out_count == T or avail_count == 0:
-                break
+        # a dart landing close enough to a cell's side fully covers the
+        # single neighbor cell across that side with its exclusion
+        # disc; such a neighbor can never host a valid point, so drop
+        # it from the pool too (if it is still in it)
+        di, dj = _fully_covered_neighbor(fracC[0], fracC[1])
+        if di != 0 or dj != 0:
+            ni, nj = i + di, j + dj
+            if 0 <= ni < i_len and 0 <= nj < j_len:
+                nk = pos_in_list[ni, nj]
+                if nk >= 0:
+                    avail_count = discard_cell(ni, nj, nk, avail_count)
+
+        out_count += 1
+        if out_count == T or avail_count == 0:
+            break
 
     return points[:out_count], iter_count
 
@@ -473,8 +486,19 @@ def poisson_disc_filler(
     # border containment check can be skipped for darts thrown in them
     is_corner_within_border_only_ = is_corner_within_border_.copy()
 
+    # a cell is clear of an obstacle if none of its corners lie inside it
+    # and the obstacle's perimeter does not cross it; cells clear of every
+    # obstacle can skip the per-dart obstacle containment loop entirely
+    cell_clear_of_obstacles__ = np.ones((i_len, j_len), dtype=bool)
     for obstacleS_ in obstacleS__:
-        is_corner_within_border_ &= ~_contains_np(obstacleS_, cornerS_)
+        is_corner_in_obstacle_ = _contains_np(obstacleS_, cornerS_)
+        is_corner_within_border_ &= ~is_corner_in_obstacle_
+        cell_clear_of_obstacles__ &= ~_cell_corners_view(is_corner_in_obstacle_).any(
+            axis=(0, 1)
+        )
+        obstacle_cells, _ = _walk_along_perimeter(obstacleS_, i_len + j_len + 1)
+        for oi, oj in obstacle_cells:
+            cell_clear_of_obstacles__[oi, oj] = False
 
     is_corner_within_border = is_corner_within_border_.reshape(
         (i_len + 1, j_len + 1), copy=False
@@ -497,6 +521,9 @@ def poisson_disc_filler(
     cell_intercepts_polygon__ = np.logical_and(
         cell_covers_polygon__, ~cell_strictly_inside_polygon__
     )
+
+    # cells needing neither the border nor any obstacle containment test
+    cell_fully_clear__ = cell_strictly_inside_border__ & cell_clear_of_obstacles__
 
     if RepellerS is not None and repel_radius >= min_dist:
         # the cells that contain the repellers can be discarded
@@ -534,6 +561,8 @@ def poisson_disc_filler(
             BorderS,
             cell_strictly_inside_border__,
             obstacleS__,
+            cell_clear_of_obstacles__,
+            cell_fully_clear__,
             repel_radius_sq,
             RepellerS,
             rng,
