@@ -60,6 +60,43 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
 
 
 @nb.njit(cache=True, inline='always')
+def _fully_covered_neighbor(x: float, y: float) -> tuple[int, int]:
+    """Identify a unit-cell edge-neighbor made unreachable by a dart at (x, y).
+
+    A dart thrown at fractional position ``(x, y)`` within its unit cell
+    (cell side = 1, min_dist = sqrt(2), matching the scaled coordinates used
+    by :func:`_poisson_disc_filler_core`) excludes a disc of radius
+    ``sqrt(2)`` around itself. When the dart lands close enough to one side
+    of the cell, that whole disc covers the entirety of the single
+    edge-adjacent neighbor cell across that side, meaning no future dart in
+    that neighbor cell could ever be valid.
+
+    The nearer of the two axis-wise distances to an edge (``ex``, ``ey``)
+    identifies the candidate side; the farther one parametrizes the critical
+    threshold below which the disc reaches the neighbor's farthest corner.
+
+    Args:
+      x: fractional x position within the unit cell, in [0, 1).
+      y: fractional y position within the unit cell, in [0, 1).
+
+    Returns:
+      ``(di, dj)`` offset of the fully-covered neighbor cell, or ``(0, 0)``
+      if none of the four edge-adjacent neighbors is fully covered.
+    """
+    ex = x if x < 0.5 else 1.0 - x
+    ey = y if y < 0.5 else 1.0 - y
+    if ex < ey:
+        h_ref = math.sqrt(1.0 + 2.0 * ey - ey * ey) - 1.0
+        if ex < h_ref:
+            return (1, 0) if x > 0.5 else (-1, 0)
+    else:
+        h_ref = math.sqrt(1.0 + 2.0 * ex - ex * ex) - 1.0
+        if ey < h_ref:
+            return (0, 1) if y > 0.5 else (0, -1)
+    return (0, 0)
+
+
+@nb.njit(cache=True, inline='always')
 def _walk_along_perimeter(
     polygonC: CoordPairs, max_loops: int
 ) -> tuple[list[tuple[int, int]], list[tuple[float, float]]]:
@@ -225,7 +262,30 @@ def _poisson_disc_filler_core(
         return not (((point[None, :] - points[ii]) ** 2).sum(axis=-1) < 2).any()
 
     out_count = 0
-    idc_list = list(range(len(cell_idc)))
+
+    # `idc_arr[:avail_count]` holds indices into `cell_idc` for the cells
+    # still available for dart-throwing. `pos_in_list[i, j]` maps a cell
+    # back to its position within `idc_arr` (-1 if unavailable), so both the
+    # just-occupied cell and any neighbor cell that becomes fully covered by
+    # the new point's exclusion disc can be dropped from the pool in O(1)
+    # via swap-with-last, instead of the O(n) `del idc_list[k]` this
+    # replaces.
+    idc_arr = np.arange(len(cell_idc), dtype=np.int64)
+    pos_in_list = np.full((i_len, j_len), -1, dtype=np.int64)
+    for k in range(len(cell_idc)):
+        ci, cj = cell_idc[k]
+        pos_in_list[ci, cj] = k
+    avail_count = len(cell_idc)
+
+    def discard_cell(i: int, j: int, k: int, avail_count: int) -> int:
+        """Remove cell (i, j), found at position k in idc_arr, from the pool."""
+        last = avail_count - 1
+        last_flat = idc_arr[last]
+        idc_arr[k] = last_flat
+        li, lj = cell_idc[last_flat]
+        pos_in_list[li, lj] = k
+        pos_in_list[i, j] = -1
+        return last
 
     # dart-throwing loop
     miss_streak = 0
@@ -235,12 +295,13 @@ def _poisson_disc_filler_core(
             # remaining to be placed
             break
         # pick random empty cell
-        empty_idx = rng.integers(low=0, high=len(idc_list))
-        ij = cell_idc[idc_list[empty_idx]]
+        empty_idx = rng.integers(low=0, high=avail_count)
+        ij = cell_idc[idc_arr[empty_idx]]
         i, j = ij
 
         # dart throw inside cell
-        dartC = ij + rng.random(2)
+        fracC = rng.random(2)
+        dartC = ij + fracC
 
         # check border, overlap and repel_radius
         if not _contains(BorderS, dartC):
@@ -259,12 +320,25 @@ def _poisson_disc_filler_core(
                 break
         else:
             miss_streak = 0
-            # add new point and remove cell from empty list
+            # add new point and remove its cell from the available pool
             points[out_count] = dartC
             cells[i, j] = out_count
-            del idc_list[empty_idx]
+            avail_count = discard_cell(i, j, empty_idx, avail_count)
+
+            # a dart landing close enough to a cell's side fully covers the
+            # single neighbor cell across that side with its exclusion
+            # disc; such a neighbor can never host a valid point, so drop
+            # it from the pool too (if it is still in it)
+            di, dj = _fully_covered_neighbor(fracC[0], fracC[1])
+            if di != 0 or dj != 0:
+                ni, nj = i + di, j + dj
+                if 0 <= ni < i_len and 0 <= nj < j_len:
+                    nk = pos_in_list[ni, nj]
+                    if nk >= 0:
+                        avail_count = discard_cell(ni, nj, nk, avail_count)
+
             out_count += 1
-            if out_count == T or not idc_list:
+            if out_count == T or avail_count == 0:
                 break
 
     return points[:out_count], iter_count
