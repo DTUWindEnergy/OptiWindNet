@@ -215,6 +215,7 @@ def _poisson_disc_filler_core(
     j_len: int,
     cell_idc: IndexPairs,
     BorderS: CoordPairs,
+    cell_strictly_inside_border: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
     obstacleS__: list[CoordPairs],
     repel_radius_sq: float,
     RepellerS: CoordPairs | None,
@@ -303,8 +304,9 @@ def _poisson_disc_filler_core(
         fracC = rng.random(2)
         dartC = ij + fracC
 
-        # check border, overlap and repel_radius
-        if not _contains(BorderS, dartC):
+        # check border, overlap and repel_radius (skip the border containment
+        # test for cells known to lie entirely within the border)
+        if not cell_strictly_inside_border[i, j] and not _contains(BorderS, dartC):
             miss_streak += 1
             continue
         elif not no_conflict(i, j, dartC):
@@ -455,8 +457,21 @@ def poisson_disc_filler(
     cornerS__[..., 0] = np.arange(i_len + 1)[:, np.newaxis]
     cornerS__[..., 1] = np.arange(j_len + 1)[np.newaxis, :]
 
+    def _cell_corners_view(corner_flag_: np.ndarray) -> np.ndarray:
+        corner_flag = corner_flag_.reshape((i_len + 1, j_len + 1), copy=False)
+        return np.lib.stride_tricks.as_strided(
+            corner_flag,
+            shape=(2, 2, i_len, j_len),
+            strides=corner_flag.strides * 2,
+            writeable=False,
+        )
+
     # process the area's border
     is_corner_within_border_ = _contains_np(BorderS, cornerS_)
+    # corners satisfying the border alone (obstacles ignored), used below to
+    # find cells lying entirely within the border so that the per-dart
+    # border containment check can be skipped for darts thrown in them
+    is_corner_within_border_only_ = is_corner_within_border_.copy()
 
     for obstacleS_ in obstacleS__:
         is_corner_within_border_ &= ~_contains_np(obstacleS_, cornerS_)
@@ -465,24 +480,19 @@ def poisson_disc_filler(
         (i_len + 1, j_len + 1), copy=False
     )
 
-    cell_corners = np.lib.stride_tricks.as_strided(
-        is_corner_within_border,
-        shape=(
-            2,
-            2,
-            is_corner_within_border.shape[0] - 1,
-            is_corner_within_border.shape[1] - 1,
-        ),
-        strides=is_corner_within_border.strides * 2,
-        writeable=False,
-    )
+    cell_corners = _cell_corners_view(is_corner_within_border_)
     cell_covers_polygon__ = cell_corners.any(axis=(0, 1))
     cell_strictly_inside_polygon__ = cell_corners.all(axis=(0, 1))
+
+    cell_strictly_inside_border__ = _cell_corners_view(
+        is_corner_within_border_only_
+    ).all(axis=(0, 1))
 
     cells, points = _walk_along_perimeter(BorderS, i_len + j_len + 1)
     for i, j in cells:
         cell_covers_polygon__[i, j] = True
         cell_strictly_inside_polygon__[i, j] = False
+        cell_strictly_inside_border__[i, j] = False
 
     cell_intercepts_polygon__ = np.logical_and(
         cell_covers_polygon__, ~cell_strictly_inside_polygon__
@@ -522,6 +532,7 @@ def poisson_disc_filler(
             j_len,
             cell_idc,
             BorderS,
+            cell_strictly_inside_border__,
             obstacleS__,
             repel_radius_sq,
             RepellerS,
