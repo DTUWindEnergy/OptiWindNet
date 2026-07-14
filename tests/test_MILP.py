@@ -1,11 +1,11 @@
-import multiprocessing
+import logging
+import math
 
 import numpy as np
 import pytest
 
 import optiwindnet.MILP as MILP
 import optiwindnet.MILP._core as core
-import optiwindnet.MILP.ortools as ortools_milp
 from optiwindnet.interarraylib import terse_links_from_S
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import ModelOptions, solver_factory
@@ -18,18 +18,22 @@ _RUNTIME = 10
 _GAP = 0.001
 
 
-# Loading solvers OR-Tools and scip within the same python instance causes DLL hell
-# (ortools contains a SCIP library). Typical usage of OWN is with a single solver.
-# Use a workaround for tests: spawn a new python process for each solver.
-def _worker_MILP_solver(P, A, solver_name, queue) -> None | tuple:
-    try:
-        solver = solver_factory(solver_name)
-        solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
-        solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
-    except BaseException as exc:
-        queue.put(exc)
-        return
-    queue.put((solution_info, solver.get_solution()))
+# ortools.math_opt bundles its own copies of HiGHS/SCIP that collide with the
+# standalone highspy/pyscipopt packages if loaded into the same process (DLL
+# hell). Only 'ortools*' work is dispatched to the shared `ortools_worker`
+# subprocess fixture (see tests/conftest.py); every other solver runs directly
+# in this process.
+#
+# Note: this module must not import optiwindnet.MILP.ortools (or anything else
+# that transitively loads ortools' native libraries) at module scope --
+# `ortools_worker` re-imports this module in its persistent worker process to
+# unpickle whichever job function it's given, and that worker process must
+# stay ortools-only (never load standalone highspy/pyscipopt).
+def _solve_toy(solver_name, P, A):
+    solver = solver_factory(solver_name)
+    solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
+    solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
+    return solution_info, solver.get_solution()
 
 
 def _solver_is_unavailable(exc: BaseException) -> bool:
@@ -68,10 +72,6 @@ def _patch_cpu_topology(monkeypatch, affinity, mapping=None):
     monkeypatch.setattr(core, 'Path', FakePath)
 
 
-def _make_solve_params(backend, **kwargs):
-    return ortools_milp.SolverORTools(backend)._make_solve_parameters(**kwargs)
-
-
 @pytest.fixture(scope='module')
 def P_A_toy():
     L = toyfarm()
@@ -83,13 +83,15 @@ def P_A_toy():
     'solver_name',
     ['ortools.cp_sat', 'gurobi', 'cplex', 'highs', 'scip', 'cbc', 'fscip'],
 )
-def test_MILP_solvers(P_A_toy, solver_name):
-    ctx = multiprocessing.get_context('spawn')
-    queue = ctx.Queue(maxsize=1)
-    p = ctx.Process(target=_worker_MILP_solver, args=(*P_A_toy, solver_name, queue))
-    p.start()
-    p.join()
-    result = queue.get(timeout=10 + _RUNTIME)
+def test_MILP_solvers(P_A_toy, solver_name, ortools_worker):
+    P, A = P_A_toy
+    if solver_name.startswith('ortools'):
+        result = ortools_worker.run(_solve_toy, (solver_name, P, A), 30 + _RUNTIME)
+    else:
+        try:
+            result = _solve_toy(solver_name, P, A)
+        except BaseException as exc:
+            result = exc
 
     if isinstance(result, BaseException) and _solver_is_unavailable(result):
         pytest.skip(f'{solver_name} not available')
@@ -101,6 +103,61 @@ def test_MILP_solvers(P_A_toy, solver_name):
     assert (terse_links_from_S(S) == _terse_toy_farm_5).all()
 
 
+def _solve_toy_balanced(solver_name, P, A, max_feeders):
+    """Solve toyfarm with the feeder count pinned to ``max_feeders`` and balanced."""
+    solver = solver_factory(solver_name)
+    solver.set_problem(
+        P,
+        A,
+        capacity=_CAPACITY,
+        model_options=ModelOptions(
+            feeder_limit='exactly', max_feeders=max_feeders, balanced=True
+        ),
+    )
+    solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
+    S, _ = solver.get_solution()
+    R = S.graph['R']
+    return sorted(S.nodes[t]['load'] for r in range(-R, 0) for t in S.neighbors(r))
+
+
+@pytest.mark.parametrize('solver_name', ['ortools.cp_sat', 'highs', 'scip'])
+@pytest.mark.parametrize(
+    ('max_feeders', 'expected_loads'),
+    [
+        (5, [2, 2, 2, 3, 3]),
+        # this one is the regression guard: the balanced lower bound is 12 // 7 = 1,
+        # so it constrains nothing and only the upper bound of 2 keeps the loads
+        # together. A model carrying just the lower bound minimizes to [1,1,1,1,1,3,4].
+        (7, [1, 1, 2, 2, 2, 2, 2]),
+    ],
+)
+def test_balanced_pins_loads_to_floor_and_ceil(
+    P_A_toy, solver_name, max_feeders, expected_loads, ortools_worker
+):
+    # toyfarm has T=12, so pinning the feeder count to a non-divisor makes the
+    # loads span the two values {T // F, ceil(T / F)}.
+    P, A = P_A_toy
+    args = (solver_name, P, A, max_feeders)
+    if solver_name.startswith('ortools'):
+        result = ortools_worker.run(_solve_toy_balanced, args, 30 + _RUNTIME)
+    else:
+        try:
+            result = _solve_toy_balanced(*args)
+        except BaseException as exc:
+            result = exc
+
+    if isinstance(result, BaseException) and _solver_is_unavailable(result):
+        pytest.skip(f'{solver_name} not available')
+    if isinstance(result, BaseException):
+        raise result
+
+    assert result == expected_loads
+
+
+def _job_solver_factory_name(solver_name):
+    return solver_factory(solver_name).name
+
+
 @pytest.mark.parametrize(
     ('solver_name', 'expected_name'),
     [
@@ -109,9 +166,9 @@ def test_MILP_solvers(P_A_toy, solver_name):
         ('ortools.highs', 'ortools.highs'),
     ],
 )
-def test_solver_factory_ortools_backends(solver_name, expected_name):
-    solver = solver_factory(solver_name)
-    assert solver.name == expected_name
+def test_solver_factory_ortools_backends(solver_name, expected_name, ortools_worker):
+    result = ortools_worker.run(_job_solver_factory_name, (solver_name,), 30)
+    assert result == expected_name
 
 
 @pytest.mark.parametrize(
@@ -168,6 +225,20 @@ def test_physical_core_count_falls_back_to_psutil(monkeypatch):
     assert core.physical_core_count() == 7
 
 
+def _job_make_solve_params(backend, physical_core_count_value, kwargs):
+    from unittest import mock
+
+    import optiwindnet.MILP.ortools as ortools_milp
+
+    with mock.patch.object(
+        ortools_milp, 'physical_core_count', lambda: physical_core_count_value
+    ):
+        solve_params = ortools_milp.SolverORTools(backend)._make_solve_parameters(
+            **kwargs
+        )
+    return solve_params, kwargs['applied_options']
+
+
 @pytest.mark.parametrize(
     ('backend', 'verbose', 'time_limit', 'mip_gap', 'expected_threads'),
     [
@@ -176,17 +247,16 @@ def test_physical_core_count_falls_back_to_psutil(monkeypatch):
     ],
 )
 def test_make_solve_parameters_thread_defaults(
-    monkeypatch, backend, verbose, time_limit, mip_gap, expected_threads
+    ortools_worker, backend, verbose, time_limit, mip_gap, expected_threads
 ):
-    monkeypatch.setattr(ortools_milp, 'physical_core_count', lambda: 6)
-    applied_options = {}
-
-    solve_params = _make_solve_params(
-        backend,
+    kwargs = dict(
         time_limit=time_limit,
         mip_gap=mip_gap,
-        applied_options=applied_options,
+        applied_options={},
         verbose=verbose,
+    )
+    solve_params, applied_options = ortools_worker.run(
+        _job_make_solve_params, (backend, 6, kwargs), 30
     )
 
     assert solve_params.threads is expected_threads
@@ -197,8 +267,19 @@ def test_make_solve_parameters_thread_defaults(
         assert solve_params.highs.int_options['threads'] == 6
 
 
-def test_make_solve_parameters_gscip_routes_native_parameter_types():
+def _job_gscip_native_params(applied_options):
+    import optiwindnet.MILP.ortools as ortools_milp
+
     solver = ortools_milp.SolverORTools('gscip')
+    return solver._make_solve_parameters(
+        time_limit=3.0,
+        mip_gap=0.001,
+        applied_options=applied_options,
+        verbose=False,
+    )
+
+
+def test_make_solve_parameters_gscip_routes_native_parameter_types(ortools_worker):
     applied_options = {
         'limits/nodes': 12,
         'display/verblevel': 4,
@@ -208,12 +289,7 @@ def test_make_solve_parameters_gscip_routes_native_parameter_types():
         'visual/vbcfilename': 'trace.vbc',
     }
 
-    solve_params = solver._make_solve_parameters(
-        time_limit=3.0,
-        mip_gap=0.001,
-        applied_options=applied_options,
-        verbose=False,
-    )
+    solve_params = ortools_worker.run(_job_gscip_native_params, (applied_options,), 30)
 
     assert solve_params.gscip.int_params['limits/nodes'] == 12
     assert solve_params.gscip.int_params['display/verblevel'] == 4
@@ -223,13 +299,102 @@ def test_make_solve_parameters_gscip_routes_native_parameter_types():
     assert solve_params.gscip.string_params['visual/vbcfilename'] == 'trace.vbc'
 
 
-def test_make_solve_parameters_gscip_rejects_unsupported_native_param_type():
-    solver = ortools_milp.SolverORTools('gscip')
+def _job_gscip_rejects_unsupported():
+    import optiwindnet.MILP.ortools as ortools_milp
 
-    with pytest.raises(TypeError, match='Unsupported type list'):
-        solver._make_solve_parameters(
-            time_limit=3.0,
-            mip_gap=0.001,
-            applied_options={'randomization/permutationseed': [1, 2, 3]},
-            verbose=False,
-        )
+    solver = ortools_milp.SolverORTools('gscip')
+    solver._make_solve_parameters(
+        time_limit=3.0,
+        mip_gap=0.001,
+        applied_options={'randomization/permutationseed': [1, 2, 3]},
+        verbose=False,
+    )
+
+
+def test_make_solve_parameters_gscip_rejects_unsupported_native_param_type(
+    ortools_worker,
+):
+    result = ortools_worker.run(_job_gscip_rejects_unsupported, (), 30)
+    assert isinstance(result, TypeError)
+    assert 'Unsupported type list' in str(result)
+
+
+def _bounds(T, capacity, feeder_limit, max_feeders=0, balanced=True):
+    return core.feeder_and_load_bounds(
+        T, capacity, core.FeederLimit(feeder_limit), max_feeders, balanced
+    )
+
+
+@pytest.mark.parametrize('capacity', range(2, 20))
+def test_feeder_and_load_bounds_balanced_at_minimum(capacity):
+    for T in range(1, 200):
+        feeders_lb, feeders_ub, load_lb, load_ub = _bounds(T, capacity, 'minimum')
+        F = math.ceil(T / capacity)
+        # the feeder count is pinned to the minimum
+        assert feeders_lb == feeders_ub == F
+        # a None bound means the flow variable's own bounds already imply it
+        lo = load_lb if load_lb is not None else 1
+        hi = load_ub if load_ub is not None else capacity
+        # every terminal fits and no subtree exceeds the requested capacity
+        assert F * lo <= T <= F * hi
+        assert hi <= capacity
+        # subtree loads differ at most by one unit
+        assert (T // F) == lo or lo == 1
+        assert math.ceil(T / F) == hi or hi == capacity
+
+
+def test_feeder_and_load_bounds_omits_implied_bounds():
+    # T = 12 over 3 feeders: loads are exactly 4, and 4 < capacity=5
+    assert _bounds(12, 5, 'minimum') == (3, 3, 4, 4)
+    # a single feeder carrying everything: only the lower bound says anything
+    assert _bounds(12, 12, 'minimum') == (1, 1, 12, None)
+    # capacity 1 forces one terminal per feeder: both bounds are already implied
+    assert _bounds(3, 1, 'minimum') == (3, 3, None, None)
+
+
+def test_feeder_and_load_bounds_exactly_pins_the_given_count():
+    # 12 terminals over 5 feeders -> loads in {2, 3}, well below capacity 5
+    assert _bounds(12, 5, 'exactly', max_feeders=5) == (5, 5, 2, 3)
+    assert _bounds(12, 5, 'exactly', max_feeders=5, balanced=False) == (
+        5,
+        5,
+        None,
+        None,
+    )
+
+
+def test_feeder_and_load_bounds_exactly_rejects_infeasible_counts():
+    with pytest.raises(ValueError, match='below the minimum'):
+        _bounds(12, 5, 'exactly', max_feeders=2)
+    with pytest.raises(ValueError, match='above the number of terminals'):
+        _bounds(12, 5, 'exactly', max_feeders=13)
+
+
+def test_feeder_and_load_bounds_specified_is_an_upper_bound():
+    assert _bounds(12, 5, 'specified', max_feeders=7, balanced=False) == (
+        3,
+        7,
+        None,
+        None,
+    )
+    # ... unless it coincides with the minimum, which pins the count
+    assert _bounds(12, 5, 'specified', max_feeders=3) == (3, 3, 4, 4)
+    with pytest.raises(ValueError, match='below the minimum'):
+        _bounds(12, 5, 'specified', max_feeders=2)
+
+
+@pytest.mark.parametrize(
+    ('feeder_limit', 'feeders_ub'),
+    [
+        ('unlimited', None),
+        ('min_plus1', 4),
+        ('min_plus2', 5),
+        ('min_plus3', 6),
+    ],
+)
+def test_feeder_and_load_bounds_warns_when_balance_is_unenforceable(
+    caplog, feeder_limit, feeders_ub
+):
+    with caplog.at_level(logging.WARNING, logger=core.__name__):
+        assert _bounds(12, 5, feeder_limit) == (3, feeders_ub, None, None)
+    assert 'will not enforce balanced subtrees' in caplog.text

@@ -2,10 +2,22 @@
 import numpy as np
 import pytest
 
-from optiwindnet.api import EWRouter, MILPRouter, WindFarmNetwork
+from optiwindnet.api import WindFarmNetwork
 
-from .helpers import canonical_edges, load_instances, router_factory, tiny_wfn
+from .helpers import (
+    canonical_edges,
+    load_instances,
+    needs_process_isolation,
+    router_factory,
+    solve_milp_low_level,
+)
 from .paths import SOLUTIONS_FILE
+
+# ortools.math_opt must never share a process with standalone highspy/pyscipopt
+# (they bundle colliding copies of the same native libraries under the same
+# soname). Only 'ortools*' cases are pushed into the shared `ortools_worker`
+# subprocess (see tests/conftest.py); every other solver is safe to run
+# directly in this process.
 
 
 def pytest_generate_tests(metafunc):
@@ -37,52 +49,67 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize('routed_instance', routed_instances, ids=ids)
 
 
-def test_expected_router_graphs_match(routed_instance, locations):
+def test_expected_router_graphs_match(routed_instance, locations, ortools_worker):
     router_spec = routed_instance['router_spec']
-    try:
-        router = router_factory(router_spec)
-    except (FileNotFoundError, ModuleNotFoundError):
-        pytest.skip(f'{router_spec["params"]["solver_name"]} not available')
     terse_ref = routed_instance['terse_links']
     L = getattr(locations, routed_instance['location'])
-    wfn = WindFarmNetwork(L=L, cables=router_spec['cables'])
-    wfn.optimize(router=router)
-    terse_obt = tuple(wfn.terse_links().tolist())
+    cables = router_spec['cables']
+
+    if router_spec['class'] == 'MILPRouter':
+        if needs_process_isolation(router_spec):
+            timeout = router_spec['params'].get('time_limit', 10) + 30
+            result = ortools_worker.run(solve_milp_low_level, (router_spec, L), timeout)
+        else:
+            try:
+                result = solve_milp_low_level(router_spec, L)
+            except BaseException as exc:
+                result = exc
+        if isinstance(result, (FileNotFoundError, ModuleNotFoundError)):
+            pytest.skip(f'{router_spec["params"]["solver_name"]} not available')
+        if isinstance(result, BaseException):
+            raise result
+        terse_obt, edges_obt = result
+    else:
+        try:
+            router = router_factory(router_spec)
+        except (FileNotFoundError, ModuleNotFoundError):
+            pytest.skip(f'{router_spec["params"]["solver_name"]} not available')
+        wfn = WindFarmNetwork(L=L, cables=cables)
+        wfn.optimize(router=router)
+        terse_obt = tuple(wfn.terse_links().tolist())
+        edges_obt = canonical_edges(wfn.G)
+
     if terse_obt == terse_ref:
         return
     # Fallback: terse_links can differ for topologically equivalent route sets
     # (e.g. a chain's direction flips). Compare the canonical edge sets
     # (detour clones replaced by their primes) of G instead.
-    G_obt = wfn.G
-    wfn_ref = WindFarmNetwork(L=L, cables=router_spec['cables'])
+    wfn_ref = WindFarmNetwork(L=L, cables=cables)
     wfn_ref.update_from_terse_links(np.asarray(terse_ref, dtype=np.int64))
-    assert canonical_edges(G_obt) == canonical_edges(wfn_ref.G), (
+    assert edges_obt == canonical_edges(wfn_ref.G), (
         f'terse_links differ and canonical edges differ.\n'
         f'  obtained: {terse_obt}\n  expected: {terse_ref}'
     )
 
 
-def test_ortools_with_warmstart():
-    try:
-        router_ortools = MILPRouter(
-            solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
-        )
-    except (FileNotFoundError, ModuleNotFoundError):
-        pytest.skip('ortools.cp_sat not available')
+def _run_ortools_warmstart():
+    from optiwindnet.api import EWRouter, MILPRouter
+
+    from .helpers import tiny_wfn
+
+    router_ortools = MILPRouter(
+        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
+    )
     wfn = tiny_wfn()
     wfn.optimize(router=EWRouter())
-    terse_links = wfn.optimize(router=router_ortools)
-    expected = [-1, 0, 1, 2]
-    assert list(terse_links) == expected
+    results = [list(wfn.optimize(router=router_ortools))]
 
     # invalid warmstart
     wfn.G.add_edge(-1, 11)
     router_ortools = MILPRouter(
         solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
     )
-    terse_links = wfn.optimize(router=router_ortools)
-    expected = [-1, 0, 1, 2]
-    assert list(terse_links) == expected
+    results.append(list(wfn.optimize(router=router_ortools)))
 
     # --- with detours
     wfn = tiny_wfn(cables=1)
@@ -90,9 +117,7 @@ def test_ortools_with_warmstart():
     router_ortools = MILPRouter(
         solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
     )
-    terse_links = wfn.optimize(router=router_ortools)
-    expected = [-1, -1, -1, -1]
-    assert list(terse_links) == expected
+    results.append(list(wfn.optimize(router=router_ortools)))
 
     # invalid warmstart
     wfn.G.add_edge(0, 12)
@@ -101,6 +126,18 @@ def test_ortools_with_warmstart():
     router_ortools = MILPRouter(
         solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
     )
-    terse_links = wfn.optimize(router=router_ortools)
-    expected = [-1, -1, -1, -1]
-    assert list(terse_links) == expected
+    results.append(list(wfn.optimize(router=router_ortools)))
+    return results
+
+
+def test_ortools_with_warmstart(ortools_worker):
+    result = ortools_worker.run(_run_ortools_warmstart, (), timeout=30)
+    if isinstance(result, (FileNotFoundError, ModuleNotFoundError)):
+        pytest.skip('ortools.cp_sat not available')
+    if isinstance(result, BaseException):
+        raise result
+
+    assert result[0] == [-1, 0, 1, 2]
+    assert result[1] == [-1, 0, 1, 2]
+    assert result[2] == [-1, -1, -1, -1]
+    assert result[3] == [-1, -1, -1, -1]

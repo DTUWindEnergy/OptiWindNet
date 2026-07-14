@@ -123,10 +123,10 @@ def _node_dist(VertexC: np.ndarray, u: int, v: int) -> float:
 def _expand_P_paths_edge(
     s: int, t: int, shortcuts: dict[tuple[int, int], list[int]]
 ) -> list[int]:
-    """Recursively expand a P_paths shortcut hop into the full P-edge sequence.
+    """Recursively expand a ``P_paths`` shortcut hop into the full P-edge sequence.
 
-    `shortcuts` maps a normalized (u_lo, v_hi) pair to the list of vertices
-    along the underlying P-path. Returns [s, t] verbatim when (s, t) is not
+    ``shortcuts`` maps a normalized ``(u_lo, v_hi)`` pair to the list of vertices
+    along the underlying P-path. Returns ``[s, t]`` verbatim when ``(s, t)`` is not
     a shortcut.
     """
     key = (s, t) if s < t else (t, s)
@@ -144,7 +144,7 @@ def _expand_P_paths_edge(
 def _expand_P_paths_path(
     path: list[int], shortcuts: dict[tuple[int, int], list[int]]
 ) -> list[int]:
-    """Expand every shortcut hop along `path` into its underlying P-edges."""
+    """Expand every shortcut hop along ``path`` into its underlying P-edges."""
     expanded = [path[0]]
     for s, t in zip(path[:-1], path[1:]):
         expanded.extend(_expand_P_paths_edge(s, t, shortcuts)[1:])
@@ -154,7 +154,7 @@ def _expand_P_paths_path(
 class PathNodes(dict):
     """Tree of pseudonodes for shortest-path candidates.
 
-    A prime is a geometry vertex id. A pseudonode id (`pn_id`) identifies one
+    A prime is a geometry vertex id. A pseudonode id (``pn_id``) identifies one
     occurrence of a prime in the path tree, since the same prime can be reached
     from different sectors or parents.
     """
@@ -206,10 +206,10 @@ class PathFinder:
     PathFinder finds the shortest segmented (or detoured) routes for tentative feeders
     (i.e. those that were created without a check for crossings of other routes). The
     path-finding is performed when the instance is initialized, but a route set is
-    returned only with a call to method `.create_detours()`.
+    returned only with a call to method :meth:`create_detours`.
 
-    Only edges in graph attribute 'tentative' or, lacking that, edges with the
-    attribute 'kind' == 'tentative' are checked for crossings.
+    Only edges in graph attribute ``'tentative'`` or, lacking that, edges with the
+    attribute ``'kind'`` with value ``'tentative'`` are checked for crossings.
 
     Args:
       G: the route set without detours
@@ -231,9 +231,9 @@ class PathFinder:
       G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
     Note:
-      On ``capacity=2`` instances the defaults may not suffice to find all
-      shortest feeders. If `validate_routeset(G)` reports any crossings, retry
-      with ``traversals_limit=10`` and ``iterations_limit=50000``.
+      On instances with ``capacity=2``, the default values may not enable finding all
+      the shortest feeders. If :func:`.crossings.find_geometric_crossings` reports any
+      crossings, retry with ``traversals_limit=10`` and ``iterations_limit=50000``.
 
     """
 
@@ -314,7 +314,13 @@ class PathFinder:
 
         self.G, self.Xings, self.tentative, self.A = G, Xings, set(tentative), A
         if not Xings:
-            # no crossings, there is no point in pathfinding
+            # no crossings, there is no point in pathfinding; still set P and
+            # fences so that scaffolded() works even when create_detours() is
+            # not called. fences stays empty here: even if G has contour
+            # clones from G_from_S, they go unconverted by scaffolded() on
+            # this path, since fences are only built below.
+            self.P = planar
+            self.fences = []
             return
 
         # clone2prime must be a copy of the one from Gʹ
@@ -656,11 +662,11 @@ class PathFinder:
         A dropped diagonal is de-shortcut by inserting, between ``a`` and ``b``,
         the endpoint of its crossed base edge that lies on the constraint mesh
         (so the chain builder can anchor it); the two new sides are base-P edges,
-        needing no flip, and ``create_detours`` reapplies the shortcut. When the
+        needing no flip, and :func:`create_detours` reapplies the shortcut. When the
         dropped diagonal has no constraint-mesh endpoint (its base spans two
         terminals), the *realized* diagonal whose flip locked its base is
         de-shortcut instead, freeing the dropped one for the next flip. Returns
-        True if any midpath changed.
+        ``True`` if any midpath changed.
         """
         # Precompute quads for all contour diagonals to avoid redundant searches
         quad_cache = {}
@@ -710,7 +716,7 @@ class PathFinder:
         return True
 
     def _trace_path(self, start_prime: int, pn_id: int):
-        """Return the path and hop distances from `start_prime` to a root."""
+        """Return the path and hop distances from ``start_prime`` to a root."""
         paths = self.paths
         path = [start_prime]
         dists = []
@@ -724,10 +730,10 @@ class PathFinder:
 
     def get_best_path(self, n: int):
         """
-        `_.get_best_path(«node»)` produces a `tuple(path, dists)`.
-        `path` contains a sequence of nodes from the original
-        networx.Graph `G`, from «node» to the closest root.
-        `dists` contains the lengths of the segments defined by `paths`.
+        ``_.get_best_path(«node»)`` produces a ``tuple(path, dists)``.
+        ``path`` contains a sequence of nodes from the original
+        ``networkx.Graph`` ``G``, from ``«node»`` to the closest root.
+        ``dists`` contains the lengths of the segments defined by ``paths``.
         """
         paths = self.paths
         best_pn_by_pair_id = self.best_pn_by_pair_id
@@ -744,7 +750,7 @@ class PathFinder:
         return self._trace_path(n, pn_id)
 
     def _scan_sector_from_opposite(self, prime: int, opposite: int) -> int:
-        """Uncached sector scan for one `(prime, opposite)` pair."""
+        """Uncached sector scan for one ``(prime, opposite)`` pair."""
         T = self.T
         G = self.G
         P = self.P
@@ -767,7 +773,7 @@ class PathFinder:
         return NULL
 
     def _get_sector_from_opposite(self, prime: int, opposite: int) -> int:
-        """Return the cached sector for reaching `prime` from `opposite`."""
+        """Return the cached sector for reaching ``prime`` from ``opposite``."""
         if prime >= self.T:
             return NULL
         try:
@@ -778,7 +784,7 @@ class PathFinder:
             return self._scan_sector_from_opposite(prime, opposite)
 
     def _precompute_sector_lookup(self, fences: list[Fence]) -> None:
-        """Precompute sector and dense `(prime, sector)` ids for pathfinding."""
+        """Precompute sector and dense ``(prime, sector)`` ids for pathfinding."""
         P = self.P
         T = self.T
         ST = self.ST
@@ -883,10 +889,10 @@ class PathFinder:
         self.fan_sectors = fan_sectors
 
     def _fan_init_sector(self, prime: int, opposite: int) -> int:
-        """Sector for a fan-init pseudonode at `prime` reached from `opposite`.
+        """Sector for a fan-init pseudonode at ``prime`` reached from ``opposite``.
 
-        Walks `prime`'s P-cyclic neighbors CCW from `opposite` and returns
-        the first one whose edge from `prime` is a barrier (a G-edge in
+        Walks ``prime``'s P-cyclic neighbors CCW from ``opposite`` and returns
+        the first one whose edge from ``prime`` is a barrier (a G-edge in
         prime form, or a constraint edge). Falls back to NULL when the
         barrier-incident neighbor cannot be identified (boxed-in or
         inconsistent G).
@@ -1040,15 +1046,15 @@ class PathFinder:
         entry_pn: int,
         is_triangle_seen: bitarray,
     ) -> None:
-        """Walk `chain` from its `cones[side]` access cone (entered via
-        the trigger that called us) to its `cones[1 - side]` cone,
+        """Walk ``chain`` from its ``cones[side]`` access cone (entered via
+        the trigger that called us) to its ``cones[1 - side]`` cone,
         creating chain-walk pseudonodes along the way and spawning exit
         advancers from the partner cone.
 
-        `entry_pn` is the pseudonode for `y_entry` (the chain-end the
-        funnel just landed on); for spanning chains `y_entry ==
-        chain.cones[side].vertex`, for single-vertex chains both cones
-        share that vertex.
+        ``entry_pn`` is the pseudonode for ``y_entry`` (the chain-end the
+        funnel just landed on); for spanning chains, ``y_entry`` is
+        ``chain.cones[side].vertex``; for single-vertex chains, both cones share
+        that vertex.
         """
         walk = chain.walks[side]
         exit_cone = chain.cones[1 - side]
@@ -1078,12 +1084,12 @@ class PathFinder:
     def _partition_into_cones(
         self, c: int, cone_bounds: set[int], rotated: list[int]
     ) -> list[tuple[int, int, list[int], list[tuple[int, int]]]]:
-        """Partition `c`'s cyclic neighbors `rotated` into wedges between
-        consecutive members of `cone_bounds`. For each wedge, return
-        `(left, right, spokes, pair_keys)` where `pair_keys` lists the
-        `(a, b)` pairs of consecutive cyclic-neighbors of `c` that fall
-        inside the wedge — these are the `(left, right)` lookup keys an
-        advancer crossing into `c` from a parent triangle on this wedge's
+        """Partition ``c``'s cyclic neighbors ``rotated`` into wedges between
+        consecutive members of ``cone_bounds``. For each wedge, return
+        ``(left, right, spokes, pair_keys)`` where ``pair_keys`` lists the
+        ``(a, b)`` pairs of consecutive cyclic-neighbors of ``c`` that fall
+        inside the wedge — these are the ``(left, right)`` lookup keys an
+        advancer crossing into ``c`` from a parent triangle on this wedge's
         side will present.
         """
         n_cw = len(rotated)
@@ -1121,31 +1127,31 @@ class PathFinder:
         ]
         | None
     ):
-        """Build chains at chain-end vertex `v` for any mix of spanning and
+        """Build chains at chain-end vertex ``v`` for any mix of spanning and
         touching fences (including pure spanning, pure touching, and mixed).
         Single unified cone-partition + label-pair classification.
 
-        Returns `(spanning_entries, local_chains)` where:
-          spanning_entries: `(subtree, cone, pair_keys, mp)` per cross-mp
-            chain at `v`, in the format consumed by the caller's
-            `spanning_by_chain` pairing pass.
-          local_chains: `(Chain, pair_keys_a, pair_keys_b)` per locally-
-            paired chain at `v`, in the format used by the caller for
+        Returns ``(spanning_entries, local_chains)`` where:
+          spanning_entries: ``(subtree, cone, pair_keys, mp)`` per cross-mp
+            chain at ``v``, in the format consumed by the caller's
+            ``spanning_by_chain`` pairing pass.
+          local_chains: ``(Chain, pair_keys_a, pair_keys_b)`` per locally-
+            paired chain at ``v``, in the format used by the caller for
             registration.
 
-        Model: a spanning fence at `v` contributes one wall (its off-
-        constraint endpoint at `v`); its "other wall" is the chain-step
+        Model: a spanning fence at ``v`` contributes one wall (its off-
+        constraint endpoint at ``v``); its "other wall" is the chain-step
         constraint edge. A touching fence contributes two walls (both
-        endpoints). Each ray is labelled with a subtree id (C_ID for
+        endpoints). Each ray is labelled with a subtree id (``C_ID`` for
         constraint bounds); chains are read off pairs of consecutive
         bound-rays in cw order. The chain-step ray (when any spanning
-        fence is present at `v`) has a dual face: C_ID on the void
+        fence is present at ``v``) has a dual face: ``C_ID`` on the void
         side, innermost spanning subtree on the navigable arc side —
         this lets the cone immediately inside the chain-step collapse
         against the spanning subtree when no touching is interposed,
         and to host the (touching ↔ spanning) cone when one is. With
-        no spanning at `v`, both constraint bounds carry the plain
-        C_ID label and the chain partition reproduces the touching-
+        no spanning at ``v``, both constraint bounds carry the plain
+        ``C_ID`` label and the chain partition reproduces the touching-
         only stack.
         """
         P = self.P
@@ -1384,21 +1390,21 @@ class PathFinder:
         """Build the chain topology from the route fences.
 
         For every chain-end vertex (any vertex on the on-constraint segment
-        of any fence), `_build_chains_at` partitions the cyclic-neighbor fan
+        of any fence), :meth:`_build_chains_at` partitions the cyclic-neighbor fan
         into cones, labels each ray by subtree (with the chain-step ray
         double-faced when any spanning fence ends there), and emits each
         chain as either a cross-mp spanning entry (one cone at this end,
         paired with the cone at the other mp end below) or a locally-paired
         chain (two cones at this end, paired in place).
 
-        The fence-split in `__init__` guarantees every spanning fence walks
-        contiguously along constraint edges through `mp` (any non-constraint
+        The fence-split in :meth:`__init__` guarantees every spanning fence walks
+        contiguously along constraint edges through ``mp`` (any non-constraint
         hop, including one at either end, breaks the fence into separate
         sub-fences). So both ends of a spanning fence always host spanning
         topology — there is no one-end "demotion" case to handle here.
 
         Returns:
-          chain_access: dict[(vertex, left, right) -> (Chain, side)]
+          chain_access: dict[(vertex, left, right) → (Chain, side)]
             Both pair orientations registered; lookup miss == "not a
             chain entry" — the trigger then does nothing and consumes no
             traversal budget.
@@ -1416,6 +1422,36 @@ class PathFinder:
                 spanning_at[mp[-1]].append((fence, 'end'))
             else:
                 touching_at[mp[0]].append(fence)
+
+        # Detect dead-end spanning chains. When two spanning fences of the
+        # *same* subtree meet at one chain-end vertex, both walls of the
+        # corridor there belong to that subtree, so the corridor leads back
+        # into the same tree — a dead-end pocket with no useful through-route,
+        # not worth routing. (If the two off-constraint walls coincide on a
+        # single node-vertex the corridor pinches to a point; if they are
+        # distinct the inner wall still shadows the outer, so only one fence
+        # could ever own the shared access cone. Both are treated the same: a
+        # genuine through-chain in this configuration would need an extremely
+        # contrived instance.) Mark such chains by key so they are dropped at
+        # *both* mp-ends — dropping only one end would leave the other with a
+        # lone cone that fails the 2-cone pairing below. Spanning fences of
+        # *different* subtrees sharing a wall remain a genuine ambiguity,
+        # handled (rejected) in `_build_chains_at`; chains of other subtrees
+        # along the same border are untouched.
+        dead_chain_keys: set[tuple[int, int, int]] = set()
+        for endings in spanning_at.values():
+            by_subtree: dict[int, list[Fence]] = defaultdict(list)
+            for fence, _side in endings:
+                by_subtree[fence.subtree].append(fence)
+            for shared in by_subtree.values():
+                if len(shared) >= 2:
+                    for fence in shared:
+                        mp = fence.primes_on_constraint
+                        dead_chain_keys.add((fence.subtree, mp[0], mp[-1]))
+
+        def is_dead(fence: Fence) -> bool:
+            mp = fence.primes_on_constraint
+            return (fence.subtree, mp[0], mp[-1]) in dead_chain_keys
 
         chain_access: dict[tuple[int, int, int], tuple[Chain, int]] = {}
         chain_end_set: set[int] = set()
@@ -1440,9 +1476,15 @@ class PathFinder:
         ] = defaultdict(list)
         chain_end_vertices = set(spanning_at) | set(touching_at)
         for v in chain_end_vertices:
-            result = self._build_chains_at(
-                v, spanning_at.get(v, []), touching_at.get(v, [])
-            )
+            # Drop dead-end chains' fences at every vertex they touch, so no
+            # half-chain survives. Other fences at `v` still build normally.
+            v_spanning = [
+                (f, side) for f, side in spanning_at.get(v, []) if not is_dead(f)
+            ]
+            v_touching = [f for f in touching_at.get(v, []) if not is_dead(f)]
+            if not v_spanning and not v_touching:
+                continue
+            result = self._build_chains_at(v, v_spanning, v_touching)
             if result is None:
                 continue
             chain_end_set.add(v)
@@ -1492,9 +1534,9 @@ class PathFinder:
         is_triangle_seen: bitarray,
     ) -> None:
         """Spawn end-spoke and intermediate-pair advancers covering exit
-        through `cone`. `cone.left` and `cone.right` are the wall-neighbor
-        primes delimiting the wedge in CW order around `cone.vertex`;
-        `cone.spokes` are the non-bound spokes inside.
+        through ``cone``. ``cone.left`` and ``cone.right`` are the wall-neighbor
+        primes delimiting the wedge in CW order around ``cone.vertex``;
+        ``cone.spokes`` are the non-bound spokes inside.
         """
         P = self.P
         paths = self.paths
@@ -1508,7 +1550,7 @@ class PathFinder:
         cum_turn_w = pn_w.cum_turn
 
         def _add_cone_exit_pn(v: int) -> tuple[int, float]:
-            """Pseudonode at `v` parented by pn_w; returns (pn_id, d_hop)."""
+            """Pseudonode at ``v`` parented by ``pn_w``; returns ``(pn_id, d_hop)``."""
             if v == w:
                 return pn_w_id, 0.0
             d_hop = _node_dist(VertexC, w, v)
@@ -1558,14 +1600,14 @@ class PathFinder:
                 _launch(cone.left, cone.right, 1)
 
     def _chain_end_sector(self, y: int, opposite: int) -> int:
-        """Sector for a portal-side-trigger narrowing onto chain-end `y`
-        across portal `(y, opposite)`. The cone at `y` the funnel just
-        left is the wedge adjacent to `opposite` on the parent-triangle
+        """Sector for a portal-side-trigger narrowing onto chain-end ``y``
+        across portal ``(y, opposite)``. The cone at ``y`` the funnel just
+        left is the wedge adjacent to ``opposite`` on the parent-triangle
         side; we resolve it by checking the two cones cyclically adjacent
-        to `opposite` at `y` and returning the chain's subtree if exactly
+        to ``opposite`` at ``y`` and returning the chain's subtree if exactly
         one of them is a chain interior. Returns NULL for non-chain cones
         or when both adjacent cones are chain interiors of different
-        chains (overlapping fences: `opposite` alone can't disambiguate).
+        chains (overlapping fences: ``opposite`` alone can't disambiguate).
         """
         if y not in self.chain_end_set:
             return NULL
@@ -1938,7 +1980,7 @@ class PathFinder:
 
     def _apply_all_best_paths(self, G: nx.Graph):
         """
-        Update G with the paths found by `_find_paths()`.
+        Update G with the paths found by :meth:`_find_paths`.
         """
         get_best_path = self.get_best_path
         for n in range(self.T):
@@ -1946,12 +1988,12 @@ class PathFinder:
             nx.add_path(G, path, kind='virtual')
 
     def best_paths_overlay(self) -> nx.Graph:
-        """Merges the shortest paths for all nodes with `G`.
+        """Merges the shortest paths for all nodes with ``G``.
 
-        The output includes `G`'s edges, excluding its feeders.
+        The output includes ``G``'s edges, excluding its feeders.
 
         Returns:
-          Merged graph (pass to `plotting.gplot()` or 'svg.svgplot()`).
+          Merged graph (pass to :func:`.plotting.gplot` or :func:`.svg.svgplot`).
         """
         J = nx.Graph()
         J.add_nodes_from(self.G.nodes)
@@ -1964,8 +2006,23 @@ class PathFinder:
         return nx.subgraph_view(K, filter_edge=lambda u, v: u >= 0 and v >= 0)
 
     def scaffolded(self) -> nx.Graph:
-        """Wrapper for `interarraylib.scaffolded`."""
-        return scaffolded(self.G, P=self.P)
+        """Wrapper for :func:`.interarraylib.scaffolded`.
+
+        Also unmarks (as real route, not background mesh) every navigation-mesh
+        hop crossed by a route fence. :func:`.interarraylib.scaffolded` cannot do
+        this on its own: a contour edge in ``G`` may be a ``shortened_contours``
+        shortcut spanning several mesh hops through one shared clone, and only
+        ``self.fences`` (built from ``A``'s midpaths during path-finding) has the
+        fully expanded, conflict-resolved hop sequence.
+        """
+        scaff = scaffolded(self.G, P=self.P)
+        for endpoints, primes_on_constraint, _ in self.fences:
+            chain = (endpoints[0], *primes_on_constraint, endpoints[1])
+            for a, b in zip(chain[:-1], chain[1:]):
+                st = (a, b) if a < b else (b, a)
+                if st in scaff.edges and 'kind' in scaff.edges[st]:
+                    del scaff.edges[st]['kind']
+        return scaff
 
     def create_detours(self) -> nx.Graph:
         """Reroute all feeder edges in G with crossings using detour paths.

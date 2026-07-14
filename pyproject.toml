@@ -108,6 +108,7 @@ version_file = "optiwindnet/version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-ra"
 filterwarnings = ["error::DeprecationWarning:optiwindnet"]
 
 [tool.black]

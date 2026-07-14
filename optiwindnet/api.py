@@ -52,7 +52,7 @@ _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 class Router(ABC):
     """Abstract base class for routing algorithms in OptiWindNet.
 
-    Each Router implementation must define a `route` method.
+    Each Router implementation must define a :meth:`route` method.
     """
 
     _summary_attrs: tuple[str, ...]
@@ -102,7 +102,7 @@ class WindFarmNetwork:
 
     An instance represents a wind farm location, which initially contains the number
     and positions of wind turbines and substations, the delimited area and eventual
-    obstacles. A cable network may be provided or a ``Router`` instance may be used
+    obstacles. A cable network may be provided or a :class:`Router` instance may be used
     to create an optimized network.
     """
 
@@ -127,27 +127,33 @@ class WindFarmNetwork:
         """Initialize a wind farm electrical network.
 
         Args:
-          cables: Multiple formats are accepted (capacity is in number of turbines):
-
-            * Set of cable specifications as: [(capacity, linear_cost), ...].
-            * Sequence of maximum capacity per cable type: [capacity_0, capacity_1, ...]
-            * Maximum capacity of all available cables: capacity
-          turbinesC: Turbine coordinates (T, 2): [(x, y), ...].
-          substationsC: Substation coordinates (R, 2): [(x, y), ...].
-          borderC: Polygonal border coordinates (_, 2): [(x, y), ...].
-          obstacleC_: One or more polygons for exclusion zones list of (_, 2):
-            [[(x, y), ...], ...].
+          cables: properties of the available cable types (see Cable Specs below)
+          turbinesC: Turbine coordinates (T, 2): ``[(x, y), ...]``.
+          substationsC: Substation coordinates (R, 2): ``[(x, y), ...]``.
+          borderC: Polygonal border coordinates (_, 2): ``[(x, y), ...]``.
+          obstacleC_: One or more polygons for exclusion zones list of
+            (_, 2): ``[[(x, y), ...], ...]``.
           name: Human-readable instance name. Defaults to "".
           handle: Short instance identifier. Defaults to "".
           L: Location geometry (takes precedence over coordinate inputs).
-          router: Routing algorithm instance. Defaults to `EWRouter`.
+          router: Routing algorithm instance. Defaults to :class:`EWRouter`.
           buffer_dist: Buffer distance to dilate borders / erode obstacles.
             Defaults to 0.
 
-        Notes:
-          * If both `L` and coordinates are provided, `L` takes precedence.
-          * Changing coordinate data after creation (`turbinesC` and/or `substationsC`)
-              rebuilds `L` and refreshes the navigation mesh and available links.
+        **Cable Specs** (``capacity`` is in number of turbines):
+            * List of 2-tuple cable specifications:
+              ``[(capacity, linear_cost), ...]``.
+
+            * List of capacity per cable type:
+              ``[capacity, ...]``.
+
+            * Maximum capacity of all available cables (single value): ``capacity``.
+
+        Note:
+          * If both ``L`` and coordinates are provided, ``L`` takes precedence.
+          * Changing coordinate data after creation (``turbinesC`` and/or
+            ``substationsC``) rebuilds ``L`` and refreshes the navigation mesh
+            and available links.
 
         Example::
 
@@ -266,7 +272,7 @@ class WindFarmNetwork:
 
     @property
     def P(self) -> nx.PlanarEmbedding:
-        "Triangular mesh over `L` (navigation mesh)."
+        "Triangular mesh over ``L`` (navigation mesh)."
         if self._is_stale_PA:
             self._refresh_planar()
         return self._P
@@ -294,7 +300,7 @@ class WindFarmNetwork:
 
     @property
     def cables(self) -> list[tuple[int, float | int]]:
-        "Set of cable specifications as [(capacity, linear_cost), ...]."
+        "Set of cable specifications as ``[(capacity, linear_cost), ...]``."
         return self._cables
 
     @cables.setter
@@ -358,9 +364,21 @@ class WindFarmNetwork:
             _logger.info('No buffering is performed')
 
     @classmethod
-    def from_yaml(cls, filepath: str, **kwargs):
-        """Create a WindFarmNetwork instance from a YAML file."""
+    def from_own_yaml(cls, filepath: str, **kwargs):
+        """Create a WindFarmNetwork instance from an OptiWindNet (OWN) YAML file."""
         return cls(L=L_from_yaml(filepath), **kwargs)
+
+    @classmethod
+    def from_yaml(cls, filepath: str, **kwargs):
+        """Deprecated: use :meth:`from_own_yaml` instead."""
+        import warnings
+
+        warnings.warn(
+            'from_yaml() is deprecated, use from_own_yaml() instead.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return cls.from_own_yaml(filepath, **kwargs)
 
     @classmethod
     def from_pbf(cls, filepath: Path | str, **kwargs):
@@ -376,7 +394,7 @@ class WindFarmNetwork:
         """Concise one-line summary for console/debugging.
 
         Defensive by design: instance attributes are getattr-guarded so the repr
-        never raises, even on a partially-initialized instance (e.g. if ``__init__``
+        never raises, even on a partially-initialized instance (e.g. if :meth:`__init__`
         aborted before ``_T``/``_R`` were set). The solved-network branch is reached
         only when ``_is_stale_SG`` is ``False``, which guarantees ``_G`` exists.
         """
@@ -411,17 +429,17 @@ class WindFarmNetwork:
         """Plot the optimized network.
 
         By default, this method utilizes the modern vector SVG-based plotting
-        backend (`svgplot`) which returns an `SvgRepr` suitable for clean
+        backend (:func:`svgplot`) which returns an :class:`SvgRepr` suitable for clean
         interactive inline displays in Jupyter notebooks.
 
-        To switch to the Matplotlib-based plotting backend (`gplot`), specify the
-        `ax` parameter as a keyword argument.
+        To switch to the Matplotlib-based plotting backend (:func:`gplot`), specify the
+        ``ax`` parameter as a keyword argument.
 
         Note:
-            Passing `ax=None` explicitly routes to the Matplotlib backend and
-            automatically instantiates a new figure and axes on the fly, allowing
-            Matplotlib figures to be created without importing `matplotlib` or
-            `pyplot` directly in the user code.
+          Passing ``ax=None`` explicitly routes to the Matplotlib backend and
+          automatically instantiates a new figure and axes on the fly, allowing
+          Matplotlib figures to be created without importing ``matplotlib`` or
+          ``pyplot`` directly in the user code.
         """
         if 'ax' in kwargs:
             return gplot(self.G, *args, **kwargs)
@@ -446,7 +464,7 @@ class WindFarmNetwork:
         return svgpplot(self.P, self.A, **kwargs)
 
     def plot_selected_links(self, **kwargs):
-        """Plot tentative link selection."""
+        """Plot link selection (tentative feeder routes)."""
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
         if 'ax' in kwargs:
@@ -532,12 +550,13 @@ class WindFarmNetwork:
         self._is_stale_PA = True
 
     def add_buffer(self, buffer_dist):
-        """Dilate the cable-laying area by `buffer_dist`.
+        """Dilate the cable-laying area by ``buffer_dist``.
 
         Useful if boundaries are not strictly enforced during optimization. This may
         happen if boundary compliance is achieved through the application of penalties
         for violations. OptiWindNet will fail if turbines are outside the border, so
-        choose a `buffer_dist` that is greater than the maximum single step in position.
+        choose a ``buffer_dist`` that is greater than the maximum single step in
+        position.
 
         Args:
           buffer_dist: Buffer distance to dilate borders / erode obstacles.
@@ -660,39 +679,56 @@ class WindFarmNetwork:
 class EWRouter(Router):
     """A lightweight, ultra-fast router for electrical network optimization.
 
-    * Uses a modified Esau-Williams heuristic (segmented or straight feeders).
+    * Uses a modified Esau-Williams (EW) heuristic (segmented or straight feeders).
     * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
     """
 
     _summary_attrs = ('iterations',)
-    _repr_attrs = ('maxiter', 'feeder_route')
+    _repr_attrs = ('method', 'maxiter', 'feeder_route', 'bias_margin')
 
     def __init__(
         self,
         maxiter: int = 10_000,
         feeder_route: str = 'segmented',
+        method: str = 'biased_EW',
+        bias_margin: float | None = None,
         verbose: bool = False,
         **kwargs,
     ) -> None:
         """Create a Esau-Williams-based router.
 
+        Available Methods:
+          ``'esau_williams'``
+            Esau-Williams C-MST heuristic modified to avoid crossings (EW).
+          ``'biased_EW'``
+            EW with a bias towards moving radially (root-ward) on quasi-ties.
+          ``'rootlust'``
+            EW with a tunable root-ward bias that increases as capacity decreases.
+          ``'radial_EW'``
+            EW variant that produces radial subtrees (simple paths from root).
+
         Args:
           maxiter: Maximum iterations.
-          feeder_route: Feeder routing mode ("segmented" or "straight").
+          feeder_route: Feeder routing mode (``'segmented'`` or ``'straight'``).
+          method: one of the **Available Methods**, defaults to ``'biased_EW'``).
+          bias_margin: Fractional margin within which edges are considered
+            equivalent (used by ``'biased_EW'`` and ``'radial_EW'``).
+            Defaults to the constructor's built-in default (0.02) when ``None``.
           verbose: Enable verbose logging.
         """
 
         super().__init__(**kwargs)
 
-        # Call the base class initialization
         self.verbose = verbose
         self.maxiter = maxiter
         self.feeder_route = feeder_route
+        self.method = method
+        self.bias_margin = bias_margin
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        # optimizing
-        #  constructor_args=dict(method='rootlust', maxiter=self.maxiter)
-        constructor_args = dict(method='biased_EW', maxiter=self.maxiter)
+        constructor_args = dict(method=self.method, maxiter=self.maxiter)
+        if self.bias_margin is not None:
+            constructor_args['bias_margin'] = self.bias_margin
         if self.feeder_route == 'segmented':
             constructor_args.update(weigh_detours=True, straight_feeder_route=False)
         elif self.feeder_route == 'straight':
@@ -726,12 +762,20 @@ class HGSRouter(Router):
     """
 
     _summary_attrs = ('runtime',)
-    _repr_attrs = ('time_limit', 'feeder_limit', 'max_retries', 'balanced', 'seed')
+    _repr_attrs = (
+        'time_limit',
+        'feeder_limit',
+        'feeder_exact',
+        'max_retries',
+        'balanced',
+        'seed',
+    )
 
     def __init__(
         self,
         time_limit: float,
         feeder_limit: int | None = None,
+        feeder_exact: bool = False,
         max_retries: int = 10,
         balanced: bool = False,
         seed: int | None = None,
@@ -741,17 +785,20 @@ class HGSRouter(Router):
         """Create an HGS-based router.
 
         Args:
-            time_limit: Maximum runtime for a single HGS run (in seconds).
-            feeder_limit: Maximum number of feeders allowed
-                (ignored if multiple substations).
-            max_retries: Maximum number of retries if a feasible solution is not found.
-            balanced: Whether to balance turbines/loads across feeders.
-            seed: Set the seed of the pseudo-random number generator (reproducibility).
-            verbose: Enable verbose logging.
+          time_limit: Maximum runtime for a single HGS run (in seconds).
+          feeder_limit: Maximum number of feeders allowed
+              (ignored if multiple substations); the exact number if ``feeder_exact``.
+          feeder_exact: Whether ``feeder_limit`` is the exact number of feeders,
+              instead of an upper bound (requires ``balanced=True`` and a single
+              substation).
+          max_retries: Maximum number of retries if a feasible solution is not found.
+          balanced: Whether to balance turbines/loads across feeders.
+          seed: Set the seed of the pseudo-random number generator (reproducibility).
+          verbose: Enable verbose logging.
 
-        Notes:
-            * The total runtime may reach up to `(max_retries + 1) * time_limit` in the
-              worst case.
+        Note:
+          The total runtime may reach up to ``(max_retries + 1) * time_limit`` in the
+          worst case.
         """
         # Call the base class initialization
         super().__init__(**kwargs)
@@ -759,6 +806,7 @@ class HGSRouter(Router):
         self.verbose = verbose
         self.max_retries = max_retries
         self.feeder_limit = feeder_limit
+        self.feeder_exact = feeder_exact
         self.balanced = balanced
         self.seed = seed
 
@@ -770,6 +818,7 @@ class HGSRouter(Router):
             time_limit=self.time_limit,
             max_retries=self.max_retries,
             vehicles=self.feeder_limit,
+            vehicles_exact=self.feeder_exact,
             balanced=self.balanced,
             seed=self.seed,
         )
@@ -808,13 +857,13 @@ class MILPRouter(Router):
         """Create a MILP-based router.
 
         Args:
-            solver_name: Name of solver (e.g., "gurobi", "cbc", "ortools",
-                "cplex", "highs", "scip").
-            time_limit: Maximum runtime (seconds).
-            mip_gap: Relative MIP optimality gap tolerance.
-            solver_options: Extra solver-specific options.
-            model_options: Options for the MILP model.
-            verbose: Enable verbose logging.
+          solver_name: Name of solver (e.g., ``'gurobi'``, ``'cbc'``, ``'ortools'``,
+            ``'cplex'``, ``'highs'``, ``'scip'``).
+          time_limit: Maximum runtime (seconds).
+          mip_gap: Relative MIP optimality gap tolerance.
+          solver_options: Extra solver-specific options.
+          model_options: Options for the MILP model.
+          verbose: Enable verbose logging.
         """
         super().__init__(**kwargs)
         self.time_limit = time_limit

@@ -1,3 +1,50 @@
+# v0.3
+
+## Important Changes
+- **Multi-Root Clustering Rewritten**: `clusterize()` partitions the terminals among the substations before the metaheuristic baselines (`hgs_cvrp()`, `lkh3()`) solve each cluster. Its one requirement is that clustering must not cost the location an extra feeder, but it enforced something stronger — that at most *one* cluster may hold a partly filled feeder — which is sufficient but not necessary. Feeder-minimality actually allows several clusters to hold partly filled feeders, as long as their remainders together need no more feeders than they occupy. The old rule ruled out the obvious partition in such cases and had to drag terminals to a distant substation to satisfy a constraint nothing was asking for, sometimes draining a substation of every terminal (`moraywest` at `capacity=30` came out as `[60, 0]` rather than `[30, 30]`). Clusters now start at the closest substation and shed only the wasted feeders, choosing what to move by exact assignment. Across the 560 bundled multi-root `(location, capacity)` pairs, this leaves the partition unchanged on 156 and improves it on the other 404; the total terminal-to-substation distance now sits 0.45% above the (feeder-blind) closest-substation bound, down from 2.89%.
+- **`clusterize()` Signature**: it now returns just the list of clusters. The second return value (`num_slack_`) was already ignored by both call sites, and cannot be reconstructed from a single global figure now that the slack may be spread over several clusters.
+
+## Bug Fixes
+- **`lkh3()` Pinned a Within-Capacity Cluster to a Single Feeder**: a cluster that fits within `capacity` needs only one feeder, and `lkh3()` used to pass exactly that to LKH. But one feeder means one route, and one route over the sparse (near-planar) link set `A` means a *Hamiltonian path* — which frequently does not exist, all the more so after `_prune_links()` discards links that would block feeders (a rationale that is vacuous when there is only one feeder to block). LKH then returned no solution at all and `lkh3()` died on `AssertionError: ERROR: root node load does not match T.` Such a cluster is now offered `min(T_c, 5)` vehicles instead of being pinned to 1 (`VEHICLES` is only an upper bound here — LKH-3 ignores `MTSP_MIN_SIZE` for `TYPE=OVRP` and leaves surplus routes empty). The extra feeders cost nothing: with capacity to spare, the routes can be joined into one subtree at the root, keeping the layout radial. Nor are they used gratuitously — with capacity inactive, a feeder only beats a terminal-terminal link when it leaves the root at a distinctly different angle, and only about four such directions fit around a root; of the 85 single-root bundled locations solved at `capacity = T`, just one (`horns3`) profits from a 5th feeder and none from a 6th. Of the 84 single-feeder clusters among the bundled locations at capacities 3..30, 10 crashed and now solve (`morayeast` 20, `walneyext` 29, `cazzaro_2022G140` 28..30, `mermaid` 27..30, `riffgat` 30); the other 74 already solved but were paying for the pin, and come out 4.1% shorter on average (up to 12.6%).
+- **Empty Cluster Crashed the Multi-Root Solvers**: a substation can legitimately end up with no terminals — most often because none is closest to it (`yunlin`'s second substation is farther from every terminal than the first one is), but also when there are simply fewer feeders to hand out than substations (`ceil(T / capacity) < R`). Both baselines dispatched the empty cluster to the solver anyway: `hgs_cvrp()` died inside HGS-CVRP on the resulting 1x1 distance matrix (`SystemError: nanobind::detail::nb_func_error_except()`) and `lkh3()` on LKH's (`ValueError: expected a positive input`). Empty clusters are now skipped, keeping the substation in the solution with no feeders attached. This affected 31 of the 560 bundled multi-root `(location, capacity)` pairs; 28 remain empty-clustered and now solve cleanly, and the other 3 were the degenerate partitions fixed above.
+
+# v0.2.3
+
+[Commit history since v0.2.2](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.2...v0.2.3)
+
+Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still available and still emit `DeprecationWarning`; they are scheduled for removal in v0.3.
+
+## Important Changes
+- **Balanced Subtrees Actually Balanced (MILP and HGS)**: `balanced=True` promises subtree loads differing at most by one unit, but both solver families only bounded those loads from below, letting a subtree grow up to `capacity`. This is now fixed consistently on both sides:
+  - *MILP*: the upper bound `ceil(T / feeders)` is now enforced across the pyomo, SCIP and OR-Tools model builders.
+  - *HGS*: `hgs_cvrp()` used to request more slack nodes than there were routes whenever `T < feeders * (capacity - 1)`, forcing the surplus through clipped `inf` arcs and inflating the reported objective. The balanced sub-problem is now solved at `capacity_effective = ceil(T / feeders)`, reported in `solver_details`.
+- **Exact Feeder Count (MILP and HGS)**: a new, mirrored way to pin the feeder count instead of only bounding it from above. Because `balanced` is only expressible once the feeder count is pinned, this makes balanced solutions reachable above the minimum feeder count.
+  - *MILP*: `feeder_limit="exactly"` pins the feeder count to `max_feeders` (whereas `"specified"` remains an upper bound).
+  - *HGS*: `hgs_cvrp(vehicles=F, vehicles_exact=True)` — exposed as `HGSRouter(feeder_limit=F, feeder_exact=True)` — pins the feeder count to `F`, whereas `vehicles` alone remains an upper bound that HGS-CVRP normally undershoots. It currently requires `balanced=True` and a single substation; `F` must lie between `ceil(T / capacity)` and `T`.
+- **Reversible lat/lon Coordinates**: `L_from_yaml()` and `L_from_pbf()` now project all coordinates into the single UTM zone holding the most turbines (instead of the zone of the first point), minimizing distortion for the bulk of the layout, and retain that zone as the graph attributes `utm_zone_number` and `utm_zone_letter`. This makes `VertexC` reversible back to lat/lon via `utm.to_latlon()`. Multi-zone `.yaml` input no longer raises an assertion.
+- **Tunable `EWRouter`**: the `method` and `bias_margin` parameters of `heuristics.constructor()` are now exposed on `EWRouter`, giving access to the `esau_williams`, `biased_EW`, `rootlust` and `radial_EW` methods from the high-level API.
+- **Concurrent HiGHS**: the pyomo HiGHS solver now runs a concurrent branch-and-bound tree search, in line with the other MILP backends. This speedup requires `highspy` v1.15 or newer; older versions accept the setting but run the search serially.
+- **New Locations**: added Revolution, Sunrise, Hornsea 2, Norfolk Vanguard West, East Anglia 3 and Hollandse Kust Noord.
+
+## Bug Fixes
+- **Multi-Root Warmstart Eligibility**: `is_warmstart_eligible()` compared only the first root's feeder count against the feeder limit, while the model constrains the total across all roots.
+- **`PathFinder` Malformed Chain**: two spanning fences of the same subtree meeting at a single chain-end vertex form a dead-end pocket, which could leave a chain short an access cone. Chain detection is now keyed on the subtree alone within a chain-end vertex.
+- **`scaffolded()` Correctness**: fence hops and shortened-contour hops are now converted to primed edges (in both `PathFinder.scaffolded()` and `interarraylib.scaffolded()`), and a supertriangle/clone id collision was fixed.
+- **Sexagesimal Coordinate Parsing**: `_translate_latlonstr()` failed to reset minutes/seconds between coordinates, corrupting the parsed values.
+
+## Deprecated
+- `WindFarmNetwork.from_yaml()` is renamed to `WindFarmNetwork.from_own_yaml()`; the old name still works and emits a `DeprecationWarning`.
+- Reminder — the following remain available in this release and will be removed in v0.3. Users are advised to migrate now:
+  - Standalone EW heuristics (`ClassicEW`, `CPEW`, `NBEW`, `OBEW`, `EW_presolver`) → `heuristics.constructor()` (or the high-level `WindFarmNetwork`/`EWRouter`). See the [Legacy heuristics migration guide](https://optiwindnet.readthedocs.io/stable/notebooks/14-Legacy_heuristics.html), which pairs each legacy call with its `constructor()` equivalent.
+  - `optiwindnet.interface` (`heuristic_wrapper()`, `HeuristicFactory`) → `WindFarmNetwork`/`EWRouter`.
+  - HGS aliases `hgs_multiroot()` / `iterative_hgs_cvrp()` → `hgs_cvrp()`.
+  - LKH entry points `lkh()` / `iterative_lkh()` → `lkh3()`.
+
+## Refactoring & Maintenance
+- **Docstrings**: project-wide docstring formatting pass — standardized markup of string values for Sphinx rendering, unicode arrows, and docstrings for the database model.
+- **Test Coverage**: expanded coverage for `geometric`, `interarraylib`, `plotting`, `svg`, `repair`, `themes` and `baselines.utils`.
+- **CI**: isolated OR-Tools in a shared subprocess to resolve solver DLL conflicts, switched SCIP download to GitHub, bumped SCIPOptSuite, installed python tooling from conda, and added manual-dispatch pipeline targets.
+
 # v0.2.2
 
 [Commit history since v0.2.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.1...v0.2.2)

@@ -59,11 +59,11 @@ def gplot(
     Extra arguments given to gplot() will be forwarded to Figure().
 
     Args:
-      ax: Axes instance to plot into. If `None`, opens a new figure.
-      node_tag: text tag inside each node (e.g. 'load', 'label' or any of
-        the nodes' attributes). If `True`, tags the nodes with their numbers.
-      tag_border: if True, all border and obstacle vertices get a number tag.
-      landscape: True -> rotate the plot by G's attribute 'landscape_angle'.
+      ax: Axes instance to plot into. If ``None``, opens a new figure.
+      node_tag: text tag inside each node (e.g. ``'load'``, ``'label'`` or any of
+        the nodes' attributes). If ``True``, tags the nodes with their numbers.
+      tag_border: if ``True``, all border and obstacle vertices get a number tag.
+      landscape: ``True`` → rotate the plot by G's attribute ``'landscape_angle'``.
       infobox: Draw text box with summary of G's main properties: capacity,
         number of turbines, number of feeders, total cable length.
       scalebar: (span_in_data_units, label) add a small bar to indicate the
@@ -327,16 +327,16 @@ def gplot(
 
 
 def pplot(P: nx.PlanarEmbedding, A: nx.Graph, **kwargs) -> Axes:
-    """Plot PlanarEmbedding `P` using coordinates from `A`.
+    """Plot PlanarEmbedding ``P`` using coordinates from ``A``.
 
-    Wrapper for `.plotting.gplot()`. Performs what one would expect
-    from `gplot(P, ...)` - which does not work because P lacks coordinates and
-    node 'kind' attribute. The source needs to be `A` (as opposed to `G` or
-    `L`) because only `A` has the supertriangle's vertices coordinates.
+    Wrapper for :func:`gplot`. Performs what one would expect
+    from ``gplot(P, ...)`` - which does not work because P lacks coordinates and
+    node ``'kind'`` attribute. The source needs to be ``A`` (as opposed to ``G`` or
+    ``L``) because only ``A`` has the supertriangle's vertices coordinates.
 
     Args:
         P: Planar embedding to plot.
-        A: source of vertex coordinates and 'kind'.
+        A: source of vertex coordinates and ``'kind'``.
 
     Returns:
         Axes instance containing the plot.
@@ -356,7 +356,7 @@ def compare(positional=None, **title2G_dict):
     """
     Plot layouts side by side. dict keys are inserted in the title.
     Arguments must be either a sequence of graphs or multiple
-    `keyword`=«graph_instance»`.
+    ``keyword=«graph_instance»``.
     """
     if positional is not None:
         if isinstance(positional, Sequence):

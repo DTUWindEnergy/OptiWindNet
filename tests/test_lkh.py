@@ -253,7 +253,7 @@ def test_lkh3_multi_root_runs_one_call_per_cluster(monkeypatch):
     captured_calls = []
 
     def fake_clusterize(A_inner, capacity):
-        return [{0, 1}, {2, 3}], [0, 0]
+        return [{0, 1}, {2, 3}]
 
     def fake_do_lkh(L, **kwargs):
         captured_calls.append(kwargs.copy())
@@ -277,7 +277,7 @@ def test_lkh3_multi_root_warns_when_vehicles_above_min(monkeypatch):
     A.graph['d2roots'] = np.ones((6, 2))
 
     def fake_clusterize(A_inner, capacity):
-        return [{0, 1}, {2, 3}], [0, 0]
+        return [{0, 1}, {2, 3}]
 
     def fake_do_lkh(L, **kwargs):
         return _fake_output(routes=[[0, 1]], vehicles=1)

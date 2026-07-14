@@ -4,13 +4,8 @@ parallel = True
 concurrency = multiprocessing
 source = optiwindnet
 omit =
-    optiwindnet/db/modelv0.py
-    optiwindnet/db/modelv1.py
-    optiwindnet/db/storagev0.py
-    optiwindnet/db/storagev1.py
     optiwindnet/db/migrate.py
     optiwindnet/synthetic.py
-    optiwindnet/baselines/lkh.py
     tests/**
 
 [report]

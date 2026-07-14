@@ -11,6 +11,13 @@ from typing import Any
 import networkx as nx
 
 def physical_core_count() -> int: ...
+def feeder_and_load_bounds(
+    T: int,
+    capacity: int,
+    feeder_limit: FeederLimit,
+    max_feeders: int,
+    balanced: bool,
+) -> tuple[int, int | None, int | None, int | None]: ...
 
 class OWNWarmupFailed(Exception): ...
 class OWNSolutionNotFound(Exception): ...
@@ -18,6 +25,7 @@ class OWNSolutionNotFound(Exception): ...
 class Topology(StrEnum):
     RADIAL: str
     BRANCHED: str
+    RINGED: str
     DEFAULT: str
 
 class FeederRoute(StrEnum):
@@ -27,6 +35,7 @@ class FeederRoute(StrEnum):
 
 class FeederLimit(StrEnum):
     UNLIMITED: str
+    EXACTLY: str
     SPECIFIED: str
     MINIMUM: str
     MIN_PLUS1: str

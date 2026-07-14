@@ -20,6 +20,40 @@ _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
 
 
+def _balanced_capacity(
+    T: int, capacity: int, vehicles: int | None = None
+) -> tuple[int, int, int]:
+    """Derive the slack-node parameters for a balanced solve of ``T`` terminals.
+
+    Slack nodes are depot clones that consume one unit of capacity each, so that
+    every route comes out exactly full (i.e. loads are balanced). They are only
+    reachable from the depot, hence a route may hold at most one of them.
+
+    Using the requested ``capacity`` directly would ask for more slack nodes than
+    there are routes whenever ``T < vehicles * (capacity - 1)``. Shrinking the
+    capacity to the smallest value that still fits ``T`` in ``vehicles`` routes
+    both restores ``num_slack < vehicles`` and makes the loads as even as
+    possible. The vehicle count is unaffected and the effective capacity never
+    exceeds the requested one, so the solution remains valid for ``capacity``.
+
+    Since the total demand ``T + num_slack`` equals ``vehicles * capacity_effective``,
+    every route is exactly full and none can be left empty: the feeder count comes
+    out exactly ``vehicles``. Passing ``vehicles`` explicitly (any value from
+    ``ceil(T / capacity)`` up to ``T``) is what pins the feeder count above its
+    minimum; if ``None``, the minimum is used.
+
+    Returns:
+        ``(capacity_effective, vehicles, num_slack)``
+    """
+    if T == 0:
+        return capacity, 0, 0
+    if vehicles is None:
+        vehicles = math.ceil(T / capacity)
+    capacity_effective = math.ceil(T / vehicles)
+    num_slack = vehicles * capacity_effective - T
+    return capacity_effective, vehicles, num_slack
+
+
 def _length_matrix(
     A: nx.Graph,
     r: int,
@@ -100,7 +134,7 @@ def _add_branches(S, branches, root, subtree_id_start):
         subtree_id_start: starting subtree_id for numbering
 
     Returns:
-        (max_load, next_subtree_id)
+        ``(max_load, next_subtree_id)``
     """
     max_load = 0
     subtree_id = subtree_id_start
@@ -166,10 +200,8 @@ def _solve_single_root(
     log_callback,
 ):
     T, VertexC = A.graph['T'], A.graph['VertexC']
-    if balanced and (T % capacity):
-        vehicles_min = math.ceil(T / capacity)
-        num_slack = vehicles_min * capacity - T
-        vehicles = vehicles_min
+    if balanced:
+        capacity, vehicles, num_slack = _balanced_capacity(T, capacity, vehicles)
     else:
         num_slack = 0
     n_from_i = np.array([-1] + list(range(T)) + [-1] * num_slack, dtype=int)
@@ -181,39 +213,68 @@ def _solve_single_root(
         distance_matrix, coordinates, vehicles, capacity, hgs_options, log_callback
     )
 
-    inputs_ = (vehicles,), (T,), (n_from_i,), (num_slack,)
+    inputs_ = (vehicles,), (T,), (n_from_i,), (num_slack,), (capacity,)
     return inputs_, (outputs,)
+
+
+def _no_terminals_output(hgs_options):
+    """Stand-in for the output of a root that got no terminals.
+
+    Such a root is never dispatched (HGS-CVRP cannot handle the resulting 1x1
+    distance matrix) but keeps its place in the per-root lists, so that root ids
+    stay aligned with cluster indices.
+    """
+    return [], 0.0, 0.0, 0.0, '', {**hybgensea.DEFAULT_ALGO_PARAMS, **hgs_options}
 
 
 def _solve_multi_root(A, capacity, hgs_options, vehicles, balanced, log_callback):
     R, VertexC = A.graph['R'], A.graph['VertexC']
-    cluster_, num_slack_ = clusterize(A, capacity)
-    W_, indices_ = _length_matrices(A, cluster_, num_slack_ if balanced else [0] * R)
+    cluster_ = clusterize(A, capacity)
     len_cluster_ = tuple(len(cluster) for cluster in cluster_)
-    if not balanced and vehicles is None:
-        vehicles_ = [None] * R
+    if balanced:
+        # each cluster is balanced independently; clusterize() already ensures
+        # that the per-cluster minimum feeder counts sum to the global minimum
+        capacity_, vehicles_, num_slack_ = (
+            list(values)
+            for values in zip(
+                *(
+                    _balanced_capacity(len_cluster, capacity)
+                    for len_cluster in len_cluster_
+                )
+            )
+        )
     else:
-        vehicles_ = [math.ceil(len_cluster / capacity) for len_cluster in len_cluster_]
-    cluster_data = zip(
-        W_,
-        [VertexC[indices].T for indices in indices_],
-        vehicles_,
-        [capacity] * R,
-        [hgs_options] * R,
-    )
+        capacity_ = [capacity] * R
+        num_slack_ = [0] * R
+        if vehicles is None:
+            vehicles_ = [None] * R
+        else:
+            vehicles_ = [
+                math.ceil(len_cluster / capacity) for len_cluster in len_cluster_
+            ]
+    W_, indices_ = _length_matrices(A, cluster_, num_slack_)
+    populated_ = [c for c, len_cluster in enumerate(len_cluster_) if len_cluster]
+    cluster_data = [
+        (W_[c], VertexC[indices_[c]].T, vehicles_[c], capacity_[c], hgs_options)
+        for c in populated_
+    ]
 
-    # Launch one parallel HGS-CVRP solver process per root.
-    with ThreadPoolExecutor(max_workers=R) as executor:
-        outputs_ = list(executor.map(lambda x: _do_hgs(*x), cluster_data))
+    # Launch one parallel HGS-CVRP solver process per populated root.
+    with ThreadPoolExecutor(max_workers=len(populated_) or 1) as executor:
+        solved_ = list(executor.map(lambda x: _do_hgs(*x), cluster_data))
 
-    inputs_ = vehicles_, len_cluster_, indices_, num_slack_
+    outputs_ = [_no_terminals_output(hgs_options) for _ in range(R)]
+    for c, output in zip(populated_, solved_):
+        outputs_[c] = output
+
+    inputs_ = vehicles_, len_cluster_, indices_, num_slack_, capacity_
     return inputs_, outputs_
 
 
 def _process_results(A, keep_log, balanced, inputs_, outputs_):
     R = A.graph['R']
     routes_, runtime_, solution_time_, cost_, log_, algo_params = zip(*outputs_)
-    vehicles_, len_cluster_, indices_, num_slack_ = inputs_
+    vehicles_, len_cluster_, indices_, num_slack_, capacity_ = inputs_
 
     if balanced:
         for num_slack, routes, len_cluster in zip(num_slack_, routes_, len_cluster_):
@@ -231,6 +292,11 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
         method_options=algo_params[0],
         solver_details=dict(
             vehicles=vehicles_ if R > 1 else vehicles_[0],
+            **(
+                dict(capacity_effective=capacity_ if R > 1 else capacity_[0])
+                if balanced
+                else {}
+            ),
         ),
     )
     if keep_log:
@@ -258,6 +324,7 @@ def hgs_cvrp(
     capacity: float,
     time_limit: float,
     vehicles: int | None = None,
+    vehicles_exact: bool = False,
     seed: int | None = None,
     keep_log: bool = False,
     repair: bool = True,
@@ -265,7 +332,7 @@ def hgs_cvrp(
     balanced: bool = False,
     log_callback: Callable | None = None,
 ) -> nx.Graph:
-    """Solves the OCVRP using HGS-CVRP with links from `A`.
+    """Solves the OCVRP using HGS-CVRP with links from ``A``.
 
     Wraps HybGenSea, which provides bindings to the HGS-CVRP library (Hybrid
     Genetic Search solver for Capacitated Vehicle Routing Problems). This
@@ -277,25 +344,38 @@ def hgs_cvrp(
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered and each cluster is solved concurrently.
 
+    By default, ``vehicles`` is an upper bound on the feeder count: HGS-CVRP is
+    free to use fewer, which it normally does, since a shorter solution seldom
+    needs more than the minimum ``ceil(T / capacity)`` feeders. Pass
+    ``vehicles_exact=True`` to pin the count to ``vehicles`` instead. This is
+    only implemented together with ``balanced=True``: the slack nodes that make
+    the loads balanced also make every route come out full, so no route can be
+    left empty and the feeder count is necessarily ``vehicles``.
+
     For multi-root instances, the vehicles (feeders) parameter can only be left
-    undefined (meaning unlimited) or set to the minimum feasible value. Attempting
-    to set other values will result in a warning and the minimum being used.
+    undefined (meaning unlimited) or set to the minimum feasible value. Any other
+    value results in a warning and the minimum being used, or, if
+    ``vehicles_exact=True``, in a ``ValueError``.
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause the
-    actual runtime to be up to (max_retries + 1) times the given time_limit.
+    actual runtime to be up to ``(max_retries + 1)`` times the given ``time_limit``.
 
     Args:
         A: graph with allowed edges (if it has 0 edges, use complete graph)
         capacity: maximum vehicle capacity
         time_limit: [s] solver run time limit
-        vehicles: number of vehicles (if None, let HGS-CVRP decide;
-            ignored for multi-root problems)
+        vehicles: maximum number of vehicles (if None, let HGS-CVRP decide;
+            clamped to the minimum for multi-root problems); the exact number of
+            vehicles if ``vehicles_exact=True``
+        vehicles_exact: whether ``vehicles`` is the exact feeder count instead of
+            an upper bound (requires ``balanced=True``, a single root, and
+            ``ceil(T / capacity) <= vehicles <= T``)
         seed: random seed for reproducibility
         keep_log: attach solver log to the solution graph
         repair: iteratively fix crossings (default True)
         max_retries: maximum repair iterations
-        balanced: balance loads across feeders (multi-root only)
+        balanced: balance loads across feeders (per root, if multiple roots)
         log_callback: callback to receive each log line produced by HGS-CVRP
             (only for single-root instances)
 
@@ -304,19 +384,44 @@ def hgs_cvrp(
     """
     R = A.graph['R']
     T = A.graph['T']
-    if vehicles is not None:
-        vehicles_min = math.ceil(T / capacity)
+    vehicles_min = math.ceil(T / capacity)
+    if vehicles_exact:
+        if vehicles is None:
+            raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
+        if not balanced:
+            raise NotImplementedError(
+                'An exact vehicles (feeders) count is only available with '
+                '`balanced`=True.'
+            )
+        if vehicles < vehicles_min:
+            raise ValueError(
+                f'Vehicles (feeders) number ({vehicles}) is below the minimum '
+                f'necessary ({vehicles_min}) for the given capacity ({capacity}).'
+            )
+        if vehicles > T:
+            raise ValueError(
+                f'Vehicles (feeders) number ({vehicles}) is above the number of '
+                f'terminals ({T}).'
+            )
+        if R > 1 and vehicles != vehicles_min:
+            raise ValueError(
+                'For multi-root instances, an exact vehicles (feeders) count is '
+                'only available at the minimum feasible value.'
+            )
+    elif vehicles is not None:
         if vehicles != vehicles_min:
             if balanced:
                 raise ValueError(
                     'If `balanced`=True, the solver can only use the minimum number of '
-                    'vehicles (feeders) (you may just pass None).'
+                    'vehicles (feeders) (you may just pass None), unless '
+                    '`vehicles_exact`=True.'
                 )
             elif R > 1:
                 _warn(
                     'For multi-root instances, the parameter vehicles (feeders) can '
                     'only be None or the minimum feasible: setting to the minimum.'
                 )
+                vehicles = vehicles_min
         if vehicles < vehicles_min:
             _warn(
                 'Vehicles (feeders) number (%d) too low for feasibilty '
@@ -326,9 +431,7 @@ def hgs_cvrp(
                 vehicles_min,
             )
             vehicles = vehicles_min
-        feeders_above_min = vehicles - vehicles_min
-    else:
-        feeders_above_min = None  # unlimited
+    feeders_above_min = None if vehicles is None else vehicles - vehicles_min
 
     if seed is None:
         seed = random.randrange(0, 2**31)
@@ -344,6 +447,12 @@ def hgs_cvrp(
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
             'ERROR: root node load does not match T.'
         )
+        if vehicles_exact:
+            feeder_count = sum(S.degree[r] for r in range(-R, 0))
+            assert feeder_count == vehicles, (
+                f'ERROR: feeder count ({feeder_count}) does not match the exact '
+                f'number requested ({vehicles}).'
+            )
         return S
 
     # iterative repair loop
@@ -383,6 +492,7 @@ def hgs_cvrp(
             solver_name='HGS-CVRP',
             complete=False,
             feeders_above_min=feeders_above_min,
+            feeders_exact=vehicles_exact,
             fun_fingerprint=_hgs_cvrp_fun_fingerprint,
             **S.graph['method_options'],
         ),

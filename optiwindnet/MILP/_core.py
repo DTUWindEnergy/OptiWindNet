@@ -9,8 +9,10 @@ import sys
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum, auto
+from inspect import cleandoc
 from itertools import chain
 from pathlib import Path
+from textwrap import indent
 from typing import Any
 
 import networkx as nx
@@ -20,7 +22,7 @@ from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 
 _lggr = logging.getLogger(__name__)
-error, info = _lggr.error, _lggr.info
+error, info, warn = _lggr.error, _lggr.info, _lggr.warning
 
 
 def physical_core_count() -> int:
@@ -78,7 +80,7 @@ class Topology(StrEnum):
 
 
 class FeederRoute(StrEnum):
-    'If feeder routes must be "straight" or can be detoured ("segmented").'
+    "If feeder routes must be ``'straight'`` or can be detoured (``'segmented'``)."
 
     STRAIGHT = auto()
     SEGMENTED = auto()
@@ -86,17 +88,89 @@ class FeederRoute(StrEnum):
 
 
 class FeederLimit(StrEnum):
-    'Whether to limit the maximum number of feeders, if set to "specified",'
-
-    ' additional kwarg "max_feeders" must be given.'
+    """Whether to limit the number of feeders. Both ``'specified'`` (an upper
+    bound) and ``'exactly'`` (an exact count) require the additional kwarg
+    ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
+    count is pinned to a single value, i.e. ``'minimum'``, ``'exactly'``, or
+    ``'specified'`` with ``'max_feeders'`` at the minimum.
+    """
 
     UNLIMITED = auto()
+    EXACTLY = auto()
     SPECIFIED = auto()
     MINIMUM = auto()
     MIN_PLUS1 = auto()
     MIN_PLUS2 = auto()
     MIN_PLUS3 = auto()
     DEFAULT = UNLIMITED
+
+
+def feeder_and_load_bounds(
+    T: int,
+    capacity: int,
+    feeder_limit: FeederLimit,
+    max_feeders: int,
+    balanced: bool,
+) -> tuple[int, int | None, int | None, int | None]:
+    """Derive the feeder-count and feeder-load bounds a model must enforce.
+
+    The feeder count is bounded below by ``min_feeders = ceil(T/capacity)``
+    regardless of ``feeder_limit`` (a valid inequality). ``feeders_ub`` is
+    ``None`` when the count is unbounded above; when it equals ``feeders_lb``,
+    the count is pinned and callers should emit an equality constraint.
+
+    Balanced subtrees (loads differing at most by one unit) are only expressible
+    with a pinned feeder count ``F``, in which case the loads must lie in
+    ``{T // F, ceil(T / F)}``. A load bound of ``None`` means "do not emit":
+    either ``balanced`` is off, or it is not enforceable (a warning is issued),
+    or the bound is already implied by the flow variable's own bounds.
+
+    Returns:
+        ``(feeders_lb, feeders_ub, load_lb, load_ub)``
+    """
+    min_feeders = math.ceil(T / capacity)
+    if feeder_limit is FeederLimit.UNLIMITED:
+        feeders_lb, feeders_ub = min_feeders, None
+    elif feeder_limit is FeederLimit.MINIMUM:
+        feeders_lb = feeders_ub = min_feeders
+    elif feeder_limit is FeederLimit.EXACTLY:
+        if max_feeders < min_feeders:
+            raise ValueError('max_feeders is below the minimum necessary')
+        if max_feeders > T:
+            raise ValueError('max_feeders is above the number of terminals')
+        feeders_lb = feeders_ub = max_feeders
+    elif feeder_limit is FeederLimit.SPECIFIED:
+        if max_feeders < min_feeders:
+            raise ValueError('max_feeders is below the minimum necessary')
+        feeders_lb, feeders_ub = min_feeders, max_feeders
+    elif feeder_limit in (
+        FeederLimit.MIN_PLUS1,
+        FeederLimit.MIN_PLUS2,
+        FeederLimit.MIN_PLUS3,
+    ):
+        plus = int(feeder_limit.value[-1])
+        feeders_lb, feeders_ub = min_feeders, min_feeders + plus
+    else:
+        raise NotImplementedError('Unknown value:', feeder_limit)
+
+    if not balanced:
+        return feeders_lb, feeders_ub, None, None
+    if feeders_lb != feeders_ub:
+        warn(
+            'Model option <balanced = True> requires a single possible feeder'
+            f' count, but <feeder_limit = {feeder_limit.value.upper()}> allows a'
+            ' range: model will not enforce balanced subtrees.'
+        )
+        return feeders_lb, feeders_ub, None, None
+    F = feeders_lb
+    load_lb, load_ub = T // F, math.ceil(T / F)
+    # bounds at the extremes are already implied by the flow variable's bounds
+    return (
+        feeders_lb,
+        feeders_ub,
+        load_lb if load_lb > 1 else None,
+        load_ub if load_ub < capacity else None,
+    )
 
 
 class ModelOptions(dict):
@@ -121,7 +195,8 @@ class ModelOptions(dict):
         max_feeders=(
             int,
             0,
-            'Maximum number of feeders (used only if <feeder_limit = "specified">)',
+            'Number of feeders: the maximum if <feeder_limit = "specified">, '
+            'the exact count if <feeder_limit = "exactly">',
         ),
     )
 
@@ -151,13 +226,14 @@ class ModelOptions(dict):
     @classmethod
     def help(cls):
         for k, v in cls.hints.items():
+            doc = indent(cleandoc(v.__doc__ or ''), '    ')
             print(
                 f'{k} in {{'
                 + ', '.join(
                     f'"{m}"' for n, m in v.__members__.items() if n != 'DEFAULT'
                 )
                 + f'}} default: {cls.hints[k].DEFAULT.value}\n'
-                f'    {v.__doc__}\n'
+                f'{doc}\n'
             )
         for name, (kind, default, desc) in cls.simple.items():
             print(f'{name} [{kind.__name__}] default: {default}\n    {desc}\n')
@@ -224,8 +300,16 @@ def _split_rings_in_S(S: nx.Graph, A: nx.Graph | None = None) -> None:
                 mid = n // 2
                 left_u, left_v = chain_[mid - 1], chain_[mid]
                 right_u, right_v = chain_[mid], chain_[mid + 1]
-                left_len = A[left_u][left_v].get('length', 0) if A.has_edge(left_u, left_v) else 0
-                right_len = A[right_u][right_v].get('length', 0) if A.has_edge(right_u, right_v) else 0
+                left_len = (
+                    A[left_u][left_v].get('length', 0)
+                    if A.has_edge(left_u, left_v)
+                    else 0
+                )
+                right_len = (
+                    A[right_u][right_v].get('length', 0)
+                    if A.has_edge(right_u, right_v)
+                    else 0
+                )
                 if left_len > right_len:
                     m = mid  # split on left edge; arm 1 gets floor(n/2) nodes
             # Update ring-back edge load to arm 1 size
@@ -298,11 +382,11 @@ class Solver(abc.ABC):
         Args:
           time_limit: maximum time (s) the solver is allowed to run.
           mip_gap: relative difference from incumbent solution to lower bound
-            at which the search may be stopped before time_limit is reached.
+            at which the search may be stopped before ``time_limit`` is reached.
           options: additional options to pass to solver (see solver manual).
 
         Returns:
-          General information about the solution search (use get_solution() for
+          General information about the solution search (use ``get_solution()`` for
             the actual solution).
         """
         pass
@@ -345,7 +429,7 @@ class Solver(abc.ABC):
         """Create a topology graph from the solution to the MILP model.
 
         Returns:
-          Graph topology `S` from the solution.
+          Graph topology ``S`` from the solution.
         """
         metadata = self.metadata
         topology = Topology[metadata.model_options.get('topology', 'BRANCHED').upper()]
@@ -366,10 +450,7 @@ class Solver(abc.ABC):
             ringback = set()
             regular = rev_from_link.keys()
         S.add_weighted_edges_from(
-            (
-                (u, v, self._flow_val(metadata.flow_[u, v]))
-                for (u, v) in regular
-            ),
+            ((u, v, self._flow_val(metadata.flow_[u, v])) for (u, v) in regular),
             weight='load',
         )
         nx.set_edge_attributes(
@@ -428,7 +509,7 @@ class PoolHandler(abc.ABC):
 
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
-        "Get objective value from solution pool at position `index`"
+        "Get objective value from solution pool at position ``index``"
         pass
 
     @abc.abstractmethod

@@ -4,7 +4,7 @@
 import logging
 import math
 import re
-from collections import namedtuple
+from collections import Counter, namedtuple
 from importlib.resources import files
 from itertools import chain
 from pathlib import Path
@@ -52,10 +52,12 @@ def _get_entries(entries):
 
 def _translate_latlonstr(entry_list):
     translated = []
-    min = sec = 0.0
     for label, lat, lon in _get_entries(entry_list):
         latlon = []
         for ll in (lat, lon):
+            # reset per component so minutes/seconds never leak between
+            # coordinates (e.g. a "D°M'S\"" latitude into a "D°" longitude)
+            min = sec = 0.0
             deg, *tail = ll.split('°')
             if tail:
                 min, *tail = tail[0].split("'")
@@ -76,22 +78,37 @@ def _translate_latlonstr(entry_list):
             else:
                 # entry is a signed fractional degree without hemisphere letter
                 latlon.append(float(deg))
-        translated.append((label, *utm.from_latlon(*latlon)))
+        # (label, latitude, longitude) in signed decimal degrees
+        translated.append((label, *latlon))
     return translated
 
 
-def _parser_latlon(entry_list):
-    # separate data into columns
-    labels, eastings, northings, zone_numbers, zone_letters = zip(
-        *_translate_latlonstr(entry_list)
+def _utm_zone_tally(latlon):
+    """Tally of ``(zone_number, zone_letter)`` over ``(latitude, longitude)`` pairs.
+
+    The most common zone (``tally.most_common(1)[0][0]``) is used as the single
+    projection zone for the whole location.
+    """
+    return Counter(
+        (utm.latlon_to_zone_number(lat, lon), utm.latitude_to_zone_letter(lat))
+        for lat, lon in latlon
     )
-    # all coordinates must belong to the same UTM zone
-    assert all(num == zone_numbers[0] for num in zone_numbers[1:])
-    assert all(letter == zone_letters[0] for letter in zone_letters[1:])
+
+
+def _parser_latlon(entry_list, force_zone_number=None, force_zone_letter=None):
+    labels, lats, lons = zip(*_translate_latlonstr(entry_list))
+    # project all points into a single (optionally forced) UTM zone
+    eastings, northings, *_ = utm.from_latlon(
+        np.array(lats),
+        np.array(lons),
+        force_zone_number=force_zone_number,
+        force_zone_letter=force_zone_letter,
+    )
     return np.c_[eastings, northings], (labels if any(labels) else ())
 
 
-def _parser_planar(entry_list):
+def _parser_planar(entry_list, force_zone_number=None, force_zone_letter=None):
+    # planar coordinates carry no UTM zone; the force_zone_* args are ignored
     labels = []
     coords = []
     for label, easting, northing in _get_entries(entry_list):
@@ -109,13 +126,13 @@ coordinate_parser = dict(
 def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     """Import wind farm data from .yaml file.
 
-    Two options available for COORDINATE_FORMAT: "planar" and "latlon".
+    Two options available for ``COORDINATE_FORMAT``: ``'planar'`` and ``'latlon'``.
 
-    Format "planar" is: [label] easting northing. Example::
+    Format ``'planar'`` is: ``[label] easting northing``. Example::
 
       LABEL 234.2 5212.5
 
-    Format "latlon" is: [label] latitude longitude. Example::
+    Format ``'latlon'`` is: [label] latitude longitude. Example::
 
       LABEL1 11°22.333'N 44°55.666'E
       LABEL2 11.3563°N 44.8903°E
@@ -123,13 +140,13 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
     The [label] is optional. Ensure no spaces within a latitude or longitude.
 
-    The coordinate pair may be separated by "," or ";" and may be enclosed in
-    "[]" or "()". Example::
+    The coordinate pair may be separated by ``','`` or ``';'`` and may be enclosed in
+    ``'[]'`` or ``'()'``. Example::
 
       LABEL [234.2, 5212.5]
 
     Args:
-      filepath: path to `.yaml` file to read.
+      filepath: path to ``.yaml`` file to read.
       handle: Short moniker for the site.
 
     Returns:
@@ -145,9 +162,23 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         handle = make_handle(name)
     # default format is "latlon"
     format = parsed_dict.get('COORDINATE_FORMAT', 'latlon')
-    Border, BorderLabel = coordinate_parser[format](parsed_dict['EXTENTS'])
-    Root, RootLabel = coordinate_parser[format](parsed_dict['SUBSTATIONS'])
-    Terminal, TerminalLabel = coordinate_parser[format](parsed_dict['TURBINES'])
+    # Pick the UTM zone holding the most turbines and project every coordinate
+    # into it, so the bulk of the layout has minimal projection distortion. The
+    # zone is stored so VertexC can be reverse-projected to lat/lon.
+    zone_number = zone_letter = None
+    if format == 'latlon':
+        turbines_latlon = _translate_latlonstr(parsed_dict['TURBINES'])
+        zone_tally = _utm_zone_tally((lat, lon) for _label, lat, lon in turbines_latlon)
+        (zone_number, zone_letter), _ = zone_tally.most_common(1)[0]
+    Border, BorderLabel = coordinate_parser[format](
+        parsed_dict['EXTENTS'], zone_number, zone_letter
+    )
+    Root, RootLabel = coordinate_parser[format](
+        parsed_dict['SUBSTATIONS'], zone_number, zone_letter
+    )
+    Terminal, TerminalLabel = coordinate_parser[format](
+        parsed_dict['TURBINES'], zone_number, zone_letter
+    )
     T = Terminal.shape[0]
     R = Root.shape[0]
     vertex_xy = {xy: i for i, xy in enumerate(map(tuple, Terminal.tolist()))}
@@ -182,7 +213,9 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         # obstacle has to be a list of arrays, so parsing is a bit different
         indices = []
         for obstacle_entry in parsed_dict['OBSTACLES']:
-            obstacleC, poly_tag = coordinate_parser[format](obstacle_entry)
+            obstacleC, poly_tag = coordinate_parser[format](
+                obstacle_entry, zone_number, zone_letter
+            )
 
             obstacle_xy_ = []
             obstacle = []
@@ -205,6 +238,12 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     lsangle = parsed_dict.get('LANDSCAPE_ANGLE')
     if lsangle is not None:
         optional['landscape_angle'] = lsangle
+
+    # store the UTM zone needed to reverse-project VertexC back to lat/lon via
+    # utm.to_latlon(easting, northing, utm_zone_number, utm_zone_letter)
+    if zone_number is not None:
+        optional['utm_zone_number'] = zone_number
+        optional['utm_zone_letter'] = zone_letter
 
     # create networkx graph
     G = nx.Graph(
@@ -234,7 +273,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     """Import wind farm data from .osm.pbf file.
 
     Args:
-        filepath: path to `.osm.pbf` file to read.
+        filepath: path to ``.osm.pbf`` file to read.
         handle: Short moniker for the site.
 
     Returns:
@@ -342,7 +381,6 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             ' substation and one generator.'
         )
 
-    #  for i, substation in enumerate(tuple(substations)):
     for i, substation in enumerate(tuple(substations)):
         if isinstance(substation, list):
             # Substation defined as a polygon, reduce it to a point
@@ -403,11 +441,16 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         dtype=float,
     )
 
-    # TODO: find the UTM sector that includes the most coordinates among
-    # vertices and boundary (bin them in 6° sectors and count). Then insert
-    # a dummy coordinate as the first array row, such that utm.from_latlon()
-    # will pick the right zone for all points.
-    VertexC = np.c_[utm.from_latlon(*latlon.T)[:2]]
+    # Pick the UTM zone holding the most turbines (the first T rows of latlon)
+    # and project every coordinate into it, so the bulk of the layout has minimal
+    # projection distortion. zone_number and zone_letter are retained so the
+    # projection can be reversed via utm.to_latlon().
+    zone_tally = _utm_zone_tally(latlon[:T])
+    (zone_number, zone_letter), _ = zone_tally.most_common(1)[0]
+    eastings, northings, *_ = utm.from_latlon(
+        *latlon.T, force_zone_number=zone_number, force_zone_letter=zone_letter
+    )
+    VertexC = np.c_[eastings, northings]
 
     if handle is None:
         handle = make_handle(name)
@@ -447,6 +490,8 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     L.graph['landscape_angle'] = ls_angle
 
     L.graph['B'] = B
+    L.graph['utm_zone_number'] = zone_number
+    L.graph['utm_zone_letter'] = zone_letter
 
     if plant_name is not None:
         L.graph['OSM_name'] = plant_name
@@ -488,7 +533,7 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     """Import wind farm data from a windIO .yaml file.
 
     Args:
-      filepath: path to windIO `.yaml` file to read.
+      filepath: path to windIO ``.yaml`` file to read.
       handle: Short moniker for the site.
 
     Returns:
@@ -528,8 +573,8 @@ def load_repository(path: Path | str | None = None) -> tuple[nx.Graph, ...]:
 
     Each file (.yaml or .osm.pbf) is translated into a location graph and
     included as an attribute in the returned namedtuple. The attribute name
-    can be specified in the .yaml with the field `HANDLE` or in the .osm.pbf
-    file with the tag `handle` applied to the power plant object.
+    can be specified in the .yaml with the field ``HANDLE`` or in the .osm.pbf
+    file with the tag ``handle`` applied to the power plant object.
 
     Args:
       path: Path to look for location files (non-recursive). If omited, the

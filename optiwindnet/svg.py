@@ -52,7 +52,7 @@ class SvgRepr:
         return '<' + ' '.join(parts) + '>'
 
     def save(self, filepath: str) -> None:
-        """write SVG to file `filepath`"""
+        """Write SVG to file ``filepath``."""
         with open(filepath, 'w', encoding='utf-8') as file:
             file.write(self.data)
 
@@ -694,19 +694,19 @@ def svgplot(
 
     Args:
       G: graph to plot
-      landscape: rotate(?) the plot by G's graph attribute 'landscape_angle'.
-      node_tag: text label inside each node. Use True for node numbers, 'load'
-        for power flow values (requires has_loads), or any node attribute name.
-      tag_border: if True, label all border and obstacle vertices with their
+      landscape: rotate(?) the plot by G's graph attribute ``'landscape_angle'``.
+      node_tag: text label inside each node. Use ``True`` for node numbers, ``'load'``
+        for power flow values (requires ``has_loads``), or any node attribute name.
+      tag_border: if ``True``, label all border and obstacle vertices with their
         index numbers (useful for geometry debugging).
       infobox: add(?) text box with summary of G's main properties: capacity,
         number of turbines, excess feeders, total feeders, total cable length.
-      legend: if True, add a legend strip at the bottom of the SVG plot.
-      dark: color theme to use: True -> dark; False: light; None -> guess
-      transparent: background color: True -> transparent; False -> theme-based
+      legend: if ``True``, add a legend strip at the bottom of the SVG plot.
+      dark: color theme to use: ``True`` → dark; ``False``: light; ``None`` → guess
+      transparent: background color: ``True`` → transparent; ``False`` → theme-based
 
     Returns:
-      SvgRepr object containing the SVG markup in its 'data' attribute
+      SvgRepr object containing the SVG markup in its ``'data'`` attribute
     """
 
     drawable = Drawable(
@@ -730,17 +730,17 @@ def svgplot(
 
 
 def svgpplot(P: nx.PlanarEmbedding, A: nx.Graph, **kwargs) -> SvgRepr:
-    """Plot PlanarEmbedding `P` using coordinates from `A` as SVG markup.
+    """Plot PlanarEmbedding ``P`` using coordinates from ``A`` as SVG markup.
 
-    SVG equivalent of `plotting.pplot()`. Accepts the same keyword arguments
-    as `svgplot()`.
+    SVG equivalent of :func:`.plotting.pplot`. Accepts the same keyword arguments
+    as :func:`svgplot`.
 
     Args:
       P: planar embedding to plot.
       A: source of vertex coordinates and node attributes.
 
     Returns:
-      SvgRepr object containing the SVG markup in its 'data' attribute
+      SvgRepr object containing the SVG markup in its ``'data'`` attribute
     """
     H = nx.create_empty_copy(A)
     if 'has_loads' in H.graph:

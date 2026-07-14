@@ -2,15 +2,16 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import math
 from collections import namedtuple
 from itertools import chain
 from typing import Any
 
 import networkx as nx
-from pyomo.common import log
 import pyomo.environ as pyo
-from pyomo.util.infeasible import find_infeasible_constraints
+from pyomo.util.infeasible import (
+    find_infeasible_constraints,
+    log_infeasible_constraints,
+)
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
@@ -25,6 +26,7 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    feeder_and_load_bounds,
     physical_core_count,
 )
 
@@ -69,7 +71,10 @@ _default_options = dict(
         liftAndProjectCuts='off',
         residualCapacityCuts='off',
     ),
-    highs={},
+    highs=dict(
+        parallel='on',
+        # threads=0,  # 0 means automatic and is HiGHS's default
+    ),
     scip={},
 )
 
@@ -170,8 +175,8 @@ class SolverPyomo(Solver):
             G_from_S(S, A),
             P,
             A,
-            branched=model_options["topology"] is Topology.BRANCHED,
-                ringed=model_options["topology"] is Topology.RINGED,
+            branched=model_options['topology'] is Topology.BRANCHED,
+            ringed=model_options['topology'] is Topology.RINGED,
         ).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -225,12 +230,17 @@ class SolverPyomoAppsi(Solver):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = self.options | options
+        for key, value in applied_options.items():
+            if key in solver.config:
+                solver.config[key] = value
+            else:
+                solver._solver_options[key] = value
         stopping = {
             _optkey[name].time_limit: time_limit,
             _optkey[name].mip_gap: mip_gap,
         }
         self.stopping = stopping
-        for k, v in (applied_options | stopping).items():
+        for k, v in stopping.items():
             solver.config[k] = v
         solver.config.load_solution = False
         solver.config.stream_solver = verbose
@@ -269,8 +279,8 @@ class SolverPyomoAppsi(Solver):
             G_from_S(S, A),
             P,
             A,
-            branched=model_options["topology"] is Topology.BRANCHED,
-                ringed=model_options["topology"] is Topology.RINGED,
+            branched=model_options['topology'] is Topology.BRANCHED,
+            ringed=model_options['topology'] is Topology.RINGED,
         ).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -293,13 +303,16 @@ def make_min_length_model(
     Args:
       A: graph with the available edges to choose from
       capacity: maximum link flow capacity
-      topology: one of Topology.{BRANCHED, RADIAL}
+      topology: one of ``Topology.{BRANCHED, RADIAL}``
       feeder_route:
-        FeederRoute.SEGMENTED -> feeder routes may be detoured around subtrees;
-        FeederRoute.STRAIGHT -> feeder routes must be straight, direct lines
-      feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
-        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}
-      max_feeders: only used if feeder_limit is FeederLimit.SPECIFIED
+        ``FeederRoute.SEGMENTED`` → feeder routes may be detoured around subtrees;
+        ``FeederRoute.STRAIGHT`` → feeder routes must be straight, direct lines
+      feeder_limit: one of ``FeederLimit.{MINIMUM, UNLIMITED, EXACTLY, SPECIFIED,
+        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}``
+      balanced: enforce subtree loads differing at most by one unit (only
+        possible if ``feeder_limit`` pins the feeder count to a single value)
+      max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
+        exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
     """
     R = A.graph['R']
     T = A.graph['T']
@@ -328,7 +341,6 @@ def make_min_length_model(
     else:
         starsʹ = ()
 
-
     # Create model
     m = pyo.ConcreteModel()
     m.T = pyo.RangeSet(0, T - 1)
@@ -345,7 +357,9 @@ def make_min_length_model(
         domain=pyo.PositiveReals,
         name='link_weight',
         initialize=lambda m, u, v: (
-            A.edges[(u, v)]['length'] if v >= 0 and u >= 0 else d2roots[(u, v) if u >= 0 else (v, u)]
+            A.edges[(u, v)]['length']
+            if v >= 0 and u >= 0
+            else d2roots[(u, v) if u >= 0 else (v, u)]
         ),
     )
 
@@ -361,7 +375,8 @@ def make_min_length_model(
     m.flow_ = pyo.Var(
         m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
         domain=pyo.NonNegativeIntegers,
-        bounds=flow_bounds, initialize=0
+        bounds=flow_bounds,
+        initialize=0,
     )
 
     ###############
@@ -383,20 +398,27 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
-
         if topology == Topology.RINGED:
+
             def feederXedge_rule(m, u, v, r, t):
                 if u >= 0:
-                    return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t] <= 1
+                    return (
+                        m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t]
+                        <= 1
+                    )
                 else:
-                    # a feeder crossing another feeder (possible in multi-root instances)
-                    return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t] <= 1
+                    # feeder-feeder crossing (possible in multi-root instances)
+                    return (
+                        m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t]
+                        <= 1
+                    )
         else:
+
             def feederXedge_rule(m, u, v, r, t):
                 if u >= 0:
                     return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
                 else:
-                    # a feeder crossing another feeder (possible in multi-root instances)
+                    # feeder-feeder crossing (possible in multi-root instances)
                     return m.link_[u, v] + m.link_[t, r] <= 1
 
         m.cons_feeder_cross = pyo.Constraint(
@@ -457,76 +479,46 @@ def make_min_length_model(
     )
 
     # feeder limits
-    min_feeders = math.ceil(T / m.k)
-    if feeder_limit is FeederLimit.UNLIMITED:
+    feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
+        T, capacity, feeder_limit, max_feeders, balanced
+    )
+    if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
+        # derived from the minimum: surface it in the solution's metadata
+        max_feeders = feeders_ub
+    if feeders_lb == feeders_ub:
+        m.cons_feeder_limit_eq = pyo.Constraint(
+            rule=(lambda m: sum(m.link_[t, r] for r in _R for t in _T) == feeders_lb),
+            name='feeder_limit_eq',
+        )
+    else:
         # valid inequality: number of feeders is at least the minimum
         m.cons_feeder_limit_lb = pyo.Constraint(
-            rule=(lambda m: sum(m.link_[t, r] for r in _R for t in _T) >= min_feeders),
+            rule=(lambda m: sum(m.link_[t, r] for r in _R for t in _T) >= feeders_lb),
             name='feeder_limit_lb',
         )
-        if balanced:
-            warn(
-                'Model option <balanced = True> is incompatible with <feeder_limit'
-                ' = UNLIMITED>: model will not enforce balanced subtrees.'
-            )
-    else:
-        is_equal_not_range = False
-        if feeder_limit is FeederLimit.SPECIFIED:
-            if max_feeders == min_feeders:
-                is_equal_not_range = True
-            elif max_feeders < min_feeders:
-                raise ValueError('max_feeders is below the minimum necessary')
-        elif feeder_limit is FeederLimit.MINIMUM:
-            is_equal_not_range = True
-        elif feeder_limit is FeederLimit.MIN_PLUS1:
-            max_feeders = min_feeders + 1
-        elif feeder_limit is FeederLimit.MIN_PLUS2:
-            max_feeders = min_feeders + 2
-        elif feeder_limit is FeederLimit.MIN_PLUS3:
-            max_feeders = min_feeders + 3
-        else:
-            raise NotImplementedError('Unknown value:', feeder_limit)
-        if is_equal_not_range:
-            m.cons_feeder_limit_eq = pyo.Constraint(
-                rule=(
-                    lambda m: sum(m.link_[t, r] for r in _R for t in _T) == min_feeders
-                ),
-                name='feeder_limit_eq',
-            )
-        else:
-            m.cons_feeder_limit_lb = pyo.Constraint(
-                rule=(
-                    lambda m: sum(m.link_[t, r] for r in _R for t in _T) >= min_feeders
-                ),
-                name='feeder_limit_lb',
-            )
+        if feeders_ub is not None:
             m.cons_feeder_limit_ub = pyo.Constraint(
                 rule=(
-                    lambda m: sum(m.link_[t, r] for r in _R for t in _T) <= max_feeders
+                    lambda m: sum(m.link_[t, r] for r in _R for t in _T) <= feeders_ub
                 ),
                 name='feeder_limit_ub',
             )
-        # enforce balanced subtrees (subtree loads differ at most by one unit)
-        if balanced:
-            if is_equal_not_range:
-                feeder_min_load = T // min_feeders
-                if feeder_min_load < capacity:
-                    m.cons_balanced = pyo.Constraint(
-                        m.T,
-                        m.R,
-                        rule=(
-                            lambda m, t, r: (
-                                m.flow_[t, r] >= m.link_[t, r] * feeder_min_load
-                            )
-                        ),
-                        name='balanced',
-                    )
-            else:
-                warn(
-                    'Model option <balanced = True> is incompatible with '
-                    'having a range of possible feeder counts: model will '
-                    'not enforce balanced subtrees.'
-                )
+
+    # enforce balanced subtrees (subtree loads differ at most by one unit)
+    if load_lb is not None:
+        m.cons_balanced_lb = pyo.Constraint(
+            m.T,
+            m.R,
+            rule=(lambda m, t, r: m.flow_[t, r] >= m.link_[t, r] * load_lb),
+            name='balanced_lb',
+        )
+    if load_ub is not None:
+        m.cons_balanced_ub = pyo.Constraint(
+            m.T,
+            m.R,
+            rule=(lambda m, t, r: m.flow_[t, r] <= m.link_[t, r] * load_ub),
+            name='balanced_ub',
+        )
 
     # only for radial or ringed topology
     if topology is Topology.RADIAL:
@@ -545,7 +537,9 @@ def make_min_length_model(
         m.cons_ringed = pyo.Constraint(
             m.T,
             rule=(
-                lambda m, t: sum(m.link_[v, t] for v in A_terminals.neighbors(t)) + sum(m.link_[r, t] for r in m.R) == 1
+                lambda m, t: sum(m.link_[v, t] for v in A_terminals.neighbors(t))
+                + sum(m.link_[r, t] for r in m.R)
+                == 1
             ),
             name='radial',
         )
@@ -613,14 +607,13 @@ def make_min_length_model(
 
 _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 
-import pyomo.util.infeasible as infeas
 
 def warmup_model(
     model: pyo.ConcreteModel, metadata: ModelMetadata, S: nx.Graph
 ) -> pyo.ConcreteModel:
-    """Set initial solution into `model`.
+    """Set initial solution into ``model``.
 
-    Changes `model` and `metadata` in-place.
+    Changes ``model`` and ``metadata`` in-place.
 
     Args:
       model: pyomo model to apply the solution to.
@@ -634,7 +627,6 @@ def warmup_model(
       OWNWarmupFailed: if some link in S is not available in model.
     """
     topology = Topology[metadata.model_options['topology'].upper()]
-    κ = metadata.capacity
     for u, v, reverse in S.edges(data='reverse'):
         u, v = (u, v) if ((u < v) == reverse) else (v, u)
         try:
@@ -658,7 +650,7 @@ def warmup_model(
     # check if solution violates any constraints:
     # checking the bounds seem redundant, but the way to do it would be:
     # next(find_infeasible_bounds(model), False)
-    infeas.log_infeasible_constraints(model, log_variables=True)
+    log_infeasible_constraints(model, log_variables=True)
     if next(find_infeasible_constraints(model), False):
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     metadata.warmed_by = S.graph['creator']

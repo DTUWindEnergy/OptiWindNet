@@ -8,7 +8,10 @@ import networkx as nx
 import numpy as np
 
 from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
-from optiwindnet.MILP import ModelOptions
+from optiwindnet.api_utils import parse_cables_input
+from optiwindnet.interarraylib import assign_cables, terse_links_from_S
+from optiwindnet.mesh import make_planar_embedding
+from optiwindnet.MILP import ModelOptions, solver_factory
 
 
 def load_instances(path: Path) -> Any:
@@ -43,6 +46,49 @@ def router_factory(spec: Optional[Dict[str, Any]]):
     if clsname == 'MILPRouter':
         return MILPRouter(**params)
     raise ValueError(f'Unknown router class: {clsname!r}')
+
+
+def needs_process_isolation(router_spec: Dict[str, Any]) -> bool:
+    """'ortools*' solvers bundle a copy of HiGHS/SCIP that collides with the
+    standalone highspy/pyscipopt packages if both load into the same process.
+    Other solvers (cplex, gurobi, 'highs', ...) never touch OR-Tools' native
+    libraries and can run directly in this process."""
+    solver_name = router_spec['params'].get('solver_name', '')
+    return router_spec['class'] == 'MILPRouter' and solver_name.startswith('ortools')
+
+
+def solve_milp_low_level(router_spec: Dict[str, Any], L: nx.Graph):
+    """Solve a `MILPRouter` routed_instance spec via the low-level MILP API,
+    bypassing `MILPRouter`/`WindFarmNetwork`.
+
+    Replicates `MILPRouter.route()`'s non-warmstart sequence directly (see
+    optiwindnet/api.py: `MILPRouter.route`, `WindFarmNetwork.optimize`) so
+    callers don't need a `WindFarmNetwork` -- solver execution (the part that
+    needs process isolation for 'ortools*' solvers) stays free of any
+    high-level API dependency.
+
+    Returns ``(terse_links, canonical_edges)`` for comparison against a
+    routed_instance fixture's expected values.
+    """
+    params = router_spec['params']
+    # cables_capacity and assign_cables() both need the *parsed* cables list,
+    # not the raw int/list stored in router_spec['cables'].
+    cables = parse_cables_input(router_spec['cables'])
+    cables_capacity = max(cables)[0]
+    model_options = ModelOptions(**params.get('model_options', {}))
+
+    P, A = make_planar_embedding(L)
+    solver = solver_factory(params['solver_name'])
+    solver.set_problem(P, A, capacity=cables_capacity, model_options=model_options)
+    solver.solve(
+        time_limit=params['time_limit'],
+        mip_gap=params['mip_gap'],
+        options=params.get('solver_options', {}),
+        verbose=params.get('verbose', False),
+    )
+    S, G = solver.get_solution()
+    assign_cables(G, cables)
+    return tuple(terse_links_from_S(S).tolist()), canonical_edges(G)
 
 
 def assert_graph_equal(

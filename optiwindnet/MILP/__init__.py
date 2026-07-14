@@ -33,14 +33,15 @@ __all__ = (
 def solver_factory(solver_name: str) -> Solver:
     """Create a Solver object tied to the specified external MILP solver.
 
-    Note that the only solver that is a dependency of OptiWindNet is 'ortools'.
+    Note that the only solver that is a dependency of OptiWindNet is ``'ortools'``.
     Check OptiWindNet's documentation on how to install optional solvers.
 
-    Legacy compatibility: if solver_name == 'ortools' then the CP-SAT backend is used.
+    Legacy compatibility: if ``solver_name == 'ortools'`` then the CP-SAT backend
+    is used.
 
     Args:
-      solver_name: one of 'ortools.cp_sat', 'ortools.gscip',
-        'ortools.highs', 'cplex', 'gurobi', 'cbc', 'scip', 'highs'.
+      solver_name: one of ``'ortools.cp_sat'``, ``'ortools.gscip'``,
+        ``'ortools.highs'``, ``'cplex'``, ``'gurobi'``, ``'cbc'``, ``'scip'``, ``'highs'``.
 
     Returns:
       Solver instance that can produce solutions for the cable routing problem.

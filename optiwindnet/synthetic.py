@@ -55,9 +55,10 @@ def L_from_synthetic(
     name: str = '',
     handle: str = 'synthetic',
 ) -> nx.Graph:
-    """Special version of L_from_site() for the synthetic location geometry generator.
+    """Sythetic location aggregator analogous to :func:`.interarraylib.L_from_site`.
 
     Example::
+
       def make_tess(radius=5600, spacing=1000):
         NodeC = equidistant(radius, center='centroid', spacing=spacing)
         RootC = np.array((0.0, 0.0))
@@ -97,7 +98,7 @@ def equidistant(
 
     Args:
       radius: of the circular area to cover
-      center: one of {'centroid', 'vertex'}
+      center: one of {``'centroid'``, ``'vertex'``}
         centroid: The coordinate origin is in the centroid of the central triangle.
         vertex: The coordinate origin a vertex of the tiling.
       spacing: the triangle's side

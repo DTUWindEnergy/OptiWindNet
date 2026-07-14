@@ -2,7 +2,6 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import math
 from datetime import timedelta
 from itertools import chain
 from typing import Any
@@ -24,6 +23,7 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    feeder_and_load_bounds,
     physical_core_count,
 )
 
@@ -72,7 +72,8 @@ class SolverORTools(Solver, PoolHandler):
     """OR-Tools MathOpt wrapper using the selected backend.
 
     This class wraps and changes the behavior of MathOpt in order to save all
-    solutions found to a pool. Meant to be used with `investigate_pool()`.
+    solutions found to a pool. Meant to be used with
+    :meth:`.PoolHandler._investigate_pool`.
     """
 
     name: str
@@ -120,8 +121,8 @@ class SolverORTools(Solver, PoolHandler):
     ) -> SolutionInfo:
         """Wrapper for MathOpt solve() that saves all solutions.
 
-        This method uses a MIP_SOLUTION callback to fill a solution pool stored
-        in the attribute self.solutions.
+        This method uses a ``MIP_SOLUTION`` callback to fill a solution pool stored
+        in the attribute ``self.solutions``.
         """
         try:
             model = self.model
@@ -215,8 +216,8 @@ class SolverORTools(Solver, PoolHandler):
                 G_from_S(S, A),
                 P,
                 A,
-                branched=model_options["topology"] is Topology.BRANCHED,
-                ringed=model_options["topology"] is Topology.RINGED,
+                branched=model_options['topology'] is Topology.BRANCHED,
+                ringed=model_options['topology'] is Topology.RINGED,
             ).create_detours()
         else:
             S, G = self._investigate_pool(P, A)
@@ -316,13 +317,16 @@ def make_min_length_model(
     Args:
       A: graph with the available edges to choose from
       capacity: maximum link flow capacity
-      topology: one of Topology.{BRANCHED, RADIAL, RINGED}
+      topology: one of ``Topology.{BRANCHED, RADIAL, RINGED}``
       feeder_route:
-        FeederRoute.SEGMENTED -> feeder routes may be detoured around subtrees;
-        FeederRoute.STRAIGHT -> feeder routes must be straight, direct lines
-      feeder_limit: one of FeederLimit.{MINIMUM, UNLIMITED, SPECIFIED,
-        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}
-      max_feeders: only used if feeder_limit is FeederLimit.SPECIFIED
+        ``FeederRoute.SEGMENTED`` → feeder routes may be detoured around subtrees;
+        ``FeederRoute.STRAIGHT`` → feeder routes must be straight, direct lines
+      feeder_limit: one of ``FeederLimit.{MINIMUM, UNLIMITED, EXACTLY, SPECIFIED,
+        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}``
+      balanced: enforce subtree loads differing at most by one unit (only
+        possible if ``feeder_limit`` pins the feeder count to a single value)
+      max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
+        exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
     """
     R = A.graph['R']
     T = A.graph['T']
@@ -360,9 +364,15 @@ def make_min_length_model(
     ##############
 
     k = capacity
-    weight_ = 2 * tuple(A[u][v]['length'] for u, v in E) + tuple(
-        chain(*(d2roots[:T, r].tolist() for r in _R))
-    ) + (tuple(chain(*(d2roots[:T, r].tolist() for r in _R))) if topology is Topology.RINGED else ())
+    weight_ = (
+        2 * tuple(A[u][v]['length'] for u, v in E)
+        + tuple(chain(*(d2roots[:T, r].tolist() for r in _R)))
+        + (
+            tuple(chain(*(d2roots[:T, r].tolist() for r in _R)))
+            if topology is Topology.RINGED
+            else ()
+        )
+    )
 
     #############
     # Variables #
@@ -458,62 +468,41 @@ def make_min_length_model(
         )
 
     # feeder limits
-    min_feeders = math.ceil(T / k)
+    feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
+        T, k, feeder_limit, max_feeders, balanced
+    )
+    if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
+        # derived from the minimum: surface it in the solution's metadata
+        max_feeders = feeders_ub
     all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
-    if feeder_limit is FeederLimit.UNLIMITED:
+    if feeders_lb == feeders_ub:
+        m.add_linear_constraint(
+            all_feeder_vars_sum == feeders_lb, name='feeder_limit_eq'
+        )
+    elif feeders_ub is None:
         # valid inequality: number of feeders is at least the minimum
         m.add_linear_constraint(
-            all_feeder_vars_sum >= min_feeders, name='feeder_limit_lb'
+            all_feeder_vars_sum >= feeders_lb, name='feeder_limit_lb'
         )
-        if balanced:
-            warn(
-                'Model option <balanced = True> is incompatible with <feeder_limit'
-                ' = UNLIMITED>: model will not enforce balanced subtrees.'
-            )
     else:
-        is_equal_not_range = False
-        if feeder_limit is FeederLimit.SPECIFIED:
-            if max_feeders == min_feeders:
-                is_equal_not_range = True
-            elif max_feeders < min_feeders:
-                raise ValueError('max_feeders is below the minimum necessary')
-        elif feeder_limit is FeederLimit.MINIMUM:
-            is_equal_not_range = True
-        elif feeder_limit is FeederLimit.MIN_PLUS1:
-            max_feeders = min_feeders + 1
-        elif feeder_limit is FeederLimit.MIN_PLUS2:
-            max_feeders = min_feeders + 2
-        elif feeder_limit is FeederLimit.MIN_PLUS3:
-            max_feeders = min_feeders + 3
-        else:
-            raise NotImplementedError('Unknown value:', feeder_limit)
-        if is_equal_not_range:
+        m.add_linear_constraint(
+            expr=all_feeder_vars_sum,
+            lb=feeders_lb,
+            ub=feeders_ub,
+            name='feeder_limit_interval',
+        )
+
+    # enforce balanced subtrees (subtree loads differ at most by one unit)
+    if load_lb is not None:
+        for t, r in stars:
             m.add_linear_constraint(
-                all_feeder_vars_sum == min_feeders, name='feeder_limit_eq'
+                flow_[t, r] >= link_[t, r] * load_lb, name=f'balanced_lb_{t}~r{-r}'
             )
-        else:
+    if load_ub is not None:
+        for t, r in stars:
             m.add_linear_constraint(
-                expr=all_feeder_vars_sum,
-                lb=min_feeders,
-                ub=max_feeders,
-                name='feeder_limit_interval',
+                flow_[t, r] <= link_[t, r] * load_ub, name=f'balanced_ub_{t}~r{-r}'
             )
-        # enforce balanced subtrees (subtree loads differ at most by one unit)
-        if balanced:
-            if is_equal_not_range:
-                feeder_min_load = T // min_feeders
-                if feeder_min_load < k:
-                    for t, r in stars:
-                        m.add_linear_constraint(
-                            flow_[t, r] >= link_[t, r] * feeder_min_load,
-                            name=f'balanced_{t}~r{-r}',
-                        )
-            else:
-                warn(
-                    'Model option <balanced = True> is incompatible with '
-                    'having a range of possible feeder counts: model will '
-                    'not enforce balanced subtrees.'
-                )
 
     # topology-specific incoming-edge constraints
     if topology is Topology.RADIAL:
@@ -589,9 +578,9 @@ _make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
 def warmup_model(
     model: mathopt.Model, metadata: ModelMetadata, S: nx.Graph
 ) -> mathopt.Model:
-    """Set initial solution into `model`.
+    """Set initial solution into ``model``.
 
-    Changes `model` and `metadata` in-place.
+    Changes ``model`` and ``metadata`` in-place.
 
     Args:
       model: CP-SAT model to apply the solution to.
