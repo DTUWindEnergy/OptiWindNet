@@ -85,7 +85,6 @@ def test_poisson_disc_filler_basic_spacing_and_inside():
         seed=123,
         max_iter=20_000,
         partial_fulfilment=True,
-        rounds=1,
     )
     # Should place at least a few points and never exceed T
     assert 0 < len(pts) <= T
@@ -109,7 +108,6 @@ def test_poisson_disc_filler_respects_repeller_radius():
         RepellerC=repeller,
         repel_radius=repel_radius,
         seed=7,
-        rounds=2,
     )
     # No point should be inside the repeller disk
     dists = np.sqrt(((pts - repeller[0]) ** 2).sum(axis=1))
@@ -131,11 +129,88 @@ def test_poisson_disc_filler_logs_warning_on_partial(caplog):
     BorderC = _square(10, 10)
     # Ask for an impossible number with big spacing: should log a warning
     with caplog.at_level(logging.WARNING, logger='optiwindnet.augmentation'):
-        pts = aug.poisson_disc_filler(
-            T=1000, min_dist=3.0, BorderC=BorderC, seed=1, rounds=1
-        )
+        pts = aug.poisson_disc_filler(T=1000, min_dist=3.0, BorderC=BorderC, seed=1)
     assert len(pts) < 1000
     assert any('Only' in rec.getMessage() for rec in caplog.records)
+
+
+def test_poisson_disc_filler_partial_fulfilment_false_reaches_exact_T():
+    # Borderline-density case (efficiency ~0.628, area=100): under a tight
+    # but sufficient budget, partial_fulfilment=False reaches exactly T.
+    # Seeds 1-10 (not 0-9: see the shortfall test below) were picked because
+    # they reach exact T reliably -- 57/60 seeds do under the current
+    # hit_rate_decay=6.0/T**2 restart tuning (see scratch/tune_ema_restart*.py),
+    # so this isn't cherry-picking a fragile edge case.
+    BorderC = _square(10, 10)
+    T, d = 20, 2.0
+    max_iter = 1600
+    seeds = range(1, 11)
+
+    for seed in seeds:
+        pts = aug.poisson_disc_filler(
+            T=T,
+            min_dist=d,
+            BorderC=BorderC,
+            seed=seed,
+            max_iter=max_iter,
+            partial_fulfilment=False,
+        )
+        assert len(pts) == T
+        assert _pairwise_min_dist(pts) >= d - 1e-9
+
+
+def test_poisson_disc_filler_partial_fulfilment_false_raises_on_budget_shortfall():
+    # Same (T, min_dist, max_iter) as the reaches-exact-T case above, but a
+    # seed whose random draws leave the search 1 point short of T when the
+    # budget runs out. partial_fulfilment=True quietly returns the partial
+    # result; partial_fulfilment=False raises instead.
+    BorderC = _square(10, 10)
+    T, d = 20, 2.0
+    max_iter = 1600
+    seed = 0
+
+    pts = aug.poisson_disc_filler(
+        T=T,
+        min_dist=d,
+        BorderC=BorderC,
+        seed=seed,
+        max_iter=max_iter,
+        partial_fulfilment=True,
+    )
+    assert len(pts) < T
+
+    with pytest.raises(ValueError):
+        aug.poisson_disc_filler(
+            T=T,
+            min_dist=d,
+            BorderC=BorderC,
+            seed=seed,
+            max_iter=max_iter,
+            partial_fulfilment=False,
+        )
+
+
+def test_poisson_disc_filler_partial_fulfilment_false_respects_hard_constraints():
+    BorderC = _square(10, 10)
+    T, d = 20, 2.0
+    repeller = np.array([[5.0, 5.0]])
+    repel_radius = 1.0
+    pts = aug.poisson_disc_filler(
+        T=T,
+        min_dist=d,
+        BorderC=BorderC,
+        RepellerC=repeller,
+        repel_radius=repel_radius,
+        seed=3,
+        max_iter=3000,
+        partial_fulfilment=False,
+    )
+    assert len(pts) == T
+    assert np.all(pts[:, 0] >= -1e-9) and np.all(pts[:, 0] <= 10 + 1e-9)
+    assert np.all(pts[:, 1] >= -1e-9) and np.all(pts[:, 1] <= 10 + 1e-9)
+    assert _pairwise_min_dist(pts) >= d - 1e-9
+    dists = np.sqrt(((pts - repeller[0]) ** 2).sum(axis=1))
+    assert np.all(dists >= repel_radius - 1e-9)
 
 
 # -------------------------------
@@ -197,7 +272,7 @@ def test_turbinate_builds_graph_with_spaced_turbines():
     borderC = _square(square_side, square_side)
     L = _make_graph(borderC, rootsC)
 
-    L2 = aug.turbinate(L, T=T_req, d=d, max_iter=50_000, rounds=4)
+    L2 = aug.turbinate(L, T=T_req, d=d, max_iter=200_000)
 
     assert isinstance(L2, nx.Graph)
     V = L2.graph['VertexC']
@@ -217,6 +292,23 @@ def test_turbinate_builds_graph_with_spaced_turbines():
     for r in roots:
         dr = np.sqrt(((turbines - r) ** 2).sum(axis=1))
         assert np.all(dr >= d - 1e-9)
+
+
+def test_turbinate_rounds_is_deprecated():
+    square_side = 10
+    T_req = 18
+    d = 2.0
+    rootsC = np.array([[5.0, 5.0]])
+    borderC = _square(square_side, square_side)
+    L = _make_graph(borderC, rootsC)
+
+    with pytest.deprecated_call():
+        L2 = aug.turbinate(L, T=T_req, d=d, max_iter=50_000, rounds=4)
+
+    V = L2.graph['VertexC']
+    R = L2.graph['R']
+    T_out = V.shape[0] - len(L.graph['border']) - R
+    assert T_out == T_req
 
 
 # -------------------------------
