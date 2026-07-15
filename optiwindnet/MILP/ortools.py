@@ -25,6 +25,7 @@ from ._core import (
     Topology,
     feeder_and_load_bounds,
     physical_core_count,
+    ringed_warmstart_values,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -467,13 +468,16 @@ def make_min_length_model(
             name=f'flow_conserv_{t}',
         )
 
-    # feeder limits
+    # feeder limits. A RINGED subtree is a closed loop with two feeders, so the
+    # user-facing feeder count is in substation connections (two per ring), while
+    # the model counts rings (one flow-feeder var each): convert between them.
+    feeders_per_subtree = 2 if topology is Topology.RINGED else 1
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, k, feeder_limit, max_feeders, balanced
+        T, k, feeder_limit, max_feeders, balanced, feeders_per_subtree
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata
-        max_feeders = feeders_ub
+        max_feeders = feeders_per_subtree * feeders_ub
     all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
     if feeders_lb == feeders_ub:
         m.add_linear_constraint(
@@ -594,6 +598,17 @@ def warmup_model(
       OWNWarmupFailed: if some link in S is not available in model.
     """
     R, T = metadata.R, metadata.T
+    if metadata.model_options.get('topology') is Topology.RINGED:
+        # A ring is a single directed chain per the flow formulation; derive the
+        # variable values from the (split) ringed solution graph directly.
+        link_vals, flow_vals = ringed_warmstart_values(metadata, S)
+        hint_values: dict[Any, float] = {
+            metadata.link_[k]: v for k, v in link_vals.items()
+        }
+        hint_values.update((metadata.flow_[k], v) for k, v in flow_vals.items())
+        metadata.solution_hint = hint_values
+        metadata.warmed_by = S.graph['creator']
+        return model
     in_S_not_in_model = S.edges - metadata.link_.keys()
     in_S_not_in_model -= {(v, u) for u, v in metadata.linkset[-R * T :]}
     if in_S_not_in_model:

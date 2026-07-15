@@ -28,6 +28,7 @@ from ._core import (
     Topology,
     feeder_and_load_bounds,
     physical_core_count,
+    ringed_warmstart_values,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -478,13 +479,16 @@ def make_min_length_model(
         name='flow_conserv',
     )
 
-    # feeder limits
+    # feeder limits. A RINGED subtree is a closed loop with two feeders, so the
+    # user-facing feeder count is in substation connections (two per ring), while
+    # the model counts rings (one flow-feeder var each): convert between them.
+    feeders_per_subtree = 2 if topology is Topology.RINGED else 1
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, capacity, feeder_limit, max_feeders, balanced
+        T, capacity, feeder_limit, max_feeders, balanced, feeders_per_subtree
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata
-        max_feeders = feeders_ub
+        max_feeders = feeders_per_subtree * feeders_ub
     if feeders_lb == feeders_ub:
         m.cons_feeder_limit_eq = pyo.Constraint(
             rule=(lambda m: sum(m.link_[t, r] for r in _R for t in _T) == feeders_lb),
@@ -627,25 +631,27 @@ def warmup_model(
       OWNWarmupFailed: if some link in S is not available in model.
     """
     topology = Topology[metadata.model_options['topology'].upper()]
-    for u, v, reverse in S.edges(data='reverse'):
-        u, v = (u, v) if ((u < v) == reverse) else (v, u)
-        try:
-            model.link_[(u, v)] = 1
-        except KeyError:
-            raise OWNWarmupFailed(
-                f'warmup_model() failed: model lacks S link ({u, v})'
-            ) from None
-        load = S[u][v]['load']
-        model.flow_[(u, v)] = load
-        if load == 1 and topology is Topology.RINGED:
-            # this is the tail of a radial string, connect it to root
-            s, t = u, v
-            while 0 <= t:
-                nb = list(S.neighbors(t))
-                nb.remove(s)
-                s, t = t, nb[0]
-            # now t is the root of the radial string
-            model.link_[(t, u)] = 1
+    if topology is Topology.RINGED:
+        # A ring is a single directed chain per the flow formulation; derive the
+        # variable values from the (split) ringed solution graph directly and set
+        # only the active links (as the radial branch below does).
+        link_vals, flow_vals = ringed_warmstart_values(metadata, S)
+        for key, value in link_vals.items():
+            if value:
+                model.link_[key] = value
+        for key, value in flow_vals.items():
+            if value:
+                model.flow_[key] = value
+    else:
+        for u, v, reverse in S.edges(data='reverse'):
+            u, v = (u, v) if ((u < v) == reverse) else (v, u)
+            try:
+                model.link_[(u, v)] = 1
+            except KeyError:
+                raise OWNWarmupFailed(
+                    f'warmup_model() failed: model lacks S link ({u, v})'
+                ) from None
+            model.flow_[(u, v)] = S[u][v]['load']
 
     # check if solution violates any constraints:
     # checking the bounds seem redundant, but the way to do it would be:

@@ -758,7 +758,7 @@ class HGSRouter(Router):
       https://doi.org/10.1016/j.cor.2021.105643
 
     * Balances solution quality and runtime.
-    * Produces only radial solutions.
+    * Produces radial solutions, or RINGED (closed-loop) solutions with ``ringed=True``.
     """
 
     _summary_attrs = ('runtime',)
@@ -768,6 +768,7 @@ class HGSRouter(Router):
         'feeder_exact',
         'max_retries',
         'balanced',
+        'ringed',
         'seed',
     )
 
@@ -778,6 +779,7 @@ class HGSRouter(Router):
         feeder_exact: bool = False,
         max_retries: int = 10,
         balanced: bool = False,
+        ringed: bool = False,
         seed: int | None = None,
         verbose: bool = False,
         **kwargs,
@@ -793,6 +795,9 @@ class HGSRouter(Router):
               substation).
           max_retries: Maximum number of retries if a feasible solution is not found.
           balanced: Whether to balance turbines/loads across feeders.
+          ringed: Whether to produce a RINGED topology (closed loops) instead of a
+              radial one. HGS then solves the closed CVRP, so each ring holds up to
+              ``2 * cables_capacity`` turbines (two arms of ``cables_capacity`` each).
           seed: Set the seed of the pseudo-random number generator (reproducibility).
           verbose: Enable verbose logging.
 
@@ -808,6 +813,7 @@ class HGSRouter(Router):
         self.feeder_limit = feeder_limit
         self.feeder_exact = feeder_exact
         self.balanced = balanced
+        self.ringed = ringed
         self.seed = seed
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
@@ -820,12 +826,15 @@ class HGSRouter(Router):
             vehicles=self.feeder_limit,
             vehicles_exact=self.feeder_exact,
             balanced=self.balanced,
+            ringed=self.ringed,
             seed=self.seed,
         )
 
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(G_tentative, planar=P, A=A, branched=False).create_detours()
+        G = PathFinder(
+            G_tentative, planar=P, A=A, branched=False, ringed=self.ringed
+        ).create_detours()
 
         assign_cables(G, cables)
 
@@ -938,11 +947,14 @@ class MILPRouter(Router):
                         constructor(A, capacity=cables_capacity, **constructor_args)
                     )
                 else:
+                    # a RINGED model warmstarts from a ringed solution, a radial
+                    # model from a radial one
                     S_warm = hgs_cvrp(
                         as_normalized(A),
                         capacity=cables_capacity,
                         time_limit=min(self.time_limit, 0.2),
                         repair=True,
+                        ringed=self.model_options['topology'] == 'ringed',
                     )
 
         else:

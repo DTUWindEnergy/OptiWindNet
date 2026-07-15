@@ -5,6 +5,7 @@ import logging
 import math
 import pickle
 import sys
+from collections import Counter, defaultdict
 from hashlib import sha256
 from itertools import chain, pairwise
 
@@ -25,6 +26,8 @@ __all__ = (
     'count_diagonals',
     'bfs_subtree_loads',
     'calcload',
+    'add_ring_to_S',
+    'rings_from_links',
     'site_fingerprint',
     'fun_fingerprint',
     'L_from_site',
@@ -87,6 +90,13 @@ def assign_cables(
     cost = [cables[k][1] for k in kind]
     has_cost = sum(cost) > 0
     for _, _, data in G.edges(data=True):
+        if data['load'] == 0:
+            # ring open point ('split'): a real cable with no current — assign the
+            # thinnest cable type, but no current-carrying capacity is consumed.
+            data['cable'] = 0
+            if has_cost:
+                data['cost'] = data['length'] * cost[0]
+            continue
         k = data['load'] - 1
         data['cable'] = kind[k]
         if has_cost:
@@ -253,6 +263,117 @@ def calcload(G):
     assert total_load == T, f'counted ({total_load}) != nonrootnodes({T})'
     G.graph['has_loads'] = True
     G.graph['max_load'] = max_load
+
+
+def add_ring_to_S(
+    S: nx.Graph,
+    root: int,
+    ordered: list[int],
+    subtree: int,
+    A: nx.Graph | None = None,
+) -> None:
+    """Add a single ring (closed loop) to topology graph ``S`` in canonical form.
+
+    A ring is the union of two radial arms that share the root ``root`` and are
+    joined at their tail ends. ``ordered`` is the terminal sequence
+    ``[t1, ..., tn]`` walked along the ring, so that ``t1`` and ``tn`` are the two
+    feeder-connected terminals. Both feeders ``(root, t1)`` and ``(root, tn)`` are
+    real, load-bearing cables (there is no asymmetric "ring-back"); the single
+    open point of the ring is the edge at the load midpoint, marked
+    ``kind='split'`` with ``load=0`` (no current flows through it).
+
+    Arm 1 (the ``t1`` side) gets ``m = ceil(n / 2)`` terminals, so each arm holds at
+    most ``ceil(n / 2)`` — i.e. half of the doubled ring capacity. When the ring has
+    an even number of nodes (odd ``n``), the middle terminal has two candidate split
+    edges yielding balanced arms; if ``A`` is provided, the longer of the two is
+    chosen as the open point.
+
+    Node ``'load'``/``'subtree'`` and edge ``'load'``/``'reverse'``/``'kind'`` are
+    all set here; the caller is responsible for the root node's aggregate load.
+
+    Args:
+      S: topology graph to add the ring to (modified in place).
+      root: the (negative) root node id shared by both arms.
+      ordered: terminal sequence ``[t1, ..., tn]`` along the ring.
+      subtree: subtree id to assign to every node of the ring (both arms).
+      A: optional available-links graph, used to pick the longer split edge on
+        even-node rings.
+    """
+    n = len(ordered)
+    if n == 1:
+        # Degenerate ring: a single terminal has both feeders on it, which
+        # collapses to one edge in a simple graph — a radial stub of load 1.
+        S.add_node(ordered[0], load=1, subtree=subtree)
+        S.add_edge(root, ordered[0], load=1, reverse=False)
+        return
+    m = math.ceil(n / 2)  # arm 1 size (t1 side)
+    # Even ring node count (odd n): the unique middle terminal has two valid split
+    # edges — choose the longer one when A is available.
+    if n % 2 == 1 and n > 1 and A is not None:
+        mid = n // 2
+        left_u, left_v = ordered[mid - 1], ordered[mid]
+        right_u, right_v = ordered[mid], ordered[mid + 1]
+        left_len = A[left_u][left_v]['length'] if A.has_edge(left_u, left_v) else 0
+        right_len = A[right_u][right_v]['length'] if A.has_edge(right_u, right_v) else 0
+        if left_len > right_len:
+            m = mid  # split on left edge; arm 1 gets floor(n / 2) nodes
+    # Node loads: arm 1 nodes ordered[0..m-1] carry m..1; arm 2 nodes
+    # ordered[m..n-1] carry 1..(n - m) toward their own feeder.
+    for i, t in enumerate(ordered):
+        S.add_node(t, load=(m - i if i < m else i - m + 1), subtree=subtree)
+    # Two feeders (both real cables) and the interior edges.
+    S.add_edge(root, ordered[0], load=m, reverse=False)
+    S.add_edge(root, ordered[-1], load=n - m, reverse=False)
+    for i in range(n - 1):
+        u, v = ordered[i], ordered[i + 1]
+        if i == m - 1:
+            # open point of the ring: real cable, no current
+            S.add_edge(u, v, load=0, reverse=False, kind='split')
+        else:
+            load = m - 1 - i if i < m else i - m + 1
+            reverse = S.nodes[u]['load'] < S.nodes[v]['load']
+            S.add_edge(u, v, load=load, reverse=reverse)
+
+
+def rings_from_links(active_links, R: int) -> list[tuple[int, list[int]]]:
+    """Recover ordered ring terminal sequences from a set of active links.
+
+    ``active_links`` is any iterable of ``(u, v)`` node pairs that are active in a
+    RINGED solution (terminal-terminal links plus the two feeders of each ring).
+    Each ring is returned as ``(root, [t1, ..., tn])`` with ``t1`` and ``tn`` the
+    feeder-connected terminals, obtained by walking the terminal adjacency from
+    one foot of the root to the other.
+
+    Feeders are identified by having exactly one negative (root) endpoint; a ring
+    with a single terminal (``n == 1``) has both feeders on that terminal.
+    """
+    term_adj: dict[int, set[int]] = defaultdict(set)
+    feet: dict[int, list[int]] = defaultdict(list)
+    for u, v in active_links:
+        if u >= 0 and v >= 0:
+            term_adj[u].add(v)
+            term_adj[v].add(u)
+        else:
+            r, t = (u, v) if u < 0 else (v, u)
+            feet[r].append(t)
+    rings: list[tuple[int, list[int]]] = []
+    for r in range(-R, 0):
+        pending = Counter(feet[r])
+        while sum(pending.values()) > 0:
+            t1 = next(t for t, c in pending.items() if c > 0)
+            pending[t1] -= 1
+            chain_ = [t1]
+            prev, curr = None, t1
+            while True:
+                nxts = [x for x in term_adj[curr] if x != prev]
+                if not nxts:
+                    break
+                prev, curr = curr, nxts[0]
+                chain_.append(curr)
+            tn = chain_[-1]
+            pending[tn] -= 1  # consume the other foot (same as t1 if n == 1)
+            rings.append((r, chain_))
+    return rings
 
 
 def site_fingerprint(
@@ -526,28 +647,17 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     for s, t in non_A_edges:
         s, t = (s, t) if s < t else (t, s)
         if s < 0:
-            if S.get_edge_data(s, t, {}).get('kind') == 'ring_back':
-                # ring-back feeder: real cable, same physical route as a regular feeder
-                G.add_edge(
-                    s,
-                    t,
-                    length=d2roots[t, s].item(),
-                    kind='tentative',
-                    load=S[s][t]['load'],
-                    reverse=False,
-                )
-                tentative.append((s, t))
-            else:
-                # far-reaching gate
-                G.add_edge(
-                    s,
-                    t,
-                    length=d2roots[t, s].item(),
-                    kind='tentative',
-                    load=S.nodes[t]['load'],
-                    reverse=False,
-                )
-                tentative.append((s, t))
+            # far-reaching gate (includes a ring's second feeder when not in A):
+            # a real cable, same physical route as a regular feeder
+            G.add_edge(
+                s,
+                t,
+                length=d2roots[t, s].item(),
+                kind='tentative',
+                load=S.nodes[t]['load'],
+                reverse=False,
+            )
+            tentative.append((s, t))
         else:
             # rogue edge (not supposed to be on the routeset, poor solver)
             st_reverse = S.edges[s, t]['reverse']

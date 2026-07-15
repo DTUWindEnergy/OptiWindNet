@@ -17,6 +17,7 @@ def feeder_and_load_bounds(
     feeder_limit: FeederLimit,
     max_feeders: int,
     balanced: bool,
+    feeders_per_subtree: int = ...,
 ) -> tuple[int, int | None, int | None, int | None]: ...
 
 class OWNWarmupFailed(Exception): ...
@@ -84,6 +85,10 @@ class SolutionInfo:
     objective: float
     relgap: float
     termination: str
+
+def ringed_warmstart_values(
+    metadata: ModelMetadata, S: nx.Graph
+) -> tuple[dict[_Link, int], dict[_Link, int]]: ...
 
 class Solver(abc.ABC):
     name: str

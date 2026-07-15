@@ -12,7 +12,7 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import clusterize
-from ..interarraylib import fun_fingerprint
+from ..interarraylib import add_ring_to_S, fun_fingerprint
 from ..repair import repair_routeset_path
 from ._core import remove_offending_crossings
 
@@ -60,8 +60,17 @@ def _length_matrix(
     num_slack: int,
     n_from_i: np.ndarray,
     *,
+    closed: bool = False,
     clip_factor: float = 5.0,
 ) -> np.ndarray:
+    """Build the HGS-CVRP distance matrix (depot at index 0).
+
+    By default the return leg to the depot is free (``W[:, 0] = 0``), turning the
+    closed CVRP that HGS-CVRP solves into the Open-CVRP used for radial layouts.
+    With ``closed=True`` the return leg costs the feeder distance, so every route
+    pays for both of its feeder legs: HGS then finds closed loops (rings). Depot
+    clones (slack nodes) stay at the depot, so their return leg is always free.
+    """
     terminal_slice = slice(1, -num_slack if num_slack else None)
     i_from_n = {n: i for i, n in enumerate(n_from_i[terminal_slice].tolist(), 1)}
     W = np.full((len(n_from_i), len(n_from_i)), np.inf)
@@ -72,12 +81,21 @@ def _length_matrix(
             W[idx] = W[idx[::-1]] = length
             w_max = max(w_max, length)
 
-    W[0, terminal_slice] = A.graph['d2roots'][n_from_i[terminal_slice], r]
-    W[:, 0] = 0.0
+    d2roots = A.graph['d2roots'][n_from_i[terminal_slice], r]
+    W[0, terminal_slice] = d2roots
+    if closed:
+        # closed CVRP (RINGED): the return leg costs the feeder distance
+        W[terminal_slice, 0] = d2roots
+        W[0, 0] = 0.0
+    else:
+        W[:, 0] = 0.0
 
     if num_slack:
         W[-num_slack:, terminal_slice] = W[0, terminal_slice]
         W[0, -num_slack:] = 0.0
+        if closed:
+            # slack nodes are depot clones: their return leg to the depot is free
+            W[-num_slack:, 0] = 0.0
     np.clip(W, a_min=None, a_max=clip_factor * w_max, out=W)
     return W
 
@@ -86,6 +104,7 @@ def _length_matrices(
     A: nx.Graph,
     cluster_: list[set[int]],
     num_slack_: Sequence[int],
+    closed: bool = False,
 ) -> tuple[list, list]:
     R = A.graph['R']
     W_ = []
@@ -93,7 +112,7 @@ def _length_matrices(
     for r, (cluster, num_slack) in enumerate(zip(cluster_, num_slack_), start=-R):
         n_from_i = np.array([r] + sorted(cluster) + [r] * num_slack, dtype=int)
         A_clu = nx.subgraph_view(A, filter_node=lambda n: n in cluster)
-        W = _length_matrix(A_clu, r, num_slack, n_from_i)
+        W = _length_matrix(A_clu, r, num_slack, n_from_i, closed=closed)
         W_.append(W)
         indices_.append(n_from_i)
     return W_, indices_
@@ -162,6 +181,28 @@ def _add_branches(S, branches, root, subtree_id_start):
     return max_load, subtree_id
 
 
+def _add_rings(S, rings, root, subtree_id_start, A):
+    """Add closed loops (rings) to solution graph S, one per CVRP tour.
+
+    Each ring is the closed CVRP route ``root → t1 → … → tn → root``, rendered in
+    canonical form by :func:`add_ring_to_S` (two real feeders joined at a single
+    ``split`` open point at the load midpoint, so each arm holds at most half of
+    the doubled ring capacity).
+
+    Returns ``(max_load, next_subtree_id)``.
+    """
+    max_load = 0
+    subtree_id = subtree_id_start
+    for ring in rings:
+        ordered = ring.tolist() if isinstance(ring, np.ndarray) else list(ring)
+        if not ordered:
+            continue
+        add_ring_to_S(S, root, ordered, subtree_id, A)
+        max_load = max(max_load, math.ceil(len(ordered) / 2))
+        subtree_id += 1
+    return max_load, subtree_id
+
+
 def _do_hgs(W, coordinates, vehicles, capacity, hgs_options, log_callback=None):
     """Multithreading worker function that calls the external library"""
     n = coordinates.shape[1]
@@ -198,6 +239,7 @@ def _solve_single_root(
     vehicles,
     balanced,
     log_callback,
+    closed=False,
 ):
     T, VertexC = A.graph['T'], A.graph['VertexC']
     if balanced:
@@ -205,7 +247,7 @@ def _solve_single_root(
     else:
         num_slack = 0
     n_from_i = np.array([-1] + list(range(T)) + [-1] * num_slack, dtype=int)
-    distance_matrix = _length_matrix(A, -1, num_slack, n_from_i)
+    distance_matrix = _length_matrix(A, -1, num_slack, n_from_i, closed=closed)
     rootC = VertexC[-1:].T
     coordinates = np.hstack((rootC, VertexC[:T].T, *((rootC,) * num_slack)))
 
@@ -227,7 +269,9 @@ def _no_terminals_output(hgs_options):
     return [], 0.0, 0.0, 0.0, '', {**hybgensea.DEFAULT_ALGO_PARAMS, **hgs_options}
 
 
-def _solve_multi_root(A, capacity, hgs_options, vehicles, balanced, log_callback):
+def _solve_multi_root(
+    A, capacity, hgs_options, vehicles, balanced, log_callback, closed=False
+):
     R, VertexC = A.graph['R'], A.graph['VertexC']
     cluster_ = clusterize(A, capacity)
     len_cluster_ = tuple(len(cluster) for cluster in cluster_)
@@ -252,7 +296,7 @@ def _solve_multi_root(A, capacity, hgs_options, vehicles, balanced, log_callback
             vehicles_ = [
                 math.ceil(len_cluster / capacity) for len_cluster in len_cluster_
             ]
-    W_, indices_ = _length_matrices(A, cluster_, num_slack_)
+    W_, indices_ = _length_matrices(A, cluster_, num_slack_, closed=closed)
     populated_ = [c for c, len_cluster in enumerate(len_cluster_) if len_cluster]
     cluster_data = [
         (W_[c], VertexC[indices_[c]].T, vehicles_[c], capacity_[c], hgs_options)
@@ -271,7 +315,7 @@ def _solve_multi_root(A, capacity, hgs_options, vehicles, balanced, log_callback
     return inputs_, outputs_
 
 
-def _process_results(A, keep_log, balanced, inputs_, outputs_):
+def _process_results(A, keep_log, balanced, inputs_, outputs_, ringed=False):
     R = A.graph['R']
     routes_, runtime_, solution_time_, cost_, log_, algo_params = zip(*outputs_)
     vehicles_, len_cluster_, indices_, num_slack_, capacity_ = inputs_
@@ -306,11 +350,16 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
     subtree_id_start = 0
     max_load = 0
     for r, (routes, indices) in enumerate(zip(routes_, indices_), start=-R):
-        branches = (indices[route] for route in routes)
-        branch_max_load, subtree_id_start = _add_branches(
-            S, branches, root=r, subtree_id_start=subtree_id_start
-        )
-        max_load = max(max_load, branch_max_load)
+        subtrees = (indices[route] for route in routes)
+        if ringed:
+            sub_max_load, subtree_id_start = _add_rings(
+                S, subtrees, root=r, subtree_id_start=subtree_id_start, A=A
+            )
+        else:
+            sub_max_load, subtree_id_start = _add_branches(
+                S, subtrees, root=r, subtree_id_start=subtree_id_start
+            )
+        max_load = max(max_load, sub_max_load)
         root_load = sum(S.nodes[n]['load'] for n in S.neighbors(r))
         S.nodes[r]['load'] = root_load
 
@@ -330,14 +379,18 @@ def hgs_cvrp(
     repair: bool = True,
     max_retries: int = 10,
     balanced: bool = False,
+    ringed: bool = False,
     log_callback: Callable | None = None,
 ) -> nx.Graph:
-    """Solves the OCVRP using HGS-CVRP with links from ``A``.
+    """Solves the O/CVRP using HGS-CVRP with links from ``A``.
 
     Wraps HybGenSea, which provides bindings to the HGS-CVRP library (Hybrid
-    Genetic Search solver for Capacitated Vehicle Routing Problems). This
-    function uses it to solve an Open-CVRP i.e., vehicles do not return to the
-    depot.
+    Genetic Search solver for Capacitated Vehicle Routing Problems). By default
+    this function solves an Open-CVRP (vehicles do not return to the depot),
+    yielding radial layouts. With ``ringed=True`` it solves the closed CVRP
+    instead: every route returns to the depot, forming a ring (closed loop). The
+    ring capacity is doubled internally (``2 * capacity``) so each of the ring's
+    two arms holds at most ``capacity`` terminals.
 
     Normalization of input graph is recommended before calling this function.
 
@@ -384,7 +437,15 @@ def hgs_cvrp(
     """
     R = A.graph['R']
     T = A.graph['T']
-    vehicles_min = math.ceil(T / capacity)
+    # A ring holds up to 2 * capacity terminals (two arms of `capacity` each);
+    # HGS solves it as a closed CVRP with the doubled vehicle capacity, while the
+    # reported cable capacity stays `capacity`.
+    solve_capacity = 2 * capacity if ringed else capacity
+    if ringed and vehicles_exact:
+        raise NotImplementedError(
+            'vehicles_exact is not supported together with ringed=True.'
+        )
+    vehicles_min = math.ceil(T / solve_capacity)
     if vehicles_exact:
         if vehicles is None:
             raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
@@ -442,8 +503,10 @@ def hgs_cvrp(
 
     def _solve():
         solve = _solve_single_root if R == 1 else _solve_multi_root
-        results_ = solve(A, capacity, hgs_options, vehicles, balanced, log_callback)
-        S = _process_results(A, keep_log, balanced, *results_)
+        results_ = solve(
+            A, solve_capacity, hgs_options, vehicles, balanced, log_callback, ringed
+        )
+        S = _process_results(A, keep_log, balanced, *results_, ringed=ringed)
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
             'ERROR: root node load does not match T.'
         )
@@ -462,7 +525,9 @@ def hgs_cvrp(
         A.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
     crossings = []
     i = 0
-    if not repair:
+    if not repair or ringed:
+        # repair_routeset_path()/remove_offending_crossings() target open radial
+        # branches; ring crossings are resolved downstream by PathFinder(ringed=True).
         S = _solve()
     else:
         while True:
