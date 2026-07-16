@@ -1,29 +1,41 @@
-"""
-Generate expected graphs for specified sites-routers.
+"""Generate the golden data consumed by the end-to-end tests.
+
+Writes ``tests/solutions.pkl`` with two sections:
+
+``snapshots``
+    Exact ``terse_links`` for the deterministic (EWRouter) cases in
+    ``matrix.build_matrix()``. These are compared byte-for-byte by
+    ``test_snapshot_matches``.
+
+``ref_lengths``
+    Solver-independent reference optima keyed by ``matrix.problem_key`` -- the
+    objective length of a MILP problem whenever *some* available solver proved
+    it optimal during generation. ``test_milp_solution_properties`` uses these
+    for a gap-tolerant length-regression check; they are optional, so problems
+    no available solver could prove (large sites) are simply absent and only
+    their structural properties are checked.
+
+MILP property cases need no snapshot: their correctness is self-validating
+(validity + topology shape + capacity + feeder/balance constraints), so this
+generator only has to record the reference optima it can obtain. Solvers that
+are missing or unlicensed are skipped, not fatal -- run it in a fuller solver
+environment to populate more references.
+
+'ortools*' solves are dispatched to the shared ``ortools_worker`` subprocess
+(see tests/isolation.py); every other solver runs in-process.
 """
 
 import pickle
-from typing import Any, Dict, Optional, Sequence
-
-import isolation
-import paths
-from helpers import needs_process_isolation, router_factory, solve_milp_low_level
 
 from optiwindnet.api import WindFarmNetwork
-from optiwindnet.importer import L_from_yaml
 
-# -----------------------
-# Small helpers
-# -----------------------
-
-
-def merge_router_specs(
-    *spec_maps: Dict[str, Dict[str, Any]],
-) -> Dict[str, Dict[str, Any]]:
-    out: Dict[str, Dict[str, Any]] = {}
-    for m in spec_maps:
-        out.update(m)
-    return out
+from . import isolation, matrix, paths, sites
+from .helpers import (
+    needs_process_isolation,
+    router_factory,
+    solve_milp_property_metrics,
+    solver_unavailable,
+)
 
 
 def print_header(title: str) -> None:
@@ -32,283 +44,78 @@ def print_header(title: str) -> None:
     print('=' * 10)
 
 
-def generate_expected_values_end_to_end_tests():
-    """
-    Generate the end-to-end expected instances file.
-    """
-    LOCATIONS_DIR = paths.LOCATIONS_DIR
+def generate() -> dict:
+    cases = matrix.build_matrix()
+    locations = sites.load_locations()
 
-    # -----------------------
-    # Local helpers / specs
-    # -----------------------
-    def r_spec(
-        cls: Optional[str], params: Optional[Dict[str, Any]] = None, cables: int = 1
-    ) -> Dict[str, Any]:
-        return {'class': cls, 'params': (params or {}), 'cables': int(cables)}
+    snapshots: dict = {}
+    ref_lengths: dict = {}
 
-    # === Sites as plain names ===
-    SITES_1: Sequence[str] = ('example_location',)  # small default
-    SITES_2: Sequence[str] = ('hornsea', 'london', 'taylor_2023', 'yi_2019', 'borkum2')
-    SITES_3: Sequence[str] = ('hornsea',)
+    snapshot_cases = [(s, sp) for s, sp in cases
+                      if sp.get('determinism') == 'snapshot']
+    milp = [(s, sp) for s, sp in cases if sp['class'] == 'MILPRouter']
+    n_property = sum(1 for _, sp in cases if sp.get('determinism') == 'property')
 
-    model_options_strict = {
-        'topology': 'radial',
-        'feeder_limit': 'minimum',
-        'feeder_route': 'straight',
-    }
+    # --- deterministic snapshots (EWRouter forest topologies) ----------------
+    print_header(f'Deterministic snapshots ({len(snapshot_cases)})')
+    for i, (site, spec) in enumerate(snapshot_cases, 1):
+        key = matrix.case_key(site, spec)
+        L = getattr(locations, site)
+        wfn = WindFarmNetwork(L=L, cables=spec['cables'])
+        wfn.optimize(router=router_factory(spec))
+        snapshots[key] = {
+            'location': site,
+            'router_spec': spec,
+            'terse_links': tuple(wfn.terse_links().tolist()),
+        }
+        print(f'[{i}/{len(snapshot_cases)}] {key}')
 
-    ROUTERS_1: Dict[str, Dict[str, Any]] = {
-        'EWRouter1_cap1': r_spec('EWRouter', cables=1),
-        'EWRouter1_cap3': r_spec('EWRouter', cables=3),
-        'EWRouter1_cap10': r_spec('EWRouter', cables=10),
-        'EWRouter1_straight_cap1': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=1
-        ),
-        'EWRouter1_straight_cap4': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=4
-        ),
-        'EWRouter1_straight_cap10': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=10
-        ),
-        'HGSRouter1_cap1': r_spec(
-            'HGSRouter', {'time_limit': 0.5, 'seed': 0}, cables=1
-        ),
-        'HGSRouter1_cap3': r_spec(
-            'HGSRouter', {'time_limit': 0.5, 'seed': 0}, cables=3
-        ),
-        'HGSRouter1_cap10': r_spec(
-            'HGSRouter', {'time_limit': 0.5, 'seed': 0}, cables=10
-        ),
-        'HGSRouter1_feeder_limit_cap1': r_spec(
-            'HGSRouter', {'time_limit': 0.5, 'feeder_limit': 0, 'seed': 0}, cables=1
-        ),
-        'HGSRouter1_feeder_limit_cap4': r_spec(
-            'HGSRouter', {'time_limit': 0.5, 'feeder_limit': 0, 'seed': 0}, cables=4
-        ),
-        'HGSRouter1_feeder_limit_cap10': r_spec(
-            'HGSRouter', {'time_limit': 0.5, 'feeder_limit': 0, 'seed': 0}, cables=10
-        ),
-        'MILPRouter1_ortools_cap5': r_spec(
-            'MILPRouter',
-            {'solver_name': 'ortools.cp_sat', 'time_limit': 5, 'mip_gap': 1e-3},
-            cables=5,
-        ),
-        'MILPRouter1_ortools_gscip_cap5': r_spec(
-            'MILPRouter',
-            {'solver_name': 'ortools.gscip', 'time_limit': 5, 'mip_gap': 1e-3},
-            cables=5,
-        ),
-        'MILPRouter1_ortools_highs_cap5': r_spec(
-            'MILPRouter',
-            {'solver_name': 'ortools.highs', 'time_limit': 5, 'mip_gap': 1e-3},
-            cables=5,
-        ),
-        'MILPRouter1_gurobi_cap4': r_spec(
-            'MILPRouter',
-            {'solver_name': 'gurobi', 'time_limit': 5, 'mip_gap': 1e-3},
-            cables=4,
-        ),
-        'MILPRouter1_highs_cap3': r_spec(
-            'MILPRouter',
-            {'solver_name': 'highs', 'time_limit': 5, 'mip_gap': 1e-3},
-            cables=3,
-        ),
-        'MILPRouter1_cplex_cap2': r_spec(
-            'MILPRouter',
-            {'solver_name': 'cplex', 'time_limit': 5, 'mip_gap': 1e-3},
-            cables=2,
-        ),
-        'MILPRouter1_ortools_cap10_modeloptions': r_spec(
-            'MILPRouter',
-            {
-                'solver_name': 'ortools.cp_sat',
-                'time_limit': 5,
-                'mip_gap': 1e-3,
-                'model_options': model_options_strict,
-            },
-            cables=10,
-        ),
-        'MILPRouter1_ortools_gscip_cap10_modeloptions': r_spec(
-            'MILPRouter',
-            {
-                'solver_name': 'ortools.gscip',
-                'time_limit': 5,
-                'mip_gap': 1e-3,
-                'model_options': model_options_strict,
-            },
-            cables=10,
-        ),
-        'MILPRouter1_ortools_highs_cap10_modeloptions': r_spec(
-            'MILPRouter',
-            {
-                'solver_name': 'ortools.highs',
-                'time_limit': 5,
-                'mip_gap': 1e-3,
-                'model_options': model_options_strict,
-            },
-            cables=10,
-        ),
-        'MILPRouter1_gurobi_cap9_modeloptions': r_spec(
-            'MILPRouter',
-            {
-                'solver_name': 'gurobi',
-                'time_limit': 5,
-                'mip_gap': 1e-3,
-                'model_options': model_options_strict,
-            },
-            cables=9,
-        ),
-        'MILPRouter1_highs_cap8_modeloptions': r_spec(
-            'MILPRouter',
-            {
-                'solver_name': 'highs',
-                'time_limit': 5,
-                'mip_gap': 1e-3,
-                'model_options': model_options_strict,
-            },
-            cables=8,
-        ),
-        'MILPRouter1_cplex_cap7_modeloptions': r_spec(
-            'MILPRouter',
-            {
-                'solver_name': 'cplex',
-                'time_limit': 5,
-                'mip_gap': 1e-3,
-                'model_options': model_options_strict,
-            },
-            cables=7,
-        ),
-    }
-
-    ROUTERS_2: Dict[str, Dict[str, Any]] = {
-        'EWRouter2_cap1': r_spec('EWRouter', cables=1),
-        'EWRouter2_cap10': r_spec('EWRouter', cables=10),
-        'EWRouter2_cap100': r_spec('EWRouter', cables=100),
-        'EWRouter2_straight_cap4': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=4
-        ),
-        'EWRouter2_straight_cap15': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=15
-        ),
-        'EWRouter2_straight_cap50': r_spec(
-            'EWRouter', {'feeder_route': 'straight'}, cables=50
-        ),
-    }
-
-    ROUTERS_3: Dict[str, Dict[str, Any]] = {
-        'HGSRouter3_cap4': r_spec('HGSRouter', {'time_limit': 2, 'seed': 0}, cables=4),
-    }
-
-    # -----------------------
-    # Prepare plan and output
-    # -----------------------
-    routers_union = merge_router_specs(ROUTERS_1, ROUTERS_2, ROUTERS_3)
-
-    cases: list[Dict[str, str]] = []
-    router_graphs: Dict[str, Any] = {}
-
-    print_header('Generating expected graphs')
-
-    # -----------------------
-    # Load locations by explicit file name
-    # -----------------------
-    from collections import namedtuple
-
-    data_dir = paths.DATA_DIR
-    location_files = {
-        'hornsea': (L_from_yaml, data_dir / 'Hornsea One.yaml'),
-        'london': (L_from_yaml, data_dir / 'London Array.yaml'),
-        'taylor_2023': (L_from_yaml, data_dir / 'Taylor-2023.yaml'),
-        'yi_2019': (L_from_yaml, data_dir / 'Yi-2019.yaml'),
-        'borkum2': (L_from_yaml, data_dir / 'Borkum Riffgrund 2.yaml'),
-        'example_location': (L_from_yaml, LOCATIONS_DIR / 'example_location.yaml'),
-    }
-    print('Loading locations:', ', '.join(location_files.keys()))
-    loaded = {handle: loader(path) for handle, (loader, path) in location_files.items()}
-    Locations = namedtuple('Locations', loaded.keys())
-    locations = Locations(**loaded)
-
-    S1, S2, R1, R2 = SITES_1, SITES_2, ROUTERS_1, ROUTERS_2
-
-    # 'ortools*' MILPRouter specs are dispatched to `ortools_worker`, a
-    # subprocess isolated from 'highs'/'gurobi'/'cplex' -- see
-    # tests/isolation.py for why.
-    def run_batch(
-        batch_sites: Sequence[str], batch_routers: Dict[str, Dict[str, Any]], label: str
-    ) -> None:
-        if not batch_sites or not batch_routers:
-            return
-        print_header(
-            f'Running {label} ({len(batch_sites)} locations'
-            f' x {len(batch_routers)} routers)'
-        )
-        for si, site_name in enumerate(batch_sites, 1):
-            L = getattr(locations, site_name)
-            for ri, (router_name, spec) in enumerate(batch_routers.items(), 1):
-                key = f'{site_name}_{router_name}'
-                cases.append({'key': key, 'location': site_name, 'router': router_name})
-                cables = int(spec['cables'])
-                print(
-                    f'[{si}/{len(batch_sites)}] [{ri}/{len(batch_routers)}]:'
-                    f' {key} (cables={cables})'
-                )
-
-                if spec.get('class') == 'MILPRouter':
-                    if needs_process_isolation(spec):
-                        timeout = spec['params'].get('time_limit', 10) + 10
-                        result = ortools_worker.run(
-                            solve_milp_low_level, (spec, L), timeout
-                        )
-                        if isinstance(result, BaseException):
-                            raise result
-                    else:
-                        result = solve_milp_low_level(spec, L)
-                    terse_links, _canonical_edges = result
-                else:
-                    router = router_factory(spec)
-                    wfn = WindFarmNetwork(L=L, cables=cables)
-                    if router is None:
-                        wfn.optimize()
-                    else:
-                        wfn.optimize(router=router)
-                    terse_links = tuple(wfn.terse_links().tolist())
-                    del wfn, router
-
-                router_graphs[key] = terse_links
-
-    run_plan = [
-        ('sites_1 x routers_1', S1, R1),
-        ('sites_2 x routers_2', S2, R2),
-        ('sites_3 x routers_3', SITES_3, ROUTERS_3),
-    ]
+    # --- MILP reference optima (solver-independent, best-effort) --------------
+    print_header(f'MILP reference optima ({len(milp)} cases)')
     ortools_worker = isolation.ortools_worker_factory()
     try:
-        for label, s, r in run_plan:
-            run_batch(s, r, label)
+        for i, (site, spec) in enumerate(milp, 1):
+            pkey = matrix.problem_key(site, spec)
+            if pkey in ref_lengths:
+                continue  # optimum already recorded by another solver
+            L = getattr(locations, site)
+            solver_name = spec['params']['solver_name']
+            if needs_process_isolation(spec):
+                timeout = spec['params'].get('time_limit', 10) + 30
+                result = ortools_worker.run(
+                    solve_milp_property_metrics, (spec, L), timeout
+                )
+            else:
+                try:
+                    result = solve_milp_property_metrics(spec, L)
+                except BaseException as exc:  # noqa: BLE001
+                    result = exc
+            if isinstance(result, BaseException):
+                if solver_unavailable(result):
+                    print(f'[{i}/{len(milp)}] skip {solver_name}: unavailable')
+                    continue
+                raise result
+            _metrics, termination, length = result
+            status = termination
+            if termination == 'OPTIMAL':
+                ref_lengths[pkey] = length
+                status += f' -> ref {length:.1f}'
+            print(f'[{i}/{len(milp)}] {matrix.case_key(site, spec)}: {status}')
     finally:
         ortools_worker.shutdown()
 
-    print_header('Completed')
-    print(f'Cases generated: {len(cases)}; Number of graphs: {len(router_graphs)}')
+    # --- property cases (HGS, ringed EWRouter): self-validating, no golden data
+    print_header(f'Property-only cases ({n_property}) -- no golden data recorded')
 
-    # Build per-instance dicts keyed by case key
-    instances = {}
-    for case in cases:
-        key = case['key']
-        instances[key] = {
-            'location': case['location'],
-            'router_spec': routers_union[case['router']],
-            'terse_links': router_graphs[key],
-        }
-    return instances
+    return {'snapshots': snapshots, 'ref_lengths': ref_lengths}
 
 
 if __name__ == '__main__':
-    print_header('Generating end_to_end expected values...')
-
-    instances = generate_expected_values_end_to_end_tests()
-    output_path = paths.SOLUTIONS_FILE
-    with output_path.open('wb') as f:
-        pickle.dump(instances, f)
-
-    print_header(f'Saved {len(instances)} instances to: {output_path}')
+    print_header('Generating end-to-end expected values...')
+    data = generate()
+    with paths.SOLUTIONS_FILE.open('wb') as f:
+        pickle.dump(data, f)
+    print_header(
+        f'Saved {len(data["snapshots"])} snapshots and '
+        f'{len(data["ref_lengths"])} reference optima to {paths.SOLUTIONS_FILE}'
+    )

@@ -329,8 +329,10 @@ def make_min_length_model(
     # topology-specific incoming-edge constraints
     if topology is Topology.RADIAL:
         for t in _T:
+            # SOS1 takes the *list* of incoming terminal-link variables (at most
+            # one may be nonzero => simple paths), not their sum.
             m.addConsSOS1(
-                sum(link_[n, t] for n in A_terminals.neighbors(t)), name=f'radial_{t}'
+                [link_[n, t] for n in A_terminals.neighbors(t)], name=f'radial_{t}'
             )
     elif topology is Topology.RINGED:
         for t in _T:

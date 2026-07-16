@@ -36,14 +36,22 @@ os.environ['NUMBA_DISABLE_JIT'] = '1'
 # Utility helpers
 # -----------------------
 def _maybe_run_generator(script_path: Path) -> None:
-    """Run a generator script via subprocess (fresh Python interpreter)."""
+    """Run the generator as a module (fresh interpreter, from the repo root).
+
+    The generator uses package-relative imports (``from . import matrix`` etc.),
+    so it must run as ``python -m tests.update_expected_values`` rather than as a
+    bare script path.
+    """
     if not script_path.exists():
         raise FileNotFoundError(f'Generator script not found: {script_path}')
-    # Use the same python interpreter
-    proc = subprocess.run([sys.executable, str(script_path)], check=False)
+    proc = subprocess.run(
+        [sys.executable, '-m', 'tests.update_expected_values'],
+        cwd=str(REPO_ROOT),
+        check=False,
+    )
     if proc.returncode != 0:
         raise RuntimeError(
-            f'Generator script failed: {script_path} (rc={proc.returncode})'
+            f'Generator failed: tests.update_expected_values (rc={proc.returncode})'
         )
 
 
@@ -101,20 +109,11 @@ def pytest_sessionstart(session):
 # -----------------------
 @pytest.fixture(scope='session')
 def locations():
-    """Load locations used by end-to-end tests, by explicit file name."""
-    from collections import namedtuple
+    """Load the locations used by the end-to-end tests.
 
-    from optiwindnet.importer import L_from_yaml
+    Backed by the single source of truth in ``tests/sites.py`` so this fixture
+    and ``update_expected_values.py`` can never drift apart.
+    """
+    from . import sites
 
-    data_dir = paths.DATA_DIR
-    location_files = {
-        'hornsea': (L_from_yaml, data_dir / 'Hornsea One.yaml'),
-        'london': (L_from_yaml, data_dir / 'London Array.yaml'),
-        'taylor_2023': (L_from_yaml, data_dir / 'Taylor-2023.yaml'),
-        'yi_2019': (L_from_yaml, data_dir / 'Yi-2019.yaml'),
-        'borkum2': (L_from_yaml, data_dir / 'Borkum Riffgrund 2.yaml'),
-        'example_location': (L_from_yaml, LOCATIONS_DIR / 'example_location.yaml'),
-    }
-    loaded = {handle: loader(path) for handle, (loader, path) in location_files.items()}
-    Locations = namedtuple('Locations', loaded.keys())
-    return Locations(**loaded)
+    return sites.load_locations()
