@@ -622,10 +622,12 @@ def test_hgs_ringed_albatros(capacity):
 
     L = load_repository().albatros
     wfn = WindFarmNetwork(cables=capacity, L=L)
+    # structure-only test: a short budget still yields a feasible ringed
+    # solution (HGS spends its whole time_limit, so keep it small)
     S = hgs_cvrp(
         as_normalized(wfn.A),
         capacity=capacity,
-        time_limit=3,
+        time_limit=0.5,
         ringed=True,
         seed=0,
     )
@@ -678,7 +680,7 @@ def test_hgs_router_ringed_end_to_end():
     capacity = 3
     L = load_repository().albatros
     wfn = WindFarmNetwork(cables=capacity, L=L)
-    wfn.optimize(router=HGSRouter(time_limit=3, ringed=True, seed=0))
+    wfn.optimize(router=HGSRouter(time_limit=0.5, ringed=True, seed=0))
     S, G = wfn.S, wfn.G
 
     _assert_canonical_ringed(S, capacity)
