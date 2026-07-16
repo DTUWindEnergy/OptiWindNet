@@ -91,14 +91,18 @@ def constructor(
         point (``kind='split'``, no current). ``capacity`` is the per-arm limit,
         so a ring holds up to ``2 * capacity`` terminals. Unions are ranked by
         their total saving — the feeders shed at the two joined endpoints minus
-        the connecting edge's length (Clarke-Wright style).
+        the connecting edge's length (Clarke-Wright style) — with a
+        ``bias_margin`` window favoring the more root-ward union on quasi-ties.
 
     Args:
       Aʹ: available links graph
       capacity: max number of terminals in a subtree
       method: choice of method (see Available Methods)
-      bias_margin: (biased_EW | radial_EW) fractional margin within which edges
-        are equivalent. Defaults to 0.02.
+      bias_margin: (biased_EW | radial_EW | ringed) fractional margin within
+        which candidates are equivalent, resolving the quasi-tie root-ward. For
+        ``'ringed'`` the margin is a fraction of the best union ``saving`` (not
+        the edge ``extent``, since the ringed saving also depends on the peer
+        feeders). Defaults to 0.02.
       weigh_detours: (!= esau_williams) only add edges whose tradeoff is not
         outweighted by detours
       straight_feeder_route: prevent crossings of feeders
@@ -227,6 +231,32 @@ def constructor(
             return (best_extent - d2root, best_feeder_length, *best_edge)
         else:
             return ()
+
+    def ringed_chooser(choices):
+        # Choose the ringed union/insertion candidate with a bias towards the
+        # smaller resulting feeder pair (root-ward), among candidates whose
+        # `saving` is within `bias_margin` of the best. Candidates carry
+        # `(-saving, feeder_pair, u, v)`; the best has the largest `saving`
+        # (smallest `-saving`). The window acts on `saving` — not `extent` as in
+        # `biased_chooser` — because the ringed saving also varies with the
+        # peer/target feeders. Returns the chosen candidate's own tuple (its
+        # `-saving` stays the priority-queue key).
+        if not choices:
+            return ()
+        choices.sort()
+        best_neg_saving, best_feeders, *best_edge = choices[0]
+        # window lower bound on saving; with bias_margin == 0 this is exactly
+        # `best_saving`, so only exact-saving ties remain (equivalent to min())
+        saving_lim = -best_neg_saving * (1.0 - bias_margin)
+        for neg_saving, feeders, *edge in choices[1:]:
+            if -neg_saving < saving_lim:
+                # no more candidates within bias_margin of the best saving
+                break
+            # the candidate is "equivalent" to the best one; prefer root-ward
+            if feeders < best_feeders:
+                best_neg_saving, best_feeders = neg_saving, feeders
+                best_edge = edge
+        return (best_neg_saving, best_feeders, *best_edge)
 
     # BEGIN: alternative methods of selecting the best edge to expand components
     def find_union_esau_williams_tradeoff(subroot):
@@ -409,8 +439,16 @@ def constructor(
 
         which is also the union's Esau-Williams tradeoff, since it is the exact
         change in total cost. Only cost-reducing unions (``saving >= 0``) are
-        candidates and the priority is ``-saving``; ties are broken by
-        ``union_feeders``.
+        candidates and the priority is ``-saving``. Selection applies a
+        ``bias_margin`` window: candidates whose ``saving`` lies within
+        ``bias_margin`` (a fraction of the best ``saving``) of the best are
+        treated as equivalent, and the one with the smallest resulting feeder
+        pair (``union_feeders``, root-ward) is chosen. Unlike the
+        ``extent``-scaled window of :func:`biased_chooser` — which relies on a
+        source feeder that is common to all of a component's candidates — the
+        ringed saving also varies with the peer/target feeders, so the window
+        acts on ``saving`` directly. With ``bias_margin == 0`` the window
+        degenerates to exact ``saving`` ties, broken by ``union_feeders``.
 
         Inserting a lone node between two adjacent path nodes sheds the node's
         ``feeder_pair`` and leaves the receiving path's feeders unchanged:
@@ -481,7 +519,7 @@ def constructor(
                 saving = feeder_pair + feeder_pair_sr_v - extent - union_feeders
                 if saving >= 0:
                     choices.append((-saving, union_feeders, u_head, v))
-        return (min(choices) if choices else ()), edges2discard
+        return ringed_chooser(choices), edges2discard
 
     # END: alternative methods of selecting the best edge to expand components
 

@@ -712,14 +712,18 @@ class EWRouter(Router):
             the per-arm limit, so a ring holds up to twice as many terminals.
             Unions are ranked by their total saving — the feeders shed at the
             two joined endpoints minus the connecting edge's length
-            (Clarke-Wright style).
+            (Clarke-Wright style) — with a ``bias_margin`` window favoring the
+            more root-ward union on quasi-ties.
 
         Args:
           maxiter: Maximum iterations.
           feeder_route: Feeder routing mode (``'segmented'`` or ``'straight'``).
           method: one of the **Available Methods**, defaults to ``'biased_EW'``).
-          bias_margin: Fractional margin within which edges are considered
-            equivalent (used by ``'biased_EW'`` and ``'radial_EW'``).
+          bias_margin: Fractional margin within which candidates are considered
+            equivalent, resolving the quasi-tie root-ward (used by
+            ``'biased_EW'``, ``'radial_EW'`` and ``'ringed'``; for ``'ringed'``
+            the margin is a fraction of the best union ``saving`` rather than the
+            edge ``extent``).
             Defaults to the constructor's built-in default (0.02) when ``None``.
           verbose: Enable verbose logging.
         """
