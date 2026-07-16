@@ -707,10 +707,12 @@ class EWRouter(Router):
           ``'radial_EW'``
             EW variant that produces radial subtrees (simple paths from root).
           ``'ringed'``
-            ``'radial_EW'`` variant that closes each subtree into a ring: both
-            endpoints connect to the same root (two feeders) joined at an open
-            point. ``cables_capacity`` is the per-arm limit, so a ring holds up
-            to twice as many terminals.
+            Closes each subtree into a ring: both endpoints connect to the same
+            root (two feeders) joined at an open point. ``cables_capacity`` is
+            the per-arm limit, so a ring holds up to twice as many terminals.
+            Unions are ranked by their total saving — the feeders shed at the
+            two joined endpoints minus the connecting edge's length
+            (Clarke-Wright style).
 
         Args:
           maxiter: Maximum iterations.

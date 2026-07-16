@@ -32,10 +32,6 @@ _debug, _info, _warn, _error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.err
 
 _ONE = bitarray('1')
 _DEFAULT_BIAS_MARGIN = 0.02
-# 'ringed' prices the return-to-root feeder through the biased_chooser tie-break,
-# which only acts among candidates within bias_margin of the best extent. The
-# narrow default above leaves it a near no-op, so ringed uses a wider window.
-_RINGED_BIAS_MARGIN = 0.25
 
 # empirically obtained coefficients
 _rootlust_coefs = (
@@ -90,18 +86,19 @@ def constructor(
       ``'radial_EW'``
         EW variant that produces radial subtrees (simple paths from root).
       ``'ringed'``
-        ``'radial_EW'`` variant that closes each simple-path subtree into a ring:
+        Grows simple-path subtrees that are closed into rings at finalization:
         both endpoints connect to the same root (two feeders), joined at an open
         point (``kind='split'``, no current). ``capacity`` is the per-arm limit,
-        so a ring holds up to ``2 * capacity`` terminals.
+        so a ring holds up to ``2 * capacity`` terminals. Unions are ranked by
+        their total saving — the feeders shed at the two joined endpoints minus
+        the connecting edge's length (Clarke-Wright style).
 
     Args:
       Aʹ: available links graph
       capacity: max number of terminals in a subtree
       method: choice of method (see Available Methods)
-      bias_margin: (biased_EW | radial_EW | ringed) fractional margin within which
-        edges are equivalent. Defaults to 0.02, except ``'ringed'`` defaults to a
-        wider 0.25 so its return-to-root feeder tie-break has room to act.
+      bias_margin: (biased_EW | radial_EW) fractional margin within which edges
+        are equivalent. Defaults to 0.02.
       weigh_detours: (!= esau_williams) only add edges whose tradeoff is not
         outweighted by detours
       straight_feeder_route: prevent crossings of feeders
@@ -125,7 +122,7 @@ def constructor(
     # methods that grow subtrees as simple paths (endpoints tracked by <tail_>)
     radial_like = method in ('radial_EW', 'ringed')
     if bias_margin is None:
-        bias_margin = _RINGED_BIAS_MARGIN if ringed else _DEFAULT_BIAS_MARGIN
+        bias_margin = _DEFAULT_BIAS_MARGIN
     capacity_report = capacity
     if ringed:
         # A ring is two radial arms sharing one root, joined at their tails. Build
@@ -389,30 +386,44 @@ def constructor(
     def find_union_ringed_tradeoff(subroot):
         """Grow simple-path subtrees that get closed into rings at finalization.
 
-        Deliberately reuses :func:`find_union_radial_EW_tradeoff`'s structure
-        verbatim — the same two extension options (unions at either endpoint, plus
-        single-node insertions), the same ``extent <= d2root`` acceptance and the
-        same :func:`biased_chooser` selection. That machinery and the radial
-        main-loop bookkeeping are a tightly coupled pair whose choice of the
-        surviving path endpoints keeps every subtree a *simple path* (required for
-        :func:`ringify_S`); perturbing which union is accepted or its priority
-        desyncs the ``tail_`` invariant and produces branched subtrees.
+        A ring's cost is its path edges plus two feeders — one at each path
+        endpoint — to a shared root (see :func:`add_ring_to_S`). A component's
+        prospective feeder cost is therefore a pair of feeders::
 
-        Ring-awareness — pricing the second, return-to-root feeder — is therefore
-        applied only through the one safe lever: the ``biased_chooser`` tie-break.
-        Among candidates that are root-ward-equivalent within ``bias_margin``, a
-        radial subtree prefers the smaller *absorbed subroot* feeder; a ring
-        instead prefers the smaller *far-endpoint* feeder of the absorbed subtree,
-        because that far endpoint is the one that becomes the merged ring's new
-        feeder foot. This nudges the greedy toward compact rings (both feeder feet
-        near the root) without changing the accepted union set.
+            feeder_pair = min over roots of (d2roots[subroot] + d2roots[tail])
+
+        (a singleton has ``subroot == tail``, so it is priced at twice its root
+        distance, consistent with the two-feeder ring it grows into; its
+        realized degenerate stub is cheaper). A union joining this component's
+        endpoint ``u_head`` to a peer's endpoint ``v`` sheds the feeders of the
+        two joined endpoints and keeps those of the two far endpoints::
+
+            saving = feeder_pair + feeder_pair_sr_v - extent - union_feeders
+
+        With a single root this reduces to the classic saving
+        ``d2root(u_head) + d2root(v) - extent`` of:
+
+          Clarke, G., and J. W. Wright. "Scheduling of Vehicles from a Central
+            Depot to a Number of Delivery Points." Operations Research 12,
+            no. 4 (1964): 568–81. https://doi.org/10.1287/opre.12.4.568.
+
+        which is also the union's Esau-Williams tradeoff, since it is the exact
+        change in total cost. Only cost-reducing unions (``saving >= 0``) are
+        candidates and the priority is ``-saving``; ties are broken by
+        ``union_feeders``.
+
+        Inserting a lone node between two adjacent path nodes sheds the node's
+        ``feeder_pair`` and leaves the receiving path's feeders unchanged:
+        ``tradeoff = extent - feeder_pair``.
         """
         subtree = subtree_[subroot]
         subtree_count = subtree.count()
         capacity_left = capacity - subtree_count
+        tail = tail_[subroot]
+        # length of this component's two feeders (at the best shared root)
+        feeder_pair = (d2roots[subroot] + d2roots[tail]).min()
         choices = []
         edges2discard = []
-        d2root = d2roots[subroot, A.nodes[subroot]['root']]
         if subtree_count == 1:
             # insertion is only considered when subtree has a single node
             if i != 0:
@@ -437,17 +448,22 @@ def constructor(
                         + A[subroot][v]['length']
                         - Aʹ[u][v]['length']
                     )
-                    # inserting the lone node into an arm buries it, shedding its
-                    # single feeder — same trade-off as radial insertion
-                    if extent <= d2root:
-                        tiebreaker = d2roots[subroot_[u], A.nodes[u]['root']]
-                        choices.append((extent, tiebreaker, u, v))
+                    # inserting the lone node sheds its feeder pair (here
+                    # feeder_pair == 2*d2root); the receiver's feeders are
+                    # unchanged
+                    tradeoff = extent - feeder_pair
+                    if tradeoff <= 0:
+                        sr_u = subroot_[u]
+                        # the receiving component's feeder pair as tie-breaker
+                        tiebreaker = (d2roots[sr_u] + d2roots[tail_[sr_u]]).min()
+                        choices.append((tradeoff, tiebreaker, u, v))
             # this is for finding extension options
-            endpoints = ((subroot, tail_[subroot]),)
+            endpoints = ((subroot, tail),)
         else:
-            endpoints = ((subroot, tail_[subroot]), (tail_[subroot], subroot))
+            endpoints = ((subroot, tail), (tail, subroot))
 
         for u_head, u_tail in endpoints:
+            # a union at u_head sheds u_head's feeder; u_tail keeps its feeder
             for v in A[u_head]:
                 sr_v = subroot_[v]
                 subtree_v = subtree_[sr_v]
@@ -458,26 +474,14 @@ def constructor(
                 if v != sr_v and v != tail_v:
                     continue
                 extent = A[u_head][v]['length']
-                if extent <= d2root:
-                    d2root_sr_v = d2roots[sr_v, A.nodes[sr_v]['root']]
-                    if v == sr_v and v != tail_v:
-                        # subroot must change either to u_tail or to the tail of sr_v
-                        union_feeder = min(
-                            d2roots[u_tail].min(), d2roots[tail_[sr_v]].min()
-                        )
-                        # add the increase in feeder length to the edge extent
-                        extent += union_feeder - d2root_sr_v
-                        if extent > d2root:
-                            continue
-                        tiebreaker = union_feeder
-                    else:
-                        # ring tie-break: price the return-to-root feeder — the
-                        # absorbed subtree's FAR endpoint becomes the merged ring's
-                        # new feeder foot, so prefer that foot close to the root
-                        far_v = tail_v if v == sr_v else sr_v
-                        tiebreaker = d2roots[far_v, A.nodes[far_v]['root']]
-                    choices.append((extent, tiebreaker, u_head, v))
-        return biased_chooser(choices, d2root), edges2discard
+                # far_v: the peer's far endpoint, which keeps its feeder
+                far_v = tail_v if v == sr_v else sr_v
+                feeder_pair_sr_v = (d2roots[sr_v] + d2roots[tail_v]).min()
+                union_feeders = (d2roots[u_tail] + d2roots[far_v]).min()
+                saving = feeder_pair + feeder_pair_sr_v - extent - union_feeders
+                if saving >= 0:
+                    choices.append((-saving, union_feeders, u_head, v))
+        return (min(choices) if choices else ()), edges2discard
 
     # END: alternative methods of selecting the best edge to expand components
 
@@ -729,31 +733,44 @@ def constructor(
             elif v == sr_kept and subtree_[v].count() > 1:
                 # this is an extension and the union feeder must be other than sr_kept
                 _debug('EXTENSION with sr_kept (%d) change', sr_kept)
-                # find the free endpoint of the dropped subroot
-                if u == sr_u:
-                    alt_sr_u = tail_[sr_u]
-                    root_u = d2roots[alt_sr_u].argmin() - R
-                else:
-                    alt_sr_u = sr_u
-                    root_u = A.nodes[sr_u]['root']
-                tail_v = tail_[sr_kept]
-                alt_root_v = d2roots[tail_v].argmin() - R
-                if d2roots[tail_v, alt_root_v] <= d2roots[alt_sr_u, root_u]:
-                    # union subroot is the tail of kept subroot
-                    reassign_subroot(sr_kept, tail_v, alt_root_v)
+                if ringed:
+                    # a ring has feeders at both endpoints, so which endpoint
+                    # carries the subroot label is cost-neutral: move it to the
+                    # kept tail
+                    union_tail = tail_[sr_u] if u == sr_u else sr_u
+                    tail_v = tail_[sr_kept]
+                    reassign_subroot(sr_kept, tail_v, A.nodes[sr_kept]['root'])
                     _debug('SUBROOT %d -> %d', sr_kept, tail_v)
                     sr_kept = tail_v
+                    # set the tail of the union outcome
+                    tail_[sr_kept] = union_tail
                 else:
-                    # union subroot is in the dropped subtree: reverse union direction
-                    if alt_sr_u != sr_u:
-                        # subroot_[u] must change
-                        reassign_subroot(sr_u, alt_sr_u, root_u)
-                        _debug('SUBROOT %d -> %d', sr_u, alt_sr_u)
-                    u, v, sr_u, sr_kept = v, u, sr_kept, alt_sr_u
-                    pq.cancel(sr_u)
-                    _debug('DIRECTION (%d, %d) -> (%d, %d)', v, u, u, v)
-                # set the tail of the union outcome
-                tail_[sr_kept] = tail_[sr_u]
+                    # find the free endpoint of the dropped subroot
+                    if u == sr_u:
+                        alt_sr_u = tail_[sr_u]
+                        root_u = d2roots[alt_sr_u].argmin() - R
+                    else:
+                        alt_sr_u = sr_u
+                        root_u = A.nodes[sr_u]['root']
+                    tail_v = tail_[sr_kept]
+                    alt_root_v = d2roots[tail_v].argmin() - R
+                    if d2roots[tail_v, alt_root_v] <= d2roots[alt_sr_u, root_u]:
+                        # union subroot is the tail of kept subroot
+                        reassign_subroot(sr_kept, tail_v, alt_root_v)
+                        _debug('SUBROOT %d -> %d', sr_kept, tail_v)
+                        sr_kept = tail_v
+                    else:
+                        # union subroot is in the dropped subtree: reverse union
+                        # direction
+                        if alt_sr_u != sr_u:
+                            # subroot_[u] must change
+                            reassign_subroot(sr_u, alt_sr_u, root_u)
+                            _debug('SUBROOT %d -> %d', sr_u, alt_sr_u)
+                        u, v, sr_u, sr_kept = v, u, sr_kept, alt_sr_u
+                        pq.cancel(sr_u)
+                        _debug('DIRECTION (%d, %d) -> (%d, %d)', v, u, u, v)
+                    # set the tail of the union outcome
+                    tail_[sr_kept] = tail_[sr_u]
             elif u == tail_[sr_u]:
                 # set the tail of the union outcome
                 tail_[sr_kept] = sr_u
@@ -763,6 +780,20 @@ def constructor(
 
         sr_dropped = sr_u
         root = A.nodes[sr_kept]['root']
+
+        if ringed and R > 1:
+            # a ring's two feeders share one root: pick the root that
+            # minimizes the length of the union's feeder pair
+            union_root = (d2roots[sr_kept] + d2roots[tail_[sr_kept]]).argmin() - R
+            if union_root != root:
+                # reassign the kept subtree's nodes (the dropped subtree's nodes
+                # get the updated `root` in the common machinery below)
+                subtree_kept = subtree_[sr_kept]
+                rootmask__[root] &= ~subtree_kept
+                rootmask__[union_root] |= subtree_kept
+                for t in subtree_kept.search(_ONE):
+                    A.nodes[t]['root'] = union_root
+                root = union_root
 
         if use_blockage:
             _debug('<angle_span> //%s//', union_span_[root])
