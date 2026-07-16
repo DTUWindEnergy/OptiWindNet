@@ -18,9 +18,13 @@ import numpy as np
 from scipy.spatial.distance import pdist, squareform
 
 from ..clustering import clusterize
-from ..interarraylib import add_link_blockmap, add_ring_to_S, fun_fingerprint
+from ..interarraylib import add_link_blockmap, fun_fingerprint, ringify_S
 from ..repair import repair_routeset_path
-from ._core import remove_offending_crossings
+from ._core import (
+    add_branches_to_S,
+    clamp_vehicles_to_min,
+    remove_offending_crossings,
+)
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
@@ -410,51 +414,6 @@ def _do_lkh(
     return output
 
 
-def _add_branches(S, branches, root, subtree_id_start):
-    """Add branches to solution graph S in place.
-
-    Returns ``(max_load, next_subtree_id)``.
-    """
-    max_load = 0
-    subtree_id = subtree_id_start
-    for branch in branches:
-        branch_load = len(branch)
-        if branch_load == 0:
-            continue
-        max_load = max(max_load, branch_load)
-        loads = range(branch_load, 0, -1)
-        S.add_nodes_from(
-            ((n, {'load': load}) for n, load in zip(branch, loads)),
-            subtree=subtree_id,
-        )
-        prev = [root] + branch[:-1]
-        reverses = tuple(u < v for u, v in zip(branch, prev))
-        edgeD = (
-            {'load': load, 'reverse': reverse} for load, reverse in zip(loads, reverses)
-        )
-        S.add_edges_from(zip(prev, branch, edgeD))
-        subtree_id += 1
-    return max_load, subtree_id
-
-
-def _add_rings(S, rings, root, subtree_id_start, A):
-    """Add closed loops (rings) to solution graph S, one per closed CVRP tour.
-
-    Each ring ``root → t1 → … → tn → root`` is rendered in canonical form by
-    :func:`add_ring_to_S` (two real feeders joined at a single ``split`` open
-    point at the load midpoint). Returns ``(max_load, next_subtree_id)``.
-    """
-    max_load = 0
-    subtree_id = subtree_id_start
-    for ring in rings:
-        if not ring:
-            continue
-        add_ring_to_S(S, root, list(ring), subtree_id, A)
-        max_load = max(max_load, math.ceil(len(ring) / 2))
-        subtree_id += 1
-    return max_load, subtree_id
-
-
 def _build_cluster_weight_matrices(
     A: nx.Graph,
     terminals_: list[list[int]],
@@ -588,7 +547,6 @@ def _build_solution(
     keep_log: bool,
     method_options: dict,
     solver_details_extra: dict,
-    ringed: bool = False,
 ) -> nx.Graph:
     """Assemble the final solution graph S from per-root LKH outputs."""
     R, T = A.graph['R'], A.graph['T']
@@ -631,14 +589,11 @@ def _build_solution(
     for r, output, terminals in zip(range(-R, 0), outputs_, terminals_):
         # output['routes'] uses matrix indices (0..T_c-1) for terminals
         subtrees = [[terminals[i] for i in route] for route in output['routes']]
-        if ringed:
-            sub_max_load, subtree_id = _add_rings(
-                S, subtrees, root=r, subtree_id_start=subtree_id, A=A
-            )
-        else:
-            sub_max_load, subtree_id = _add_branches(
-                S, subtrees, root=r, subtree_id_start=subtree_id
-            )
+        # rings, too, are built as paths here (one feeder each), so that the
+        # path-based repair machinery applies; ringify_S() closes them afterwards
+        sub_max_load, subtree_id = add_branches_to_S(
+            S, subtrees, root=r, subtree_id_start=subtree_id
+        )
         max_load = max(max_load, sub_max_load)
         root_load = sum(S.nodes[n]['load'] for n in S.neighbors(r))
         S.nodes[r]['load'] = root_load
@@ -978,9 +933,7 @@ def lkh3(
         Solution topology S.
     """
     R, T = A.graph['R'], A.graph['T']
-    # A ring holds up to 2 * capacity terminals (two arms of `capacity` each);
-    # LKH solves it as a closed CVRP with the doubled vehicle capacity, while the
-    # reported cable capacity stays `capacity`.
+    # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
     if vehicles is not None:
         vehicles_min = math.ceil(T / solve_capacity)
@@ -990,15 +943,7 @@ def lkh3(
                     'For multi-root instances, the parameter vehicles (feeders) can '
                     'only be None or the minimum feasible: setting to the minimum.'
                 )
-        if vehicles < vehicles_min:
-            warn(
-                'Vehicles (feeders) number (%d) too low for feasibilty '
-                'with given capacity (%d). Setting to %d.',
-                vehicles,
-                capacity,
-                vehicles_min,
-            )
-            vehicles = vehicles_min
+        vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
         feeders_above_min = vehicles - vehicles_min
     else:
         feeders_above_min = None
@@ -1071,7 +1016,6 @@ def lkh3(
             keep_log=keep_log,
             method_options=method_options,
             solver_details_extra=solver_details_extra,
-            ringed=ringed,
         )
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
             'ERROR: root node load does not match T.'
@@ -1081,24 +1025,22 @@ def lkh3(
     crossings: list = []
     over_capacity_clusters: list[int] = []
     i = 0
-    if not repair or ringed:
-        # repair_routeset_path()/remove_offending_crossings() target open radial
-        # branches; ring crossings are resolved downstream by PathFinder(ringed=True).
+    if not repair:
         S, _ = _solve_and_repair()
     else:
         while True:
             S, outputs_ = _solve_and_repair()
-            S = repair_routeset_path(S, A_iter)
+            S = repair_routeset_path(S, A_iter, ringed=ringed)
             crossings = S.graph.get('outstanding_crossings', [])
             over_capacity_clusters = [
                 ic
                 for ic, output in enumerate(outputs_)
-                if max((len(r) for r in output['routes']), default=0) > capacity
+                if max((len(r) for r in output['routes']), default=0) > solve_capacity
             ]
             if over_capacity_clusters:
                 warn(
                     'Capacity violated in LKH solution: '
-                    f'max_load ({S.graph["max_load"]}) > capacity ({capacity}). '
+                    f'max_load ({S.graph["max_load"]}) > capacity ({solve_capacity}). '
                     'Retrying with increased vehicles.'
                 )
             if (not crossings and not over_capacity_clusters) or i == max_retries:
@@ -1131,6 +1073,9 @@ def lkh3(
         S.graph['retries'] = i
         if crossings or over_capacity_clusters:
             warn('Solution remains invalid (max_retries reached)')
+    if ringed:
+        # routes were built (and repaired) as open paths: close them into rings
+        ringify_S(S, A)
     return S
 
 

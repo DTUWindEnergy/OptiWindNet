@@ -376,6 +376,48 @@ def rings_from_links(active_links, R: int) -> list[tuple[int, list[int]]]:
     return rings
 
 
+def ringify_S(S: nx.Graph, A: nx.Graph | None = None) -> None:
+    """Convert a path-form topology to canonical ring form, in place.
+
+    Each subtree of ``S`` must be a non-branching path with a single feeder at
+    its head (the form produced by OCVRP-style route building). Every path
+    ``root → t1 → … → tn`` becomes the ring ``root → t1 → … → tn → root`` in the
+    canonical form of :func:`add_ring_to_S`: a second feeder at ``tn`` and the
+    open point (``kind='split'``, ``load=0``) at the load midpoint. This enables
+    solvers to run path-based crossing repair before committing to rings.
+
+    Node/edge ``'load'``, ``'subtree'`` and the graph's ``'max_load'`` and root
+    loads are recomputed; subtree ids are renumbered.
+
+    Args:
+      S: path-form topology graph (modified in place).
+      A: optional available-links graph, forwarded to :func:`add_ring_to_S` for
+        choosing the longer split edge on even-node rings.
+    """
+    R = S.graph['R']
+    paths: list[tuple[int, list[int]]] = []
+    for root in range(-R, 0):
+        for gate in S[root]:
+            ordered = [gate]
+            back, fwd = root, gate
+            while True:
+                nbrs = [n for n in S[fwd] if n != back]
+                if not nbrs:
+                    break
+                (nxt,) = nbrs  # ValueError here means S has a branching subtree
+                ordered.append(nxt)
+                back, fwd = fwd, nxt
+            paths.append((root, ordered))
+    S.remove_edges_from(list(S.edges))
+    max_load = 0
+    for subtree_id, (root, ordered) in enumerate(paths):
+        add_ring_to_S(S, root, ordered, subtree_id, A)
+        max_load = max(max_load, math.ceil(len(ordered) / 2))
+    for root in range(-R, 0):
+        S.nodes[root]['load'] = sum(S.nodes[n]['load'] for n in S[root])
+    S.graph['max_load'] = max_load
+
+
 def site_fingerprint(
     VertexC: np.ndarray, boundary: np.ndarray
 ) -> tuple[bytes, dict[str, bytes]]:

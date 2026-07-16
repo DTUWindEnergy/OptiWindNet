@@ -12,9 +12,13 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import clusterize
-from ..interarraylib import add_ring_to_S, fun_fingerprint
+from ..interarraylib import fun_fingerprint, ringify_S
 from ..repair import repair_routeset_path
-from ._core import remove_offending_crossings
+from ._core import (
+    add_branches_to_S,
+    clamp_vehicles_to_min,
+    remove_offending_crossings,
+)
 
 _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
@@ -143,66 +147,6 @@ def _solution_time(log, objective) -> float:
         return 0.0
 
 
-def _add_branches(S, branches, root, subtree_id_start):
-    """Add branches to solution graph S.
-
-    Args:
-        S: solution graph (modified in place)
-        branches: iterable of branches (each a list or array of node ids)
-        root: root node id
-        subtree_id_start: starting subtree_id for numbering
-
-    Returns:
-        ``(max_load, next_subtree_id)``
-    """
-    max_load = 0
-    subtree_id = subtree_id_start
-    for branch in branches:
-        branch_load = len(branch)
-        max_load = max(max_load, branch_load)
-        loads = range(branch_load, 0, -1)
-        branch_list = (
-            branch.tolist() if isinstance(branch, np.ndarray) else list(branch)
-        )
-
-        S.add_nodes_from(
-            ((n, {'load': load}) for n, load in zip(branch_list, loads)),
-            subtree=subtree_id,
-        )
-
-        prev = [root] + branch_list[:-1]
-        reverses = tuple(u < v for u, v in zip(branch_list, prev))
-        edgeD = (
-            {'load': load, 'reverse': reverse} for load, reverse in zip(loads, reverses)
-        )
-        S.add_edges_from(zip(prev, branch_list, edgeD))
-        subtree_id += 1
-
-    return max_load, subtree_id
-
-
-def _add_rings(S, rings, root, subtree_id_start, A):
-    """Add closed loops (rings) to solution graph S, one per CVRP tour.
-
-    Each ring is the closed CVRP route ``root → t1 → … → tn → root``, rendered in
-    canonical form by :func:`add_ring_to_S` (two real feeders joined at a single
-    ``split`` open point at the load midpoint, so each arm holds at most half of
-    the doubled ring capacity).
-
-    Returns ``(max_load, next_subtree_id)``.
-    """
-    max_load = 0
-    subtree_id = subtree_id_start
-    for ring in rings:
-        ordered = ring.tolist() if isinstance(ring, np.ndarray) else list(ring)
-        if not ordered:
-            continue
-        add_ring_to_S(S, root, ordered, subtree_id, A)
-        max_load = max(max_load, math.ceil(len(ordered) / 2))
-        subtree_id += 1
-    return max_load, subtree_id
-
-
 def _do_hgs(W, coordinates, vehicles, capacity, hgs_options, log_callback=None):
     """Multithreading worker function that calls the external library"""
     n = coordinates.shape[1]
@@ -315,7 +259,7 @@ def _solve_multi_root(
     return inputs_, outputs_
 
 
-def _process_results(A, keep_log, balanced, inputs_, outputs_, ringed=False):
+def _process_results(A, keep_log, balanced, inputs_, outputs_):
     R = A.graph['R']
     routes_, runtime_, solution_time_, cost_, log_, algo_params = zip(*outputs_)
     vehicles_, len_cluster_, indices_, num_slack_, capacity_ = inputs_
@@ -351,14 +295,11 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_, ringed=False):
     max_load = 0
     for r, (routes, indices) in enumerate(zip(routes_, indices_), start=-R):
         subtrees = (indices[route] for route in routes)
-        if ringed:
-            sub_max_load, subtree_id_start = _add_rings(
-                S, subtrees, root=r, subtree_id_start=subtree_id_start, A=A
-            )
-        else:
-            sub_max_load, subtree_id_start = _add_branches(
-                S, subtrees, root=r, subtree_id_start=subtree_id_start
-            )
+        # rings, too, are built as paths here (one feeder each), so that the
+        # path-based repair machinery applies; ringify_S() closes them afterwards
+        sub_max_load, subtree_id_start = add_branches_to_S(
+            S, subtrees, root=r, subtree_id_start=subtree_id_start
+        )
         max_load = max(max_load, sub_max_load)
         root_load = sum(S.nodes[n]['load'] for n in S.neighbors(r))
         S.nodes[r]['load'] = root_load
@@ -437,9 +378,7 @@ def hgs_cvrp(
     """
     R = A.graph['R']
     T = A.graph['T']
-    # A ring holds up to 2 * capacity terminals (two arms of `capacity` each);
-    # HGS solves it as a closed CVRP with the doubled vehicle capacity, while the
-    # reported cable capacity stays `capacity`.
+    # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
     if ringed and vehicles_exact:
         raise NotImplementedError(
@@ -483,15 +422,7 @@ def hgs_cvrp(
                     'only be None or the minimum feasible: setting to the minimum.'
                 )
                 vehicles = vehicles_min
-        if vehicles < vehicles_min:
-            _warn(
-                'Vehicles (feeders) number (%d) too low for feasibilty '
-                'with given capacity (%d). Setting to %d.',
-                vehicles,
-                capacity,
-                vehicles_min,
-            )
-            vehicles = vehicles_min
+        vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
     feeders_above_min = None if vehicles is None else vehicles - vehicles_min
 
     if seed is None:
@@ -506,7 +437,7 @@ def hgs_cvrp(
         results_ = solve(
             A, solve_capacity, hgs_options, vehicles, balanced, log_callback, ringed
         )
-        S = _process_results(A, keep_log, balanced, *results_, ringed=ringed)
+        S = _process_results(A, keep_log, balanced, *results_)
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
             'ERROR: root node load does not match T.'
         )
@@ -519,20 +450,19 @@ def hgs_cvrp(
         return S
 
     # iterative repair loop
+    A_orig = A  # the loop may rebind A to a pruned copy
     diagonals = A.graph['diagonals']
     if R > 1:
         # needed in clustering
         A.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
     crossings = []
     i = 0
-    if not repair or ringed:
-        # repair_routeset_path()/remove_offending_crossings() target open radial
-        # branches; ring crossings are resolved downstream by PathFinder(ringed=True).
+    if not repair:
         S = _solve()
     else:
         while True:
             S = _solve()
-            S = repair_routeset_path(S, A)
+            S = repair_routeset_path(S, A, ringed=ringed)
             crossings = S.graph.get('outstanding_crossings', [])
             if not crossings or i == max_retries:
                 break
@@ -546,6 +476,9 @@ def hgs_cvrp(
         S.graph['retries'] = i
         if crossings:
             _warn('Solution contains crossings (max_retries reached)')
+    if ringed:
+        # routes were built (and repaired) as open paths: close them into rings
+        ringify_S(S, A_orig)
 
     S.graph.update(
         T=T,
