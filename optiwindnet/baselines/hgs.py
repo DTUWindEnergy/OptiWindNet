@@ -478,13 +478,14 @@ def hgs_cvrp(
             _warn('Solution contains crossings (max_retries reached)')
     if ringed:
         # routes were built (and repaired) as open paths: close them into rings
-        ringify_S(S, A_orig)
+        ringify_S(S, A_orig)  # also sets 'has_loads'
+    else:
+        S.graph['has_loads'] = True
 
     S.graph.update(
         T=T,
         R=R,
         capacity=capacity,
-        has_loads=True,
         creator='baselines.hgs',
         method_options=dict(
             solver_name='HGS-CVRP',

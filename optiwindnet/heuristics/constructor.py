@@ -18,10 +18,10 @@ from ..geometric import (
 )
 from ..interarraylib import (
     add_link_blockmap,
-    add_ring_to_S,
     add_terminal_closest_root,
     calcload,
     fun_fingerprint,
+    ringify_S,
 )
 from .priorityqueue import PriorityQueue
 
@@ -395,7 +395,7 @@ def constructor(
         same :func:`biased_chooser` selection. That machinery and the radial
         main-loop bookkeeping are a tightly coupled pair whose choice of the
         surviving path endpoints keeps every subtree a *simple path* (required for
-        :func:`add_ring_to_S`); perturbing which union is accepted or its priority
+        :func:`ringify_S`); perturbing which union is accepted or its priority
         desyncs the ``tail_`` invariant and produces branched subtrees.
 
         Ring-awareness — pricing the second, return-to-root feeder — is therefore
@@ -892,39 +892,14 @@ def constructor(
         who_targets_[sr_dropped] = None
     # END: main loop
 
-    # add feeders (close each path subtree into a ring for the 'ringed' method)
+    # add feeders (the 'ringed' method closes each path subtree into a ring)
     is_subroot_ = bitarray(subtree is not None for subtree in subtree_)
+    for r, rootmask_ in zip(roots, rootmask__):
+        for sr in (rootmask_ & is_subroot_).search(_ONE):
+            S.add_edge(r, sr)
     if ringed:
-        for r, rootmask_ in zip(roots, rootmask__):
-            for sr in (rootmask_ & is_subroot_).search(_ONE):
-                # recover the ordered terminal sequence of the path subtree by
-                # walking S from the subroot to the other endpoint (tail_[sr])
-                ordered = [sr]
-                prev, curr = None, sr
-                # an isolated single-node subtree has no edges in S yet
-                while S.has_node(curr):
-                    nbrs = [x for x in S[curr] if x >= 0 and x != prev]
-                    if not nbrs:
-                        break
-                    prev, curr = curr, nbrs[0]
-                    ordered.append(curr)
-                add_ring_to_S(S, r, ordered, sr, Aʹ)
-        # aggregate root loads and track the maximum feeder (arm) load; each ring
-        # foot's node load equals its arm's load (mirrors _topology_from_mip_sol)
-        max_load = 0
-        for r in roots:
-            rootload = 0
-            for nbr in S.neighbors(r):
-                arm_load = S.nodes[nbr]['load']
-                rootload += arm_load
-                max_load = max(max_load, arm_load)
-            S.nodes[r]['load'] = rootload
-        S.graph['has_loads'] = True
-        S.graph['max_load'] = max_load
+        ringify_S(S, Aʹ)
     else:
-        for r, rootmask_ in zip(roots, rootmask__):
-            for sr in (rootmask_ & is_subroot_).search(_ONE):
-                S.add_edge(r, sr)
         calcload(S)
     # algorithm finished, store some info in the graph object
     S.graph.update(

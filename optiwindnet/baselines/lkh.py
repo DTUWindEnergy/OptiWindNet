@@ -562,7 +562,6 @@ def _build_solution(
         T=T,
         R=R,
         capacity=capacity,
-        has_loads=True,
         objective=objective,
         creator='baselines.lkh',
         runtime=runtime,
@@ -697,6 +696,7 @@ def _lkh(
         solver_details_extra=dict(seed=seed),
     )
     assert S.nodes[-1]['load'] == T, 'ERROR: root node load does not match T.'
+    S.graph['has_loads'] = True
     return S
 
 
@@ -1075,7 +1075,9 @@ def lkh3(
             warn('Solution remains invalid (max_retries reached)')
     if ringed:
         # routes were built (and repaired) as open paths: close them into rings
-        ringify_S(S, A)
+        ringify_S(S, A)  # also sets 'has_loads'
+    else:
+        S.graph['has_loads'] = True
     return S
 
 

@@ -386,8 +386,8 @@ def ringify_S(S: nx.Graph, A: nx.Graph | None = None) -> None:
     open point (``kind='split'``, ``load=0``) at the load midpoint. This enables
     solvers to run path-based crossing repair before committing to rings.
 
-    Node/edge ``'load'``, ``'subtree'`` and the graph's ``'max_load'`` and root
-    loads are recomputed; subtree ids are renumbered.
+    Node/edge ``'load'``, ``'subtree'`` and the graph's ``'max_load'``,
+    ``'has_loads'`` and root loads are recomputed; subtree ids are renumbered.
 
     Args:
       S: path-form topology graph (modified in place).
@@ -416,6 +416,7 @@ def ringify_S(S: nx.Graph, A: nx.Graph | None = None) -> None:
     for root in range(-R, 0):
         S.nodes[root]['load'] = sum(S.nodes[n]['load'] for n in S[root])
     S.graph['max_load'] = max_load
+    S.graph['has_loads'] = True
 
 
 def site_fingerprint(
