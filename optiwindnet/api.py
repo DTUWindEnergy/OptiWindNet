@@ -706,6 +706,11 @@ class EWRouter(Router):
             EW with a tunable root-ward bias that increases as capacity decreases.
           ``'radial_EW'``
             EW variant that produces radial subtrees (simple paths from root).
+          ``'ringed'``
+            ``'radial_EW'`` variant that closes each subtree into a ring: both
+            endpoints connect to the same root (two feeders) joined at an open
+            point. ``cables_capacity`` is the per-arm limit, so a ring holds up
+            to twice as many terminals.
 
         Args:
           maxiter: Maximum iterations.
@@ -742,7 +747,10 @@ class EWRouter(Router):
         S = constructor(A, capacity=cables_capacity, **constructor_args)
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        # RINGED subtrees are closed loops: PathFinder must resolve crossings in
+        # ringed mode (matching the other ringed solver paths)
+        ringed = self.method == 'ringed'
+        G = PathFinder(G_tentative, planar=P, A=A, ringed=ringed).create_detours()
 
         assign_cables(G, cables)
 

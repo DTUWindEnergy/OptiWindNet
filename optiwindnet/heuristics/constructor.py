@@ -18,6 +18,7 @@ from ..geometric import (
 )
 from ..interarraylib import (
     add_link_blockmap,
+    add_ring_to_S,
     add_terminal_closest_root,
     calcload,
     fun_fingerprint,
@@ -31,6 +32,10 @@ _debug, _info, _warn, _error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.err
 
 _ONE = bitarray('1')
 _DEFAULT_BIAS_MARGIN = 0.02
+# 'ringed' prices the return-to-root feeder through the biased_chooser tie-break,
+# which only acts among candidates within bias_margin of the best extent. The
+# narrow default above leaves it a near no-op, so ringed uses a wider window.
+_RINGED_BIAS_MARGIN = 0.25
 
 # empirically obtained coefficients
 _rootlust_coefs = (
@@ -48,7 +53,7 @@ def constructor(
     *,
     rootlust_: tuple[float, float] = (),
     maxiter: int = 10000,
-    bias_margin: float = _DEFAULT_BIAS_MARGIN,
+    bias_margin: float | None = None,
     weigh_detours: bool = True,
     straight_feeder_route: bool = False,
     keep_log: bool = False,
@@ -84,13 +89,19 @@ def constructor(
         EW with a tunable root-ward bias that increases as capacity decreases.
       ``'radial_EW'``
         EW variant that produces radial subtrees (simple paths from root).
+      ``'ringed'``
+        ``'radial_EW'`` variant that closes each simple-path subtree into a ring:
+        both endpoints connect to the same root (two feeders), joined at an open
+        point (``kind='split'``, no current). ``capacity`` is the per-arm limit,
+        so a ring holds up to ``2 * capacity`` terminals.
 
     Args:
       Aʹ: available links graph
       capacity: max number of terminals in a subtree
       method: choice of method (see Available Methods)
-      bias_margin: (biased_EW | radial_EW) fractional margin within which edges
-        are equivalent
+      bias_margin: (biased_EW | radial_EW | ringed) fractional margin within which
+        edges are equivalent. Defaults to 0.02, except ``'ringed'`` defaults to a
+        wider 0.25 so its return-to-root feeder tie-break has room to act.
       weigh_detours: (!= esau_williams) only add edges whose tradeoff is not
         outweighted by detours
       straight_feeder_route: prevent crossings of feeders
@@ -110,6 +121,18 @@ def constructor(
         weigh_detours = False
     R, T = (Aʹ.graph[k] for k in 'RT')
     _T = range(T)
+    ringed = method == 'ringed'
+    # methods that grow subtrees as simple paths (endpoints tracked by <tail_>)
+    radial_like = method in ('radial_EW', 'ringed')
+    if bias_margin is None:
+        bias_margin = _RINGED_BIAS_MARGIN if ringed else _DEFAULT_BIAS_MARGIN
+    capacity_report = capacity
+    if ringed:
+        # A ring is two radial arms sharing one root, joined at their tails. Build
+        # a simple path of up to 2*capacity terminals (each arm holds at most
+        # `capacity`); the path is closed into a ring at finalization, with the
+        # open point placed at the load midpoint so neither arm exceeds capacity.
+        capacity *= 2
     VertexC = Aʹ.graph['VertexC']
     diagonals = Aʹ.graph['diagonals']
     d2roots = Aʹ.graph['d2roots']
@@ -181,8 +204,8 @@ def constructor(
     pq = PriorityQueue()
     # <i>: iteration counter
     i = 0
-    if method == 'radial_EW':
-        # <tail_>: the endpoint of path subtrees (radial_EW)
+    if radial_like:
+        # <tail_>: the endpoint of path subtrees (radial_EW | ringed)
         tail_ = [t for t in _T]
         num_insertions = 0
     # END: helper data structures
@@ -363,6 +386,99 @@ def constructor(
                     choices.append((extent, tiebreaker, u_head, v))
         return biased_chooser(choices, d2root), edges2discard
 
+    def find_union_ringed_tradeoff(subroot):
+        """Grow simple-path subtrees that get closed into rings at finalization.
+
+        Deliberately reuses :func:`find_union_radial_EW_tradeoff`'s structure
+        verbatim — the same two extension options (unions at either endpoint, plus
+        single-node insertions), the same ``extent <= d2root`` acceptance and the
+        same :func:`biased_chooser` selection. That machinery and the radial
+        main-loop bookkeeping are a tightly coupled pair whose choice of the
+        surviving path endpoints keeps every subtree a *simple path* (required for
+        :func:`add_ring_to_S`); perturbing which union is accepted or its priority
+        desyncs the ``tail_`` invariant and produces branched subtrees.
+
+        Ring-awareness — pricing the second, return-to-root feeder — is therefore
+        applied only through the one safe lever: the ``biased_chooser`` tie-break.
+        Among candidates that are root-ward-equivalent within ``bias_margin``, a
+        radial subtree prefers the smaller *absorbed subroot* feeder; a ring
+        instead prefers the smaller *far-endpoint* feeder of the absorbed subtree,
+        because that far endpoint is the one that becomes the merged ring's new
+        feeder foot. This nudges the greedy toward compact rings (both feeder feet
+        near the root) without changing the accepted union set.
+        """
+        subtree = subtree_[subroot]
+        subtree_count = subtree.count()
+        capacity_left = capacity - subtree_count
+        choices = []
+        edges2discard = []
+        d2root = d2roots[subroot, A.nodes[subroot]['root']]
+        if subtree_count == 1:
+            # insertion is only considered when subtree has a single node
+            if i != 0:
+                # search for insertions only after the initial queue-filling run
+                candidates = []
+                source, target = tee(P_A.neighbors_cw_order(subroot))
+                for u, v in zip(source, chain(target, (next(target),))):
+                    # assess path insertion options
+                    nb_ = A[subroot]
+                    if u in nb_ and v in nb_ and (u, v) in S.edges:
+                        candidates.append((u, v))
+                    elif diag := diagonals.inv.get((u, v) if u < v else (v, u)):
+                        n = diag[0] if diag[1] == subroot else diag[1]
+                        # check the triangles (u, subroot, n) and (n, subroot, v)
+                        if u in nb_ and n in nb_ and (u, v) in S.edges:
+                            candidates.append((u, n))
+                        if n in nb_ and v in nb_ and (n, v) in S.edges:
+                            candidates.append((n, v))
+                for u, v in candidates:
+                    extent = (
+                        A[subroot][u]['length']
+                        + A[subroot][v]['length']
+                        - Aʹ[u][v]['length']
+                    )
+                    # inserting the lone node into an arm buries it, shedding its
+                    # single feeder — same trade-off as radial insertion
+                    if extent <= d2root:
+                        tiebreaker = d2roots[subroot_[u], A.nodes[u]['root']]
+                        choices.append((extent, tiebreaker, u, v))
+            # this is for finding extension options
+            endpoints = ((subroot, tail_[subroot]),)
+        else:
+            endpoints = ((subroot, tail_[subroot]), (tail_[subroot], subroot))
+
+        for u_head, u_tail in endpoints:
+            for v in A[u_head]:
+                sr_v = subroot_[v]
+                subtree_v = subtree_[sr_v]
+                tail_v = tail_[sr_v]
+                if sr_v == subroot or subtree_v.count() > capacity_left:
+                    edges2discard.append((u_head, v))
+                    continue
+                if v != sr_v and v != tail_v:
+                    continue
+                extent = A[u_head][v]['length']
+                if extent <= d2root:
+                    d2root_sr_v = d2roots[sr_v, A.nodes[sr_v]['root']]
+                    if v == sr_v and v != tail_v:
+                        # subroot must change either to u_tail or to the tail of sr_v
+                        union_feeder = min(
+                            d2roots[u_tail].min(), d2roots[tail_[sr_v]].min()
+                        )
+                        # add the increase in feeder length to the edge extent
+                        extent += union_feeder - d2root_sr_v
+                        if extent > d2root:
+                            continue
+                        tiebreaker = union_feeder
+                    else:
+                        # ring tie-break: price the return-to-root feeder — the
+                        # absorbed subtree's FAR endpoint becomes the merged ring's
+                        # new feeder foot, so prefer that foot close to the root
+                        far_v = tail_v if v == sr_v else sr_v
+                        tiebreaker = d2roots[far_v, A.nodes[far_v]['root']]
+                    choices.append((extent, tiebreaker, u_head, v))
+        return biased_chooser(choices, d2root), edges2discard
+
     # END: alternative methods of selecting the best edge to expand components
 
     def blocked_feeders(u, v, sr_dropped, sr_kept):
@@ -435,6 +551,7 @@ def constructor(
             biased_EW=find_union_biased_EW_tradeoff,
             rootlust=find_union_rootlust_tradeoff,
             radial_EW=find_union_radial_EW_tradeoff,
+            ringed=find_union_ringed_tradeoff,
         )[method]
     except KeyError:
         raise ValueError(f'Unsupported constructor method: {method!r}')
@@ -596,7 +713,7 @@ def constructor(
 
         # EFFECT union
 
-        if method == 'radial_EW':
+        if radial_like:
             if is_insertion:
                 # this is an insertion
                 _debug('INSERTION of %d between %d and %d', sr_u, u, v)
@@ -775,17 +892,44 @@ def constructor(
         who_targets_[sr_dropped] = None
     # END: main loop
 
-    # add feeders
+    # add feeders (close each path subtree into a ring for the 'ringed' method)
     is_subroot_ = bitarray(subtree is not None for subtree in subtree_)
-    for r, rootmask_ in zip(roots, rootmask__):
-        for sr in (rootmask_ & is_subroot_).search(_ONE):
-            S.add_edge(r, sr)
-
-    calcload(S)
+    if ringed:
+        for r, rootmask_ in zip(roots, rootmask__):
+            for sr in (rootmask_ & is_subroot_).search(_ONE):
+                # recover the ordered terminal sequence of the path subtree by
+                # walking S from the subroot to the other endpoint (tail_[sr])
+                ordered = [sr]
+                prev, curr = None, sr
+                # an isolated single-node subtree has no edges in S yet
+                while S.has_node(curr):
+                    nbrs = [x for x in S[curr] if x >= 0 and x != prev]
+                    if not nbrs:
+                        break
+                    prev, curr = curr, nbrs[0]
+                    ordered.append(curr)
+                add_ring_to_S(S, r, ordered, sr, Aʹ)
+        # aggregate root loads and track the maximum feeder (arm) load; each ring
+        # foot's node load equals its arm's load (mirrors _topology_from_mip_sol)
+        max_load = 0
+        for r in roots:
+            rootload = 0
+            for nbr in S.neighbors(r):
+                arm_load = S.nodes[nbr]['load']
+                rootload += arm_load
+                max_load = max(max_load, arm_load)
+            S.nodes[r]['load'] = rootload
+        S.graph['has_loads'] = True
+        S.graph['max_load'] = max_load
+    else:
+        for r, rootmask_ in zip(roots, rootmask__):
+            for sr in (rootmask_ & is_subroot_).search(_ONE):
+                S.add_edge(r, sr)
+        calcload(S)
     # algorithm finished, store some info in the graph object
     S.graph.update(
         runtime=time.perf_counter() - start_time,
-        capacity=capacity,
+        capacity=capacity_report,
         creator='constructor',
         iterations=i,
         method_options=dict(
@@ -793,7 +937,7 @@ def constructor(
             fun_fingerprint=_constructor_fun_fingerprint,
         ),
     )
-    if method == 'radial_EW':
+    if radial_like:
         S.graph['num_insertions'] = num_insertions
     #  if keep_log:
     #      S.graph['method_log'] = log
