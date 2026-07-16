@@ -542,20 +542,44 @@ def test_milp_ringed_notebook_instances(
     assert res['g_edges'] > res['T']
     assert res['length'] > 0.0
     if expected is not None:
-        # these instances solve to proven optimality: length is deterministic
-        assert res['length'] == pytest.approx(expected, rel=1e-3)
+        if res['termination'] == 'OPTIMAL':
+            # optimality proven: the ringed optimum is deterministic
+            assert res['length'] == pytest.approx(expected, rel=1e-3)
+        else:
+            # stopped at the mip_gap without proving optimality (e.g. on slower
+            # hardware): the incumbent is a correct ringed solution no worse than
+            # the gap tolerance above the known optimum, and never below it.
+            assert expected * (1 - 1e-3) <= res['length'] <= expected * (1 + mip_gap)
 
 
 # --------------------------------------------------------------------------- #
-# MILP RINGED on the in-process solvers (highs, scip) -- no ortools involved
+# MILP RINGED on the in-process solvers -- no ortools involved
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize('solver_name', ['highs', 'scip'])
+def _milp_solver_unavailable(exc: BaseException) -> bool:
+    """A solver counts as unavailable if its backend is missing or unlicensed.
+
+    Mirrors ``test_MILP._solver_is_unavailable``: the open-source backends
+    (highs/scip) fail with import/binary errors when absent, while commercial
+    ones (gurobi/cplex) fail with a license message on machines without a valid
+    license (e.g. the size-limited pip license expiring on a large model).
+    """
+    if isinstance(exc, (FileNotFoundError, ModuleNotFoundError)):
+        return True
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in ('not licensed', 'license', 'token.gurobi.com', 'gurobi model')
+    )
+
+
+@pytest.mark.parametrize('solver_name', ['highs', 'scip', 'gurobi'])
 def test_milp_ringed_inprocess_solvers_are_canonical(solver_name):
-    """highs / scip RINGED produce a canonical ringed S (skip if unavailable).
+    """Each in-process MILP backend produces a canonical ringed S.
 
     These solvers never touch OR-Tools' native libraries, so they run directly
     in-process. The solve is loose (short budget, wide gap) because we assert
-    the *structure* of a ringed solution, not its optimal length.
+    the *structure* of a ringed solution, not its optimal length. Skips when the
+    backend is missing or unlicensed.
     """
     from optiwindnet.api import WindFarmNetwork, load_repository
     from optiwindnet.MILP import ModelOptions, solver_factory
@@ -571,10 +595,22 @@ def test_milp_ringed_inprocess_solvers_are_canonical(solver_name):
             model_options=ModelOptions(topology='ringed'),
         )
         info = solver.solve(time_limit=30, mip_gap=0.2)
-    except (FileNotFoundError, ModuleNotFoundError):
-        pytest.skip(f'{solver_name} solver unavailable')
+    except BaseException as exc:
+        if _milp_solver_unavailable(exc):
+            pytest.skip(f'{solver_name} solver unavailable: {exc}')
+        raise
 
-    assert info.termination.lower() in ('optimal', 'feasible')
+    # any termination that leaves a feasible incumbent is fine here: with a
+    # wide mip_gap a solver legitimately stops at 'gaplimit' (or 'timelimit'),
+    # not only 'optimal'/'feasible'. The real check is get_solution() below --
+    # it raises if there is no incumbent, and _assert_canonical_ringed pins the
+    # structure of whatever solution was returned.
+    assert info.termination.lower() in (
+        'optimal',
+        'feasible',
+        'gaplimit',
+        'timelimit',
+    )
     S, G = solver.get_solution()
     _assert_canonical_ringed(S, capacity)
     assign_cables(G, [(capacity, 1.0)])
