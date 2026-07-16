@@ -105,6 +105,10 @@ class SolverSCIP(Solver, PoolHandler):
         self._solution_pool = [
             (model.getSolObjVal(sol), sol) for sol in model.getSols()
         ]
+        # Prime _value_map with the best solution so the STRAIGHT get_solution()
+        # path (which calls _topology_from_mip_pool without _objective_at) works;
+        # the SEGMENTED path resets it per pool entry via _objective_at().
+        _, self._value_map = self._solution_pool[0]
         self.num_solutions = num_solutions
         solution_info = SolutionInfo(
             runtime=model.getSolvingTime(),

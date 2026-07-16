@@ -272,11 +272,19 @@ def _milp_cases():
         )
     )
 
-    # --- per-solver breadth: every backend sees branched + radial + ringed ---
+    # --- per-solver breadth: every backend sees branched + radial + ringed,
+    #     plus a straight-feeder + pinned-feeder-count case. The straight route
+    #     and feeder-limit constraints are solver-specific code (each backend has
+    #     its own get_solution() STRAIGHT path and constraint emission), so the
+    #     segmented+unlimited cases alone leave those branches uncovered.
     for solver in MILP_SOLVERS:
         cases.append((small, milp_spec(solver, 5, topology='branched')))
         cases.append((small, milp_spec(solver, 5, topology='radial')))
         cases.append((small, milp_spec(solver, 5, topology='ringed')))
+        cases.append(
+            (small, milp_spec(solver, 5, topology='radial',
+                              feeder_route='straight', feeder_limit='minimum'))
+        )
 
     # --- a couple of larger / multi-substation MILP cases --------------------
     cases.append(('borkum2', milp_spec(SWEEP_SOLVER, 5, topology='ringed',
