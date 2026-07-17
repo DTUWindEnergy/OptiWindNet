@@ -12,7 +12,7 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import clusterize
-from ..interarraylib import fun_fingerprint, ringify_S
+from ..interarraylib import calcload, fun_fingerprint
 from ..repair import repair_routeset_path
 from ._core import (
     add_branches_to_S,
@@ -296,7 +296,7 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
     for r, (routes, indices) in enumerate(zip(routes_, indices_), start=-R):
         subtrees = (indices[route] for route in routes)
         # rings, too, are built as paths here (one feeder each), so that the
-        # path-based repair machinery applies; ringify_S() closes them afterwards
+        # path-based repair machinery applies; calcload(S, A) closes them afterwards
         sub_max_load, subtree_id_start = add_branches_to_S(
             S, subtrees, root=r, subtree_id_start=subtree_id_start
         )
@@ -477,12 +477,11 @@ def hgs_cvrp(
         if crossings:
             _warn('Solution contains crossings (max_retries reached)')
     if ringed:
-        # routes were built (and repaired) as open paths: close them into rings
         S.graph['topology'] = 'ringed'
-        ringify_S(S, A_orig)  # also sets 'has_loads'
+        calcload(S, A_orig)
     else:
         S.graph['topology'] = 'radial'
-        S.graph['has_loads'] = True
+        calcload(S)
 
     S.graph.update(
         T=T,

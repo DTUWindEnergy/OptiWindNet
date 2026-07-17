@@ -21,7 +21,6 @@ from ..interarraylib import (
     add_terminal_closest_root,
     calcload,
     fun_fingerprint,
-    ringify_S,
 )
 from .priorityqueue import PriorityQueue
 
@@ -969,10 +968,8 @@ def constructor(
     S.graph['topology'] = (
         'ringed' if ringed else 'radial' if method == 'radial_EW' else 'branched'
     )
-    if ringed:
-        ringify_S(S, Aʹ)
-    else:
-        calcload(S)
+    # ringed: pass Aʹ to close each path subtree into a ring; else just set loads
+    calcload(S, Aʹ if ringed else None)
     # algorithm finished, store some info in the graph object
     S.graph.update(
         runtime=time.perf_counter() - start_time,

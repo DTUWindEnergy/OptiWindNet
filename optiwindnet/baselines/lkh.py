@@ -18,7 +18,7 @@ import numpy as np
 from scipy.spatial.distance import pdist, squareform
 
 from ..clustering import clusterize
-from ..interarraylib import add_link_blockmap, fun_fingerprint, ringify_S
+from ..interarraylib import add_link_blockmap, calcload, fun_fingerprint
 from ..repair import repair_routeset_path
 from ._core import (
     add_branches_to_S,
@@ -589,7 +589,7 @@ def _build_solution(
         # output['routes'] uses matrix indices (0..T_c-1) for terminals
         subtrees = [[terminals[i] for i in route] for route in output['routes']]
         # rings, too, are built as paths here (one feeder each), so that the
-        # path-based repair machinery applies; ringify_S() closes them afterwards
+        # path-based repair machinery applies; calcload(S, A) closes them afterwards
         sub_max_load, subtree_id = add_branches_to_S(
             S, subtrees, root=r, subtree_id_start=subtree_id
         )
@@ -1074,12 +1074,11 @@ def lkh3(
         if crossings or over_capacity_clusters:
             warn('Solution remains invalid (max_retries reached)')
     if ringed:
-        # routes were built (and repaired) as open paths: close them into rings
         S.graph['topology'] = 'ringed'
-        ringify_S(S, A)  # also sets 'has_loads'
+        calcload(S, A)
     else:
         S.graph['topology'] = 'radial'
-        S.graph['has_loads'] = True
+        calcload(S)
     return S
 
 

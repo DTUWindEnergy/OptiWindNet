@@ -2,7 +2,7 @@
 
 The RINGED topology is now available across every solver family:
 
-* the shared ring builders :func:`add_ring_to_S`, :func:`ringify_S` and
+* the shared ring builders :func:`add_ring_to_S`, :func:`calcload` and
   :func:`rings_from_links` (canonical two-arm-with-split shape) that every
   backend reconstructs its solution through;
 * the constructive heuristic ``method='ringed'`` (and its public
@@ -13,7 +13,7 @@ The RINGED topology is now available across every solver family:
 
 Because every backend canonicalises its output through :func:`add_ring_to_S`
 (the MILP path in ``MILP/_core.py:get_solution``, HGS/LKH/constructor through
-:func:`ringify_S`), the same structural invariants hold for all of them. They
+:func:`calcload`), the same structural invariants hold for all of them. They
 are collected in :func:`_assert_canonical_ringed` and reused throughout so the
 suite pins the *shared contract* of a ringed solution rather than each
 backend's incidental output.
@@ -37,8 +37,8 @@ from optiwindnet.interarraylib import (
     G_from_S,
     add_ring_to_S,
     assign_cables,
-    ringify_S,
     rings_from_links,
+    calcload,
 )
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
@@ -224,8 +224,15 @@ def test_add_ring_to_S_odd_n_uses_longer_split_edge_when_A_given():
 
 
 # --------------------------------------------------------------------------- #
-# ringify_S: path-form -> canonical ring conversion (used by HGS/LKH/constructor)
+# calcload: path-form -> canonical ring conversion (used by HGS/LKH/constructor)
+#
+# calcload closes paths into rings exactly when handed an available-links graph
+# ``A``. These path-form tests don't care which split edge wins, so an empty
+# ``A`` (no lengths) is enough to request construction and take the default split.
 # --------------------------------------------------------------------------- #
+_CONSTRUCT = nx.Graph()  # non-None A: "close these paths into rings"
+
+
 def _path_form_S(R, paths):
     """Build a path-form topology: one non-branching path per (root, [terminals])."""
     T = sum(len(p) for _, p in paths)
@@ -238,10 +245,10 @@ def _path_form_S(R, paths):
     return S
 
 
-def test_ringify_S_single_root_matches_canonical_form():
-    """ringify_S turns non-branching paths into canonical rings within capacity."""
+def test_calcload_single_root_matches_canonical_form():
+    """calcload turns non-branching paths into canonical rings within capacity."""
     S = _path_form_S(1, [(-1, [0, 1, 2]), (-1, [3, 4])])
-    ringify_S(S, None)
+    calcload(S, _CONSTRUCT)
 
     rings = _assert_canonical_ringed(S, capacity=2)
     assert {frozenset(ordered) for _, ordered in rings} == {
@@ -254,10 +261,10 @@ def test_ringify_S_single_root_matches_canonical_form():
     assert S.nodes[-1]['load'] == 5
 
 
-def test_ringify_S_multi_root_keeps_rings_with_their_root():
+def test_calcload_multi_root_keeps_rings_with_their_root():
     """Each root's paths become rings still attached to that root."""
     S = _path_form_S(2, [(-2, [0, 1]), (-1, [2, 3, 4, 5]), (-1, [6])])
-    ringify_S(S, None)
+    calcload(S, _CONSTRUCT)
     _assert_canonical_ringed(S, capacity=3)
     rings = _rings(S)
     by_root = {r: {frozenset(o) for rr, o in rings if rr == r} for r in (-2, -1)}
@@ -265,10 +272,10 @@ def test_ringify_S_multi_root_keeps_rings_with_their_root():
     assert by_root[-1] == {frozenset({2, 3, 4, 5}), frozenset({6})}
 
 
-def test_ringify_S_renumbers_subtrees_uniquely_per_ring():
-    """After ringify each ring is a single, distinct subtree id."""
+def test_calcload_renumbers_subtrees_uniquely_per_ring():
+    """After calcload each ring is a single, distinct subtree id."""
     S = _path_form_S(1, [(-1, [0, 1]), (-1, [2, 3]), (-1, [4, 5])])
-    ringify_S(S, None)
+    calcload(S, _CONSTRUCT)
     ring_subtrees = [
         {S.nodes[t]['subtree'] for t in ordered} for _, ordered in _rings(S)
     ]
@@ -278,7 +285,7 @@ def test_ringify_S_renumbers_subtrees_uniquely_per_ring():
     assert len(set(flat)) == len(flat)
 
 
-def test_ringify_S_rejects_branching_subtree():
+def test_calcload_rejects_branching_subtree():
     """A branching (non-path) subtree cannot be ringified."""
     S = nx.Graph(R=1, T=3)
     S.add_node(-1)
@@ -286,7 +293,7 @@ def test_ringify_S_rejects_branching_subtree():
     S.add_edge(0, 1)
     S.add_edge(0, 2)  # branch at terminal 0
     with pytest.raises(ValueError):
-        ringify_S(S, None)
+        calcload(S, _CONSTRUCT)
 
 
 # --------------------------------------------------------------------------- #
@@ -367,7 +374,11 @@ def test_constructor_ringed_multi_root_covers_every_root(ringed_mesh_multiroot):
     R = A.graph['R']
     S = constructor(A, capacity=5, method='ringed')
     _assert_canonical_ringed(S, capacity=5)
-    roots_used = {r for r, _ in _rings(S)}
+    roots_used = {
+        r
+        for root_spec, _ in _rings(S)
+        for r in ((root_spec,) if isinstance(root_spec, int) else root_spec)
+    }
     assert roots_used == set(range(-R, 0))
 
 

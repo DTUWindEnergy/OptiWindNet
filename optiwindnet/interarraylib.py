@@ -236,16 +236,65 @@ def bfs_subtree_loads(G, parent, children, subtree):
     return load
 
 
-def calcload(G):
-    """Calculate link loads and updates edge and node attributes of G.
+def calcload(G: nx.Graph, A: nx.Graph | None = None) -> None:
+    """Calculate link loads and update edge and node attributes of ``G``.
 
-    Perform a breadth-first-traversal of each root's subtree. As each node is
-    visited, its subtree id and the load leaving it are stored as its
-    attribute (keys ``'subtree'`` and ``'load'``, respectively). Also the edges'
-    ``'load'`` attributes are updated accordingly.
+    The mode is selected by whether the available-links graph ``A`` is passed:
+
+    * **``A`` given — ring construction.** Only the ringed builders (HGS, LKH and
+      the ``method='ringed'`` constructor) pass ``A``. ``G`` is then a set of
+      simple ``root → … → root`` paths still missing their ``split`` edges: each
+      path is closed into a canonical ring (see :func:`add_ring_to_S`), using
+      ``A`` to pick the longer split edge on odd-length rings.
+    * **``A`` omitted — load (re)computation.** ``G`` is already in final form (a
+      forest, or a ring-form graph whose ``kind='split'`` open points are
+      present). A breadth-first traversal of each root's subtree propagates the
+      loads, treating ``split`` edges as breaks.
+
+    In both modes each node's subtree id and outgoing load land on its
+    ``'subtree'`` / ``'load'`` attributes, the edges' ``'load'`` attributes are
+    updated, and the graph's ``'max_load'``, ``'has_loads'`` and root loads are set.
     """
+    if A is not None:
+        # Ring construction: G is path-form (no 'split' edges yet). Walk each
+        # root's single-feeder path to its tail, then close it into a canonical
+        # ring; a tail already touching a root bridges two roots (r1, r2).
+        R = G.graph['R']
+        paths: list[tuple[int | tuple[int, int], list[int]]] = []
+        for root in range(-R, 0):
+            for gate in G[root]:
+                ordered = [gate]
+                back, fwd = root, gate
+                while True:
+                    nbrs = [n for n in G[fwd] if n != back]
+                    if not nbrs:
+                        break
+                    (nxt,) = nbrs  # ValueError here means G has a branching subtree
+                    if nxt < 0:
+                        break
+                    ordered.append(nxt)
+                    back, fwd = fwd, nxt
+                tn = ordered[-1]
+                end_roots = [
+                    r
+                    for r in range(-R, 0)
+                    if r in G[tn] and (len(ordered) > 1 or r != root)
+                ]
+                end_root = end_roots[0] if end_roots else root
+                root_spec = (root, end_root) if root != end_root else root
+                paths.append((root_spec, ordered))
+        G.remove_edges_from(list(G.edges))
+        max_load = 0
+        for subtree_id, (root_spec, ordered) in enumerate(paths):
+            add_ring_to_S(G, root_spec, ordered, subtree_id, A)
+            max_load = max(max_load, math.ceil(len(ordered) / 2))
+        for root in range(-R, 0):
+            G.nodes[root]['load'] = sum(G.nodes[n]['load'] for n in G[root])
+        G.graph['max_load'] = max_load
+        G.graph['has_loads'] = True
+        return
+
     R, T = (G.graph[k] for k in 'RT')
-    roots = range(-R, 0)
     for _, data in G.nodes(data=True):
         if 'load' in data:
             del data['load']
@@ -253,9 +302,12 @@ def calcload(G):
     subtree = 0
     total_load = 0
     max_load = 0
-    for root in roots:
+    for root in range(-R, 0):
         G.nodes[root]['load'] = 0
         for subroot in G[root]:
+            # a 'split' feeder (degenerate multi-root ring) carries no load
+            if G[root][subroot].get('kind') == 'split':
+                continue
             _ = bfs_subtree_loads(G, root, [subroot], subtree)
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
@@ -267,19 +319,19 @@ def calcload(G):
 
 def add_ring_to_S(
     S: nx.Graph,
-    root: int,
+    root: int | tuple[int, int] | list[int],
     ordered: list[int],
     subtree: int,
     A: nx.Graph | None = None,
 ) -> None:
     """Add a single ring (closed loop) to topology graph ``S`` in canonical form.
 
-    A ring is the union of two radial arms that share the root ``root`` and are
-    joined at their tail ends. ``ordered`` is the terminal sequence
-    ``[t1, ..., tn]`` walked along the ring, so that ``t1`` and ``tn`` are the two
-    feeder-connected terminals. Both feeders ``(root, t1)`` and ``(root, tn)`` are
-    real, load-bearing cables (there is no asymmetric "ring-back"); the single
-    open point of the ring is the edge at the load midpoint, marked
+    A ring is the union of two radial arms that share the root ``root`` (or bridge
+    two roots ``(r1, r2)``) and are joined at their tail ends. ``ordered`` is the
+    terminal sequence ``[t1, ..., tn]`` walked along the ring, so that ``t1`` and
+    ``tn`` are the two feeder-connected terminals. Both feeders ``(r1, t1)`` and
+    ``(r2, tn)`` are real, load-bearing cables (there is no asymmetric "ring-back");
+    the single open point of the ring is the edge at the load midpoint, marked
     ``kind='split'`` with ``load=0`` (no current flows through it).
 
     Arm 1 (the ``t1`` side) gets ``m = ceil(n / 2)`` terminals, so each arm holds at
@@ -293,37 +345,38 @@ def add_ring_to_S(
 
     Args:
       S: topology graph to add the ring to (modified in place).
-      root: the (negative) root node id shared by both arms.
+      root: the (negative) root node id or pair ``(r1, r2)`` of root node ids.
       ordered: terminal sequence ``[t1, ..., tn]`` along the ring.
       subtree: subtree id to assign to every node of the ring (both arms).
       A: optional available-links graph, used to pick the longer split edge on
-        even-node rings.
+        odd-node rings.
     """
+    r1, r2 = (root[0], root[1]) if isinstance(root, (tuple, list)) else (root, root)
     n = len(ordered)
     if n == 1:
-        # Degenerate ring: a single terminal has both feeders on it, which
-        # collapses to one edge in a simple graph — a radial stub of load 1.
+        # Degenerate ring: a single terminal has feeder(s) on it.
         S.add_node(ordered[0], load=1, subtree=subtree)
-        S.add_edge(root, ordered[0], load=1, reverse=False)
+        S.add_edge(r1, ordered[0], load=1, reverse=False)
+        if r1 != r2:
+            S.add_edge(r2, ordered[0], load=0, reverse=False, kind='split')
         return
-    m = math.ceil(n / 2)  # arm 1 size (t1 side)
-    # Even ring node count (odd n): the unique middle terminal has two valid split
-    # edges — choose the longer one when A is available.
-    if n % 2 == 1 and n > 1 and A is not None:
-        mid = n // 2
-        left_u, left_v = ordered[mid - 1], ordered[mid]
-        right_u, right_v = ordered[mid], ordered[mid + 1]
-        left_len = A[left_u][left_v]['length'] if A.has_edge(left_u, left_v) else 0
-        right_len = A[right_u][right_v]['length'] if A.has_edge(right_u, right_v) else 0
-        if left_len > right_len:
-            m = mid  # split on left edge; arm 1 gets floor(n / 2) nodes
+    m, mod = divmod(n, 2)
+    m += mod  # arm 1 (t1 side) gets ceil(n / 2); open point defaults to t2 side
+    if mod and A is not None:
+        # odd ring node count: the unique middle terminal has two valid split edges
+        #   — keep the open point on the longer one when A is available.
+        rev, center, fwd = ordered[m - 2], ordered[m - 1], ordered[m]
+        rev_len = A[rev][center]['length'] if A.has_edge(rev, center) else 0
+        fwd_len = A[center][fwd]['length'] if A.has_edge(center, fwd) else 0
+        if rev_len > fwd_len:
+            m -= 1
     # Node loads: arm 1 nodes ordered[0..m-1] carry m..1; arm 2 nodes
     # ordered[m..n-1] carry 1..(n - m) toward their own feeder.
     for i, t in enumerate(ordered):
         S.add_node(t, load=(m - i if i < m else i - m + 1), subtree=subtree)
     # Two feeders (both real cables) and the interior edges.
-    S.add_edge(root, ordered[0], load=m, reverse=False)
-    S.add_edge(root, ordered[-1], load=n - m, reverse=False)
+    S.add_edge(r1, ordered[0], load=m, reverse=False)
+    S.add_edge(r2, ordered[-1], load=n - m, reverse=False)
     for i in range(n - 1):
         u, v = ordered[i], ordered[i + 1]
         if i == m - 1:
@@ -335,7 +388,9 @@ def add_ring_to_S(
             S.add_edge(u, v, load=load, reverse=reverse)
 
 
-def rings_from_links(active_links, R: int) -> list[tuple[int, list[int]]]:
+def rings_from_links(
+    active_links, R: int
+) -> list[tuple[int | tuple[int, int], list[int]]]:
     """Recover ordered ring terminal sequences from a set of active links.
 
     ``active_links`` is any iterable of ``(u, v)`` node pairs that are active in a
@@ -349,6 +404,7 @@ def rings_from_links(active_links, R: int) -> list[tuple[int, list[int]]]:
     """
     term_adj: dict[int, set[int]] = defaultdict(set)
     feet: dict[int, list[int]] = defaultdict(list)
+    term_to_roots: dict[int, list[int]] = defaultdict(list)
     for u, v in active_links:
         if u >= 0 and v >= 0:
             term_adj[u].add(v)
@@ -356,7 +412,8 @@ def rings_from_links(active_links, R: int) -> list[tuple[int, list[int]]]:
         else:
             r, t = (u, v) if u < 0 else (v, u)
             feet[r].append(t)
-    rings: list[tuple[int, list[int]]] = []
+            term_to_roots[t].append(r)
+    rings: list[tuple[int | tuple[int, int], list[int]]] = []
     for r in range(-R, 0):
         pending = Counter(feet[r])
         while sum(pending.values()) > 0:
@@ -371,52 +428,25 @@ def rings_from_links(active_links, R: int) -> list[tuple[int, list[int]]]:
                 prev, curr = curr, nxts[0]
                 chain_.append(curr)
             tn = chain_[-1]
-            pending[tn] -= 1  # consume the other foot (same as t1 if n == 1)
-            rings.append((r, chain_))
+            r2_candidates = [
+                root_cand
+                for root_cand in term_to_roots[tn]
+                if root_cand in feet and tn in feet[root_cand]
+            ]
+            if r2_candidates:
+                r2 = (
+                    r
+                    if r in r2_candidates and (len(chain_) > 1 or pending[tn] > 0)
+                    else r2_candidates[0]
+                )
+                feet[r2].remove(tn)
+                if r2 == r:
+                    pending[tn] -= 1
+            else:
+                r2 = r
+            root_spec = (r, r2) if r != r2 else r
+            rings.append((root_spec, chain_))
     return rings
-
-
-def ringify_S(S: nx.Graph, A: nx.Graph | None = None) -> None:
-    """Convert a path-form topology to canonical ring form, in place.
-
-    Each subtree of ``S`` must be a non-branching path with a single feeder at
-    its head (the form produced by OCVRP-style route building). Every path
-    ``root → t1 → … → tn`` becomes the ring ``root → t1 → … → tn → root`` in the
-    canonical form of :func:`add_ring_to_S`: a second feeder at ``tn`` and the
-    open point (``kind='split'``, ``load=0``) at the load midpoint. This enables
-    solvers to run path-based crossing repair before committing to rings.
-
-    Node/edge ``'load'``, ``'subtree'`` and the graph's ``'max_load'``,
-    ``'has_loads'`` and root loads are recomputed; subtree ids are renumbered.
-
-    Args:
-      S: path-form topology graph (modified in place).
-      A: optional available-links graph, forwarded to :func:`add_ring_to_S` for
-        choosing the longer split edge on even-node rings.
-    """
-    R = S.graph['R']
-    paths: list[tuple[int, list[int]]] = []
-    for root in range(-R, 0):
-        for gate in S[root]:
-            ordered = [gate]
-            back, fwd = root, gate
-            while True:
-                nbrs = [n for n in S[fwd] if n != back]
-                if not nbrs:
-                    break
-                (nxt,) = nbrs  # ValueError here means S has a branching subtree
-                ordered.append(nxt)
-                back, fwd = fwd, nxt
-            paths.append((root, ordered))
-    S.remove_edges_from(list(S.edges))
-    max_load = 0
-    for subtree_id, (root, ordered) in enumerate(paths):
-        add_ring_to_S(S, root, ordered, subtree_id, A)
-        max_load = max(max_load, math.ceil(len(ordered) / 2))
-    for root in range(-R, 0):
-        S.nodes[root]['load'] = sum(S.nodes[n]['load'] for n in S[root])
-    S.graph['max_load'] = max_load
-    S.graph['has_loads'] = True
 
 
 def site_fingerprint(
@@ -905,8 +935,11 @@ def _ring_sequence_from_S(S: nx.Graph, R: int) -> list[int]:
             )
             if j != math.ceil(n / 2) - 1:
                 ordered = ordered[::-1]
-        seq.append(root)
+        r1, r2 = root if isinstance(root, tuple) else (root, root)
+        seq.append(r1)
         seq.extend(ordered)
+        if r1 != r2:
+            seq.append(r2)
     return seq
 
 

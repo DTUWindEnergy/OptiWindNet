@@ -206,13 +206,13 @@ def _find_fix_choices_path(
 def _quantify_choices_ringed(S, A, swapS, src_path, dst_path, choices):
     """Ring-aware counterpart of :func:`_quantify_choices`.
 
-    In a topology destined for rings (see :func:`.interarraylib.ringify_S`),
-    *both* extremes of every path get a feeder, so the length change prices
-    ``d2roots`` at all four extremes and there is no freedom to flip a gate to
-    a leaf end. The returned ``gates_del``/``gates_add`` still maintain the
-    single-feeder path form: if a path's fed extreme does not survive the fix,
+    In a topology destined for rings (closed by :func:`.interarraylib.calcload`
+    when handed ``A``), *both* extremes of every path get a feeder, so the length
+    change prices ``d2roots`` at all four extremes and there is no freedom to flip
+    a gate to a leaf end. The returned ``gates_del``/``gates_add`` still maintain
+    the single-feeder path form: if a path's fed extreme does not survive the fix,
     its feeder moves to the nearest new extreme (the other extreme's feeder is
-    added later by ``ringify_S``, so this choice does not affect final cost).
+    added later by ``calcload``, so this choice does not affect final cost).
     """
     quant_choices = []
     (rootS,) = (n for n in S[src_path[0]] if n < 0)
