@@ -3,7 +3,6 @@
 
 import abc
 import logging
-import math
 import os
 import sys
 from collections.abc import Mapping
@@ -92,6 +91,11 @@ class FeederLimit(StrEnum):
     ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
     count is pinned to a single value, i.e. ``'minimum'``, ``'exactly'``, or
     ``'specified'`` with ``'max_feeders'`` at the minimum.
+
+    For weighted turbine power, ``'minimum'`` and ``'min_plus*'`` are not
+    supported because aggregate power does not determine the exact number of
+    feeders needed for indivisible turbine loads. Use ``'unlimited'``,
+    ``'exactly'``, or ``'specified'`` instead.
     """
 
     UNLIMITED = auto()
@@ -119,7 +123,9 @@ def feeder_and_load_bounds(
     is bounded below by ``min_feeders = ceil(total_power/capacity)`` regardless
     of ``feeder_limit`` (a valid inequality). ``feeders_ub`` is ``None`` when
     the count is unbounded above; when it equals ``feeders_lb``, the count is
-    pinned and callers should emit an equality constraint.
+    pinned and callers should emit an equality constraint. With explicitly
+    weighted power, modes that derive their count from ``min_feeders`` are
+    rejected because indivisible turbine loads may require additional feeders.
 
     Balanced subtrees (loads differing at most by one unit) are only expressible
     with a pinned feeder count ``F``, in which case the loads must lie in
@@ -132,7 +138,20 @@ def feeder_and_load_bounds(
         ``(feeders_lb, feeders_ub, load_lb, load_ub)``
     """
     W = T if total_power is None else total_power
-    min_feeders = math.ceil(W / capacity)
+    derived_minimum = (
+        FeederLimit.MINIMUM,
+        FeederLimit.MIN_PLUS1,
+        FeederLimit.MIN_PLUS2,
+        FeederLimit.MIN_PLUS3,
+    )
+    if total_power is not None and W != T and feeder_limit in derived_minimum:
+        raise ValueError(
+            'weighted turbine power is unsupported for feeder_limit modes '
+            'derived from the minimum; use "unlimited", "exactly", or '
+            '"specified" instead'
+        )
+
+    min_feeders = -(-W // capacity)
     if feeder_limit is FeederLimit.UNLIMITED:
         feeders_lb, feeders_ub = min_feeders, None
     elif feeder_limit is FeederLimit.MINIMUM:
@@ -147,11 +166,7 @@ def feeder_and_load_bounds(
         if max_feeders < min_feeders:
             raise ValueError('max_feeders is below the minimum necessary')
         feeders_lb, feeders_ub = min_feeders, max_feeders
-    elif feeder_limit in (
-        FeederLimit.MIN_PLUS1,
-        FeederLimit.MIN_PLUS2,
-        FeederLimit.MIN_PLUS3,
-    ):
+    elif feeder_limit in derived_minimum[1:]:
         plus = int(feeder_limit.value[-1])
         feeders_lb, feeders_ub = min_feeders, min_feeders + plus
     else:
@@ -167,7 +182,7 @@ def feeder_and_load_bounds(
         )
         return feeders_lb, feeders_ub, None, None
     F = feeders_lb
-    load_lb, load_ub = W // F, math.ceil(W / F)
+    load_lb, load_ub = W // F, -(-W // F)
     # bounds at the extremes are already implied by the flow variable's bounds
     return (
         feeders_lb,
@@ -376,8 +391,9 @@ class Solver(abc.ABC):
         """
         metadata = self.metadata
         S = nx.Graph(R=metadata.R, T=metadata.T)
-        if 'power_scale' in self.A.graph:
-            S.graph['power_scale'] = self.A.graph['power_scale']
+        for key in ('power_scale', 'turbine_power_decimals'):
+            if key in self.A.graph:
+                S.graph[key] = self.A.graph[key]
         # ensure roots are added, even if some are not connected
         S.add_nodes_from(range(-metadata.R, 0))
         # Get active links and if flow is reversed (i.e. from small to big)

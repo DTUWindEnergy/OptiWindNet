@@ -50,6 +50,26 @@ plt.rcParams['svg.fonttype'] = 'none'
 _logger = logging.getLogger(__name__)
 _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 
+# Largest supported factor between nominal turbine power and integer quanta.
+_MAX_POWER_SCALE = 10_000_000
+
+
+def _validate_power_scale(power_scale: int) -> int:
+    """Return a valid supported power scale as a built-in integer."""
+    if (
+        not isinstance(power_scale, (int, np.integer))
+        or isinstance(power_scale, (bool, np.bool_))
+        or power_scale <= 0
+    ):
+        raise ValueError('power_scale must be a positive integer.')
+    if power_scale > _MAX_POWER_SCALE:
+        raise ValueError(
+            f'power_scale {power_scale} exceeds the maximum supported '
+            f'power_scale {_MAX_POWER_SCALE}. Reduce turbine_power_decimals or '
+            'use turbine_power values with a smaller common scale.'
+        )
+    return int(power_scale)
+
 
 def _normalize_turbine_power(
     turbine_power: 'Sequence[float] | np.ndarray', T: int, decimals: int
@@ -100,7 +120,7 @@ def _normalize_turbine_power(
     decimal_scale = 10**decimals
     scaled_powers = [int(power * decimal_scale) for power in rounded_powers]
     common_divisor = gcd(decimal_scale, *scaled_powers)
-    power_scale = decimal_scale // common_divisor
+    power_scale = _validate_power_scale(decimal_scale // common_divisor)
     if power_scale > 10:
         _warning(
             'turbine_power values require a scale factor of %d to be treated as'
@@ -225,7 +245,8 @@ class WindFarmNetwork:
             :class:`TypeError` for non-uniform power.
           turbine_power_decimals: Number of decimal places of ``turbine_power``
             to preserve (default 1). The resulting integer scale depends on the
-            rounded values; smaller scales are easier on the MILP solvers.
+            rounded values; smaller scales are easier on the MILP solvers. The
+            scale may not exceed 10,000,000.
 
         **Cable Specs** (``capacity`` is in turbine count for unit-power networks
         and in the same nominal units as ``turbine_power`` for weighted networks):
@@ -314,19 +335,35 @@ class WindFarmNetwork:
         elif any('power' in L.nodes[t] for t in range(T)):
             for t in range(T):
                 L.nodes[t].setdefault('power', 1)
-            power_scale = L.graph.get('power_scale', 1)
+            power_scale = _validate_power_scale(L.graph.get('power_scale', 1))
             L.graph.setdefault('turbine_power_decimals', 1)
         else:
             L.graph.pop('turbine_power_decimals', None)
         L.graph['power_scale'] = power_scale
+        self._validate_turbine_power_capacity(self.cables_capacity)
 
     # -------- helpers --------
-    def _scaled_cables(self) -> list[tuple[int, float | int]]:
+    def _scaled_cables(
+        self, cables: list[tuple[int, float | int]] | None = None
+    ) -> list[tuple[int, float | int]]:
         """Cable specs with capacities converted to integer power quanta."""
+        cables = self._cables if cables is None else cables
         power_scale = self.power_scale
         if power_scale == 1:
-            return self._cables
-        return [(capacity * power_scale, cost) for capacity, cost in self._cables]
+            return cables
+        return [(capacity * power_scale, cost) for capacity, cost in cables]
+
+    def _validate_turbine_power_capacity(self, cables_capacity: int) -> None:
+        """Ensure every turbine fits into the largest available cable."""
+        max_power = max(
+            (self._L.nodes[t].get('power', 1) for t in range(self._T)), default=1
+        )
+        if max_power > cables_capacity * self.power_scale:
+            nominal_power = max_power / self.power_scale
+            raise ValueError(
+                f'Maximum turbine power {nominal_power:g} exceeds maximum cable '
+                f'capacity {cables_capacity:g} (both in nominal units).'
+            )
 
     def _annotate_power(self, *graphs: nx.Graph) -> None:
         """Stamp per-terminal power attributes on solution graphs."""
@@ -337,6 +374,10 @@ class WindFarmNetwork:
         }
         for graph in graphs:
             graph.graph['power_scale'] = self.power_scale
+            if 'turbine_power_decimals' in self._L.graph:
+                graph.graph['turbine_power_decimals'] = self._L.graph[
+                    'turbine_power_decimals'
+                ]
             if turbine_power:
                 nx.set_node_attributes(graph, turbine_power, 'power')
 
@@ -359,7 +400,7 @@ class WindFarmNetwork:
                 #  print(list(out_of_bounds.geoms))
                 raise ValueError('Turbine out of bounds!')
         self._P, self._A = make_planar_embedding(self._L)
-        self._A.graph['power_scale'] = self.power_scale
+        self._annotate_power(self._A)
         self._is_stale_PA = False
 
     # -------- properties --------
@@ -431,11 +472,14 @@ class WindFarmNetwork:
     @cables.setter
     def cables(self, cables):
         parsed = parse_cables_input(cables)
-        self._cables = parsed
-        self.cables_capacity = max(parsed)[0]
-        'highest cable capacity in cables.'
+        cables_capacity = max(parsed)[0]
+        if hasattr(self, '_L'):
+            self._validate_turbine_power_capacity(cables_capacity)
         if not self._is_stale_SG:
-            assign_cables(self._G, self._scaled_cables())
+            assign_cables(self._G, self._scaled_cables(parsed))
+        self._cables = parsed
+        self.cables_capacity = cables_capacity
+        'highest cable capacity in cables.'
 
     @property
     def turbine_power(self) -> list[float] | None:
@@ -454,7 +498,8 @@ class WindFarmNetwork:
         """Factor between nominal units and internal integer power quanta.
 
         Raw graph ``'power'``, ``'load'``, and ``'capacity'`` values use quanta;
-        plots and high-level exports convert them back to nominal units.
+        plots and high-level exports convert them back to nominal units. The
+        maximum supported value is 10,000,000.
         """
         return self._L.graph.get('power_scale', 1)
 
@@ -1059,6 +1104,9 @@ class MILPRouter(Router):
             )
 
         solver = self.solver
+        has_non_unit_power = any(
+            A.nodes[t].get('power', 1) != 1 for t in range(A.graph['T'])
+        )
 
         for _ in range(2):
             try:
@@ -1071,6 +1119,11 @@ class MILPRouter(Router):
                 )
                 break
             except OWNWarmupFailed:
+                if has_non_unit_power:
+                    if S_warm is None:
+                        raise
+                    S_warm = None
+                    continue
                 if self.model_options['topology'] == 'branched':
                     feeder_route = self.model_options['feeder_route']
                     if feeder_route == 'segmented':

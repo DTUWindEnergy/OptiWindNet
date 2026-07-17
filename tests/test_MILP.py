@@ -154,16 +154,43 @@ def test_balanced_pins_loads_to_floor_and_ceil(
     assert result == expected_loads
 
 
+@pytest.mark.parametrize(
+    'feeder_limit',
+    [
+        core.FeederLimit.MINIMUM,
+        core.FeederLimit.MIN_PLUS1,
+        core.FeederLimit.MIN_PLUS2,
+        core.FeederLimit.MIN_PLUS3,
+    ],
+)
+def test_feeder_and_load_bounds_rejects_weighted_derived_minimum(feeder_limit):
+    with pytest.raises(
+        ValueError,
+        match='weighted turbine power.*unlimited.*exactly.*specified',
+    ):
+        core.feeder_and_load_bounds(12, 5, feeder_limit, 0, False, total_power=18)
+
+
 def test_feeder_and_load_bounds_weighted_power():
-    # weighted terminals: W=18 at capacity 5 needs 4 feeders (T=12 would need 3)
+    # Weighted terminals: W=18 at capacity 5 needs at least 4 feeders (T=12
+    # would need 3). Modes whose count is not derived from that lower bound
+    # remain supported.
     assert core.feeder_and_load_bounds(
-        12, 5, core.FeederLimit.MINIMUM, 0, False, total_power=18
-    ) == (4, 4, None, None)
-    # balanced bounds derive from W: floor(18/4) = 4; ceil(18/4) = 5 is already
-    # implied by the flow variable's upper bound (the capacity), hence None
+        12, 5, core.FeederLimit.UNLIMITED, 0, False, total_power=18
+    ) == (4, None, None, None)
     assert core.feeder_and_load_bounds(
-        12, 5, core.FeederLimit.MINIMUM, 0, True, total_power=18
+        12, 5, core.FeederLimit.SPECIFIED, 6, False, total_power=18
+    ) == (4, 6, None, None)
+    # With an exact count, balanced bounds still derive from W: floor(18/4) = 4;
+    # ceil(18/4) = 5 is implied by the flow variable's capacity bound.
+    assert core.feeder_and_load_bounds(
+        12, 5, core.FeederLimit.EXACTLY, 4, True, total_power=18
     ) == (4, 4, 4, None)
+
+    # An explicitly supplied unit total remains compatible with derived modes.
+    assert core.feeder_and_load_bounds(
+        12, 5, core.FeederLimit.MINIMUM, 0, False, total_power=12
+    ) == (3, 3, None, None)
 
     # EXACTLY is constrained by the number of terminals, not their total power.
     with pytest.raises(ValueError, match='above the number of terminals'):
@@ -172,9 +199,25 @@ def test_feeder_and_load_bounds_weighted_power():
         )
 
 
+def test_feeder_and_load_bounds_uses_exact_integer_ceiling_for_huge_values():
+    W = 10**400 + 1
+
+    minimum = (W + 2) // 3
+    assert core.feeder_and_load_bounds(
+        W, 3, core.FeederLimit.MINIMUM, 0, False, total_power=W
+    ) == (minimum, minimum, None, None)
+
+    load_lb, remainder = divmod(W, 3)
+    load_ub = load_lb + bool(remainder)
+    assert core.feeder_and_load_bounds(
+        W, W, core.FeederLimit.EXACTLY, 3, True, total_power=W
+    ) == (3, 3, load_lb, load_ub)
+
+
 def _solve_toy_weighted(solver_name, P, A):
     A = A.copy()
     A.graph['power_scale'] = 2
+    A.graph['turbine_power_decimals'] = 1
     for t in range(3):
         A.nodes[t]['power'] = 3
     solver = solver_factory(solver_name)
@@ -203,6 +246,10 @@ def test_weighted_power_solve(P_A_toy, solver_name, ortools_worker):
 
     S, G = result
     assert (S.graph.get('power_scale'), G.graph.get('power_scale')) == (2, 2)
+    assert (
+        S.graph.get('turbine_power_decimals'),
+        G.graph.get('turbine_power_decimals'),
+    ) == (1, 1)
     T = S.graph['T']
     expected_power = [3, 3, 3] + [1] * 9
     assert [S.nodes[t].get('power', 1) for t in range(T)] == expected_power

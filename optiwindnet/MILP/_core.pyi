@@ -88,6 +88,7 @@ class SolutionInfo:
 
 class Solver(abc.ABC):
     name: str
+    A: nx.Graph
     metadata: ModelMetadata
     solver: Any
     options: dict[str, Any]

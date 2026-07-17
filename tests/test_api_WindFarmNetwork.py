@@ -15,6 +15,7 @@ from optiwindnet.api import (
     MILPRouter,
     WindFarmNetwork,
 )
+from optiwindnet.MILP import ModelOptions
 
 from .helpers import tiny_wfn
 
@@ -163,9 +164,12 @@ def test_turbine_power_api_round_trip():
     assert restored.power_scale == 4
     assert restored.L.graph['power_scale'] == 4
     assert restored.A.graph['power_scale'] == 4
+    assert restored.A.graph['turbine_power_decimals'] == 2
 
     restored.update_from_terse_links(np.array([-1, -1]))
     assert restored.S.graph['power_scale'] == 4
+    assert restored.S.graph['turbine_power_decimals'] == 2
+    assert restored.G.graph['turbine_power_decimals'] == 2
     assert [restored.S.nodes[t]['power'] for t in range(2)] == [4, 5]
     assert sorted(data['load'] for *_, data in restored.G.edges(data=True)) == [4, 5]
     assert restored.G[0][-1]['cable'] == 0
@@ -215,6 +219,62 @@ def test_turbine_power_validation(overrides, match):
         WindFarmNetwork(**kwargs)
 
 
+def test_turbine_power_scale_limit_is_inclusive(caplog):
+    with caplog.at_level(logging.WARNING):
+        wfn = WindFarmNetwork(
+            cables=2,
+            turbine_power=[1.0, 1.0000001],
+            turbine_power_decimals=7,
+            **_TWO_TURBINES,
+        )
+
+    assert wfn.power_scale == 10_000_000
+    assert any('may slow down MILP solvers' in message for message in caplog.messages)
+
+
+def test_turbine_power_scale_above_limit_raises():
+    with pytest.raises(ValueError, match=r'100000000.*maximum supported.*10000000'):
+        WindFarmNetwork(
+            cables=2,
+            turbine_power=[1.0, 1.00000001],
+            turbine_power_decimals=8,
+            **_TWO_TURBINES,
+        )
+
+
+def test_turbine_power_must_fit_largest_cable():
+    with pytest.raises(ValueError, match=r'turbine power 1\.5.*cable capacity 1'):
+        WindFarmNetwork(cables=1, turbine_power=[1.0, 1.5], **_TWO_TURBINES)
+
+
+def test_failed_cable_reassignment_keeps_previous_cables():
+    wfn = WindFarmNetwork(cables=2, turbine_power=[1.0, 1.5], **_TWO_TURBINES)
+    wfn.update_from_terse_links(np.array([-1, -1]))
+    old_cables = wfn.cables
+    old_graph_cables = wfn.G.graph['cables']
+
+    with pytest.raises(ValueError, match=r'turbine power 1\.5.*cable capacity 1'):
+        wfn.cables = 1
+
+    assert wfn.cables is old_cables
+    assert wfn.cables_capacity == 2
+    assert wfn.G.graph['cables'] is old_graph_cables
+
+
+def test_failed_cable_reassignment_on_route_load_keeps_previous_cables():
+    wfn = WindFarmNetwork(cables=2, **_TWO_TURBINES)
+    wfn.update_from_terse_links(np.array([-1, 0]))
+    old_cables = wfn.cables
+    old_graph_cables = wfn.G.graph['cables']
+
+    with pytest.raises(ValueError, match='smaller than maximum load'):
+        wfn.cables = 1
+
+    assert wfn.cables is old_cables
+    assert wfn.cables_capacity == 2
+    assert wfn.G.graph['cables'] is old_graph_cables
+
+
 def test_heuristic_routers_reject_weighted_power():
     wfn = WindFarmNetwork(cables=5, turbine_power=[1.0, 1.5], **_TWO_TURBINES)
 
@@ -238,6 +298,30 @@ def test_weighted_solution_graphs_use_power_quanta(ortools_worker):
     assert S.graph['power_scale'] == G.graph['power_scale'] == 2
     assert [S.nodes[t]['power'] for t in range(2)] == [2, 3]
     assert G.graph['cables'] == [(4, 1.0)]
+
+
+def test_weighted_highs_reoptimization_retries_without_warmstart():
+    pytest.importorskip('highspy')
+    router = MILPRouter(
+        'highs',
+        time_limit=10,
+        mip_gap=0.01,
+        model_options=ModelOptions(feeder_limit='exactly', max_feeders=2),
+    )
+    wfn = WindFarmNetwork(
+        cables=3,
+        turbinesC=np.array([[-1.0, 0.0], [0.0, 1.0], [1.0, 0.0], [0.0, -1.0]]),
+        substationsC=np.array([[0.0, 0.0]]),
+        turbine_power=[1.5] * 4,
+        router=router,
+    )
+
+    wfn.optimize()
+    assert wfn.S.degree[-1] == 2
+
+    router.model_options = ModelOptions(feeder_limit='exactly', max_feeders=4)
+    wfn.optimize()
+    assert wfn.S.degree[-1] == 4
 
 
 def test_warmstart_eligibility_uses_total_power():
@@ -267,6 +351,33 @@ def test_warmstart_eligibility_uses_total_power():
     )
 
     assert ok is True
+
+
+def test_warmstart_balancing_uses_exact_large_integer_ceiling():
+    lower_load = 2**52
+    upper_load = lower_load + 1
+    S = nx.Graph(R=1, T=2)
+    S.add_node(-1, load=lower_load + upper_load)
+    S.add_node(0, power=lower_load, load=lower_load)
+    S.add_node(1, power=upper_load, load=upper_load)
+    S.add_edge(-1, 0, load=lower_load)
+    S.add_edge(-1, 1, load=upper_load)
+
+    assert U.is_warmstart_eligible(
+        S_warm=S,
+        cables_capacity=upper_load,
+        model_options={
+            'balanced': True,
+            'feeder_limit': 'exactly',
+            'max_feeders': 2,
+            'topology': 'radial',
+            'feeder_route': 'segmented',
+        },
+        S_warm_has_detour=False,
+        solver_name='ortools.cp_sat',
+        logger=logging.getLogger(U.__name__),
+        verbose=True,
+    )
 
 
 def test_invalid_gradient_type_raises():

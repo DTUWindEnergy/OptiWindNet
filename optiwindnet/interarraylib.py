@@ -2,9 +2,9 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import math
 import pickle
 import sys
+from bisect import bisect_left
 from hashlib import sha256
 from itertools import chain, pairwise
 
@@ -60,6 +60,8 @@ _essential_graph_attrs = (
     'landscape_angle',  # optional
     'norm_scale',
     'norm_offset',  # optional
+    'power_scale',
+    'turbine_power_decimals',
 )
 
 
@@ -84,18 +86,23 @@ def assign_cables(
         cable entry must be a tuple)
       currency: symbol representing the unit of the cost
     """
+    capacities = [cable[0] for cable in cables]
     capacity = max(cables)[0]
     if G.graph['max_load'] > capacity:
         raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
-    run_len_ = (b[0] - a[0] for a, b in pairwise(chain(((0,),), cables)))
-    kind = [k for k, run_len in enumerate(run_len_) for _ in range(run_len)]
-    cost = [cables[k][1] for k in kind]
-    has_cost = sum(cost) > 0
+    costs = [cable[1] for cable in cables]
+    has_cost = (
+        sum(
+            (cable[0] - previous[0]) * cable[1]
+            for previous, cable in pairwise(chain(((0,),), cables))
+        )
+        > 0
+    )
     for _, _, data in G.edges(data=True):
-        k = data['load'] - 1
-        data['cable'] = kind[k]
+        cable = bisect_left(capacities, data['load'])
+        data['cable'] = cable
         if has_cost:
-            data['cost'] = data['length'] * cost[k]
+            data['cost'] = data['length'] * costs[cable]
     G.graph['cables'] = cables
     if has_cost:
         G.graph['currency'] = currency
@@ -125,9 +132,8 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     desc = []
     desc.append(f'κ = {capacity / power_scale:g}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
-    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(
-        total_power(G) / capacity
-    )
+    min_feeders = -(-int(total_power(G)) // int(capacity))
+    excess_feeders = sum(G.degree[-r] for r in roots) - min_feeders
     desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
     length = G.size(weight='length')
     if length > 0:
@@ -353,6 +359,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         'norm_offset',
         'is_normalized',
         'power_scale',
+        'turbine_power_decimals',
     ):
         value = A.graph.get(k)
         if value is not None:
@@ -628,8 +635,9 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
         R=R,
         capacity=capacity,
     )
-    if 'power_scale' in G.graph:
-        S.graph['power_scale'] = G.graph['power_scale']
+    for key in ('power_scale', 'turbine_power_decimals'):
+        if key in G.graph:
+            S.graph[key] = G.graph[key]
     # create a topology graph S from the results
     for r in range(-R, 0):
         S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']} if has_loads else {}))
@@ -703,10 +711,11 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
         L.graph['B'] -= len(stunts_primes)
     # END: Legacy compatibility block
 
-    L.add_nodes_from(
-        ((n, {'label': label}) for n, label in G.nodes(data='label') if 0 <= n < T),
-        kind='wtg',
-    )
+    for n in range(T):
+        node_attrs = {'label': G.nodes[n].get('label'), 'kind': 'wtg'}
+        if 'power' in G.nodes[n]:
+            node_attrs['power'] = G.nodes[n]['power']
+        L.add_node(n, **node_attrs)
     for r in range(-R, 0):
         L.add_node(r, label=G.nodes[r].get('label'), kind='oss')
     return L

@@ -1,5 +1,4 @@
 import logging
-import math
 from typing import Sequence
 
 import matplotlib.pyplot as plt
@@ -165,7 +164,7 @@ def is_warmstart_eligible(
     # the model constrains the feeder count over all roots, not per root
     feeder_count = sum(S_warm.degree[r] for r in range(-R, 0))
     feeder_limit_mode = model_options.get('feeder_limit', 'unlimited')
-    feeder_minimum = math.ceil(W / capacity)
+    feeder_minimum = -(-W // capacity)
 
     # feeder_exact is the pinned feeder count, if the mode pins it
     feeder_exact = None
@@ -200,7 +199,7 @@ def is_warmstart_eligible(
 
     # Balanced constraint: only enforced by the model if the feeder count is pinned
     if model_options.get('balanced') and feeder_exact:
-        load_lb, load_ub = W // feeder_exact, math.ceil(W / feeder_exact)
+        load_lb, load_ub = W // feeder_exact, -(-W // feeder_exact)
         subtree_loads = [
             S_warm.nodes[t]['load'] for r in range(-R, 0) for t in S_warm.neighbors(r)
         ]
