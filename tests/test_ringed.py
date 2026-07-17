@@ -408,23 +408,80 @@ def test_constructor_ringed_end_to_end_is_valid(ringed_mesh, feeder_route):
     assert G.size(weight='length') > 0.0
 
 
-def test_constructor_ringed_no_crossing_compacts_stunt_contour_clone():
-    """The no-crossing PathFinder path must finalize stunt-based contours."""
+def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
+    """A stunt contour survives G_from_S and the no-crossing PathFinder path.
+
+    Stunt vertices are dropped from the compacted ``VertexC`` that routesets
+    keep, so a contour clone that runs through a stunt cannot address it.
+    :func:`G_from_S` must therefore emit an ``fnT`` that already maps such a
+    clone to the stunt's original prime -- otherwise every ``fnT`` consumer
+    (``gateXing_iter``, ``svgplot``, ...) would index past ``VertexC``. On top
+    of that, PathFinder must, even on its no-crossing early return, close the
+    stunt-id gap left in the clone *node* numbering.
+
+    borkum2's ringed constructor output always has genuine feeder crossings
+    where a stunt contour is present, so we drive the no-crossing branch with a
+    minimal single-subtree routeset over an A-edge whose contour runs through a
+    stunt.
+    """
     P, A = _load_ringed_mesh('borkum2')
-    T, B_A = (A.graph[k] for k in 'TB')
+    R, T, B_A = (A.graph[k] for k in 'RTB')
     stunts_primes = A.graph['stunts_primes']
     stunt_nodes = set(range(T + B_A - len(stunts_primes), T + B_A))
+    stunt_prime_set = set(stunts_primes)
 
-    S = constructor(A, capacity=8, method='ringed')
-    G_tentative = G_from_S(S, A)
-    tentative_fnT = G_tentative.graph['fnT']
-    tentative_contours = {
-        n for n, data in G_tentative.nodes(data=True) if data.get('kind') == 'contour'
-    }
-    assert any(tentative_fnT[n] in stunt_nodes for n in tentative_contours)
+    def minimal_routeset(gate, leaf):
+        """A single two-terminal subtree: root -> gate -> leaf."""
+        S = nx.Graph(R=R, T=T, capacity=T, creator='synthetic', has_loads=True)
+        S.add_node(-1, load=2)
+        S.add_node(gate, load=2, subtree=0)
+        S.add_node(leaf, load=1, subtree=0)
+        S.add_edge(-1, gate, load=2, reverse=False)
+        S.add_edge(gate, leaf, load=1, reverse=False)
+        return S
 
-    pathfinder = PathFinder(G_tentative, planar=P, A=A, ringed=True)
-    assert pathfinder.Xings == []
+    # Terminal-to-terminal A-edges whose contour passes through a stunt vertex.
+    # Route each as a lone subtree (either endpoint as the gate) and keep the
+    # first whose single feeder crosses nothing, so PathFinder takes its
+    # no-crossing early return while a stunt contour clone is present.
+    stunt_edges = [
+        (u, v)
+        for u, v, mp in A.edges(data='midpath')
+        if 0 <= u < T and 0 <= v < T and mp and any(m in stunt_nodes for m in mp)
+    ]
+    for u, v in stunt_edges:
+        for gate, leaf in ((u, v), (v, u)):
+            G_tentative = G_from_S(minimal_routeset(gate, leaf), A)
+            tentative_fnT = G_tentative.graph.get('fnT')
+            if tentative_fnT is None:  # contour got fully shortened -> no clone
+                continue
+            # a stunt-derived clone resolves either to the stunt node (before the
+            # G_from_S remap) or to the stunt's prime (after it) -- detect both so
+            # the check does not presuppose the fix.
+            stunt_contours = {
+                n
+                for n, data in G_tentative.nodes(data=True)
+                if data.get('kind') == 'contour'
+                and (
+                    tentative_fnT[n] in stunt_nodes
+                    or tentative_fnT[n] in stunt_prime_set
+                )
+            }
+            if not stunt_contours:
+                continue
+            # G_from_S must map the clone within the compacted VertexC bounds
+            nrows = G_tentative.graph['VertexC'].shape[0]
+            assert all(tentative_fnT[n] < nrows for n in stunt_contours)
+            pathfinder = PathFinder(G_tentative, planar=P, A=A, ringed=True)
+            if not pathfinder.Xings:
+                break
+        else:
+            continue
+        break
+    else:
+        pytest.skip('no crossing-free stunt-contour routeset found for borkum2')
+
+    assert pathfinder.Xings == []  # the no-crossing early return is taken
     G = pathfinder.create_detours()
 
     R, T, B = (G.graph[k] for k in 'RTB')
@@ -434,9 +491,14 @@ def test_constructor_ringed_no_crossing_compacts_stunt_contour_clone():
         n for n, data in G.nodes(data=True) if data.get('kind') == 'contour'
     }
 
+    assert C > 0  # the stunt contour clone survived
     assert len(fnT) == T + B + C + D + R
+    # the stunt-id gap in the clone node numbering was closed
     assert contour_nodes == set(range(T + B, T + B + C))
+    # every clone maps to an original constraint vertex, never a stunt node
     assert all(fnT[n] < T + B for n in contour_nodes)
+    assert not any(fnT[n] in stunt_nodes for n in contour_nodes)
+    assert not any(fnT[n] in stunt_nodes for n in contour_nodes)
 
 
 # --------------------------------------------------------------------------- #
