@@ -32,6 +32,10 @@ _debug, _info, _warn, _error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.err
 _ONE = bitarray('1')
 _DEFAULT_BIAS_MARGIN = 0.02
 
+# ringed root-ward bias (r0, r1), tuned on the R>1 repository locations; nearly
+# constant in capacity, so unlike _rootlust_coefs it is not a closed form
+_RINGED_ROOTLUST = (0.7, 0.3)
+
 # empirically obtained coefficients
 _rootlust_coefs = (
     # rootlust_0 = [0] + [1]/capacity
@@ -86,12 +90,13 @@ def constructor(
         EW variant that produces radial subtrees (simple paths from root).
       ``'ringed'``
         Grows simple-path subtrees that are closed into rings at finalization:
-        both endpoints connect to the same root (two feeders), joined at an open
-        point (``kind='split'``, no current). ``capacity`` is the per-arm limit,
-        so a ring holds up to ``2 * capacity`` terminals. Unions are ranked by
-        their total saving — the feeders shed at the two joined endpoints minus
-        the connecting edge's length (Clarke-Wright style) — with a
-        ``bias_margin`` window favoring the more root-ward union on quasi-ties.
+        each endpoint connects to its nearest root (two feeders, which may bridge
+        two roots), joined at an open point (``kind='split'``, no current).
+        ``capacity`` is the per-arm limit, so a ring holds up to ``2 * capacity``
+        terminals. Unions are ranked by their total saving — the feeders shed at
+        the two joined endpoints minus the connecting edge's length (Clarke-Wright
+        style) — with a ``bias_margin`` window favoring the more root-ward union
+        on quasi-ties.
 
     Args:
       Aʹ: available links graph
@@ -145,14 +150,18 @@ def constructor(
     add_terminal_closest_root(A)
     rootmask__ = A.graph['rootmask__']
     d2rootsRank = rankdata(d2roots, method='dense', axis=0)
-    if not rootlust_:
-        # closed form approximations for providing the best rootlust for the capacity
-        rootlust_0 = _rootlust_coefs[0][0] + _rootlust_coefs[0][1] / capacity
-        rootlust_1 = _rootlust_coefs[1][0] + _rootlust_coefs[1][1] * rootlust_0
-        # pre-scale rootlust_1 to avoid the division inside the loop
-        rootlust_ = rootlust_0, rootlust_1 / max(capacity - 1, 1)
+    if rootlust_:
+        r0, r1 = rootlust_
+    elif ringed:
+        # ringed's root-ward bias is near-constant in capacity (tuned on the
+        # R>1 repository locations); the branched closed form does not apply
+        r0, r1 = _RINGED_ROOTLUST
     else:
-        rootlust_ = rootlust_[0], rootlust_[1] / max(capacity - 1, 1)
+        # closed form approximations for the best rootlust for the capacity
+        r0 = _rootlust_coefs[0][0] + _rootlust_coefs[0][1] / capacity
+        r1 = _rootlust_coefs[1][0] + _rootlust_coefs[1][1] * r0
+    # pre-scale the slope to avoid the division inside the loop
+    rootlust_ = r0, r1 / max(capacity - 1, 1)
 
     # removing root nodes from A to speedup enqueue_best_union
     # this may be done because G already starts with feeders
@@ -232,14 +241,11 @@ def constructor(
             return ()
 
     def ringed_chooser(choices):
-        # Choose the ringed union/insertion candidate with a bias towards the
-        # smaller resulting feeder pair (root-ward), among candidates whose
-        # `saving` is within `bias_margin` of the best. Candidates carry
-        # `(-saving, feeder_pair, u, v)`; the best has the largest `saving`
-        # (smallest `-saving`). The window acts on `saving` — not `extent` as in
-        # `biased_chooser` — because the ringed saving also varies with the
-        # peer/target feeders. Returns the chosen candidate's own tuple (its
-        # `-saving` stays the priority-queue key).
+        # Among candidates `(-saving, feeder_pair, u, v)` within `bias_margin` of
+        # the best `saving`, pick the smallest resulting feeder pair (root-ward).
+        # The window acts on `saving` (not `extent` as in biased_chooser) since
+        # the ringed saving also depends on the peer feeders; bias_margin == 0
+        # reduces to exact-saving ties broken by feeder_pair.
         if not choices:
             return ()
         choices.sort()
@@ -413,52 +419,36 @@ def constructor(
         return biased_chooser(choices, d2root), edges2discard
 
     def find_union_ringed_tradeoff(subroot):
-        """Grow simple-path subtrees that get closed into rings at finalization.
+        """Rank unions that grow simple paths (closed into rings at finalization).
 
-        A ring's cost is its path edges plus two feeders — one at each path
-        endpoint — to a shared root (see :func:`add_ring_to_S`). A component's
-        prospective feeder cost is therefore a pair of feeders::
-
-            feeder_pair = min over roots of (d2roots[subroot] + d2roots[tail])
-
-        (a singleton has ``subroot == tail``, so it is priced at twice its root
-        distance, consistent with the two-feeder ring it grows into; its
-        realized degenerate stub is cheaper). A union joining this component's
-        endpoint ``u_head`` to a peer's endpoint ``v`` sheds the feeders of the
-        two joined endpoints and keeps those of the two far endpoints::
+        A ring costs its path edges plus two feeders, one at each endpoint; each
+        foot attaches to its own nearest root, so the feeder pair is
+        ``d2roots[subroot].min() + d2roots[tail].min()`` (feet nearest different
+        roots make the ring bridge them). Joining this component's endpoint
+        ``u_head`` to a peer's endpoint ``v`` sheds the two joined feeders and
+        keeps the two far ones::
 
             saving = feeder_pair + feeder_pair_sr_v - extent - union_feeders
 
-        With a single root this reduces to the classic saving
-        ``d2root(u_head) + d2root(v) - extent`` of:
-
-          Clarke, G., and J. W. Wright. "Scheduling of Vehicles from a Central
-            Depot to a Number of Delivery Points." Operations Research 12,
-            no. 4 (1964): 568–81. https://doi.org/10.1287/opre.12.4.568.
-
-        which is also the union's Esau-Williams tradeoff, since it is the exact
-        change in total cost. Only cost-reducing unions (``saving >= 0``) are
-        candidates and the priority is ``-saving``. Selection applies a
-        ``bias_margin`` window: candidates whose ``saving`` lies within
-        ``bias_margin`` (a fraction of the best ``saving``) of the best are
-        treated as equivalent, and the one with the smallest resulting feeder
-        pair (``union_feeders``, root-ward) is chosen. Unlike the
-        ``extent``-scaled window of :func:`biased_chooser` — which relies on a
-        source feeder that is common to all of a component's candidates — the
-        ringed saving also varies with the peer/target feeders, so the window
-        acts on ``saving`` directly. With ``bias_margin == 0`` the window
-        degenerates to exact ``saving`` ties, broken by ``union_feeders``.
-
-        Inserting a lone node between two adjacent path nodes sheds the node's
-        ``feeder_pair`` and leaves the receiving path's feeders unchanged:
-        ``tradeoff = extent - feeder_pair``.
+        This is the exact change in total cost (the Clarke-Wright / Esau-Williams
+        tradeoff; https://doi.org/10.1287/opre.12.4.568). Only ``saving >= 0``
+        unions qualify, priority ``-saving``; ties within ``bias_margin`` of the
+        best saving are broken root-ward (see :func:`ringed_chooser`). Inserting
+        a lone node between two adjacent path nodes instead sheds its feeder pair
+        and leaves the receiver unchanged: ``tradeoff = extent - feeder_pair``.
         """
         subtree = subtree_[subroot]
         subtree_count = subtree.count()
         capacity_left = capacity - subtree_count
         tail = tail_[subroot]
-        # length of this component's two feeders (at the best shared root)
-        feeder_pair = (d2roots[subroot] + d2roots[tail]).min()
+        # length of this component's two feeders; each foot attaches to its own
+        # nearest root, so a ring may bridge two roots (r1, r2)
+        feeder_pair = d2roots[subroot].min() + d2roots[tail].min()
+        # rootlust-like root-ward pull, growing as the ring fills (see
+        # find_union_rootlust_tradeoff); for an extension at u_head,
+        # feeder_pair - union_feeders is the shed feeder minus the adopted far
+        # feeder, the ringed analog of rootlust's d2rGain
+        rootlust = rootlust_[0] + rootlust_[1] * subtree_count
         choices = []
         edges2discard = []
         if subtree_count == 1:
@@ -491,6 +481,8 @@ def constructor(
                     tradeoff = extent - feeder_pair
                     if tradeoff <= 0:
                         sr_u = subroot_[u]
+                        if subtree_[sr_u].count() + 1 > capacity:
+                            continue
                         # the receiving component's feeder pair as tie-breaker
                         tiebreaker = (d2roots[sr_u] + d2roots[tail_[sr_u]]).min()
                         choices.append((tradeoff, tiebreaker, u, v))
@@ -513,11 +505,12 @@ def constructor(
                 extent = A[u_head][v]['length']
                 # far_v: the peer's far endpoint, which keeps its feeder
                 far_v = tail_v if v == sr_v else sr_v
-                feeder_pair_sr_v = (d2roots[sr_v] + d2roots[tail_v]).min()
-                union_feeders = (d2roots[u_tail] + d2roots[far_v]).min()
+                feeder_pair_sr_v = d2roots[sr_v].min() + d2roots[tail_v].min()
+                union_feeders = d2roots[u_tail].min() + d2roots[far_v].min()
                 saving = feeder_pair + feeder_pair_sr_v - extent - union_feeders
                 if saving >= 0:
-                    choices.append((-saving, union_feeders, u_head, v))
+                    biased = saving + rootlust * (feeder_pair - union_feeders)
+                    choices.append((-biased, union_feeders, u_head, v))
         return ringed_chooser(choices), edges2discard
 
     # END: alternative methods of selecting the best edge to expand components
@@ -713,6 +706,28 @@ def constructor(
         # HACK: queue entries encode an insertion if sr_kept has edge (u, v) in S
         is_insertion = subroot_[u] != sr_u and (u, v) in S.edges
         _debug('<pop> «%d~%d», sr_dropped: <%d>, ins: %s', u, v, sr_u, is_insertion)
+        # re-validate the popped entry: state may have changed since it was
+        # queued. A failed check refreshes the subtree (is_stale_) and retries.
+        if not is_insertion:
+            if subroot_[u] == subroot_[v]:
+                _debug('<discard> «%d~%d» same subroot', u, v)
+                is_stale_[sr_u] = True
+                continue
+            if radial_like and (
+                (u != sr_u and u != tail_[sr_u])
+                or (v != sr_kept and v != tail_[sr_kept])
+            ):
+                _debug('<discard> «%d~%d» nodes are no longer endpoints', u, v)
+                is_stale_[sr_u] = True
+                continue
+            if subtree_[subroot_[u]].count() + subtree_[subroot_[v]].count() > capacity:
+                _debug('<discard> «%d~%d» combined capacity exceeded', u, v)
+                is_stale_[sr_u] = True
+                continue
+        elif subtree_[subroot_[u]].count() + 1 > capacity:
+            _debug('<discard> «%d~%d» insertion capacity exceeded', u, v)
+            is_stale_[sr_u] = True
+            continue
         if (u, v) not in A.edges:
             if not is_insertion:
                 _debug('<discard> «%d~%d» not in A anymore', u, v)
@@ -817,20 +832,6 @@ def constructor(
 
         sr_dropped = sr_u
         root = A.nodes[sr_kept]['root']
-
-        if ringed and R > 1:
-            # a ring's two feeders share one root: pick the root that
-            # minimizes the length of the union's feeder pair
-            union_root = (d2roots[sr_kept] + d2roots[tail_[sr_kept]]).argmin() - R
-            if union_root != root:
-                # reassign the kept subtree's nodes (the dropped subtree's nodes
-                # get the updated `root` in the common machinery below)
-                subtree_kept = subtree_[sr_kept]
-                rootmask__[root] &= ~subtree_kept
-                rootmask__[union_root] |= subtree_kept
-                for t in subtree_kept.search(_ONE):
-                    A.nodes[t]['root'] = union_root
-                root = union_root
 
         if use_blockage:
             _debug('<angle_span> //%s//', union_span_[root])
@@ -962,9 +963,19 @@ def constructor(
 
     # add feeders (the 'ringed' method closes each path subtree into a ring)
     is_subroot_ = bitarray(subtree is not None for subtree in subtree_)
-    for r, rootmask_ in zip(roots, rootmask__):
-        for sr in (rootmask_ & is_subroot_).search(_ONE):
-            S.add_edge(r, sr)
+    if ringed and R > 1:
+        # each ring foot attaches to its own nearest root; when the two feet
+        # prefer different roots the ring bridges them (calcload reads the pair
+        # of feeders back as a (r1, r2) ring)
+        for sr in is_subroot_.search(_ONE):
+            S.add_edge(int(d2roots[sr].argmin()) - R, sr)
+            far = tail_[sr]
+            if far != sr:
+                S.add_edge(int(d2roots[far].argmin()) - R, far)
+    else:
+        for r, rootmask_ in zip(roots, rootmask__):
+            for sr in (rootmask_ & is_subroot_).search(_ONE):
+                S.add_edge(r, sr)
     S.graph['topology'] = (
         'ringed' if ringed else 'radial' if method == 'radial_EW' else 'branched'
     )

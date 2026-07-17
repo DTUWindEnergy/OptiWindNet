@@ -261,8 +261,12 @@ def calcload(G: nx.Graph, A: nx.Graph | None = None) -> None:
         # ring; a tail already touching a root bridges two roots (r1, r2).
         R = G.graph['R']
         paths: list[tuple[int | tuple[int, int], list[int]]] = []
+        seen: set[int] = set()  # first terminal of each ring already walked
         for root in range(-R, 0):
             for gate in G[root]:
+                if gate in seen:
+                    # bridging ring: already walked from its other foot's root
+                    continue
                 ordered = [gate]
                 back, fwd = root, gate
                 while True:
@@ -274,6 +278,7 @@ def calcload(G: nx.Graph, A: nx.Graph | None = None) -> None:
                         break
                     ordered.append(nxt)
                     back, fwd = fwd, nxt
+                seen.update(ordered)
                 tn = ordered[-1]
                 end_roots = [
                     r
