@@ -3,6 +3,7 @@ import math
 import networkx as nx
 import numpy as np
 
+import optiwindnet.pathfinding as pathfinding
 from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import G_from_S
 from optiwindnet.pathfinding import PathFinder
@@ -89,6 +90,27 @@ def test_pathfinder_detects_crossings():
     # Xings identify which feeders are crossing
     assert (-1, 1) in pf.Xings
     assert (-1, 2) in pf.Xings
+
+
+def test_label_free_shortened_contour_is_not_an_ordinary_route(monkeypatch):
+    """A fully shortened contour contributes only its expanded fence edges."""
+    G_tent, P, A = _make_crossing_case()
+    G_tent.add_edge(0, 2, length=A[0][2]['length'], load=1, reverse=False)
+    G_tent.graph['shortened_contours'] = {(0, 2): ([9], [])}
+
+    flipped_edge_sets = []
+    original = pathfinding.planar_flipped_by_routeset
+
+    def capture_edges(edges, **kwargs):
+        flipped_edge_sets.append(set(edges))
+        return original(edges, **kwargs)
+
+    monkeypatch.setattr(pathfinding, 'planar_flipped_by_routeset', capture_edges)
+    pf = PathFinder(G_tent, planar=P, A=A)
+
+    assert flipped_edge_sets
+    assert all((0, 2) not in edges for edges in flipped_edge_sets)
+    assert any(fence.endpoints == (0, 2) for fence in pf.fences)
 
 
 def test_create_detours_adds_detour_nodes():

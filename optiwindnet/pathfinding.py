@@ -339,17 +339,21 @@ class PathFinder:
 
         # Single pass over G.edges: non-contour edges contribute their
         # prime pair to `edges_G_primes` directly; contour edges register
-        # their A-edge for later fence emission. G's contour clones may
-        # follow a synthetic (shortcut) prime sequence, so the fence-side
-        # loop below substitutes the fully P-edge-expanded chain for what
-        # those clones would naively project to.
+        # their A-edge for later fence emission. Fully shortened contours have
+        # no contour clones or edge kind, so identify their direct edge through
+        # `shortened_contours`. G's contour clones may follow a synthetic
+        # (shortcut) prime sequence, so the fence-side loop below substitutes
+        # the fully P-edge-expanded chain for what those clones would naively
+        # project to.
         shortened = G.graph.get('shortened_contours') or {}
         contour_A_edges: dict[tuple[int, int], int] = {
             ae: G.nodes[ae[1]]['subtree'] for ae in shortened
         }
         edges_G_primes: set[tuple[int, int]] = set()
         for u, v, d in G.edges(data=True):
-            if d.get('kind') == 'contour':
+            kind = d.get('kind')
+            uv = (u, v) if u < v else (v, u)
+            if kind == 'contour' or (kind is None and uv in shortened):
                 ae = d.get('A_edge')
                 if ae is not None and ae not in contour_A_edges:
                     contour_A_edges[ae] = G.nodes[ae[1]]['subtree']

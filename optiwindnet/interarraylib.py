@@ -682,7 +682,6 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                 G.add_edge(
                     s,
                     t,
-                    kind=edge_kind,
                     reverse=st_reverse,
                     load=load,
                     length=AedgeD['length'],
