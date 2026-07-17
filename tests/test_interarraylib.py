@@ -528,9 +528,7 @@ def test_terse_links_ringed_preserves_open_point(longer, expected_open):
 
     terse = terse_links_from_S(S)
     S2 = S_from_terse_links(terse, R=1, T=3)
-    open_point = next(
-        {u, v} for u, v, d in S2.edges(data=True) if d.get('kind') == 'split'
-    )
+    open_point = next({u, v} for u, v, d in S2.edges(data=True) if d.get('load') == 0)
     assert open_point == set(expected_open)
 
 

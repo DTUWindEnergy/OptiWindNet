@@ -21,6 +21,7 @@ from ..interarraylib import (
     add_terminal_closest_root,
     calcload,
     fun_fingerprint,
+    split_rings_and_calc_loads,
 )
 from .priorityqueue import PriorityQueue
 
@@ -91,7 +92,7 @@ def constructor(
       ``'ringed'``
         Grows simple-path subtrees that are closed into rings at finalization:
         each endpoint connects to its nearest root (two feeders, which may bridge
-        two roots), joined at an open point (``kind='split'``, no current).
+        two roots), joined at an open point (``load=0``, no current).
         ``capacity`` is the per-arm limit, so a ring holds up to ``2 * capacity``
         terminals. Unions are ranked by their total saving — the feeders shed at
         the two joined endpoints minus the connecting edge's length (Clarke-Wright
@@ -979,8 +980,11 @@ def constructor(
     S.graph['topology'] = (
         'ringed' if ringed else 'radial' if method == 'radial_EW' else 'branched'
     )
-    # ringed: pass Aʹ to close each path subtree into a ring; else just set loads
-    calcload(S, Aʹ if ringed else None)
+    # ringed: close each path subtree into a ring (adds open points); else set loads
+    if ringed:
+        split_rings_and_calc_loads(S, Aʹ)
+    else:
+        calcload(S)
     # algorithm finished, store some info in the graph object
     S.graph.update(
         runtime=time.perf_counter() - start_time,

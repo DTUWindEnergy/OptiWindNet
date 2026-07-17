@@ -184,9 +184,7 @@ def test_G_from_routeset_ringed(tmp_path):
         verbose=False,
     )
     # the reloaded routeset is a genuine ring set, not a forest
-    split_edges = [
-        (u, v) for u, v, d in G_rs.edges(data=True) if d.get('kind') == 'split'
-    ]
+    split_edges = [(u, v) for u, v, d in G_rs.edges(data=True) if d.get('load') == 0]
     assert split_edges, 'split open points must be restored on read'
     assert all(G_rs[u][v]['load'] == 0 for u, v in split_edges)
 

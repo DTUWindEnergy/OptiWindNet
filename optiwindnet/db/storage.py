@@ -283,13 +283,13 @@ def _ring_routes_from_G(
     """Recover the ring routes ``(open_root, walk, close_root)`` of a ringed ``G``.
 
     ``walk`` lists a ring's nodes (terminals and clones) between its two feeder
-    feet. Each walk is oriented so its open point (``kind='split'``) falls on the
+    feet. Each walk is oriented so its open point (``load=0``) falls on the
     load midpoint that :func:`untersify_to_G` re-derives from the terminal count,
     so the open point round-trips without being stored. A ring may open and close
     on different roots (a routed ring can bridge two substations).
     """
     split_pairs = {
-        frozenset((u, v)) for u, v, d in G.edges(data=True) if d.get('kind') == 'split'
+        frozenset((u, v)) for u, v, d in G.edges(data=True) if d.get('load') == 0
     }
     routes: list[tuple[int, list[int], int]] = []
     visited: set[tuple[int, int]] = set()
@@ -482,7 +482,7 @@ def _untersify_ring_seq(
             if term_pos[m] != p + 1:
                 raise ValueError('ring split terminals are not adjacent in the walk')
             u, v = walk[p], walk[p + 1]
-            G[u][v].update(load=0, reverse=False, kind='split')
+            G[u][v].update(load=0, reverse=False)
 
 
 def oddtypes_to_serializable(obj):

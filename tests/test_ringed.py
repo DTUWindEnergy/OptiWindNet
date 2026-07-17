@@ -2,9 +2,9 @@
 
 The RINGED topology is now available across every solver family:
 
-* the shared ring builders :func:`add_ring_to_S`, :func:`calcload` and
-  :func:`rings_from_links` (canonical two-arm-with-split shape) that every
-  backend reconstructs its solution through;
+* the shared ring builders :func:`add_ring_to_S`,
+  :func:`split_rings_and_calc_loads` and :func:`rings_from_links` (canonical
+  two-arm-with-split shape) that every backend reconstructs its solution through;
 * the constructive heuristic ``method='ringed'`` (and its public
   :class:`~optiwindnet.api.EWRouter` wrapper);
 * the MILP RINGED path (``ModelOptions(topology='ringed')``), both at the
@@ -13,7 +13,8 @@ The RINGED topology is now available across every solver family:
 
 Because every backend canonicalises its output through :func:`add_ring_to_S`
 (the MILP path in ``MILP/_core.py:get_solution``, HGS/LKH/constructor through
-:func:`calcload`), the same structural invariants hold for all of them. They
+:func:`split_rings_and_calc_loads`), the same structural invariants hold for all
+of them. They
 are collected in :func:`_assert_canonical_ringed` and reused throughout so the
 suite pins the *shared contract* of a ringed solution rather than each
 backend's incidental output.
@@ -38,7 +39,7 @@ from optiwindnet.interarraylib import (
     add_ring_to_S,
     assign_cables,
     rings_from_links,
-    calcload,
+    split_rings_and_calc_loads,
 )
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
@@ -57,15 +58,15 @@ def _assert_canonical_ringed(S, capacity):
 
     A canonical ringed ``S`` is a set of rings sharing the ``R`` roots. Each
     ring of ``n >= 2`` terminals is two radial arms joined at their tails, with
-    two real (load-bearing) feeders and exactly one load-0 ``'split'`` open
-    point; a lone terminal (``n == 1``) collapses to a single radial stub (one
-    feeder, no split). Returns the recovered rings for further per-test checks.
+    two real (load-bearing) feeders and exactly one load-0 open point; a lone
+    terminal (``n == 1``) collapses to a single radial stub (one feeder, no
+    split). Returns the recovered rings for further per-test checks.
     """
     R, T = S.graph['R'], S.graph['T']
 
-    # only the ring open point may carry an edge 'kind'
+    # topology-graph ring edges are pure geometry: they carry no edge 'kind'
     kinds = {d.get('kind') for _, _, d in S.edges(data=True)}
-    assert kinds <= {None, 'split'}, kinds
+    assert kinds <= {None}, kinds
 
     # every cable segment (arm) stays within the per-cable capacity
     assert max(d['load'] for _, _, d in S.edges(data=True)) <= capacity
@@ -78,7 +79,7 @@ def _assert_canonical_ringed(S, capacity):
     covered = sorted(t for _, ordered in rings for t in ordered)
     assert covered == list(range(T)), 'rings must partition the terminals'
 
-    split_edges = [(u, v) for u, v, d in S.edges(data=True) if d.get('kind') == 'split']
+    split_edges = [(u, v) for u, v, d in S.edges(data=True) if d.get('load') == 0]
     feeders = [(u, v) for u, v, d in S.edges(data=True) if u < 0 or v < 0]
     non_stub = [ordered for _, ordered in rings if len(ordered) > 1]
     stub = [ordered for _, ordered in rings if len(ordered) == 1]
@@ -135,10 +136,10 @@ def test_add_ring_to_S_canonical_shape(n):
     add_ring_to_S(S, -1, list(range(n)), subtree=0, A=None)
 
     kinds = {d.get('kind') for _, _, d in S.edges(data=True)}
-    assert kinds <= {None, 'split'}, 'only the open point may carry a kind'
+    assert kinds <= {None}, 'topology-graph ring edges must not carry a kind'
 
     feeders = [d['load'] for u, v, d in S.edges(data=True) if u < 0 or v < 0]
-    splits = [(u, v) for u, v, d in S.edges(data=True) if d.get('kind') == 'split']
+    splits = [(u, v) for u, v, d in S.edges(data=True) if d.get('load') == 0]
     max_load = max(d['load'] for _, _, d in S.edges(data=True))
 
     # every arm holds at most half of the doubled ring capacity
@@ -217,20 +218,19 @@ def test_add_ring_to_S_odd_n_uses_longer_split_edge_when_A_given():
         A.add_edge(0, 1, length=10.0 if longer == 0 else 1.0)
         A.add_edge(1, 2, length=10.0 if longer == 1 else 1.0)
         add_ring_to_S(S, -1, [0, 1, 2], subtree=0, A=A)
-        (su, sv) = [
-            (u, v) for u, v, d in S.edges(data=True) if d.get('kind') == 'split'
-        ][0]
+        (su, sv) = [(u, v) for u, v, d in S.edges(data=True) if d.get('load') == 0][0]
         assert {su, sv} == {longer, expected}
 
 
 # --------------------------------------------------------------------------- #
-# calcload: path-form -> canonical ring conversion (used by HGS/LKH/constructor)
+# split_rings_and_calc_loads: path-form -> canonical ring conversion
+# (used by HGS/LKH/constructor)
 #
-# calcload closes paths into rings exactly when handed an available-links graph
-# ``A``. These path-form tests don't care which split edge wins, so an empty
-# ``A`` (no lengths) is enough to request construction and take the default split.
+# It closes each path-form arm into a ring, adding the load-0 open point. These
+# path-form tests don't care which open point wins, so an empty ``A`` (no
+# lengths) is enough to take the default open point.
 # --------------------------------------------------------------------------- #
-_CONSTRUCT = nx.Graph()  # non-None A: "close these paths into rings"
+_CONSTRUCT = nx.Graph()  # empty available-links graph: take the default open point
 
 
 def _path_form_S(R, paths):
@@ -245,10 +245,10 @@ def _path_form_S(R, paths):
     return S
 
 
-def test_calcload_single_root_matches_canonical_form():
-    """calcload turns non-branching paths into canonical rings within capacity."""
+def test_split_rings_single_root_matches_canonical_form():
+    """Non-branching paths become canonical rings within capacity."""
     S = _path_form_S(1, [(-1, [0, 1, 2]), (-1, [3, 4])])
-    calcload(S, _CONSTRUCT)
+    split_rings_and_calc_loads(S, _CONSTRUCT)
 
     rings = _assert_canonical_ringed(S, capacity=2)
     assert {frozenset(ordered) for _, ordered in rings} == {
@@ -261,10 +261,10 @@ def test_calcload_single_root_matches_canonical_form():
     assert S.nodes[-1]['load'] == 5
 
 
-def test_calcload_multi_root_keeps_rings_with_their_root():
+def test_split_rings_multi_root_keeps_rings_with_their_root():
     """Each root's paths become rings still attached to that root."""
     S = _path_form_S(2, [(-2, [0, 1]), (-1, [2, 3, 4, 5]), (-1, [6])])
-    calcload(S, _CONSTRUCT)
+    split_rings_and_calc_loads(S, _CONSTRUCT)
     _assert_canonical_ringed(S, capacity=3)
     rings = _rings(S)
     by_root = {r: {frozenset(o) for rr, o in rings if rr == r} for r in (-2, -1)}
@@ -272,10 +272,10 @@ def test_calcload_multi_root_keeps_rings_with_their_root():
     assert by_root[-1] == {frozenset({2, 3, 4, 5}), frozenset({6})}
 
 
-def test_calcload_renumbers_subtrees_uniquely_per_ring():
-    """After calcload each ring is a single, distinct subtree id."""
+def test_split_rings_renumbers_subtrees_uniquely_per_ring():
+    """After ring construction each ring is a single, distinct subtree id."""
     S = _path_form_S(1, [(-1, [0, 1]), (-1, [2, 3]), (-1, [4, 5])])
-    calcload(S, _CONSTRUCT)
+    split_rings_and_calc_loads(S, _CONSTRUCT)
     ring_subtrees = [
         {S.nodes[t]['subtree'] for t in ordered} for _, ordered in _rings(S)
     ]
@@ -285,7 +285,7 @@ def test_calcload_renumbers_subtrees_uniquely_per_ring():
     assert len(set(flat)) == len(flat)
 
 
-def test_calcload_rejects_branching_subtree():
+def test_split_rings_rejects_branching_subtree():
     """A branching (non-path) subtree cannot be ringified."""
     S = nx.Graph(R=1, T=3)
     S.add_node(-1)
@@ -293,7 +293,7 @@ def test_calcload_rejects_branching_subtree():
     S.add_edge(0, 1)
     S.add_edge(0, 2)  # branch at terminal 0
     with pytest.raises(ValueError):
-        calcload(S, _CONSTRUCT)
+        split_rings_and_calc_loads(S, _CONSTRUCT)
 
 
 # --------------------------------------------------------------------------- #
@@ -403,7 +403,7 @@ def test_constructor_ringed_end_to_end_is_valid(ringed_mesh, feeder_route):
     assign_cables(G, [(5, 1.0)])
     assert validate_routeset(G) == []
     # the routed graph keeps the ring open points and stays within capacity
-    assert sum(d.get('kind') == 'split' for _, _, d in G.edges(data=True)) >= 1
+    assert sum(d.get('load') == 0 for _, _, d in G.edges(data=True)) >= 1
     assert G.graph['max_load'] <= 5
     assert G.size(weight='length') > 0.0
 
@@ -421,7 +421,7 @@ def test_ewrouter_ringed_end_to_end():
     S, G = wfn.S, wfn.G
 
     _assert_canonical_ringed(S, capacity)
-    assert sum(d.get('kind') == 'split' for _, _, d in G.edges(data=True)) >= 1
+    assert sum(d.get('load') == 0 for _, _, d in G.edges(data=True)) >= 1
     assert G.graph['max_load'] <= capacity
     assert G.size(weight='length') > 0.0
 
@@ -531,7 +531,7 @@ def _solve_milp_ringed(name, capacity, time_limit, mip_gap):
         kinds=sorted({str(d.get('kind')) for _, _, d in S.edges(data=True)}),
         max_edge_load=max(d['load'] for _, _, d in S.edges(data=True)),
         sum_root_load=sum(S.nodes[r]['load'] for r in range(-R, 0)),
-        num_splits=sum(d.get('kind') == 'split' for _, _, d in S.edges(data=True)),
+        num_splits=sum(d.get('load') == 0 for _, _, d in S.edges(data=True)),
         T=T,
         R=R,
         g_edges=G.number_of_edges(),
@@ -566,8 +566,9 @@ def test_milp_ringed_optimum_bracket(
         raise res
 
     assert res['termination'] in ('OPTIMAL', 'FEASIBLE')
-    # canonical representation: no legacy 'ring_back', only plain + split edges
-    assert set(res['kinds']) <= {'None', 'split'}
+    # canonical representation: topology-graph ring edges carry no kind (open
+    # points are marked by load == 0, not by a kind)
+    assert set(res['kinds']) <= {'None'}
     # every cable segment (arm) stays within the per-cable capacity
     assert res['max_edge_load'] <= capacity
     # all terminals are connected
@@ -672,7 +673,7 @@ def test_milprouter_ringed_end_to_end():
 
     _assert_canonical_ringed(wfn.S, capacity)
     G = wfn.G
-    assert sum(d.get('kind') == 'split' for _, _, d in G.edges(data=True)) >= 1
+    assert sum(d.get('load') == 0 for _, _, d in G.edges(data=True)) >= 1
     assert G.graph['max_load'] <= capacity
     assert G.size(weight='length') > 0.0
 
@@ -751,6 +752,6 @@ def test_hgs_router_ringed_end_to_end():
 
     _assert_canonical_ringed(S, capacity)
     # the routed graph carries the ring open points and stays within capacity
-    assert sum(d.get('kind') == 'split' for _, _, d in G.edges(data=True)) >= 1
+    assert sum(d.get('load') == 0 for _, _, d in G.edges(data=True)) >= 1
     assert G.graph['max_load'] <= capacity
     assert G.size(weight='length') > 0.0

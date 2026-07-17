@@ -180,8 +180,8 @@ def solution_property_metrics(
         max_term_degree=max(term_degrees) if term_degrees else 0,
         num_feeders=len(feeder_edges),
         feeder_loads=feeder_loads,
-        num_splits=sum(1 for _, _, d in S.edges(data=True) if d.get('kind') == 'split'),
-        kinds_ok=kinds <= {None, 'split'},
+        num_splits=sum(1 for _, _, d in S.edges(data=True) if d.get('load') == 0),
+        kinds_ok=kinds <= {None},
         min_feeders=math.ceil(T / capacity),
         ring_partition_ok=ring_partition_ok,
         num_non_stub_rings=num_non_stub_rings,
@@ -218,9 +218,9 @@ def assert_solution_properties(
     elif topology == 'branched':
         assert metrics['is_forest'], 'branched topology must be a forest'
     elif topology == 'ringed':
-        assert metrics['kinds_ok'], "only 'split' open points may carry a kind"
+        assert metrics['kinds_ok'], 'topology-graph ring edges must not carry a kind'
         assert metrics['ring_partition_ok'], 'rings must partition the terminals'
-        # every non-stub ring contributes exactly one open point
+        # every non-stub ring contributes exactly one open point (load == 0)
         assert metrics['num_splits'] == metrics['num_non_stub_rings']
         if T > 1:
             assert not metrics['is_forest'], 'a ring closes a loop'

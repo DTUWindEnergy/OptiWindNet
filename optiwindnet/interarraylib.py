@@ -26,6 +26,7 @@ __all__ = (
     'count_diagonals',
     'bfs_subtree_loads',
     'calcload',
+    'split_rings_and_calc_loads',
     'add_ring_to_S',
     'rings_from_links',
     'site_fingerprint',
@@ -226,9 +227,8 @@ def bfs_subtree_loads(G, parent, children, subtree):
     load = nodeD.get('load', default)
     for child in children:
         G.nodes[child]['subtree'] = subtree
-        grandchildren = {n for n in G[child] if G[child][n].get('kind') != 'split'} - {
-            parent
-        }
+        # a load=0 link is a ring open point: never traverse across it
+        grandchildren = {n for n in G[child] if G[child][n].get('load') != 0} - {parent}
         childload = bfs_subtree_loads(G, child, grandchildren, subtree)
         G[parent][child].update(load=childload, reverse=parent > child)
         load += childload
@@ -236,69 +236,78 @@ def bfs_subtree_loads(G, parent, children, subtree):
     return load
 
 
-def calcload(G: nx.Graph, A: nx.Graph | None = None) -> None:
+def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
+    """Close path-form ring arms into canonical rings and compute their loads.
+
+    Only the ringed builders (HGS, LKH and the ``method='ringed'`` constructor)
+    call this, on a solution ``S`` that is still a set of simple
+    ``root → … → root`` paths missing their open points. Each path is walked and
+    closed into a canonical ring (see :func:`add_ring_to_S`), using ``A`` to pick
+    the longer open-point edge on odd-length rings; a tail already touching a root
+    bridges two roots ``(r1, r2)``. Every ring receives exactly one open-point
+    link (``load=0``, no current flows through it), and each node's subtree id and
+    load, the edges' loads, and the graph's ``max_load`` / ``has_loads`` / root
+    loads are set.
+
+    All ringed solvers must call this before returning a solution, so that every
+    ringed ``S`` carries exactly one ``load=0`` link per ring.
+    """
+    # Ring construction: S is path-form (no open points yet). Walk each root's
+    # single-feeder path to its tail, then close it into a canonical ring; a tail
+    # already touching a root bridges two roots (r1, r2).
+    R = S.graph['R']
+    paths: list[tuple[int | tuple[int, int], list[int]]] = []
+    seen: set[int] = set()  # first terminal of each ring already walked
+    for root in range(-R, 0):
+        for gate in S[root]:
+            if gate in seen:
+                # bridging ring: already walked from its other foot's root
+                continue
+            ordered = [gate]
+            back, fwd = root, gate
+            while True:
+                nbrs = [n for n in S[fwd] if n != back]
+                if not nbrs:
+                    break
+                (nxt,) = nbrs  # ValueError here means S has a branching subtree
+                if nxt < 0:
+                    break
+                ordered.append(nxt)
+                back, fwd = fwd, nxt
+            seen.update(ordered)
+            tn = ordered[-1]
+            end_roots = [
+                r
+                for r in range(-R, 0)
+                if r in S[tn] and (len(ordered) > 1 or r != root)
+            ]
+            end_root = end_roots[0] if end_roots else root
+            root_spec = (root, end_root) if root != end_root else root
+            paths.append((root_spec, ordered))
+    S.remove_edges_from(list(S.edges))
+    max_load = 0
+    for subtree_id, (root_spec, ordered) in enumerate(paths):
+        add_ring_to_S(S, root_spec, ordered, subtree_id, A)
+        max_load = max(max_load, math.ceil(len(ordered) / 2))
+    for root in range(-R, 0):
+        S.nodes[root]['load'] = sum(S.nodes[n]['load'] for n in S[root])
+    S.graph['max_load'] = max_load
+    S.graph['has_loads'] = True
+
+
+def calcload(G: nx.Graph) -> None:
     """Calculate link loads and update edge and node attributes of ``G``.
 
-    The mode is selected by whether the available-links graph ``A`` is passed:
+    ``G`` must already be in final form (a forest, or a ring-form graph whose
+    ``load=0`` open points are present). A breadth-first traversal of each root's
+    subtree propagates the loads, treating ``load=0`` links (ring open points) as
+    breaks. Each node's subtree id and outgoing load land on its ``'subtree'`` /
+    ``'load'`` attributes, the edges' ``'load'`` attributes are updated, and the
+    graph's ``'max_load'``, ``'has_loads'`` and root loads are set.
 
-    * **``A`` given — ring construction.** Only the ringed builders (HGS, LKH and
-      the ``method='ringed'`` constructor) pass ``A``. ``G`` is then a set of
-      simple ``root → … → root`` paths still missing their ``split`` edges: each
-      path is closed into a canonical ring (see :func:`add_ring_to_S`), using
-      ``A`` to pick the longer split edge on odd-length rings.
-    * **``A`` omitted — load (re)computation.** ``G`` is already in final form (a
-      forest, or a ring-form graph whose ``kind='split'`` open points are
-      present). A breadth-first traversal of each root's subtree propagates the
-      loads, treating ``split`` edges as breaks.
-
-    In both modes each node's subtree id and outgoing load land on its
-    ``'subtree'`` / ``'load'`` attributes, the edges' ``'load'`` attributes are
-    updated, and the graph's ``'max_load'``, ``'has_loads'`` and root loads are set.
+    Ring construction — closing path-form arms into rings — lives in
+    :func:`split_rings_and_calc_loads`, which the ringed builders call instead.
     """
-    if A is not None:
-        # Ring construction: G is path-form (no 'split' edges yet). Walk each
-        # root's single-feeder path to its tail, then close it into a canonical
-        # ring; a tail already touching a root bridges two roots (r1, r2).
-        R = G.graph['R']
-        paths: list[tuple[int | tuple[int, int], list[int]]] = []
-        seen: set[int] = set()  # first terminal of each ring already walked
-        for root in range(-R, 0):
-            for gate in G[root]:
-                if gate in seen:
-                    # bridging ring: already walked from its other foot's root
-                    continue
-                ordered = [gate]
-                back, fwd = root, gate
-                while True:
-                    nbrs = [n for n in G[fwd] if n != back]
-                    if not nbrs:
-                        break
-                    (nxt,) = nbrs  # ValueError here means G has a branching subtree
-                    if nxt < 0:
-                        break
-                    ordered.append(nxt)
-                    back, fwd = fwd, nxt
-                seen.update(ordered)
-                tn = ordered[-1]
-                end_roots = [
-                    r
-                    for r in range(-R, 0)
-                    if r in G[tn] and (len(ordered) > 1 or r != root)
-                ]
-                end_root = end_roots[0] if end_roots else root
-                root_spec = (root, end_root) if root != end_root else root
-                paths.append((root_spec, ordered))
-        G.remove_edges_from(list(G.edges))
-        max_load = 0
-        for subtree_id, (root_spec, ordered) in enumerate(paths):
-            add_ring_to_S(G, root_spec, ordered, subtree_id, A)
-            max_load = max(max_load, math.ceil(len(ordered) / 2))
-        for root in range(-R, 0):
-            G.nodes[root]['load'] = sum(G.nodes[n]['load'] for n in G[root])
-        G.graph['max_load'] = max_load
-        G.graph['has_loads'] = True
-        return
-
     R, T = (G.graph[k] for k in 'RT')
     for _, data in G.nodes(data=True):
         if 'load' in data:
@@ -310,8 +319,8 @@ def calcload(G: nx.Graph, A: nx.Graph | None = None) -> None:
     for root in range(-R, 0):
         G.nodes[root]['load'] = 0
         for subroot in G[root]:
-            # a 'split' feeder (degenerate multi-root ring) carries no load
-            if G[root][subroot].get('kind') == 'split':
+            # a load=0 feeder (degenerate multi-root ring open point) carries no load
+            if G[root][subroot].get('load') == 0:
                 continue
             _ = bfs_subtree_loads(G, root, [subroot], subtree)
             subtree += 1
@@ -336,8 +345,8 @@ def add_ring_to_S(
     terminal sequence ``[t1, ..., tn]`` walked along the ring, so that ``t1`` and
     ``tn`` are the two feeder-connected terminals. Both feeders ``(r1, t1)`` and
     ``(r2, tn)`` are real, load-bearing cables (there is no asymmetric "ring-back");
-    the single open point of the ring is the edge at the load midpoint, marked
-    ``kind='split'`` with ``load=0`` (no current flows through it).
+    the single open point of the ring is the edge at the load midpoint, marked by
+    ``load=0`` (a real cable, no current flows through it).
 
     Arm 1 (the ``t1`` side) gets ``m = ceil(n / 2)`` terminals, so each arm holds at
     most ``ceil(n / 2)`` — i.e. half of the doubled ring capacity. When the ring has
@@ -345,8 +354,8 @@ def add_ring_to_S(
     edges yielding balanced arms; if ``A`` is provided, the longer of the two is
     chosen as the open point.
 
-    Node ``'load'``/``'subtree'`` and edge ``'load'``/``'reverse'``/``'kind'`` are
-    all set here; the caller is responsible for the root node's aggregate load.
+    Node ``'load'``/``'subtree'`` and edge ``'load'``/``'reverse'`` are all set
+    here; the caller is responsible for the root node's aggregate load.
 
     Args:
       S: topology graph to add the ring to (modified in place).
@@ -363,7 +372,7 @@ def add_ring_to_S(
         S.add_node(ordered[0], load=1, subtree=subtree)
         S.add_edge(r1, ordered[0], load=1, reverse=False)
         if r1 != r2:
-            S.add_edge(r2, ordered[0], load=0, reverse=False, kind='split')
+            S.add_edge(r2, ordered[0], load=0, reverse=False)
         return
     m, mod = divmod(n, 2)
     m += mod  # arm 1 (t1 side) gets ceil(n / 2); open point defaults to t2 side
@@ -385,8 +394,8 @@ def add_ring_to_S(
     for i in range(n - 1):
         u, v = ordered[i], ordered[i + 1]
         if i == m - 1:
-            # open point of the ring: real cable, no current
-            S.add_edge(u, v, load=0, reverse=False, kind='split')
+            # open point of the ring: real cable, no current (marked by load=0)
+            S.add_edge(u, v, load=0, reverse=False)
         else:
             load = m - 1 - i if i < m else i - m + 1
             reverse = S.nodes[u]['load'] < S.nodes[v]['load']
@@ -579,14 +588,15 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     # add to G the S edges that are in A
     for edge in common_TA:
         s, t = edge if edge[0] < edge[1] else edge[::-1]
-        is_split = S.get_edge_data(s, t, {}).get('kind') == 'split'
+        is_split = S.get_edge_data(s, t, {}).get('load') == 0
         AedgeD = A[s][t]
         subtree_id = S.nodes[t]['subtree']
         # only count diagonals that are not gates
         num_diagonals += AedgeD['kind'] == 'extended' and s >= 0
         midpath = AedgeD.get('midpath')
 
-        # split edges are ring midpoints (open point: no current flows)
+        # split edges are ring open points (load=0: no current flows). The open
+        # point keeps its geometry kind — it may follow a contour like any edge.
         if is_split:
             load = S[s][t]['load']
             st_reverse = False
@@ -597,7 +607,6 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                     length=AedgeD['length'],
                     load=load,
                     reverse=st_reverse,
-                    kind='split',
                 )
                 continue
             # has a contour: fall through to contour expansion below
@@ -649,8 +658,9 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                 G.add_edge(s, t, length=AedgeD['length'], load=load, reverse=st_reverse)
                 continue
 
-        # contour edge (reached for regular contour edges and split edges with contour)
-        edge_kind = 'split' if is_split else 'contour'
+        # contour edge (reached for regular contour edges and split edges with
+        # contour); split-ness rides on load=0, so the kind stays 'contour'
+        edge_kind = 'contour'
         shortcuts = AedgeD.get('shortcuts')
         if shortcuts is not None:
             if len(shortcuts) == len(midpath):
@@ -925,7 +935,7 @@ def _ring_sequence_from_S(S: nx.Graph, R: int) -> list[int]:
     this preserves the exact open point without storing it.
     """
     split_pairs = {
-        frozenset((u, v)) for u, v, d in S.edges(data=True) if d.get('kind') == 'split'
+        frozenset((u, v)) for u, v, d in S.edges(data=True) if d.get('load') == 0
     }
     seq: list[int] = []
     for root, ordered in rings_from_links(list(S.edges()), R):
