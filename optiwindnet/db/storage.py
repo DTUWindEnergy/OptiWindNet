@@ -4,6 +4,7 @@
 import base64
 import io
 import json
+import math
 from collections.abc import Sequence
 from functools import partial
 from hashlib import sha256
@@ -253,69 +254,235 @@ def nodeset_from_G(G: nx.Graph) -> bytes:
     return add_if_absent(NodeSet, pack)
 
 
+def _walk_ring_in_G(G: nx.Graph, root: int, foot: int) -> tuple[list[int], int]:
+    """Walk one ring's cycle in ``G`` from a root's foot until a root is reached.
+
+    Every non-root node of a canonical ring has degree 2 (both terminals and the
+    contour/detour clones spliced into its edges), so the walk is forced. Returns
+    the ordered list of walked nodes (roots excluded) and the root it closes on
+    (the same root for a single-terminal stub).
+    """
+    walk = [foot]
+    prev, curr = root, foot
+    while True:
+        nbrs = [x for x in G[curr] if x != prev]
+        if not nbrs:  # single-terminal stub (degree-1)
+            return walk, root
+        if len(nbrs) != 1:
+            raise ValueError(f'ring node {curr} is not degree-2 (neighbours {nbrs})')
+        (nxt,) = nbrs
+        if nxt < 0:  # reached a root: the ring closes here
+            return walk, nxt
+        walk.append(nxt)
+        prev, curr = curr, nxt
+
+
+def _ring_routes_from_G(
+    G: nx.Graph, R: int, T: int
+) -> list[tuple[int, list[int], int]]:
+    """Recover the ring routes ``(open_root, walk, close_root)`` of a ringed ``G``.
+
+    ``walk`` lists a ring's nodes (terminals and clones) between its two feeder
+    feet. Each walk is oriented so its open point (``kind='split'``) falls on the
+    load midpoint that :func:`untersify_to_G` re-derives from the terminal count,
+    so the open point round-trips without being stored. A ring may open and close
+    on different roots (a routed ring can bridge two substations).
+    """
+    split_pairs = {
+        frozenset((u, v)) for u, v, d in G.edges(data=True) if d.get('kind') == 'split'
+    }
+    routes: list[tuple[int, list[int], int]] = []
+    visited: set[tuple[int, int]] = set()
+    for root in range(-R, 0):
+        for foot in sorted(G[root]):
+            if (root, foot) in visited:
+                continue
+            walk, close = _walk_ring_in_G(G, root, foot)
+            visited.add((root, walk[0]))
+            visited.add((close, walk[-1]))
+            open_ = root
+            n = sum(1 for x in walk if x < T)
+            if n > 1:
+                seen, a = 0, None
+                for i in range(len(walk) - 1):
+                    if (
+                        walk[i] < T
+                        and walk[i + 1] < T
+                        and frozenset((walk[i], walk[i + 1])) in split_pairs
+                    ):
+                        a = seen
+                        break
+                    if walk[i] < T:
+                        seen += 1
+                if a is None:
+                    raise ValueError('ring open point not found among its terminals')
+                if a != math.ceil(n / 2) - 1:
+                    walk = walk[::-1]
+                    open_, close = close, open_
+            routes.append((open_, walk, close))
+    return routes
+
+
+def _compress_ring_routes(routes: list[tuple[int, list[int], int]]) -> list[int]:
+    """Flatten ring routes into the stored ``edges`` sequence.
+
+    Each route is written as its ``open_root`` (only when it differs from the
+    running root), its walk, then its ``close_root``. A shared boundary root
+    (``close_i == open_{i+1}``) is therefore written once, so two consecutive
+    negative numbers are always distinct; the last route's ``close`` is elided
+    when it equals its ``open`` (a single-root ring, inferred at end-of-sequence).
+    """
+    seq: list[int] = []
+    pen = None
+    last = len(routes) - 1
+    for idx, (open_, walk, close) in enumerate(routes):
+        if open_ != pen:
+            seq.append(int(open_))
+        seq.extend(int(x) for x in walk)
+        if idx == last and close == open_:
+            pen = close
+            continue
+        seq.append(int(close))
+        pen = close
+    return seq
+
+
+def _parse_ring_routes(seq: list[int]) -> list[tuple[int, list[int], int]]:
+    """Inverse of :func:`_compress_ring_routes`: recover ``(open, walk, close)``."""
+    routes: list[tuple[int, list[int], int]] = []
+    i, length, pen = 0, len(seq), None
+    while i < length:
+        if seq[i] < 0:
+            open_ = seq[i]
+            i += 1
+        else:
+            open_ = pen
+        walk: list[int] = []
+        while i < length and seq[i] >= 0:
+            walk.append(seq[i])
+            i += 1
+        if i >= length:
+            close = open_  # last route, single-root: close inferred == open
+        else:
+            # a lone marker is the shared close/next-open; two consecutive markers
+            # are this route's close then a distinct next open
+            close = seq[i]
+            i += 1
+        pen = close
+        routes.append((open_, walk, close))
+    return routes
+
+
 def terse_pack_from_G(G: nx.Graph) -> PackType:
     """Convert ``G``'s edges to a format suitable for storing in the database.
 
-    Although graph ``G`` is undirected, the edge attribute ``'reverse'`` and its
-    nodes' numbers encode the direction of power flow. The terse
-    representation uses that and the fact that ``G`` is a tree.
+    A *forest* routeset (radial/branched) is stored positionally: ``G`` is
+    undirected, but the edge attribute ``'reverse'`` and node numbering encode
+    the power-flow direction, so ``(i, edges[i])`` is a directed link and the
+    array has one entry per non-root node (``T + C + D``).
+
+    A *ringed* routeset has cycles a single parent per node cannot capture, so it
+    is stored as a sequence of routes instead (see :func:`_compress_ring_routes`).
+    It therefore has more than ``T + C + D`` entries, which is how
+    :func:`untersify_to_G` tells the two encodings apart.
 
     Returns:
         dict with keys:
-            edges: where ``(i, edges[i])`` is a directed edge of ``G``
+            edges: positional links (forest) or a route sequence (ringed)
             clone2prime: mapping the above-T clones to below-T nodes
     """
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
-    terse = np.empty((T + C + D,), dtype=int)
     if not G.graph.get('has_loads'):
         calcload(G)
-    for u, v, reverse in G.edges(data='reverse'):
-        if reverse is None:
-            raise ValueError('reverse must not be None')
-        u, v = (u, v) if u < v else (v, u)
-        i, target = (u, v) if reverse else (v, u)
-        if i < T:
-            terse[i] = target
-        else:
-            terse[i - B] = target
-    terse_pack = dict(edges=terse.tolist())
+    if nx.is_forest(G):
+        terse = np.empty((T + C + D,), dtype=int)
+        for u, v, edgeD in G.edges(data=True):
+            reverse = edgeD.get('reverse')
+            if reverse is None:
+                raise ValueError('reverse must not be None')
+            u, v = (u, v) if u < v else (v, u)
+            i, target = (u, v) if reverse else (v, u)
+            if i < T:
+                terse[i] = target
+            else:
+                terse[i - B] = target
+        edges = terse.tolist()
+    else:
+        edges = _compress_ring_routes(_ring_routes_from_G(G, R, T))
+    terse_pack = dict(edges=edges)
     if C > 0 or D > 0:
         terse_pack['clone2prime'] = G.graph['fnT'][T + B : -R].tolist()
     return terse_pack
 
 
 def untersify_to_G(G: nx.Graph, terse: list, clone2prime: list) -> None:
-    """
-    Changes G in place!
+    """Rebuild ``G``'s edges from a terse pack. Changes G in place!
+
+    Forest routesets (``len(terse) == T + C + D``) are decoded positionally;
+    ringed routesets (more entries) are decoded as a sequence of routes, each
+    ring's open point re-derived at the load midpoint of its terminals.
     """
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     VertexC = G.graph['VertexC']
-    terse = np.asarray(terse)
-    source = np.arange(len(terse))
+    terse = list(terse)
     if clone2prime:
-        source[T:] += B
-        contournodes = range(T + B, T + B + C)
-        detournodes = range(T + B + C, T + B + C + D)
-        G.add_nodes_from(contournodes, kind='contour')
-        G.add_nodes_from(detournodes, kind='detour')
+        G.add_nodes_from(range(T + B, T + B + C), kind='contour')
+        G.add_nodes_from(range(T + B + C, T + B + C + D), kind='detour')
         fnT = np.arange(R + T + B + C + D)
         fnT[T + B : T + B + C + D] = clone2prime
         fnT[-R:] = range(-R, 0)
         G.graph['fnT'] = fnT
-        Length = np.hypot(*(VertexC[fnT[terse]] - VertexC[fnT[source]]).T)
     else:
-        Length = np.hypot(*(VertexC[terse] - VertexC[source]).T)
-    G.add_weighted_edges_from(
-        zip(source.tolist(), terse.tolist(), Length.tolist()), weight='length'
-    )
+        fnT = None
+
+    if len(terse) == T + C + D:
+        # positional forest encoding: (source, terse[source]) is a directed link
+        terse_arr = np.asarray(terse)
+        source = np.arange(len(terse_arr))
+        if clone2prime:
+            source[T:] += B
+            Length = np.hypot(*(VertexC[fnT[terse_arr]] - VertexC[fnT[source]]).T)
+        else:
+            Length = np.hypot(*(VertexC[terse_arr] - VertexC[source]).T)
+        G.add_weighted_edges_from(
+            zip(source.tolist(), terse_arr.tolist(), Length.tolist()), weight='length'
+        )
+    else:
+        _untersify_ring_seq(G, terse, T, VertexC, fnT)
+
     if clone2prime:
-        for _, _, edgeD in G.edges(contournodes, data=True):
+        for _, _, edgeD in G.edges(range(T + B, T + B + C), data=True):
             edgeD['kind'] = 'contour'
-        for _, _, edgeD in G.edges(detournodes, data=True):
+        for _, _, edgeD in G.edges(range(T + B + C, T + B + C + D), data=True):
             edgeD['kind'] = 'detour'
     calcload(G)
+
+
+def _untersify_ring_seq(
+    G: nx.Graph, seq: list[int], T: int, VertexC: np.ndarray, fnT: np.ndarray | None
+) -> None:
+    """Rebuild a ringed ``G``'s edges from its route sequence (in place)."""
+
+    def length(a: int, b: int) -> float:
+        pa, pb = (fnT[a], fnT[b]) if fnT is not None else (a, b)
+        return float(np.hypot(*(VertexC[pa] - VertexC[pb])))
+
+    for open_, walk, close in _parse_ring_routes(seq):
+        term_pos = [k for k, v in enumerate(walk) if v < T]
+        n = len(term_pos)
+        chain = [open_, *walk] + ([close] if n > 1 else [])
+        for a, b in zip(chain, chain[1:]):
+            G.add_edge(a, b, length=length(a, b))
+        if n > 1:
+            # the open point closes the ring at the load midpoint of its arms
+            m = math.ceil(n / 2)
+            p = term_pos[m - 1]
+            if term_pos[m] != p + 1:
+                raise ValueError('ring split terminals are not adjacent in the walk')
+            u, v = walk[p], walk[p + 1]
+            G[u][v].update(load=0, reverse=False, kind='split')
 
 
 def oddtypes_to_serializable(obj):

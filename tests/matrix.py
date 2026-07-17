@@ -62,10 +62,10 @@ def ew_spec(cables, *, method='biased_EW', feeder_route='segmented', bias_margin
         params['feeder_route'] = feeder_route
     if bias_margin is not None:
         params['bias_margin'] = bias_margin
-    # EWRouter is deterministic, but the terse_links snapshot format is
-    # forest-only (one parent per node) and cannot encode a ring's two-feeder
-    # node. Ringed EW is therefore validated by properties, like MILP/HGS.
-    determinism = 'property' if method == 'ringed' else 'snapshot'
+    # EWRouter is deterministic across every method, and terse_links now encodes
+    # ringed topologies too (as a sequence of routes), so all EW methods -- ring
+    # included -- are pinned by an exact terse_links snapshot.
+    determinism = 'snapshot'
     return {
         'class': 'EWRouter',
         'params': params,
@@ -144,7 +144,11 @@ def spec_key(spec):
     p = spec['params']
     parts = []
     if cls == 'EWRouter':
-        parts += ['ew', p.get('method', 'biased_EW'), p.get('feeder_route', 'segmented')]
+        parts += [
+            'ew',
+            p.get('method', 'biased_EW'),
+            p.get('feeder_route', 'segmented'),
+        ]
         if 'bias_margin' in p:
             parts.append('bm' + str(p['bias_margin']).replace('.', 'p'))
     elif cls == 'HGSRouter':
@@ -244,14 +248,16 @@ def _milp_cases():
     for topology in TOPOLOGIES:
         for feeder_route in FEEDER_ROUTES:
             cases.append(
-                (small, milp_spec(SWEEP_SOLVER, 3, topology=topology,
-                                  feeder_route=feeder_route))
+                (
+                    small,
+                    milp_spec(
+                        SWEEP_SOLVER, 3, topology=topology, feeder_route=feeder_route
+                    ),
+                )
             )
     # feeder_limit axis (branched)
     for feeder_limit in FEEDER_LIMITS:
-        cases.append(
-            (small, milp_spec(SWEEP_SOLVER, 3, feeder_limit=feeder_limit))
-        )
+        cases.append((small, milp_spec(SWEEP_SOLVER, 3, feeder_limit=feeder_limit)))
     # feeder_limit values that need an explicit max_feeders (example: T=12,
     # cap=3 => min_feeders=4)
     cases.append(
@@ -267,8 +273,13 @@ def _milp_cases():
     cases.append(
         (
             small,
-            milp_spec(SWEEP_SOLVER, 3, topology='ringed', feeder_limit='minimum',
-                      balanced=True),
+            milp_spec(
+                SWEEP_SOLVER,
+                3,
+                topology='ringed',
+                feeder_limit='minimum',
+                balanced=True,
+            ),
         )
     )
 
@@ -282,13 +293,22 @@ def _milp_cases():
         cases.append((small, milp_spec(solver, 5, topology='radial')))
         cases.append((small, milp_spec(solver, 5, topology='ringed')))
         cases.append(
-            (small, milp_spec(solver, 5, topology='radial',
-                              feeder_route='straight', feeder_limit='minimum'))
+            (
+                small,
+                milp_spec(
+                    solver,
+                    5,
+                    topology='radial',
+                    feeder_route='straight',
+                    feeder_limit='minimum',
+                ),
+            )
         )
 
     # --- a couple of larger / multi-substation MILP cases --------------------
-    cases.append(('borkum2', milp_spec(SWEEP_SOLVER, 5, topology='ringed',
-                                       time_limit=10)))
+    cases.append(
+        ('borkum2', milp_spec(SWEEP_SOLVER, 5, topology='ringed', time_limit=10))
+    )
     cases.append(('taylor_2023', milp_spec(SWEEP_SOLVER, 8, time_limit=10)))
     return cases
 

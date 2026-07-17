@@ -200,7 +200,9 @@ def assert_solution_properties(
     model options. Objective-length regression is checked separately by the
     caller against a stored reference.
     """
-    mo = spec['params'].get('model_options', {}) if spec['class'] == 'MILPRouter' else {}
+    mo = (
+        spec['params'].get('model_options', {}) if spec['class'] == 'MILPRouter' else {}
+    )
     topology = metrics['topology']
     T = metrics['T']
 
@@ -250,6 +252,7 @@ def assert_graph_equal(
     G2: nx.Graph,
     ignored_graph_keys: Optional[Iterable[str]] = None,
     *,
+    ignored_node_keys: Optional[Iterable[str]] = None,
     rtol: float = 1e-7,
     atol: float = 1e-10,
     max_show: int = 50,
@@ -362,11 +365,10 @@ def assert_graph_equal(
         raise AssertionError(msg)
 
     # --- compare node attributes -------------------------------------------------
+    ignored_node_all = {'label'} | set(ignored_node_keys or ())
     for n in sorted(G1c.nodes):
-        a1 = dict(G1c.nodes[n])
-        a1.pop('label', None)
-        a2 = dict(G2c.nodes[n])
-        a2.pop('label', None)
+        a1 = {k: v for k, v in G1c.nodes[n].items() if k not in ignored_node_all}
+        a2 = {k: v for k, v in G2c.nodes[n].items() if k not in ignored_node_all}
         if a1.keys() != a2.keys():
             diff = sorted(a1.keys() ^ a2.keys())
             raise AssertionError(f'Node {n} attribute keys differ: {diff}')

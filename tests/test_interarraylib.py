@@ -13,6 +13,7 @@ from optiwindnet.interarraylib import (
     S_from_terse_links,
     add_link_blockmap,
     add_link_cosines,
+    add_ring_to_S,
     add_terminal_closest_root,
     as_hooked_to_head,
     as_hooked_to_nearest,
@@ -29,6 +30,7 @@ from optiwindnet.interarraylib import (
     fun_fingerprint,
     make_remap,
     pathdist,
+    rings_from_links,
     scaffolded,
     site_fingerprint,
     terse_links_from_S,
@@ -453,6 +455,94 @@ def test_terse_links_from_S():
     )
 
 
+# --------------------------------------------------------------------------- #
+# terse_links for RINGED topologies (sequence-of-routes encoding)
+# --------------------------------------------------------------------------- #
+def _ringed_S(R, ringspec):
+    """Build a canonical ringed S from a list of (root, [terminals]) rings."""
+    S = nx.Graph(R=R, T=sum(len(o) for _, o in ringspec))
+    S.add_nodes_from(range(-R, 0))
+    for i, (root, ordered) in enumerate(ringspec):
+        add_ring_to_S(S, root, ordered, subtree=i, A=None)
+    for r in range(-R, 0):
+        S.nodes[r]['load'] = sum(S.nodes[n]['load'] for n in S[r])
+    return S
+
+
+def _ring_sets(S):
+    R = S.graph['R']
+    return {(r, frozenset(o)) for r, o in rings_from_links(list(S.edges()), R)}
+
+
+def test_terse_links_ringed_wire_format():
+    """Each route is entered as its root number followed by its nodes.
+
+    Every route -- including the first -- carries its own leading root number,
+    which both ends the previous route and names this route's root.
+    """
+    S = _ringed_S(1, [(-1, [0, 1, 2, 3]), (-1, [4, 5])])
+    terse = terse_links_from_S(S)
+    assert terse.tolist() == [-1, 0, 1, 2, 3, -1, 4, 5]
+
+
+@pytest.mark.parametrize(
+    'R, ringspec',
+    [
+        (1, [(-1, [0, 1, 2, 3])]),  # a single ring (no special-casing needed)
+        (1, [(-1, [0, 1]), (-1, [2, 3]), (-1, [4, 5])]),  # many rings, one root
+        (2, [(-1, [0, 1, 2, 3]), (-1, [4, 5]), (-2, [6, 7, 8])]),  # multi-root
+        (2, [(-2, [0, 1, 2])]),  # only the second root is used
+        (1, [(-1, [0, 1, 2]), (-1, [3])]),  # a real ring plus a lone-terminal stub
+        (3, [(-1, [0, 1]), (-3, [2, 3, 4, 5]), (-3, [6])]),  # gap in roots used
+    ],
+)
+def test_terse_links_ringed_roundtrip(R, ringspec):
+    S = _ringed_S(R, ringspec)
+    T = S.graph['T']
+    terse = terse_links_from_S(S)
+    # a genuine ringed topology (with a cycle) is always longer than the T-entry
+    # forest encoding: T terminals plus one root number per route
+    if not nx.is_forest(S):
+        assert terse.shape[0] > T
+    S2 = S_from_terse_links(terse, R=R, T=T)
+    assert _ring_sets(S2) == _ring_sets(S)
+    # the encoding is a fixed point: re-encoding the decoded S is identical
+    assert terse_links_from_S(S2).tolist() == terse.tolist()
+
+
+@pytest.mark.parametrize('longer, expected_open', [(0, (0, 1)), (1, (1, 2))])
+def test_terse_links_ringed_preserves_open_point(longer, expected_open):
+    """An odd-terminal ring's open point survives the round-trip losslessly.
+
+    The two balanced split edges of an odd ring map onto the two walk
+    directions, so the encoder orients the walk to reproduce the exact open
+    point that ``add_ring_to_S`` chose from ``A`` -- without storing it.
+    """
+    A = nx.Graph()
+    A.add_edge(0, 1, length=10.0 if longer == 0 else 1.0)
+    A.add_edge(1, 2, length=10.0 if longer == 1 else 1.0)
+    S = nx.Graph(R=1, T=3)
+    S.add_node(-1)
+    add_ring_to_S(S, -1, [0, 1, 2], subtree=0, A=A)
+    S.nodes[-1]['load'] = sum(S.nodes[n]['load'] for n in S[-1])
+
+    terse = terse_links_from_S(S)
+    S2 = S_from_terse_links(terse, R=1, T=3)
+    open_point = next(
+        {u, v} for u, v, d in S2.edges(data=True) if d.get('kind') == 'split'
+    )
+    assert open_point == set(expected_open)
+
+
+def test_terse_links_forest_still_positional():
+    """A radial/branched (forest) S keeps the positional one-entry-per-node form."""
+    S = tiny_wfn().S
+    terse = terse_links_from_S(S)
+    assert terse.shape[0] == S.graph['T']
+    S2 = S_from_terse_links(terse)
+    assert set(map(frozenset, S2.edges())) == set(map(frozenset, S.edges()))
+
+
 def test_as_single_root():
     # 1) single root L
     L_prime = tiny_wfn().L
@@ -836,7 +926,7 @@ def test_as_single_root_no_root_in_border():
     """Border has no negative-index entries → B stays the same, no vertex transfer."""
     wfn = tiny_wfn(optimize=False)
     L = wfn.L.copy()
-    T, R = L.graph['T'], L.graph['R']
+    T = L.graph['T']
     # replace border with indices all in [T, T+B) range (no root refs)
     B = L.graph['B']
     if B > 0:

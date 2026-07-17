@@ -26,10 +26,11 @@ from .importer import load_repository as load_repository
 from .interarraylib import (
     G_from_S,
     S_from_G,
+    S_from_terse_links,
     as_normalized,
     as_stratified_vertices,
     assign_cables,
-    calcload,
+    terse_links_from_S,
 )
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
@@ -472,18 +473,13 @@ class WindFarmNetwork:
         return svgplot(G_tentative, **kwargs)
 
     def terse_links(self):
-        """Get a compact representation of the solution topology."""
-        T = self.S.graph['T']
-        terse = np.empty(T, dtype=int)
+        """Get a compact representation of the solution topology.
 
-        for u, v, reverse in self.S.edges(data='reverse'):
-            if reverse is None:
-                _error('reverse must not be None')
-            u, v = (u, v) if u < v else (v, u)
-            i, target = (u, v) if reverse else (v, u)
-            terse[i] = target
-
-        return terse
+        Forest topologies (radial/branched) are encoded positionally (one entry
+        per terminal); ringed topologies are encoded as a sequence of routes.
+        See :func:`optiwindnet.interarraylib.terse_links_from_S`.
+        """
+        return terse_links_from_S(self.S)
 
     def update_from_terse_links(
         self,
@@ -509,16 +505,18 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
-        S = nx.Graph(R=R, T=T, creator='from_terse_links')
-        for i, j in enumerate(terse_links_ints):
-            S.add_edge(i, j)
-
-        calcload(S)
+        # A ringed encoding has a number of entries different from T (see the
+        # convention in interarraylib.terse_links_from_S); a forest encoding has
+        # exactly T. Decode accordingly and route with the matching PathFinder.
+        ringed = terse_links_ints.shape[0] != T
+        S = S_from_terse_links(terse_links_ints, R=R, T=T, creator='from_terse_links')
 
         G_tentative = G_from_S(S, self.A)
 
         self._S = S
-        self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
+        self._G = PathFinder(
+            G_tentative, planar=self.P, A=self.A, ringed=ringed
+        ).create_detours()
 
         assign_cables(self._G, self.cables)
         self._is_stale_SG = False
