@@ -18,9 +18,18 @@ import numpy as np
 from scipy.spatial.distance import pdist, squareform
 
 from ..clustering import clusterize
-from ..interarraylib import add_link_blockmap, fun_fingerprint
+from ..interarraylib import (
+    add_link_blockmap,
+    calcload,
+    fun_fingerprint,
+    split_rings_and_calc_loads,
+)
 from ..repair import repair_routeset_path
-from ._core import remove_offending_crossings
+from ._core import (
+    add_branches_to_S,
+    clamp_vehicles_to_min,
+    remove_offending_crossings,
+)
 
 _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
@@ -204,10 +213,17 @@ def _do_lkh(
     seed: int,
     initial_tour_nodes: list[int] | None,
     name: str,
+    ringed: bool = False,
 ) -> dict:
     """Run LKH-3 on a precomputed weight matrix.
 
     ``L`` has shape ``(T+1, T+1)`` with the depot at the last index.
+
+    With ``ringed=False`` (default) LKH solves an Open-CVRP (``TYPE=OVRP``): the
+    return leg to the depot is free and routes are radial. With ``ringed=True``
+    it solves the closed CVRP (``TYPE=CVRP``): every route returns to the depot,
+    so the symmetric weight matrix charges both feeder legs and each route is a
+    ring (closed loop).
 
     Returns a dict containing routes (list of lists of 0-based terminal indices
     in the matrix), penalty, minimum, log, ``elapsed_time``, ``solution_time``, plus
@@ -228,7 +244,7 @@ def _do_lkh(
     distance_cap = _distance_cap(L, capacity=capacity, scale=scale)
     specs: dict[str, str | int | float] = dict(
         NAME=name,
-        TYPE='OVRP',
+        TYPE='CVRP' if ringed else 'OVRP',
         DIMENSION=N,  # CVRP number of nodes and depots
         # For CAPACITY to be enforced, a DEMAND section is required.
         # MTSP_MAX_SIZE should work for unitary demand, but did not.
@@ -236,16 +252,21 @@ def _do_lkh(
         EDGE_WEIGHT_TYPE='EXPLICIT',
         EDGE_WEIGHT_FORMAT='UPPER_ROW',
     )
-    if not math.isinf(distance_cap):
+    if not ringed and not math.isinf(distance_cap):
         # LKH treats DISTANCE as a hard constraint: too low and it reports the
-        # problem infeasible and returns no solution at all.
+        # problem infeasible and returns no solution at all. The cap is
+        # calibrated for open (radial) routes; a closed ring pays a second feeder
+        # leg, so the cap is not imposed for ringed solves.
         specs['DISTANCE'] = distance_cap  # maximum route length
     data = dict(
         EDGE_WEIGHT_SECTION=edge_weights,
         DEMAND_SECTION='\n'.join(chain((f'{i + 1} 1' for i in range(T)), (f'{N} 0',))),
     )
     params = dict(
-        SPECIAL=None,  # None -> output only the key
+        # SPECIAL is a shorthand for a bundle of large-neighborhood move settings
+        # (MOVE_TYPE='5 SPECIAL', MAX_SWAPS=0, ...). It segfaults LKH-3 on
+        # TYPE=CVRP (the ringed solve), so it is only enabled for the OVRP case.
+        **({} if ringed else {'SPECIAL': None}),  # None -> output only the key
         DEPOT=N,
         SEED=seed,  # 0 means pick a random seed
         PRECISION=precision,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
@@ -398,33 +419,6 @@ def _do_lkh(
     return output
 
 
-def _add_branches(S, branches, root, subtree_id_start):
-    """Add branches to solution graph S in place.
-
-    Returns ``(max_load, next_subtree_id)``.
-    """
-    max_load = 0
-    subtree_id = subtree_id_start
-    for branch in branches:
-        branch_load = len(branch)
-        if branch_load == 0:
-            continue
-        max_load = max(max_load, branch_load)
-        loads = range(branch_load, 0, -1)
-        S.add_nodes_from(
-            ((n, {'load': load}) for n, load in zip(branch, loads)),
-            subtree=subtree_id,
-        )
-        prev = [root] + branch[:-1]
-        reverses = tuple(u < v for u, v in zip(branch, prev))
-        edgeD = (
-            {'load': load, 'reverse': reverse} for load, reverse in zip(loads, reverses)
-        )
-        S.add_edges_from(zip(prev, branch, edgeD))
-        subtree_id += 1
-    return max_load, subtree_id
-
-
 def _build_cluster_weight_matrices(
     A: nx.Graph,
     terminals_: list[list[int]],
@@ -463,6 +457,7 @@ def _solve_cluster(
     seed: int,
     initial_tour_nodes: list[int] | None,
     name: str,
+    ringed: bool = False,
 ) -> dict:
     """Run LKH-3 on a pre-built cluster weight matrix.
 
@@ -473,7 +468,11 @@ def _solve_cluster(
     not mutate the underlying graph.
     """
     T_c = L.shape[0] - 1
-    if balanced:
+    if ringed:
+        # MTSP_MIN_SIZE for TYPE=CVRP would require a FULL_MATRIX (asymmetric)
+        # formulation; the symmetric ring solve does not impose a minimum size.
+        min_route_size = 0
+    elif balanced:
         min_route_size = T_c // vehicles
     elif vehicles == math.ceil(T_c / capacity):
         min_route_size = (T_c % capacity) or capacity
@@ -492,6 +491,7 @@ def _solve_cluster(
         seed=seed,
         initial_tour_nodes=initial_tour_nodes,
         name=name,
+        ringed=ringed,
     )
 
 
@@ -567,7 +567,6 @@ def _build_solution(
         T=T,
         R=R,
         capacity=capacity,
-        has_loads=True,
         objective=objective,
         creator='baselines.lkh',
         runtime=runtime,
@@ -593,11 +592,14 @@ def _build_solution(
     max_load = 0
     for r, output, terminals in zip(range(-R, 0), outputs_, terminals_):
         # output['routes'] uses matrix indices (0..T_c-1) for terminals
-        branches = [[terminals[i] for i in route] for route in output['routes']]
-        branch_max_load, subtree_id = _add_branches(
-            S, branches, root=r, subtree_id_start=subtree_id
+        subtrees = [[terminals[i] for i in route] for route in output['routes']]
+        # rings, too, are built as paths here (one feeder each), so that the
+        # path-based repair machinery applies; split_rings_and_calc_loads closes
+        # them afterwards
+        sub_max_load, subtree_id = add_branches_to_S(
+            S, subtrees, root=r, subtree_id_start=subtree_id
         )
-        max_load = max(max_load, branch_max_load)
+        max_load = max(max_load, sub_max_load)
         root_load = sum(S.nodes[n]['load'] for n in S.neighbors(r))
         S.nodes[r]['load'] = root_load
 
@@ -700,6 +702,7 @@ def _lkh(
         solver_details_extra=dict(seed=seed),
     )
     assert S.nodes[-1]['load'] == T, 'ERROR: root node load does not match T.'
+    S.graph['has_loads'] = True
     return S
 
 
@@ -736,6 +739,7 @@ def _run_lkh_per_cluster(
     per_run_limit: float,
     precision: int,
     seed: int,
+    ringed: bool = False,
 ) -> list[dict]:
     """Solve every root cluster with LKH-3, sequentially or in parallel.
 
@@ -762,6 +766,7 @@ def _run_lkh_per_cluster(
             seed=seed,
             initial_tour_nodes=init_tour,
             name=name if R == 1 else f'{name}_root{r}',
+            ringed=ringed,
         )
         for r, L, vehicles_c, init_tour in zip(
             range(-R, 0), L_, vehicles_, warmstart_tours
@@ -877,17 +882,22 @@ def lkh3(
     per_run_limit: float = 15.0,
     precision: int = 1000,
     complete: bool = False,
+    ringed: bool = False,
     warmstart: nx.Graph | None = None,
 ) -> nx.Graph:
-    """Solve the OCVRP using LKH-3 with links from ``A``.
+    """Solve the O/CVRP using LKH-3 with links from ``A``.
 
     Wraps the LKH-3 executable, which is not distributed with OptiWindNet.
     Get it from http://akira.ruc.dk/~keld/research/LKH-3/ and make sure the
     ``LKH`` executable is in the environment's PATH.
 
     Uses the Lin-Kernighan-Helsgaun meta-heuristic to solve an Open-CVRP
-    (i.e., vehicles do not return to the depot). Normalization of input graph
-    is recommended before calling this function (use :func:`as_normalized`).
+    (i.e., vehicles do not return to the depot), yielding radial layouts. With
+    ``ringed=True`` it solves the closed CVRP instead (``TYPE=CVRP``): every
+    route returns to the depot, forming a ring whose capacity is doubled
+    internally (``2 * capacity``) so each of the two arms holds at most
+    ``capacity`` terminals. Normalization of the input graph is recommended
+    before calling this function (use :func:`as_normalized`).
 
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered (one cluster per root) and each cluster is
@@ -929,23 +939,17 @@ def lkh3(
         Solution topology S.
     """
     R, T = A.graph['R'], A.graph['T']
+    # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
+    solve_capacity = 2 * capacity if ringed else capacity
     if vehicles is not None:
-        vehicles_min = math.ceil(T / capacity)
+        vehicles_min = math.ceil(T / solve_capacity)
         if vehicles != vehicles_min:
             if R > 1:
                 warn(
                     'For multi-root instances, the parameter vehicles (feeders) can '
                     'only be None or the minimum feasible: setting to the minimum.'
                 )
-        if vehicles < vehicles_min:
-            warn(
-                'Vehicles (feeders) number (%d) too low for feasibilty '
-                'with given capacity (%d). Setting to %d.',
-                vehicles,
-                capacity,
-                vehicles_min,
-            )
-            vehicles = vehicles_min
+        vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
         feeders_above_min = vehicles - vehicles_min
     else:
         feeders_above_min = None
@@ -974,10 +978,10 @@ def lkh3(
     else:
         A_iter.graph['closest_root'] = np.full((T,), -1, dtype=np.int_)
     add_link_blockmap(A_iter)
-    _prune_links(A_iter, math.ceil(2.4 * capacity))
+    _prune_links(A_iter, math.ceil(2.4 * solve_capacity))
 
     terminals_, vehicles_ = _setup_clusters(
-        A_iter, capacity=capacity, vehicles=vehicles
+        A_iter, capacity=solve_capacity, vehicles=vehicles
     )
     if warmstart is not None:
         warmstart_tours = _initial_tours_from_warmstart(
@@ -998,7 +1002,7 @@ def lkh3(
         outputs_ = _run_lkh_per_cluster(
             L_,
             name=name,
-            capacity=capacity,
+            capacity=solve_capacity,
             time_limit=time_limit,
             vehicles_=vehicles_,
             warmstart_tours=warmstart_tours,
@@ -1008,6 +1012,7 @@ def lkh3(
             per_run_limit=per_run_limit,
             precision=precision,
             seed=seed,
+            ringed=ringed,
         )
         S = _build_solution(
             A_iter,
@@ -1031,17 +1036,17 @@ def lkh3(
     else:
         while True:
             S, outputs_ = _solve_and_repair()
-            S = repair_routeset_path(S, A_iter)
+            S = repair_routeset_path(S, A_iter, ringed=ringed)
             crossings = S.graph.get('outstanding_crossings', [])
             over_capacity_clusters = [
                 ic
                 for ic, output in enumerate(outputs_)
-                if max((len(r) for r in output['routes']), default=0) > capacity
+                if max((len(r) for r in output['routes']), default=0) > solve_capacity
             ]
             if over_capacity_clusters:
                 warn(
                     'Capacity violated in LKH solution: '
-                    f'max_load ({S.graph["max_load"]}) > capacity ({capacity}). '
+                    f'max_load ({S.graph["max_load"]}) > capacity ({solve_capacity}). '
                     'Retrying with increased vehicles.'
                 )
             if (not crossings and not over_capacity_clusters) or i == max_retries:
@@ -1074,6 +1079,12 @@ def lkh3(
         S.graph['retries'] = i
         if crossings or over_capacity_clusters:
             warn('Solution remains invalid (max_retries reached)')
+    if ringed:
+        S.graph['topology'] = 'ringed'
+        split_rings_and_calc_loads(S, A)
+    else:
+        S.graph['topology'] = 'radial'
+        calcload(S)
     return S
 
 

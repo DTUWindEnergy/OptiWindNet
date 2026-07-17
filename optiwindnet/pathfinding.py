@@ -217,6 +217,7 @@ class PathFinder:
       A: the available links graph
       branched: if True, any terminal can be linked to root, else only subtrees'
         heads/tails
+      ringed: if True, only the node the tentative feeder connects to is considered
       iterations_limit: maximum number of steps in the path-finding process
       traversals_limit: maximum number of times a single portal may be traversed
       bad_streak_limit: limit on how many steps in a row without finding an improved
@@ -243,6 +244,7 @@ class PathFinder:
         A: nx.Graph,
         *,
         branched: bool = True,
+        ringed: bool = False,
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
         bad_streak_limit: int = 5,
@@ -557,6 +559,7 @@ class PathFinder:
         )
         self.predetour_length = Gʹ.size(weight='length')
         self.branched = branched
+        self.ringed = ringed
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.stunts_primes = A.graph.get('stunts_primes')
@@ -2062,7 +2065,9 @@ class PathFinder:
             subtree_load = G.nodes[n]['load']
             # set of nodes to examine is different depending on `branched`
             hook_candidates = (
-                [n for n in subtree if n < T]
+                [n]
+                if self.ringed
+                else [n for n in subtree if n < T]
                 if self.branched
                 else [n, next(h for h in subtree if len(G._adj[h]) == 1)]  # type: ignore
             )

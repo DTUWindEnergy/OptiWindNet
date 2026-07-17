@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from optiwindnet.api import HGSRouter
+from optiwindnet.api import HGSRouter, WindFarmNetwork, load_repository
 from optiwindnet.db import (
     G_from_routeset,
     L_from_nodeset,
@@ -127,6 +127,66 @@ def test_G_from_routeset(tmp_path):
         'num_diagonals',
     }
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
+
+
+def test_G_from_routeset_ringed(tmp_path):
+    """A RINGED routeset (a graph with cycles) round-trips through the database.
+
+    The rings are stored as a sequence of routes in ``edges`` (roots interleaved
+    with each ring's node walk), so it is longer than the one-entry-per-non-root
+    -node forest encoding; the open points are re-derived at the load midpoint on
+    read, not stored. The derived ``subtree`` node attribute is recomputed by
+    ``calcload`` with a per-arm convention, so it is excluded from the
+    comparison, as are the contour/detour counters that are ``None`` before
+    storage and ``0`` after.
+    """
+    pytest.importorskip('hybgensea')
+    dbfile = tmp_path / 'db_test.sqlite'
+
+    with database_connection(dbfile, create_db=True):
+        get_machine_pk()
+
+        # capacity 5 yields both rings (split open points) and detour clones, so
+        # this exercises the ring route-sequence together with the clone nodes.
+        capacity = 5
+        wfn = WindFarmNetwork(cables=capacity, L=load_repository().albatros)
+        wfn.optimize(router=HGSRouter(time_limit=0.5, ringed=True, seed=0))
+        G = wfn.G
+        T = G.graph['T']
+        C, D = (G.graph.get(k) or 0 for k in 'CD')
+        assert C + D > 0, 'this fixture must have clone nodes to be meaningful'
+
+        id = store_G(G)
+        rs = RouteSet.get_by_id(id)
+        # a ringed routeset is stored as a route sequence: longer than the
+        # forest encoding (one entry per non-root node, clones included)
+        assert len(rs.edges) > T + C + D
+    G_rs = G_from_routeset(rs)
+
+    ignored_keys = {
+        'bound',
+        'method_options',
+        'relgap',
+        'solver_details',
+        'C',
+        'D',
+        'landscape_angle',
+        'method',
+        'norm_offset',
+        'norm_scale',
+        'num_diagonals',
+    }
+    assert_graph_equal(
+        G_rs,
+        G,
+        ignored_graph_keys=ignored_keys,
+        ignored_node_keys={'subtree'},
+        verbose=False,
+    )
+    # the reloaded routeset is a genuine ring set, not a forest
+    split_edges = [(u, v) for u, v, d in G_rs.edges(data=True) if d.get('load') == 0]
+    assert split_edges, 'split open points must be restored on read'
+    assert all(G_rs[u][v]['load'] == 0 for u, v in split_edges)
 
 
 # tests when G has detours

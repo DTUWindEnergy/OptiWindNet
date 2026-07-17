@@ -18,7 +18,7 @@ from typing import Any
 import networkx as nx
 from makefun import with_signature
 
-from ..interarraylib import G_from_S
+from ..interarraylib import G_from_S, add_ring_to_S, rings_from_links
 from ..pathfinding import PathFinder
 
 _lggr = logging.getLogger(__name__)
@@ -75,6 +75,7 @@ class Topology(StrEnum):
 
     RADIAL = auto()
     BRANCHED = auto()
+    RINGED = auto()
     DEFAULT = BRANCHED
 
 
@@ -110,10 +111,20 @@ def feeder_and_load_bounds(
     feeder_limit: FeederLimit,
     max_feeders: int,
     balanced: bool,
+    feeders_per_subtree: int = 1,
 ) -> tuple[int, int | None, int | None, int | None]:
     """Derive the feeder-count and feeder-load bounds a model must enforce.
 
-    The feeder count is bounded below by ``min_feeders = ceil(T/capacity)``
+    Bounds are returned in units of **subtrees** (the quantity the model's
+    feeder-sum constraint counts): one feeder per subtree for radial/branched
+    topologies, but a RINGED subtree is a closed loop with two feeders. The
+    caller signals this with ``feeders_per_subtree`` (2 for RINGED), so that a
+    user-supplied ``max_feeders`` — always expressed as the number of physical
+    **substation connections** — is converted to the subtree count the model
+    constrains, and the returned bounds are multiplied back by
+    ``feeders_per_subtree`` for reporting.
+
+    The subtree count is bounded below by ``min_feeders = ceil(T/capacity)``
     regardless of ``feeder_limit`` (a valid inequality). ``feeders_ub`` is
     ``None`` when the count is unbounded above; when it equals ``feeders_lb``,
     the count is pinned and callers should emit an equality constraint.
@@ -125,8 +136,16 @@ def feeder_and_load_bounds(
     or the bound is already implied by the flow variable's own bounds.
 
     Returns:
-        ``(feeders_lb, feeders_ub, load_lb, load_ub)``
+        ``(feeders_lb, feeders_ub, load_lb, load_ub)`` in subtree-count units.
     """
+    if feeders_per_subtree != 1 and max_feeders:
+        if max_feeders % feeders_per_subtree:
+            raise ValueError(
+                f'max_feeders ({max_feeders}) must be a multiple of '
+                f'{feeders_per_subtree} for a RINGED topology (each ring uses '
+                f'{feeders_per_subtree} substation connections)'
+            )
+        max_feeders //= feeders_per_subtree
     min_feeders = math.ceil(T / capacity)
     if feeder_limit is FeederLimit.UNLIMITED:
         feeders_lb, feeders_ub = min_feeders, None
@@ -265,6 +284,51 @@ class SolutionInfo:
     termination: str
 
 
+def ringed_warmstart_values(
+    metadata: ModelMetadata, S: nx.Graph
+) -> tuple[dict[_Link, int], dict[_Link, int]]:
+    """Model link/flow variable values to warm-start a RINGED model from ``S``.
+
+    In the flow formulation a ring is a single directed chain of its ``n``
+    terminals: flow enters at one end from a flowless closing feeder ``r→tn`` and
+    exits at the other end through a flow feeder ``t1→r`` carrying the whole ring
+    (``n``). The canonical solution graph ``S`` instead splits the ring into two
+    arms at an open point; this recovers the ordered ring (walking across the
+    ``split`` edge with :func:`rings_from_links`) and "un-splits" it into the
+    continuous chain the model expects — the split edge becomes an ordinary
+    flow-carrying link.
+
+    Returns ``(link_vals, flow_vals)``: complete assignments over
+    ``metadata.link_`` / ``metadata.flow_`` keys (inactive variables set to 0).
+
+    Raises:
+        OWNWarmupFailed: a ring uses a terminal-terminal link absent from the model.
+    """
+    link_vals: dict[_Link, int] = dict.fromkeys(metadata.link_, 0)
+    flow_vals: dict[_Link, int] = dict.fromkeys(metadata.flow_, 0)
+    for r, chain_ in rings_from_links(S.edges(), metadata.R):
+        n = len(chain_)
+        # flow feeder: chain_[0] → r carries the whole ring
+        link_vals[chain_[0], r] = 1
+        flow_vals[chain_[0], r] = n
+        if n == 1:
+            # degenerate ring (single terminal): close with a flowless r→t feeder
+            link_vals[r, chain_[0]] = 1
+            continue
+        # closing feeder: r → chain_[-1] (starsʹ link, no flow variable)
+        link_vals[r, chain_[-1]] = 1
+        # directed chain chain_[j] → chain_[j-1], flow accumulating toward the feeder
+        for j in range(n - 1, 0, -1):
+            key = (chain_[j], chain_[j - 1])
+            if key not in link_vals:
+                raise OWNWarmupFailed(
+                    f'warmup_model() failed: model lacks ring link {key}'
+                )
+            link_vals[key] = 1
+            flow_vals[key] = n - j
+    return link_vals, flow_vals
+
+
 class Solver(abc.ABC):
     "Common interface to multiple MILP solvers"
 
@@ -369,40 +433,57 @@ class Solver(abc.ABC):
           Graph topology ``S`` from the solution.
         """
         metadata = self.metadata
-        S = nx.Graph(R=metadata.R, T=metadata.T)
+        topology = Topology[metadata.model_options.get('topology', 'BRANCHED').upper()]
+        R = metadata.R
+        S = nx.Graph(R=R, T=metadata.T)
         # ensure roots are added, even if some are not connected
-        S.add_nodes_from(range(-metadata.R, 0))
+        S.add_nodes_from(range(-R, 0))
         # Get active links and if flow is reversed (i.e. from small to big)
         rev_from_link = {
             (u, v): u < v
             for (u, v), var in metadata.link_.items()
             if self._link_val(var)
         }
-        S.add_weighted_edges_from(
-            (
-                (u, v, self._flow_val(metadata.flow_[u, v]))
-                for (u, v) in rev_from_link.keys()
-            ),
-            weight='load',
-        )
-        # set the 'reverse' edge attribute
-        nx.set_edge_attributes(S, rev_from_link, name='reverse')
-        # propagate loads from edges to nodes
-        subtree = -1
         max_load = 0
-        for r in range(-metadata.R, 0):
-            for u, v in nx.edge_dfs(S, r):
-                S.nodes[v]['load'] = S[u][v]['load']
-                if u == r:
-                    subtree += 1
-                S.nodes[v]['subtree'] = subtree
-            rootload = 0
-            for nbr in S.neighbors(r):
-                subtree_load = S.nodes[nbr]['load']
-                max_load = max(max_load, subtree_load)
-                rootload += subtree_load
-            S.nodes[r]['load'] = rootload
+        if topology is Topology.RINGED:
+            # A ring is a closed loop: two feeders to a shared root joined at
+            # their tail ends. Recover each ring's ordered terminal sequence from
+            # the active links and build it in canonical form (both feeders real,
+            # a single ``split`` open point at the load midpoint).
+            for subtree, (r, ordered) in enumerate(rings_from_links(rev_from_link, R)):
+                add_ring_to_S(S, r, ordered, subtree, getattr(self, 'A', None))
+            for r in range(-R, 0):
+                rootload = 0
+                for nbr in S.neighbors(r):
+                    subtree_load = S.nodes[nbr]['load']
+                    max_load = max(max_load, subtree_load)
+                    rootload += subtree_load
+                S.nodes[r]['load'] = rootload
+        else:
+            S.add_weighted_edges_from(
+                (
+                    (u, v, self._flow_val(metadata.flow_[u, v]))
+                    for (u, v) in rev_from_link
+                ),
+                weight='load',
+            )
+            nx.set_edge_attributes(S, rev_from_link, name='reverse')
+            # propagate loads from edges to nodes
+            subtree = -1
+            for r in range(-R, 0):
+                for u, v in nx.edge_dfs(S, r):
+                    S.nodes[v]['load'] = S[u][v]['load']
+                    if u == r:
+                        subtree += 1
+                    S.nodes[v]['subtree'] = subtree
+                rootload = 0
+                for nbr in S.neighbors(r):
+                    subtree_load = S.nodes[nbr]['load']
+                    max_load = max(max_load, subtree_load)
+                    rootload += subtree_load
+                S.nodes[r]['load'] = rootload
         S.graph.update(
+            topology=topology.name.lower(),
             capacity=metadata.capacity,
             max_load=max_load,
             has_loads=True,
@@ -434,6 +515,7 @@ class PoolHandler(abc.ABC):
         after applying the detours with PathFinder."""
         Λ = float('inf')
         branched = self.model_options['topology'] is Topology.BRANCHED
+        ringed = self.model_options['topology'] is Topology.RINGED
         num_solutions = self.num_solutions
         info(f'Solution pool has {num_solutions} solutions.')
         for i in range(num_solutions):
@@ -445,7 +527,7 @@ class PoolHandler(abc.ABC):
                 break
             Sʹ = self._topology_from_mip_pool()
             Gʹ = PathFinder(
-                G_from_S(Sʹ, A), planar=P, A=A, branched=branched
+                G_from_S(Sʹ, A), planar=P, A=A, branched=branched, ringed=ringed
             ).create_detours()
             Λʹ = Gʹ.size(weight='length')
             if Λʹ < Λ:

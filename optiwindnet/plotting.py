@@ -170,11 +170,17 @@ def gplot(
     edges_width = 1.0
     edges_capstyle = 'round'
 
-    # draw edges
+    # draw edges. A ring open point (``load == 0``) keeps its geometry ``kind``
+    # but is drawn with the 'split' style, so it reads as an open point whether
+    # it is a straight edge or follows a contour.
     for graph, edge_kind in product((G, G.graph.get('overlay')), c.kind2style):
         if graph is None:
             continue
-        edges = [(u, v) for u, v, kind in graph.edges.data('kind') if kind == edge_kind]
+        edges = [
+            (u, v)
+            for u, v, d in graph.edges(data=True)
+            if ('split' if d.get('load') == 0 else d.get('kind')) == edge_kind
+        ]
         if edges:
             if 'cables' in G.graph:
                 # use variable edge width

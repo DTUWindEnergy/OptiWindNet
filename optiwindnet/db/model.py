@@ -157,7 +157,10 @@ class RouteSet(BaseModel):
     """List of length C + D mapping cloned nodes back to original nodes."""
 
     edges = JSONField()
-    """Terse tree encoding where edges[i] is the target of node i."""
+    """Terse edge encoding. For a forest routeset it is the positional tree form
+    (``edges[i]`` is the target of node ``i``, one entry per non-root node); for
+    a RINGED routeset it is a sequence of routes (roots interleaved with each
+    ring's node walk), which is longer than the non-root node count."""
 
     nodes = ForeignKeyField(NodeSet, backref='routesets')
     """Foreign key link to the layout NodeSet."""

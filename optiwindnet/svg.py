@@ -228,6 +228,9 @@ class Drawable:
             if kind == 'detour':
                 # detours are drawn separately as polylines
                 continue
+            if edgeD.get('load') == 0:
+                # ring open point: keep geometry, draw with the 'split' style
+                kind = 'split'
             u, v = (u, v) if u < v else (v, u)
             (x1, y1), (x2, y2) = VertexS[fnT[u]], VertexS[fnT[v]]
             if self.overflow is None and not (
@@ -270,6 +273,8 @@ class Drawable:
             overlay_by_kind = defaultdict(list)
             for u, v, edgeD in overlay.edges(data=True):
                 kind = edgeD.get('kind', 'unspecified')
+                if edgeD.get('load') == 0:
+                    kind = 'split'
                 u, v = (u, v) if u < v else (v, u)
                 overlay_by_kind[kind].append(self._line(u, v))
             kind_groups = [
@@ -560,21 +565,23 @@ class Drawable:
         if G.graph.get('D', 0) > 0:
             legend_items.append(('node', 'corner', 'corner', 'none', 'ring'))
 
-        # 4. Edges (collect unique kinds from G and overlay if any)
+        # 4. Edges (collect unique kinds from G and overlay if any). A ring open
+        # point (load == 0) is drawn with the 'split' style regardless of its
+        # geometry kind, so it contributes 'split' to the legend.
+        def _legend_kind(d):
+            if d.get('load') == 0:
+                return 'split'
+            k = d.get('kind')
+            return k if k is not None else 'route'
+
         kinds = set()
-        for u, v, k in G.edges.data('kind'):
-            if k is not None:
-                kinds.add(k)
-            else:
-                kinds.add('route')
+        for u, v, d in G.edges(data=True):
+            kinds.add(_legend_kind(d))
 
         overlay = G.graph.get('overlay')
         if overlay is not None:
-            for u, v, k in overlay.edges.data('kind'):
-                if k is not None:
-                    kinds.add(k)
-                else:
-                    kinds.add('route')
+            for u, v, d in overlay.edges(data=True):
+                kinds.add(_legend_kind(d))
 
         for kind in sorted(kinds):
             color_key = None if kind == 'route' else kind

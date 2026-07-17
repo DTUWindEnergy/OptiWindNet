@@ -26,10 +26,11 @@ from .importer import load_repository as load_repository
 from .interarraylib import (
     G_from_S,
     S_from_G,
+    S_from_terse_links,
     as_normalized,
     as_stratified_vertices,
     assign_cables,
-    calcload,
+    terse_links_from_S,
 )
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
@@ -472,18 +473,13 @@ class WindFarmNetwork:
         return svgplot(G_tentative, **kwargs)
 
     def terse_links(self):
-        """Get a compact representation of the solution topology."""
-        T = self.S.graph['T']
-        terse = np.empty(T, dtype=int)
+        """Get a compact representation of the solution topology.
 
-        for u, v, reverse in self.S.edges(data='reverse'):
-            if reverse is None:
-                _error('reverse must not be None')
-            u, v = (u, v) if u < v else (v, u)
-            i, target = (u, v) if reverse else (v, u)
-            terse[i] = target
-
-        return terse
+        Forest topologies (radial/branched) are encoded positionally (one entry
+        per terminal); ringed topologies are encoded as a sequence of routes.
+        See :func:`optiwindnet.interarraylib.terse_links_from_S`.
+        """
+        return terse_links_from_S(self.S)
 
     def update_from_terse_links(
         self,
@@ -509,16 +505,18 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
-        S = nx.Graph(R=R, T=T, creator='from_terse_links')
-        for i, j in enumerate(terse_links_ints):
-            S.add_edge(i, j)
-
-        calcload(S)
+        # A ringed encoding has a number of entries different from T (see the
+        # convention in interarraylib.terse_links_from_S); a forest encoding has
+        # exactly T. Decode accordingly and route with the matching PathFinder.
+        ringed = terse_links_ints.shape[0] != T
+        S = S_from_terse_links(terse_links_ints, R=R, T=T, creator='from_terse_links')
 
         G_tentative = G_from_S(S, self.A)
 
         self._S = S
-        self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
+        self._G = PathFinder(
+            G_tentative, planar=self.P, A=self.A, ringed=ringed
+        ).create_detours()
 
         assign_cables(self._G, self.cables)
         self._is_stale_SG = False
@@ -706,13 +704,24 @@ class EWRouter(Router):
             EW with a tunable root-ward bias that increases as capacity decreases.
           ``'radial_EW'``
             EW variant that produces radial subtrees (simple paths from root).
+          ``'ringed'``
+            Closes each subtree into a ring: both endpoints connect to the same
+            root (two feeders) joined at an open point. ``cables_capacity`` is
+            the per-arm limit, so a ring holds up to twice as many terminals.
+            Unions are ranked by their total saving — the feeders shed at the
+            two joined endpoints minus the connecting edge's length
+            (Clarke-Wright style) — with a ``bias_margin`` window favoring the
+            more root-ward union on quasi-ties.
 
         Args:
           maxiter: Maximum iterations.
           feeder_route: Feeder routing mode (``'segmented'`` or ``'straight'``).
           method: one of the **Available Methods**, defaults to ``'biased_EW'``).
-          bias_margin: Fractional margin within which edges are considered
-            equivalent (used by ``'biased_EW'`` and ``'radial_EW'``).
+          bias_margin: Fractional margin within which candidates are considered
+            equivalent, resolving the quasi-tie root-ward (used by
+            ``'biased_EW'``, ``'radial_EW'`` and ``'ringed'``; for ``'ringed'``
+            the margin is a fraction of the best union ``saving`` rather than the
+            edge ``extent``).
             Defaults to the constructor's built-in default (0.02) when ``None``.
           verbose: Enable verbose logging.
         """
@@ -742,7 +751,10 @@ class EWRouter(Router):
         S = constructor(A, capacity=cables_capacity, **constructor_args)
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
+        # RINGED subtrees are closed loops: PathFinder must resolve crossings in
+        # ringed mode (matching the other ringed solver paths)
+        ringed = self.method == 'ringed'
+        G = PathFinder(G_tentative, planar=P, A=A, ringed=ringed).create_detours()
 
         assign_cables(G, cables)
 
@@ -758,7 +770,7 @@ class HGSRouter(Router):
       https://doi.org/10.1016/j.cor.2021.105643
 
     * Balances solution quality and runtime.
-    * Produces only radial solutions.
+    * Produces radial solutions, or RINGED (closed-loop) solutions with ``ringed=True``.
     """
 
     _summary_attrs = ('runtime',)
@@ -768,6 +780,7 @@ class HGSRouter(Router):
         'feeder_exact',
         'max_retries',
         'balanced',
+        'ringed',
         'seed',
     )
 
@@ -778,6 +791,7 @@ class HGSRouter(Router):
         feeder_exact: bool = False,
         max_retries: int = 10,
         balanced: bool = False,
+        ringed: bool = False,
         seed: int | None = None,
         verbose: bool = False,
         **kwargs,
@@ -793,6 +807,9 @@ class HGSRouter(Router):
               substation).
           max_retries: Maximum number of retries if a feasible solution is not found.
           balanced: Whether to balance turbines/loads across feeders.
+          ringed: Whether to produce a RINGED topology (closed loops) instead of a
+              radial one. HGS then solves the closed CVRP, so each ring holds up to
+              ``2 * cables_capacity`` turbines (two arms of ``cables_capacity`` each).
           seed: Set the seed of the pseudo-random number generator (reproducibility).
           verbose: Enable verbose logging.
 
@@ -808,6 +825,7 @@ class HGSRouter(Router):
         self.feeder_limit = feeder_limit
         self.feeder_exact = feeder_exact
         self.balanced = balanced
+        self.ringed = ringed
         self.seed = seed
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
@@ -820,12 +838,15 @@ class HGSRouter(Router):
             vehicles=self.feeder_limit,
             vehicles_exact=self.feeder_exact,
             balanced=self.balanced,
+            ringed=self.ringed,
             seed=self.seed,
         )
 
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(G_tentative, planar=P, A=A, branched=False).create_detours()
+        G = PathFinder(
+            G_tentative, planar=P, A=A, branched=False, ringed=self.ringed
+        ).create_detours()
 
         assign_cables(G, cables)
 
@@ -938,11 +959,14 @@ class MILPRouter(Router):
                         constructor(A, capacity=cables_capacity, **constructor_args)
                     )
                 else:
+                    # a RINGED model warmstarts from a ringed solution, a radial
+                    # model from a radial one
                     S_warm = hgs_cvrp(
                         as_normalized(A),
                         capacity=cables_capacity,
                         time_limit=min(self.time_limit, 0.2),
                         repair=True,
+                        ringed=self.model_options['topology'] == 'ringed',
                     )
 
         else:

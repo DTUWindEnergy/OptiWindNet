@@ -50,7 +50,9 @@ class SolverFSCIP(Solver, PoolHandler):
         return round(self._value_map[var])
 
     def _flow_val(self, var: Any) -> int:
-        return self._value_map[var]
+        # round() to coerce flow_ value (should be integer): as with link_, the
+        # SCIP solution values are floats and may be slightly off.
+        return round(self._value_map[var])
 
     def set_problem(
         self,
@@ -171,34 +173,36 @@ class SolverFSCIP(Solver, PoolHandler):
                 model.writeBestSol(isol_path)
                 cmd.extend(['-isol', isol_path])
             subprocess.run(cmd, cwd=tmpdir)
-            # non-zero variable values are 2*T (T for link_ and T for flow_)
-            table_range = range(2 * self.A.graph['T'])
+            # The number of non-zero variables per solution block is not fixed:
+            # radial/branched topologies have T link_ + T flow_ vars, but RINGED
+            # topologies emit extra link_ vars (closed rings / dual feeders), so
+            # the block is parsed until its separator ('\n' or '[ Final Solution ]')
+            # rather than by a fixed count.
             var_from_name = self.var_from_name
             objective = float('inf')
             with open(os.path.join(tmpdir, sol_path), 'r') as f:
-                while True:
-                    try:
-                        first_line = next(f)
-                    except StopIteration:
-                        break
-                    assert first_line in ('\n', '[ Final Solution ]\n')
-                    solution = model.createOrigSol()
-                    objective = float(self._regexp_objective.match(next(f)).group(1))
-                    for _, line in zip(table_range, f):
-                        m = self._regexp_var_value.match(line)
-                        if m is not None:
-                            name, value = m.groups()
-                            model.setSolVal(
-                                solution, var_from_name[name], round(float(value))
-                            )
-                        else:
-                            error('Unexpected line in %s:\n%s', sol_path, line)
+                solution = None
+                for line in f:
+                    if line in ('\n', '[ Final Solution ]\n'):
+                        # block separator: finalize the previous block, start a new one
+                        if solution is not None:
+                            model.addSol(solution)
+                        solution = model.createOrigSol()
+                        continue
+                    m = self._regexp_objective.match(line)
+                    if m is not None:
+                        objective = float(m.group(1))
+                        continue
+                    m = self._regexp_var_value.match(line)
+                    if m is not None:
+                        name, value = m.groups()
+                        model.setSolVal(
+                            solution, var_from_name[name], round(float(value))
+                        )
+                    else:
+                        error('Unexpected line in %s:\n%s', sol_path, line)
+                if solution is not None:
                     model.addSol(solution)
-                    #  accepted = model.addSol(solution)
-                    #  print(f'<obj={objective}> accepted?:', accepted)
-                    #  if not accepted:
-                    #      # model.checkSol() cause a segfault
-                    #      print(model.checkSol(solution))
             num_solutions = model.getNSols()
             if num_solutions == 0:
                 raise OWNSolutionNotFound(
@@ -239,6 +243,10 @@ class SolverFSCIP(Solver, PoolHandler):
         solution_pool = [(model.getSolObjVal(sol), sol) for sol in model.getSols()]
         solution_pool.sort()
         self._solution_pool = solution_pool
+        # Prime _value_map with the best solution so the STRAIGHT get_solution()
+        # path (which calls _topology_from_mip_pool without _objective_at) works;
+        # the SEGMENTED path resets it per pool entry via _objective_at().
+        _, self._value_map = self._solution_pool[0]
         self.num_solutions = num_solutions
         solution_info = SolutionInfo(
             runtime=solving_time,
@@ -264,6 +272,7 @@ class SolverFSCIP(Solver, PoolHandler):
                 P,
                 A,
                 branched=model_options['topology'] is Topology.BRANCHED,
+                ringed=model_options['topology'] is Topology.RINGED,
             ).create_detours()
         else:
             S, G = self._investigate_pool(P, A)

@@ -124,7 +124,7 @@ def test_lkh3_single_root_calls_do_lkh_with_expected_args(monkeypatch):
         return _fake_output(routes=[[0, 1], [2, 3]], vehicles=kwargs['vehicles'])
 
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A: S)
+    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
     S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=42)
 
@@ -148,7 +148,7 @@ def test_lkh3_balanced_sets_min_route_size(monkeypatch):
         return _fake_output(routes=[[0, 1], [2, 3], [4]], vehicles=3)
 
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A: S)
+    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
     lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, balanced=True)
 
@@ -165,7 +165,7 @@ def test_lkh3_seed_none_picks_random_seed(monkeypatch):
         return _fake_output(routes=[[0, 1], [2, 3]], vehicles=2)
 
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A: S)
+    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
     S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=None)
 
@@ -188,7 +188,7 @@ def test_lkh3_repairs_on_crossings(monkeypatch):
     def fake_do_lkh(L, **kwargs):
         return _fake_output(routes=[[0, 1], [2, 3]], vehicles=2)
 
-    def fake_repair(S, A_inner):
+    def fake_repair(S, A_inner, ringed=False):
         label, crossings = next(repair_iter)
         S.graph['outstanding_crossings'] = crossings
         S.graph['_label'] = label
@@ -211,7 +211,7 @@ def test_lkh3_max_retries_warns(monkeypatch):
     def fake_do_lkh(L, **kwargs):
         return _fake_output(routes=[[0, 1], [2, 3]], vehicles=2)
 
-    def fake_repair(S, A_inner):
+    def fake_repair(S, A_inner, ringed=False):
         S.graph['outstanding_crossings'] = [((0, 1), (2, 3))]
         return S
 
@@ -235,7 +235,7 @@ def test_lkh3_repair_false_skips_repair_loop(monkeypatch):
     def fake_do_lkh(L, **kwargs):
         return _fake_output(routes=[[0, 1], [2, 3]], vehicles=2)
 
-    def fake_repair(S, A_inner):
+    def fake_repair(S, A_inner, ringed=False):
         repair_calls.append(1)
         return S
 
@@ -261,7 +261,7 @@ def test_lkh3_multi_root_runs_one_call_per_cluster(monkeypatch):
 
     monkeypatch.setattr(lkh_mod, 'clusterize', fake_clusterize)
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A: S)
+    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
     S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=7)
     assert len(captured_calls) == 2
@@ -284,7 +284,7 @@ def test_lkh3_multi_root_warns_when_vehicles_above_min(monkeypatch):
 
     monkeypatch.setattr(lkh_mod, 'clusterize', fake_clusterize)
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A: S)
+    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
     warnings_seen = []
     monkeypatch.setattr(lkh_mod, 'warn', warnings_seen.append)

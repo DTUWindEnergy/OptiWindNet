@@ -24,6 +24,7 @@ from ._core import (
     Topology,
     feeder_and_load_bounds,
     physical_core_count,
+    ringed_warmstart_values,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -104,6 +105,10 @@ class SolverSCIP(Solver, PoolHandler):
         self._solution_pool = [
             (model.getSolObjVal(sol), sol) for sol in model.getSols()
         ]
+        # Prime _value_map with the best solution so the STRAIGHT get_solution()
+        # path (which calls _topology_from_mip_pool without _objective_at) works;
+        # the SEGMENTED path resets it per pool entry via _objective_at().
+        _, self._value_map = self._solution_pool[0]
         self.num_solutions = num_solutions
         solution_info = SolutionInfo(
             runtime=model.getSolvingTime(),
@@ -128,6 +133,7 @@ class SolverSCIP(Solver, PoolHandler):
                 P,
                 A,
                 branched=model_options['topology'] is Topology.BRANCHED,
+                ringed=model_options['topology'] is Topology.RINGED,
             ).create_detours()
         else:
             S, G = self._investigate_pool(P, A)
@@ -159,7 +165,7 @@ def make_min_length_model(
     Args:
       A: graph with the available edges to choose from
       capacity: maximum link flow capacity
-      topology: one of ``Topology.{BRANCHED, RADIAL}``
+      topology: one of ``Topology.{BRANCHED, RADIAL, RINGED}``
       feeder_route:
         ``FeederRoute.SEGMENTED`` → feeder routes may be detoured around subtrees;
         ``FeederRoute.STRAIGHT`` → feeder routes must be straight, direct lines
@@ -176,6 +182,11 @@ def make_min_length_model(
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
     W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
 
+    # For RINGED, double the internal capacity; store original for metadata.
+    ring_capacity = capacity
+    if topology is Topology.RINGED:
+        capacity = 2 * capacity
+
     # Sets
     _T = range(T)
     _R = range(-R, 0)
@@ -185,7 +196,13 @@ def make_min_length_model(
     Eʹ = tuple((v, u) for u, v in E)
     # set of feeders to all roots
     stars = tuple((t, r) for t in _T for r in _R)
-    linkset = E + Eʹ + stars
+    if topology is Topology.RINGED:
+        starsʹ = tuple((r, t) for t, r in stars)
+    else:
+        starsʹ = ()
+    linkset = E + Eʹ + stars + starsʹ
+    # flow variables only for edges with actual flow (no ring-backs)
+    flowset = E + Eʹ + stars
 
     # Create model
     m = Model()
@@ -195,8 +212,14 @@ def make_min_length_model(
     ##############
 
     k = capacity
-    weight_ = 2 * tuple(A[u][v]['length'] for u, v in E) + tuple(
-        d2roots[t, r] for t, r in stars
+    weight_ = (
+        2 * tuple(A[u][v]['length'] for u, v in E)
+        + tuple(d2roots[t, r] for t, r in stars)
+        + (
+            tuple(d2roots[t, r] for t, r in stars)
+            if topology is Topology.RINGED
+            else ()
+        )
     )
 
     #############
@@ -205,6 +228,8 @@ def make_min_length_model(
 
     link_ = {(u, v): m.addVar(f'link_{u}~{v}', 'B') for u, v in chain(E, Eʹ)}
     link_ |= {(t, r): m.addVar(f'link_{t}~r{-r}', 'B') for t, r in stars}
+    if topology is Topology.RINGED:
+        link_ |= {(r, t): m.addVar(f'link_r{-r}~{t}', 'B') for r, t in starsʹ}
     flow_ = {
         (u, v): m.addVar(f'flow_{u}~{v}', 'I', lb=0, ub=k - 1) for u, v in chain(E, Eʹ)
     }
@@ -214,8 +239,9 @@ def make_min_length_model(
     # Constraints #
     ###############
 
-    # total number of edges must be equal to number of terminal nodes
-    m.addCons(sum(link_.values()) == T, name='num_links_eq_T')
+    # total number of edges must equal number of terminal nodes (skip for RINGED)
+    if topology is not Topology.RINGED:
+        m.addCons(sum(link_.values()) == T, name='num_links_eq_T')
 
     # enforce a single directed edge between each node pair
     for u, v in E:
@@ -225,16 +251,28 @@ def make_min_length_model(
     if feeder_route is FeederRoute.STRAIGHT:
         for (u, v), (r, t) in gateXing_iter(A):
             if u >= 0:
-                m.addConsSOS1(
-                    (link_[(u, v)], link_[(v, u)], link_[t, r]),
-                    name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
-                )
+                if topology is Topology.RINGED:
+                    m.addConsSOS1(
+                        (link_[(u, v)], link_[(v, u)], link_[t, r], link_[r, t]),
+                        name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
+                    )
+                else:
+                    m.addConsSOS1(
+                        (link_[(u, v)], link_[(v, u)], link_[t, r]),
+                        name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
+                    )
             else:
                 # a feeder crossing another feeder (possible in multi-root instances)
-                m.addConsSOS1(
-                    (link_[(u, v)], link_[t, r]),
-                    name=f'feeder_feeder_cross_r{-u}~{v}_{t}~r{-r}',
-                )
+                if topology is Topology.RINGED:
+                    m.addConsSOS1(
+                        (link_[(u, v)], link_[t, r], link_[r, t]),
+                        name=f'feeder_feeder_cross_r{-u}~{v}_{t}~r{-r}',
+                    )
+                else:
+                    m.addConsSOS1(
+                        (link_[(u, v)], link_[t, r]),
+                        name=f'feeder_feeder_cross_r{-u}~{v}_{t}~r{-r}',
+                    )
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):
@@ -243,8 +281,8 @@ def make_min_length_model(
             name=f'link_link_cross_{"_".join(f"{u}~{v}" for u, v in Xing)}',
         )
 
-    # bind flow to link activation
-    for t, n in linkset:
+    # bind flow to link activation (only for edges with flow variables)
+    for t, n in flowset:
         _n = str(n) if n >= 0 else f'r{-n}'
         m.addCons(
             flow_[t, n] <= link_[t, n] * (k if n < 0 else (k - 1)),
@@ -261,13 +299,16 @@ def make_min_length_model(
             name=f'flow_conserv_{t}',
         )
 
-    # feeder limits
+    # feeder limits. A RINGED subtree is a closed loop with two feeders, so the
+    # user-facing feeder count is in substation connections (two per ring), while
+    # the model counts rings (one flow-feeder var each): convert between them.
+    feeders_per_subtree = 2 if topology is Topology.RINGED else 1
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, k, feeder_limit, max_feeders, balanced
+        T, k, feeder_limit, max_feeders, balanced, feeders_per_subtree
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata
-        max_feeders = feeders_ub
+        max_feeders = feeders_per_subtree * feeders_ub
     all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
     if feeders_lb == feeders_ub:
         m.addCons(all_feeder_vars_sum == feeders_lb, name='feeder_limit_eq')
@@ -289,11 +330,21 @@ def make_min_length_model(
                 flow_[t, r] <= link_[t, r] * load_ub, name=f'balanced_ub_{t}~r{-r}'
             )
 
-    # radial or branched topology
+    # topology-specific incoming-edge constraints
     if topology is Topology.RADIAL:
         for t in _T:
+            # SOS1 takes the *list* of incoming terminal-link variables (at most
+            # one may be nonzero => simple paths), not their sum.
             m.addConsSOS1(
-                sum(link_[n, t] for n in A_terminals.neighbors(t)), name=f'radial_{t}'
+                [link_[n, t] for n in A_terminals.neighbors(t)], name=f'radial_{t}'
+            )
+    elif topology is Topology.RINGED:
+        for t in _T:
+            m.addCons(
+                sum(link_[n, t] for n in A_terminals.neighbors(t))
+                + sum(link_[r, t] for r in _R)
+                == 1,
+                name=f'ringed_{t}',
             )
 
     # assert all nodes are connected to some root
@@ -335,7 +386,7 @@ def make_min_length_model(
     metadata = ModelMetadata(
         R,
         T,
-        k,
+        ring_capacity,
         linkset,
         link_,
         flow_,
@@ -366,6 +417,21 @@ def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
       OWNWarmupFailed: if some link in S is not available in model.
     """
     R, T = metadata.R, metadata.T
+    if metadata.model_options.get('topology') is Topology.RINGED:
+        # A ring is a single directed chain per the flow formulation; derive the
+        # variable values from the (split) ringed solution graph directly.
+        link_vals, flow_vals = ringed_warmstart_values(metadata, S)
+        sol = model.createSol()
+        for key, var in metadata.link_.items():
+            model.setSolVal(sol, var, link_vals[key])
+        for key, var in metadata.flow_.items():
+            model.setSolVal(sol, var, flow_vals[key])
+        if not model.addSol(sol):
+            raise OWNWarmupFailed(
+                'warmup_model() failed: S violates some model constraint'
+            )
+        metadata.warmed_by = S.graph['creator']
+        return model
     in_S_not_in_model = S.edges - metadata.link_.keys()
     in_S_not_in_model -= {(v, u) for u, v in metadata.linkset[-R * T :]}
     if in_S_not_in_model:

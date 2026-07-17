@@ -8,7 +8,10 @@ from typing import Any
 
 import networkx as nx
 import pyomo.environ as pyo
-from pyomo.util.infeasible import find_infeasible_constraints
+from pyomo.util.infeasible import (
+    find_infeasible_constraints,
+    log_infeasible_constraints,
+)
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..interarraylib import G_from_S, fun_fingerprint
@@ -25,6 +28,7 @@ from ._core import (
     Topology,
     feeder_and_load_bounds,
     physical_core_count,
+    ringed_warmstart_values,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -173,6 +177,7 @@ class SolverPyomo(Solver):
             P,
             A,
             branched=model_options['topology'] is Topology.BRANCHED,
+            ringed=model_options['topology'] is Topology.RINGED,
         ).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -276,6 +281,7 @@ class SolverPyomoAppsi(Solver):
             P,
             A,
             branched=model_options['topology'] is Topology.BRANCHED,
+            ringed=model_options['topology'] is Topology.RINGED,
         ).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -315,6 +321,12 @@ def make_min_length_model(
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
     W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
 
+    # For RINGED, double the internal capacity so each ring can hold up to
+    # 2×capacity turbines (capacity per arm); store original for metadata.
+    ring_capacity = capacity
+    if topology is Topology.RINGED:
+        capacity = 2 * capacity
+
     # Sets
     _T = range(T)
     _R = range(-R, 0)
@@ -324,12 +336,17 @@ def make_min_length_model(
     Eʹ = tuple((v, u) for u, v in E)
     # set of feeders to all roots
     stars = tuple((t, r) for t in _T for r in _R)
+    if topology is Topology.RINGED:
+        # append the links leaving the roots
+        starsʹ = tuple((r, t) for t, r in stars)
+    else:
+        starsʹ = ()
 
     # Create model
     m = pyo.ConcreteModel()
     m.T = pyo.RangeSet(0, T - 1)
     m.R = pyo.RangeSet(-R, -1)
-    m.linkset = pyo.Set(initialize=E + Eʹ + stars)
+    m.linkset = pyo.Set(initialize=E + Eʹ + stars + starsʹ)
 
     ##############
     # Parameters #
@@ -341,7 +358,9 @@ def make_min_length_model(
         domain=pyo.PositiveReals,
         name='link_weight',
         initialize=lambda m, u, v: (
-            A.edges[(u, v)]['length'] if v >= 0 else d2roots[u, v]
+            A.edges[(u, v)]['length']
+            if v >= 0 and u >= 0
+            else d2roots[(u, v) if u >= 0 else (v, u)]
         ),
     )
 
@@ -355,7 +374,10 @@ def make_min_length_model(
         return (0, (m.k if v < 0 else m.k - 1))
 
     m.flow_ = pyo.Var(
-        m.linkset, domain=pyo.NonNegativeIntegers, bounds=flow_bounds, initialize=0
+        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
+        domain=pyo.NonNegativeIntegers,
+        bounds=flow_bounds,
+        initialize=0,
     )
 
     ###############
@@ -363,9 +385,10 @@ def make_min_length_model(
     ###############
 
     # total number of edges must be equal to number of non-root nodes
-    m.cons_num_links_eq_T = pyo.Constraint(
-        rule=(lambda m: sum(m.link_.values()) == T), name='num_links_eq_T'
-    )
+    if topology != Topology.RINGED:
+        m.cons_num_links_eq_T = pyo.Constraint(
+            rule=(lambda m: sum(m.link_.values()) == T), name='num_links_eq_T'
+        )
 
     # enforce a single directed edge between each node pair
     m.cons_single_dir_link = pyo.Constraint(
@@ -376,13 +399,28 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
+        if topology == Topology.RINGED:
 
-        def feederXedge_rule(m, u, v, r, t):
-            if u >= 0:
-                return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
-            else:
-                # a feeder crossing another feeder (possible in multi-root instances)
-                return m.link_[u, v] + m.link_[t, r] <= 1
+            def feederXedge_rule(m, u, v, r, t):
+                if u >= 0:
+                    return (
+                        m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t]
+                        <= 1
+                    )
+                else:
+                    # feeder-feeder crossing (possible in multi-root instances)
+                    return (
+                        m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t]
+                        <= 1
+                    )
+        else:
+
+            def feederXedge_rule(m, u, v, r, t):
+                if u >= 0:
+                    return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
+                else:
+                    # feeder-feeder crossing (possible in multi-root instances)
+                    return m.link_[u, v] + m.link_[t, r] <= 1
 
         m.cons_feeder_cross = pyo.Constraint(
             gateXing_iter(A), rule=feederXedge_rule, name='feeder_cross'
@@ -414,7 +452,7 @@ def make_min_length_model(
 
     # bind flow to link activation
     m.cons_flow_ub = pyo.Constraint(
-        m.linkset,
+        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
         rule=(
             lambda m, u, v: (
                 m.flow_[(u, v)] <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
@@ -423,7 +461,7 @@ def make_min_length_model(
         name='flow_ub',
     )
     m.cons_flow_lb = pyo.Constraint(
-        m.linkset,
+        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
         rule=(lambda m, u, v: m.link_[(u, v)] <= m.flow_[(u, v)]),
         name='flow_lb',
     )
@@ -441,13 +479,16 @@ def make_min_length_model(
         name='flow_conserv',
     )
 
-    # feeder limits
+    # feeder limits. A RINGED subtree is a closed loop with two feeders, so the
+    # user-facing feeder count is in substation connections (two per ring), while
+    # the model counts rings (one flow-feeder var each): convert between them.
+    feeders_per_subtree = 2 if topology is Topology.RINGED else 1
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, capacity, feeder_limit, max_feeders, balanced
+        T, capacity, feeder_limit, max_feeders, balanced, feeders_per_subtree
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata
-        max_feeders = feeders_ub
+        max_feeders = feeders_per_subtree * feeders_ub
     if feeders_lb == feeders_ub:
         m.cons_feeder_limit_eq = pyo.Constraint(
             rule=(lambda m: sum(m.link_[t, r] for r in _R for t in _T) == feeders_lb),
@@ -483,7 +524,7 @@ def make_min_length_model(
             name='balanced_ub',
         )
 
-    # radial or branched topology
+    # only for radial or ringed topology
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
         # limited by the m.cons_single_out_link
@@ -491,6 +532,18 @@ def make_min_length_model(
             m.T,
             rule=(
                 lambda m, u: sum(m.link_[v, u] for v in A_terminals.neighbors(u)) <= 1
+            ),
+            name='radial',
+        )
+    elif topology is Topology.RINGED:
+        # just need to limit incoming edges since the outgoing are
+        # limited by the m.cons_one_out_edge
+        m.cons_ringed = pyo.Constraint(
+            m.T,
+            rule=(
+                lambda m, t: sum(m.link_[v, t] for v in A_terminals.neighbors(t))
+                + sum(m.link_[r, t] for r in m.R)
+                == 1
             ),
             name='radial',
         )
@@ -545,7 +598,7 @@ def make_min_length_model(
     metadata = ModelMetadata(
         R,
         T,
-        capacity,
+        ring_capacity,
         m.linkset,
         m.link_,
         m.flow_,
@@ -577,18 +630,33 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    for u, v, reverse in S.edges(data='reverse'):
-        u, v = (u, v) if ((u < v) == reverse) else (v, u)
-        try:
-            model.link_[(u, v)] = 1
-        except KeyError:
-            raise OWNWarmupFailed(
-                f'warmup_model() failed: model lacks S link ({u, v})'
-            ) from None
-        model.flow_[(u, v)] = S[u][v]['load']
+    topology = Topology[metadata.model_options['topology'].upper()]
+    if topology is Topology.RINGED:
+        # A ring is a single directed chain per the flow formulation; derive the
+        # variable values from the (split) ringed solution graph directly and set
+        # only the active links (as the radial branch below does).
+        link_vals, flow_vals = ringed_warmstart_values(metadata, S)
+        for key, value in link_vals.items():
+            if value:
+                model.link_[key] = value
+        for key, value in flow_vals.items():
+            if value:
+                model.flow_[key] = value
+    else:
+        for u, v, reverse in S.edges(data='reverse'):
+            u, v = (u, v) if ((u < v) == reverse) else (v, u)
+            try:
+                model.link_[(u, v)] = 1
+            except KeyError:
+                raise OWNWarmupFailed(
+                    f'warmup_model() failed: model lacks S link ({u, v})'
+                ) from None
+            model.flow_[(u, v)] = S[u][v]['load']
+
     # check if solution violates any constraints:
     # checking the bounds seem redundant, but the way to do it would be:
     # next(find_infeasible_bounds(model), False)
+    log_infeasible_constraints(model, log_variables=True)
     if next(find_infeasible_constraints(model), False):
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     metadata.warmed_by = S.graph['creator']
