@@ -120,6 +120,43 @@ def _node_dist(VertexC: np.ndarray, u: int, v: int) -> float:
     return math.hypot(ux - vx, uy - vy)
 
 
+def _compact_stunt_clones(
+    G: nx.Graph,
+    *,
+    T: int,
+    B: int,
+    clone_idx: int,
+    clone2prime: list[int],
+    stunts_primes: list[int] | None,
+) -> tuple[nx.Graph, int, int, list[int]]:
+    """Remove stunt-id gaps and map their clones to the original primes.
+
+    ``B`` and ``clone_idx`` use the planar embedding's numbering, in which
+    temporary stunt vertices occupy the end of the constraint-vertex range.
+    Routesets do not retain those vertices, so every contour/detour clone must
+    be shifted down and any clone of a stunt must map to that stunt's original
+    constraint vertex.
+    """
+    if not stunts_primes:
+        return G, B, clone_idx, clone2prime
+
+    num_stunts = len(stunts_primes)
+    first_clone = T + B
+    G = nx.relabel_nodes(
+        G,
+        {clone: clone - num_stunts for clone in range(first_clone, clone_idx)},
+        copy=False,
+    )
+    clone_idx -= num_stunts
+    B -= num_stunts
+
+    stunt2prime = {
+        stunt: prime for stunt, prime in enumerate(stunts_primes, start=T + B)
+    }
+    clone2prime = [stunt2prime.get(prime, prime) for prime in clone2prime]
+    return G, B, clone_idx, clone2prime
+
+
 def _expand_P_paths_edge(
     s: int, t: int, shortcuts: dict[tuple[int, int], list[int]]
 ) -> list[int]:
@@ -2044,6 +2081,24 @@ class PathFinder:
                     del G[r][n]['kind']
             if 'tentative' in G.graph:
                 del G.graph['tentative']
+
+            R, T, B = (self.A.graph[k] for k in 'RTB')
+            C = G.graph.get('C', 0)
+            clone_idx = T + B + C
+            clone2prime = G.graph['fnT'][T + B : -R].tolist() if C > 0 else []
+            G, B, clone_idx, clone2prime = _compact_stunt_clones(
+                G,
+                T=T,
+                B=B,
+                clone_idx=clone_idx,
+                clone2prime=clone2prime,
+                stunts_primes=self.A.graph.get('stunts_primes'),
+            )
+            if C > 0:
+                fnT = np.arange(R + clone_idx)
+                fnT[T + B : clone_idx] = clone2prime
+                fnT[-R:] = range(-R, 0)
+                G.graph.update(B=B, fnT=fnT)
             debug('<PathFinder: no crossings, detagged all tentative edges.')
             return G
 
@@ -2194,23 +2249,14 @@ class PathFinder:
 
         D = clone_idx - T - B - C
         detextra = G.size(weight='length') / self.predetour_length - 1
-        if self.stunts_primes is not None:
-            num_stunts = len(self.stunts_primes)
-            G = nx.relabel_nodes(
-                G,
-                {clone: clone - num_stunts for clone in range(T + B, clone_idx)},
-                copy=False,
-            )
-            clone_idx -= num_stunts
-            B -= num_stunts
-            if clone2prime:
-                for stunt, prime in enumerate(self.stunts_primes, start=T + B):
-                    try:
-                        while True:
-                            i = clone2prime.index(stunt)
-                            clone2prime[i] = prime
-                    except ValueError:
-                        continue
+        G, B, clone_idx, clone2prime = _compact_stunt_clones(
+            G,
+            T=T,
+            B=B,
+            clone_idx=clone_idx,
+            clone2prime=clone2prime,
+            stunts_primes=self.stunts_primes,
+        )
 
         fnT = np.arange(R + clone_idx)
         fnT[T + B : clone_idx] = clone2prime

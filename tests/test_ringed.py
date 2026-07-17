@@ -408,6 +408,37 @@ def test_constructor_ringed_end_to_end_is_valid(ringed_mesh, feeder_route):
     assert G.size(weight='length') > 0.0
 
 
+def test_constructor_ringed_no_crossing_compacts_stunt_contour_clone():
+    """The no-crossing PathFinder path must finalize stunt-based contours."""
+    P, A = _load_ringed_mesh('borkum2')
+    T, B_A = (A.graph[k] for k in 'TB')
+    stunts_primes = A.graph['stunts_primes']
+    stunt_nodes = set(range(T + B_A - len(stunts_primes), T + B_A))
+
+    S = constructor(A, capacity=8, method='ringed')
+    G_tentative = G_from_S(S, A)
+    tentative_fnT = G_tentative.graph['fnT']
+    tentative_contours = {
+        n for n, data in G_tentative.nodes(data=True) if data.get('kind') == 'contour'
+    }
+    assert any(tentative_fnT[n] in stunt_nodes for n in tentative_contours)
+
+    pathfinder = PathFinder(G_tentative, planar=P, A=A, ringed=True)
+    assert pathfinder.Xings == []
+    G = pathfinder.create_detours()
+
+    R, T, B = (G.graph[k] for k in 'RTB')
+    C, D = G.graph.get('C', 0), G.graph.get('D', 0)
+    fnT = G.graph['fnT']
+    contour_nodes = {
+        n for n, data in G.nodes(data=True) if data.get('kind') == 'contour'
+    }
+
+    assert len(fnT) == T + B + C + D + R
+    assert contour_nodes == set(range(T + B, T + B + C))
+    assert all(fnT[n] < T + B for n in contour_nodes)
+
+
 # --------------------------------------------------------------------------- #
 # EWRouter(method='ringed') through the public WindFarmNetwork API
 # --------------------------------------------------------------------------- #
