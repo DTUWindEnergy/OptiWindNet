@@ -450,9 +450,7 @@ class Solver(abc.ABC):
             # their tail ends. Recover each ring's ordered terminal sequence from
             # the active links and build it in canonical form (both feeders real,
             # a single ``split`` open point at the load midpoint).
-            for subtree, (r, ordered) in enumerate(
-                rings_from_links(rev_from_link, R)
-            ):
+            for subtree, (r, ordered) in enumerate(rings_from_links(rev_from_link, R)):
                 add_ring_to_S(S, r, ordered, subtree, getattr(self, 'A', None))
             for r in range(-R, 0):
                 rootload = 0
@@ -485,6 +483,7 @@ class Solver(abc.ABC):
                     rootload += subtree_load
                 S.nodes[r]['load'] = rootload
         S.graph.update(
+            topology=topology.name.lower(),
             capacity=metadata.capacity,
             max_load=max_load,
             has_loads=True,

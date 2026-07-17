@@ -966,6 +966,9 @@ def constructor(
     for r, rootmask_ in zip(roots, rootmask__):
         for sr in (rootmask_ & is_subroot_).search(_ONE):
             S.add_edge(r, sr)
+    S.graph['topology'] = (
+        'ringed' if ringed else 'radial' if method == 'radial_EW' else 'branched'
+    )
     if ringed:
         ringify_S(S, Aʹ)
     else:
