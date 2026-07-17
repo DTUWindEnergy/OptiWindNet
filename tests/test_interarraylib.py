@@ -308,7 +308,7 @@ def test_G_from_S():
     G = G_from_S(S_sc, A_sc)
 
     assert (0, 2) in G.edges
-    assert G[0][2]['kind'] == 'contour'
+    assert 'kind' not in G[0][2]
     assert (0, 2) in G.graph['shortened_contours']
 
     #
@@ -335,9 +335,9 @@ def test_G_from_S():
         # Check edge exists
         assert (s, t) in G.edges
 
-        # Check kind based on s
-        expected_kind = 'contour' if s >= 0 else 'tentative'
-        actual_kind = G[s][t]['kind'] if (s, t) in G.edges() else G[t][s]['kind']
+        # Fully shortened non-gates are realized as ordinary direct edges.
+        expected_kind = None if s >= 0 else 'tentative'
+        actual_kind = G[s][t].get('kind')
         assert actual_kind == expected_kind
 
     #
