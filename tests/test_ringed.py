@@ -292,21 +292,42 @@ def test_ringify_S_rejects_branching_subtree():
 # --------------------------------------------------------------------------- #
 # Constructive heuristic RINGED (method='ringed') -- runs in-process
 # --------------------------------------------------------------------------- #
+# id -> (repository location name, number of roots R)
 _RINGED_MESHES = {
-    'albatros_1ss': 'albatros',  # R=1, T=16
-    'neart_2ss': 'neart',  # R=2, T=54 (exercises per-root ring loops)
+    'albatros_1ss': ('albatros', 1),  # T=16
+    'neart_2ss': ('neart', 2),  # T=54 (exercises per-root ring loops)
+}
+# multi-root subset, for tests whose assertion only makes sense with R >= 2
+_MULTIROOT_RINGED_MESHES = {
+    mesh_id: name for mesh_id, (name, R) in _RINGED_MESHES.items() if R >= 2
 }
 
 
+def _load_ringed_mesh(name):
+    """(P, A) for a repository location, built via its planar embedding."""
+    from optiwindnet.api import load_repository
+
+    return make_planar_embedding(getattr(load_repository(), name))
+
+
 @pytest.fixture(
-    scope='session', params=list(_RINGED_MESHES.values()), ids=list(_RINGED_MESHES)
+    scope='session',
+    params=[name for name, _ in _RINGED_MESHES.values()],
+    ids=list(_RINGED_MESHES),
 )
 def ringed_mesh(request):
     """(P, A) for a repository location, built once per location per session."""
-    from optiwindnet.api import load_repository
+    return _load_ringed_mesh(request.param)
 
-    L = getattr(load_repository(), request.param)
-    return make_planar_embedding(L)
+
+@pytest.fixture(
+    scope='session',
+    params=list(_MULTIROOT_RINGED_MESHES.values()),
+    ids=list(_MULTIROOT_RINGED_MESHES),
+)
+def ringed_mesh_multiroot(request):
+    """(P, A) restricted to multi-substation sites (R >= 2)."""
+    return _load_ringed_mesh(request.param)
 
 
 @pytest.mark.parametrize('capacity', (3, 5, 8))
@@ -340,12 +361,10 @@ def test_constructor_ringed_graph_metadata(ringed_mesh):
     assert 'num_insertions' in S.graph
 
 
-def test_constructor_ringed_multi_root_covers_every_root(ringed_mesh):
+def test_constructor_ringed_multi_root_covers_every_root(ringed_mesh_multiroot):
     """On a multi-substation site every root carries at least one ring."""
-    _, A = ringed_mesh
+    _, A = ringed_mesh_multiroot
     R = A.graph['R']
-    if R < 2:
-        pytest.skip('single-root mesh')
     S = constructor(A, capacity=5, method='ringed')
     _assert_canonical_ringed(S, capacity=5)
     roots_used = {r for r, _ in _rings(S)}
