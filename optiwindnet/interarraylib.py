@@ -725,6 +725,17 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     if shortened_contours:
         G.graph['shortened_contours'] = shortened_contours
     if clone2prime:
+        if stunts_primes:
+            # Contour clones may address stunt vertices, which were dropped from
+            # the compacted VertexC above. Map them to their original primes so
+            # the emitted fnT stays consistent with VertexC. (PathFinder later
+            # closes the stunt-id gap in the clone *node* numbering and remaps
+            # any detour clones it adds that trace through stunts.)
+            first_stunt = T + G.graph['B']
+            stunt2prime = {
+                first_stunt + i: prime for i, prime in enumerate(stunts_primes)
+            }
+            clone2prime = [stunt2prime.get(prime, prime) for prime in clone2prime]
         fnT = np.arange(iC + R)
         fnT[T + B : -R] = clone2prime
         fnT[-R:] = range(-R, 0)
