@@ -248,13 +248,15 @@ class PathFinder:
     Only edges in graph attribute ``'tentative'`` or, lacking that, edges with the
     attribute ``'kind'`` with value ``'tentative'`` are checked for crossings.
 
+    Feeders are rerouted within the topology ``Gʹ`` declares in its mandatory
+    ``'topology'`` graph attribute, which decides where a feeder may re-hook:
+    ``'branched'`` allows any terminal of the subtree, ``'radial'`` only its
+    head or tail, ``'ringed'`` only the current subroot.
+
     Args:
       G: the route set without detours
       P: the planar embedding associated with A
       A: the available links graph
-      branched: if True, any terminal can be linked to root, else only subtrees'
-        heads/tails
-      ringed: if True, only the node the tentative feeder connects to is considered
       iterations_limit: maximum number of steps in the path-finding process
       traversals_limit: maximum number of times a single portal may be traversed
       bad_streak_limit: limit on how many steps in a row without finding an improved
@@ -280,8 +282,6 @@ class PathFinder:
         planar: nx.PlanarEmbedding,
         A: nx.Graph,
         *,
-        branched: bool = True,
-        ringed: bool = False,
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
         bad_streak_limit: int = 5,
@@ -599,8 +599,7 @@ class PathFinder:
             Rank if Rank is not None else rankdata(d2roots, method='dense', axis=0)
         )
         self.predetour_length = Gʹ.size(weight='length')
-        self.branched = branched
-        self.ringed = ringed
+        self.topology = Gʹ.graph['topology']
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.stunts_primes = A.graph.get('stunts_primes')
@@ -2122,12 +2121,12 @@ class PathFinder:
             subtree_id = subtree_id_from_n[n]
             subtree = subtree_from_subtree_id[subtree_id]
             subtree_load = G.nodes[n]['load']
-            # set of nodes to examine is different depending on `branched`
+            # where a feeder may re-hook depends on the declared topology
             hook_candidates = (
                 [n]
-                if self.ringed
+                if self.topology == 'ringed'
                 else [n for n in subtree if n < T]
-                if self.branched
+                if self.topology == 'branched'
                 else [n, next(h for h in subtree if len(G._adj[h]) == 1)]  # type: ignore
             )
             debug('hook_candidates: %s', hook_candidates)

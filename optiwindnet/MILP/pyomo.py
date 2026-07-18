@@ -164,7 +164,7 @@ class SolverPyomo(Solver):
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        P, model, model_options = self.P, self.model, self.model_options
+        P, model = self.P, self.model
         result = self.result
         # hack to prevent warning about the solver not reaching the desired mip_gap
         result.solver.status = pyo.SolverStatus.ok
@@ -173,13 +173,7 @@ class SolverPyomo(Solver):
             A = self.A
         S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
-        G = PathFinder(
-            G_from_S(S, A),
-            P,
-            A,
-            branched=model_options['topology'] is Topology.BRANCHED,
-            ringed=model_options['topology'] is Topology.RINGED,
-        ).create_detours()
+        G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
 
@@ -269,7 +263,7 @@ class SolverPyomoAppsi(Solver):
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        P, model_options = self.P, self.model_options
+        P = self.P
         result = self.result
         result.solution_loader.load_vars()
         #  model.solutions.load_from(result)
@@ -277,13 +271,7 @@ class SolverPyomoAppsi(Solver):
             A = self.A
         S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
-        G = PathFinder(
-            G_from_S(S, A),
-            P,
-            A,
-            branched=model_options['topology'] is Topology.BRANCHED,
-            ringed=model_options['topology'] is Topology.RINGED,
-        ).create_detours()
+        G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
 

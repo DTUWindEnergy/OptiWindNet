@@ -20,7 +20,6 @@ from ._core import (
     PoolHandler,
     SolutionInfo,
     Solver,
-    Topology,
     physical_core_count,
 )
 from .scip import make_min_length_model, warmup_model
@@ -267,13 +266,7 @@ class SolverFSCIP(Solver, PoolHandler):
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
             S = self._topology_from_mip_pool()
-            G = PathFinder(
-                G_from_S(S, A),
-                P,
-                A,
-                branched=model_options['topology'] is Topology.BRANCHED,
-                ringed=model_options['topology'] is Topology.RINGED,
-            ).create_detours()
+            G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
             S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())

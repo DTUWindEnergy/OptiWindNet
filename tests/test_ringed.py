@@ -341,14 +341,14 @@ def test_constructor_ringed_bias_margin_accepted(ringed_mesh, bias_margin):
 
 @pytest.mark.parametrize('feeder_route', ('segmented', 'straight'))
 def test_constructor_ringed_end_to_end_is_valid(ringed_mesh, feeder_route):
-    """constructor(ringed) -> PathFinder(ringed=True) -> validate_routeset == []."""
+    """constructor(ringed) -> PathFinder -> validate_routeset == []."""
     P, A = ringed_mesh
     if feeder_route == 'straight':
         kwargs = dict(weigh_detours=False, straight_feeder_route=True)
     else:
         kwargs = dict(weigh_detours=True, straight_feeder_route=False)
     S = constructor(A, capacity=5, method='ringed', **kwargs)
-    G = PathFinder(G_from_S(S, A), planar=P, A=A, ringed=True).create_detours()
+    G = PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
     assign_cables(G, [(5, 1.0)])
     assert validate_routeset(G) == []
     # the routed graph keeps the ring open points and stays within capacity
@@ -381,7 +381,11 @@ def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
 
     def minimal_routeset(gate, leaf):
         """A single two-terminal subtree: root -> gate -> leaf."""
-        S = nx.Graph(R=R, T=T, capacity=T, creator='synthetic', has_loads=True)
+        # a single path subtree is radial: the ringed mesh is what this test
+        # needs (stunt contours), not a ringed routeset
+        S = nx.Graph(
+            R=R, T=T, capacity=T, creator='synthetic', has_loads=True, topology='radial'
+        )
         S.add_node(-1, load=2)
         S.add_node(gate, load=2, subtree=0)
         S.add_node(leaf, load=1, subtree=0)
@@ -421,7 +425,7 @@ def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
             # G_from_S must map the clone within the compacted VertexC bounds
             nrows = G_tentative.graph['VertexC'].shape[0]
             assert all(tentative_fnT[n] < nrows for n in stunt_contours)
-            pathfinder = PathFinder(G_tentative, planar=P, A=A, ringed=True)
+            pathfinder = PathFinder(G_tentative, planar=P, A=A)
             if not pathfinder.Xings:
                 break
         else:
@@ -726,9 +730,7 @@ def test_hgs_ringed_albatros(capacity):
 
     _assert_canonical_ringed(S, capacity)
 
-    G = PathFinder(
-        G_from_S(S, wfn.A), planar=wfn.P, A=wfn.A, branched=False, ringed=True
-    ).create_detours()
+    G = PathFinder(G_from_S(S, wfn.A), planar=wfn.P, A=wfn.A).create_detours()
     assign_cables(G, [(capacity, 1.0)])
     assert validate_routeset(G) == []
     assert G.size(weight='length') > 0.0
@@ -756,9 +758,7 @@ def test_lkh_ringed_albatros():
 
     _assert_canonical_ringed(S, capacity)
 
-    G = PathFinder(
-        G_from_S(S, wfn.A), planar=wfn.P, A=wfn.A, branched=False, ringed=True
-    ).create_detours()
+    G = PathFinder(G_from_S(S, wfn.A), planar=wfn.P, A=wfn.A).create_detours()
     assign_cables(G, [(capacity, 1.0)])
     assert validate_routeset(G) == []
     assert G.size(weight='length') > 0.0

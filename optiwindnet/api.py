@@ -507,16 +507,14 @@ class WindFarmNetwork:
 
         # A ringed encoding has a number of entries different from T (see the
         # convention in interarraylib.terse_links_from_S); a forest encoding has
-        # exactly T. Decode accordingly and route with the matching PathFinder.
-        ringed = terse_links_ints.shape[0] != T
+        # exactly T. S_from_terse_links decodes accordingly and labels S, which
+        # is what PathFinder then routes within.
         S = S_from_terse_links(terse_links_ints, R=R, T=T, creator='from_terse_links')
 
         G_tentative = G_from_S(S, self.A)
 
         self._S = S
-        self._G = PathFinder(
-            G_tentative, planar=self.P, A=self.A, ringed=ringed
-        ).create_detours()
+        self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
 
         assign_cables(self._G, self.cables)
         self._is_stale_SG = False
@@ -751,14 +749,7 @@ class EWRouter(Router):
         S = constructor(A, capacity=cables_capacity, **constructor_args)
         G_tentative = G_from_S(S, A)
 
-        # PathFinder must reroute feeders within the topology it was given:
-        # RADIAL only hooks to a subtree's head or tail, RINGED only to the
-        # current subroot.
-        ringed = self.method == 'ringed'
-        branched = self.method not in ('ringed', 'radial_EW')
-        G = PathFinder(
-            G_tentative, planar=P, A=A, branched=branched, ringed=ringed
-        ).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
         assign_cables(G, cables)
 
@@ -848,9 +839,7 @@ class HGSRouter(Router):
 
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(
-            G_tentative, planar=P, A=A, branched=False, ringed=self.ringed
-        ).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
         assign_cables(G, cables)
 

@@ -555,8 +555,6 @@ class PoolHandler(abc.ABC):
         """Go through the solver's solutions checking which has the shortest length
         after applying the detours with PathFinder."""
         Λ = float('inf')
-        branched = self.model_options['topology'] is Topology.BRANCHED
-        ringed = self.model_options['topology'] is Topology.RINGED
         num_solutions = self.num_solutions
         info(f'Solution pool has {num_solutions} solutions.')
         for i in range(num_solutions):
@@ -567,9 +565,7 @@ class PoolHandler(abc.ABC):
                 )
                 break
             Sʹ = self._topology_from_mip_pool()
-            Gʹ = PathFinder(
-                G_from_S(Sʹ, A), planar=P, A=A, branched=branched, ringed=ringed
-            ).create_detours()
+            Gʹ = PathFinder(G_from_S(Sʹ, A), planar=P, A=A).create_detours()
             Λʹ = Gʹ.size(weight='length')
             if Λʹ < Λ:
                 S, G, Λ = Sʹ, Gʹ, Λʹ

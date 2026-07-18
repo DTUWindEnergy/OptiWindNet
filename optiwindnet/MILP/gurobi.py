@@ -16,7 +16,6 @@ from ._core import (
     OWNSolutionNotFound,
     PoolHandler,
     SolutionInfo,
-    Topology,
 )
 from .pyomo import SolverPyomo
 
@@ -122,17 +121,11 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
-        P, model_options = self.P, self.model_options
+        P = self.P
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
                 S = self._topology_from_mip_pool()
-                G = PathFinder(
-                    G_from_S(S, A),
-                    P,
-                    A,
-                    branched=model_options['topology'] is Topology.BRANCHED,
-                    ringed=model_options['topology'] is Topology.RINGED,
-                ).create_detours()
+                G = PathFinder(G_from_S(S, A), P, A).create_detours()
             else:
                 S, G = self._investigate_pool(P, A)
         except Exception as exc:

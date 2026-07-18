@@ -275,10 +275,11 @@ def test_best_paths_overlay_structure():
     assert has_virtual, 'overlay graph J should contain virtual path edges'
 
 
-def test_pathfinder_branched_false():
-    """With branched=False, only path endpoints can be hooks."""
+def test_pathfinder_radial_topology():
+    """A graph declaring topology='radial' hooks only to path endpoints."""
     G_tent, P, A = _make_crossing_case()
-    pf = PathFinder(G_tent, planar=P, A=A, branched=False)
+    G_tent.graph['topology'] = 'radial'
+    pf = PathFinder(G_tent, planar=P, A=A)
     G_det = pf.create_detours()
 
     assert _all_turbines_connected(G_det)
