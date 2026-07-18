@@ -209,6 +209,18 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
     return extended
 
 
+# A link's ``'reverse'`` flag orients it independently of the node order it
+# happens to be stored in. Current flows from the terminal that sources it to the
+# root that sinks it, and readers recover that direction with::
+#
+#     u, v = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
+#
+# which yields ``(source, sink)`` for either stored order. So every writer sets
+# ``reverse = source < sink``. Beware of writing ``load[u] < load[v]`` instead: it
+# only matches while ``u < v`` holds, and silently mis-orients links stored the
+# other way round. Feeders are never reversed, the sink being a root and a root's
+# id negative; links carrying ``load=0`` (a ring's open point) have no current and
+# so no direction to encode.
 def bfs_subtree_loads(G, parent, children, subtree):
     """Recurse down the subtree, updating edge and node attributes.
 
@@ -230,7 +242,8 @@ def bfs_subtree_loads(G, parent, children, subtree):
         # a load=0 link is a ring open point: never traverse across it
         grandchildren = {n for n in G[child] if G[child][n].get('load') != 0} - {parent}
         childload = bfs_subtree_loads(G, child, grandchildren, subtree)
-        G[parent][child].update(load=childload, reverse=parent > child)
+        # the child sources the current, the parent sinks it (towards the root)
+        G[parent][child].update(load=childload, reverse=child < parent)
         load += childload
     nodeD['load'] = load
     return load
@@ -388,18 +401,22 @@ def add_ring_to_S(
     # ordered[m..n-1] carry 1..(n - m) toward their own feeder.
     for i, t in enumerate(ordered):
         S.add_node(t, load=(m - i if i < m else i - m + 1), subtree=subtree)
-    # Two feeders (both real cables) and the interior edges.
+    # Two feeders (both real cables) and the interior edges. A feeder sinks into
+    # its root, whose id is negative, so it is never reversed.
     S.add_edge(r1, ordered[0], load=m, reverse=False)
     S.add_edge(r2, ordered[-1], load=n - m, reverse=False)
     for i in range(n - 1):
         u, v = ordered[i], ordered[i + 1]
         if i == m - 1:
-            # open point of the ring: real cable, no current (marked by load=0)
+            # open point of the ring: real cable, no current (marked by load=0),
+            # so it has no flow direction to encode
             S.add_edge(u, v, load=0, reverse=False)
         else:
             load = m - 1 - i if i < m else i - m + 1
-            reverse = S.nodes[u]['load'] < S.nodes[v]['load']
-            S.add_edge(u, v, load=load, reverse=reverse)
+            # current flows towards the arm's feeder, i.e. towards the heavier end
+            u_lighter = S.nodes[u]['load'] < S.nodes[v]['load']
+            source, sink = (u, v) if u_lighter else (v, u)
+            S.add_edge(u, v, load=load, reverse=source < sink)
 
 
 def rings_from_links(
@@ -641,7 +658,11 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                     st_is_tentative = True
 
             load = S[s][t]['load']
-            st_reverse = S.nodes[s]['load'] < S.nodes[t]['load']
+            # current flows towards the heavier end (the one nearer a root)
+            st_source, st_sink = (
+                (s, t) if S.nodes[s]['load'] < S.nodes[t]['load'] else (t, s)
+            )
+            st_reverse = st_source < st_sink
             if st_is_tentative:
                 G.add_edge(
                     s,
