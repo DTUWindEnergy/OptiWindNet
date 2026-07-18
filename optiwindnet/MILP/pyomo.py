@@ -14,7 +14,7 @@ from pyomo.util.infeasible import (
 )
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
-from ..interarraylib import G_from_S, fun_fingerprint
+from ..interarraylib import G_from_S, directed_links, fun_fingerprint
 from ..pathfinding import PathFinder
 from ._core import (
     FeederLimit,
@@ -643,15 +643,14 @@ def warmup_model(
             if value:
                 model.flow_[key] = value
     else:
-        for u, v, reverse in S.edges(data='reverse'):
-            u, v = (u, v) if ((u < v) == reverse) else (v, u)
+        for source, sink, flow in directed_links(S, radialize_rings=False):
             try:
-                model.link_[(u, v)] = 1
+                model.link_[source, sink] = 1
             except KeyError:
                 raise OWNWarmupFailed(
-                    f'warmup_model() failed: model lacks S link ({u, v})'
+                    f'warmup_model() failed: model lacks S link ({(source, sink)})'
                 ) from None
-            model.flow_[(u, v)] = S[u][v]['load']
+            model.flow_[source, sink] = flow
 
     # check if solution violates any constraints:
     # checking the bounds seem redundant, but the way to do it would be:

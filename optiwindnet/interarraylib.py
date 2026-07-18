@@ -6,6 +6,7 @@ import math
 import pickle
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from hashlib import sha256
 from itertools import chain, pairwise
 
@@ -29,6 +30,7 @@ __all__ = (
     'split_rings_and_calc_loads',
     'add_ring_to_S',
     'rings_from_links',
+    'directed_links',
     'site_fingerprint',
     'fun_fingerprint',
     'L_from_site',
@@ -478,6 +480,54 @@ def rings_from_links(
             root_spec = (r, r2) if r != r2 else r
             rings.append((root_spec, chain_))
     return rings
+
+
+def directed_links(
+    S: nx.Graph, *, radialize_rings: bool | None = None
+) -> Iterator[tuple[int, int, int]]:
+    """Yield ``(source, sink, flow)`` for every link of ``S``.
+
+    Forest topologies read each link's orientation off its ``'reverse'`` flag (see
+    the note above :func:`bfs_subtree_loads`), so ``flow`` is just the link's load.
+
+    A RINGED ``S`` stores each ring split into two arms at a load-0 open point,
+    which is not how a flow formulation sees it: there a ring is one directed
+    chain of its ``n`` terminals, fed by a flowless closing feeder ``r -> tn`` at
+    one end and draining through a feeder ``t1 -> r`` carrying the whole ring at
+    the other. *Radializing* recovers that chain (walking across the open point
+    with :func:`rings_from_links`) and re-orients every link along it, so the open
+    point becomes an ordinary flow-carrying link. Callers that need a ring
+    oriented the way a solver's model expects -- warm-starting a MILP, above all
+    -- want this rather than the stored ``'reverse'``.
+
+    Args:
+      S: solution topology.
+      radialize_rings: whether to radialize. Defaults to whether ``S`` declares
+        itself ``topology='ringed'``; pass it explicitly when the consumer's
+        expectation, rather than ``S``, decides (a model's topology, say).
+
+    Yields:
+      ``(source, sink, flow)`` per link, current flowing ``source`` -> ``sink``.
+      ``flow`` is 0 for links carrying no current: a ring's closing feeder.
+    """
+    if radialize_rings is None:
+        radialize_rings = S.graph.get('topology') == 'ringed'
+    if not radialize_rings:
+        for u, v, edgeD in S.edges(data=True):
+            source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
+            yield source, sink, edgeD['load']
+        return
+    for r, chain_ in rings_from_links(S.edges(), S.graph['R']):
+        n = len(chain_)
+        # the ring drains through chain_[0], whose feeder carries all of it
+        yield chain_[0], r, n
+        if n == 1:
+            # degenerate ring (a lone terminal): close it with a flowless feeder
+            yield r, chain_[0], 0
+            continue
+        yield r, chain_[-1], 0
+        for j in range(n - 1, 0, -1):
+            yield chain_[j], chain_[j - 1], n - j
 
 
 def site_fingerprint(
