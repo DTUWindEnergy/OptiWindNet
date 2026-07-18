@@ -26,6 +26,7 @@ from ._core import (
     feeder_and_load_bounds,
     physical_core_count,
     ringed_warmstart_values,
+    warmstart_topology,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -598,7 +599,8 @@ def warmup_model(
       OWNWarmupFailed: if some link in S is not available in model.
     """
     R, T = metadata.R, metadata.T
-    if metadata.model_options.get('topology') is Topology.RINGED:
+    topology = warmstart_topology(metadata, S)
+    if topology is Topology.RINGED:
         # A ring is a single directed chain per the flow formulation; derive the
         # variable values from the (split) ringed solution graph directly.
         link_vals, flow_vals = ringed_warmstart_values(metadata, S)

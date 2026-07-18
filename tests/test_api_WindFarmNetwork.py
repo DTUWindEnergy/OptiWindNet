@@ -482,8 +482,9 @@ def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
     model_options = {
         'feeder_limit': mode,
         'max_feeders': plus,
-        'topology': 'radial',
+        'topology': 'branched',
         'feeder_route': 'segmented',
+        'balanced': False,
     }
     ok = U.is_warmstart_eligible(
         S_warm=S,
@@ -503,8 +504,9 @@ def test_warmstart_feeder_limit_specified_allows(capfd):
     model_options = {
         'feeder_limit': 'specified',
         'max_feeders': 3,
-        'topology': 'radial',
+        'topology': 'branched',
         'feeder_route': 'segmented',
+        'balanced': False,
     }
     ok = U.is_warmstart_eligible(
         S_warm=S,
@@ -519,12 +521,19 @@ def test_warmstart_feeder_limit_specified_allows(capfd):
 
 
 def _eligible(S, cables_capacity, **model_options):
+    # a branched model accepts both radial and branched S: the topology axis is
+    # neutral here, so these tests exercise the constraint each one names
     return U.is_warmstart_eligible(
         S_warm=S,
         cables_capacity=cables_capacity,
         model_options=dict(
-            topology='radial', feeder_route='segmented', **model_options
-        ),
+            topology='branched',
+            feeder_route='segmented',
+            feeder_limit='unlimited',
+            max_feeders=0,
+            balanced=False,
+        )
+        | model_options,
         S_warm_has_detour=False,
         solver_name='ortools.cp_sat',
         logger=logging.getLogger(U.__name__),
@@ -543,7 +552,7 @@ def test_warmstart_feeder_limit_exactly(max_feeders, eligible):
 def test_warmstart_blocked_when_loads_are_not_balanced():
     # 5 terminals over 2 feeders: the model would demand loads within [2, 3],
     # but this warmstart splits them 4 + 1
-    S = nx.Graph(T=5, R=1)
+    S = nx.Graph(T=5, R=1, topology='radial')
     S.add_node(-1, load=5)
     for subtree, branch in enumerate(([0, 1, 2, 3], [4])):
         predecessor = -1
@@ -555,6 +564,51 @@ def test_warmstart_blocked_when_loads_are_not_balanced():
     assert _eligible(S, 3, feeder_limit='minimum', balanced=True) is False
     # without `balanced` the same warmstart is fine: 2 feeders is the minimum
     assert _eligible(S, 3, feeder_limit='minimum') is True
+
+
+def _labelled_S(topology):
+    """A two-terminal ``S`` under one root, declaring ``topology``.
+
+    Structure is deliberately the same for every label: the compatibility rule
+    reads ``S.graph['topology']``, never the shape.
+    """
+    S = nx.Graph(T=2, R=1, topology=topology)
+    S.add_node(-1, load=2)
+    for load, node in ((2, 0), (1, 1)):
+        S.add_node(node, load=load, subtree=0)
+    S.add_edge(-1, 0, load=2)
+    S.add_edge(0, 1, load=1)
+    return S
+
+
+@pytest.mark.parametrize(
+    ('model_topology', 'S_topology', 'eligible'),
+    [
+        ('radial', 'radial', True),
+        ('radial', 'branched', False),
+        ('radial', 'ringed', False),
+        # a radial solution is a valid seed for a branched model, not the reverse
+        ('branched', 'radial', True),
+        ('branched', 'branched', True),
+        ('branched', 'ringed', False),
+        ('ringed', 'radial', False),
+        ('ringed', 'branched', False),
+        ('ringed', 'ringed', True),
+    ],
+)
+def test_warmstart_topology_compatibility(model_topology, S_topology, eligible):
+    S = _labelled_S(S_topology)
+    assert _eligible(S, 2, topology=model_topology) is eligible
+
+
+def test_warmstart_topology_read_from_label_not_structure():
+    """A branched-labelled S is refused by a radial model even if it has no branching.
+
+    The label is the only input to the decision; structure is never inspected.
+    """
+    S = _labelled_S('branched')
+    assert max(S.degree[n] for n in S.nodes if n >= 0) == 2, 'S has no branching'
+    assert _eligible(S, 2, topology='radial') is False
 
 
 def test_parse_cables_input_numpy_ints_and_pairs():

@@ -289,6 +289,55 @@ class SolutionInfo:
     termination: str
 
 
+#: topologies of ``S`` that can seed a model of each topology. A radial
+#: solution is a valid warmstart for a branched model, but not the reverse;
+#: ringed is incomparable with both (a ringed model requires two feeders per
+#: subtree, which no radial or branched solution provides).
+_WARMSTART_OK: Mapping[Topology, frozenset[Topology]] = {
+    Topology.RADIAL: frozenset({Topology.RADIAL}),
+    Topology.BRANCHED: frozenset({Topology.RADIAL, Topology.BRANCHED}),
+    Topology.RINGED: frozenset({Topology.RINGED}),
+}
+
+
+def warmstart_topology_mismatch(model_topology: Topology, S: nx.Graph) -> str:
+    """Report whether ``S``'s topology can seed a ``model_topology`` model.
+
+    The topology of ``S`` is read from ``S.graph['topology']``, never inferred
+    from its structure.
+
+    Returns:
+      Human-readable incompatibility, or ``''`` if ``S`` is a valid warmstart.
+    """
+    S_topology = Topology(S.graph['topology'])
+    if S_topology in _WARMSTART_OK[model_topology]:
+        return ''
+    return (
+        f'{S_topology} network incompatible with model option: '
+        f'topology="{model_topology}"'
+    )
+
+
+def warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> Topology:
+    """Topology of the model ``metadata`` describes, checked against ``S``'s.
+
+    Every backend's ``warmup_model()`` opens with this: the topology decides how
+    the warmstart is mapped onto the model's variables, and ``S`` must be a
+    valid seed for it.
+
+    Returns:
+      The model's topology.
+
+    Raises:
+        OWNWarmupFailed: ``S`` is not a valid warmstart for the model.
+    """
+    model_topology = metadata.model_options['topology']
+    mismatch = warmstart_topology_mismatch(model_topology, S)
+    if mismatch:
+        raise OWNWarmupFailed(f'warmup_model() failed: {mismatch}')
+    return model_topology
+
+
 def ringed_warmstart_values(
     metadata: ModelMetadata, S: nx.Graph
 ) -> tuple[dict[_Link, int], dict[_Link, int]]:
@@ -304,16 +353,15 @@ def ringed_warmstart_values(
     ``metadata.link_`` / ``metadata.flow_`` keys (inactive variables set to 0).
 
     Raises:
-        OWNWarmupFailed: a ring uses a terminal-terminal link absent from the model.
+        OWNWarmupFailed: a ring uses a link absent from the model.
     """
     link_vals: dict[_Link, int] = dict.fromkeys(metadata.link_, 0)
     flow_vals: dict[_Link, int] = dict.fromkeys(metadata.flow_, 0)
     for source, sink, flow in directed_links(S, radialize_rings=True):
         key = (source, sink)
-        if source >= 0 and sink >= 0 and key not in link_vals:
-            # only terminal-terminal links have to be in the model: a feeder is
-            # there by construction, in both its flow-carrying t→r and its
-            # flowless r→t (a ring's closing feeder) direction.
+        if key not in link_vals:
+            # a ring's closing feeder (r→t) is only a model variable under
+            # Topology.RINGED; t→r feeders are there by construction.
             raise OWNWarmupFailed(f'warmup_model() failed: model lacks ring link {key}')
         link_vals[key] = 1
         if key in flow_vals:
@@ -426,7 +474,7 @@ class Solver(abc.ABC):
           Graph topology ``S`` from the solution.
         """
         metadata = self.metadata
-        topology = Topology[metadata.model_options.get('topology', 'BRANCHED').upper()]
+        topology = metadata.model_options['topology']
         R = metadata.R
         S = nx.Graph(R=R, T=metadata.T)
         # ensure roots are added, even if some are not connected

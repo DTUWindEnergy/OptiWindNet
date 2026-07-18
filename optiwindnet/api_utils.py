@@ -8,6 +8,8 @@ from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
+from .MILP._core import warmstart_topology_mismatch
+
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
 
@@ -161,7 +163,7 @@ def is_warmstart_eligible(
     # Feeder constraints
     # the model constrains the feeder count over all roots, not per root
     feeder_count = sum(S_warm.degree[r] for r in range(-R, 0))
-    feeder_limit_mode = model_options.get('feeder_limit', 'unlimited')
+    feeder_limit_mode = model_options['feeder_limit']
     feeder_minimum = math.ceil(T / capacity)
 
     # feeder_exact is the pinned feeder count, if the mode pins it
@@ -169,9 +171,9 @@ def is_warmstart_eligible(
     if feeder_limit_mode == 'unlimited':
         feeder_limit = float('inf')
     elif feeder_limit_mode == 'exactly':
-        feeder_limit = feeder_exact = model_options.get('max_feeders', 0)
+        feeder_limit = feeder_exact = model_options['max_feeders']
     elif feeder_limit_mode == 'specified':
-        feeder_limit = model_options.get('max_feeders', 0)
+        feeder_limit = model_options['max_feeders']
         if feeder_limit == feeder_minimum:
             feeder_exact = feeder_limit
     elif feeder_limit_mode == 'minimum':
@@ -196,7 +198,7 @@ def is_warmstart_eligible(
         )
 
     # Balanced constraint: only enforced by the model if the feeder count is pinned
-    if model_options.get('balanced') and feeder_exact:
+    if model_options['balanced'] and feeder_exact:
         load_lb, load_ub = T // feeder_exact, math.ceil(T / feeder_exact)
         subtree_loads = [
             S_warm.nodes[t]['load'] for r in range(-R, 0) for t in S_warm.neighbors(r)
@@ -209,18 +211,16 @@ def is_warmstart_eligible(
             )
 
     # Detour constraint
-    if S_warm_has_detour and model_options.get('feeder_route') == 'straight':
+    if S_warm_has_detour and model_options['feeder_route'] == 'straight':
         reasons.append(
             'segmented feeders are incompatible with model option:'
             ' feeder_route="straight"'
         )
 
     # Topology constraint
-    branched_nodes = [n for n in S_warm.nodes if n >= 0 and S_warm.degree[n] > 2]
-    if branched_nodes and model_options.get('topology') == 'radial':
-        reasons.append(
-            'branched network incompatible with model option: topology="radial"'
-        )
+    topology_mismatch = warmstart_topology_mismatch(model_options['topology'], S_warm)
+    if topology_mismatch:
+        reasons.append(topology_mismatch)
 
     # Output
     if reasons and verbose_warmstart:
