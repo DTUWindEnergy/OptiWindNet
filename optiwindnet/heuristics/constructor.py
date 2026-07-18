@@ -423,9 +423,9 @@ def constructor(
         """Rank unions that grow simple paths (closed into rings at finalization).
 
         A ring costs its path edges plus two feeders, one at each endpoint; each
-        foot attaches to its own nearest root, so the feeder pair is
-        ``d2roots[subroot].min() + d2roots[tail].min()`` (feet nearest different
-        roots make the ring bridge them). Joining this component's endpoint
+        subroot attaches to its own nearest root, so the feeder pair is
+        ``d2roots[subroot].min() + d2roots[tail].min()`` (subroots nearest
+        different roots make the ring bridge them). Joining this component's endpoint
         ``u_head`` to a peer's endpoint ``v`` sheds the two joined feeders and
         keeps the two far ones::
 
@@ -442,7 +442,7 @@ def constructor(
         subtree_count = subtree.count()
         capacity_left = capacity - subtree_count
         tail = tail_[subroot]
-        # length of this component's two feeders; each foot attaches to its own
+        # length of this component's two feeders; each end attaches to its own
         # nearest root, so a ring may bridge two roots (r1, r2)
         feeder_pair = d2roots[subroot].min() + d2roots[tail].min()
         # rootlust-like root-ward pull, growing as the ring fills (see
@@ -965,7 +965,7 @@ def constructor(
     # add feeders (the 'ringed' method closes each path subtree into a ring)
     is_subroot_ = bitarray(subtree is not None for subtree in subtree_)
     if ringed and R > 1:
-        # each ring foot attaches to its own nearest root; when the two feet
+        # each ring subroot attaches to its own nearest root; when the two
         # prefer different roots the ring bridges them (calcload reads the pair
         # of feeders back as a (r1, r2) ring)
         for sr in is_subroot_.search(_ONE):
