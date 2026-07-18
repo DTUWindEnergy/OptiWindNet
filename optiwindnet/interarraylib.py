@@ -838,8 +838,11 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
     This ensures that topology ``S`` is feasible (if radial) and not
     trivially suboptimal (if branched).
 
+    RINGED routesets are supported: the rings' cycle-closing links are preserved
+    (see the traversal note below), so ``S`` keeps the ring partition of ``G``.
+
     Args:
-        G: must contain a feasible solution (either tree or path)
+        G: must contain a feasible solution (tree, path or ring)
 
     Returns:
         Topology of ``G``
@@ -852,36 +855,71 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
         R=R,
         capacity=capacity,
     )
-    # create a topology graph S from the results
+
+    def is_real(n: int) -> bool:
+        "Only roots and terminals survive in S (border vertices and clones do not)."
+        return n < T
+
     for r in range(-R, 0):
         S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']} if has_loads else {}))
-        on_hold = None
-        for edge in nx.dfs_edges(G, r):
-            u, v = edge
-            if v >= T:
-                on_hold = u if on_hold is None else on_hold
-                continue
-            if on_hold is not None:
-                u = on_hold
+    for t in sorted(n for n in G if 0 <= n < T):
+        if has_loads:
+            S.add_node(
+                t, kind='wtg', load=G.nodes[t]['load'], subtree=G.nodes[t]['subtree']
+            )
+        else:
+            S.add_node(t, kind='wtg')
+
+    # Links already joining two real nodes carry over verbatim, keeping ``G``'s
+    # own orientation: 'reverse' is relative to the stored node order, and the
+    # RINGED builders (:func:`add_ring_to_S`) and the forest ones
+    # (:func:`bfs_subtree_loads`) give it different meanings — copying sidesteps
+    # having to pick one.
+    for u, v, edgeD in G.edges(data=True):
+        if is_real(u) and is_real(v):
             if has_loads:
-                v_load = G.nodes[v]['load']
-                S.add_node(v, kind='wtg', load=v_load, subtree=G.nodes[v]['subtree'])
-                S.add_edge(
-                    u,
-                    v,
-                    load=G.edges[edge]['load'],
-                    reverse=(G.nodes[u]['load'] < v_load) == (u < v),
-                )
+                S.add_edge(u, v, load=edgeD['load'], reverse=edgeD['reverse'])
             else:
-                S.add_node(v, kind='wtg')
                 S.add_edge(u, v)
-            on_hold = None
+
+    # Every remaining link runs through a chain of non-real nodes (border
+    # vertices, contour and detour clones), which collapses to the single link
+    # joining the real nodes at its ends. Walking outward from each real node --
+    # rather than following a DFS *tree* -- is what keeps the cycle-closing links
+    # of a RINGED topology: a ring's second feeder is a DFS back edge, so a tree
+    # traversal drops it and silently merges the two rings it separates.
+    for s in sorted(n for n in G if is_real(n)):
+        for nbr in G[s]:
+            if is_real(nbr):
+                continue
+            prev, node = s, nbr
+            while not is_real(node):
+                fwd = [x for x in G[node] if x != prev]
+                if len(fwd) != 1:
+                    break
+                prev, node = node, fwd[0]
+            if not is_real(node) or node == s or S.has_edge(s, node):
+                continue
+            if has_loads:
+                # orient parent -> child (the parent carries the heavier load,
+                # being the closer of the two to a root). A chain spanning a root
+                # is a feeder, which both conventions above agree to leave
+                # unreversed (a root's id is negative, so always the lower one).
+                s_load, node_load = G.nodes[s]['load'], G.nodes[node]['load']
+                u, v = (s, node) if s_load >= node_load else (node, s)
+                S.add_edge(u, v, load=G.edges[s, nbr]['load'], reverse=u > v)
+            else:
+                S.add_edge(s, node)
+
     creator = G.graph.get('creator')
     if creator is not None:
         S.graph['creator'] = creator
     method_options = G.graph.get('method_options')
     if method_options is not None:
         S.graph['method_options'] = method_options
+    topology = G.graph.get('topology')
+    if topology is not None:
+        S.graph['topology'] = topology
     if has_loads:
         S.graph['has_loads'] = True
     else:
