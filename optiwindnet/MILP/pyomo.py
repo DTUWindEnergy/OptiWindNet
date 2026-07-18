@@ -3,6 +3,7 @@
 
 import logging
 from collections import namedtuple
+from collections.abc import Mapping
 from itertools import chain
 from typing import Any
 
@@ -98,10 +99,11 @@ class SolverPyomo(Solver):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
+        model_options = ModelOptions(**model_options)
         model, metadata = make_min_length_model(A, capacity, **model_options)
         self.model, self.model_options, self.metadata = model, model_options, metadata
         if warmstart is not None and self.solver.warm_start_capable():
@@ -200,10 +202,11 @@ class SolverPyomoAppsi(Solver):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
+        model_options = ModelOptions(**model_options)
         model, metadata = make_min_length_model(A, capacity, **model_options)
         self.model, self.model_options, self.metadata = model, model_options, metadata
         if warmstart is not None and self.solver.warm_start_capable():
@@ -530,9 +533,11 @@ def make_min_length_model(
         m.cons_ringed = pyo.Constraint(
             m.T,
             rule=(
-                lambda m, t: sum(m.link_[v, t] for v in A_terminals.neighbors(t))
-                + sum(m.link_[r, t] for r in m.R)
-                == 1
+                lambda m, t: (
+                    sum(m.link_[v, t] for v in A_terminals.neighbors(t))
+                    + sum(m.link_[r, t] for r in m.R)
+                    == 1
+                )
             ),
             name='radial',
         )

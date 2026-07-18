@@ -1,8 +1,9 @@
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from itertools import pairwise
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -864,7 +865,7 @@ class MILPRouter(Router):
         time_limit: float,
         mip_gap: float,
         solver_options: dict | None = None,
-        model_options: ModelOptions | None = None,
+        model_options: Mapping[str, Any] | None = None,
         verbose: bool = False,
         **kwargs,
     ) -> None:
@@ -876,7 +877,8 @@ class MILPRouter(Router):
           time_limit: Maximum runtime (seconds).
           mip_gap: Relative MIP optimality gap tolerance.
           solver_options: Extra solver-specific options.
-          model_options: Options for the MILP model.
+          model_options: Options for the MILP model. A plain mapping is coerced
+            into a :class:`.ModelOptions`.
           verbose: Enable verbose logging.
         """
         super().__init__(**kwargs)
@@ -884,7 +886,7 @@ class MILPRouter(Router):
         self.mip_gap = mip_gap
         self.solver_name = solver_name
         self.solver_options = solver_options or {}
-        self.model_options = model_options or ModelOptions()
+        self.model_options = ModelOptions(**(model_options or {}))
         self.verbose = verbose
         self.solver = solver_factory(solver_name)
         try:

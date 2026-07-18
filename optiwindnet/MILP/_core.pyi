@@ -111,7 +111,7 @@ class Solver(abc.ABC):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ) -> None: ...
     @abc.abstractmethod

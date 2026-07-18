@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
+from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,7 +13,6 @@ from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 from ._core import (
     FeederRoute,
-    ModelOptions,
     OWNSolutionNotFound,
     PoolHandler,
     SolutionInfo,
@@ -58,7 +58,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         """

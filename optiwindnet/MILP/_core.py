@@ -237,14 +237,35 @@ class ModelOptions(dict):
         + ')'
     )
     def __init__(self, **kwargs):
+        # dispatch on the key, not on the value's type: a str passed for an int
+        # option is a type error, not an enum to look up
         for k, v in kwargs.items():
-            if isinstance(v, str):
-                kwargs[k] = self.hints[k](v)
+            kind = self.hints.get(k)
+            if kind is not None:
+                kwargs[k] = kind(v)
             else:
-                if k not in self.simple:
-                    raise ValueError(f'Unknown argument: {k}')
+                expected = self.simple[k][0]
+                if not isinstance(v, expected):
+                    raise TypeError(
+                        f'{k} must be {expected.__name__}, got '
+                        f'{type(v).__name__}: {v!r}'
+                    )
 
         super().__init__(kwargs)
+
+    # Options are a value object: every value is coerced and every key is
+    # present once __init__ returns, and the whole library reads them on that
+    # basis (`is Topology.RINGED` is false for a plain 'ringed' str). Mutating
+    # the mapping afterwards would bypass the coercion, so it is refused --
+    # build a new instance instead.
+    def _immutable(self, *args, **kwargs):
+        raise TypeError(
+            f'{type(self).__name__} is immutable: construct a new one instead of '
+            'modifying it in place'
+        )
+
+    __setitem__ = __delitem__ = _immutable
+    clear = pop = popitem = setdefault = update = _immutable
 
     @classmethod
     def help(cls):
@@ -397,7 +418,7 @@ class Solver(abc.ABC):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         """Define the problem geometry, available edges and tree properties

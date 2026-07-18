@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
+from collections.abc import Mapping
 from itertools import chain
 from typing import Any
 
@@ -61,11 +62,11 @@ class SolverSCIP(Solver, PoolHandler):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
-        self.model_options = model_options
+        model_options = self.model_options = ModelOptions(**model_options)
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
         self.model, self.metadata = model, metadata
         if warmstart is not None:
