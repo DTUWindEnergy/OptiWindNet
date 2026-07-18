@@ -5,7 +5,7 @@ import logging
 import math
 import pickle
 import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Iterator
 from hashlib import sha256
 from itertools import chain, pairwise
@@ -276,7 +276,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     for root in range(-R, 0):
         for gate in S[root]:
             if gate in seen:
-                # bridging ring: already walked from its other foot's root
+                # bridging ring: already walked from its other subroot's root
                 continue
             ordered = [gate]
             back, fwd = root, gate
@@ -430,13 +430,13 @@ def rings_from_links(
     RINGED solution (terminal-terminal links plus the two feeders of each ring).
     Each ring is returned as ``(root, [t1, ..., tn])`` with ``t1`` and ``tn`` the
     feeder-connected terminals, obtained by walking the terminal adjacency from
-    one foot of the root to the other.
+    the head subroot to the tail one.
 
     Feeders are identified by having exactly one negative (root) endpoint; a ring
     with a single terminal (``n == 1``) has both feeders on that terminal.
     """
     term_adj: dict[int, set[int]] = defaultdict(set)
-    feet: dict[int, list[int]] = defaultdict(list)
+    subroots: dict[int, list[int]] = defaultdict(list)
     term_to_roots: dict[int, list[int]] = defaultdict(list)
     for u, v in active_links:
         if u >= 0 and v >= 0:
@@ -444,14 +444,13 @@ def rings_from_links(
             term_adj[v].add(u)
         else:
             r, t = (u, v) if u < 0 else (v, u)
-            feet[r].append(t)
+            subroots[r].append(t)
             term_to_roots[t].append(r)
     rings: list[tuple[int | tuple[int, int], list[int]]] = []
+    # `subroots` is consumed as the walk goes: each feeder is claimed once
     for r in range(-R, 0):
-        pending = Counter(feet[r])
-        while sum(pending.values()) > 0:
-            t1 = next(t for t, c in pending.items() if c > 0)
-            pending[t1] -= 1
+        while subroots[r]:
+            t1 = subroots[r].pop(0)
             chain_ = [t1]
             prev, curr = None, t1
             while True:
@@ -461,22 +460,19 @@ def rings_from_links(
                 prev, curr = curr, nxts[0]
                 chain_.append(curr)
             tn = chain_[-1]
-            r2_candidates = [
-                root_cand
-                for root_cand in term_to_roots[tn]
-                if root_cand in feet and tn in feet[root_cand]
-            ]
-            if r2_candidates:
-                r2 = (
-                    r
-                    if r in r2_candidates and (len(chain_) > 1 or pending[tn] > 0)
-                    else r2_candidates[0]
-                )
-                feet[r2].remove(tn)
-                if r2 == r:
-                    pending[tn] -= 1
-            else:
+            # claim the tail feeder: a ring of n > 1 always has one, a lone
+            # terminal only if it bridges two roots
+            if tn in subroots[r]:
                 r2 = r
+            else:
+                r2 = next(
+                    (rc for rc in term_to_roots[tn] if rc != r and tn in subroots[rc]),
+                    None,
+                )
+            if r2 is None:
+                r2 = r
+            else:
+                subroots[r2].remove(tn)
             root_spec = (r, r2) if r != r2 else r
             rings.append((root_spec, chain_))
     return rings
