@@ -180,7 +180,9 @@ class Drawable:
                     fill_rule='evenodd',
                     # fill_rule "evenodd" is agnostic to polygon vertices orientation
                     # "nonzero" would depend on orientation (if opposite, no fill)
-                    d=' '.join(
+                    # svg.py types `d` as list[PathData], but it renders a
+                    # pre-joined path string just as well
+                    d=' '.join(  # pyrefly: ignore[bad-argument-type]
                         chain(
                             (
                                 'M'
@@ -277,7 +279,7 @@ class Drawable:
                     kind = 'split'
                 u, v = (u, v) if u < v else (v, u)
                 overlay_by_kind[kind].append(self._line(u, v))
-            kind_groups = [
+            kind_groups: list[svg.Element] = [
                 self._kind_group(
                     f'overlay_{kind}',
                     kind,
@@ -323,7 +325,7 @@ class Drawable:
                 points__[G[s][t].get('cable', None)].append(
                     ' '.join(str(c) for c in VertexS[hops].flat)
                 )
-        common_attr = dict(
+        common_attr: dict[str, Any] = dict(
             stroke=c.kind2color['detour'],
             stroke_dasharray=[18, 15],
             fill='none',
@@ -448,12 +450,12 @@ class Drawable:
                 wtg_font, oss_font = normal, large
             else:
                 wtg_font, oss_font = normal, small
-            wtg_labels = [
+            wtg_labels: list[svg.Element] = [
                 svg.Text(x=VertexS[n, 0], y=VertexS[n, 1], text=lbl)
                 for n in range(T)
                 if (lbl := get_label(n))
             ]
-            oss_labels = [
+            oss_labels: list[svg.Element] = [
                 svg.Text(x=VertexS[r, 0], y=VertexS[r, 1], text=lbl)
                 for r in range(-R, 0)
                 if (lbl := get_label(r))
@@ -463,7 +465,7 @@ class Drawable:
                     svg.G(
                         id='WTGlabels',
                         fill='black',
-                        extra={'font-size': wtg_font, **base_attrs},
+                        extra={'font-size': str(wtg_font), **base_attrs},
                         elements=wtg_labels,
                     )
                 )
@@ -472,7 +474,7 @@ class Drawable:
                     svg.G(
                         id='OSSlabels',
                         fill=c.root_edge,
-                        extra={'font-size': oss_font, **base_attrs},
+                        extra={'font-size': str(oss_font), **base_attrs},
                         elements=oss_labels,
                     )
                 )
@@ -483,7 +485,7 @@ class Drawable:
         obstacles = G.graph.get('obstacles')
         border_ = border if border is not None else []
         obstacles_ = obstacles if obstacles is not None else [()]
-        tags = [
+        tags: list[svg.Element] = [
             svg.Text(x=VertexS[b, 0], y=VertexS[b, 1], text=str(b))
             for b in chain(border_, *obstacles_)
         ]
@@ -493,7 +495,7 @@ class Drawable:
                     id='border_tags',
                     fill=c.fg_color,
                     extra={
-                        'font-size': round(node_radius * 1.3),
+                        'font-size': str(round(node_radius * 1.3)),
                         'font-family': 'sans-serif',
                     },
                     elements=tags,

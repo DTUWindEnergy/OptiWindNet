@@ -51,7 +51,7 @@ def constructor(
     capacity: int,
     method: str = 'rootlust',
     *,
-    rootlust_: tuple[float, float] = (),
+    rootlust_: tuple[float, float] | None = None,
     maxiter: int = 10000,
     bias_margin: float | None = None,
     weigh_detours: bool = True,
@@ -176,9 +176,11 @@ def constructor(
 
     # mappings from nodes
     # <subtree_>: maps nodes to the list of nodes in their subtree
-    subtree_: list[bitarray | None] = [zeros(T) for _ in _T]
-    for t, subtree in zip(_T, subtree_):
+    subtree_: list[bitarray | None] = []
+    for t in _T:
+        subtree = zeros(T)
         subtree[t] = True
+        subtree_.append(subtree)
     # <subroot_>: maps terminals to their subroots
     subroot_ = list(_T)
     #  last_hop_of: list[int | None] = [t for t in _T]
@@ -214,10 +216,9 @@ def constructor(
     pq = PriorityQueue()
     # <i>: iteration counter
     i = 0
-    if radial_like:
-        # <tail_>: the endpoint of path subtrees (radial_EW | ringed)
-        tail_ = [t for t in _T]
-        num_insertions = 0
+    # <tail_>: the endpoint of path subtrees (only read if radial_like)
+    tail_ = list(_T)
+    num_insertions = 0
     # END: helper data structures
 
     # relative limit to consider two extents equivalent
@@ -529,16 +530,13 @@ def constructor(
     def estimate_detours(u, v, sr_dropped, sr_kept):
         """Note: the ``detour_increase`` calculated here is an estimate."""
         # assess the union's angle span
-        union_span_ = [
-            union_limits(
-                r,
-                u,
-                *subtree_span__[sr_dropped][r],
-                v,
-                *subtree_span__[sr_kept][r],
-            )
-            for r in roots
-        ]
+        span_dropped_ = subtree_span__[sr_dropped]
+        span_kept_ = subtree_span__[sr_kept]
+        union_span_ = []
+        for r in roots:
+            LO, HI = span_dropped_[r]
+            lo, hi = span_kept_[r]
+            union_span_.append(union_limits(r, u, LO, HI, v, lo, hi))
         blocked__ = A[u][v]['blocked__']
         detour_increase = 0.0
         changes = []
@@ -672,6 +670,10 @@ def constructor(
     # initialize pq
     for n in _T:
         enqueue_best_union(n)
+
+    # only read if use_blockage, in which case estimate_detours() assigns them
+    union_span_: list[tuple[int, int]] = []
+    changes: list[tuple[int, int, int, int | None]] = []
 
     # BEGIN: main loop
     while True:

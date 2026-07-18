@@ -6,7 +6,9 @@ import logging
 import math
 from bisect import bisect_left
 from collections import defaultdict, namedtuple
+from collections.abc import Generator
 from itertools import chain
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -24,7 +26,7 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
-PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn'.split())
+PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn')
 # Terminology used by PathFinder internals:
 #   wall: one non-traversable mesh segment; route walls are contour edges of
 #     the route, constraint walls are planar constraint edges (borders and
@@ -631,7 +633,9 @@ class PathFinder:
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
 
         self._precompute_sector_lookup(fences)
-        self.best_pn_by_pair_id = [None] * len(self.pair_id_by_prime_sector)
+        self.best_pn_by_pair_id: list[int | None] = [None] * len(
+            self.pair_id_by_prime_sector
+        )
 
         # Build the chain topology: one Chain per route fence, with
         # chain_access mapping
@@ -1679,7 +1683,11 @@ class PathFinder:
         _funnel: list[int],
         wedge_end: list[int],
         bad_streak: int = 0,
-    ):
+    ) -> Generator[Any, Any, None]:
+        # The yielded shape depends on the protocol phase, so it cannot be typed
+        # more precisely than Any: a bare `yield` asks for the next
+        # (portal, side); sending None yields the 6-tuple funnel state; sending
+        # a (portal, side) yields (prio, is_promising).
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
         #     - _node: the index it contains maps to a coordinate in VertexC

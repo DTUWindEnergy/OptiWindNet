@@ -54,7 +54,7 @@ def test_wfn_fails_without_cables():
     with pytest.raises(
         TypeError, match="missing 1 required positional argument: 'cables'"
     ):
-        WindFarmNetwork(
+        WindFarmNetwork(  # pyrefly: ignore[missing-argument]
             turbinesC=w.L.graph.get('VertexC'), substationsC=w.L.graph.get('VertexC')
         )
 

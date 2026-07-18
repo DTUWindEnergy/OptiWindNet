@@ -937,19 +937,13 @@ class MILPRouter(Router):
                 break
             except OWNWarmupFailed:
                 if self.model_options['topology'] == 'branched':
-                    feeder_route = self.model_options['feeder_route']
-                    if feeder_route == 'segmented':
-                        constructor_args = dict(
-                            method=self.default_heuristic,
-                            weigh_detours=True,
-                            straight_feeder_route=False,
-                        )
-                    elif feeder_route == 'straight':
-                        constructor_args = dict(
-                            method=self.default_heuristic,
-                            weigh_detours=False,
-                            straight_feeder_route=True,
-                        )
+                    # 'feeder_route' is binary: 'straight' or 'segmented'
+                    straight = self.model_options['feeder_route'] == 'straight'
+                    constructor_args = dict(
+                        method=self.default_heuristic,
+                        weigh_detours=not straight,
+                        straight_feeder_route=straight,
+                    )
                     S_warm = S_from_G(
                         constructor(A, capacity=cables_capacity, **constructor_args)
                     )

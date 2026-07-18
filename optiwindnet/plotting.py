@@ -3,6 +3,7 @@
 
 from collections.abc import Sequence
 from itertools import chain, product
+from typing import Any
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -102,7 +103,7 @@ def gplot(
 
     if ax is None:
         dpi = max(min_dpi, plt.rcParams['figure.dpi'])
-        kw_fig = dict(frameon=False, layout='constrained', dpi=dpi)
+        kw_fig: dict[str, Any] = dict(frameon=False, layout='constrained', dpi=dpi)
         fig = plt.figure(**(kw_fig | kwargs))
         ax = fig.add_subplot(**kw_axes)
     else:
@@ -241,6 +242,7 @@ def gplot(
         arts.set_clip_on(False)
 
     # draw labels
+    label_options: dict[str, Any]
     if 'has_loads' in G.graph and node_tag == 'load':
         label_options = dict(
             labels={n: G.nodes[n].get('load', '-') for n in range(-R, T)},
@@ -319,7 +321,8 @@ def gplot(
         border_ = border if border is not None else []
         obstacles_ = obstacles if obstacles is not None else [()]
         for b in chain(border_, *(obstacles_)):
-            ax.text(*VertexC[b], str(b), color=c.fg_color, size=FONTSIZE_ROOT_LABEL)
+            x, y = VertexC[b]
+            ax.text(x, y, str(b), color=c.fg_color, size=FONTSIZE_ROOT_LABEL)
     if hide_ST and VertexC.shape[0] > R + T + B:
         # coordinates include the supertriangle, adjust view limits to hide it
         nonStC = np.r_[VertexC[: T + B], VertexC[-R:]]

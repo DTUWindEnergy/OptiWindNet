@@ -13,7 +13,7 @@ from inspect import cleandoc
 from itertools import chain
 from pathlib import Path
 from textwrap import indent
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 from makefun import with_signature
@@ -223,35 +223,56 @@ class ModelOptions(dict):
         ),
     )
 
-    @with_signature(
-        '__init__(self, *, '
-        + ', '.join(
-            chain(
-                (f'{k}: {v.__name__} = "{v.DEFAULT.value}"' for k, v in hints.items()),
-                (
-                    f'{name}: {kind.__name__} = {default}'
-                    for name, (kind, default, _) in simple.items()
-                ),
-            )
-        )
-        + ')'
-    )
-    def __init__(self, **kwargs):
-        # dispatch on the key, not on the value's type: a str passed for an int
-        # option is a type error, not an enum to look up
-        for k, v in kwargs.items():
-            kind = self.hints.get(k)
-            if kind is not None:
-                kwargs[k] = kind(v)
-            else:
-                expected = self.simple[k][0]
-                if not isinstance(v, expected):
-                    raise TypeError(
-                        f'{k} must be {expected.__name__}, got '
-                        f'{type(v).__name__}: {v!r}'
-                    )
+    # `with_signature` rewrites `__init__` at import time so that `help()`,
+    # `inspect.signature` and IDE introspection show the real options. Type
+    # checkers cannot follow that, so the same signature is declared statically
+    # under TYPE_CHECKING -- keep the two in sync (they are both derived from
+    # `hints` and `simple`).
+    if TYPE_CHECKING:
 
-        super().__init__(kwargs)
+        def __init__(
+            self,
+            *,
+            topology: Topology | str = ...,
+            feeder_route: FeederRoute | str = ...,
+            feeder_limit: FeederLimit | str = ...,
+            balanced: bool = ...,
+            max_feeders: int = ...,
+        ) -> None: ...
+    else:
+
+        @with_signature(
+            '__init__(self, *, '
+            + ', '.join(
+                chain(
+                    (
+                        f'{k}: {v.__name__} = "{v.DEFAULT.value}"'
+                        for k, v in hints.items()
+                    ),
+                    (
+                        f'{name}: {kind.__name__} = {default}'
+                        for name, (kind, default, _) in simple.items()
+                    ),
+                )
+            )
+            + ')'
+        )
+        def __init__(self, **kwargs):
+            # dispatch on the key, not on the value's type: a str passed for an
+            # int option is a type error, not an enum to look up
+            for k, v in kwargs.items():
+                kind = self.hints.get(k)
+                if kind is not None:
+                    kwargs[k] = kind(v)
+                else:
+                    expected = self.simple[k][0]
+                    if not isinstance(v, expected):
+                        raise TypeError(
+                            f'{k} must be {expected.__name__}, got '
+                            f'{type(v).__name__}: {v!r}'
+                        )
+
+            super().__init__(kwargs)
 
     # Options are a value object: every value is coerced and every key is
     # present once __init__ returns, and the whole library reads them on that
@@ -576,6 +597,7 @@ class PoolHandler(abc.ABC):
         """Go through the solver's solutions checking which has the shortest length
         after applying the detours with PathFinder."""
         Λ = float('inf')
+        S = G = None
         num_solutions = self.num_solutions
         info(f'Solution pool has {num_solutions} solutions.')
         for i in range(num_solutions):
@@ -594,5 +616,7 @@ class PoolHandler(abc.ABC):
                 info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
             else:
                 info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')
+        if S is None or G is None:
+            raise ValueError('Solution pool has no usable solution.')
         G.graph['pool_count'] = num_solutions
         return S, G

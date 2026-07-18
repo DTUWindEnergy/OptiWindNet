@@ -1,6 +1,6 @@
 import logging
 import math
-from typing import Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -66,7 +66,8 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
 
 
 def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC, **kwargs):
-    fig = plt.figure(**({'layout': 'constrained'} | kwargs))
+    kw_fig: dict[str, Any] = {'layout': 'constrained'}
+    fig = plt.figure(**(kw_fig | kwargs))
     ax = fig.add_subplot()
     ax.set_title('Original and Buffered Shapes')
 
@@ -261,6 +262,14 @@ def parse_cables_input(
             else:
                 raise ValueError(f'Invalid cable values: {cables}')
         return cables_out
+    else:
+        raise ValueError(f'Invalid cable values: {cables}')
+
+
+if TYPE_CHECKING:
+    # IPython injects `get_ipython` into builtins; outside IPython the name is
+    # simply absent, which is what the NameError below detects.
+    def get_ipython() -> Any: ...
 
 
 def enable_ortools_logging_if_jupyter(solver):
@@ -436,7 +445,7 @@ def buffer_border_obs(L, buffer_dist):
     obstaclesC = [V[idx] for idx in obstacles_idx]
 
     pre_buffer = {
-        'borderC': borderC.copy(),
+        'borderC': None if borderC is None else borderC.copy(),
         'obstaclesC': [obs.copy() for obs in obstaclesC],
     }
 
