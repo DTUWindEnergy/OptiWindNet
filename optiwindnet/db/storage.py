@@ -416,12 +416,60 @@ def terse_pack_from_G(G: nx.Graph) -> PackType:
     return terse_pack
 
 
+def infer_topology(G: nx.Graph, terse: Sequence[int]) -> str:
+    """Infer the topology of a record stored before ``topology`` was an attribute.
+
+    Reads, in order of authority:
+
+    * the ``terse`` encoding: a route sequence settles RINGED, being the only
+      signal that comes from the routeset itself. The converse does not hold --
+      a ring of one terminal is a stub, so an all-stub RINGED solution has no
+      cycles and is stored positionally, like a forest;
+    * ``method_options['topology']``, recorded by the MILP backends. A recorded
+      RINGED is taken at face value even against a positional encoding: it is
+      right for the all-stub case above, and where it is wrong
+      :func:`~optiwindnet.interarraylib.validate_topology` says so, reading the
+      whole graph rather than the length of its encoding;
+    * ``creator``: HGS and LKH solve a CVRP, whose routes are paths, so their
+      non-ringed output is RADIAL. The constructor names its method instead.
+
+    Falls back to ``'branched'``, the weakest claim any forest satisfies, when a
+    record carries none of these.
+
+    Args:
+      G: routeset graph, already carrying the record's metadata.
+      terse: the record's ``edges`` sequence.
+
+    Returns:
+      one of ``'ringed'``, ``'radial'`` or ``'branched'``.
+    """
+    T = G.graph['T']
+    C, D = (G.graph.get(k, 0) for k in 'CD')
+    if len(terse) != T + C + D:
+        return 'ringed'
+
+    method_options = G.graph.get('method_options') or {}
+    topology = method_options.get('topology')
+    if topology in ('ringed', 'radial', 'branched'):
+        return topology
+
+    creator = G.graph.get('creator', '')
+    if creator in ('baselines.hgs', 'baselines.lkh'):
+        return 'radial'
+    if creator == 'constructor':
+        return 'radial' if method_options.get('method') == 'radial_EW' else 'branched'
+    return 'branched'
+
+
 def untersify_to_G(G: nx.Graph, terse: list, clone2prime: list) -> None:
     """Rebuild ``G``'s edges from a terse pack. Changes G in place!
 
     Forest routesets (``len(terse) == T + C + D``) are decoded positionally;
     ringed routesets (more entries) are decoded as a sequence of routes, each
     ring's open point re-derived at the load midpoint of its terminals.
+
+    Sets ``G.graph['topology']`` from :func:`infer_topology` if the record did
+    not carry one.
     """
     R, T, B = (G.graph[k] for k in 'RTB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
@@ -436,6 +484,10 @@ def untersify_to_G(G: nx.Graph, terse: list, clone2prime: list) -> None:
         G.graph['fnT'] = fnT
     else:
         fnT = None
+
+    # a stored topology is authoritative; older records get an inferred one
+    if 'topology' not in G.graph:
+        G.graph['topology'] = infer_topology(G, terse)
 
     if len(terse) == T + C + D:
         # positional forest encoding: (source, terse[source]) is a directed link

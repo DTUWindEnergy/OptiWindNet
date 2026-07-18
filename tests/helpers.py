@@ -150,25 +150,20 @@ def solution_property_metrics(
     import math
 
     from optiwindnet.crossings import validate_routeset
-    from optiwindnet.interarraylib import rings_from_links
+    from optiwindnet.interarraylib import validate_topology
 
     R, T = S.graph['R'], S.graph['T']
     topology = (model_options or {}).get('topology', 'branched')
 
     edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
-    kinds = {d.get('kind') for _, _, d in S.edges(data=True)}
     feeder_edges = [(u, v) for u, v in S.edges if u < 0 or v < 0]
     feeder_loads = sorted(S[u][v]['load'] for u, v in feeder_edges)
-    term_degrees = [S.degree(t) for t in range(T)]
 
-    # ringed: rings must partition the terminals and each carry one open point
-    ring_partition_ok = None
-    num_non_stub_rings = None
-    if topology == 'ringed':
-        rings = rings_from_links(list(S.edges()), R)
-        covered = sorted(t for _, ordered in rings for t in ordered)
-        ring_partition_ok = covered == list(range(T))
-        num_non_stub_rings = sum(1 for _, o in rings if len(o) > 1)
+    # a list of strings is picklable, so the whole check crosses the worker
+    # boundary intact
+    S.graph.setdefault('topology', topology)
+    topology = S.graph['topology']
+    topology_violations = validate_topology(S, capacity)
 
     return dict(
         valid_findings=len(validate_routeset(G)),
@@ -178,14 +173,10 @@ def solution_property_metrics(
         T=T,
         R=R,
         is_forest=nx.is_forest(S),
-        max_term_degree=max(term_degrees) if term_degrees else 0,
         num_feeders=len(feeder_edges),
         feeder_loads=feeder_loads,
-        num_splits=sum(1 for _, _, d in S.edges(data=True) if d.get('load') == 0),
-        kinds_ok=kinds <= {None},
         min_feeders=math.ceil(T / capacity),
-        ring_partition_ok=ring_partition_ok,
-        num_non_stub_rings=num_non_stub_rings,
+        topology_violations=topology_violations,
         topology=str(topology),
     )
 
@@ -213,18 +204,11 @@ def assert_solution_properties(
     assert metrics['sum_root_load'] == T, 'not every terminal is connected'
 
     # --- topology shape -------------------------------------------------------
-    if topology == 'radial':
-        assert metrics['is_forest'], 'radial topology must be a forest'
-        assert metrics['max_term_degree'] <= 2, 'radial subtrees must be simple paths'
-    elif topology == 'branched':
-        assert metrics['is_forest'], 'branched topology must be a forest'
-    elif topology == 'ringed':
-        assert metrics['kinds_ok'], 'topology-graph ring edges must not carry a kind'
-        assert metrics['ring_partition_ok'], 'rings must partition the terminals'
-        # every non-stub ring contributes exactly one open point (load == 0)
-        assert metrics['num_splits'] == metrics['num_non_stub_rings']
-        if T > 1:
-            assert not metrics['is_forest'], 'a ring closes a loop'
+    # the shape invariants themselves belong to the library (`validate_topology`);
+    # they were reduced to violation strings on the worker side
+    assert metrics['topology_violations'] == []
+    if topology == 'ringed' and T > 1:
+        assert not metrics['is_forest'], 'a ring closes a loop'
 
     # --- feeder-count / balance (single-root, non-ringed: well-defined) -------
     single_root = metrics['R'] == 1

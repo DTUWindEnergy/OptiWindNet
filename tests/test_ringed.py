@@ -39,6 +39,7 @@ from optiwindnet.interarraylib import (
     assign_cables,
     rings_from_links,
     split_rings_and_calc_loads,
+    validate_topology,
 )
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
@@ -62,49 +63,15 @@ def _assert_canonical_ringed(S, capacity):
     two real (load-bearing) feeders and exactly one load-0 open point; a lone
     terminal (``n == 1``) collapses to a single radial stub (one feeder, no
     split). Returns the recovered rings for further per-test checks.
+
+    The invariants live in :func:`~optiwindnet.interarraylib.validate_topology`;
+    this only pins that a *solved* ``S`` carries the loads they read, so they
+    cannot pass vacuously.
     """
-    R, T = S.graph['R'], S.graph['T']
-
-    # topology-graph ring edges are pure geometry: they carry no edge 'kind'
-    kinds = {d.get('kind') for _, _, d in S.edges(data=True)}
-    assert kinds <= {None}, kinds
-
-    # every cable segment (arm) stays within the per-cable capacity
-    assert max(d['load'] for _, _, d in S.edges(data=True)) <= capacity
-
-    # all terminals are accounted for at the roots
-    assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T
-
-    rings = _rings(S)
-    # the rings partition the terminal set: every terminal in exactly one ring
-    covered = sorted(t for _, ordered in rings for t in ordered)
-    assert covered == list(range(T)), 'rings must partition the terminals'
-
-    split_edges = [(u, v) for u, v, d in S.edges(data=True) if d.get('load') == 0]
-    feeders = [(u, v) for u, v, d in S.edges(data=True) if u < 0 or v < 0]
-    non_stub = [ordered for _, ordered in rings if len(ordered) > 1]
-    stub = [ordered for _, ordered in rings if len(ordered) == 1]
-
-    # exactly one open point per non-stub ring, none for single-terminal stubs
-    assert len(split_edges) == len(non_stub)
-    # no current flows through an open point
-    assert all(S[u][v]['load'] == 0 for u, v in split_edges)
-    # two feeders per non-stub ring, one per stub
-    assert len(feeders) == 2 * len(non_stub) + len(stub)
-
-    for _, ordered in rings:
-        n = len(ordered)
-        # a ring holds up to 2*capacity terminals (two arms of ceil(n / 2))
-        assert math.ceil(n / 2) <= capacity
-        # the heaviest cable/node of a ring carries a full arm: ceil(n / 2)
-        assert max(S.nodes[t]['load'] for t in ordered) == math.ceil(n / 2)
-        # the two arm-head (feeder) terminals carry the whole ring between them
-        if n > 1:
-            assert S.nodes[ordered[0]]['load'] + S.nodes[ordered[-1]]['load'] == n
-        else:
-            assert S.nodes[ordered[0]]['load'] == 1
-
-    return rings
+    assert S.graph['topology'] == 'ringed', 'S must declare its topology'
+    assert S.graph.get('has_loads'), 'a solved S must carry its loads'
+    assert validate_topology(S, capacity) == []
+    return _rings(S)
 
 
 # --------------------------------------------------------------------------- #
