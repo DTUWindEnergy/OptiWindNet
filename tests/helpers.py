@@ -9,6 +9,7 @@ import numpy as np
 
 from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
 from optiwindnet.api_utils import parse_cables_input
+from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import assign_cables, terse_links_from_S
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import ModelOptions, solver_factory
@@ -245,6 +246,38 @@ def assert_solution_properties(
             # pinned feeder count => subtree (feeder) loads differ by at most one
             loads = metrics['feeder_loads']
             assert max(loads) - min(loads) <= 1, 'balanced subtrees must differ by <=1'
+
+
+def terminal_terminal_edges(S: nx.Graph) -> list[tuple[int, int]]:
+    """Edges connecting two terminals (i.e. excluding root feeders)."""
+    return [(u, v) for u, v in S.edges if u >= 0 and v >= 0]
+
+
+def terminal_terminal_crossings(
+    S: nx.Graph, VertexC: np.ndarray
+) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """Crossings among terminal-terminal edges (feeders excluded).
+
+    The constructive heuristics guarantee no terminal-terminal crossings (the
+    core feature of `constructor`, ringed or not); straight feeders may still
+    cross and are resolved later by PathFinder, so they are excluded here.
+
+    Brute-force O(n^2) on purpose: it is independent of `A`/`diagonals`, so it
+    checks the heuristic's own guarantee rather than re-deriving it from the
+    same combinatorial data the heuristic used.
+    """
+    edges = terminal_terminal_edges(S)
+    crossings = []
+    for i, (u, v) in enumerate(edges):
+        for s, t in edges[i + 1 :]:
+            if len({u, v, s, t}) < 4:
+                # shared endpoint: not a crossing
+                continue
+            if is_crossing(
+                VertexC[u], VertexC[v], VertexC[s], VertexC[t], touch_is_cross=False
+            ):
+                crossings.append(((u, v), (s, t)))
+    return crossings
 
 
 def assert_graph_equal(

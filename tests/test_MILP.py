@@ -11,6 +11,8 @@ from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.synthetic import toyfarm
 
+from .helpers import solver_unavailable
+
 # topology in terse links for toy_farm at capacity=5
 _terse_toy_farm_5 = np.array([2, -1, 1, 2, -1, -1, 3, 4, -1, 5, 8, 8])
 _CAPACITY = 5
@@ -34,22 +36,6 @@ def _solve_toy(solver_name, P, A):
     solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
     solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
     return solution_info, solver.get_solution()
-
-
-def _solver_is_unavailable(exc: BaseException) -> bool:
-    if isinstance(exc, (FileNotFoundError, ModuleNotFoundError)):
-        return True
-
-    message = str(exc).lower()
-    return any(
-        marker in message
-        for marker in (
-            'unable to create gurobi model',
-            'token.gurobi.com',
-            'not licensed',
-            'license',
-        )
-    )
 
 
 def _patch_cpu_topology(monkeypatch, affinity, mapping=None):
@@ -93,7 +79,7 @@ def test_MILP_solvers(P_A_toy, solver_name, ortools_worker):
         except BaseException as exc:
             result = exc
 
-    if isinstance(result, BaseException) and _solver_is_unavailable(result):
+    if isinstance(result, BaseException) and solver_unavailable(result):
         pytest.skip(f'{solver_name} not available')
     if isinstance(result, BaseException):
         raise result
@@ -146,7 +132,7 @@ def test_balanced_pins_loads_to_floor_and_ceil(
         except BaseException as exc:
             result = exc
 
-    if isinstance(result, BaseException) and _solver_is_unavailable(result):
+    if isinstance(result, BaseException) and solver_unavailable(result):
         pytest.skip(f'{solver_name} not available')
     if isinstance(result, BaseException):
         raise result
