@@ -85,7 +85,7 @@ def test_add_ring_to_S_canonical_shape(n):
     """A ring built from an ordered terminal list is in canonical form."""
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
-    add_ring_to_S(S, -1, list(range(n)), subtree=0, A=None)
+    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
 
     kinds = {d.get('kind') for _, _, d in S.edges(data=True)}
     assert kinds <= {None}, 'topology-graph ring edges must not carry a kind'
@@ -119,11 +119,11 @@ def test_rings_from_links_roundtrip(n):
     """rings_from_links recovers the terminal set of a built ring."""
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
-    add_ring_to_S(S, -1, list(range(n)), subtree=0, A=None)
+    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
     rings = rings_from_links(list(S.edges()), R=1)
     assert len(rings) == 1
-    root, ordered = rings[0]
-    assert root == -1
+    roots, ordered = rings[0]
+    assert roots == (-1, -1)
     assert set(ordered) == set(range(n))
 
 
@@ -131,15 +131,15 @@ def test_rings_from_links_multiple_rings_and_roots():
     """Two roots, several rings: each ring is recovered with its own root."""
     S = nx.Graph(R=2, T=9)
     S.add_nodes_from([-2, -1])
-    add_ring_to_S(S, -1, [0, 1, 2, 3], subtree=0, A=None)
-    add_ring_to_S(S, -1, [4, 5], subtree=1, A=None)
-    add_ring_to_S(S, -2, [6, 7, 8], subtree=2, A=None)
+    add_ring_to_S(S, (-1, -1), [0, 1, 2, 3], subtree=0, A=None)
+    add_ring_to_S(S, (-1, -1), [4, 5], subtree=1, A=None)
+    add_ring_to_S(S, (-2, -2), [6, 7, 8], subtree=2, A=None)
     rings = rings_from_links(list(S.edges()), R=2)
-    recovered = {(r, frozenset(ordered)) for r, ordered in rings}
+    recovered = {(roots, frozenset(ordered)) for roots, ordered in rings}
     assert recovered == {
-        (-1, frozenset({0, 1, 2, 3})),
-        (-1, frozenset({4, 5})),
-        (-2, frozenset({6, 7, 8})),
+        ((-1, -1), frozenset({0, 1, 2, 3})),
+        ((-1, -1), frozenset({4, 5})),
+        ((-2, -2), frozenset({6, 7, 8})),
     }
 
 
@@ -154,8 +154,8 @@ def test_rings_from_links_roundtrip_bridging(n):
     add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
     rings = rings_from_links(list(S.edges()), R=2)
     assert len(rings) == 1
-    root, ordered = rings[0]
-    assert set(root) == {-1, -2}
+    roots, ordered = rings[0]
+    assert set(roots) == {-1, -2}
     assert set(ordered) == set(range(n))
 
 
@@ -190,7 +190,7 @@ def test_add_ring_to_S_even_nodes_default_split_is_balanced(n):
     """
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
-    add_ring_to_S(S, -1, list(range(n)), subtree=0, A=None)
+    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
     feeder_loads = sorted(d['load'] for u, v, d in S.edges(data=True) if u < 0 or v < 0)
     assert feeder_loads == [n // 2, math.ceil(n / 2)]
 
@@ -207,7 +207,7 @@ def test_add_ring_to_S_odd_n_uses_longer_split_edge_when_A_given():
         A = nx.Graph()
         A.add_edge(0, 1, length=10.0 if longer == 0 else 1.0)
         A.add_edge(1, 2, length=10.0 if longer == 1 else 1.0)
-        add_ring_to_S(S, -1, [0, 1, 2], subtree=0, A=A)
+        add_ring_to_S(S, (-1, -1), [0, 1, 2], subtree=0, A=A)
         (su, sv) = [(u, v) for u, v, d in S.edges(data=True) if d.get('load') == 0][0]
         assert {su, sv} == {longer, expected}
 
@@ -257,7 +257,7 @@ def test_split_rings_multi_root_keeps_rings_with_their_root():
     split_rings_and_calc_loads(S, _CONSTRUCT)
     _assert_canonical_ringed(S, capacity=3)
     rings = _rings(S)
-    by_root = {r: {frozenset(o) for rr, o in rings if rr == r} for r in (-2, -1)}
+    by_root = {r: {frozenset(o) for rr, o in rings if rr == (r, r)} for r in (-2, -1)}
     assert by_root[-2] == {frozenset({0, 1})}
     assert by_root[-1] == {frozenset({2, 3, 4, 5}), frozenset({6})}
 
@@ -544,7 +544,7 @@ def test_ringed_warmstart_values_flow_conservation(n, bridging):
 
     S = nx.Graph(R=R, T=n)
     S.add_nodes_from(roots)
-    add_ring_to_S(S, (-1, -2) if bridging else -1, terminals, subtree=0, A=None)
+    add_ring_to_S(S, (-1, -2) if bridging else (-1, -1), terminals, subtree=0, A=None)
 
     link_vals, flow_vals = ringed_warmstart_values(metadata, S)
 

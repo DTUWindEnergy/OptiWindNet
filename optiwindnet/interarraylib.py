@@ -271,7 +271,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     # single-feeder path to its tail, then close it into a canonical ring; a tail
     # already touching a root bridges two roots (r1, r2).
     R = S.graph['R']
-    paths: list[tuple[int | tuple[int, int], list[int]]] = []
+    paths: list[tuple[tuple[int, int], list[int]]] = []
     seen: set[int] = set()  # first terminal of each ring already walked
     for root in range(-R, 0):
         for gate in S[root]:
@@ -297,12 +297,11 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
                 if r in S[tn] and (len(ordered) > 1 or r != root)
             ]
             end_root = end_roots[0] if end_roots else root
-            root_spec = (root, end_root) if root != end_root else root
-            paths.append((root_spec, ordered))
+            paths.append(((root, end_root), ordered))
     S.remove_edges_from(list(S.edges))
     max_load = 0
-    for subtree_id, (root_spec, ordered) in enumerate(paths):
-        add_ring_to_S(S, root_spec, ordered, subtree_id, A)
+    for subtree_id, (roots, ordered) in enumerate(paths):
+        add_ring_to_S(S, roots, ordered, subtree_id, A)
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
         # a load=0 feeder carries no current, so it adds nothing to its root
@@ -352,17 +351,20 @@ def calcload(G: nx.Graph) -> None:
 
 def add_ring_to_S(
     S: nx.Graph,
-    root: int | tuple[int, int] | list[int],
+    roots: tuple[int, int],
     ordered: list[int],
     subtree: int,
     A: nx.Graph | None = None,
 ) -> None:
     """Add a single ring (closed loop) to topology graph ``S`` in canonical form.
 
-    A ring is the union of two radial arms that share the root ``root`` (or bridge
-    two roots ``(r1, r2)``) and are joined at their tail ends. ``ordered`` is the
-    terminal sequence ``[t1, ..., tn]`` walked along the ring, so that ``t1`` and
-    ``tn`` are the two feeder-connected terminals. Both feeders ``(r1, t1)`` and
+    A ring is the union of two radial arms, fed by ``r1`` and ``r2`` and joined at
+    their tail ends. The two roots may differ, in which case the ring bridges two
+    substations; they are always given as a pair, equal ones included.
+
+    ``ordered`` is the terminal sequence ``[t1, ..., tn]`` walked along the ring,
+    so that ``t1`` and ``tn`` are the feeder-connected terminals. Both feeders
+    ``(r1, t1)`` and
     ``(r2, tn)`` are real, load-bearing cables (there is no asymmetric "ring-back");
     the single open point of the ring is the edge at the load midpoint, marked by
     ``load=0`` (a real cable, no current flows through it).
@@ -378,7 +380,8 @@ def add_ring_to_S(
 
     Args:
       S: topology graph to add the ring to (modified in place).
-      root: the (negative) root node id or pair ``(r1, r2)`` of root node ids.
+      roots: the pair ``(r1, r2)`` of (negative) root node ids; ``r1 == r2``
+        for a ring whose two feeders share one root.
       ordered: terminal sequence ``[t1, ..., tn]`` along the ring.
       subtree: subtree id to assign to every node of the ring (both arms).
       A: optional available-links graph, used to pick the longer split edge on
@@ -386,7 +389,7 @@ def add_ring_to_S(
     """
     # the builder declares the shape it establishes
     S.graph['topology'] = 'ringed'
-    r1, r2 = (root[0], root[1]) if isinstance(root, (tuple, list)) else (root, root)
+    r1, r2 = roots
     n = len(ordered)
     if n == 1:
         # Degenerate ring: a single terminal has feeder(s) on it.
@@ -427,16 +430,20 @@ def add_ring_to_S(
             S.add_edge(u, v, load=load, reverse=source < sink)
 
 
-def rings_from_links(
-    active_links, R: int
-) -> list[tuple[int | tuple[int, int], list[int]]]:
+def rings_from_links(active_links, R: int) -> list[tuple[tuple[int, int], list[int]]]:
     """Recover ordered ring terminal sequences from a set of active links.
 
     ``active_links`` is any iterable of ``(u, v)`` node pairs that are active in a
     RINGED solution (terminal-terminal links plus the two feeders of each ring).
-    Each ring is returned as ``(root, [t1, ..., tn])`` with ``t1`` and ``tn`` the
-    feeder-connected terminals, obtained by walking the terminal adjacency from
-    the head subroot to the tail one.
+    Each ring is returned as ``((r1, r2), [t1, ..., tn])`` with ``t1`` and ``tn``
+    the feeder-connected terminals, obtained by walking the terminal adjacency
+    from the head subroot to the tail one; ``r1`` feeds ``t1`` and ``r2`` feeds
+    ``tn``.
+
+    The two roots are *always* both reported, equal ones included: a ring bridges
+    two substations whenever they differ, and collapsing that case to a bare root
+    would oblige every caller to expand it again -- which is exactly how bridging
+    rings came to be mishandled across the codebase.
 
     Feeders are identified by having exactly one negative (root) endpoint; a ring
     with a single terminal (``n == 1``) has both feeders on that terminal.
@@ -452,7 +459,7 @@ def rings_from_links(
             r, t = (u, v) if u < 0 else (v, u)
             subroots[r].append(t)
             term_to_roots[t].append(r)
-    rings: list[tuple[int | tuple[int, int], list[int]]] = []
+    rings: list[tuple[tuple[int, int], list[int]]] = []
     # `subroots` is consumed as the walk goes: each feeder is claimed once
     for r in range(-R, 0):
         while subroots[r]:
@@ -479,8 +486,7 @@ def rings_from_links(
                 r2 = r
             else:
                 subroots[r2].remove(tn)
-            root_spec = (r, r2) if r != r2 else r
-            rings.append((root_spec, chain_))
+            rings.append(((r, r2), chain_))
     return rings
 
 
@@ -506,7 +512,7 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
     # two feeders per ring, except a lone terminal hanging off a single root
     n_feeders = sum(1 for u, v in S.edges if u < 0 or v < 0)
     expected = sum(
-        1 if len(ordered) == 1 and isinstance(rs, int) else 2 for rs, ordered in rings
+        1 if len(ordered) == 1 and rs[0] == rs[1] else 2 for rs, ordered in rings
     )
     if n_feeders != expected:
         violations.append(f'expected {expected} feeders, got {n_feeders}')
@@ -514,19 +520,17 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
     if not S.graph.get('has_loads'):
         return violations
 
-    for root_spec, ordered in rings:
+    for roots, ordered in rings:
         n = len(ordered)
         arm = math.ceil(n / 2)
         # a ring holds up to 2*capacity terminals (two arms of ceil(n / 2))
         if capacity is not None and arm > capacity:
-            violations.append(
-                f'ring at {root_spec} needs arms of {arm} > κ = {capacity}'
-            )
+            violations.append(f'ring at {roots} needs arms of {arm} > κ = {capacity}')
         # the heaviest node of a ring carries a full arm: the arms are balanced
         heaviest = max(S.nodes[t]['load'] for t in ordered)
         if heaviest != arm:
             violations.append(
-                f'ring at {root_spec} has unbalanced arms: heaviest node carries '
+                f'ring at {roots} has unbalanced arms: heaviest node carries '
                 f'{heaviest}, balanced arms would carry {arm}'
             )
         # the two arm-head (feeder) terminals carry the whole ring between them
@@ -535,8 +539,7 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
         )
         if heads != n:
             violations.append(
-                f'ring at {root_spec} spans {n} terminals, but its arm heads '
-                f'carry {heads}'
+                f'ring at {roots} spans {n} terminals, but its arm heads carry {heads}'
             )
         # exactly one open point per ring: a real cable with no current through it
         opens = [
@@ -546,7 +549,7 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
         ]
         if len(opens) != (1 if n > 1 else 0):
             violations.append(
-                f'ring at {root_spec} has {len(opens)} open points, expected '
+                f'ring at {roots} has {len(opens)} open points, expected '
                 f'{1 if n > 1 else 0}'
             )
     return violations
@@ -644,7 +647,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
             yield source, sink, edgeD['load']
         return
     for root, chain_ in rings_from_links(S.edges(), S.graph['R']):
-        head_root, tail_root = root if isinstance(root, tuple) else (root, root)
+        head_root, tail_root = root
         n = len(chain_)
         # the ring drains through chain_[0], whose feeder carries all of it, and
         # closes on the far feeder. A lone terminal needs no special case: it is
@@ -1234,7 +1237,7 @@ def _ring_routes_from_S(S: nx.Graph, R: int) -> list[tuple[int, list[int], int]]
     }
     routes: list[tuple[int, list[int], int]] = []
     for root, ordered in rings_from_links(list(S.edges()), R):
-        open_, close = root if isinstance(root, tuple) else (root, root)
+        open_, close = root
         n = len(ordered)
         if n > 1:
             # locate the open point in the walk and orient so it lands on the
@@ -1309,8 +1312,7 @@ def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
     routes = parse_ring_routes(terse_links.tolist())
     max_load = 0
     for subtree, (open_, ordered, close) in enumerate(routes):
-        root = open_ if open_ == close else (open_, close)
-        add_ring_to_S(S, root, ordered, subtree, A=None)
+        add_ring_to_S(S, (open_, close), ordered, subtree, A=None)
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
         # a load=0 feeder carries no current, so it adds nothing to its root

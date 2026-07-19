@@ -459,11 +459,15 @@ def test_terse_links_from_S():
 # terse_links for RINGED topologies (sequence-of-routes encoding)
 # --------------------------------------------------------------------------- #
 def _ringed_S(R, ringspec):
-    """Build a canonical ringed S from a list of (root, [terminals]) rings."""
+    """Build a canonical ringed S from a list of (root, [terminals]) rings.
+
+    Every ring here has both feeders on one root; rings bridging two roots are
+    covered in ``test_ringed.py``.
+    """
     S = nx.Graph(R=R, T=sum(len(o) for _, o in ringspec))
     S.add_nodes_from(range(-R, 0))
     for i, (root, ordered) in enumerate(ringspec):
-        add_ring_to_S(S, root, ordered, subtree=i, A=None)
+        add_ring_to_S(S, (root, root), ordered, subtree=i, A=None)
     for r in range(-R, 0):
         S.nodes[r]['load'] = sum(S.nodes[n]['load'] for n in S[r])
     return S
@@ -523,7 +527,7 @@ def test_terse_links_ringed_preserves_open_point(longer, expected_open):
     A.add_edge(1, 2, length=10.0 if longer == 1 else 1.0)
     S = nx.Graph(R=1, T=3)
     S.add_node(-1)
-    add_ring_to_S(S, -1, [0, 1, 2], subtree=0, A=A)
+    add_ring_to_S(S, (-1, -1), [0, 1, 2], subtree=0, A=A)
     S.nodes[-1]['load'] = sum(S.nodes[n]['load'] for n in S[-1])
 
     terse = terse_links_from_S(S)
