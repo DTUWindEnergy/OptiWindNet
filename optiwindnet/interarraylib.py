@@ -358,16 +358,13 @@ def add_ring_to_S(
 ) -> None:
     """Add a single ring (closed loop) to topology graph ``S`` in canonical form.
 
-    A ring is the union of two radial arms, fed by ``r1`` and ``r2`` and joined at
-    their tail ends. The two roots may differ, in which case the ring bridges two
-    substations; they are always given as a pair, equal ones included.
-
-    ``ordered`` is the terminal sequence ``[t1, ..., tn]`` walked along the ring,
-    so that ``t1`` and ``tn`` are the feeder-connected terminals. Both feeders
-    ``(r1, t1)`` and
-    ``(r2, tn)`` are real, load-bearing cables (there is no asymmetric "ring-back");
-    the single open point of the ring is the edge at the load midpoint, marked by
-    ``load=0`` (a real cable, no current flows through it).
+    A ring is the union of two radial arms, fed by ``r1`` and ``r2`` and joined
+    at their tail ends; it bridges two substations when ``r1 != r2``. ``ordered``
+    is the terminal sequence ``[t1, ..., tn]`` walked along the ring, so that
+    ``t1`` and ``tn`` are the feeder-connected terminals. Both feeders
+    ``(r1, t1)`` and ``(r2, tn)`` are real, load-bearing cables; the single open
+    point of the ring is the edge at the load midpoint, marked by ``load=0`` (a
+    real cable, no current flows through it).
 
     Arm 1 (the ``t1`` side) gets ``m = ceil(n / 2)`` terminals, so each arm holds at
     most ``ceil(n / 2)`` — i.e. half of the doubled ring capacity. When the ring has
@@ -380,8 +377,8 @@ def add_ring_to_S(
 
     Args:
       S: topology graph to add the ring to (modified in place).
-      roots: the pair ``(r1, r2)`` of (negative) root node ids; ``r1 == r2``
-        for a ring whose two feeders share one root.
+      roots: the pair ``(r1, r2)`` of (negative) root node ids, equal when both
+        feeders share one root.
       ordered: terminal sequence ``[t1, ..., tn]`` along the ring.
       subtree: subtree id to assign to every node of the ring (both arms).
       A: optional available-links graph, used to pick the longer split edge on
@@ -438,12 +435,7 @@ def rings_from_links(active_links, R: int) -> list[tuple[tuple[int, int], list[i
     Each ring is returned as ``((r1, r2), [t1, ..., tn])`` with ``t1`` and ``tn``
     the feeder-connected terminals, obtained by walking the terminal adjacency
     from the head subroot to the tail one; ``r1`` feeds ``t1`` and ``r2`` feeds
-    ``tn``.
-
-    The two roots are *always* both reported, equal ones included: a ring bridges
-    two substations whenever they differ, and collapsing that case to a bare root
-    would oblige every caller to expand it again -- which is exactly how bridging
-    rings came to be mishandled across the codebase.
+    ``tn``. The ring bridges two substations when ``r1 != r2``.
 
     Feeders are identified by having exactly one negative (root) endpoint; a ring
     with a single terminal (``n == 1``) has both feeders on that terminal.
@@ -612,27 +604,22 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
 def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     """Yield ``(source, sink, flow)`` for every link of ``S``.
 
-    Forest topologies read each link's orientation off its ``'reverse'`` flag (see
-    the note above :func:`bfs_subtree_loads`), so ``flow`` is just the link's load.
+    Forest topologies read each link's orientation off its ``'reverse'`` flag
+    (see the note above :func:`bfs_subtree_loads`), so ``flow`` is just the
+    link's load.
 
-    A RINGED ``S`` stores each ring split into two arms at a load-0 open point,
-    which is not how a flow formulation sees it: there a ring is one directed
-    chain of its ``n`` terminals, fed by a flowless closing feeder at one end and
-    draining through a feeder carrying the whole ring at the other. *Radializing*
-    recovers that chain (walking across the open point with
-    :func:`rings_from_links`) and re-orients every link along it, so the open
-    point becomes an ordinary flow-carrying link. Callers that need a ring
-    oriented the way a solver's model expects -- warm-starting a MILP, above all
-    -- want this rather than the stored ``'reverse'``.
+    A RINGED ``S`` -- as declared by ``S.graph['topology']`` -- stores each ring
+    split into two arms at a load-0 open point, which is not how a flow
+    formulation sees it: there a ring is one directed chain of its ``n``
+    terminals, fed by a flowless closing feeder at one end and draining through
+    a feeder carrying the whole ring at the other. Such rings are *radialized*
+    into that chain here (walking across the open point with
+    :func:`rings_from_links`), so the open point becomes an ordinary
+    flow-carrying link.
 
-    A ring bridging two roots drains through the one feeding the head of the walk
-    and closes on the other. Which of the two drains is arbitrary: it moves no
-    cable, and only length enters the objective.
-
-    Whether to radialize follows ``S.graph['topology']``, which is a contract on
-    ``S``. A model's own topology cannot disagree -- only a RINGED ``S`` may seed
-    a RINGED model, and only a forest one a forest model (see
-    ``MILP._core._WARMSTART_OK``).
+    A ring bridging two roots drains through the one feeding the head of the
+    walk and closes on the other; which of the two drains is arbitrary, as it
+    moves no cable.
 
     Args:
       S: solution topology.
@@ -1174,9 +1161,9 @@ def compress_ring_routes(routes: list[tuple[int, list[int], int]]) -> list[int]:
     negative numbers are always distinct; the last route's ``close`` is elided
     when it equals its ``open`` (a single-root ring, inferred at end-of-sequence).
 
-    A route always contributes at least its walk, and the first route always
-    writes a marker, so the sequence has more entries than there are walk nodes
-    -- which is what tells a ringed encoding from a positional forest one.
+    Every route contributes its walk and the first writes a marker, so the
+    sequence always has more entries than walk nodes -- which is what
+    distinguishes a ringed encoding from a positional forest one.
     """
     seq: list[int] = []
     pen = None
@@ -1229,8 +1216,8 @@ def _ring_routes_from_S(S: nx.Graph, R: int) -> list[tuple[int, list[int], int]]
     the two balanced split edges map one-to-one onto the two walk directions, so
     this preserves the exact open point without storing it.
 
-    A ring may open and close on different roots (it bridges two substations),
-    so reversing a walk swaps the two roots along with the ends they feed.
+    A ring may open and close on different roots, so reversing a walk swaps the
+    two roots along with the ends they feed.
     """
     split_pairs = {
         frozenset((u, v)) for u, v, d in S.edges(data=True) if d.get('load') == 0
@@ -1276,7 +1263,7 @@ def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
       from ``T``.
 
     The two are told apart by comparing the number of entries with ``T`` (see
-    the class docstring convention): equal ⇒ forest, otherwise ⇒ ringed. ``T``
+    :func:`terse_links_from_S`): equal ⇒ forest, otherwise ⇒ ringed. ``T``
     and ``R`` may be supplied explicitly; when omitted a forest encoding is
     assumed (``T = len(terse_links)``) and ``R`` is inferred from the array.
 
@@ -1338,10 +1325,9 @@ def terse_links_from_S(S):
     opens and closes on. The two encodings are told apart by their length
     relative to ``T``.
 
-    The encoding is chosen from ``S.graph['topology']``, never from the shape of
-    ``S``: a ring whose two feeders land on *different* roots is a path between
-    them, so a ringed ``S`` is not necessarily cyclic and structure cannot tell
-    the two encodings apart.
+    The encoding follows ``S.graph['topology']``. A ringed ``S`` need not be
+    cyclic -- a ring whose two feeders land on different roots is a path between
+    them -- so its shape does not determine the encoding.
 
     Args:
       S: solution topology (a forest, or a canonical ringed topology).

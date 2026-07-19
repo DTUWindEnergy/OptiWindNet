@@ -345,9 +345,9 @@ def terse_pack_from_G(G: nx.Graph) -> PackType:
     C, D = (G.graph.get(k, 0) for k in 'CD')
     if not G.graph.get('has_loads'):
         calcload(G)
-    # the recorded topology picks the encoding, never the shape of G: a ring
-    # whose two feeders land on different roots is a path between them, so a
-    # ringed G is not necessarily cyclic.
+    # the recorded topology picks the encoding: a ringed G need not be cyclic,
+    # since a ring whose two feeders land on different roots is a path between
+    # them.
     if G.graph['topology'] != 'ringed':
         terse = np.empty((T + C + D,), dtype=int)
         for u, v, edgeD in G.edges(data=True):

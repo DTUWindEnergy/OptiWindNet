@@ -163,9 +163,9 @@ def test_rings_from_links_roundtrip_bridging(n):
 def test_terse_roundtrip_preserves_bridging_ring(n):
     """A bridging ring survives the terse encoding intact.
 
-    The encoding is what the public ``terse_links`` API and the database share;
-    a ring closing on a root other than the one it opened on used to be dropped
-    by the decoder, which then rebuilt it against a single root (or crashed).
+    The encoding is what the public ``terse_links`` API and the database share,
+    so a ring closing on a root other than the one it opened on must round-trip
+    with both feeders and its open point.
     """
     S = nx.Graph(R=2, T=n)
     S.add_nodes_from([-2, -1])
