@@ -1325,9 +1325,7 @@ def terse_links_from_S(S):
     opens and closes on. The two encodings are told apart by their length
     relative to ``T``.
 
-    The encoding follows ``S.graph['topology']``. A ringed ``S`` need not be
-    cyclic -- a ring whose two feeders land on different roots is a path between
-    them -- so its shape does not determine the encoding.
+    The encoding follows ``S.graph['topology']``.
 
     Args:
       S: solution topology (a forest, or a canonical ringed topology).
