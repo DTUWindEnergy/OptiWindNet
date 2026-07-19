@@ -637,7 +637,7 @@ def warmup_model(
             if value:
                 model.flow_[key] = value
     else:
-        for source, sink, flow in directed_links(S, radialize_rings=False):
+        for source, sink, flow in directed_links(S):
             try:
                 model.link_[source, sink] = 1
             except KeyError:

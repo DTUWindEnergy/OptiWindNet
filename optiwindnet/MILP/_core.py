@@ -399,7 +399,7 @@ def ringed_warmstart_values(
     """
     link_vals: dict[_Link, int] = dict.fromkeys(metadata.link_, 0)
     flow_vals: dict[_Link, int] = dict.fromkeys(metadata.flow_, 0)
-    for source, sink, flow in directed_links(S, radialize_rings=True):
+    for source, sink, flow in directed_links(S):
         key = (source, sink)
         if key not in link_vals:
             # a ring's closing feeder (r→t) is only a model variable under

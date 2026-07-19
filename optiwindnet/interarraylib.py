@@ -606,9 +606,7 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     return violations
 
 
-def directed_links(
-    S: nx.Graph, *, radialize_rings: bool | None = None
-) -> Iterator[tuple[int, int, int]]:
+def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     """Yield ``(source, sink, flow)`` for every link of ``S``.
 
     Forest topologies read each link's orientation off its ``'reverse'`` flag (see
@@ -616,40 +614,43 @@ def directed_links(
 
     A RINGED ``S`` stores each ring split into two arms at a load-0 open point,
     which is not how a flow formulation sees it: there a ring is one directed
-    chain of its ``n`` terminals, fed by a flowless closing feeder ``r -> tn`` at
-    one end and draining through a feeder ``t1 -> r`` carrying the whole ring at
-    the other. *Radializing* recovers that chain (walking across the open point
-    with :func:`rings_from_links`) and re-orients every link along it, so the open
+    chain of its ``n`` terminals, fed by a flowless closing feeder at one end and
+    draining through a feeder carrying the whole ring at the other. *Radializing*
+    recovers that chain (walking across the open point with
+    :func:`rings_from_links`) and re-orients every link along it, so the open
     point becomes an ordinary flow-carrying link. Callers that need a ring
     oriented the way a solver's model expects -- warm-starting a MILP, above all
     -- want this rather than the stored ``'reverse'``.
 
+    A ring bridging two roots drains through the one feeding the head of the walk
+    and closes on the other. Which of the two drains is arbitrary: it moves no
+    cable, and only length enters the objective.
+
+    Whether to radialize follows ``S.graph['topology']``, which is a contract on
+    ``S``. A model's own topology cannot disagree -- only a RINGED ``S`` may seed
+    a RINGED model, and only a forest one a forest model (see
+    ``MILP._core._WARMSTART_OK``).
+
     Args:
       S: solution topology.
-      radialize_rings: whether to radialize. Defaults to whether ``S`` declares
-        itself ``topology='ringed'``; pass it explicitly when the consumer's
-        expectation, rather than ``S``, decides (a model's topology, say).
 
     Yields:
       ``(source, sink, flow)`` per link, current flowing ``source`` -> ``sink``.
       ``flow`` is 0 for links carrying no current: a ring's closing feeder.
     """
-    if radialize_rings is None:
-        radialize_rings = S.graph.get('topology') == 'ringed'
-    if not radialize_rings:
+    if S.graph['topology'] != 'ringed':
         for u, v, edgeD in S.edges(data=True):
             source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
             yield source, sink, edgeD['load']
         return
-    for r, chain_ in rings_from_links(S.edges(), S.graph['R']):
+    for root, chain_ in rings_from_links(S.edges(), S.graph['R']):
+        head_root, tail_root = root if isinstance(root, tuple) else (root, root)
         n = len(chain_)
-        # the ring drains through chain_[0], whose feeder carries all of it
-        yield chain_[0], r, n
-        if n == 1:
-            # degenerate ring (a lone terminal): close it with a flowless feeder
-            yield r, chain_[0], 0
-            continue
-        yield r, chain_[-1], 0
+        # the ring drains through chain_[0], whose feeder carries all of it, and
+        # closes on the far feeder. A lone terminal needs no special case: it is
+        # both head and tail, and the chain below is empty.
+        yield chain_[0], head_root, n
+        yield tail_root, chain_[-1], 0
         for j in range(n - 1, 0, -1):
             yield chain_[j], chain_[j - 1], n - j
 

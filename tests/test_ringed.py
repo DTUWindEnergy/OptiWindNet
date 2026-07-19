@@ -516,37 +516,44 @@ def test_ewrouter_ringed_end_to_end():
 # --------------------------------------------------------------------------- #
 # RINGED warmstart: a ringed solution maps onto the model's single-chain flow
 # --------------------------------------------------------------------------- #
+@pytest.mark.parametrize('bridging', [False, True], ids=['single_root', 'bridging'])
 @pytest.mark.parametrize('n', range(2, 11))
-def test_ringed_warmstart_values_flow_conservation(n):
-    """ringed_warmstart_values yields a flow-feasible single-chain assignment."""
+def test_ringed_warmstart_values_flow_conservation(n, bridging):
+    """ringed_warmstart_values yields a flow-feasible single-chain assignment.
+
+    A ring whose two feeders land on different roots radializes the same way: it
+    drains through the root feeding the head of the walk and closes on the other.
+    Which of the two drains is arbitrary -- it moves no cable.
+    """
     from types import SimpleNamespace
 
     from optiwindnet.MILP._core import ringed_warmstart_values
 
     terminals = list(range(n))
-    root = -1
+    R = 2 if bridging else 1
+    roots = list(range(-R, 0))
     E = [(u, v) for u in terminals for v in terminals if u < v]
     Ep = [(v, u) for u, v in E]
-    stars = [(t, root) for t in terminals]
-    starsp = [(root, t) for t in terminals]
+    stars = [(t, r) for t in terminals for r in roots]
+    starsp = [(r, t) for t in terminals for r in roots]
     metadata = SimpleNamespace(
-        R=1,
+        R=R,
         link_={k: None for k in E + Ep + stars + starsp},
         flow_={k: None for k in E + Ep + stars},
     )
 
-    S = nx.Graph(R=1, T=n)
-    S.add_node(root)
-    add_ring_to_S(S, root, terminals, subtree=0, A=None)
+    S = nx.Graph(R=R, T=n)
+    S.add_nodes_from(roots)
+    add_ring_to_S(S, (-1, -2) if bridging else -1, terminals, subtree=0, A=None)
 
     link_vals, flow_vals = ringed_warmstart_values(metadata, S)
 
     # exactly one flow feeder (t → r) carries the whole ring (n)
-    active_feeders = [(t, root) for t in terminals if link_vals[(t, root)]]
+    active_feeders = [(t, r) for t in terminals for r in roots if link_vals[(t, r)]]
     assert len(active_feeders) == 1
     assert flow_vals[active_feeders[0]] == n
     # exactly one flowless closing feeder (r → t)
-    assert sum(link_vals[(root, t)] for t in terminals) == 1
+    assert sum(link_vals[(r, t)] for t in terminals for r in roots) == 1
 
     # in-/out-degree of every terminal is exactly 1, and flow is conserved
     for t in terminals:
