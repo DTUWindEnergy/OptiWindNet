@@ -7,8 +7,7 @@ from collections import defaultdict
 from itertools import chain, combinations, pairwise, tee
 from typing import Literal, NewType
 
-# compiled extension: ships neither stubs nor py.typed
-import condeltri as cdt  # pyrefly: ignore[missing-import]
+import condeltri as cdt
 import networkx as nx
 import numba as nb
 import numpy as np

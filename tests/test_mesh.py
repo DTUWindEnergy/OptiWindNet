@@ -1,4 +1,4 @@
-import condeltri as cdt  # pyrefly: ignore[missing-import]
+import condeltri as cdt
 import networkx as nx
 import numpy as np
 import shapely as shp
