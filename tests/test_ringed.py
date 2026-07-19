@@ -35,10 +35,13 @@ from optiwindnet.crossings import validate_routeset
 from optiwindnet.heuristics import constructor
 from optiwindnet.interarraylib import (
     G_from_S,
+    calcload,
+    S_from_terse_links,
     add_ring_to_S,
     assign_cables,
     rings_from_links,
     split_rings_and_calc_loads,
+    terse_links_from_S,
     validate_topology,
 )
 from optiwindnet.mesh import make_planar_embedding
@@ -138,6 +141,44 @@ def test_rings_from_links_multiple_rings_and_roots():
         (-1, frozenset({4, 5})),
         (-2, frozenset({6, 7, 8})),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Bridging rings (a ring whose two feeders land on different roots)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize('n', range(1, 13))
+def test_rings_from_links_roundtrip_bridging(n):
+    """A ring bridging two roots is recovered with both of its roots."""
+    S = nx.Graph(R=2, T=n)
+    S.add_nodes_from([-2, -1])
+    add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
+    rings = rings_from_links(list(S.edges()), R=2)
+    assert len(rings) == 1
+    root, ordered = rings[0]
+    assert set(root) == {-1, -2}
+    assert set(ordered) == set(range(n))
+
+
+@pytest.mark.parametrize('n', range(1, 13))
+def test_terse_roundtrip_preserves_bridging_ring(n):
+    """A bridging ring survives the terse encoding intact.
+
+    The encoding is what the public ``terse_links`` API and the database share;
+    a ring closing on a root other than the one it opened on used to be dropped
+    by the decoder, which then rebuilt it against a single root (or crashed).
+    """
+    S = nx.Graph(R=2, T=n)
+    S.add_nodes_from([-2, -1])
+    add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
+    calcload(S)
+
+    terse = terse_links_from_S(S)
+    S2 = S_from_terse_links(terse, R=2, T=n)
+
+    assert set(map(frozenset, S2.edges())) == set(map(frozenset, S.edges()))
+    assert not validate_topology(S2, capacity=math.ceil(n / 2))
+    # re-encoding is stable: the decoder lands on the encoder's walk orientation
+    assert terse_links_from_S(S2).tolist() == terse.tolist()
 
 
 @pytest.mark.parametrize('n', range(2, 12, 2))

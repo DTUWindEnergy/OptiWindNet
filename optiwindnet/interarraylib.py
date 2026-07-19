@@ -6,7 +6,7 @@ import math
 import pickle
 import sys
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from hashlib import sha256
 from itertools import chain, pairwise
 
@@ -305,7 +305,11 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
         add_ring_to_S(S, root_spec, ordered, subtree_id, A)
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
-        S.nodes[root]['load'] = sum(S.nodes[n]['load'] for n in S[root])
+        # a load=0 feeder carries no current, so it adds nothing to its root
+        # (the open point of a bridging stub is a feeder, not an interior link)
+        S.nodes[root]['load'] = sum(
+            S.nodes[n]['load'] for n in S[root] if S[root][n]['load'] != 0
+        )
     S.graph['max_load'] = max_load
     S.graph['has_loads'] = True
 
@@ -1157,25 +1161,79 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     return L
 
 
-def _ring_sequence_from_S(S: nx.Graph, R: int) -> list[int]:
-    """Encode the rings of a RINGED topology ``S`` as a flat sequence.
+def compress_ring_routes(routes: list[tuple[int, list[int], int]]) -> list[int]:
+    """Flatten ring routes ``(open_root, walk, close_root)`` into a sequence.
 
-    The rings are drawn as routes, each leaving and returning to a root. Each
-    route is entered as its (negative) root number followed by its terminals in
-    walking order; the root number both ends the previous route and names the
-    root this route belongs to. See :func:`S_from_terse_links` for the inverse.
+    Each route is written as its ``open_root`` (only when it differs from the
+    running root), its walk, then its ``close_root``. A shared boundary root
+    (``close_i == open_{i+1}``) is therefore written once, so two consecutive
+    negative numbers are always distinct; the last route's ``close`` is elided
+    when it equals its ``open`` (a single-root ring, inferred at end-of-sequence).
+
+    A route always contributes at least its walk, and the first route always
+    writes a marker, so the sequence has more entries than there are walk nodes
+    -- which is what tells a ringed encoding from a positional forest one.
+    """
+    seq: list[int] = []
+    pen = None
+    last = len(routes) - 1
+    for idx, (open_, walk, close) in enumerate(routes):
+        if open_ != pen:
+            seq.append(int(open_))
+        seq.extend(int(x) for x in walk)
+        if idx == last and close == open_:
+            pen = close
+            continue
+        seq.append(int(close))
+        pen = close
+    return seq
+
+
+def parse_ring_routes(seq: Sequence[int]) -> list[tuple[int, list[int], int]]:
+    """Inverse of :func:`compress_ring_routes`: recover ``(open, walk, close)``."""
+    routes: list[tuple[int, list[int], int]] = []
+    seq = [int(x) for x in seq]
+    i, length, pen = 0, len(seq), None
+    while i < length:
+        if seq[i] < 0:
+            open_ = seq[i]
+            i += 1
+        else:
+            open_ = pen
+        walk: list[int] = []
+        while i < length and seq[i] >= 0:
+            walk.append(seq[i])
+            i += 1
+        if i >= length:
+            close = open_  # last route, single-root: close inferred == open
+        else:
+            # a lone marker is the shared close/next-open; two consecutive markers
+            # are this route's close then a distinct next open
+            close = seq[i]
+            i += 1
+        pen = close
+        routes.append((open_, walk, close))
+    return routes
+
+
+def _ring_routes_from_S(S: nx.Graph, R: int) -> list[tuple[int, list[int], int]]:
+    """Recover the ring routes ``(open_root, walk, close_root)`` of a ringed ``S``.
 
     The walk direction of each ring is chosen so that the open point falls where
     :func:`add_ring_to_S` (called with ``A=None`` on decode) re-derives it: the
     load midpoint ``ceil(n / 2) - 1``. For a ring with an odd number of terminals
     the two balanced split edges map one-to-one onto the two walk directions, so
     this preserves the exact open point without storing it.
+
+    A ring may open and close on different roots (it bridges two substations),
+    so reversing a walk swaps the two roots along with the ends they feed.
     """
     split_pairs = {
         frozenset((u, v)) for u, v, d in S.edges(data=True) if d.get('load') == 0
     }
-    seq: list[int] = []
+    routes: list[tuple[int, list[int], int]] = []
     for root, ordered in rings_from_links(list(S.edges()), R):
+        open_, close = root if isinstance(root, tuple) else (root, root)
         n = len(ordered)
         if n > 1:
             # locate the open point in the walk and orient so it lands on the
@@ -1187,35 +1245,19 @@ def _ring_sequence_from_S(S: nx.Graph, R: int) -> list[int]:
             )
             if j != math.ceil(n / 2) - 1:
                 ordered = ordered[::-1]
-        r1, r2 = root if isinstance(root, tuple) else (root, root)
-        seq.append(r1)
-        seq.extend(ordered)
-        if r1 != r2:
-            seq.append(r2)
-    return seq
+                open_, close = close, open_
+        routes.append((open_, ordered, close))
+    return routes
 
 
-def _rings_from_ring_sequence(seq) -> list[tuple[int, list[int]]]:
-    """Recover ``(root, [t1, ..., tn])`` routes from a ring sequence.
+def _ring_sequence_from_S(S: nx.Graph, R: int) -> list[int]:
+    """Encode the rings of a RINGED topology ``S`` as a flat sequence.
 
-    Inverse of :func:`_ring_sequence_from_S`'s layout: each (negative) root
-    number opens a new route, and the terminals that follow it are that route's
-    nodes in walking order.
+    The rings are drawn as routes, each leaving a root and returning to a root
+    -- not necessarily the same one. See :func:`S_from_terse_links` for the
+    inverse, and :func:`compress_ring_routes` for the sequence layout.
     """
-    rings: list[tuple[int, list[int]]] = []
-    root: int | None = None
-    route: list[int] = []
-    for x in seq:
-        x = int(x)
-        if x < 0:
-            if root is not None:
-                rings.append((root, route))
-            root, route = x, []
-        else:
-            route.append(x)
-    if root is not None:
-        rings.append((root, route))
-    return rings
+    return compress_ring_routes(_ring_routes_from_S(S, R))
 
 
 def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
@@ -1263,13 +1305,17 @@ def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
     # ringed encoding: rebuild each route as a canonical ring
     S = nx.Graph(T=T, R=R, **kwargs)
     S.add_nodes_from(range(-R, 0))
-    rings = _rings_from_ring_sequence(terse_links.tolist())
+    routes = parse_ring_routes(terse_links.tolist())
     max_load = 0
-    for subtree, (root, ordered) in enumerate(rings):
+    for subtree, (open_, ordered, close) in enumerate(routes):
+        root = open_ if open_ == close else (open_, close)
         add_ring_to_S(S, root, ordered, subtree, A=None)
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
-        S.nodes[root]['load'] = sum(S.nodes[nbr]['load'] for nbr in S[root])
+        # a load=0 feeder carries no current, so it adds nothing to its root
+        S.nodes[root]['load'] = sum(
+            S.nodes[nbr]['load'] for nbr in S[root] if S[root][nbr]['load'] != 0
+        )
     S.graph['max_load'] = max_load
     S.graph['has_loads'] = True
     if 'capacity' not in kwargs:
@@ -1282,11 +1328,17 @@ def terse_links_from_S(S):
 
     Inverse function of :func:`S_from_terse_links`. A *forest* topology (radial
     or branched) is stored positionally – ``(i, terse[i])`` are the links, one
-    entry per terminal. A *ringed* topology has cycles that a single parent per
-    node cannot capture, so it is stored instead as a sequence of routes (see
-    :func:`_ring_sequence_from_S`): the terminals of each ring in walking order,
-    with (negative) root numbers marking where the drawing shifts to a new
-    route. The two encodings are told apart by their length relative to ``T``.
+    entry per terminal. A *ringed* topology needs two feeders per ring, which a
+    single parent per node cannot capture, so it is stored instead as a sequence
+    of routes (see :func:`_ring_sequence_from_S`): the terminals of each ring in
+    walking order, with (negative) root numbers marking the roots each route
+    opens and closes on. The two encodings are told apart by their length
+    relative to ``T``.
+
+    The encoding is chosen from ``S.graph['topology']``, never from the shape of
+    ``S``: a ring whose two feeders land on *different* roots is a path between
+    them, so a ringed ``S`` is not necessarily cyclic and structure cannot tell
+    the two encodings apart.
 
     Args:
       S: solution topology (a forest, or a canonical ringed topology).
@@ -1295,7 +1347,7 @@ def terse_links_from_S(S):
       1D array ``terse`` encoding ``S``.
     """
     T = S.graph['T']
-    if nx.is_forest(S):
+    if S.graph['topology'] != 'ringed':
         terse_links = np.zeros((T,), dtype=np.int_)
         # convert the graph to array representing the tree (edges i->terse[i])
         for u, v, edgeD in S.edges(data=True):
@@ -1303,10 +1355,10 @@ def terse_links_from_S(S):
             i, target = (u, v) if edgeD['reverse'] else (v, u)
             terse_links[i] = target
         return terse_links
-    # ringed topology: encode the routes sequentially. Every route carries its
-    # own leading root number, so a ringed encoding always has more than T
-    # entries (T terminals + one root number per route) and never collides with
-    # the T-entry forest encoding.
+    # ringed topology: encode the routes sequentially. Every route contributes
+    # its terminals and the first one always writes a root marker, so a ringed
+    # encoding always has more than T entries and never collides with the
+    # T-entry forest encoding.
     seq = _ring_sequence_from_S(S, S.graph['R'])
     return np.array(seq, dtype=np.int_)
 
