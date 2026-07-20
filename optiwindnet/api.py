@@ -751,10 +751,14 @@ class EWRouter(Router):
         S = constructor(A, capacity=cables_capacity, **constructor_args)
         G_tentative = G_from_S(S, A)
 
-        # RINGED subtrees are closed loops: PathFinder must resolve crossings in
-        # ringed mode (matching the other ringed solver paths)
+        # PathFinder must reroute feeders within the topology it was given:
+        # RADIAL only hooks to a subtree's head or tail, RINGED only to the
+        # current subroot.
         ringed = self.method == 'ringed'
-        G = PathFinder(G_tentative, planar=P, A=A, ringed=ringed).create_detours()
+        branched = self.method not in ('ringed', 'radial_EW')
+        G = PathFinder(
+            G_tentative, planar=P, A=A, branched=branched, ringed=ringed
+        ).create_detours()
 
         assign_cables(G, cables)
 

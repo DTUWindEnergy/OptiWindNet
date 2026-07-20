@@ -5,7 +5,8 @@ import logging
 import math
 import pickle
 import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
+from collections.abc import Iterator
 from hashlib import sha256
 from itertools import chain, pairwise
 
@@ -29,6 +30,7 @@ __all__ = (
     'split_rings_and_calc_loads',
     'add_ring_to_S',
     'rings_from_links',
+    'directed_links',
     'site_fingerprint',
     'fun_fingerprint',
     'L_from_site',
@@ -209,6 +211,18 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
     return extended
 
 
+# A link's ``'reverse'`` flag orients it independently of the node order it
+# happens to be stored in. Current flows from the terminal that sources it to the
+# root that sinks it, and readers recover that direction with::
+#
+#     u, v = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
+#
+# which yields ``(source, sink)`` for either stored order. So every writer sets
+# ``reverse = source < sink``. Beware of writing ``load[u] < load[v]`` instead: it
+# only matches while ``u < v`` holds, and silently mis-orients links stored the
+# other way round. Feeders are never reversed, the sink being a root and a root's
+# id negative; links carrying ``load=0`` (a ring's open point) have no current and
+# so no direction to encode.
 def bfs_subtree_loads(G, parent, children, subtree):
     """Recurse down the subtree, updating edge and node attributes.
 
@@ -230,7 +244,8 @@ def bfs_subtree_loads(G, parent, children, subtree):
         # a load=0 link is a ring open point: never traverse across it
         grandchildren = {n for n in G[child] if G[child][n].get('load') != 0} - {parent}
         childload = bfs_subtree_loads(G, child, grandchildren, subtree)
-        G[parent][child].update(load=childload, reverse=parent > child)
+        # the child sources the current, the parent sinks it (towards the root)
+        G[parent][child].update(load=childload, reverse=child < parent)
         load += childload
     nodeD['load'] = load
     return load
@@ -261,7 +276,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     for root in range(-R, 0):
         for gate in S[root]:
             if gate in seen:
-                # bridging ring: already walked from its other foot's root
+                # bridging ring: already walked from its other subroot's root
                 continue
             ordered = [gate]
             back, fwd = root, gate
@@ -388,18 +403,22 @@ def add_ring_to_S(
     # ordered[m..n-1] carry 1..(n - m) toward their own feeder.
     for i, t in enumerate(ordered):
         S.add_node(t, load=(m - i if i < m else i - m + 1), subtree=subtree)
-    # Two feeders (both real cables) and the interior edges.
+    # Two feeders (both real cables) and the interior edges. A feeder sinks into
+    # its root, whose id is negative, so it is never reversed.
     S.add_edge(r1, ordered[0], load=m, reverse=False)
     S.add_edge(r2, ordered[-1], load=n - m, reverse=False)
     for i in range(n - 1):
         u, v = ordered[i], ordered[i + 1]
         if i == m - 1:
-            # open point of the ring: real cable, no current (marked by load=0)
+            # open point of the ring: real cable, no current (marked by load=0),
+            # so it has no flow direction to encode
             S.add_edge(u, v, load=0, reverse=False)
         else:
             load = m - 1 - i if i < m else i - m + 1
-            reverse = S.nodes[u]['load'] < S.nodes[v]['load']
-            S.add_edge(u, v, load=load, reverse=reverse)
+            # current flows towards the arm's feeder, i.e. towards the heavier end
+            u_lighter = S.nodes[u]['load'] < S.nodes[v]['load']
+            source, sink = (u, v) if u_lighter else (v, u)
+            S.add_edge(u, v, load=load, reverse=source < sink)
 
 
 def rings_from_links(
@@ -411,13 +430,13 @@ def rings_from_links(
     RINGED solution (terminal-terminal links plus the two feeders of each ring).
     Each ring is returned as ``(root, [t1, ..., tn])`` with ``t1`` and ``tn`` the
     feeder-connected terminals, obtained by walking the terminal adjacency from
-    one foot of the root to the other.
+    the head subroot to the tail one.
 
     Feeders are identified by having exactly one negative (root) endpoint; a ring
     with a single terminal (``n == 1``) has both feeders on that terminal.
     """
     term_adj: dict[int, set[int]] = defaultdict(set)
-    feet: dict[int, list[int]] = defaultdict(list)
+    subroots: dict[int, list[int]] = defaultdict(list)
     term_to_roots: dict[int, list[int]] = defaultdict(list)
     for u, v in active_links:
         if u >= 0 and v >= 0:
@@ -425,14 +444,13 @@ def rings_from_links(
             term_adj[v].add(u)
         else:
             r, t = (u, v) if u < 0 else (v, u)
-            feet[r].append(t)
+            subroots[r].append(t)
             term_to_roots[t].append(r)
     rings: list[tuple[int | tuple[int, int], list[int]]] = []
+    # `subroots` is consumed as the walk goes: each feeder is claimed once
     for r in range(-R, 0):
-        pending = Counter(feet[r])
-        while sum(pending.values()) > 0:
-            t1 = next(t for t, c in pending.items() if c > 0)
-            pending[t1] -= 1
+        while subroots[r]:
+            t1 = subroots[r].pop(0)
             chain_ = [t1]
             prev, curr = None, t1
             while True:
@@ -442,25 +460,70 @@ def rings_from_links(
                 prev, curr = curr, nxts[0]
                 chain_.append(curr)
             tn = chain_[-1]
-            r2_candidates = [
-                root_cand
-                for root_cand in term_to_roots[tn]
-                if root_cand in feet and tn in feet[root_cand]
-            ]
-            if r2_candidates:
-                r2 = (
-                    r
-                    if r in r2_candidates and (len(chain_) > 1 or pending[tn] > 0)
-                    else r2_candidates[0]
-                )
-                feet[r2].remove(tn)
-                if r2 == r:
-                    pending[tn] -= 1
-            else:
+            # claim the tail feeder: a ring of n > 1 always has one, a lone
+            # terminal only if it bridges two roots
+            if tn in subroots[r]:
                 r2 = r
+            else:
+                r2 = next(
+                    (rc for rc in term_to_roots[tn] if rc != r and tn in subroots[rc]),
+                    None,
+                )
+            if r2 is None:
+                r2 = r
+            else:
+                subroots[r2].remove(tn)
             root_spec = (r, r2) if r != r2 else r
             rings.append((root_spec, chain_))
     return rings
+
+
+def directed_links(
+    S: nx.Graph, *, radialize_rings: bool | None = None
+) -> Iterator[tuple[int, int, int]]:
+    """Yield ``(source, sink, flow)`` for every link of ``S``.
+
+    Forest topologies read each link's orientation off its ``'reverse'`` flag (see
+    the note above :func:`bfs_subtree_loads`), so ``flow`` is just the link's load.
+
+    A RINGED ``S`` stores each ring split into two arms at a load-0 open point,
+    which is not how a flow formulation sees it: there a ring is one directed
+    chain of its ``n`` terminals, fed by a flowless closing feeder ``r -> tn`` at
+    one end and draining through a feeder ``t1 -> r`` carrying the whole ring at
+    the other. *Radializing* recovers that chain (walking across the open point
+    with :func:`rings_from_links`) and re-orients every link along it, so the open
+    point becomes an ordinary flow-carrying link. Callers that need a ring
+    oriented the way a solver's model expects -- warm-starting a MILP, above all
+    -- want this rather than the stored ``'reverse'``.
+
+    Args:
+      S: solution topology.
+      radialize_rings: whether to radialize. Defaults to whether ``S`` declares
+        itself ``topology='ringed'``; pass it explicitly when the consumer's
+        expectation, rather than ``S``, decides (a model's topology, say).
+
+    Yields:
+      ``(source, sink, flow)`` per link, current flowing ``source`` -> ``sink``.
+      ``flow`` is 0 for links carrying no current: a ring's closing feeder.
+    """
+    if radialize_rings is None:
+        radialize_rings = S.graph.get('topology') == 'ringed'
+    if not radialize_rings:
+        for u, v, edgeD in S.edges(data=True):
+            source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
+            yield source, sink, edgeD['load']
+        return
+    for r, chain_ in rings_from_links(S.edges(), S.graph['R']):
+        n = len(chain_)
+        # the ring drains through chain_[0], whose feeder carries all of it
+        yield chain_[0], r, n
+        if n == 1:
+            # degenerate ring (a lone terminal): close it with a flowless feeder
+            yield r, chain_[0], 0
+            continue
+        yield r, chain_[-1], 0
+        for j in range(n - 1, 0, -1):
+            yield chain_[j], chain_[j - 1], n - j
 
 
 def site_fingerprint(
@@ -641,7 +704,11 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                     st_is_tentative = True
 
             load = S[s][t]['load']
-            st_reverse = S.nodes[s]['load'] < S.nodes[t]['load']
+            # current flows towards the heavier end (the one nearer a root)
+            st_source, st_sink = (
+                (s, t) if S.nodes[s]['load'] < S.nodes[t]['load'] else (t, s)
+            )
+            st_reverse = st_source < st_sink
             if st_is_tentative:
                 G.add_edge(
                     s,
@@ -838,8 +905,11 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
     This ensures that topology ``S`` is feasible (if radial) and not
     trivially suboptimal (if branched).
 
+    RINGED routesets are supported: the rings' cycle-closing links are preserved
+    (see the traversal note below), so ``S`` keeps the ring partition of ``G``.
+
     Args:
-        G: must contain a feasible solution (either tree or path)
+        G: must contain a feasible solution (tree, path or ring)
 
     Returns:
         Topology of ``G``
@@ -852,36 +922,71 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
         R=R,
         capacity=capacity,
     )
-    # create a topology graph S from the results
+
+    def is_real(n: int) -> bool:
+        "Only roots and terminals survive in S (border vertices and clones do not)."
+        return n < T
+
     for r in range(-R, 0):
         S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']} if has_loads else {}))
-        on_hold = None
-        for edge in nx.dfs_edges(G, r):
-            u, v = edge
-            if v >= T:
-                on_hold = u if on_hold is None else on_hold
-                continue
-            if on_hold is not None:
-                u = on_hold
+    for t in sorted(n for n in G if 0 <= n < T):
+        if has_loads:
+            S.add_node(
+                t, kind='wtg', load=G.nodes[t]['load'], subtree=G.nodes[t]['subtree']
+            )
+        else:
+            S.add_node(t, kind='wtg')
+
+    # Links already joining two real nodes carry over verbatim, keeping ``G``'s
+    # own orientation: 'reverse' is relative to the stored node order, and the
+    # RINGED builders (:func:`add_ring_to_S`) and the forest ones
+    # (:func:`bfs_subtree_loads`) give it different meanings — copying sidesteps
+    # having to pick one.
+    for u, v, edgeD in G.edges(data=True):
+        if is_real(u) and is_real(v):
             if has_loads:
-                v_load = G.nodes[v]['load']
-                S.add_node(v, kind='wtg', load=v_load, subtree=G.nodes[v]['subtree'])
-                S.add_edge(
-                    u,
-                    v,
-                    load=G.edges[edge]['load'],
-                    reverse=(G.nodes[u]['load'] < v_load) == (u < v),
-                )
+                S.add_edge(u, v, load=edgeD['load'], reverse=edgeD['reverse'])
             else:
-                S.add_node(v, kind='wtg')
                 S.add_edge(u, v)
-            on_hold = None
+
+    # Every remaining link runs through a chain of non-real nodes (border
+    # vertices, contour and detour clones), which collapses to the single link
+    # joining the real nodes at its ends. Walking outward from each real node --
+    # rather than following a DFS *tree* -- is what keeps the cycle-closing links
+    # of a RINGED topology: a ring's second feeder is a DFS back edge, so a tree
+    # traversal drops it and silently merges the two rings it separates.
+    for s in sorted(n for n in G if is_real(n)):
+        for nbr in G[s]:
+            if is_real(nbr):
+                continue
+            prev, node = s, nbr
+            while not is_real(node):
+                fwd = [x for x in G[node] if x != prev]
+                if len(fwd) != 1:
+                    break
+                prev, node = node, fwd[0]
+            if not is_real(node) or node == s or S.has_edge(s, node):
+                continue
+            if has_loads:
+                # orient parent -> child (the parent carries the heavier load,
+                # being the closer of the two to a root). A chain spanning a root
+                # is a feeder, which both conventions above agree to leave
+                # unreversed (a root's id is negative, so always the lower one).
+                s_load, node_load = G.nodes[s]['load'], G.nodes[node]['load']
+                u, v = (s, node) if s_load >= node_load else (node, s)
+                S.add_edge(u, v, load=G.edges[s, nbr]['load'], reverse=u > v)
+            else:
+                S.add_edge(s, node)
+
     creator = G.graph.get('creator')
     if creator is not None:
         S.graph['creator'] = creator
     method_options = G.graph.get('method_options')
     if method_options is not None:
         S.graph['method_options'] = method_options
+    topology = G.graph.get('topology')
+    if topology is not None:
+        S.graph['topology'] = topology
     if has_loads:
         S.graph['has_loads'] = True
     else:

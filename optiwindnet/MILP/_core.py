@@ -18,7 +18,12 @@ from typing import Any
 import networkx as nx
 from makefun import with_signature
 
-from ..interarraylib import G_from_S, add_ring_to_S, rings_from_links
+from ..interarraylib import (
+    G_from_S,
+    add_ring_to_S,
+    directed_links,
+    rings_from_links,
+)
 from ..pathfinding import PathFinder
 
 _lggr = logging.getLogger(__name__)
@@ -290,13 +295,10 @@ def ringed_warmstart_values(
     """Model link/flow variable values to warm-start a RINGED model from ``S``.
 
     In the flow formulation a ring is a single directed chain of its ``n``
-    terminals: flow enters at one end from a flowless closing feeder ``r→tn`` and
-    exits at the other end through a flow feeder ``t1→r`` carrying the whole ring
-    (``n``). The canonical solution graph ``S`` instead splits the ring into two
-    arms at an open point; this recovers the ordered ring (walking across the
-    ``split`` edge with :func:`rings_from_links`) and "un-splits" it into the
-    continuous chain the model expects — the split edge becomes an ordinary
-    flow-carrying link.
+    terminals, which is not how the canonical solution graph ``S`` stores it (two
+    arms split at an open point). :func:`.interarraylib.directed_links` does that
+    conversion — radializing the rings; this maps its output onto the model's
+    link/flow variables.
 
     Returns ``(link_vals, flow_vals)``: complete assignments over
     ``metadata.link_`` / ``metadata.flow_`` keys (inactive variables set to 0).
@@ -306,26 +308,17 @@ def ringed_warmstart_values(
     """
     link_vals: dict[_Link, int] = dict.fromkeys(metadata.link_, 0)
     flow_vals: dict[_Link, int] = dict.fromkeys(metadata.flow_, 0)
-    for r, chain_ in rings_from_links(S.edges(), metadata.R):
-        n = len(chain_)
-        # flow feeder: chain_[0] → r carries the whole ring
-        link_vals[chain_[0], r] = 1
-        flow_vals[chain_[0], r] = n
-        if n == 1:
-            # degenerate ring (single terminal): close with a flowless r→t feeder
-            link_vals[r, chain_[0]] = 1
-            continue
-        # closing feeder: r → chain_[-1] (starsʹ link, no flow variable)
-        link_vals[r, chain_[-1]] = 1
-        # directed chain chain_[j] → chain_[j-1], flow accumulating toward the feeder
-        for j in range(n - 1, 0, -1):
-            key = (chain_[j], chain_[j - 1])
-            if key not in link_vals:
-                raise OWNWarmupFailed(
-                    f'warmup_model() failed: model lacks ring link {key}'
-                )
-            link_vals[key] = 1
-            flow_vals[key] = n - j
+    for source, sink, flow in directed_links(S, radialize_rings=True):
+        key = (source, sink)
+        if source >= 0 and sink >= 0 and key not in link_vals:
+            # only terminal-terminal links have to be in the model: a feeder is
+            # there by construction, in both its flow-carrying t→r and its
+            # flowless r→t (a ring's closing feeder) direction.
+            raise OWNWarmupFailed(f'warmup_model() failed: model lacks ring link {key}')
+        link_vals[key] = 1
+        if key in flow_vals:
+            # a ring's closing feeder is a starsʹ link: it has no flow variable
+            flow_vals[key] = flow
     return link_vals, flow_vals
 
 

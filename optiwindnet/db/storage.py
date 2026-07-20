@@ -254,16 +254,16 @@ def nodeset_from_G(G: nx.Graph) -> bytes:
     return add_if_absent(NodeSet, pack)
 
 
-def _walk_ring_in_G(G: nx.Graph, root: int, foot: int) -> tuple[list[int], int]:
-    """Walk one ring's cycle in ``G`` from a root's foot until a root is reached.
+def _walk_ring_in_G(G: nx.Graph, root: int, subroot: int) -> tuple[list[int], int]:
+    """Walk one ring's cycle in ``G`` from a subroot until a root is reached.
 
     Every non-root node of a canonical ring has degree 2 (both terminals and the
     contour/detour clones spliced into its edges), so the walk is forced. Returns
     the ordered list of walked nodes (roots excluded) and the root it closes on
     (the same root for a single-terminal stub).
     """
-    walk = [foot]
-    prev, curr = root, foot
+    walk = [subroot]
+    prev, curr = root, subroot
     while True:
         nbrs = [x for x in G[curr] if x != prev]
         if not nbrs:  # single-terminal stub (degree-1)
@@ -282,8 +282,8 @@ def _ring_routes_from_G(
 ) -> list[tuple[int, list[int], int]]:
     """Recover the ring routes ``(open_root, walk, close_root)`` of a ringed ``G``.
 
-    ``walk`` lists a ring's nodes (terminals and clones) between its two feeder
-    feet. Each walk is oriented so its open point (``load=0``) falls on the
+    ``walk`` lists a ring's nodes (terminals and clones) between its two
+    subroots. Each walk is oriented so its open point (``load=0``) falls on the
     load midpoint that :func:`untersify_to_G` re-derives from the terminal count,
     so the open point round-trips without being stored. A ring may open and close
     on different roots (a routed ring can bridge two substations).
@@ -294,10 +294,10 @@ def _ring_routes_from_G(
     routes: list[tuple[int, list[int], int]] = []
     visited: set[tuple[int, int]] = set()
     for root in range(-R, 0):
-        for foot in sorted(G[root]):
-            if (root, foot) in visited:
+        for subroot in sorted(G[root]):
+            if (root, subroot) in visited:
                 continue
-            walk, close = _walk_ring_in_G(G, root, foot)
+            walk, close = _walk_ring_in_G(G, root, subroot)
             visited.add((root, walk[0]))
             visited.add((close, walk[-1]))
             open_ = root

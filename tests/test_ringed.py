@@ -32,7 +32,6 @@ import networkx as nx
 import pytest
 
 from optiwindnet.crossings import validate_routeset
-from optiwindnet.geometric import is_crossing
 from optiwindnet.heuristics import constructor
 from optiwindnet.interarraylib import (
     G_from_S,
@@ -43,6 +42,8 @@ from optiwindnet.interarraylib import (
 )
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
+
+from .helpers import solver_unavailable, terminal_terminal_crossings
 
 
 # --------------------------------------------------------------------------- #
@@ -104,25 +105,6 @@ def _assert_canonical_ringed(S, capacity):
             assert S.nodes[ordered[0]]['load'] == 1
 
     return rings
-
-
-def _terminal_terminal_crossings(S, VertexC):
-    """Crossings among terminal-terminal edges (feeders excluded).
-
-    The heuristic guarantees no terminal-terminal crossings; straight feeders
-    may still cross and are resolved later by PathFinder, so they are excluded.
-    """
-    edges = [(u, v) for u, v in S.edges if u >= 0 and v >= 0]
-    crossings = []
-    for i, (u, v) in enumerate(edges):
-        for s, t in edges[i + 1 :]:
-            if len({u, v, s, t}) < 4:
-                continue
-            if is_crossing(
-                VertexC[u], VertexC[v], VertexC[s], VertexC[t], touch_is_cross=False
-            ):
-                crossings.append(((u, v), (s, t)))
-    return crossings
 
 
 # --------------------------------------------------------------------------- #
@@ -354,7 +336,7 @@ def test_constructor_ringed_is_canonical(ringed_mesh, capacity):
 def test_constructor_ringed_no_terminal_terminal_crossings(ringed_mesh, capacity):
     _, A = ringed_mesh
     S = constructor(A, capacity=capacity, method='ringed')
-    crossings = _terminal_terminal_crossings(S, A.graph['VertexC'])
+    crossings = terminal_terminal_crossings(S, A.graph['VertexC'])
     assert crossings == [], f'ringed produced terminal-terminal crossings: {crossings}'
 
 
@@ -679,23 +661,6 @@ def test_milp_ringed_optimum_bracket(
 # --------------------------------------------------------------------------- #
 # MILP RINGED on the in-process solvers -- no ortools involved
 # --------------------------------------------------------------------------- #
-def _milp_solver_unavailable(exc: BaseException) -> bool:
-    """A solver counts as unavailable if its backend is missing or unlicensed.
-
-    Mirrors ``test_MILP._solver_is_unavailable``: the open-source backends
-    (highs/scip) fail with import/binary errors when absent, while commercial
-    ones (gurobi/cplex) fail with a license message on machines without a valid
-    license (e.g. the size-limited pip license expiring on a large model).
-    """
-    if isinstance(exc, (FileNotFoundError, ModuleNotFoundError)):
-        return True
-    message = str(exc).lower()
-    return any(
-        marker in message
-        for marker in ('not licensed', 'license', 'token.gurobi.com', 'gurobi model')
-    )
-
-
 @pytest.mark.parametrize('solver_name', ['highs', 'scip', 'gurobi'])
 def test_milp_ringed_inprocess_solvers_are_canonical(solver_name):
     """Each in-process MILP backend produces a canonical ringed S.
@@ -720,7 +685,7 @@ def test_milp_ringed_inprocess_solvers_are_canonical(solver_name):
         )
         info = solver.solve(time_limit=30, mip_gap=0.2)
     except BaseException as exc:
-        if _milp_solver_unavailable(exc):
+        if solver_unavailable(exc):
             pytest.skip(f'{solver_name} solver unavailable: {exc}')
         raise
 
