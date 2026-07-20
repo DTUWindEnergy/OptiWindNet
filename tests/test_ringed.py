@@ -2,19 +2,17 @@
 
 The RINGED topology is now available across every solver family:
 
-* the shared ring builders :func:`add_ring_to_S`,
-  :func:`split_rings_and_calc_loads` and :func:`rings_from_links` (canonical
-  two-arm-with-split shape) that every backend reconstructs its solution through;
+* the shared ring builders :func:`add_ring_to_S` and
+  :func:`split_rings_and_calc_loads`, plus :func:`rings_from_S` for recovering
+  rings from their canonical two-arm-with-split shape;
 * the constructive heuristic ``method='ringed'`` (and its public
   :class:`~optiwindnet.api.EWRouter` wrapper);
 * the MILP RINGED path (``ModelOptions(topology='ringed')``), both at the
   low level and through :class:`~optiwindnet.api.MILPRouter`;
 * the HGS-CVRP and LKH-3 closed-CVRP paths (``ringed=True``).
 
-Because every backend canonicalises its output through :func:`add_ring_to_S`
-(the MILP path in ``MILP/_core.py:get_solution``, HGS/LKH/constructor through
-:func:`split_rings_and_calc_loads`), the same structural invariants hold for all
-of them. They
+Because every backend canonicalises its output to the same shape, the same
+structural invariants hold for all of them. They
 are collected in :func:`_assert_canonical_ringed` and reused throughout so the
 suite pins the *shared contract* of a ringed solution rather than each
 backend's incidental output.
@@ -31,20 +29,23 @@ import math
 import networkx as nx
 import pytest
 
-from optiwindnet.crossings import validate_routeset
 from optiwindnet.heuristics import constructor
 from optiwindnet.interarraylib import (
     G_from_S,
+    calcload,
+    S_from_terse_links,
     add_ring_to_S,
     assign_cables,
-    rings_from_links,
+    rings_from_S,
     split_rings_and_calc_loads,
+    terse_links_from_S,
+    validate_routeset,
     validate_topology,
 )
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 
-from .helpers import solver_unavailable, terminal_terminal_crossings
+from .helpers import has_cycle, solver_unavailable, terminal_terminal_crossings
 
 
 # --------------------------------------------------------------------------- #
@@ -52,7 +53,7 @@ from .helpers import solver_unavailable, terminal_terminal_crossings
 # --------------------------------------------------------------------------- #
 def _rings(S):
     """Recover the ``(root, [t1, ..., tn])`` rings of a ringed topology ``S``."""
-    return rings_from_links(list(S.edges()), S.graph['R'])
+    return rings_from_S(S)
 
 
 def _assert_canonical_ringed(S, capacity):
@@ -82,7 +83,7 @@ def test_add_ring_to_S_canonical_shape(n):
     """A ring built from an ordered terminal list is in canonical form."""
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
-    add_ring_to_S(S, -1, list(range(n)), subtree=0, A=None)
+    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
 
     kinds = {d.get('kind') for _, _, d in S.edges(data=True)}
     assert kinds <= {None}, 'topology-graph ring edges must not carry a kind'
@@ -112,32 +113,95 @@ def test_add_ring_to_S_canonical_shape(n):
 
 
 @pytest.mark.parametrize('n', range(1, 13))
-def test_rings_from_links_roundtrip(n):
-    """rings_from_links recovers the terminal set of a built ring."""
+def test_rings_from_S_roundtrip(n):
+    """rings_from_S recovers the terminal set of a built ring."""
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
-    add_ring_to_S(S, -1, list(range(n)), subtree=0, A=None)
-    rings = rings_from_links(list(S.edges()), R=1)
+    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
+    rings = rings_from_S(S)
     assert len(rings) == 1
-    root, ordered = rings[0]
-    assert root == -1
+    roots, ordered = rings[0]
+    assert roots == (-1, -1)
     assert set(ordered) == set(range(n))
 
 
-def test_rings_from_links_multiple_rings_and_roots():
+def test_rings_from_S_multiple_rings_and_roots():
     """Two roots, several rings: each ring is recovered with its own root."""
     S = nx.Graph(R=2, T=9)
     S.add_nodes_from([-2, -1])
-    add_ring_to_S(S, -1, [0, 1, 2, 3], subtree=0, A=None)
-    add_ring_to_S(S, -1, [4, 5], subtree=1, A=None)
-    add_ring_to_S(S, -2, [6, 7, 8], subtree=2, A=None)
-    rings = rings_from_links(list(S.edges()), R=2)
-    recovered = {(r, frozenset(ordered)) for r, ordered in rings}
+    add_ring_to_S(S, (-1, -1), [0, 1, 2, 3], subtree=0, A=None)
+    add_ring_to_S(S, (-1, -1), [4, 5], subtree=1, A=None)
+    add_ring_to_S(S, (-2, -2), [6, 7, 8], subtree=2, A=None)
+    rings = rings_from_S(S)
+    recovered = {(roots, frozenset(ordered)) for roots, ordered in rings}
     assert recovered == {
-        (-1, frozenset({0, 1, 2, 3})),
-        (-1, frozenset({4, 5})),
-        (-2, frozenset({6, 7, 8})),
+        ((-1, -1), frozenset({0, 1, 2, 3})),
+        ((-1, -1), frozenset({4, 5})),
+        ((-2, -2), frozenset({6, 7, 8})),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Bridging rings (a ring whose two feeders land on different roots)
+# --------------------------------------------------------------------------- #
+def test_has_cycle_sees_through_the_substations():
+    """A bridging ring closes a cycle; a radial forest does not.
+
+    Interconnecting the substations is what makes the cycle visible: a ring
+    bridging two of them is a path between two roots in ``S`` alone.
+    """
+    bridged = nx.Graph(R=2, T=4)
+    bridged.add_nodes_from([-2, -1])
+    add_ring_to_S(bridged, (-1, -2), [0, 1, 2, 3], subtree=0, A=None)
+    assert nx.is_forest(bridged), 'S alone carries no cycle'
+    assert has_cycle(bridged)
+
+    # the two bridged roots need not be adjacent in the path linking them
+    far = nx.Graph(R=3, T=1)
+    far.add_nodes_from(range(-3, 0))
+    add_ring_to_S(far, (-1, -3), [0], subtree=0, A=None)
+    assert has_cycle(far)
+
+    # a radial forest must not be mistaken for a ring
+    radial = nx.Graph(R=3, T=6, topology='radial')
+    radial.add_nodes_from(range(-3, 0))
+    radial.add_edges_from([(-1, 0), (0, 1), (-2, 2), (2, 3), (-3, 4), (4, 5)])
+    assert not has_cycle(radial)
+
+
+@pytest.mark.parametrize('n', range(1, 13))
+def test_rings_from_S_roundtrip_bridging(n):
+    """A ring bridging two roots is recovered with both of its roots."""
+    S = nx.Graph(R=2, T=n)
+    S.add_nodes_from([-2, -1])
+    add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
+    rings = rings_from_S(S)
+    assert len(rings) == 1
+    roots, ordered = rings[0]
+    assert set(roots) == {-1, -2}
+    assert set(ordered) == set(range(n))
+
+
+@pytest.mark.parametrize('n', range(1, 13))
+def test_terse_roundtrip_preserves_bridging_ring(n):
+    """A bridging ring survives the terse encoding intact.
+
+    The encoding is what the public ``terse_links`` API and the database share,
+    so a ring closing on a root other than the one it opened on must round-trip
+    with both feeders and its open point.
+    """
+    S = nx.Graph(R=2, T=n)
+    S.add_nodes_from([-2, -1])
+    add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
+    calcload(S)
+
+    terse = terse_links_from_S(S)
+    S2 = S_from_terse_links(terse, R=2, T=n)
+
+    assert set(map(frozenset, S2.edges())) == set(map(frozenset, S.edges()))
+    assert not validate_topology(S2, capacity=math.ceil(n / 2))
+    # re-encoding is stable: the decoder lands on the encoder's walk orientation
+    assert terse_links_from_S(S2).tolist() == terse.tolist()
 
 
 @pytest.mark.parametrize('n', range(2, 12, 2))
@@ -149,7 +213,7 @@ def test_add_ring_to_S_even_nodes_default_split_is_balanced(n):
     """
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
-    add_ring_to_S(S, -1, list(range(n)), subtree=0, A=None)
+    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
     feeder_loads = sorted(d['load'] for u, v, d in S.edges(data=True) if u < 0 or v < 0)
     assert feeder_loads == [n // 2, math.ceil(n / 2)]
 
@@ -166,7 +230,7 @@ def test_add_ring_to_S_odd_n_uses_longer_split_edge_when_A_given():
         A = nx.Graph()
         A.add_edge(0, 1, length=10.0 if longer == 0 else 1.0)
         A.add_edge(1, 2, length=10.0 if longer == 1 else 1.0)
-        add_ring_to_S(S, -1, [0, 1, 2], subtree=0, A=A)
+        add_ring_to_S(S, (-1, -1), [0, 1, 2], subtree=0, A=A)
         (su, sv) = [(u, v) for u, v, d in S.edges(data=True) if d.get('load') == 0][0]
         assert {su, sv} == {longer, expected}
 
@@ -216,7 +280,7 @@ def test_split_rings_multi_root_keeps_rings_with_their_root():
     split_rings_and_calc_loads(S, _CONSTRUCT)
     _assert_canonical_ringed(S, capacity=3)
     rings = _rings(S)
-    by_root = {r: {frozenset(o) for rr, o in rings if rr == r} for r in (-2, -1)}
+    by_root = {r: {frozenset(o) for rr, o in rings if rr == (r, r)} for r in (-2, -1)}
     assert by_root[-2] == {frozenset({0, 1})}
     assert by_root[-1] == {frozenset({2, 3, 4, 5}), frozenset({6})}
 
@@ -251,7 +315,7 @@ def test_split_rings_rejects_branching_subtree():
 # id -> (repository location name, number of roots R)
 _RINGED_MESHES = {
     'albatros_1ss': ('albatros', 1),  # T=16
-    'neart_2ss': ('neart', 2),  # T=54 (exercises per-root ring loops)
+    'neart_2ss': ('neart', 2),  # T=54 (exercises per-root ring cycles)
 }
 # multi-root subset, for tests whose assertion only makes sense with R >= 2
 _MULTIROOT_RINGED_MESHES = {
@@ -259,11 +323,9 @@ _MULTIROOT_RINGED_MESHES = {
 }
 
 
-def _load_ringed_mesh(name):
+def _load_ringed_mesh(name, locations):
     """(P, A) for a repository location, built via its planar embedding."""
-    from optiwindnet.api import load_repository
-
-    return make_planar_embedding(getattr(load_repository(), name))
+    return make_planar_embedding(getattr(locations, name))
 
 
 @pytest.fixture(
@@ -271,9 +333,9 @@ def _load_ringed_mesh(name):
     params=[name for name, _ in _RINGED_MESHES.values()],
     ids=list(_RINGED_MESHES),
 )
-def ringed_mesh(request):
+def ringed_mesh(request, locations):
     """(P, A) for a repository location, built once per location per session."""
-    return _load_ringed_mesh(request.param)
+    return _load_ringed_mesh(request.param, locations)
 
 
 @pytest.fixture(
@@ -281,9 +343,9 @@ def ringed_mesh(request):
     params=list(_MULTIROOT_RINGED_MESHES.values()),
     ids=list(_MULTIROOT_RINGED_MESHES),
 )
-def ringed_mesh_multiroot(request):
+def ringed_mesh_multiroot(request, locations):
     """(P, A) restricted to multi-substation sites (R >= 2)."""
-    return _load_ringed_mesh(request.param)
+    return _load_ringed_mesh(request.param, locations)
 
 
 @pytest.mark.parametrize('capacity', (3, 5, 8))
@@ -293,9 +355,8 @@ def test_constructor_ringed_is_canonical(ringed_mesh, capacity):
     S = constructor(A, capacity=capacity, method='ringed')
     rings = _assert_canonical_ringed(S, capacity)
 
-    # a genuine ring (not a radial forest): at least one ring closes a loop,
-    # so S carries a cycle and has more than T edges.
-    assert not nx.is_forest(S)
+    # a genuine ring, not a radial forest: at least one ring closes a cycle
+    assert has_cycle(S)
     assert any(len(ordered) > 1 for _, ordered in rings)
 
 
@@ -357,7 +418,7 @@ def test_constructor_ringed_end_to_end_is_valid(ringed_mesh, feeder_route):
     assert G.size(weight='length') > 0.0
 
 
-def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
+def test_no_crossing_pathfinder_compacts_stunt_contour_clone(locations):
     """A stunt contour survives G_from_S and the no-crossing PathFinder path.
 
     Stunt vertices are dropped from the compacted ``VertexC`` that routesets
@@ -373,7 +434,7 @@ def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
     minimal single-subtree routeset over an A-edge whose contour runs through a
     stunt.
     """
-    P, A = _load_ringed_mesh('borkum2')
+    P, A = _load_ringed_mesh('borkum2', locations)
     R, T, B_A = (A.graph[k] for k in 'RTB')
     stunts_primes = A.graph['stunts_primes']
     stunt_nodes = set(range(T + B_A - len(stunts_primes), T + B_A))
@@ -457,12 +518,15 @@ def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
 # --------------------------------------------------------------------------- #
 # EWRouter(method='ringed') through the public WindFarmNetwork API
 # --------------------------------------------------------------------------- #
-def test_ewrouter_ringed_end_to_end():
+@pytest.mark.parametrize(
+    'name', ('albatros', 'neart'), ids=('albatros_1ss', 'neart_2ss')
+)
+def test_ewrouter_ringed_end_to_end(name, locations):
     """WindFarmNetwork.optimize(EWRouter(method='ringed')) yields a ringed route."""
-    from optiwindnet.api import EWRouter, WindFarmNetwork, load_repository
+    from optiwindnet.api import EWRouter, WindFarmNetwork
 
     capacity = 3
-    wfn = WindFarmNetwork(cables=capacity, L=load_repository().albatros)
+    wfn = WindFarmNetwork(cables=capacity, L=getattr(locations, name))
     wfn.optimize(router=EWRouter(method='ringed'))
     S, G = wfn.S, wfn.G
 
@@ -475,37 +539,44 @@ def test_ewrouter_ringed_end_to_end():
 # --------------------------------------------------------------------------- #
 # RINGED warmstart: a ringed solution maps onto the model's single-chain flow
 # --------------------------------------------------------------------------- #
+@pytest.mark.parametrize('bridging', [False, True], ids=['single_root', 'bridging'])
 @pytest.mark.parametrize('n', range(2, 11))
-def test_ringed_warmstart_values_flow_conservation(n):
-    """ringed_warmstart_values yields a flow-feasible single-chain assignment."""
+def test_ringed_warmstart_values_flow_conservation(n, bridging):
+    """ringed_warmstart_values yields a flow-feasible single-chain assignment.
+
+    A ring whose two feeders land on different roots radializes the same way: it
+    drains through the root feeding the head of the walk and closes on the other.
+    Which of the two drains is arbitrary -- it moves no cable.
+    """
     from types import SimpleNamespace
 
     from optiwindnet.MILP._core import ringed_warmstart_values
 
     terminals = list(range(n))
-    root = -1
+    R = 2 if bridging else 1
+    roots = list(range(-R, 0))
     E = [(u, v) for u in terminals for v in terminals if u < v]
     Ep = [(v, u) for u, v in E]
-    stars = [(t, root) for t in terminals]
-    starsp = [(root, t) for t in terminals]
+    stars = [(t, r) for t in terminals for r in roots]
+    starsp = [(r, t) for t in terminals for r in roots]
     metadata = SimpleNamespace(
-        R=1,
+        R=R,
         link_={k: None for k in E + Ep + stars + starsp},
         flow_={k: None for k in E + Ep + stars},
     )
 
-    S = nx.Graph(R=1, T=n)
-    S.add_node(root)
-    add_ring_to_S(S, root, terminals, subtree=0, A=None)
+    S = nx.Graph(R=R, T=n)
+    S.add_nodes_from(roots)
+    add_ring_to_S(S, (-1, -2) if bridging else (-1, -1), terminals, subtree=0, A=None)
 
     link_vals, flow_vals = ringed_warmstart_values(metadata, S)
 
     # exactly one flow feeder (t → r) carries the whole ring (n)
-    active_feeders = [(t, root) for t in terminals if link_vals[(t, root)]]
+    active_feeders = [(t, r) for t in terminals for r in roots if link_vals[(t, r)]]
     assert len(active_feeders) == 1
     assert flow_vals[active_feeders[0]] == n
     # exactly one flowless closing feeder (r → t)
-    assert sum(link_vals[(root, t)] for t in terminals) == 1
+    assert sum(link_vals[(r, t)] for t in terminals for r in roots) == 1
 
     # in-/out-degree of every terminal is exactly 1, and flow is conserved
     for t in terminals:
@@ -517,13 +588,69 @@ def test_ringed_warmstart_values_flow_conservation(n):
         assert out_flow - in_flow == 1  # each terminal sinks one unit
 
 
-def test_ringed_warmstart_roundtrip_scip():
+@pytest.mark.parametrize('bridging', [False, True], ids=['single_root', 'bridging'])
+@pytest.mark.parametrize('n', range(1, 11))
+def test_ringed_mip_decoder_reuses_flow_tree_decoding(n, bridging):
+    """The shared decoder closes a MILP flow path into a canonical ring."""
+    from types import SimpleNamespace
+
+    from optiwindnet.MILP._core import Solver, Topology
+
+    head_root = -1
+    close_root = -2 if bridging else head_root
+    R = 2 if bridging else 1
+    flow_vals = {(0, head_root): n}
+    flow_vals.update({(t, t - 1): n - t for t in range(1, n)})
+    closing_link = (close_root, n - 1)
+    link_vals = dict.fromkeys((*flow_vals, closing_link), True)
+    metadata = SimpleNamespace(
+        R=R,
+        T=n,
+        capacity=math.ceil(n / 2),
+        model_options={'topology': Topology.RINGED},
+        link_=link_vals,
+        flow_=flow_vals,
+    )
+    A = nx.path_graph(n)
+    nx.set_edge_attributes(A, 1.0, 'length')
+    if n == 3:
+        A[0][1]['length'] = 2.0
+
+    class FakeSolver:
+        name = 'fake'
+
+        @staticmethod
+        def _link_val(value):
+            return value
+
+        @staticmethod
+        def _flow_val(value):
+            return value
+
+    fake = FakeSolver()
+    fake.A = A
+    fake.metadata = metadata
+    S = Solver._topology_from_mip_sol(fake)
+
+    _assert_canonical_ringed(S, metadata.capacity)
+    assert {S.nodes[t]['subtree'] for t in range(n)} == {0}
+    assert S.graph['max_load'] == math.ceil(n / 2)
+    assert (
+        S.nodes[head_root]['load'] + (S.nodes[close_root]['load'] if bridging else 0)
+        == n
+    )
+    if n == 3:
+        open_point = next({u, v} for u, v, d in S.edges(data=True) if d['load'] == 0)
+        assert open_point == {0, 1}
+
+
+def test_ringed_warmstart_roundtrip_scip(locations):
     """A ringed solution warm-starts a fresh ringed scip model (accepted)."""
-    from optiwindnet.api import WindFarmNetwork, load_repository
+    from optiwindnet.api import WindFarmNetwork
     from optiwindnet.MILP import ModelOptions, solver_factory
 
     opts = ModelOptions(topology='ringed')
-    wfn = WindFarmNetwork(cables=3, L=load_repository().albatros)
+    wfn = WindFarmNetwork(cables=3, L=locations.albatros)
     try:
         seed = solver_factory('scip')
         seed.set_problem(P=wfn.P, A=wfn.A, capacity=3, model_options=opts)
@@ -543,16 +670,15 @@ def test_ringed_warmstart_roundtrip_scip():
 # --------------------------------------------------------------------------- #
 # MILP RINGED optimum bracket on repository instances (via the ortools worker)
 # --------------------------------------------------------------------------- #
-def _solve_milp_ringed(name, capacity, time_limit, mip_gap):
+def _solve_milp_ringed(L, capacity, time_limit, mip_gap):
     """Worker job: solve one repository instance with ortools.cp_sat RINGED.
 
     Runs in the ortools subprocess and returns only picklable primitives.
     """
-    from optiwindnet.api import WindFarmNetwork, load_repository
+    from optiwindnet.api import WindFarmNetwork
     from optiwindnet.interarraylib import assign_cables
     from optiwindnet.MILP import ModelOptions, solver_factory
 
-    L = getattr(load_repository(), name)
     wfn = WindFarmNetwork(cables=capacity, L=L)
     solver = solver_factory('ortools.cp_sat')
     solver.set_problem(
@@ -601,11 +727,11 @@ _MILP_CASES = [
 
 @pytest.mark.parametrize('name, capacity, time_limit, mip_gap, optimum', _MILP_CASES)
 def test_milp_ringed_optimum_bracket(
-    name, capacity, time_limit, mip_gap, optimum, ortools_worker
+    name, capacity, time_limit, mip_gap, optimum, ortools_worker, locations
 ):
     res = ortools_worker.run(
         _solve_milp_ringed,
-        (name, capacity, time_limit, mip_gap),
+        (getattr(locations, name), capacity, time_limit, mip_gap),
         time_limit + 60,
     )
     if isinstance(res, BaseException):
@@ -633,7 +759,7 @@ def test_milp_ringed_optimum_bracket(
 # MILP RINGED on the in-process solvers -- no ortools involved
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize('solver_name', ['highs', 'scip', 'gurobi'])
-def test_milp_ringed_inprocess_solvers_are_canonical(solver_name):
+def test_milp_ringed_inprocess_solvers_are_canonical(solver_name, locations):
     """Each in-process MILP backend produces a canonical ringed S.
 
     These solvers never touch OR-Tools' native libraries, so they run directly
@@ -641,11 +767,11 @@ def test_milp_ringed_inprocess_solvers_are_canonical(solver_name):
     the *structure* of a ringed solution, not its optimal length. Skips when the
     backend is missing or unlicensed.
     """
-    from optiwindnet.api import WindFarmNetwork, load_repository
+    from optiwindnet.api import WindFarmNetwork
     from optiwindnet.MILP import ModelOptions, solver_factory
 
     capacity = 3
-    wfn = WindFarmNetwork(cables=capacity, L=load_repository().albatros)
+    wfn = WindFarmNetwork(cables=capacity, L=locations.albatros)
     try:
         solver = solver_factory(solver_name)
         solver.set_problem(
@@ -677,17 +803,17 @@ def test_milp_ringed_inprocess_solvers_are_canonical(solver_name):
     assert G.size(weight='length') > 0.0
 
 
-def test_milprouter_ringed_end_to_end():
+def test_milprouter_ringed_end_to_end(locations):
     """MILPRouter(topology='ringed') via WindFarmNetwork yields a ringed route.
 
     Exercises the high-level warmstart+solve path (api.py: MILPRouter.route),
     including the ringed-solution warmstart, not just the low-level solver.
     """
-    from optiwindnet.api import MILPRouter, WindFarmNetwork, load_repository
+    from optiwindnet.api import MILPRouter, WindFarmNetwork
     from optiwindnet.MILP import ModelOptions
 
     capacity = 3
-    wfn = WindFarmNetwork(cables=capacity, L=load_repository().albatros)
+    wfn = WindFarmNetwork(cables=capacity, L=locations.albatros)
     try:
         wfn.optimize(
             router=MILPRouter(
@@ -711,12 +837,12 @@ def test_milprouter_ringed_end_to_end():
 # HGS-CVRP RINGED (closed CVRP) -- runs in-process (no ortools involved)
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize('capacity', (2, 3, 5))
-def test_hgs_ringed_albatros(capacity):
+def test_hgs_ringed_albatros(capacity, locations):
     pytest.importorskip('hybgensea')
-    from optiwindnet.api import WindFarmNetwork, as_normalized, load_repository
+    from optiwindnet.api import WindFarmNetwork, as_normalized
     from optiwindnet.baselines.hgs import hgs_cvrp
 
-    L = load_repository().albatros
+    L = locations.albatros
     wfn = WindFarmNetwork(cables=capacity, L=L)
     # structure-only test: a short budget still yields a feasible ringed
     # solution (HGS spends its whole time_limit, so keep it small)
@@ -736,17 +862,17 @@ def test_hgs_ringed_albatros(capacity):
     assert G.size(weight='length') > 0.0
 
 
-def test_lkh_ringed_albatros():
+def test_lkh_ringed_albatros(locations):
     """LKH-3 ringed (closed CVRP) produces a valid ring set covering all terminals."""
     import shutil
 
     if shutil.which('LKH') is None:
         pytest.skip('LKH executable not on PATH')
-    from optiwindnet.api import WindFarmNetwork, as_normalized, load_repository
+    from optiwindnet.api import WindFarmNetwork, as_normalized
     from optiwindnet.baselines.lkh import lkh3
 
     capacity = 3
-    L = load_repository().albatros
+    L = locations.albatros
     wfn = WindFarmNetwork(cables=capacity, L=L)
     S = lkh3(
         as_normalized(wfn.A),
@@ -764,13 +890,13 @@ def test_lkh_ringed_albatros():
     assert G.size(weight='length') > 0.0
 
 
-def test_hgs_router_ringed_end_to_end():
+def test_hgs_router_ringed_end_to_end(locations):
     """HGSRouter(ringed=True) produces a valid ringed routeset via WindFarmNetwork."""
     pytest.importorskip('hybgensea')
-    from optiwindnet.api import HGSRouter, WindFarmNetwork, load_repository
+    from optiwindnet.api import HGSRouter, WindFarmNetwork
 
     capacity = 3
-    L = load_repository().albatros
+    L = locations.albatros
     wfn = WindFarmNetwork(cables=capacity, L=L)
     wfn.optimize(router=HGSRouter(time_limit=0.5, ringed=True, seed=0))
     S, G = wfn.S, wfn.G

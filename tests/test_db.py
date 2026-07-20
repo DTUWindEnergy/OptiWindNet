@@ -2,7 +2,7 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from optiwindnet.api import HGSRouter, WindFarmNetwork, load_repository
+from optiwindnet.api import HGSRouter, WindFarmNetwork
 from optiwindnet.db import (
     G_from_routeset,
     L_from_nodeset,
@@ -133,7 +133,7 @@ def test_G_from_routeset(tmp_path):
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 
 
-def test_G_from_routeset_ringed(tmp_path):
+def test_G_from_routeset_ringed(tmp_path, locations):
     """A RINGED routeset (a graph with cycles) round-trips through the database.
 
     The rings are stored as a sequence of routes in ``edges`` (roots interleaved
@@ -153,7 +153,7 @@ def test_G_from_routeset_ringed(tmp_path):
         # capacity 5 yields both rings (split open points) and detour clones, so
         # this exercises the ring route-sequence together with the clone nodes.
         capacity = 5
-        wfn = WindFarmNetwork(cables=capacity, L=load_repository().albatros)
+        wfn = WindFarmNetwork(cables=capacity, L=locations.albatros)
         wfn.optimize(router=HGSRouter(time_limit=0.5, ringed=True, seed=0))
         G = wfn.G
         T = G.graph['T']

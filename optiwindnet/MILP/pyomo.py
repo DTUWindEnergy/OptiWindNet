@@ -471,7 +471,7 @@ def make_min_length_model(
         name='flow_conserv',
     )
 
-    # feeder limits. A RINGED subtree is a closed loop with two feeders, so the
+    # feeder limits. A RINGED subtree is a cycle with two feeders, so the
     # user-facing feeder count is in substation connections (two per ring), while
     # the model counts rings (one flow-feeder var each): convert between them.
     feeders_per_subtree = 2 if topology is Topology.RINGED else 1
@@ -637,7 +637,7 @@ def warmup_model(
             if value:
                 model.flow_[key] = value
     else:
-        for source, sink, flow in directed_links(S, radialize_rings=False):
+        for source, sink, flow in directed_links(S):
             try:
                 model.link_[source, sink] = 1
             except KeyError:

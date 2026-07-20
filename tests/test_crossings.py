@@ -4,9 +4,10 @@ import pytest
 
 from optiwindnet.crossings import (
     find_geometric_crossings,
+    find_routeset_crossings,
     get_interferences_list,
-    validate_routeset,
 )
+from optiwindnet.interarraylib import validate_routeset
 
 from .helpers import tiny_wfn
 
@@ -71,26 +72,55 @@ def test_get_interferences_list():
     assert check_interferences(crossings_3, expected)
 
 
+def test_find_routeset_crossings():
+    G = tiny_wfn().G
+    assert find_routeset_crossings(G) == []
+
+    # this feeder crosses the 0–12 link
+    G.add_edge(-1, 11)
+    Xings = find_routeset_crossings(G)
+    assert len(Xings) == 1
+    assert set(Xings[0]) == {0, 12, -1, 11}
+
+    # with detours
+    assert find_routeset_crossings(tiny_wfn(cables=1).G) == []
+
+
 def test_validate_routeset():
     wfn = tiny_wfn()
     G = wfn.G
+    assert validate_routeset(G) == []
 
-    validate_0 = validate_routeset(G)
-    assert validate_0 == []
-
+    # the added feeder crosses 0–12 and leaves the loads no longer matching
     G.add_edge(-1, 11)
-    validate_1 = validate_routeset(G)
-    expected = [(0, 12, -1, 11)]
-    assert all(set(val) == set(exp) for val, exp in zip(validate_1, expected))
-
-    G.remove_edge(0, 12)
-    with pytest.raises(AssertionError):
-        validate_routeset(G)
+    violations = validate_routeset(G)
+    assert any('crosses' in v for v in violations)
 
     # with detours
-    wfn2 = tiny_wfn(cables=1)
-    G2 = wfn2.G
-    assert validate_routeset(G2) == []
+    assert validate_routeset(tiny_wfn(cables=1).G) == []
+
+
+def test_validate_routeset_reports_a_disconnected_terminal():
+    """Removing a link strands a terminal: reported, not raised."""
+    G = tiny_wfn().G
+    G.remove_edge(0, 12)
+
+    violations = validate_routeset(G)
+    assert violations
+    assert not any('crosses' in v for v in violations)
+
+
+def test_validate_routeset_reports_wrong_loads_instead_of_fixing_them():
+    """Loads are verified against the links, not recomputed over them."""
+    G = tiny_wfn().G
+    u, v, edgeD = next(iter(G.edges(data=True)))
+    stated = edgeD['load'] + 7
+    edgeD['load'] = stated
+
+    violations = validate_routeset(G)
+    assert any(f'states load {stated}' in v for v in violations)
+    # G is left exactly as it was handed over
+    assert G[u][v]['load'] == stated
 
 
 def test_find_geometric_crossings_detects_simple_cross():

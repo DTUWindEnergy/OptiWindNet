@@ -17,10 +17,9 @@ import logging
 import networkx as nx
 import pytest
 
-from optiwindnet.crossings import validate_routeset
 from optiwindnet.heuristics import constructor
 from optiwindnet.importer import L_from_yaml
-from optiwindnet.interarraylib import G_from_S
+from optiwindnet.interarraylib import G_from_S, validate_routeset
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 

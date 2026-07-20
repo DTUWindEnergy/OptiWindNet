@@ -15,7 +15,7 @@ from typing import Any, Mapping
 import networkx as nx
 import numpy as np
 
-from ..interarraylib import calcload
+from ..interarraylib import calcload, compress_ring_routes, parse_ring_routes
 from ..utils import make_handle
 from .model import (
     Machine,
@@ -323,56 +323,6 @@ def _ring_routes_from_G(
     return routes
 
 
-def _compress_ring_routes(routes: list[tuple[int, list[int], int]]) -> list[int]:
-    """Flatten ring routes into the stored ``edges`` sequence.
-
-    Each route is written as its ``open_root`` (only when it differs from the
-    running root), its walk, then its ``close_root``. A shared boundary root
-    (``close_i == open_{i+1}``) is therefore written once, so two consecutive
-    negative numbers are always distinct; the last route's ``close`` is elided
-    when it equals its ``open`` (a single-root ring, inferred at end-of-sequence).
-    """
-    seq: list[int] = []
-    pen = None
-    last = len(routes) - 1
-    for idx, (open_, walk, close) in enumerate(routes):
-        if open_ != pen:
-            seq.append(int(open_))
-        seq.extend(int(x) for x in walk)
-        if idx == last and close == open_:
-            pen = close
-            continue
-        seq.append(int(close))
-        pen = close
-    return seq
-
-
-def _parse_ring_routes(seq: list[int]) -> list[tuple[int, list[int], int]]:
-    """Inverse of :func:`_compress_ring_routes`: recover ``(open, walk, close)``."""
-    routes: list[tuple[int, list[int], int]] = []
-    i, length, pen = 0, len(seq), None
-    while i < length:
-        if seq[i] < 0:
-            open_ = seq[i]
-            i += 1
-        else:
-            open_ = pen
-        walk: list[int] = []
-        while i < length and seq[i] >= 0:
-            walk.append(seq[i])
-            i += 1
-        if i >= length:
-            close = open_  # last route, single-root: close inferred == open
-        else:
-            # a lone marker is the shared close/next-open; two consecutive markers
-            # are this route's close then a distinct next open
-            close = seq[i]
-            i += 1
-        pen = close
-        routes.append((open_, walk, close))
-    return routes
-
-
 def terse_pack_from_G(G: nx.Graph) -> PackType:
     """Convert ``G``'s edges to a format suitable for storing in the database.
 
@@ -381,10 +331,10 @@ def terse_pack_from_G(G: nx.Graph) -> PackType:
     the power-flow direction, so ``(i, edges[i])`` is a directed link and the
     array has one entry per non-root node (``T + C + D``).
 
-    A *ringed* routeset has cycles a single parent per node cannot capture, so it
-    is stored as a sequence of routes instead (see :func:`_compress_ring_routes`).
-    It therefore has more than ``T + C + D`` entries, which is how
-    :func:`untersify_to_G` tells the two encodings apart.
+    A *ringed* routeset needs two feeders per ring, which a single parent per
+    node cannot capture, so it is stored as a sequence of routes instead (see
+    :func:`compress_ring_routes`). It therefore has more than ``T + C + D``
+    entries, which is how :func:`untersify_to_G` tells the two encodings apart.
 
     Returns:
         dict with keys:
@@ -395,7 +345,8 @@ def terse_pack_from_G(G: nx.Graph) -> PackType:
     C, D = (G.graph.get(k, 0) for k in 'CD')
     if not G.graph.get('has_loads'):
         calcload(G)
-    if nx.is_forest(G):
+    # the recorded topology picks the encoding
+    if G.graph['topology'] != 'ringed':
         terse = np.empty((T + C + D,), dtype=int)
         for u, v, edgeD in G.edges(data=True):
             reverse = edgeD.get('reverse')
@@ -409,7 +360,7 @@ def terse_pack_from_G(G: nx.Graph) -> PackType:
                 terse[i - B] = target
         edges = terse.tolist()
     else:
-        edges = _compress_ring_routes(_ring_routes_from_G(G, R, T))
+        edges = compress_ring_routes(_ring_routes_from_G(G, R, T))
     terse_pack = dict(edges=edges)
     if C > 0 or D > 0:
         terse_pack['clone2prime'] = G.graph['fnT'][T + B : -R].tolist()
@@ -521,7 +472,7 @@ def _untersify_ring_seq(
         pa, pb = (fnT[a], fnT[b]) if fnT is not None else (a, b)
         return float(np.hypot(*(VertexC[pa] - VertexC[pb])))
 
-    for open_, walk, close in _parse_ring_routes(seq):
+    for open_, walk, close in parse_ring_routes(seq):
         term_pos = [k for k, v in enumerate(walk) if v < T]
         n = len(term_pos)
         chain = [open_, *walk] + ([close] if n > 1 else [])

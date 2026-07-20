@@ -1,6 +1,7 @@
 import copy
 import pickle
 from collections import Counter
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -137,6 +138,20 @@ def solve_milp_property_metrics(router_spec: Dict[str, Any], L: nx.Graph):
     return metrics, str(info.termination), metrics['length']
 
 
+def has_cycle(S: nx.Graph) -> bool:
+    """Whether ``S`` carries a cycle once the substations are interconnected.
+
+    The graphs OptiWindNet works with do not represent the substation-to-
+    substation connections of the physical network, so a ring bridging two
+    substations reads as a path between two roots. Linking the roots in a path
+    supplies those connections, so that every ring -- bridging or not -- closes
+    a cycle.
+    """
+    Sx = S.copy()
+    Sx.add_edges_from(pairwise(range(-S.graph['R'], 0)))
+    return not nx.is_forest(Sx)
+
+
 def solution_property_metrics(
     S: nx.Graph, G: nx.Graph, model_options: Optional[dict], capacity: int
 ) -> Dict[str, Any]:
@@ -149,8 +164,7 @@ def solution_property_metrics(
     """
     import math
 
-    from optiwindnet.crossings import validate_routeset
-    from optiwindnet.interarraylib import validate_topology
+    from optiwindnet.interarraylib import validate_routeset, validate_topology
 
     R, T = S.graph['R'], S.graph['T']
     topology = (model_options or {}).get('topology', 'branched')
@@ -172,7 +186,7 @@ def solution_property_metrics(
         sum_root_load=sum(S.nodes[r]['load'] for r in range(-R, 0)),
         T=T,
         R=R,
-        is_forest=nx.is_forest(S),
+        has_cycle=has_cycle(S),
         num_feeders=len(feeder_edges),
         feeder_loads=feeder_loads,
         min_feeders=math.ceil(T / capacity),
@@ -208,7 +222,7 @@ def assert_solution_properties(
     # they were reduced to violation strings on the worker side
     assert metrics['topology_violations'] == []
     if topology == 'ringed' and T > 1:
-        assert not metrics['is_forest'], 'a ring closes a loop'
+        assert metrics['has_cycle'], 'a ring closes a cycle'
 
     # --- feeder-count / balance (single-root, non-ringed: well-defined) -------
     single_root = metrics['R'] == 1

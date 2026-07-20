@@ -5,8 +5,7 @@ import logging
 import math
 import pickle
 import sys
-from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from hashlib import sha256
 from itertools import chain, pairwise
 
@@ -29,7 +28,7 @@ __all__ = (
     'calcload',
     'split_rings_and_calc_loads',
     'add_ring_to_S',
-    'rings_from_links',
+    'rings_from_S',
     'directed_links',
     'site_fingerprint',
     'fun_fingerprint',
@@ -52,6 +51,8 @@ __all__ = (
     'add_link_cosines',
     'make_remap',
     'scaffolded',
+    'validate_topology',
+    'validate_routeset',
 )
 
 _essential_graph_attrs = (
@@ -223,16 +224,31 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 # other way round. Feeders are never reversed, the sink being a root and a root's
 # id negative; links carrying ``load=0`` (a ring's open point) have no current and
 # so no direction to encode.
-def bfs_subtree_loads(G, parent, children, subtree):
+def bfs_subtree_loads(G, parent, children, subtree, visited=None):
     """Recurse down the subtree, updating edge and node attributes.
 
     Meant to be called by :func:`calcload`, but can be used independently (e.g.
     from PathFinder). Nodes must not have a ``'load'`` attribute.
 
+    Args:
+      G: graph to traverse.
+      parent: node the recursion descends from.
+      children: nodes of ``G`` to descend into.
+      subtree: subtree id to assign to every node visited.
+      visited: nodes already claimed by this traversal; pass one set across
+        several calls to keep them from claiming a node twice. A fresh set is
+        used when omitted.
+
     Returns:
       Total number of descendant nodes
+
+    Raises:
+      ValueError: a node is reached twice, so the traversal is not descending a
+        tree -- ``G`` holds a cycle, or two roots reach the same node.
     """
     T = G.graph['T']
+    if visited is None:
+        visited = {parent}
     nodeD = G.nodes[parent]
     default = 1 if parent < T else 0  # load is 1 for wtg nodes
     if not children:
@@ -240,10 +256,13 @@ def bfs_subtree_loads(G, parent, children, subtree):
         return default
     load = nodeD.get('load', default)
     for child in children:
+        if child in visited:
+            raise ValueError(f'node {child} reached twice: not a tree below {parent}')
+        visited.add(child)
         G.nodes[child]['subtree'] = subtree
         # a load=0 link is a ring open point: never traverse across it
         grandchildren = {n for n in G[child] if G[child][n].get('load') != 0} - {parent}
-        childload = bfs_subtree_loads(G, child, grandchildren, subtree)
+        childload = bfs_subtree_loads(G, child, grandchildren, subtree, visited)
         # the child sources the current, the parent sinks it (towards the root)
         G[parent][child].update(load=childload, reverse=child < parent)
         load += childload
@@ -271,7 +290,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     # single-feeder path to its tail, then close it into a canonical ring; a tail
     # already touching a root bridges two roots (r1, r2).
     R = S.graph['R']
-    paths: list[tuple[int | tuple[int, int], list[int]]] = []
+    paths: list[tuple[tuple[int, int], list[int]]] = []
     seen: set[int] = set()  # first terminal of each ring already walked
     for root in range(-R, 0):
         for gate in S[root]:
@@ -297,15 +316,18 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
                 if r in S[tn] and (len(ordered) > 1 or r != root)
             ]
             end_root = end_roots[0] if end_roots else root
-            root_spec = (root, end_root) if root != end_root else root
-            paths.append((root_spec, ordered))
+            paths.append(((root, end_root), ordered))
     S.remove_edges_from(list(S.edges))
     max_load = 0
-    for subtree_id, (root_spec, ordered) in enumerate(paths):
-        add_ring_to_S(S, root_spec, ordered, subtree_id, A)
+    for subtree_id, (roots, ordered) in enumerate(paths):
+        add_ring_to_S(S, roots, ordered, subtree_id, A)
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
-        S.nodes[root]['load'] = sum(S.nodes[n]['load'] for n in S[root])
+        # a load=0 feeder carries no current, so it adds nothing to its root
+        # (the open point of a bridging stub is a feeder, not an interior link)
+        S.nodes[root]['load'] = sum(
+            S.nodes[n]['load'] for n in S[root] if S[root][n]['load'] != 0
+        )
     S.graph['max_load'] = max_load
     S.graph['has_loads'] = True
 
@@ -331,37 +353,54 @@ def calcload(G: nx.Graph) -> None:
     subtree = 0
     total_load = 0
     max_load = 0
+    # one set across every root: a node claimed by two roots is reported too
+    visited = set(range(-R, 0))
     for root in range(-R, 0):
         G.nodes[root]['load'] = 0
         for subroot in G[root]:
             # a load=0 feeder (degenerate multi-root ring open point) carries no load
             if G[root][subroot].get('load') == 0:
                 continue
-            _ = bfs_subtree_loads(G, root, [subroot], subtree)
+            _ = bfs_subtree_loads(G, root, [subroot], subtree, visited)
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
         total_load += G.nodes[root]['load']
-    assert total_load == T, f'counted ({total_load}) != nonrootnodes({T})'
+    if total_load != T:
+        raise ValueError(f'root loads sum to {total_load}, expected T = {T}')
     G.graph['has_loads'] = True
     G.graph['max_load'] = max_load
 
 
+def _ring_split_position(ordered: list[int], A: nx.Graph | None = None) -> int:
+    """Choose the balanced position between a ring's two arms."""
+    n = len(ordered)
+    m, mod = divmod(n, 2)
+    m += mod
+    if mod and n > 1 and A is not None:
+        rev, center, fwd = ordered[m - 2], ordered[m - 1], ordered[m]
+        rev_len = A[rev][center]['length'] if A.has_edge(rev, center) else 0
+        fwd_len = A[center][fwd]['length'] if A.has_edge(center, fwd) else 0
+        if rev_len > fwd_len:
+            m -= 1
+    return m
+
+
 def add_ring_to_S(
     S: nx.Graph,
-    root: int | tuple[int, int] | list[int],
+    roots: tuple[int, int],
     ordered: list[int],
     subtree: int,
     A: nx.Graph | None = None,
 ) -> None:
-    """Add a single ring (closed loop) to topology graph ``S`` in canonical form.
+    """Add a single ring to topology graph ``S`` in canonical form.
 
-    A ring is the union of two radial arms that share the root ``root`` (or bridge
-    two roots ``(r1, r2)``) and are joined at their tail ends. ``ordered`` is the
-    terminal sequence ``[t1, ..., tn]`` walked along the ring, so that ``t1`` and
-    ``tn`` are the two feeder-connected terminals. Both feeders ``(r1, t1)`` and
-    ``(r2, tn)`` are real, load-bearing cables (there is no asymmetric "ring-back");
-    the single open point of the ring is the edge at the load midpoint, marked by
-    ``load=0`` (a real cable, no current flows through it).
+    A ring is the union of two radial arms, fed by ``r1`` and ``r2`` and joined
+    at their tail ends; it bridges two substations when ``r1 != r2``. ``ordered``
+    is the terminal sequence ``[t1, ..., tn]`` walked along the ring, so that
+    ``t1`` and ``tn`` are the feeder-connected terminals. Both feeders
+    ``(r1, t1)`` and ``(r2, tn)`` are real, load-bearing cables; the single open
+    point of the ring is the edge at the load midpoint, marked by ``load=0`` (a
+    real cable, no current flows through it).
 
     Arm 1 (the ``t1`` side) gets ``m = ceil(n / 2)`` terminals, so each arm holds at
     most ``ceil(n / 2)`` — i.e. half of the doubled ring capacity. When the ring has
@@ -374,7 +413,8 @@ def add_ring_to_S(
 
     Args:
       S: topology graph to add the ring to (modified in place).
-      root: the (negative) root node id or pair ``(r1, r2)`` of root node ids.
+      roots: the pair ``(r1, r2)`` of (negative) root node ids, equal when both
+        feeders share one root.
       ordered: terminal sequence ``[t1, ..., tn]`` along the ring.
       subtree: subtree id to assign to every node of the ring (both arms).
       A: optional available-links graph, used to pick the longer split edge on
@@ -382,7 +422,7 @@ def add_ring_to_S(
     """
     # the builder declares the shape it establishes
     S.graph['topology'] = 'ringed'
-    r1, r2 = (root[0], root[1]) if isinstance(root, (tuple, list)) else (root, root)
+    r1, r2 = roots
     n = len(ordered)
     if n == 1:
         # Degenerate ring: a single terminal has feeder(s) on it.
@@ -391,16 +431,7 @@ def add_ring_to_S(
         if r1 != r2:
             S.add_edge(r2, ordered[0], load=0, reverse=False)
         return
-    m, mod = divmod(n, 2)
-    m += mod  # arm 1 (t1 side) gets ceil(n / 2); open point defaults to t2 side
-    if mod and A is not None:
-        # odd ring node count: the unique middle terminal has two valid split edges
-        #   — keep the open point on the longer one when A is available.
-        rev, center, fwd = ordered[m - 2], ordered[m - 1], ordered[m]
-        rev_len = A[rev][center]['length'] if A.has_edge(rev, center) else 0
-        fwd_len = A[center][fwd]['length'] if A.has_edge(center, fwd) else 0
-        if rev_len > fwd_len:
-            m -= 1
+    m = _ring_split_position(ordered, A)
     # Node loads: arm 1 nodes ordered[0..m-1] carry m..1; arm 2 nodes
     # ordered[m..n-1] carry 1..(n - m) toward their own feeder.
     for i, t in enumerate(ordered):
@@ -423,32 +454,20 @@ def add_ring_to_S(
             S.add_edge(u, v, load=load, reverse=source < sink)
 
 
-def rings_from_links(
-    active_links, R: int
-) -> list[tuple[int | tuple[int, int], list[int]]]:
-    """Recover ordered ring terminal sequences from a set of active links.
+def rings_from_S(S: nx.Graph) -> list[tuple[tuple[int, int], list[int]]]:
+    """Recover ordered ring terminal sequences from a RINGED solution graph.
 
-    ``active_links`` is any iterable of ``(u, v)`` node pairs that are active in a
-    RINGED solution (terminal-terminal links plus the two feeders of each ring).
-    Each ring is returned as ``(root, [t1, ..., tn])`` with ``t1`` and ``tn`` the
-    feeder-connected terminals, obtained by walking the terminal adjacency from
-    the head subroot to the tail one.
+    Each ring is returned as ``((r1, r2), [t1, ..., tn])`` with ``t1`` and ``tn``
+    the feeder-connected terminals, obtained by walking the terminal adjacency
+    from the head subroot to the tail one; ``r1`` feeds ``t1`` and ``r2`` feeds
+    ``tn``. The ring bridges two substations when ``r1 != r2``.
 
     Feeders are identified by having exactly one negative (root) endpoint; a ring
     with a single terminal (``n == 1``) has both feeders on that terminal.
     """
-    term_adj: dict[int, set[int]] = defaultdict(set)
-    subroots: dict[int, list[int]] = defaultdict(list)
-    term_to_roots: dict[int, list[int]] = defaultdict(list)
-    for u, v in active_links:
-        if u >= 0 and v >= 0:
-            term_adj[u].add(v)
-            term_adj[v].add(u)
-        else:
-            r, t = (u, v) if u < 0 else (v, u)
-            subroots[r].append(t)
-            term_to_roots[t].append(r)
-    rings: list[tuple[int | tuple[int, int], list[int]]] = []
+    R = S.graph['R']
+    subroots = {r: [t for t in S[r] if t >= 0] if r in S else [] for r in range(-R, 0)}
+    rings: list[tuple[tuple[int, int], list[int]]] = []
     # `subroots` is consumed as the walk goes: each feeder is claimed once
     for r in range(-R, 0):
         while subroots[r]:
@@ -456,7 +475,7 @@ def rings_from_links(
             chain_ = [t1]
             prev, curr = None, t1
             while True:
-                nxts = [x for x in term_adj[curr] if x != prev]
+                nxts = [x for x in S[curr] if x >= 0 and x != prev]
                 if not nxts:
                     break
                 prev, curr = curr, nxts[0]
@@ -468,22 +487,21 @@ def rings_from_links(
                 r2 = r
             else:
                 r2 = next(
-                    (rc for rc in term_to_roots[tn] if rc != r and tn in subroots[rc]),
+                    (rc for rc in S[tn] if rc < 0 and rc != r and tn in subroots[rc]),
                     None,
                 )
             if r2 is None:
                 r2 = r
             else:
                 subroots[r2].remove(tn)
-            root_spec = (r, r2) if r != r2 else r
-            rings.append((root_spec, chain_))
+            rings.append(((r, r2), chain_))
     return rings
 
 
 def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
     """Violations of the canonical RINGED shape (see :func:`add_ring_to_S`)."""
     violations = []
-    R, T = S.graph['R'], S.graph['T']
+    T = S.graph['T']
 
     # topology-graph ring edges are pure geometry: they carry no edge 'kind'
     kinds = {d.get('kind') for _, _, d in S.edges(data=True)} - {None}
@@ -492,7 +510,7 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
             f'ring edges must not carry a kind, got {sorted(map(str, kinds))}'
         )
 
-    rings = rings_from_links(list(S.edges()), R)
+    rings = rings_from_S(S)
 
     # the rings partition the terminal set: every terminal in exactly one ring
     covered = sorted(t for _, ordered in rings for t in ordered)
@@ -502,27 +520,22 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
     # two feeders per ring, except a lone terminal hanging off a single root
     n_feeders = sum(1 for u, v in S.edges if u < 0 or v < 0)
     expected = sum(
-        1 if len(ordered) == 1 and isinstance(rs, int) else 2 for rs, ordered in rings
+        1 if len(ordered) == 1 and rs[0] == rs[1] else 2 for rs, ordered in rings
     )
     if n_feeders != expected:
         violations.append(f'expected {expected} feeders, got {n_feeders}')
 
-    if not S.graph.get('has_loads'):
-        return violations
-
-    for root_spec, ordered in rings:
+    for roots, ordered in rings:
         n = len(ordered)
         arm = math.ceil(n / 2)
         # a ring holds up to 2*capacity terminals (two arms of ceil(n / 2))
         if capacity is not None and arm > capacity:
-            violations.append(
-                f'ring at {root_spec} needs arms of {arm} > κ = {capacity}'
-            )
+            violations.append(f'ring at {roots} needs arms of {arm} > κ = {capacity}')
         # the heaviest node of a ring carries a full arm: the arms are balanced
         heaviest = max(S.nodes[t]['load'] for t in ordered)
         if heaviest != arm:
             violations.append(
-                f'ring at {root_spec} has unbalanced arms: heaviest node carries '
+                f'ring at {roots} has unbalanced arms: heaviest node carries '
                 f'{heaviest}, balanced arms would carry {arm}'
             )
         # the two arm-head (feeder) terminals carry the whole ring between them
@@ -531,20 +544,31 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
         )
         if heads != n:
             violations.append(
-                f'ring at {root_spec} spans {n} terminals, but its arm heads '
-                f'carry {heads}'
+                f'ring at {roots} spans {n} terminals, but its arm heads carry {heads}'
             )
         # exactly one open point per ring: a real cable with no current through it
         opens = [
-            (u, v)
-            for u, v in zip(ordered, ordered[1:])
+            i
+            for i, (u, v) in enumerate(zip(ordered, ordered[1:]))
             if S.has_edge(u, v) and S[u][v]['load'] == 0
         ]
         if len(opens) != (1 if n > 1 else 0):
             violations.append(
-                f'ring at {root_spec} has {len(opens)} open points, expected '
+                f'ring at {roots} has {len(opens)} open points, expected '
                 f'{1 if n > 1 else 0}'
             )
+        elif opens:
+            # the open point splits the ring where the node loads say it does:
+            # arm 1 takes `arm` terminals, and an odd-terminal ring has a second
+            # balanced split one link earlier (see :func:`add_ring_to_S`). Both
+            # walk directions are covered: the two indices map onto each other.
+            balanced = {arm - 1} if n % 2 == 0 else {arm - 1, arm - 2}
+            if opens[0] not in balanced:
+                u, v = ordered[opens[0]], ordered[opens[0] + 1]
+                violations.append(
+                    f'ring at {roots} opens between {u} and {v}, which is not '
+                    f'where its node loads split the arms'
+                )
     return violations
 
 
@@ -554,9 +578,14 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     The canonical shape of a solution is a contract of the library, not of the
     test suite, so the invariants live next to the builders that establish them.
 
+    Together these invariants make ``S`` representable: a topology that passes
+    survives a round-trip through its ``terse_links`` encoding unchanged, which
+    is what makes it storable and usable as a MILP warm start.
+
     Args:
       S: topology graph to check. ``S.graph['topology']`` is mandatory: it is
-        one of ``'ringed'``, ``'radial'`` or ``'branched'``.
+        one of ``'ringed'``, ``'radial'`` or ``'branched'``. Loads are
+        mandatory too -- ``S`` without them is reported as a violation.
       capacity: cable capacity; defaults to ``S.graph['capacity']``. Capacity
         checks are skipped when neither is available.
 
@@ -577,15 +606,18 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     topology = S.graph['topology']
 
     # --- universal invariants ------------------------------------------------
-    if S.graph.get('has_loads'):
-        edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
-        max_load = max(edge_loads, default=0)
-        if capacity is not None and max_load > capacity:
-            violations.append(f'κ = {capacity}, max_load = {max_load}')
-        # all terminals are accounted for at the roots
-        total = sum(S.nodes[r]['load'] for r in range(-R, 0))
-        if total != T:
-            violations.append(f'root loads sum to {total}, expected T = {T}')
+    if not S.graph.get('has_loads'):
+        # every producer sets them, and the shape checks below read them: a
+        # topology without loads is unfinished, not merely unannotated
+        return violations + ['topology carries no loads']
+    edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
+    max_load = max(edge_loads, default=0)
+    if capacity is not None and max_load > capacity:
+        violations.append(f'κ = {capacity}, max_load = {max_load}')
+    # all terminals are accounted for at the roots
+    total = sum(S.nodes[r]['load'] for r in range(-R, 0))
+    if total != T:
+        violations.append(f'root loads sum to {total}, expected T = {T}')
 
     # --- topology shape ------------------------------------------------------
     if topology == 'ringed':
@@ -593,59 +625,160 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     elif topology in ('radial', 'branched'):
         if not nx.is_forest(S):
             violations.append(f'{topology} topology must be a forest')
+        # every terminal is served by some root: a forest may leave a terminal
+        # stranded in a component of its own without ever growing a cycle
+        roots = set(range(-R, 0))
+        served = set()
+        for component in nx.connected_components(S):
+            if component & roots:
+                served |= component
+        # the subtraction also covers terminals absent from S altogether
+        stranded = sorted(set(range(T)) - served)
+        if stranded:
+            violations.append(f'terminals not connected to any root: {stranded}')
+        # 'reverse' orients each link towards its root: terse_links and the flow
+        # formulations read it, and a forest stores nothing else to orient by
+        unoriented = sorted(
+            (u, v) for u, v, d in S.edges(data=True) if 'reverse' not in d
+        )
+        if unoriented:
+            violations.append(f'links missing the "reverse" flag: {unoriented}')
         if topology == 'radial':
-            degrees = [S.degree(t) for t in range(T)]
+            # a terminal absent from S has no degree to ask for; it is already
+            # reported as stranded above
+            degrees = [S.degree(t) for t in range(T) if S.has_node(t)]
             if max(degrees, default=0) > 2:
                 violations.append('radial subtrees must be simple paths')
     else:
         raise ValueError(f'unknown topology: {topology!r}')
+
     return violations
 
 
-def directed_links(
-    S: nx.Graph, *, radialize_rings: bool | None = None
-) -> Iterator[tuple[int, int, int]]:
+def _load_mismatches(G: nx.Graph, Gʹ: nx.Graph) -> list[str]:
+    """Differences between the loads ``G`` carries and those of reference ``Gʹ``.
+
+    ``Gʹ`` is ``G`` with its loads recomputed from the link structure, so any
+    difference is a load ``G`` states but does not have. Subtree ids are left
+    out: they are a labelling whose numbering follows traversal order, not a
+    property of the routeset.
+    """
+    violations = []
+    if G.graph.get('max_load') != Gʹ.graph['max_load']:
+        violations.append(
+            f'max_load is {G.graph.get("max_load")}, links carry {Gʹ.graph["max_load"]}'
+        )
+    for u, v, edgeD in G.edges(data=True):
+        refD = Gʹ[u][v]
+        if edgeD.get('load') != refD['load']:
+            violations.append(
+                f'link {u}–{v} states load {edgeD.get("load")}, carries {refD["load"]}'
+            )
+        # 'reverse' orients the link for terse_links and the flow formulations
+        if edgeD.get('reverse') != refD['reverse']:
+            violations.append(
+                f'link {u}–{v} states reverse={edgeD.get("reverse")}, flows '
+                f'reverse={refD["reverse"]}'
+            )
+    for node, nodeD in G.nodes(data=True):
+        refD = Gʹ.nodes[node]
+        if nodeD.get('load') != refD.get('load'):
+            violations.append(
+                f'node {node} states load {nodeD.get("load")}, carries '
+                f'{refD.get("load")}'
+            )
+    return violations
+
+
+def validate_routeset(G: nx.Graph) -> list[str]:
+    """Check a routeset ``G`` for load, topology and crossing violations.
+
+    Orchestrates the specific checkers: the loads ``G`` carries are compared
+    against those its links imply (:func:`calcload` on a copy, so ``G`` is left
+    untouched), the topology is checked against the shape it declares
+    (:func:`validate_topology`), and the routes are checked for crossings and
+    branch splits (:func:`~optiwindnet.crossings.find_routeset_crossings`).
+
+    Every routeset producer emits loads, so they are verified rather than
+    recomputed: a routeset whose loads disagree with its links is reported, not
+    silently corrected.
+
+    Crossings are geometry alone, so they are reported even when the loads are
+    unusable.
+
+    Args:
+      G: routeset graph to evaluate.
+
+    Returns:
+      list of human-readable violations; ``G`` is valid if it is empty.
+
+    Example::
+
+      violations = validate_routeset(G)
+      if violations:
+          print('\\n'.join(violations))
+
+    """
+    # deferred: this orchestrator is the only part of interarraylib that needs
+    # the crossings machinery, which the other importers of this module do not
+    from .crossings import describe_crossings, find_routeset_crossings
+
+    violations = []
+    if not G.graph.get('has_loads'):
+        violations.append('routeset carries no loads')
+    else:
+        Gʹ = G.copy()
+        try:
+            calcload(Gʹ)
+        except ValueError as exc:
+            violations.append(str(exc))
+        else:
+            violations += _load_mismatches(G, Gʹ)
+            violations += validate_topology(S_from_G(G), G.graph.get('capacity'))
+    violations += describe_crossings(find_routeset_crossings(G))
+    return violations
+
+
+def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     """Yield ``(source, sink, flow)`` for every link of ``S``.
 
-    Forest topologies read each link's orientation off its ``'reverse'`` flag (see
-    the note above :func:`bfs_subtree_loads`), so ``flow`` is just the link's load.
+    Forest topologies read each link's orientation off its ``'reverse'`` flag
+    (see the note above :func:`bfs_subtree_loads`), so ``flow`` is just the
+    link's load.
 
-    A RINGED ``S`` stores each ring split into two arms at a load-0 open point,
-    which is not how a flow formulation sees it: there a ring is one directed
-    chain of its ``n`` terminals, fed by a flowless closing feeder ``r -> tn`` at
-    one end and draining through a feeder ``t1 -> r`` carrying the whole ring at
-    the other. *Radializing* recovers that chain (walking across the open point
-    with :func:`rings_from_links`) and re-orients every link along it, so the open
-    point becomes an ordinary flow-carrying link. Callers that need a ring
-    oriented the way a solver's model expects -- warm-starting a MILP, above all
-    -- want this rather than the stored ``'reverse'``.
+    A RINGED ``S`` -- as declared by ``S.graph['topology']`` -- stores each ring
+    split into two arms at a load-0 open point, which is not how a flow
+    formulation sees it: there a ring is one directed chain of its ``n``
+    terminals, fed by a flowless closing feeder at one end and draining through
+    a feeder carrying the whole ring at the other. Such rings are *radialized*
+    into that chain here (walking across the open point with
+    :func:`rings_from_S`), so the open point becomes an ordinary
+    flow-carrying link.
+
+    A ring bridging two roots drains through the one feeding the head of the
+    walk and closes on the other; which of the two drains is arbitrary, as it
+    moves no cable.
 
     Args:
       S: solution topology.
-      radialize_rings: whether to radialize. Defaults to whether ``S`` declares
-        itself ``topology='ringed'``; pass it explicitly when the consumer's
-        expectation, rather than ``S``, decides (a model's topology, say).
 
     Yields:
       ``(source, sink, flow)`` per link, current flowing ``source`` -> ``sink``.
       ``flow`` is 0 for links carrying no current: a ring's closing feeder.
     """
-    if radialize_rings is None:
-        radialize_rings = S.graph.get('topology') == 'ringed'
-    if not radialize_rings:
+    if S.graph['topology'] != 'ringed':
         for u, v, edgeD in S.edges(data=True):
             source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
             yield source, sink, edgeD['load']
         return
-    for r, chain_ in rings_from_links(S.edges(), S.graph['R']):
+    for root, chain_ in rings_from_S(S):
+        head_root, tail_root = root
         n = len(chain_)
-        # the ring drains through chain_[0], whose feeder carries all of it
-        yield chain_[0], r, n
-        if n == 1:
-            # degenerate ring (a lone terminal): close it with a flowless feeder
-            yield r, chain_[0], 0
-            continue
-        yield r, chain_[-1], 0
+        # the ring drains through chain_[0], whose feeder carries all of it, and
+        # closes on the far feeder. A lone terminal needs no special case: it is
+        # both head and tail, and the chain below is empty.
+        yield chain_[0], head_root, n
+        yield tail_root, chain_[-1], 0
         for j in range(n - 1, 0, -1):
             yield chain_[j], chain_[j - 1], n - j
 
@@ -1157,25 +1290,79 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     return L
 
 
-def _ring_sequence_from_S(S: nx.Graph, R: int) -> list[int]:
-    """Encode the rings of a RINGED topology ``S`` as a flat sequence.
+def compress_ring_routes(routes: list[tuple[int, list[int], int]]) -> list[int]:
+    """Flatten ring routes ``(open_root, walk, close_root)`` into a sequence.
 
-    The rings are drawn as routes, each leaving and returning to a root. Each
-    route is entered as its (negative) root number followed by its terminals in
-    walking order; the root number both ends the previous route and names the
-    root this route belongs to. See :func:`S_from_terse_links` for the inverse.
+    Each route is written as its ``open_root`` (only when it differs from the
+    running root), its walk, then its ``close_root``. A shared boundary root
+    (``close_i == open_{i+1}``) is therefore written once, so two consecutive
+    negative numbers are always distinct; the last route's ``close`` is elided
+    when it equals its ``open`` (a single-root ring, inferred at end-of-sequence).
+
+    Every route contributes its walk and the first writes a marker, so the
+    sequence always has more entries than walk nodes -- which is what
+    distinguishes a ringed encoding from a positional forest one.
+    """
+    seq: list[int] = []
+    pen = None
+    last = len(routes) - 1
+    for idx, (open_, walk, close) in enumerate(routes):
+        if open_ != pen:
+            seq.append(int(open_))
+        seq.extend(int(x) for x in walk)
+        if idx == last and close == open_:
+            pen = close
+            continue
+        seq.append(int(close))
+        pen = close
+    return seq
+
+
+def parse_ring_routes(seq: Sequence[int]) -> list[tuple[int, list[int], int]]:
+    """Inverse of :func:`compress_ring_routes`: recover ``(open, walk, close)``."""
+    routes: list[tuple[int, list[int], int]] = []
+    seq = [int(x) for x in seq]
+    i, length, pen = 0, len(seq), None
+    while i < length:
+        if seq[i] < 0:
+            open_ = seq[i]
+            i += 1
+        else:
+            open_ = pen
+        walk: list[int] = []
+        while i < length and seq[i] >= 0:
+            walk.append(seq[i])
+            i += 1
+        if i >= length:
+            close = open_  # last route, single-root: close inferred == open
+        else:
+            # a lone marker is the shared close/next-open; two consecutive markers
+            # are this route's close then a distinct next open
+            close = seq[i]
+            i += 1
+        pen = close
+        routes.append((open_, walk, close))
+    return routes
+
+
+def _ring_routes_from_S(S: nx.Graph) -> list[tuple[int, list[int], int]]:
+    """Recover the ring routes ``(open_root, walk, close_root)`` of a ringed ``S``.
 
     The walk direction of each ring is chosen so that the open point falls where
     :func:`add_ring_to_S` (called with ``A=None`` on decode) re-derives it: the
     load midpoint ``ceil(n / 2) - 1``. For a ring with an odd number of terminals
     the two balanced split edges map one-to-one onto the two walk directions, so
     this preserves the exact open point without storing it.
+
+    A ring may open and close on different roots, so reversing a walk swaps the
+    two roots along with the ends they feed.
     """
     split_pairs = {
         frozenset((u, v)) for u, v, d in S.edges(data=True) if d.get('load') == 0
     }
-    seq: list[int] = []
-    for root, ordered in rings_from_links(list(S.edges()), R):
+    routes: list[tuple[int, list[int], int]] = []
+    for root, ordered in rings_from_S(S):
+        open_, close = root
         n = len(ordered)
         if n > 1:
             # locate the open point in the walk and orient so it lands on the
@@ -1187,35 +1374,9 @@ def _ring_sequence_from_S(S: nx.Graph, R: int) -> list[int]:
             )
             if j != math.ceil(n / 2) - 1:
                 ordered = ordered[::-1]
-        r1, r2 = root if isinstance(root, tuple) else (root, root)
-        seq.append(r1)
-        seq.extend(ordered)
-        if r1 != r2:
-            seq.append(r2)
-    return seq
-
-
-def _rings_from_ring_sequence(seq) -> list[tuple[int, list[int]]]:
-    """Recover ``(root, [t1, ..., tn])`` routes from a ring sequence.
-
-    Inverse of :func:`_ring_sequence_from_S`'s layout: each (negative) root
-    number opens a new route, and the terminals that follow it are that route's
-    nodes in walking order.
-    """
-    rings: list[tuple[int, list[int]]] = []
-    root: int | None = None
-    route: list[int] = []
-    for x in seq:
-        x = int(x)
-        if x < 0:
-            if root is not None:
-                rings.append((root, route))
-            root, route = x, []
-        else:
-            route.append(x)
-    if root is not None:
-        rings.append((root, route))
-    return rings
+                open_, close = close, open_
+        routes.append((open_, ordered, close))
+    return routes
 
 
 def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
@@ -1225,12 +1386,11 @@ def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
 
     * *forest* topologies (radial/branched) are stored positionally – the array
       has exactly ``T`` entries and ``(i, terse_links[i])`` is a directed link;
-    * *ringed* topologies are stored as a sequence of routes (see
-      :func:`_ring_sequence_from_S`), which has a number of entries different
-      from ``T``.
+    * *ringed* topologies are stored as a sequence of routes, which has a number
+      of entries different from ``T``.
 
     The two are told apart by comparing the number of entries with ``T`` (see
-    the class docstring convention): equal ⇒ forest, otherwise ⇒ ringed. ``T``
+    :func:`terse_links_from_S`): equal ⇒ forest, otherwise ⇒ ringed. ``T``
     and ``R`` may be supplied explicitly; when omitted a forest encoding is
     assumed (``T = len(terse_links)``) and ``R`` is inferred from the array.
 
@@ -1263,13 +1423,16 @@ def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
     # ringed encoding: rebuild each route as a canonical ring
     S = nx.Graph(T=T, R=R, **kwargs)
     S.add_nodes_from(range(-R, 0))
-    rings = _rings_from_ring_sequence(terse_links.tolist())
+    routes = parse_ring_routes(terse_links.tolist())
     max_load = 0
-    for subtree, (root, ordered) in enumerate(rings):
-        add_ring_to_S(S, root, ordered, subtree, A=None)
+    for subtree, (open_, ordered, close) in enumerate(routes):
+        add_ring_to_S(S, (open_, close), ordered, subtree, A=None)
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
-        S.nodes[root]['load'] = sum(S.nodes[nbr]['load'] for nbr in S[root])
+        # a load=0 feeder carries no current, so it adds nothing to its root
+        S.nodes[root]['load'] = sum(
+            S.nodes[nbr]['load'] for nbr in S[root] if S[root][nbr]['load'] != 0
+        )
     S.graph['max_load'] = max_load
     S.graph['has_loads'] = True
     if 'capacity' not in kwargs:
@@ -1282,11 +1445,13 @@ def terse_links_from_S(S):
 
     Inverse function of :func:`S_from_terse_links`. A *forest* topology (radial
     or branched) is stored positionally – ``(i, terse[i])`` are the links, one
-    entry per terminal. A *ringed* topology has cycles that a single parent per
-    node cannot capture, so it is stored instead as a sequence of routes (see
-    :func:`_ring_sequence_from_S`): the terminals of each ring in walking order,
-    with (negative) root numbers marking where the drawing shifts to a new
-    route. The two encodings are told apart by their length relative to ``T``.
+    entry per terminal. A *ringed* topology needs two feeders per ring, which a
+    single parent per node cannot capture, so it is stored instead as a sequence
+    of routes: the terminals of each ring in walking order, with (negative) root
+    numbers marking the roots each route opens and closes on. The two encodings
+    are told apart by their length relative to ``T``.
+
+    The encoding follows ``S.graph['topology']``.
 
     Args:
       S: solution topology (a forest, or a canonical ringed topology).
@@ -1295,7 +1460,7 @@ def terse_links_from_S(S):
       1D array ``terse`` encoding ``S``.
     """
     T = S.graph['T']
-    if nx.is_forest(S):
+    if S.graph['topology'] != 'ringed':
         terse_links = np.zeros((T,), dtype=np.int_)
         # convert the graph to array representing the tree (edges i->terse[i])
         for u, v, edgeD in S.edges(data=True):
@@ -1303,11 +1468,11 @@ def terse_links_from_S(S):
             i, target = (u, v) if edgeD['reverse'] else (v, u)
             terse_links[i] = target
         return terse_links
-    # ringed topology: encode the routes sequentially. Every route carries its
-    # own leading root number, so a ringed encoding always has more than T
-    # entries (T terminals + one root number per route) and never collides with
-    # the T-entry forest encoding.
-    seq = _ring_sequence_from_S(S, S.graph['R'])
+    # ringed topology: encode the routes sequentially. Every route contributes
+    # its terminals and the first one always writes a root marker, so a ringed
+    # encoding always has more than T entries and never collides with the
+    # T-entry forest encoding.
+    seq = compress_ring_routes(_ring_routes_from_S(S))
     return np.array(seq, dtype=np.int_)
 
 
