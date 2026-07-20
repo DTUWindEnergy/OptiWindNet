@@ -25,6 +25,7 @@ from ..interarraylib import (
     directed_links,
 )
 from ..pathfinding import PathFinder
+from ..types import Topology
 
 _lggr = logging.getLogger(__name__)
 error, info, warn = _lggr.error, _lggr.info, _lggr.warning
@@ -73,15 +74,6 @@ class OWNWarmupFailed(Exception):
 
 class OWNSolutionNotFound(Exception):
     pass
-
-
-class Topology(StrEnum):
-    "Set the topology of subtrees in the solution."
-
-    RADIAL = auto()
-    BRANCHED = auto()
-    RINGED = auto()
-    DEFAULT = BRANCHED
 
 
 class FeederRoute(StrEnum):

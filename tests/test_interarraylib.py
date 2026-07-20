@@ -1,10 +1,12 @@
 import copy
 import math
+import pickle
 
 import networkx as nx
 import numpy as np
 import pytest
 
+from optiwindnet.MILP import Topology
 from optiwindnet.interarraylib import (
     G_from_S,
     L_from_G,
@@ -238,10 +240,18 @@ def test_S_from_G():
     G = wfn.G
 
     def check_nodes(G, expected):
-        return all(G.nodes[node] == nodeD for node, nodeD in expected)
+        actual = {node: G.nodes.get(node) for node, _ in expected}
+        expected_dict = dict(expected)
+        assert actual == expected_dict
+        return True
 
     def check_edges(G, expected):
-        return all(G[u][v] == edgeD for u, v, edgeD in expected)
+        actual = {}
+        for u, v, _ in expected:
+            actual[(u, v)] = G[u][v] if G.has_edge(u, v) else None
+        expected_dict = {(u, v): edgeD for u, v, edgeD in expected}
+        assert actual == expected_dict
+        return True
 
     expected_nodes = [
         (-1, {'kind': 'oss', 'load': 4}),
@@ -515,6 +525,17 @@ def test_terse_links_ringed_roundtrip(R, ringspec):
     assert terse_links_from_S(S2).tolist() == terse.tolist()
 
 
+def test_tagged_ringed_roundtrip_infers_dimensions():
+    S = _ringed_S(2, [(-1, [0, 1, 2]), (-2, [3, 4])])
+
+    S2 = S_from_terse_links(terse_links_from_S(S))
+
+    assert S2.graph['topology'] == 'ringed'
+    assert S2.graph['R'] == S.graph['R']
+    assert S2.graph['T'] == S.graph['T']
+    assert _ring_sets(S2) == _ring_sets(S)
+
+
 @pytest.mark.parametrize('longer, expected_open', [(0, (0, 1)), (1, (1, 2))])
 def test_terse_links_ringed_preserves_open_point(longer, expected_open):
     """An odd-terminal ring's open point survives the round-trip losslessly.
@@ -544,6 +565,44 @@ def test_terse_links_forest_still_positional():
     assert terse.shape[0] == S.graph['T']
     S2 = S_from_terse_links(terse)
     assert set(map(frozenset, S2.edges())) == set(map(frozenset, S.edges()))
+
+
+@pytest.mark.parametrize(
+    'topology, links',
+    [
+        ('radial', [(-1, 0), (0, 1), (1, 2)]),
+        ('branched', [(-1, 0), (0, 1), (0, 2)]),
+    ],
+)
+def test_terse_links_carries_forest_architecture(topology, links):
+    """Identical-length forest encodings retain their architecture metadata."""
+    S = nx.Graph(R=1, T=3, topology=topology)
+    S.add_edges_from(links)
+    calcload(S)
+
+    terse = terse_links_from_S(S)
+    S2 = S_from_terse_links(terse, R=1, T=3)
+    S3 = S_from_terse_links(np.asarray(terse), R=1, T=3, topology=topology)
+
+    assert terse.topology is Topology(topology)
+    assert S2.graph['topology'] is Topology(topology)
+    assert S3.graph['topology'] is Topology(topology)
+    assert set(map(frozenset, S2.edges())) == set(map(frozenset, S.edges()))
+
+
+def test_terse_links_preserves_architecture_when_pickled():
+    terse = terse_links_from_S(tiny_wfn().S)
+
+    restored = pickle.loads(pickle.dumps(terse))
+
+    assert restored.topology == terse.topology
+    assert np.array_equal(restored, terse)
+
+
+def test_terse_links_repr_shows_architecture_and_terse_array():
+    terse = terse_links_from_S(tiny_wfn().S)
+
+    assert repr(terse) == ("TerseLinks(topology='branched', terse=[-1,  0,  1,  2])")
 
 
 # --------------------------------------------------------------------------- #

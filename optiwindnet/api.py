@@ -38,6 +38,7 @@ from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_fac
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot, svgpplot
+from .types import Topology
 
 ##################################
 # OptiWindNet Network/Router API #
@@ -487,14 +488,19 @@ class WindFarmNetwork:
         terse_links: np.ndarray,
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
+        topology: Topology | str | None = None,
     ):
         """Update the network from terse link representation.
 
-        Accepts integers or integer-like floats (e.g., 3.0).
+        Accepts integers or integer-like floats (e.g., 3.0). ``TerseLinks``
+        values carry their topology architecture. For a plain array, pass
+        ``topology`` explicitly when radial/branched identity must be retained.
         """
         T = self._T
         R = self._R
 
+        if topology is None:
+            topology = getattr(terse_links, 'topology', None)
         terse_links_ints = np.asarray(terse_links, dtype=np.int64)
 
         # Update coordinates if provided
@@ -510,7 +516,13 @@ class WindFarmNetwork:
         # convention in interarraylib.terse_links_from_S); a forest encoding has
         # exactly T. S_from_terse_links decodes accordingly and labels S, which
         # is what PathFinder then routes within.
-        S = S_from_terse_links(terse_links_ints, R=R, T=T, creator='from_terse_links')
+        S = S_from_terse_links(
+            terse_links_ints,
+            R=R,
+            T=T,
+            topology=topology,
+            creator='from_terse_links',
+        )
 
         G_tentative = G_from_S(S, self.A)
 

@@ -168,6 +168,21 @@ def test_update_from_terse_links():
     assert np.array_equal(terse2, np.array([1, 2, -1, 0]))
 
 
+def test_update_from_terse_links_preserves_topology_architecture():
+    wfn = tiny_wfn()
+    terse = wfn.terse_links()
+    topology = wfn.S.graph['topology']
+
+    wfn.update_from_terse_links(terse)
+
+    assert wfn.S.graph['topology'] == terse.topology == topology
+
+    # Serialized links are plain arrays; the public API also accepts the
+    # architecture in its legacy string form.
+    wfn.update_from_terse_links(np.asarray(terse), topology=topology)
+    assert wfn.S.graph['topology'] == topology
+
+
 def test_map_detour_vertex_empty_if_no_detours_smoke():
     wfn = tiny_wfn()
     map_detour = wfn.map_detour_vertex()
