@@ -1386,16 +1386,6 @@ def _ring_routes_from_S(S: nx.Graph, R: int) -> list[tuple[int, list[int], int]]
     return routes
 
 
-def _ring_sequence_from_S(S: nx.Graph, R: int) -> list[int]:
-    """Encode the rings of a RINGED topology ``S`` as a flat sequence.
-
-    The rings are drawn as routes, each leaving a root and returning to a root
-    -- not necessarily the same one. See :func:`S_from_terse_links` for the
-    inverse, and :func:`compress_ring_routes` for the sequence layout.
-    """
-    return compress_ring_routes(_ring_routes_from_S(S, R))
-
-
 def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
     """Create a solution topology graph ``S`` from its ``terse_links`` encoding.
 
@@ -1403,9 +1393,8 @@ def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
 
     * *forest* topologies (radial/branched) are stored positionally – the array
       has exactly ``T`` entries and ``(i, terse_links[i])`` is a directed link;
-    * *ringed* topologies are stored as a sequence of routes (see
-      :func:`_ring_sequence_from_S`), which has a number of entries different
-      from ``T``.
+    * *ringed* topologies are stored as a sequence of routes, which has a number
+      of entries different from ``T``.
 
     The two are told apart by comparing the number of entries with ``T`` (see
     :func:`terse_links_from_S`): equal ⇒ forest, otherwise ⇒ ringed. ``T``
@@ -1465,10 +1454,9 @@ def terse_links_from_S(S):
     or branched) is stored positionally – ``(i, terse[i])`` are the links, one
     entry per terminal. A *ringed* topology needs two feeders per ring, which a
     single parent per node cannot capture, so it is stored instead as a sequence
-    of routes (see :func:`_ring_sequence_from_S`): the terminals of each ring in
-    walking order, with (negative) root numbers marking the roots each route
-    opens and closes on. The two encodings are told apart by their length
-    relative to ``T``.
+    of routes: the terminals of each ring in walking order, with (negative) root
+    numbers marking the roots each route opens and closes on. The two encodings
+    are told apart by their length relative to ``T``.
 
     The encoding follows ``S.graph['topology']``.
 
@@ -1491,7 +1479,7 @@ def terse_links_from_S(S):
     # its terminals and the first one always writes a root marker, so a ringed
     # encoding always has more than T entries and never collides with the
     # T-entry forest encoding.
-    seq = _ring_sequence_from_S(S, S.graph['R'])
+    seq = compress_ring_routes(_ring_routes_from_S(S, S.graph['R']))
     return np.array(seq, dtype=np.int_)
 
 
