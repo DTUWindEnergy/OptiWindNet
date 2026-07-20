@@ -164,8 +164,7 @@ def solution_property_metrics(
     """
     import math
 
-    from optiwindnet.crossings import validate_routeset
-    from optiwindnet.interarraylib import validate_topology
+    from optiwindnet.interarraylib import validate_routeset, validate_topology
 
     R, T = S.graph['R'], S.graph['T']
     topology = (model_options or {}).get('topology', 'branched')

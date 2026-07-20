@@ -31,7 +31,6 @@ import math
 import networkx as nx
 import pytest
 
-from optiwindnet.crossings import validate_routeset
 from optiwindnet.heuristics import constructor
 from optiwindnet.interarraylib import (
     G_from_S,
@@ -42,6 +41,7 @@ from optiwindnet.interarraylib import (
     rings_from_links,
     split_rings_and_calc_loads,
     terse_links_from_S,
+    validate_routeset,
     validate_topology,
 )
 from optiwindnet.mesh import make_planar_embedding

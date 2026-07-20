@@ -14,7 +14,6 @@ from .geometric import (
     is_same_side,
     polylines_cross_at_point,
 )
-from .interarraylib import S_from_G, calcload, validate_topology
 
 
 @dataclass(frozen=True)
@@ -287,51 +286,33 @@ def gateXing_iter(
                     yield (u, v), (root, n)
 
 
-def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
-    """Validate G's tree topology and absence of crossings.
+def find_routeset_crossings(G: nx.Graph) -> list[tuple[int, int, int, int]]:
+    """Find edge crossings and branch splits in a routeset.
 
-    Check if the routeset represented by G's edges is topologically sound,
-    repects capacity and has no edge crossings nor branch splitting.
+    Each of ``G``'s edges is tested as a straight segment between the prime
+    coordinates of its endpoints, every pair against every other. Edges that
+    merely touch are reported only where the touch splits a branch apart, and
+    each detour node is checked for splitting the branch it routes around.
+
+    Straight segments are what makes this cheaper than
+    :func:`find_geometric_crossings`, which assembles whole polylines and so
+    also reports collinear overlaps and touches. Neither requires ``G`` to be
+    built from ``A`` -- unlike :func:`list_edge_crossings`.
 
     Args:
-      G: graph to evaluate
+      G: routeset graph. Needs graph attributes ``'R'``, ``'T'``, ``'B'`` and
+        ``'VertexC'``; ``'fnT'`` is required iff ``C > 0`` or ``D > 0``.
 
     Returns:
-      list of crossings/splits, G is valid if an empty list is returned
-
-    Example::
-
-      Xings = validate_routeset(G)
-        for u, v, s, t in Xings:
-          if u != v:
-            print(f'{u}–{v} crosses {s}–{t}')
-          else:
-            print(f'detour @ {u} splits {s}–{v}–{t}')
-
+      list of ``(u, v, s, t)``, empty if ``G`` has neither. ``u != v`` means
+      edge ⟨u, v⟩ crosses edge ⟨s, t⟩; ``u == v`` means the detour at ``u``
+      splits the branch between ``s`` and ``t``. See :func:`describe_crossings`
+      to render them.
     """
-    R, T, B = (G.graph[k] for k in 'RTB')
+    T, B = (G.graph[k] for k in 'TB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     VertexC = G.graph['VertexC']
-    if C > 0 or D > 0:
-        fnT = G.graph['fnT']
-    else:
-        fnT = np.arange(T + R)
-        fnT[-R:] = range(-R, 0)
-
-    # TOPOLOGY check: is it a proper tree?
-    calcload(G)
-
-    # TOPOLOGY check: is load within capacity?
-    max_load = G.graph['max_load']
-    capacity = G.graph.get('capacity')
-    if capacity is not None:
-        assert max_load <= capacity, f'κ = {capacity}, max_load= {max_load}'
-    else:
-        capacity = G.graph['capacity'] = max_load
-
-    # TOPOLOGY check: does the routeset keep the shape it declares?
-    violations = validate_topology(S_from_G(G), capacity)
-    assert not violations, '; '.join(violations)
+    fnT = _routeset_fnT(G)
 
     # check edge×edge crossings
     #  Edge = np.array(tuple((fnT[u], fnT[v]) for u, v in G.edges))
@@ -372,11 +353,24 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
         )
         if is_split:
             Xings.append((d_, d_, bunch[insideI[0]], bunch[outsideI[0]]))
-        # assert not is_split, \
-        #     f'Detour around node {d_} splits a branch; ' \
-        #     f'inside: {[bunch[i] for i in insideI]}; ' \
-        #     f'outside: {[bunch[i] for i in outsideI]}'
     return Xings
+
+
+def describe_crossings(Xings: list[tuple[int, int, int, int]]) -> list[str]:
+    """Render the findings of :func:`find_routeset_crossings` as text.
+
+    Args:
+      Xings: ``(u, v, s, t)`` findings.
+
+    Returns:
+      one line per finding, in the order given.
+    """
+    return [
+        f'{u}–{v} crosses {s}–{t}'
+        if u != v
+        else f'detour @ {u} splits the branch between {s} and {t}'
+        for u, v, s, t in Xings
+    ]
 
 
 def _routeset_fnT(G: nx.Graph) -> np.ndarray:
@@ -665,14 +659,16 @@ def find_geometric_crossings(
 ) -> list[dict]:
     """Find route intersections in a routeset using Shapely geometries.
 
-    Geometry-first diagnostic complement to :func:`validate_routeset` and
+    Geometry-first diagnostic complement to :func:`find_routeset_crossings` and
     :func:`list_edge_crossings`. Unlike :func:`list_edge_crossings`, which only
     detects crossings between extended-Delaunay edges (i.e. it requires a
     routeset built from ``A``, OptiWindNet's available-edges graph), this
     routine works on **any** routeset graph that exposes ``VertexC`` (and
     ``fnT`` if it carries contour or detour clones). It can therefore validate
     routes produced by external tools, hand-built test graphs, or post-edited
-    OptiWindNet results — at the cost of a heavier geometry-based check.
+    OptiWindNet results. Unlike :func:`find_routeset_crossings`, which tests
+    each edge as a straight segment, it assembles whole polylines and so also
+    reports collinear overlaps and touches — at the cost of a heavier check.
 
     Polylines are extracted from ``G`` (one per feeder, plus one per
     junction-to-junction link) and translated through ``fnT`` so that contour

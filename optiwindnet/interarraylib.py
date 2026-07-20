@@ -52,6 +52,8 @@ __all__ = (
     'add_link_cosines',
     'make_remap',
     'scaffolded',
+    'validate_topology',
+    'validate_routeset',
 )
 
 _essential_graph_attrs = (
@@ -223,16 +225,31 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 # other way round. Feeders are never reversed, the sink being a root and a root's
 # id negative; links carrying ``load=0`` (a ring's open point) have no current and
 # so no direction to encode.
-def bfs_subtree_loads(G, parent, children, subtree):
+def bfs_subtree_loads(G, parent, children, subtree, visited=None):
     """Recurse down the subtree, updating edge and node attributes.
 
     Meant to be called by :func:`calcload`, but can be used independently (e.g.
     from PathFinder). Nodes must not have a ``'load'`` attribute.
 
+    Args:
+      G: graph to traverse.
+      parent: node the recursion descends from.
+      children: nodes of ``G`` to descend into.
+      subtree: subtree id to assign to every node visited.
+      visited: nodes already claimed by this traversal; pass one set across
+        several calls to keep them from claiming a node twice. A fresh set is
+        used when omitted.
+
     Returns:
       Total number of descendant nodes
+
+    Raises:
+      ValueError: a node is reached twice, so the traversal is not descending a
+        tree -- ``G`` holds a cycle, or two roots reach the same node.
     """
     T = G.graph['T']
+    if visited is None:
+        visited = {parent}
     nodeD = G.nodes[parent]
     default = 1 if parent < T else 0  # load is 1 for wtg nodes
     if not children:
@@ -240,10 +257,13 @@ def bfs_subtree_loads(G, parent, children, subtree):
         return default
     load = nodeD.get('load', default)
     for child in children:
+        if child in visited:
+            raise ValueError(f'node {child} reached twice: not a tree below {parent}')
+        visited.add(child)
         G.nodes[child]['subtree'] = subtree
         # a load=0 link is a ring open point: never traverse across it
         grandchildren = {n for n in G[child] if G[child][n].get('load') != 0} - {parent}
-        childload = bfs_subtree_loads(G, child, grandchildren, subtree)
+        childload = bfs_subtree_loads(G, child, grandchildren, subtree, visited)
         # the child sources the current, the parent sinks it (towards the root)
         G[parent][child].update(load=childload, reverse=child < parent)
         load += childload
@@ -334,17 +354,20 @@ def calcload(G: nx.Graph) -> None:
     subtree = 0
     total_load = 0
     max_load = 0
+    # one set across every root: a node claimed by two roots is reported too
+    visited = set(range(-R, 0))
     for root in range(-R, 0):
         G.nodes[root]['load'] = 0
         for subroot in G[root]:
             # a load=0 feeder (degenerate multi-root ring open point) carries no load
             if G[root][subroot].get('load') == 0:
                 continue
-            _ = bfs_subtree_loads(G, root, [subroot], subtree)
+            _ = bfs_subtree_loads(G, root, [subroot], subtree, visited)
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
         total_load += G.nodes[root]['load']
-    assert total_load == T, f'counted ({total_load}) != nonrootnodes({T})'
+    if total_load != T:
+        raise ValueError(f'root loads sum to {total_load}, expected T = {T}')
     G.graph['has_loads'] = True
     G.graph['max_load'] = max_load
 
@@ -509,9 +532,6 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
     if n_feeders != expected:
         violations.append(f'expected {expected} feeders, got {n_feeders}')
 
-    if not S.graph.get('has_loads'):
-        return violations
-
     for roots, ordered in rings:
         n = len(ordered)
         arm = math.ceil(n / 2)
@@ -535,8 +555,8 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
             )
         # exactly one open point per ring: a real cable with no current through it
         opens = [
-            (u, v)
-            for u, v in zip(ordered, ordered[1:])
+            i
+            for i, (u, v) in enumerate(zip(ordered, ordered[1:]))
             if S.has_edge(u, v) and S[u][v]['load'] == 0
         ]
         if len(opens) != (1 if n > 1 else 0):
@@ -544,6 +564,18 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
                 f'ring at {roots} has {len(opens)} open points, expected '
                 f'{1 if n > 1 else 0}'
             )
+        elif opens:
+            # the open point splits the ring where the node loads say it does:
+            # arm 1 takes `arm` terminals, and an odd-terminal ring has a second
+            # balanced split one link earlier (see :func:`add_ring_to_S`). Both
+            # walk directions are covered: the two indices map onto each other.
+            balanced = {arm - 1} if n % 2 == 0 else {arm - 1, arm - 2}
+            if opens[0] not in balanced:
+                u, v = ordered[opens[0]], ordered[opens[0] + 1]
+                violations.append(
+                    f'ring at {roots} opens between {u} and {v}, which is not '
+                    f'where its node loads split the arms'
+                )
     return violations
 
 
@@ -553,9 +585,14 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     The canonical shape of a solution is a contract of the library, not of the
     test suite, so the invariants live next to the builders that establish them.
 
+    Together these invariants make ``S`` representable: a topology that passes
+    survives a round-trip through its ``terse_links`` encoding unchanged, which
+    is what makes it storable and usable as a MILP warm start.
+
     Args:
       S: topology graph to check. ``S.graph['topology']`` is mandatory: it is
-        one of ``'ringed'``, ``'radial'`` or ``'branched'``.
+        one of ``'ringed'``, ``'radial'`` or ``'branched'``. Loads are
+        mandatory too -- ``S`` without them is reported as a violation.
       capacity: cable capacity; defaults to ``S.graph['capacity']``. Capacity
         checks are skipped when neither is available.
 
@@ -576,15 +613,18 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     topology = S.graph['topology']
 
     # --- universal invariants ------------------------------------------------
-    if S.graph.get('has_loads'):
-        edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
-        max_load = max(edge_loads, default=0)
-        if capacity is not None and max_load > capacity:
-            violations.append(f'κ = {capacity}, max_load = {max_load}')
-        # all terminals are accounted for at the roots
-        total = sum(S.nodes[r]['load'] for r in range(-R, 0))
-        if total != T:
-            violations.append(f'root loads sum to {total}, expected T = {T}')
+    if not S.graph.get('has_loads'):
+        # every producer sets them, and the shape checks below read them: a
+        # topology without loads is unfinished, not merely unannotated
+        return violations + ['topology carries no loads']
+    edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
+    max_load = max(edge_loads, default=0)
+    if capacity is not None and max_load > capacity:
+        violations.append(f'κ = {capacity}, max_load = {max_load}')
+    # all terminals are accounted for at the roots
+    total = sum(S.nodes[r]['load'] for r in range(-R, 0))
+    if total != T:
+        violations.append(f'root loads sum to {total}, expected T = {T}')
 
     # --- topology shape ------------------------------------------------------
     if topology == 'ringed':
@@ -592,12 +632,117 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     elif topology in ('radial', 'branched'):
         if not nx.is_forest(S):
             violations.append(f'{topology} topology must be a forest')
+        # every terminal is served by some root: a forest may leave a terminal
+        # stranded in a component of its own without ever growing a cycle
+        roots = set(range(-R, 0))
+        served = set()
+        for component in nx.connected_components(S):
+            if component & roots:
+                served |= component
+        # the subtraction also covers terminals absent from S altogether
+        stranded = sorted(set(range(T)) - served)
+        if stranded:
+            violations.append(f'terminals not connected to any root: {stranded}')
+        # 'reverse' orients each link towards its root: terse_links and the flow
+        # formulations read it, and a forest stores nothing else to orient by
+        unoriented = sorted(
+            (u, v) for u, v, d in S.edges(data=True) if 'reverse' not in d
+        )
+        if unoriented:
+            violations.append(f'links missing the "reverse" flag: {unoriented}')
         if topology == 'radial':
-            degrees = [S.degree(t) for t in range(T)]
+            # a terminal absent from S has no degree to ask for; it is already
+            # reported as stranded above
+            degrees = [S.degree(t) for t in range(T) if S.has_node(t)]
             if max(degrees, default=0) > 2:
                 violations.append('radial subtrees must be simple paths')
     else:
         raise ValueError(f'unknown topology: {topology!r}')
+
+    return violations
+
+
+def _load_mismatches(G: nx.Graph, Gʹ: nx.Graph) -> list[str]:
+    """Differences between the loads ``G`` carries and those of reference ``Gʹ``.
+
+    ``Gʹ`` is ``G`` with its loads recomputed from the link structure, so any
+    difference is a load ``G`` states but does not have. Subtree ids are left
+    out: they are a labelling whose numbering follows traversal order, not a
+    property of the routeset.
+    """
+    violations = []
+    if G.graph.get('max_load') != Gʹ.graph['max_load']:
+        violations.append(
+            f'max_load is {G.graph.get("max_load")}, links carry {Gʹ.graph["max_load"]}'
+        )
+    for u, v, edgeD in G.edges(data=True):
+        refD = Gʹ[u][v]
+        if edgeD.get('load') != refD['load']:
+            violations.append(
+                f'link {u}–{v} states load {edgeD.get("load")}, carries {refD["load"]}'
+            )
+        # 'reverse' orients the link for terse_links and the flow formulations
+        if edgeD.get('reverse') != refD['reverse']:
+            violations.append(
+                f'link {u}–{v} states reverse={edgeD.get("reverse")}, flows '
+                f'reverse={refD["reverse"]}'
+            )
+    for node, nodeD in G.nodes(data=True):
+        refD = Gʹ.nodes[node]
+        if nodeD.get('load') != refD.get('load'):
+            violations.append(
+                f'node {node} states load {nodeD.get("load")}, carries '
+                f'{refD.get("load")}'
+            )
+    return violations
+
+
+def validate_routeset(G: nx.Graph) -> list[str]:
+    """Check a routeset ``G`` for load, topology and crossing violations.
+
+    Orchestrates the specific checkers: the loads ``G`` carries are compared
+    against those its links imply (:func:`calcload` on a copy, so ``G`` is left
+    untouched), the topology is checked against the shape it declares
+    (:func:`validate_topology`), and the routes are checked for crossings and
+    branch splits (:func:`~optiwindnet.crossings.find_routeset_crossings`).
+
+    Every routeset producer emits loads, so they are verified rather than
+    recomputed: a routeset whose loads disagree with its links is reported, not
+    silently corrected.
+
+    Crossings are geometry alone, so they are reported even when the loads are
+    unusable.
+
+    Args:
+      G: routeset graph to evaluate.
+
+    Returns:
+      list of human-readable violations; ``G`` is valid if it is empty.
+
+    Example::
+
+      violations = validate_routeset(G)
+      if violations:
+          print('\\n'.join(violations))
+
+    """
+    # deferred: this orchestrator is the only part of interarraylib that needs
+    # the crossings machinery, which the other importers of this module do not
+    from .crossings import describe_crossings, find_routeset_crossings
+
+    violations = []
+    if not G.graph.get('has_loads'):
+        violations.append('routeset carries no loads')
+    else:
+        Gʹ = G.copy()
+        try:
+            calcload(Gʹ)
+        except ValueError as exc:
+            violations.append(str(exc))
+        else:
+            violations += _load_mismatches(G, Gʹ)
+            violations += validate_topology(S_from_G(G), G.graph.get('capacity'))
+    violations += describe_crossings(find_routeset_crossings(G))
     return violations
 
 

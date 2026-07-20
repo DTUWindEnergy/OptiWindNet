@@ -35,6 +35,7 @@ from optiwindnet.interarraylib import (
     site_fingerprint,
     terse_links_from_S,
     update_lengths,
+    validate_topology,
 )
 
 from .helpers import assert_graph_equal, tiny_wfn
@@ -470,6 +471,8 @@ def _ringed_S(R, ringspec):
         add_ring_to_S(S, (root, root), ordered, subtree=i, A=None)
     for r in range(-R, 0):
         S.nodes[r]['load'] = sum(S.nodes[n]['load'] for n in S[r])
+    # add_ring_to_S sets every load but leaves the flag to its caller
+    S.graph['has_loads'] = True
     return S
 
 
@@ -542,6 +545,138 @@ def test_terse_links_forest_still_positional():
     assert terse.shape[0] == S.graph['T']
     S2 = S_from_terse_links(terse)
     assert set(map(frozenset, S2.edges())) == set(map(frozenset, S.edges()))
+
+
+# --------------------------------------------------------------------------- #
+# validate_topology
+# --------------------------------------------------------------------------- #
+def _radial_S(T, links):
+    """A radial S over ``links``, with loads and orientation from calcload."""
+    S = nx.Graph(R=1, T=T, topology='radial')
+    S.add_edges_from(links)
+    calcload(S)
+    return S
+
+
+def test_validate_topology_accepts_valid_topologies():
+    assert validate_topology(tiny_wfn().S) == []
+    assert validate_topology(_ringed_S(1, [(-1, [0, 1, 2, 3]), (-1, [4, 5])])) == []
+
+
+def test_validate_topology_requires_loads():
+    """Every producer sets loads, so a topology without them is unfinished.
+
+    The shape checks read the loads, so tolerating their absence would silently
+    skip most of them rather than validate a leaner graph.
+    """
+    S = _radial_S(3, [(-1, 0), (0, 1), (1, 2)])
+    S.graph['has_loads'] = False
+
+    assert validate_topology(S) == ['topology carries no loads']
+
+
+def test_validate_topology_rejects_forest_without_reverse():
+    """The positional forest encoding reads link orientation off ``'reverse'``."""
+    S = _radial_S(3, [(-1, 0), (0, 1), (1, 2)])
+    for _, _, edgeD in S.edges(data=True):
+        del edgeD['reverse']
+
+    violations = validate_topology(S)
+    assert len(violations) == 1
+    assert 'missing the "reverse" flag' in violations[0]
+
+
+def test_validate_topology_rejects_stranded_terminal():
+    """A terminal reaching no root is a broken solution in its own right.
+
+    A stranded terminal sits in its own component without growing a cycle, so
+    neither the forest check nor the simple-path one sees it.
+    """
+    S = nx.Graph(R=1, T=4, topology='radial', has_loads=True, max_load=3)
+    S.add_edge(-1, 0, load=3, reverse=False)
+    S.add_edge(0, 1, load=2, reverse=False)
+    S.add_edge(1, 2, load=1, reverse=False)
+    S.add_node(3)
+    S.nodes[-1]['load'] = 3
+    for terminal, load in ((0, 3), (1, 2), (2, 1)):
+        S.nodes[terminal]['load'] = load
+    assert nx.is_forest(S)
+
+    assert 'terminals not connected to any root: [3]' in validate_topology(S)
+
+
+def test_validate_topology_rejects_terminal_absent_from_S():
+    """A terminal missing from ``S`` altogether is stranded just the same.
+
+    Asking for its degree used to raise instead of reporting.
+    """
+    S = nx.Graph(R=1, T=4, topology='radial', has_loads=True, max_load=3)
+    S.add_edge(-1, 0, load=3, reverse=False)
+    S.add_edge(0, 1, load=2, reverse=False)
+    S.add_edge(1, 2, load=1, reverse=False)
+    S.nodes[-1]['load'] = 3
+    for terminal, load in ((0, 3), (1, 2), (2, 1)):
+        S.nodes[terminal]['load'] = load
+
+    assert 'terminals not connected to any root: [3]' in validate_topology(S)
+
+
+def test_validate_topology_rejects_misplaced_open_point():
+    """A ring's open point must sit where its node loads split the arms.
+
+    Moving it while leaving every node load alone keeps the open-point count,
+    the arm balance and the arm-head totals all intact, so only comparing the
+    link loads against the node loads catches it.
+    """
+    S = _ringed_S(1, [(-1, [0, 1, 2, 3])])
+    assert S[1][2]['load'] == 0
+    S[0][1]['load'], S[1][2]['load'] = 0, 1
+
+    violations = validate_topology(S)
+    assert len(violations) == 1
+    assert 'opens between 0 and 1' in violations[0]
+
+
+def test_validate_topology_reports_every_shape_violation():
+    S = nx.Graph(R=1, T=3, topology='radial', has_loads=True, max_load=3)
+    S.add_edges_from([(-1, 0), (0, 1), (0, 2), (1, 2)], load=1, reverse=False)
+    S.nodes[-1]['load'] = 3
+    for terminal in range(3):
+        S.nodes[terminal]['load'] = 1
+
+    violations = validate_topology(S)
+    assert 'radial topology must be a forest' in violations
+    assert 'radial subtrees must be simple paths' in violations
+
+
+# --------------------------------------------------------------------------- #
+# A topology that validates is representable: it survives its own encoding.
+# The invariants live in validate_topology; this pins that they are sufficient.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    'build',
+    [
+        pytest.param(lambda: tiny_wfn().S, id='radial'),
+        pytest.param(lambda: _ringed_S(1, [(-1, [0, 1, 2, 3])]), id='ring-even'),
+        pytest.param(lambda: _ringed_S(1, [(-1, [0, 1, 2])]), id='ring-odd'),
+        pytest.param(lambda: _ringed_S(1, [(-1, [0, 1]), (-1, [2, 3])]), id='rings'),
+        pytest.param(
+            lambda: _ringed_S(2, [(-1, [0, 1, 2]), (-2, [3, 4])]), id='multi-root'
+        ),
+        pytest.param(lambda: _ringed_S(1, [(-1, [0, 1, 2]), (-1, [3])]), id='stub'),
+    ],
+)
+def test_validated_topology_round_trips_through_terse_links(build):
+    S = build()
+    assert validate_topology(S) == []
+
+    terse = terse_links_from_S(S)
+    S_rt = S_from_terse_links(terse, R=S.graph['R'], T=S.graph['T'])
+
+    assert {frozenset(link) for link in S_rt.edges()} == {
+        frozenset(link) for link in S.edges()
+    }
+    assert all(S_rt[u][v]['load'] == d['load'] for u, v, d in S.edges(data=True))
 
 
 def test_as_single_root():
