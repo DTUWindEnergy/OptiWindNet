@@ -384,3 +384,75 @@ def test_feeder_and_load_bounds_warns_when_balance_is_unenforceable(
     with caplog.at_level(logging.WARNING, logger=core.__name__):
         assert _bounds(12, 5, feeder_limit) == (3, feeders_ub, None, None)
     assert 'will not enforce balanced subtrees' in caplog.text
+
+
+# --------------------------------------------------------------------------- #
+# ModelOptions is the contract: coerced on the way in, frozen thereafter
+# --------------------------------------------------------------------------- #
+def test_model_options_coerces_strings_to_enums():
+    opts = ModelOptions(topology='ringed', feeder_limit='minimum')
+    assert opts['topology'] is core.Topology.RINGED
+    assert opts['feeder_limit'] is core.FeederLimit.MINIMUM
+
+
+def test_model_options_materializes_every_default():
+    assert set(ModelOptions()) == {
+        'topology',
+        'feeder_route',
+        'feeder_limit',
+        'balanced',
+        'max_feeders',
+    }
+
+
+@pytest.mark.parametrize(
+    ('kwargs', 'expected'),
+    [
+        (dict(max_feeders='3'), 'max_feeders must be int'),
+        (dict(balanced='yes'), 'balanced must be bool'),
+    ],
+)
+def test_model_options_rejects_wrong_scalar_type(kwargs, expected):
+    """A str for an int option is a type error, not an enum lookup."""
+    with pytest.raises(TypeError, match=expected):
+        ModelOptions(**kwargs)
+
+
+@pytest.mark.parametrize(
+    'mutate',
+    [
+        lambda o: o.__setitem__('topology', 'ringed'),
+        lambda o: o.__delitem__('topology'),
+        lambda o: o.update(topology='ringed'),
+        lambda o: o.pop('topology'),
+        lambda o: o.popitem(),
+        lambda o: o.setdefault('topology', 'ringed'),
+        lambda o: o.clear(),
+    ],
+)
+def test_model_options_is_immutable(mutate):
+    """Mutation would bypass __init__'s coercion, so it is refused."""
+    opts = ModelOptions()
+    with pytest.raises(TypeError, match='immutable'):
+        mutate(opts)
+    assert opts['topology'] is core.Topology.BRANCHED
+
+
+def test_set_problem_coerces_a_plain_mapping(P_A_toy):
+    """A plain dict builds the same model as the ModelOptions equivalent.
+
+    Uncoerced, ``{'topology': 'ringed'}`` compares false against
+    ``Topology.RINGED`` and silently yields a *branched* model -- one with no
+    root-to-terminal ring variables at all.
+    """
+    P, A = P_A_toy
+
+    def ring_var_count(model_options):
+        solver = solver_factory('highs')
+        solver.set_problem(P, A, capacity=_CAPACITY, model_options=model_options)
+        assert isinstance(solver.model_options, ModelOptions)
+        return sum(1 for u, _ in solver.metadata.linkset if u < 0)
+
+    from_mapping = ring_var_count({'topology': 'ringed'})
+    from_options = ring_var_count(ModelOptions(topology='ringed'))
+    assert from_mapping == from_options > 0

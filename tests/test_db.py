@@ -1,3 +1,4 @@
+import networkx as nx
 import numpy as np
 import pytest
 
@@ -14,8 +15,11 @@ from optiwindnet.db import (
 from optiwindnet.db.storage import (
     add_if_absent,
     get_machine_pk,
+    infer_topology,
     packnodes,
+    untersify_to_G,
 )
+from optiwindnet.interarraylib import S_from_G, validate_topology
 
 from .helpers import assert_graph_equal, tiny_wfn
 
@@ -238,3 +242,122 @@ def test_G_from_routeset_detours(tmp_path):
         'num_diagonals',
     }
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
+
+
+def _bare_G(**graph_attrs):
+    """A 3-terminal, 1-root routeset graph carrying only record metadata."""
+    return nx.Graph(
+        R=1,
+        T=3,
+        B=0,
+        capacity=3,
+        VertexC=np.array([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (0.0, 1.0)]),
+        **graph_attrs,
+    )
+
+
+_FOREST = [-1, 0, 1]  # positional: a chain -1--0--1--2
+_STUBS = [-1, -1, -1]  # positional: every terminal straight to the root
+_RINGED = [-1, 0, 1, 2]  # route sequence: any length other than the positional one
+
+
+@pytest.mark.parametrize(
+    'terse, attrs, expected',
+    (
+        # the encoding settles RINGED on its own, whatever the metadata says
+        (_RINGED, {}, 'ringed'),
+        (_RINGED, {'creator': 'baselines.hgs'}, 'ringed'),
+        # MILP records name their topology
+        (_FOREST, {'method_options': {'topology': 'radial'}}, 'radial'),
+        (_FOREST, {'method_options': {'topology': 'branched'}}, 'branched'),
+        # HGS/LKH solve a CVRP: their routes are paths
+        (_FOREST, {'creator': 'baselines.hgs'}, 'radial'),
+        (_FOREST, {'creator': 'baselines.lkh'}, 'radial'),
+        # the constructor names its method instead
+        (
+            _FOREST,
+            {'creator': 'constructor', 'method_options': {'method': 'radial_EW'}},
+            'radial',
+        ),
+        (
+            _FOREST,
+            {'creator': 'constructor', 'method_options': {'method': 'esau_williams'}},
+            'branched',
+        ),
+        # nothing to go on: the weakest claim any forest satisfies
+        (_FOREST, {}, 'branched'),
+    ),
+)
+def test_untersify_infers_topology_of_records_without_one(terse, attrs, expected):
+    """Records predating 'topology' get one inferred from encoding and metadata.
+
+    ``validate_topology`` requires the attribute, so a graph read back from an
+    older row must declare a shape, and must satisfy the one it declares.
+    """
+    G = _bare_G(**attrs)
+    untersify_to_G(G, terse=terse, clone2prime=[])
+
+    assert G.graph['topology'] == expected
+    assert validate_topology(S_from_G(G)) == []
+
+
+def test_infer_topology_trusts_a_recorded_ringed_over_the_encoding():
+    """An all-stub RINGED solution is a forest, so it is stored positionally.
+
+    A ring of one terminal has a feeder and no cycle-closing link, so a solution
+    made only of stubs has no cycles at all. The encoding cannot tell it apart
+    from a forest; the recorded topology can, and it is right.
+    """
+    G = _bare_G(method_options={'topology': 'ringed'})
+    assert infer_topology(G, _STUBS) == 'ringed'
+
+    untersify_to_G(G, terse=_STUBS, clone2prime=[])
+    # and the label holds up: every terminal is its own single-terminal ring
+    assert validate_topology(S_from_G(G)) == []
+
+
+def test_a_wrongly_recorded_ringed_is_caught_by_validation():
+    """Trusting the record moves the objection to where the diagnosis is.
+
+    Inference reports what the record claims; ``validate_topology`` reads the
+    whole graph and rejects the claim, which the encoding length could not do.
+    """
+    G = _bare_G(method_options={'topology': 'ringed'})
+    assert infer_topology(G, _FOREST) == 'ringed'
+
+    untersify_to_G(G, terse=_FOREST, clone2prime=[])
+    violations = validate_topology(S_from_G(G))
+    assert violations, 'a path with one feeder is not a ring'
+
+
+def test_inference_recovers_the_topology_of_a_stripped_record(tmp_path):
+    """A real record with 'topology' removed reads back with the shape it had.
+
+    Pins that ``G_from_routeset`` populates the metadata inference reads
+    (``creator``, ``method_options``) before it decodes the edges.
+    """
+    dbfile = tmp_path / 'db_test.sqlite'
+
+    with database_connection(dbfile, create_db=True):
+        get_machine_pk()
+        G = tiny_wfn(router=HGSRouter(time_limit=0.1)).G
+        rs = RouteSet.get_by_id(store_G(G))
+        assert 'topology' in rs.misc, 'current records store it; older ones did not'
+
+        misc = dict(rs.misc)
+        del misc['topology']
+        rs.misc = misc
+        rs.save()
+
+        G_rs = G_from_routeset(rs)
+
+    assert G_rs.graph['creator'] == 'baselines.hgs'
+    assert G_rs.graph['topology'] == G.graph['topology']
+
+
+def test_untersify_keeps_a_stored_topology():
+    """A stored 'topology' is authoritative -- inference never overrides it."""
+    G = _bare_G(topology='radial', creator='constructor')
+    untersify_to_G(G, terse=_FOREST, clone2prime=[])
+
+    assert G.graph['topology'] == 'radial'

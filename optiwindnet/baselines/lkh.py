@@ -12,6 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from itertools import chain
 from pathlib import Path
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -58,6 +59,19 @@ def _prune_links(A: nx.Graph, max_blockable_per_link: int):
     for link in unfeas_links:
         if link in diagonals:
             del diagonals[link]
+
+
+def _extrema(pattern: str, line: str) -> tuple[float, ...] | None:
+    """Parse the (min, max) pair out of one of LKH's summary lines.
+
+    Returns ``None`` if the line does not match, since these per-cluster stats
+    are optional and a format change should not abort an otherwise good solve.
+    """
+    match = re.match(pattern, line)
+    if match is None:
+        warn('Could not parse LKH summary line: %s', line)
+        return None
+    return tuple(float(v) for v in match.groups())
 
 
 def _solution_time(log, objective) -> float:
@@ -362,7 +376,7 @@ def _do_lkh(
             routes = []
 
     log = result.stdout.decode('utf8')
-    output = dict(
+    output: dict[str, Any] = dict(
         routes=routes,
         penalty=int(penalty),
         minimum=minimum,
@@ -383,38 +397,23 @@ def _do_lkh(
     tail = result.stdout[result.stdout.rfind(b'Successes/') :].decode()
     entries = iter(tail.splitlines())
     next(entries)  # skip successes line
-    output['cost_extrema'] = tuple(
-        float(v)
-        for v in re.match(
-            r'Cost\.min = (-?\d+), Cost\.avg = -?\d+\.?\d*,'
-            r' Cost\.max = -?(\d+)',
-            next(entries),
-        ).groups()
+    output['cost_extrema'] = _extrema(
+        r'Cost\.min = (-?\d+), Cost\.avg = -?\d+\.?\d*, Cost\.max = -?(\d+)',
+        next(entries),
     )
     next(entries)  # skip gap line
-    output['penalty_extrema'] = tuple(
-        float(v)
-        for v in re.match(
-            r'Penalty\.min = (\d+), Penalty\.avg = \d+\.?\d*,'
-            r' Penalty\.max = (\d+)',
-            next(entries),
-        ).groups()
+    output['penalty_extrema'] = _extrema(
+        r'Penalty\.min = (\d+), Penalty\.avg = \d+\.?\d*, Penalty\.max = (\d+)',
+        next(entries),
     )
-    output['trials_extrema'] = tuple(
-        float(v)
-        for v in re.match(
-            r'Trials\.min = (\d+), Trials\.avg = \d+\.?\d*,'
-            r' Trials\.max = (\d+)',
-            next(entries),
-        ).groups()
+    output['trials_extrema'] = _extrema(
+        r'Trials\.min = (\d+), Trials\.avg = \d+\.?\d*, Trials\.max = (\d+)',
+        next(entries),
     )
-    output['runtime_extrema'] = tuple(
-        float(v)
-        for v in re.match(
-            r'Time\.min = (\d+\.?\d*) sec., Time\.avg = \d+\.?\d* sec.,'
-            r' Time\.max = (\d+\.?\d*) sec.',
-            next(entries),
-        ).groups()
+    output['runtime_extrema'] = _extrema(
+        r'Time\.min = (\d+\.?\d*) sec., Time\.avg = \d+\.?\d* sec.,'
+        r' Time\.max = (\d+\.?\d*) sec.',
+        next(entries),
     )
     return output
 

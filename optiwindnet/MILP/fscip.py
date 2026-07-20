@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from itertools import chain
 from typing import Any
 
@@ -20,7 +21,6 @@ from ._core import (
     PoolHandler,
     SolutionInfo,
     Solver,
-    Topology,
     physical_core_count,
 )
 from .scip import make_min_length_model, warmup_model
@@ -59,11 +59,11 @@ class SolverFSCIP(Solver, PoolHandler):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
-        self.model_options = model_options
+        model_options = self.model_options = ModelOptions(**model_options)
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
         self.var_from_name = {
             var.name: var
@@ -267,13 +267,7 @@ class SolverFSCIP(Solver, PoolHandler):
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
             S = self._topology_from_mip_pool()
-            G = PathFinder(
-                G_from_S(S, A),
-                P,
-                A,
-                branched=model_options['topology'] is Topology.BRANCHED,
-                ringed=model_options['topology'] is Topology.RINGED,
-            ).create_detours()
+            G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
             S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())

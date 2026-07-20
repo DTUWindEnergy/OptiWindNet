@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
+from collections.abc import Mapping
 from datetime import timedelta
 from itertools import chain
 from typing import Any
@@ -26,6 +27,7 @@ from ._core import (
     feeder_and_load_bounds,
     physical_core_count,
     ringed_warmstart_values,
+    warmstart_topology,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -103,11 +105,11 @@ class SolverORTools(Solver, PoolHandler):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
-        self.model_options = model_options
+        model_options = self.model_options = ModelOptions(**model_options)
         model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
         self.model, self.metadata = model, metadata
         if warmstart is not None:
@@ -213,13 +215,7 @@ class SolverORTools(Solver, PoolHandler):
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
             S = self._topology_from_mip_pool()
-            G = PathFinder(
-                G_from_S(S, A),
-                P,
-                A,
-                branched=model_options['topology'] is Topology.BRANCHED,
-                ringed=model_options['topology'] is Topology.RINGED,
-            ).create_detours()
+            G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
             S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
@@ -598,7 +594,8 @@ def warmup_model(
       OWNWarmupFailed: if some link in S is not available in model.
     """
     R, T = metadata.R, metadata.T
-    if metadata.model_options.get('topology') is Topology.RINGED:
+    topology = warmstart_topology(metadata, S)
+    if topology is Topology.RINGED:
         # A ring is a single directed chain per the flow formulation; derive the
         # variable values from the (split) ringed solution graph directly.
         link_vals, flow_vals = ringed_warmstart_values(metadata, S)

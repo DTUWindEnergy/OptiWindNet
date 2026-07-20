@@ -380,6 +380,8 @@ def add_ring_to_S(
       A: optional available-links graph, used to pick the longer split edge on
         odd-node rings.
     """
+    # the builder declares the shape it establishes
+    S.graph['topology'] = 'ringed'
     r1, r2 = (root[0], root[1]) if isinstance(root, (tuple, list)) else (root, root)
     n = len(ordered)
     if n == 1:
@@ -476,6 +478,128 @@ def rings_from_links(
             root_spec = (r, r2) if r != r2 else r
             rings.append((root_spec, chain_))
     return rings
+
+
+def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
+    """Violations of the canonical RINGED shape (see :func:`add_ring_to_S`)."""
+    violations = []
+    R, T = S.graph['R'], S.graph['T']
+
+    # topology-graph ring edges are pure geometry: they carry no edge 'kind'
+    kinds = {d.get('kind') for _, _, d in S.edges(data=True)} - {None}
+    if kinds:
+        violations.append(
+            f'ring edges must not carry a kind, got {sorted(map(str, kinds))}'
+        )
+
+    rings = rings_from_links(list(S.edges()), R)
+
+    # the rings partition the terminal set: every terminal in exactly one ring
+    covered = sorted(t for _, ordered in rings for t in ordered)
+    if covered != list(range(T)):
+        violations.append('rings must partition the terminals')
+
+    # two feeders per ring, except a lone terminal hanging off a single root
+    n_feeders = sum(1 for u, v in S.edges if u < 0 or v < 0)
+    expected = sum(
+        1 if len(ordered) == 1 and isinstance(rs, int) else 2 for rs, ordered in rings
+    )
+    if n_feeders != expected:
+        violations.append(f'expected {expected} feeders, got {n_feeders}')
+
+    if not S.graph.get('has_loads'):
+        return violations
+
+    for root_spec, ordered in rings:
+        n = len(ordered)
+        arm = math.ceil(n / 2)
+        # a ring holds up to 2*capacity terminals (two arms of ceil(n / 2))
+        if capacity is not None and arm > capacity:
+            violations.append(
+                f'ring at {root_spec} needs arms of {arm} > κ = {capacity}'
+            )
+        # the heaviest node of a ring carries a full arm: the arms are balanced
+        heaviest = max(S.nodes[t]['load'] for t in ordered)
+        if heaviest != arm:
+            violations.append(
+                f'ring at {root_spec} has unbalanced arms: heaviest node carries '
+                f'{heaviest}, balanced arms would carry {arm}'
+            )
+        # the two arm-head (feeder) terminals carry the whole ring between them
+        heads = S.nodes[ordered[0]]['load'] + (
+            S.nodes[ordered[-1]]['load'] if n > 1 else 0
+        )
+        if heads != n:
+            violations.append(
+                f'ring at {root_spec} spans {n} terminals, but its arm heads '
+                f'carry {heads}'
+            )
+        # exactly one open point per ring: a real cable with no current through it
+        opens = [
+            (u, v)
+            for u, v in zip(ordered, ordered[1:])
+            if S.has_edge(u, v) and S[u][v]['load'] == 0
+        ]
+        if len(opens) != (1 if n > 1 else 0):
+            violations.append(
+                f'ring at {root_spec} has {len(opens)} open points, expected '
+                f'{1 if n > 1 else 0}'
+            )
+    return violations
+
+
+def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
+    """Check ``S`` against the invariants of the topology it declares.
+
+    The canonical shape of a solution is a contract of the library, not of the
+    test suite, so the invariants live next to the builders that establish them.
+
+    Args:
+      S: topology graph to check. ``S.graph['topology']`` is mandatory: it is
+        one of ``'ringed'``, ``'radial'`` or ``'branched'``.
+      capacity: cable capacity; defaults to ``S.graph['capacity']``. Capacity
+        checks are skipped when neither is available.
+
+    Returns:
+      list of human-readable violations; ``S`` is valid if it is empty.
+
+    Example::
+
+      violations = validate_topology(S, capacity)
+      if violations:
+          print('\\n'.join(violations))
+
+    """
+    violations = []
+    R, T = S.graph['R'], S.graph['T']
+    if capacity is None:
+        capacity = S.graph.get('capacity')
+    topology = S.graph['topology']
+
+    # --- universal invariants ------------------------------------------------
+    if S.graph.get('has_loads'):
+        edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
+        max_load = max(edge_loads, default=0)
+        if capacity is not None and max_load > capacity:
+            violations.append(f'κ = {capacity}, max_load = {max_load}')
+        # all terminals are accounted for at the roots
+        total = sum(S.nodes[r]['load'] for r in range(-R, 0))
+        if total != T:
+            violations.append(f'root loads sum to {total}, expected T = {T}')
+
+    # --- topology shape ------------------------------------------------------
+    if topology == 'ringed':
+        violations += _validate_ringed(S, capacity)
+    elif topology in ('radial', 'branched'):
+        if not nx.is_forest(S):
+            violations.append(f'{topology} topology must be a forest')
+        if topology == 'radial':
+            degrees = [S.degree(t) for t in range(T)]
+            if max(degrees, default=0) > 2:
+                violations.append('radial subtrees must be simple paths')
+    else:
+        raise ValueError(f'unknown topology: {topology!r}')
+    return violations
 
 
 def directed_links(
@@ -984,9 +1108,7 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
     method_options = G.graph.get('method_options')
     if method_options is not None:
         S.graph['method_options'] = method_options
-    topology = G.graph.get('topology')
-    if topology is not None:
-        S.graph['topology'] = topology
+    S.graph['topology'] = G.graph['topology']
     if has_loads:
         S.graph['has_loads'] = True
     else:
@@ -1132,6 +1254,9 @@ def S_from_terse_links(terse_links, R=None, T=None, **kwargs):
         S = nx.Graph(T=T, R=R, **kwargs)
         S.add_edges_from(tuple(zip(range(T), terse_links.tolist())))
         calcload(S)
+        # the encoding does not distinguish radial from branched: claim the
+        # weaker of the two unless the caller knows better
+        S.graph.setdefault('topology', 'branched')
         if 'capacity' not in kwargs:
             S.graph['capacity'] = S.graph['max_load']
         return S

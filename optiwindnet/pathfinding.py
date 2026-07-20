@@ -6,7 +6,9 @@ import logging
 import math
 from bisect import bisect_left
 from collections import defaultdict, namedtuple
+from collections.abc import Generator
 from itertools import chain
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -24,7 +26,7 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
-PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn'.split())
+PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn')
 # Terminology used by PathFinder internals:
 #   wall: one non-traversable mesh segment; route walls are contour edges of
 #     the route, constraint walls are planar constraint edges (borders and
@@ -248,13 +250,15 @@ class PathFinder:
     Only edges in graph attribute ``'tentative'`` or, lacking that, edges with the
     attribute ``'kind'`` with value ``'tentative'`` are checked for crossings.
 
+    Feeders are rerouted within the topology ``Gʹ`` declares in its mandatory
+    ``'topology'`` graph attribute, which decides where a feeder may re-hook:
+    ``'branched'`` allows any terminal of the subtree, ``'radial'`` only its
+    head or tail, ``'ringed'`` only the current subroot.
+
     Args:
       G: the route set without detours
       P: the planar embedding associated with A
       A: the available links graph
-      branched: if True, any terminal can be linked to root, else only subtrees'
-        heads/tails
-      ringed: if True, only the node the tentative feeder connects to is considered
       iterations_limit: maximum number of steps in the path-finding process
       traversals_limit: maximum number of times a single portal may be traversed
       bad_streak_limit: limit on how many steps in a row without finding an improved
@@ -280,8 +284,6 @@ class PathFinder:
         planar: nx.PlanarEmbedding,
         A: nx.Graph,
         *,
-        branched: bool = True,
-        ringed: bool = False,
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
         bad_streak_limit: int = 5,
@@ -599,8 +601,7 @@ class PathFinder:
             Rank if Rank is not None else rankdata(d2roots, method='dense', axis=0)
         )
         self.predetour_length = Gʹ.size(weight='length')
-        self.branched = branched
-        self.ringed = ringed
+        self.topology = Gʹ.graph['topology']
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.stunts_primes = A.graph.get('stunts_primes')
@@ -632,7 +633,9 @@ class PathFinder:
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
 
         self._precompute_sector_lookup(fences)
-        self.best_pn_by_pair_id = [None] * len(self.pair_id_by_prime_sector)
+        self.best_pn_by_pair_id: list[int | None] = [None] * len(
+            self.pair_id_by_prime_sector
+        )
 
         # Build the chain topology: one Chain per route fence, with
         # chain_access mapping
@@ -1680,7 +1683,11 @@ class PathFinder:
         _funnel: list[int],
         wedge_end: list[int],
         bad_streak: int = 0,
-    ):
+    ) -> Generator[Any, Any, None]:
+        # The yielded shape depends on the protocol phase, so it cannot be typed
+        # more precisely than Any: a bare `yield` asks for the next
+        # (portal, side); sending None yields the 6-tuple funnel state; sending
+        # a (portal, side) yields (prio, is_promising).
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
         #     - _node: the index it contains maps to a coordinate in VertexC
@@ -2122,12 +2129,12 @@ class PathFinder:
             subtree_id = subtree_id_from_n[n]
             subtree = subtree_from_subtree_id[subtree_id]
             subtree_load = G.nodes[n]['load']
-            # set of nodes to examine is different depending on `branched`
+            # where a feeder may re-hook depends on the declared topology
             hook_candidates = (
                 [n]
-                if self.ringed
+                if self.topology == 'ringed'
                 else [n for n in subtree if n < T]
-                if self.branched
+                if self.topology == 'branched'
                 else [n, next(h for h in subtree if len(G._adj[h]) == 1)]  # type: ignore
             )
             debug('hook_candidates: %s', hook_candidates)

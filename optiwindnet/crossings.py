@@ -14,7 +14,7 @@ from .geometric import (
     is_same_side,
     polylines_cross_at_point,
 )
-from .interarraylib import calcload
+from .interarraylib import S_from_G, calcload, validate_topology
 
 
 @dataclass(frozen=True)
@@ -328,6 +328,10 @@ def validate_routeset(G: nx.Graph) -> list[tuple[int, int, int, int]]:
         assert max_load <= capacity, f'κ = {capacity}, max_load= {max_load}'
     else:
         capacity = G.graph['capacity'] = max_load
+
+    # TOPOLOGY check: does the routeset keep the shape it declares?
+    violations = validate_topology(S_from_G(G), capacity)
+    assert not violations, '; '.join(violations)
 
     # check edge×edge crossings
     #  Edge = np.array(tuple((fnT[u], fnT[v]) for u, v in G.edges))

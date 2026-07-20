@@ -13,7 +13,7 @@ from inspect import cleandoc
 from itertools import chain
 from pathlib import Path
 from textwrap import indent
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 from makefun import with_signature
@@ -223,28 +223,70 @@ class ModelOptions(dict):
         ),
     )
 
-    @with_signature(
-        '__init__(self, *, '
-        + ', '.join(
-            chain(
-                (f'{k}: {v.__name__} = "{v.DEFAULT.value}"' for k, v in hints.items()),
-                (
-                    f'{name}: {kind.__name__} = {default}'
-                    for name, (kind, default, _) in simple.items()
-                ),
-            )
-        )
-        + ')'
-    )
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            if isinstance(v, str):
-                kwargs[k] = self.hints[k](v)
-            else:
-                if k not in self.simple:
-                    raise ValueError(f'Unknown argument: {k}')
+    # `with_signature` rewrites `__init__` at import time so that `help()`,
+    # `inspect.signature` and IDE introspection show the real options. Type
+    # checkers cannot follow that, so the same signature is declared statically
+    # under TYPE_CHECKING -- keep the two in sync (they are both derived from
+    # `hints` and `simple`).
+    if TYPE_CHECKING:
 
-        super().__init__(kwargs)
+        def __init__(
+            self,
+            *,
+            topology: Topology | str = ...,
+            feeder_route: FeederRoute | str = ...,
+            feeder_limit: FeederLimit | str = ...,
+            balanced: bool = ...,
+            max_feeders: int = ...,
+        ) -> None: ...
+    else:
+
+        @with_signature(
+            '__init__(self, *, '
+            + ', '.join(
+                chain(
+                    (
+                        f'{k}: {v.__name__} = "{v.DEFAULT.value}"'
+                        for k, v in hints.items()
+                    ),
+                    (
+                        f'{name}: {kind.__name__} = {default}'
+                        for name, (kind, default, _) in simple.items()
+                    ),
+                )
+            )
+            + ')'
+        )
+        def __init__(self, **kwargs):
+            # dispatch on the key, not on the value's type: a str passed for an
+            # int option is a type error, not an enum to look up
+            for k, v in kwargs.items():
+                kind = self.hints.get(k)
+                if kind is not None:
+                    kwargs[k] = kind(v)
+                else:
+                    expected = self.simple[k][0]
+                    if not isinstance(v, expected):
+                        raise TypeError(
+                            f'{k} must be {expected.__name__}, got '
+                            f'{type(v).__name__}: {v!r}'
+                        )
+
+            super().__init__(kwargs)
+
+    # Options are a value object: every value is coerced and every key is
+    # present once __init__ returns, and the whole library reads them on that
+    # basis (`is Topology.RINGED` is false for a plain 'ringed' str). Mutating
+    # the mapping afterwards would bypass the coercion, so it is refused --
+    # build a new instance instead.
+    def _immutable(self, *args, **kwargs):
+        raise TypeError(
+            f'{type(self).__name__} is immutable: construct a new one instead of '
+            'modifying it in place'
+        )
+
+    __setitem__ = __delitem__ = _immutable
+    clear = pop = popitem = setdefault = update = _immutable
 
     @classmethod
     def help(cls):
@@ -289,6 +331,55 @@ class SolutionInfo:
     termination: str
 
 
+#: topologies of ``S`` that can seed a model of each topology. A radial
+#: solution is a valid warmstart for a branched model, but not the reverse;
+#: ringed is incomparable with both (a ringed model requires two feeders per
+#: subtree, which no radial or branched solution provides).
+_WARMSTART_OK: Mapping[Topology, frozenset[Topology]] = {
+    Topology.RADIAL: frozenset({Topology.RADIAL}),
+    Topology.BRANCHED: frozenset({Topology.RADIAL, Topology.BRANCHED}),
+    Topology.RINGED: frozenset({Topology.RINGED}),
+}
+
+
+def warmstart_topology_mismatch(model_topology: Topology, S: nx.Graph) -> str:
+    """Report whether ``S``'s topology can seed a ``model_topology`` model.
+
+    The topology of ``S`` is read from ``S.graph['topology']``, never inferred
+    from its structure.
+
+    Returns:
+      Human-readable incompatibility, or ``''`` if ``S`` is a valid warmstart.
+    """
+    S_topology = Topology(S.graph['topology'])
+    if S_topology in _WARMSTART_OK[model_topology]:
+        return ''
+    return (
+        f'{S_topology} network incompatible with model option: '
+        f'topology="{model_topology}"'
+    )
+
+
+def warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> Topology:
+    """Topology of the model ``metadata`` describes, checked against ``S``'s.
+
+    Every backend's ``warmup_model()`` opens with this: the topology decides how
+    the warmstart is mapped onto the model's variables, and ``S`` must be a
+    valid seed for it.
+
+    Returns:
+      The model's topology.
+
+    Raises:
+        OWNWarmupFailed: ``S`` is not a valid warmstart for the model.
+    """
+    model_topology = metadata.model_options['topology']
+    mismatch = warmstart_topology_mismatch(model_topology, S)
+    if mismatch:
+        raise OWNWarmupFailed(f'warmup_model() failed: {mismatch}')
+    return model_topology
+
+
 def ringed_warmstart_values(
     metadata: ModelMetadata, S: nx.Graph
 ) -> tuple[dict[_Link, int], dict[_Link, int]]:
@@ -304,16 +395,15 @@ def ringed_warmstart_values(
     ``metadata.link_`` / ``metadata.flow_`` keys (inactive variables set to 0).
 
     Raises:
-        OWNWarmupFailed: a ring uses a terminal-terminal link absent from the model.
+        OWNWarmupFailed: a ring uses a link absent from the model.
     """
     link_vals: dict[_Link, int] = dict.fromkeys(metadata.link_, 0)
     flow_vals: dict[_Link, int] = dict.fromkeys(metadata.flow_, 0)
     for source, sink, flow in directed_links(S, radialize_rings=True):
         key = (source, sink)
-        if source >= 0 and sink >= 0 and key not in link_vals:
-            # only terminal-terminal links have to be in the model: a feeder is
-            # there by construction, in both its flow-carrying t→r and its
-            # flowless r→t (a ring's closing feeder) direction.
+        if key not in link_vals:
+            # a ring's closing feeder (r→t) is only a model variable under
+            # Topology.RINGED; t→r feeders are there by construction.
             raise OWNWarmupFailed(f'warmup_model() failed: model lacks ring link {key}')
         link_vals[key] = 1
         if key in flow_vals:
@@ -349,7 +439,7 @@ class Solver(abc.ABC):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         """Define the problem geometry, available edges and tree properties
@@ -426,7 +516,7 @@ class Solver(abc.ABC):
           Graph topology ``S`` from the solution.
         """
         metadata = self.metadata
-        topology = Topology[metadata.model_options.get('topology', 'BRANCHED').upper()]
+        topology = metadata.model_options['topology']
         R = metadata.R
         S = nx.Graph(R=R, T=metadata.T)
         # ensure roots are added, even if some are not connected
@@ -507,8 +597,7 @@ class PoolHandler(abc.ABC):
         """Go through the solver's solutions checking which has the shortest length
         after applying the detours with PathFinder."""
         Λ = float('inf')
-        branched = self.model_options['topology'] is Topology.BRANCHED
-        ringed = self.model_options['topology'] is Topology.RINGED
+        S = G = None
         num_solutions = self.num_solutions
         info(f'Solution pool has {num_solutions} solutions.')
         for i in range(num_solutions):
@@ -519,9 +608,7 @@ class PoolHandler(abc.ABC):
                 )
                 break
             Sʹ = self._topology_from_mip_pool()
-            Gʹ = PathFinder(
-                G_from_S(Sʹ, A), planar=P, A=A, branched=branched, ringed=ringed
-            ).create_detours()
+            Gʹ = PathFinder(G_from_S(Sʹ, A), planar=P, A=A).create_detours()
             Λʹ = Gʹ.size(weight='length')
             if Λʹ < Λ:
                 S, G, Λ = Sʹ, Gʹ, Λʹ
@@ -529,5 +616,7 @@ class PoolHandler(abc.ABC):
                 info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
             else:
                 info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')
+        if S is None or G is None:
+            raise ValueError('Solution pool has no usable solution.')
         G.graph['pool_count'] = num_solutions
         return S, G

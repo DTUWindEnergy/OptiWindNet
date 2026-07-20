@@ -5,9 +5,11 @@ import logging
 import math
 import re
 from collections import Counter, namedtuple
+from collections.abc import Iterator
 from importlib.resources import files
 from itertools import chain
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import esy.osm.pbf
 import networkx as nx
@@ -32,7 +34,7 @@ _coord_lbraces = '(['
 _coord_rbraces = ')]'
 
 
-def _get_entries(entries):
+def _get_entries(entries) -> Iterator[tuple[str | None, str, str]]:
     if isinstance(entries, str):
         for entry in entries.splitlines():
             *opt, lat, lon = re.split(_coord_sep, entry)
@@ -568,7 +570,22 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     return L
 
 
-def load_repository(path: Path | str | None = None) -> tuple[nx.Graph, ...]:
+if TYPE_CHECKING:
+
+    class LocationsRepository(tuple[nx.Graph, ...]):
+        """Locations addressable both by position and by handle.
+
+        The real object is a ``namedtuple`` whose field names come from the
+        loaded files, so they are unknown until run time; this declaration
+        lets type checkers accept any handle as an attribute.
+        """
+
+        def __getattr__(self, handle: str) -> nx.Graph: ...
+else:
+    LocationsRepository = tuple
+
+
+def load_repository(path: Path | str | None = None) -> 'LocationsRepository':
     """Load locations from files of known formats into a namedtuple.
 
     Each file (.yaml or .osm.pbf) is translated into a location graph and
@@ -583,10 +600,12 @@ def load_repository(path: Path | str | None = None) -> tuple[nx.Graph, ...]:
       Named tuple which has the location handles as attribute identifiers.
     """
     if path is None:
-        path = files(__package__) / 'data'
+        # the bundled data always lives on the filesystem
+        root = Path(str(files(__package__) / 'data'))
     else:
-        path = Path(path)
-    locations = [L_from_yaml(file) for file in path.glob('*.yaml')]
-    locations.extend(L_from_pbf(file) for file in path.glob('*.osm.pbf'))
+        root = Path(path)
+    locations = [L_from_yaml(file) for file in root.glob('*.yaml')]
+    locations.extend(L_from_pbf(file) for file in root.glob('*.osm.pbf'))
     handles = tuple(L.graph['handle'] for L in locations)
-    return namedtuple('Locations', handles)(*locations)
+    # field names are only known at run time -- see LocationsRepository
+    return namedtuple('Locations', handles)(*locations)  # pyrefly: ignore

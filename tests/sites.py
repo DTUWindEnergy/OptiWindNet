@@ -11,7 +11,7 @@ option sweeps and the larger, multi-substation sites for breadth.
 
 from collections import namedtuple
 
-from optiwindnet.importer import L_from_yaml
+from optiwindnet.importer import L_from_yaml, LocationsRepository
 
 from . import paths
 
@@ -43,8 +43,9 @@ def _path_for(handle: str):
     return base / _DATA_FILES[handle]
 
 
-def load_locations(handles=ALL_SITES):
+def load_locations(handles=ALL_SITES) -> 'LocationsRepository':
     """Return a namedtuple of loaded ``L`` graphs for the requested handles."""
     loaded = {h: L_from_yaml(_path_for(h)) for h in handles}
-    Locations = namedtuple('Locations', loaded.keys())
-    return Locations(**loaded)
+    # field names are only known at run time -- see LocationsRepository
+    Locations = namedtuple('Locations', loaded.keys())  # pyrefly: ignore
+    return Locations(**loaded)  # pyrefly: ignore

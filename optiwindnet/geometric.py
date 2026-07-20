@@ -6,7 +6,7 @@ import operator
 from collections import defaultdict
 from itertools import combinations, pairwise
 from math import isclose
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 import networkx as nx
 import numba as nb
@@ -876,13 +876,9 @@ def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
                         i = j
                 paths.append(path[i:])
             path = paths.pop()
-            λ_incumbent = 0.0
-            uv_incumbent = None
-            for u, v, λ_hop in ((u, v, A[u][v]['length']) for u, v in pairwise(path)):
-                if λ_hop > λ_incumbent:
-                    λ_incumbent = λ_hop
-                    uv_incumbent = u, v
-            S.remove_edge(*uv_incumbent)
+            # remove the longest hop of the path connecting two roots
+            u, v = max(pairwise(path), key=lambda uv: A[uv[0]][uv[1]]['length'])
+            S.remove_edge(u, v)
             removals -= 1
     return S
 
@@ -939,6 +935,7 @@ def rotating_calipers(
       ``best_calipers``, ``best_caliper_angle``, ``best_metric``, ``bbox``
     """
     best_metric = np.inf
+    best: tuple[NDArray[np.int_], Any, NDArray, NDArray] | None = None
     H = convex_hull.shape[0]
     min_x, min_y = convex_hull.argmin(axis=0)
     max_x, max_y = convex_hull.argmax(axis=0)
@@ -983,10 +980,11 @@ def rotating_calipers(
         # check if area is a new minimum
         if metric_value < best_metric:
             best_metric = metric_value
-            best_calipers = calipers.copy()
-            best_caliper_angle = angle + angle_offset
-            best_bbox_rot_min = bbox_rot_min
-            best_bbox_rot_max = bbox_rot_max
+            best = calipers.copy(), angle + angle_offset, bbox_rot_min, bbox_rot_max
+
+    if best is None:
+        raise ValueError('`convex_hull` must have at least one vertex.')
+    best_calipers, best_caliper_angle, best_bbox_rot_min, best_bbox_rot_max = best
 
     c, s = np.cos(-best_caliper_angle), np.sin(-best_caliper_angle)
     t = best_bbox_rot_max

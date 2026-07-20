@@ -3,6 +3,7 @@
 
 import logging
 from collections import namedtuple
+from collections.abc import Mapping
 from itertools import chain
 from typing import Any
 
@@ -29,6 +30,7 @@ from ._core import (
     feeder_and_load_bounds,
     physical_core_count,
     ringed_warmstart_values,
+    warmstart_topology,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -97,10 +99,11 @@ class SolverPyomo(Solver):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
+        model_options = ModelOptions(**model_options)
         model, metadata = make_min_length_model(A, capacity, **model_options)
         self.model, self.model_options, self.metadata = model, model_options, metadata
         if warmstart is not None and self.solver.warm_start_capable():
@@ -163,7 +166,7 @@ class SolverPyomo(Solver):
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        P, model, model_options = self.P, self.model, self.model_options
+        P, model = self.P, self.model
         result = self.result
         # hack to prevent warning about the solver not reaching the desired mip_gap
         result.solver.status = pyo.SolverStatus.ok
@@ -172,13 +175,7 @@ class SolverPyomo(Solver):
             A = self.A
         S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
-        G = PathFinder(
-            G_from_S(S, A),
-            P,
-            A,
-            branched=model_options['topology'] is Topology.BRANCHED,
-            ringed=model_options['topology'] is Topology.RINGED,
-        ).create_detours()
+        G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
 
@@ -205,10 +202,11 @@ class SolverPyomoAppsi(Solver):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         self.P, self.A, self.capacity = P, A, capacity
+        model_options = ModelOptions(**model_options)
         model, metadata = make_min_length_model(A, capacity, **model_options)
         self.model, self.model_options, self.metadata = model, model_options, metadata
         if warmstart is not None and self.solver.warm_start_capable():
@@ -268,7 +266,7 @@ class SolverPyomoAppsi(Solver):
         return solution_info
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        P, model_options = self.P, self.model_options
+        P = self.P
         result = self.result
         result.solution_loader.load_vars()
         #  model.solutions.load_from(result)
@@ -276,13 +274,7 @@ class SolverPyomoAppsi(Solver):
             A = self.A
         S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
-        G = PathFinder(
-            G_from_S(S, A),
-            P,
-            A,
-            branched=model_options['topology'] is Topology.BRANCHED,
-            ringed=model_options['topology'] is Topology.RINGED,
-        ).create_detours()
+        G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
 
@@ -541,9 +533,11 @@ def make_min_length_model(
         m.cons_ringed = pyo.Constraint(
             m.T,
             rule=(
-                lambda m, t: sum(m.link_[v, t] for v in A_terminals.neighbors(t))
-                + sum(m.link_[r, t] for r in m.R)
-                == 1
+                lambda m, t: (
+                    sum(m.link_[v, t] for v in A_terminals.neighbors(t))
+                    + sum(m.link_[r, t] for r in m.R)
+                    == 1
+                )
             ),
             name='radial',
         )
@@ -630,7 +624,7 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    topology = Topology[metadata.model_options['topology'].upper()]
+    topology = warmstart_topology(metadata, S)
     if topology is Topology.RINGED:
         # A ring is a single directed chain per the flow formulation; derive the
         # variable values from the (split) ringed solution graph directly and set

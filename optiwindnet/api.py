@@ -1,8 +1,9 @@
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from itertools import pairwise
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -507,16 +508,14 @@ class WindFarmNetwork:
 
         # A ringed encoding has a number of entries different from T (see the
         # convention in interarraylib.terse_links_from_S); a forest encoding has
-        # exactly T. Decode accordingly and route with the matching PathFinder.
-        ringed = terse_links_ints.shape[0] != T
+        # exactly T. S_from_terse_links decodes accordingly and labels S, which
+        # is what PathFinder then routes within.
         S = S_from_terse_links(terse_links_ints, R=R, T=T, creator='from_terse_links')
 
         G_tentative = G_from_S(S, self.A)
 
         self._S = S
-        self._G = PathFinder(
-            G_tentative, planar=self.P, A=self.A, ringed=ringed
-        ).create_detours()
+        self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
 
         assign_cables(self._G, self.cables)
         self._is_stale_SG = False
@@ -751,14 +750,7 @@ class EWRouter(Router):
         S = constructor(A, capacity=cables_capacity, **constructor_args)
         G_tentative = G_from_S(S, A)
 
-        # PathFinder must reroute feeders within the topology it was given:
-        # RADIAL only hooks to a subtree's head or tail, RINGED only to the
-        # current subroot.
-        ringed = self.method == 'ringed'
-        branched = self.method not in ('ringed', 'radial_EW')
-        G = PathFinder(
-            G_tentative, planar=P, A=A, branched=branched, ringed=ringed
-        ).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
         assign_cables(G, cables)
 
@@ -848,9 +840,7 @@ class HGSRouter(Router):
 
         G_tentative = G_from_S(S, A)
 
-        G = PathFinder(
-            G_tentative, planar=P, A=A, branched=False, ringed=self.ringed
-        ).create_detours()
+        G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
         assign_cables(G, cables)
 
@@ -875,7 +865,7 @@ class MILPRouter(Router):
         time_limit: float,
         mip_gap: float,
         solver_options: dict | None = None,
-        model_options: ModelOptions | None = None,
+        model_options: Mapping[str, Any] | None = None,
         verbose: bool = False,
         **kwargs,
     ) -> None:
@@ -887,7 +877,8 @@ class MILPRouter(Router):
           time_limit: Maximum runtime (seconds).
           mip_gap: Relative MIP optimality gap tolerance.
           solver_options: Extra solver-specific options.
-          model_options: Options for the MILP model.
+          model_options: Options for the MILP model. A plain mapping is coerced
+            into a :class:`.ModelOptions`.
           verbose: Enable verbose logging.
         """
         super().__init__(**kwargs)
@@ -895,7 +886,7 @@ class MILPRouter(Router):
         self.mip_gap = mip_gap
         self.solver_name = solver_name
         self.solver_options = solver_options or {}
-        self.model_options = model_options or ModelOptions()
+        self.model_options = ModelOptions(**(model_options or {}))
         self.verbose = verbose
         self.solver = solver_factory(solver_name)
         try:
@@ -946,19 +937,13 @@ class MILPRouter(Router):
                 break
             except OWNWarmupFailed:
                 if self.model_options['topology'] == 'branched':
-                    feeder_route = self.model_options['feeder_route']
-                    if feeder_route == 'segmented':
-                        constructor_args = dict(
-                            method=self.default_heuristic,
-                            weigh_detours=True,
-                            straight_feeder_route=False,
-                        )
-                    elif feeder_route == 'straight':
-                        constructor_args = dict(
-                            method=self.default_heuristic,
-                            weigh_detours=False,
-                            straight_feeder_route=True,
-                        )
+                    # 'feeder_route' is binary: 'straight' or 'segmented'
+                    straight = self.model_options['feeder_route'] == 'straight'
+                    constructor_args = dict(
+                        method=self.default_heuristic,
+                        weigh_detours=not straight,
+                        straight_feeder_route=straight,
+                    )
                     S_warm = S_from_G(
                         constructor(A, capacity=cables_capacity, **constructor_args)
                     )

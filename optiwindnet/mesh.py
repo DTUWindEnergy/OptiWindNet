@@ -7,7 +7,8 @@ from collections import defaultdict
 from itertools import chain, combinations, pairwise, tee
 from typing import Literal, NewType
 
-import condeltri as cdt
+# compiled extension: ships neither stubs nor py.typed
+import condeltri as cdt  # pyrefly: ignore[missing-import]
 import networkx as nx
 import numba as nb
 import numpy as np
@@ -458,6 +459,9 @@ def make_planar_embedding(
     )
 
     if len(border) == 0:
+        # inert placeholders: every use below is guarded by a condition that
+        # cannot hold when there is no border
+        border_poly = hull_poly = shp.Polygon()
         hull_minus_border = shp.MultiPolygon()
         out_root_pts = shp.MultiPoint()
         hull_border_vertices = ()

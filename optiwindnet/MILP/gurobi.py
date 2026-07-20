@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
+from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,11 +13,9 @@ from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 from ._core import (
     FeederRoute,
-    ModelOptions,
     OWNSolutionNotFound,
     PoolHandler,
     SolutionInfo,
-    Topology,
 )
 from .pyomo import SolverPyomo
 
@@ -59,7 +58,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         """
@@ -122,17 +121,11 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
-        P, model_options = self.P, self.model_options
+        P = self.P
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
                 S = self._topology_from_mip_pool()
-                G = PathFinder(
-                    G_from_S(S, A),
-                    P,
-                    A,
-                    branched=model_options['topology'] is Topology.BRANCHED,
-                    ringed=model_options['topology'] is Topology.RINGED,
-                ).create_detours()
+                G = PathFinder(G_from_S(S, A), P, A).create_detours()
             else:
                 S, G = self._investigate_pool(P, A)
         except Exception as exc:

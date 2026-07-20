@@ -69,14 +69,7 @@ def _route_end_to_end(S, P, A):
     Feeder rerouting must respect the topology S declares, or PathFinder can
     hand back a routeset that no longer has the shape it solved for.
     """
-    topology = S.graph['topology']
-    return PathFinder(
-        G_from_S(S, A),
-        planar=P,
-        A=A,
-        branched=topology == 'branched',
-        ringed=topology == 'ringed',
-    ).create_detours()
+    return PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
 
 
 # --------------------------------------------------------------------------- #
