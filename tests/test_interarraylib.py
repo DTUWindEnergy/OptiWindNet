@@ -504,10 +504,9 @@ def test_terse_links_ringed_roundtrip(R, ringspec):
     S = _ringed_S(R, ringspec)
     T = S.graph['T']
     terse = terse_links_from_S(S)
-    # a genuine ringed topology (with a cycle) is always longer than the T-entry
-    # forest encoding: T terminals plus one root number per route
-    if not nx.is_forest(S):
-        assert terse.shape[0] > T
+    # the ringed encoding always outgrows the T-entry forest one, which is how
+    # the two are told apart
+    assert terse.shape[0] > T
     S2 = S_from_terse_links(terse, R=R, T=T)
     assert _ring_sets(S2) == _ring_sets(S)
     # the encoding is a fixed point: re-encoding the decoded S is identical
