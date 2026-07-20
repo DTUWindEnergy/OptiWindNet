@@ -88,8 +88,7 @@ class FeederLimit(StrEnum):
     """Whether to limit the number of feeders. Both ``'specified'`` (an upper
     bound) and ``'exactly'`` (an exact count) require the additional kwarg
     ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
-    count is pinned to a single value, i.e. ``'minimum'``, ``'exactly'``, or
-    ``'specified'`` with ``'max_feeders'`` at the minimum.
+    count is pinned to a single value, i.e. ``'minimum'`` or ``'exactly'``.
     """
 
     UNLIMITED = auto()

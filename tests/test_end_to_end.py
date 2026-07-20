@@ -91,7 +91,7 @@ def pytest_generate_tests(metafunc):
 # --------------------------------------------------------------------------- #
 def test_snapshot_matches(snapshot_case, locations):
     router_spec = snapshot_case['router_spec']
-    terse_ref = snapshot_case['terse_links']
+    topology_ref, terse_ref = snapshot_case['terse_links']
     L = getattr(locations, snapshot_case['location'])
     cables = router_spec['cables']
 
@@ -105,7 +105,9 @@ def test_snapshot_matches(snapshot_case, locations):
     # direction flips). Compare the canonical edge sets (detour clones replaced
     # by their primes) instead.
     wfn_ref = WindFarmNetwork(L=L, cables=cables)
-    wfn_ref.update_from_terse_links(np.asarray(terse_ref, dtype=np.int64))
+    wfn_ref.update_from_terse_links(
+        np.asarray(terse_ref, dtype=np.int64), topology=topology_ref
+    )
     assert canonical_edges(wfn.G) == canonical_edges(wfn_ref.G), (
         f'terse_links differ and canonical edges differ.\n'
         f'  obtained: {terse_obt}\n  expected: {terse_ref}'
