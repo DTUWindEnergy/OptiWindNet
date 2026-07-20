@@ -2212,9 +2212,7 @@ class PathFinder:
                 )
                 for _, _, edgeD in G.edges(Clone, data=True):
                     edgeD.update(kind='detour', reverse=True)
-                if added_clones > 0:
-                    # an edge reaching root always has target < source
-                    G[Clone[-1]][path[-1]]['reverse'] = False
+                G[Clone[-1] if Clone else path[-2]][path[-1]]['reverse'] = False
             else:
                 del G[n][r]['kind']
                 debug(
