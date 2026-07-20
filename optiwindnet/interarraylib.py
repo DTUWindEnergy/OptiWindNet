@@ -5,7 +5,6 @@ import logging
 import math
 import pickle
 import sys
-from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from hashlib import sha256
 from itertools import chain, pairwise
@@ -29,7 +28,7 @@ __all__ = (
     'calcload',
     'split_rings_and_calc_loads',
     'add_ring_to_S',
-    'rings_from_links',
+    'rings_from_S',
     'directed_links',
     'site_fingerprint',
     'fun_fingerprint',
@@ -372,6 +371,20 @@ def calcload(G: nx.Graph) -> None:
     G.graph['max_load'] = max_load
 
 
+def _ring_split_position(ordered: list[int], A: nx.Graph | None = None) -> int:
+    """Choose the balanced position between a ring's two arms."""
+    n = len(ordered)
+    m, mod = divmod(n, 2)
+    m += mod
+    if mod and n > 1 and A is not None:
+        rev, center, fwd = ordered[m - 2], ordered[m - 1], ordered[m]
+        rev_len = A[rev][center]['length'] if A.has_edge(rev, center) else 0
+        fwd_len = A[center][fwd]['length'] if A.has_edge(center, fwd) else 0
+        if rev_len > fwd_len:
+            m -= 1
+    return m
+
+
 def add_ring_to_S(
     S: nx.Graph,
     roots: tuple[int, int],
@@ -418,16 +431,7 @@ def add_ring_to_S(
         if r1 != r2:
             S.add_edge(r2, ordered[0], load=0, reverse=False)
         return
-    m, mod = divmod(n, 2)
-    m += mod  # arm 1 (t1 side) gets ceil(n / 2); open point defaults to t2 side
-    if mod and A is not None:
-        # odd ring node count: the unique middle terminal has two valid split edges
-        #   — keep the open point on the longer one when A is available.
-        rev, center, fwd = ordered[m - 2], ordered[m - 1], ordered[m]
-        rev_len = A[rev][center]['length'] if A.has_edge(rev, center) else 0
-        fwd_len = A[center][fwd]['length'] if A.has_edge(center, fwd) else 0
-        if rev_len > fwd_len:
-            m -= 1
+    m = _ring_split_position(ordered, A)
     # Node loads: arm 1 nodes ordered[0..m-1] carry m..1; arm 2 nodes
     # ordered[m..n-1] carry 1..(n - m) toward their own feeder.
     for i, t in enumerate(ordered):
@@ -450,11 +454,9 @@ def add_ring_to_S(
             S.add_edge(u, v, load=load, reverse=source < sink)
 
 
-def rings_from_links(active_links, R: int) -> list[tuple[tuple[int, int], list[int]]]:
-    """Recover ordered ring terminal sequences from a set of active links.
+def rings_from_S(S: nx.Graph) -> list[tuple[tuple[int, int], list[int]]]:
+    """Recover ordered ring terminal sequences from a RINGED solution graph.
 
-    ``active_links`` is any iterable of ``(u, v)`` node pairs that are active in a
-    RINGED solution (terminal-terminal links plus the two feeders of each ring).
     Each ring is returned as ``((r1, r2), [t1, ..., tn])`` with ``t1`` and ``tn``
     the feeder-connected terminals, obtained by walking the terminal adjacency
     from the head subroot to the tail one; ``r1`` feeds ``t1`` and ``r2`` feeds
@@ -463,17 +465,8 @@ def rings_from_links(active_links, R: int) -> list[tuple[tuple[int, int], list[i
     Feeders are identified by having exactly one negative (root) endpoint; a ring
     with a single terminal (``n == 1``) has both feeders on that terminal.
     """
-    term_adj: dict[int, set[int]] = defaultdict(set)
-    subroots: dict[int, list[int]] = defaultdict(list)
-    term_to_roots: dict[int, list[int]] = defaultdict(list)
-    for u, v in active_links:
-        if u >= 0 and v >= 0:
-            term_adj[u].add(v)
-            term_adj[v].add(u)
-        else:
-            r, t = (u, v) if u < 0 else (v, u)
-            subroots[r].append(t)
-            term_to_roots[t].append(r)
+    R = S.graph['R']
+    subroots = {r: [t for t in S[r] if t >= 0] if r in S else [] for r in range(-R, 0)}
     rings: list[tuple[tuple[int, int], list[int]]] = []
     # `subroots` is consumed as the walk goes: each feeder is claimed once
     for r in range(-R, 0):
@@ -482,7 +475,7 @@ def rings_from_links(active_links, R: int) -> list[tuple[tuple[int, int], list[i
             chain_ = [t1]
             prev, curr = None, t1
             while True:
-                nxts = [x for x in term_adj[curr] if x != prev]
+                nxts = [x for x in S[curr] if x >= 0 and x != prev]
                 if not nxts:
                     break
                 prev, curr = curr, nxts[0]
@@ -494,7 +487,7 @@ def rings_from_links(active_links, R: int) -> list[tuple[tuple[int, int], list[i
                 r2 = r
             else:
                 r2 = next(
-                    (rc for rc in term_to_roots[tn] if rc != r and tn in subroots[rc]),
+                    (rc for rc in S[tn] if rc < 0 and rc != r and tn in subroots[rc]),
                     None,
                 )
             if r2 is None:
@@ -508,7 +501,7 @@ def rings_from_links(active_links, R: int) -> list[tuple[tuple[int, int], list[i
 def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
     """Violations of the canonical RINGED shape (see :func:`add_ring_to_S`)."""
     violations = []
-    R, T = S.graph['R'], S.graph['T']
+    T = S.graph['T']
 
     # topology-graph ring edges are pure geometry: they carry no edge 'kind'
     kinds = {d.get('kind') for _, _, d in S.edges(data=True)} - {None}
@@ -517,7 +510,7 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
             f'ring edges must not carry a kind, got {sorted(map(str, kinds))}'
         )
 
-    rings = rings_from_links(list(S.edges()), R)
+    rings = rings_from_S(S)
 
     # the rings partition the terminal set: every terminal in exactly one ring
     covered = sorted(t for _, ordered in rings for t in ordered)
@@ -759,7 +752,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     terminals, fed by a flowless closing feeder at one end and draining through
     a feeder carrying the whole ring at the other. Such rings are *radialized*
     into that chain here (walking across the open point with
-    :func:`rings_from_links`), so the open point becomes an ordinary
+    :func:`rings_from_S`), so the open point becomes an ordinary
     flow-carrying link.
 
     A ring bridging two roots drains through the one feeding the head of the
@@ -778,7 +771,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
             source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
             yield source, sink, edgeD['load']
         return
-    for root, chain_ in rings_from_links(S.edges(), S.graph['R']):
+    for root, chain_ in rings_from_S(S):
         head_root, tail_root = root
         n = len(chain_)
         # the ring drains through chain_[0], whose feeder carries all of it, and
@@ -1352,7 +1345,7 @@ def parse_ring_routes(seq: Sequence[int]) -> list[tuple[int, list[int], int]]:
     return routes
 
 
-def _ring_routes_from_S(S: nx.Graph, R: int) -> list[tuple[int, list[int], int]]:
+def _ring_routes_from_S(S: nx.Graph) -> list[tuple[int, list[int], int]]:
     """Recover the ring routes ``(open_root, walk, close_root)`` of a ringed ``S``.
 
     The walk direction of each ring is chosen so that the open point falls where
@@ -1368,7 +1361,7 @@ def _ring_routes_from_S(S: nx.Graph, R: int) -> list[tuple[int, list[int], int]]
         frozenset((u, v)) for u, v, d in S.edges(data=True) if d.get('load') == 0
     }
     routes: list[tuple[int, list[int], int]] = []
-    for root, ordered in rings_from_links(list(S.edges()), R):
+    for root, ordered in rings_from_S(S):
         open_, close = root
         n = len(ordered)
         if n > 1:
@@ -1479,7 +1472,7 @@ def terse_links_from_S(S):
     # its terminals and the first one always writes a root marker, so a ringed
     # encoding always has more than T entries and never collides with the
     # T-entry forest encoding.
-    seq = compress_ring_routes(_ring_routes_from_S(S, S.graph['R']))
+    seq = compress_ring_routes(_ring_routes_from_S(S))
     return np.array(seq, dtype=np.int_)
 
 

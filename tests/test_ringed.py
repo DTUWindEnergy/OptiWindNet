@@ -2,19 +2,17 @@
 
 The RINGED topology is now available across every solver family:
 
-* the shared ring builders :func:`add_ring_to_S`,
-  :func:`split_rings_and_calc_loads` and :func:`rings_from_links` (canonical
-  two-arm-with-split shape) that every backend reconstructs its solution through;
+* the shared ring builders :func:`add_ring_to_S` and
+  :func:`split_rings_and_calc_loads`, plus :func:`rings_from_S` for recovering
+  rings from their canonical two-arm-with-split shape;
 * the constructive heuristic ``method='ringed'`` (and its public
   :class:`~optiwindnet.api.EWRouter` wrapper);
 * the MILP RINGED path (``ModelOptions(topology='ringed')``), both at the
   low level and through :class:`~optiwindnet.api.MILPRouter`;
 * the HGS-CVRP and LKH-3 closed-CVRP paths (``ringed=True``).
 
-Because every backend canonicalises its output through :func:`add_ring_to_S`
-(the MILP path in ``MILP/_core.py:get_solution``, HGS/LKH/constructor through
-:func:`split_rings_and_calc_loads`), the same structural invariants hold for all
-of them. They
+Because every backend canonicalises its output to the same shape, the same
+structural invariants hold for all of them. They
 are collected in :func:`_assert_canonical_ringed` and reused throughout so the
 suite pins the *shared contract* of a ringed solution rather than each
 backend's incidental output.
@@ -38,7 +36,7 @@ from optiwindnet.interarraylib import (
     S_from_terse_links,
     add_ring_to_S,
     assign_cables,
-    rings_from_links,
+    rings_from_S,
     split_rings_and_calc_loads,
     terse_links_from_S,
     validate_routeset,
@@ -55,7 +53,7 @@ from .helpers import has_cycle, solver_unavailable, terminal_terminal_crossings
 # --------------------------------------------------------------------------- #
 def _rings(S):
     """Recover the ``(root, [t1, ..., tn])`` rings of a ringed topology ``S``."""
-    return rings_from_links(list(S.edges()), S.graph['R'])
+    return rings_from_S(S)
 
 
 def _assert_canonical_ringed(S, capacity):
@@ -115,26 +113,26 @@ def test_add_ring_to_S_canonical_shape(n):
 
 
 @pytest.mark.parametrize('n', range(1, 13))
-def test_rings_from_links_roundtrip(n):
-    """rings_from_links recovers the terminal set of a built ring."""
+def test_rings_from_S_roundtrip(n):
+    """rings_from_S recovers the terminal set of a built ring."""
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
     add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
-    rings = rings_from_links(list(S.edges()), R=1)
+    rings = rings_from_S(S)
     assert len(rings) == 1
     roots, ordered = rings[0]
     assert roots == (-1, -1)
     assert set(ordered) == set(range(n))
 
 
-def test_rings_from_links_multiple_rings_and_roots():
+def test_rings_from_S_multiple_rings_and_roots():
     """Two roots, several rings: each ring is recovered with its own root."""
     S = nx.Graph(R=2, T=9)
     S.add_nodes_from([-2, -1])
     add_ring_to_S(S, (-1, -1), [0, 1, 2, 3], subtree=0, A=None)
     add_ring_to_S(S, (-1, -1), [4, 5], subtree=1, A=None)
     add_ring_to_S(S, (-2, -2), [6, 7, 8], subtree=2, A=None)
-    rings = rings_from_links(list(S.edges()), R=2)
+    rings = rings_from_S(S)
     recovered = {(roots, frozenset(ordered)) for roots, ordered in rings}
     assert recovered == {
         ((-1, -1), frozenset({0, 1, 2, 3})),
@@ -172,12 +170,12 @@ def test_has_cycle_sees_through_the_substations():
 
 
 @pytest.mark.parametrize('n', range(1, 13))
-def test_rings_from_links_roundtrip_bridging(n):
+def test_rings_from_S_roundtrip_bridging(n):
     """A ring bridging two roots is recovered with both of its roots."""
     S = nx.Graph(R=2, T=n)
     S.add_nodes_from([-2, -1])
     add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
-    rings = rings_from_links(list(S.edges()), R=2)
+    rings = rings_from_S(S)
     assert len(rings) == 1
     roots, ordered = rings[0]
     assert set(roots) == {-1, -2}
@@ -587,6 +585,62 @@ def test_ringed_warmstart_values_flow_conservation(n, bridging):
         out_flow = sum(flow_vals.get(k, 0) for k in out_links)
         in_flow = sum(flow_vals.get(k, 0) for k in in_links)
         assert out_flow - in_flow == 1  # each terminal sinks one unit
+
+
+@pytest.mark.parametrize('bridging', [False, True], ids=['single_root', 'bridging'])
+@pytest.mark.parametrize('n', range(1, 11))
+def test_ringed_mip_decoder_reuses_flow_tree_decoding(n, bridging):
+    """The shared decoder closes a MILP flow path into a canonical ring."""
+    from types import SimpleNamespace
+
+    from optiwindnet.MILP._core import Solver, Topology
+
+    head_root = -1
+    close_root = -2 if bridging else head_root
+    R = 2 if bridging else 1
+    flow_vals = {(0, head_root): n}
+    flow_vals.update({(t, t - 1): n - t for t in range(1, n)})
+    closing_link = (close_root, n - 1)
+    link_vals = dict.fromkeys((*flow_vals, closing_link), True)
+    metadata = SimpleNamespace(
+        R=R,
+        T=n,
+        capacity=math.ceil(n / 2),
+        model_options={'topology': Topology.RINGED},
+        link_=link_vals,
+        flow_=flow_vals,
+    )
+    A = nx.path_graph(n)
+    nx.set_edge_attributes(A, 1.0, 'length')
+    if n == 3:
+        A[0][1]['length'] = 2.0
+
+    class FakeSolver:
+        name = 'fake'
+
+        @staticmethod
+        def _link_val(value):
+            return value
+
+        @staticmethod
+        def _flow_val(value):
+            return value
+
+    fake = FakeSolver()
+    fake.A = A
+    fake.metadata = metadata
+    S = Solver._topology_from_mip_sol(fake)
+
+    _assert_canonical_ringed(S, metadata.capacity)
+    assert {S.nodes[t]['subtree'] for t in range(n)} == {0}
+    assert S.graph['max_load'] == math.ceil(n / 2)
+    assert (
+        S.nodes[head_root]['load'] + (S.nodes[close_root]['load'] if bridging else 0)
+        == n
+    )
+    if n == 3:
+        open_point = next({u, v} for u, v, d in S.edges(data=True) if d['load'] == 0)
+        assert open_point == {0, 1}
 
 
 def test_ringed_warmstart_roundtrip_scip():

@@ -30,7 +30,7 @@ from optiwindnet.interarraylib import (
     fun_fingerprint,
     make_remap,
     pathdist,
-    rings_from_links,
+    rings_from_S,
     scaffolded,
     site_fingerprint,
     terse_links_from_S,
@@ -477,8 +477,7 @@ def _ringed_S(R, ringspec):
 
 
 def _ring_sets(S):
-    R = S.graph['R']
-    return {(r, frozenset(o)) for r, o in rings_from_links(list(S.edges()), R)}
+    return {(r, frozenset(o)) for r, o in rings_from_S(S)}
 
 
 def test_terse_links_ringed_wire_format():

@@ -20,9 +20,9 @@ from makefun import with_signature
 
 from ..interarraylib import (
     G_from_S,
-    add_ring_to_S,
+    _ring_split_position,
+    bfs_subtree_loads,
     directed_links,
-    rings_from_links,
 )
 from ..pathfinding import PathFinder
 
@@ -412,6 +412,62 @@ def ringed_warmstart_values(
     return link_vals, flow_vals
 
 
+def _finalize_ringed_mip_S(
+    S: nx.Graph,
+    closing_links: list[tuple[int, int]],
+    A: nx.Graph | None,
+) -> int:
+    """Close decoded MILP paths into canonical rings and recalculate their loads."""
+    rings: list[tuple[int, int, int, int, int, int]] = []
+    for close_root, tail in closing_links:
+        subtree = S.nodes[tail]['subtree']
+        ordered = [tail]
+        prev, curr = None, tail
+        while True:
+            nxts = [n for n in S[curr] if n != prev]
+            if len(nxts) != 1:
+                raise ValueError(
+                    f'RINGED MILP path at terminal {curr} has {len(nxts)} continuations'
+                )
+            nxt = nxts[0]
+            if nxt < 0:
+                head_root = nxt
+                break
+            ordered.append(nxt)
+            prev, curr = curr, nxt
+        ordered.reverse()
+        head, n = ordered[0], len(ordered)
+        if n == 1:
+            if close_root != head_root:
+                S.add_edge(close_root, tail, load=0, reverse=False)
+        else:
+            m = _ring_split_position(ordered, A)
+            u, v = ordered[m - 1], ordered[m]
+            S[u][v].update(load=0, reverse=False)
+            # bfs_subtree_loads overwrites this placeholder with the arm load.
+            S.add_edge(close_root, tail, load=1, reverse=False)
+        rings.append((subtree, head_root, head, close_root, tail, n))
+
+    for nodeD in S.nodes.values():
+        nodeD.pop('load', None)
+    roots = set(range(-S.graph['R'], 0))
+    visited = roots.copy()
+    for root in roots:
+        S.nodes[root]['load'] = 0
+    for subtree, head_root, head, close_root, tail, n in rings:
+        bfs_subtree_loads(S, head_root, [head], subtree, visited)
+        if n > 1:
+            bfs_subtree_loads(S, close_root, [tail], subtree, visited)
+
+    max_load = max(
+        (edgeD['load'] for u, v, edgeD in S.edges(data=True) if u < 0 or v < 0),
+        default=0,
+    )
+    S.graph['max_load'] = max_load
+    S.graph['has_loads'] = True
+    return max_load
+
+
 class Solver(abc.ABC):
     "Common interface to multiple MILP solvers"
 
@@ -527,44 +583,39 @@ class Solver(abc.ABC):
             for (u, v), var in metadata.link_.items()
             if self._link_val(var)
         }
+        flow_links = {
+            link: reverse
+            for link, reverse in rev_from_link.items()
+            if link in metadata.flow_
+        }
+        S.add_weighted_edges_from(
+            ((u, v, self._flow_val(metadata.flow_[u, v])) for u, v in flow_links),
+            weight='load',
+        )
+        nx.set_edge_attributes(S, flow_links, name='reverse')
+        # Propagate the decoded flow-tree attributes for every topology. A RINGED
+        # model is a path forest until its flowless starsʹ links are restored.
+        subtree = -1
         max_load = 0
+        for r in range(-R, 0):
+            for u, v in nx.edge_dfs(S, r):
+                S.nodes[v]['load'] = S[u][v]['load']
+                if u == r:
+                    subtree += 1
+                S.nodes[v]['subtree'] = subtree
+            rootload = 0
+            for nbr in S.neighbors(r):
+                subtree_load = S.nodes[nbr]['load']
+                max_load = max(max_load, subtree_load)
+                rootload += subtree_load
+            S.nodes[r]['load'] = rootload
         if topology is Topology.RINGED:
-            # A ring is a cycle: two feeders to a shared root joined at
-            # their tail ends. Recover each ring's ordered terminal sequence from
-            # the active links and build it in canonical form (both feeders real,
-            # a single ``split`` open point at the load midpoint).
-            for subtree, (r, ordered) in enumerate(rings_from_links(rev_from_link, R)):
-                add_ring_to_S(S, r, ordered, subtree, getattr(self, 'A', None))
-            for r in range(-R, 0):
-                rootload = 0
-                for nbr in S.neighbors(r):
-                    subtree_load = S.nodes[nbr]['load']
-                    max_load = max(max_load, subtree_load)
-                    rootload += subtree_load
-                S.nodes[r]['load'] = rootload
-        else:
-            S.add_weighted_edges_from(
-                (
-                    (u, v, self._flow_val(metadata.flow_[u, v]))
-                    for (u, v) in rev_from_link
-                ),
-                weight='load',
+            closing_links = [
+                link for link in rev_from_link if link not in metadata.flow_
+            ]
+            max_load = _finalize_ringed_mip_S(
+                S, closing_links, getattr(self, 'A', None)
             )
-            nx.set_edge_attributes(S, rev_from_link, name='reverse')
-            # propagate loads from edges to nodes
-            subtree = -1
-            for r in range(-R, 0):
-                for u, v in nx.edge_dfs(S, r):
-                    S.nodes[v]['load'] = S[u][v]['load']
-                    if u == r:
-                        subtree += 1
-                    S.nodes[v]['subtree'] = subtree
-                rootload = 0
-                for nbr in S.neighbors(r):
-                    subtree_load = S.nodes[nbr]['load']
-                    max_load = max(max_load, subtree_load)
-                    rootload += subtree_load
-                S.nodes[r]['load'] = rootload
         S.graph.update(
             topology=topology.name.lower(),
             capacity=metadata.capacity,
