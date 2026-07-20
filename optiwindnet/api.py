@@ -766,7 +766,7 @@ class HGSRouter(Router):
       https://doi.org/10.1016/j.cor.2021.105643
 
     * Balances solution quality and runtime.
-    * Produces radial solutions, or RINGED (closed-loop) solutions with ``ringed=True``.
+    * Produces radial solutions, or RINGED (cycle) solutions with ``ringed=True``.
     """
 
     _summary_attrs = ('runtime',)
@@ -803,7 +803,7 @@ class HGSRouter(Router):
               substation).
           max_retries: Maximum number of retries if a feasible solution is not found.
           balanced: Whether to balance turbines/loads across feeders.
-          ringed: Whether to produce a RINGED topology (closed loops) instead of a
+          ringed: Whether to produce a RINGED topology (cycles) instead of a
               radial one. HGS then solves the closed CVRP, so each ring holds up to
               ``2 * cables_capacity`` turbines (two arms of ``cables_capacity`` each).
           seed: Set the seed of the pseudo-random number generator (reproducibility).

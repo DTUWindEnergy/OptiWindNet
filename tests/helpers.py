@@ -138,14 +138,14 @@ def solve_milp_property_metrics(router_spec: Dict[str, Any], L: nx.Graph):
     return metrics, str(info.termination), metrics['length']
 
 
-def closes_a_loop(S: nx.Graph) -> bool:
+def has_cycle(S: nx.Graph) -> bool:
     """Whether ``S`` carries a cycle once the substations are interconnected.
 
     The graphs OptiWindNet works with do not represent the substation-to-
     substation connections of the physical network, so a ring bridging two
     substations reads as a path between two roots. Linking the roots in a path
     supplies those connections, so that every ring -- bridging or not -- closes
-    a loop.
+    a cycle.
     """
     Sx = S.copy()
     Sx.add_edges_from(pairwise(range(-S.graph['R'], 0)))
@@ -187,7 +187,7 @@ def solution_property_metrics(
         sum_root_load=sum(S.nodes[r]['load'] for r in range(-R, 0)),
         T=T,
         R=R,
-        closes_a_loop=closes_a_loop(S),
+        has_cycle=has_cycle(S),
         num_feeders=len(feeder_edges),
         feeder_loads=feeder_loads,
         min_feeders=math.ceil(T / capacity),
@@ -223,7 +223,7 @@ def assert_solution_properties(
     # they were reduced to violation strings on the worker side
     assert metrics['topology_violations'] == []
     if topology == 'ringed' and T > 1:
-        assert metrics['closes_a_loop'], 'a ring closes a loop'
+        assert metrics['has_cycle'], 'a ring closes a cycle'
 
     # --- feeder-count / balance (single-root, non-ringed: well-defined) -------
     single_root = metrics['R'] == 1

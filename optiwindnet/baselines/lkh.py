@@ -237,7 +237,7 @@ def _do_lkh(
     return leg to the depot is free and routes are radial. With ``ringed=True``
     it solves the closed CVRP (``TYPE=CVRP``): every route returns to the depot,
     so the symmetric weight matrix charges both feeder legs and each route is a
-    ring (closed loop).
+    ring.
 
     Returns a dict containing routes (list of lists of 0-based terminal indices
     in the matrix), penalty, minimum, log, ``elapsed_time``, ``solution_time``, plus

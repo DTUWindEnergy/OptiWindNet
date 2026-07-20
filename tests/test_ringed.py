@@ -47,7 +47,7 @@ from optiwindnet.interarraylib import (
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 
-from .helpers import closes_a_loop, solver_unavailable, terminal_terminal_crossings
+from .helpers import has_cycle, solver_unavailable, terminal_terminal_crossings
 
 
 # --------------------------------------------------------------------------- #
@@ -146,29 +146,29 @@ def test_rings_from_links_multiple_rings_and_roots():
 # --------------------------------------------------------------------------- #
 # Bridging rings (a ring whose two feeders land on different roots)
 # --------------------------------------------------------------------------- #
-def test_closes_a_loop_sees_through_the_substations():
-    """A bridging ring closes a loop; a radial forest does not.
+def test_has_cycle_sees_through_the_substations():
+    """A bridging ring closes a cycle; a radial forest does not.
 
-    Interconnecting the substations is what makes the loop visible: a ring
+    Interconnecting the substations is what makes the cycle visible: a ring
     bridging two of them is a path between two roots in ``S`` alone.
     """
     bridged = nx.Graph(R=2, T=4)
     bridged.add_nodes_from([-2, -1])
     add_ring_to_S(bridged, (-1, -2), [0, 1, 2, 3], subtree=0, A=None)
     assert nx.is_forest(bridged), 'S alone carries no cycle'
-    assert closes_a_loop(bridged)
+    assert has_cycle(bridged)
 
     # the two bridged roots need not be adjacent in the path linking them
     far = nx.Graph(R=3, T=1)
     far.add_nodes_from(range(-3, 0))
     add_ring_to_S(far, (-1, -3), [0], subtree=0, A=None)
-    assert closes_a_loop(far)
+    assert has_cycle(far)
 
     # a radial forest must not be mistaken for a ring
     radial = nx.Graph(R=3, T=6, topology='radial')
     radial.add_nodes_from(range(-3, 0))
     radial.add_edges_from([(-1, 0), (0, 1), (-2, 2), (2, 3), (-3, 4), (4, 5)])
-    assert not closes_a_loop(radial)
+    assert not has_cycle(radial)
 
 
 @pytest.mark.parametrize('n', range(1, 13))
@@ -317,7 +317,7 @@ def test_split_rings_rejects_branching_subtree():
 # id -> (repository location name, number of roots R)
 _RINGED_MESHES = {
     'albatros_1ss': ('albatros', 1),  # T=16
-    'neart_2ss': ('neart', 2),  # T=54 (exercises per-root ring loops)
+    'neart_2ss': ('neart', 2),  # T=54 (exercises per-root ring cycles)
 }
 # multi-root subset, for tests whose assertion only makes sense with R >= 2
 _MULTIROOT_RINGED_MESHES = {
@@ -359,8 +359,8 @@ def test_constructor_ringed_is_canonical(ringed_mesh, capacity):
     S = constructor(A, capacity=capacity, method='ringed')
     rings = _assert_canonical_ringed(S, capacity)
 
-    # a genuine ring, not a radial forest: at least one ring closes a loop
-    assert closes_a_loop(S)
+    # a genuine ring, not a radial forest: at least one ring closes a cycle
+    assert has_cycle(S)
     assert any(len(ordered) > 1 for _, ordered in rings)
 
 

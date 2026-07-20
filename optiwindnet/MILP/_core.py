@@ -122,7 +122,7 @@ def feeder_and_load_bounds(
 
     Bounds are returned in units of **subtrees** (the quantity the model's
     feeder-sum constraint counts): one feeder per subtree for radial/branched
-    topologies, but a RINGED subtree is a closed loop with two feeders. The
+    topologies, but a RINGED subtree is a cycle with two feeders. The
     caller signals this with ``feeders_per_subtree`` (2 for RINGED), so that a
     user-supplied ``max_feeders`` — always expressed as the number of physical
     **substation connections** — is converted to the subtree count the model
@@ -529,7 +529,7 @@ class Solver(abc.ABC):
         }
         max_load = 0
         if topology is Topology.RINGED:
-            # A ring is a closed loop: two feeders to a shared root joined at
+            # A ring is a cycle: two feeders to a shared root joined at
             # their tail ends. Recover each ring's ordered terminal sequence from
             # the active links and build it in canonical form (both feeders real,
             # a single ``split`` open point at the load midpoint).

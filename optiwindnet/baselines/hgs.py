@@ -72,7 +72,7 @@ def _length_matrix(
     By default the return leg to the depot is free (``W[:, 0] = 0``), turning the
     closed CVRP that HGS-CVRP solves into the Open-CVRP used for radial layouts.
     With ``closed=True`` the return leg costs the feeder distance, so every route
-    pays for both of its feeder legs: HGS then finds closed loops (rings). Depot
+    pays for both of its feeder legs: HGS then finds cycles (rings). Depot
     clones (slack nodes) stay at the depot, so their return leg is always free.
     """
     terminal_slice = slice(1, -num_slack if num_slack else None)
@@ -330,9 +330,9 @@ def hgs_cvrp(
     Genetic Search solver for Capacitated Vehicle Routing Problems). By default
     this function solves an Open-CVRP (vehicles do not return to the depot),
     yielding radial layouts. With ``ringed=True`` it solves the closed CVRP
-    instead: every route returns to the depot, forming a ring (closed loop). The
-    ring capacity is doubled internally (``2 * capacity``) so each of the ring's
-    two arms holds at most ``capacity`` terminals.
+    instead: every route returns to the depot, forming a ring. The ring capacity
+    is doubled internally (``2 * capacity``) so each of the ring's two arms holds
+    at most ``capacity`` terminals.
 
     Normalization of input graph is recommended before calling this function.
 

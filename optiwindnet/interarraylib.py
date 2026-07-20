@@ -356,7 +356,7 @@ def add_ring_to_S(
     subtree: int,
     A: nx.Graph | None = None,
 ) -> None:
-    """Add a single ring (closed loop) to topology graph ``S`` in canonical form.
+    """Add a single ring to topology graph ``S`` in canonical form.
 
     A ring is the union of two radial arms, fed by ``r1`` and ``r2`` and joined
     at their tail ends; it bridges two substations when ``r1 != r2``. ``ordered``
