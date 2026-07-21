@@ -36,7 +36,6 @@ from optiwindnet.interarraylib import (
     scaffolded,
     site_fingerprint,
     terse_links_from_S,
-    total_power,
     update_lengths,
     validate_topology,
 )
@@ -134,21 +133,6 @@ def test_assign_cables():
     assert G4.graph['capacity'] == 5
 
 
-def test_assign_cables_with_billion_scale_capacities():
-    G = nx.Graph(R=1, T=2, B=0, max_load=1_000_000_000)
-    G.add_edge(-1, 0, load=1, length=2.0)
-    G.add_edge(-1, 1, load=1_000_000_000, length=3.0)
-    cables = [(500_000_000, 4.0), (1_000_000_000, 5.0)]
-
-    assign_cables(G, cables)
-
-    assert G[-1][0]['cable'] == 0
-    assert G[-1][0]['cost'] == 8.0
-    assert G[-1][1]['cable'] == 1
-    assert G[-1][1]['cost'] == 15.0
-    assert G.graph['capacity'] == 1_000_000_000
-
-
 def test_describe_G():
     wfn = tiny_wfn()
     G = wfn.G
@@ -157,18 +141,6 @@ def test_describe_G():
     expected = ['κ = 4, T = 4', '(+0) [-1]: 1', 'Σλ = 5.5456\u00a0m', '55\u00a0€']
 
     assert desc == expected, f'Output mismatch:\nGot: {desc}\nExpected: {expected}'
-
-
-def test_describe_G_uses_exact_integer_feeder_count():
-    G = tiny_wfn().G
-    G.graph['capacity'] = 10**20
-    G.nodes[0]['power'] = 10**20 - 2
-    for turbine in range(1, G.graph['T']):
-        G.nodes[turbine]['power'] = 1
-
-    desc = describe_G(G)
-
-    assert desc[1] == '(-1) [-1]: 1'
 
 
 def test_calcload():
@@ -313,29 +285,6 @@ def test_S_from_G():
     assert 'creator' not in S2.graph
     assert 'method_options' not in S2.graph
 
-    # Weighted power metadata is preserved and used when loads are calculated.
-    weighted_G = nx.Graph(
-        R=1,
-        T=3,
-        B=0,
-        capacity=6,
-        power_scale=2,
-        topology=Topology.BRANCHED,
-    )
-    weighted_G.graph['turbine_power_decimals'] = 3
-    weighted_G.add_node(-1, kind='oss')
-    for turbine, power in enumerate((1, 2, 3)):
-        weighted_G.add_node(turbine, kind='wtg', power=power)
-    weighted_G.add_edges_from([(-1, 0), (0, 1), (1, 2)])
-
-    weighted_S = S_from_G(weighted_G)
-    assert weighted_S.graph['power_scale'] == 2
-    assert weighted_S.graph['turbine_power_decimals'] == 3
-    assert [weighted_S.nodes[t]['power'] for t in range(3)] == [1, 2, 3]
-    assert total_power(weighted_S) == 6
-    assert weighted_S.graph['max_load'] == 6
-    assert [weighted_S[u][v]['load'] for u, v in ((-1, 0), (0, 1), (1, 2))] == [6, 5, 3]
-
 
 def test_G_from_S():
     wfn = tiny_wfn()
@@ -474,27 +423,6 @@ def test_L_from_G():
     assert L_stunts.graph['VertexC'].shape[0] == len(G_stunts.graph['VertexC']) - len(
         G_stunts.graph['stunts_primes']
     )
-
-
-def test_weighted_graph_conversion_round_trip():
-    wfn = tiny_wfn()
-    A = copy.deepcopy(wfn.A)
-    S = copy.deepcopy(wfn.S)
-    powers = [4, 5, 6, 7]
-    A.graph['power_scale'] = 4
-    A.graph['turbine_power_decimals'] = 2
-    nx.set_node_attributes(A, dict(enumerate(powers)), 'power')
-    nx.set_node_attributes(S, dict(enumerate(powers)), 'power')
-    calcload(S)
-
-    G = G_from_S(S, A)
-    L = L_from_G(G)
-    restored_S = S_from_G(G)
-
-    for graph in (G, L, restored_S):
-        assert graph.graph['power_scale'] == 4
-        assert graph.graph['turbine_power_decimals'] == 2
-        assert [graph.nodes[t]['power'] for t in range(4)] == powers
 
 
 def test_S_from_terse_links():

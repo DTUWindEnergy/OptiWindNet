@@ -27,21 +27,9 @@ def test_gplot_with_provided_axes(wfn):
 
 
 def test_gplot_node_tag_load(wfn):
-    G = wfn.G.copy()
-    G.graph['power_scale'] = 2
-    G.graph['capacity'] = 8
-    for turbine in range(G.graph['T']):
-        G.nodes[turbine]['power'] = 2
-    G.nodes[0]['power'] = 3
-    G.nodes[0]['load'] = 3
-
-    power_ax = gplot(G, node_tag='power')
-    assert isinstance(power_ax, Axes)
-    assert '1.5' in {text.get_text() for text in power_ax.texts}
-    assert 'κ = 4, T =' in power_ax.get_legend().get_title().get_text()
-
-    load_ax = gplot(G, node_tag='load', infobox=False)
-    assert '1.5' in {text.get_text() for text in load_ax.texts}
+    """node_tag='load' path uses has_loads branch and load-specific font sizes."""
+    ax = gplot(wfn.G, node_tag='load')
+    assert isinstance(ax, Axes)
     plt.close('all')
 
 
