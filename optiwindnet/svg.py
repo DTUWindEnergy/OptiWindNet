@@ -29,27 +29,20 @@ class SvgRepr:
     Helper class to get IPython to display the SVG figure encoded in data.
     """
 
-    def __init__(self, data: str, metadata: dict[str, Any] | None = None):
+    def __init__(self, data: str, metadata: dict[str, Any] = {}):
         self.data = data
-        self.metadata: dict[str, Any] = metadata or {}
+        self.metadata = metadata.copy()
+        self.handle = self.metadata.pop('handle', '')
+        if self.handle == self.metadata.get('name'):
+            del self.metadata['name']
 
     def _repr_svg_(self) -> str:
         return self.data
 
     def __repr__(self) -> str:
-        m = self.metadata
-        parts = [f'SvgRepr {m["handle"]!r}'] if 'handle' in m else ['SvgRepr']
-        name = m.get('name')
-        if name and name != m.get('handle'):
-            parts.append(f'name={name!r}')
-        if 'T' in m:
-            parts.append(f'T={m["T"]}')
-        if 'R' in m:
-            parts.append(f'R={m["R"]}')
-        if m.get('capacity') is not None:
-            parts.append(f'capacity={m["capacity"]}')
+        parts = [f'{key}={value}' for key, value in self.metadata.items()]
         parts.append(f'{len(self.data)} chars')
-        return '<' + ' '.join(parts) + '>'
+        return f'<SvgRepr[{self.handle}]: ' + '; '.join(parts) + '>'
 
     def save(self, filepath: str) -> None:
         """Write SVG to file ``filepath``."""
@@ -94,14 +87,12 @@ class Drawable:
         R, T, B = (G.graph[k] for k in 'RTB')
         self.R, self.T, self.B = R, T, B
         name = G.graph.get('name')
-        handle = G.graph.get('handle', name if name is not None else 'handleless')
-        self.handle = handle
-        self.metadata = {'handle': handle, 'T': T, 'R': R}
-        if name is not None:
-            self.metadata['name'] = name
-        capacity = G.graph.get('capacity')
-        if capacity is not None:
-            self.metadata['capacity'] = capacity
+        self.handle = G.graph.get('handle', name if name is not None else '')
+        self.metadata = {
+            key: G.graph[key]
+            for key in ('name', 'T', 'R', 'capacity', 'topology')
+            if key in G.graph
+        }
         self.c = c = Colors(dark)
         fnT = G.graph.get('fnT')
         if fnT is None:

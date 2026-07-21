@@ -3,6 +3,7 @@ import re
 import networkx as nx
 
 from optiwindnet.svg import SvgRepr, svgplot, svgpplot
+from optiwindnet.types import Topology
 
 from .helpers import tiny_wfn
 
@@ -16,6 +17,7 @@ def test_svgplot_basic():
     wfn1 = tiny_wfn()
     svg1 = svgplot(wfn1.G)
     assert isinstance(svg1, SvgRepr)
+    assert 'topology=branched' in repr(svg1)
 
     wfn2 = tiny_wfn(cables=1)
     svg2 = svgplot(wfn2.G)
@@ -220,37 +222,40 @@ def test_svgplot_legend_detour_dasharray():
 
 def test_svgrepr_repr_no_metadata():
     r = repr(SvgRepr('abc'))
-    assert r == '<SvgRepr 3 chars>'
+    assert r == '<SvgRepr[]: 3 chars>'
 
 
 def test_svgrepr_repr_with_handle_only():
     r = repr(SvgRepr('ab', {'handle': 'myfarm'}))
-    assert "'myfarm'" in r
+    assert "[myfarm]" in r
     assert 'name=' not in r
 
 
 def test_svgrepr_repr_name_differs_from_handle():
     r = repr(
         SvgRepr(
-            'x', {'handle': 'h', 'name': 'Full Name', 'T': 5, 'R': 2, 'capacity': 9}
+            'x',
+            {
+                'handle': 'h',
+                'name': 'Full Name',
+                'T': 5,
+                'R': 2,
+                'capacity': 9,
+                'topology': Topology.BRANCHED,
+            },
         )
     )
-    assert "name='Full Name'" in r
+    assert "name=Full Name" in r
     assert 'T=5' in r
     assert 'R=2' in r
     assert 'capacity=9' in r
+    assert 'topology=branched' in r
 
 
 def test_svgrepr_repr_name_equals_handle():
     """When name == handle the name field must NOT appear in repr."""
     r = repr(SvgRepr('x', {'handle': 'same', 'name': 'same'}))
     assert 'name=' not in r
-
-
-def test_svgrepr_repr_capacity_none():
-    """capacity=None must not appear in repr."""
-    r = repr(SvgRepr('x', {'capacity': None}))
-    assert 'capacity' not in r
 
 
 # ─────────────────────────────────────────────
