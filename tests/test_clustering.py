@@ -17,7 +17,6 @@ import pytest
 
 import optiwindnet.clustering as clustering_mod
 from optiwindnet.clustering import clusterize
-from optiwindnet.importer import load_repository
 from optiwindnet.mesh import make_planar_embedding
 
 CAPACITIES = range(3, 31)
@@ -49,11 +48,11 @@ def _check_partition(cluster_, A: nx.Graph, capacity: int) -> None:
 # the whole bundled repository
 # --------------------------------------------------------------------------
 @pytest.fixture(scope='module')
-def multiroot_instances() -> dict[str, nx.Graph]:
+def multiroot_instances(locations) -> dict[str, nx.Graph]:
     """Mesh every bundled location that has more than one root."""
     return {
         L.graph['handle']: make_planar_embedding(L)[1]
-        for L in load_repository()
+        for L in locations
         if L.graph['R'] > 1
     }
 

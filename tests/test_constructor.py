@@ -17,15 +17,14 @@ import logging
 import networkx as nx
 import pytest
 
-from optiwindnet.crossings import validate_routeset
-from optiwindnet.geometric import is_crossing
 from optiwindnet.heuristics import constructor
 from optiwindnet.importer import L_from_yaml
-from optiwindnet.interarraylib import G_from_S
+from optiwindnet.interarraylib import G_from_S, validate_routeset
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 
 from . import paths
+from .helpers import terminal_terminal_crossings
 
 METHODS = ('esau_williams', 'biased_EW', 'rootlust', 'radial_EW')
 BRANCHED_METHODS = ('esau_williams', 'biased_EW', 'rootlust')
@@ -54,32 +53,6 @@ def mesh(request):
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
-def _terminal_terminal_edges(S):
-    """Edges connecting two terminals (i.e. excluding root feeders)."""
-    return [(u, v) for u, v in S.edges if u >= 0 and v >= 0]
-
-
-def _terminal_terminal_crossings(S, VertexC):
-    """Crossings among terminal-terminal edges.
-
-    The constructor guarantees no terminal-terminal crossings (its core
-    feature); straight feeders may still cross and are resolved later by
-    PathFinder, so they are deliberately excluded here.
-    """
-    edges = _terminal_terminal_edges(S)
-    crossings = []
-    for i, (u, v) in enumerate(edges):
-        for s, t in edges[i + 1 :]:
-            if len({u, v, s, t}) < 4:
-                # shared endpoint: not a crossing
-                continue
-            if is_crossing(
-                VertexC[u], VertexC[v], VertexC[s], VertexC[t], touch_is_cross=False
-            ):
-                crossings.append(((u, v), (s, t)))
-    return crossings
-
-
 def _each_terminal_reaches_exactly_one_root(S):
     R, T = S.graph['R'], S.graph['T']
     roots = range(-R, 0)
@@ -90,7 +63,11 @@ def _each_terminal_reaches_exactly_one_root(S):
 
 
 def _route_end_to_end(S, P, A):
-    """Mirror EWRouter.route: turn S into a detoured routeset G."""
+    """Mirror EWRouter.route: turn S into a detoured routeset G.
+
+    Feeder rerouting must respect the topology S declares, or PathFinder can
+    hand back a routeset that no longer has the shape it solved for.
+    """
     return PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
 
 
@@ -119,7 +96,7 @@ def test_output_is_capacitated_forest(mesh, method, capacity):
 def test_no_terminal_terminal_crossings(mesh, method, capacity):
     _, A = mesh
     S = constructor(A, capacity=capacity, method=method)
-    crossings = _terminal_terminal_crossings(S, A.graph['VertexC'])
+    crossings = terminal_terminal_crossings(S, A.graph['VertexC'])
     assert crossings == [], (
         f'{method} produced terminal-terminal crossings: {crossings}'
     )

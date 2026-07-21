@@ -285,13 +285,41 @@ def _P_from_halfedge_pack(
     """
     halfedges, ref_is_cw_ = halfedge_pack
     P = nx.PlanarEmbedding()
-    for (u, v, ref), ref_is_cw in zip(halfedges, ref_is_cw_):
-        if ref == NULL:
-            P.add_half_edge(u.item(), v.item())
+    # This inlines nx.PlanarEmbedding.add_half_edge() (including its invariant
+    # of keeping the leftmost neighbor as the last key of `succ[u]`), which is
+    # ~6x faster than calling it, as the reference node is always valid here.
+    # pyrefly: ignore[missing-attribute]
+    succ, pred, node = P._succ, P._pred, P._node
+    for (u, v, ref), ref_is_cw in zip(halfedges.tolist(), ref_is_cw_.tolist()):
+        succ_u = succ.get(u)
+        if succ_u is None:
+            succ[u] = succ_u = {}
+            pred[u] = {}
+            node[u] = {}
+        if v not in succ:
+            succ[v] = {}
+            pred[v] = {}
+            node[v] = {}
+        if not succ_u:
+            # first out-half-edge of u
+            succ_u[v] = pred[v][u] = {'cw': v, 'ccw': v}
+            continue
+        leftmost = next(reversed(succ_u))
+        refD = succ_u[ref]
+        if ref_is_cw:
+            ref_ccw = refD['ccw']
+            succ_u[v] = pred[v][u] = {'cw': ref, 'ccw': ref_ccw}
+            succ_u[ref_ccw]['cw'] = v
+            refD['ccw'] = v
+            move_leftmost_to_end = ref != leftmost
         else:
-            P.add_half_edge(
-                u.item(), v.item(), **{('cw' if ref_is_cw else 'ccw'): ref.item()}
-            )
+            ref_cw = refD['cw']
+            succ_u[v] = pred[v][u] = {'cw': ref_cw, 'ccw': ref}
+            succ_u[ref_cw]['ccw'] = v
+            refD['cw'] = v
+            move_leftmost_to_end = True
+        if move_leftmost_to_end:
+            succ_u[leftmost] = succ_u.pop(leftmost)
     return P
 
 
@@ -458,6 +486,9 @@ def make_planar_embedding(
     )
 
     if len(border) == 0:
+        # inert placeholders: every use below is guarded by a condition that
+        # cannot hold when there is no border
+        border_poly = hull_poly = shp.Polygon()
         hull_minus_border = shp.MultiPolygon()
         out_root_pts = shp.MultiPoint()
         hull_border_vertices = ()
@@ -800,7 +831,9 @@ def make_planar_embedding(
     nx.set_edge_attributes(A, 'delaunay', name='kind')
 
     # Extend A with diagonals.
-    diagonals = bidict()
+    # accumulate in a plain dict: bidict.__setitem__ is ~9x costlier per item
+    # than validating the whole mapping once, at construction.
+    diagonals_ = {}
     for u, v in P_A_edges - hull_pruned_edges:
         uvD = P_A[u][v]
         s, t = uvD['cw'], uvD['ccw']
@@ -811,8 +844,9 @@ def make_planar_embedding(
 
         if is_triangle_pair_a_convex_quadrilateral(*VertexS[[u, v, s, t]]):
             s, t = (s, t) if s < t else (t, s)
-            diagonals[(s, t)] = (u, v)
+            diagonals_[(s, t)] = (u, v)
             A.add_edge(s, t, kind='extended')
+    diagonals = bidict(diagonals_)
 
     # ##########################
     # G) Build the hull-concave.
@@ -1145,14 +1179,15 @@ def make_planar_embedding(
         for s, t in ((border[-1], border[0]), *zip(border[:-1], border[1:])):
             border_edges.add((s, t) if s < t else (t, s))
 
-    P_diags = bidict()
+    P_diags_ = {}
     for u, v in P_edges.difference(hull_pruned_edges, constraint_edges, border_edges):
         uvD = P[u][v]
         s, t = uvD['cw'], uvD['ccw']
         if is_triangle_pair_a_convex_quadrilateral(*VertexC[[u, v, s, t]]):
             s, t = (s, t) if s < t else (t, s)
-            P_diags[(s, t)] = (u, v)
+            P_diags_[(s, t)] = (u, v)
             P_paths.add_edge(s, t)
+    P_diags = bidict(P_diags_)
 
     nx.set_edge_attributes(P_paths, A_edge_length, name='length')
     for u, v, edgeD in P_paths.edges(data=True):

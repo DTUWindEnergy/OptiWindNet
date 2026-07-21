@@ -5,20 +5,26 @@ import abc
 import logging
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum, auto
 from inspect import cleandoc
 from itertools import chain
 from pathlib import Path
 from textwrap import indent
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 from makefun import with_signature
 
-from ..interarraylib import G_from_S
+from ..interarraylib import (
+    G_from_S,
+    _ring_split_position,
+    bfs_subtree_loads,
+    directed_links,
+)
 from ..pathfinding import PathFinder
+from ..types import Topology
 
 _lggr = logging.getLogger(__name__)
 error, info, warn = _lggr.error, _lggr.info, _lggr.warning
@@ -69,14 +75,6 @@ class OWNSolutionNotFound(Exception):
     pass
 
 
-class Topology(StrEnum):
-    "Set the topology of subtrees in the solution."
-
-    RADIAL = auto()
-    BRANCHED = auto()
-    DEFAULT = BRANCHED
-
-
 class FeederRoute(StrEnum):
     "If feeder routes must be ``'straight'`` or can be detoured (``'segmented'``)."
 
@@ -114,10 +112,18 @@ def feeder_and_load_bounds(
     feeder_limit: FeederLimit,
     max_feeders: int,
     balanced: bool,
+    feeders_per_subtree: int = 1,
     *,
     total_power: int | None = None,
 ) -> tuple[int, int | None, int | None, int | None]:
     """Derive the feeder-count and feeder-load bounds a model must enforce.
+
+    Bounds are returned in units of **subtrees** (the quantity the model's
+    feeder-sum constraint counts): one feeder per subtree for radial/branched
+    topologies, but a RINGED subtree is a cycle with two feeders. The caller
+    signals this with ``feeders_per_subtree`` (2 for RINGED), so a user-supplied
+    ``max_feeders`` in physical substation connections can be converted to the
+    subtree count constrained by the model.
 
     ``total_power`` defaults to ``T`` for unit-power terminals. The feeder count
     is bounded below by ``min_feeders = ceil(total_power/capacity)`` regardless
@@ -135,7 +141,7 @@ def feeder_and_load_bounds(
     variable's own bounds.
 
     Returns:
-        ``(feeders_lb, feeders_ub, load_lb, load_ub)``
+        ``(feeders_lb, feeders_ub, load_lb, load_ub)`` in subtree-count units.
     """
     W = T if total_power is None else total_power
     derived_minimum = (
@@ -151,6 +157,14 @@ def feeder_and_load_bounds(
             '"specified" instead'
         )
 
+    if feeders_per_subtree != 1 and max_feeders:
+        if max_feeders % feeders_per_subtree:
+            raise ValueError(
+                f'max_feeders ({max_feeders}) must be a multiple of '
+                f'{feeders_per_subtree} for a RINGED topology (each ring uses '
+                f'{feeders_per_subtree} substation connections)'
+            )
+        max_feeders //= feeders_per_subtree
     min_feeders = -(-W // capacity)
     if feeder_limit is FeederLimit.UNLIMITED:
         feeders_lb, feeders_ub = min_feeders, None
@@ -219,28 +233,70 @@ class ModelOptions(dict):
         ),
     )
 
-    @with_signature(
-        '__init__(self, *, '
-        + ', '.join(
-            chain(
-                (f'{k}: {v.__name__} = "{v.DEFAULT.value}"' for k, v in hints.items()),
-                (
-                    f'{name}: {kind.__name__} = {default}'
-                    for name, (kind, default, _) in simple.items()
-                ),
-            )
-        )
-        + ')'
-    )
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            if isinstance(v, str):
-                kwargs[k] = self.hints[k](v)
-            else:
-                if k not in self.simple:
-                    raise ValueError(f'Unknown argument: {k}')
+    # `with_signature` rewrites `__init__` at import time so that `help()`,
+    # `inspect.signature` and IDE introspection show the real options. Type
+    # checkers cannot follow that, so the same signature is declared statically
+    # under TYPE_CHECKING -- keep the two in sync (they are both derived from
+    # `hints` and `simple`).
+    if TYPE_CHECKING:
 
-        super().__init__(kwargs)
+        def __init__(
+            self,
+            *,
+            topology: Topology | str = ...,
+            feeder_route: FeederRoute | str = ...,
+            feeder_limit: FeederLimit | str = ...,
+            balanced: bool = ...,
+            max_feeders: int = ...,
+        ) -> None: ...
+    else:
+
+        @with_signature(
+            '__init__(self, *, '
+            + ', '.join(
+                chain(
+                    (
+                        f'{k}: {v.__name__} = "{v.DEFAULT.value}"'
+                        for k, v in hints.items()
+                    ),
+                    (
+                        f'{name}: {kind.__name__} = {default}'
+                        for name, (kind, default, _) in simple.items()
+                    ),
+                )
+            )
+            + ')'
+        )
+        def __init__(self, **kwargs):
+            # dispatch on the key, not on the value's type: a str passed for an
+            # int option is a type error, not an enum to look up
+            for k, v in kwargs.items():
+                kind = self.hints.get(k)
+                if kind is not None:
+                    kwargs[k] = kind(v)
+                else:
+                    expected = self.simple[k][0]
+                    if not isinstance(v, expected):
+                        raise TypeError(
+                            f'{k} must be {expected.__name__}, got '
+                            f'{type(v).__name__}: {v!r}'
+                        )
+
+            super().__init__(kwargs)
+
+    # Options are a value object: every value is coerced and every key is
+    # present once __init__ returns, and the whole library reads them on that
+    # basis (`is Topology.RINGED` is false for a plain 'ringed' str). Mutating
+    # the mapping afterwards would bypass the coercion, so it is refused --
+    # build a new instance instead.
+    def _immutable(self, *args, **kwargs):
+        raise TypeError(
+            f'{type(self).__name__} is immutable: construct a new one instead of '
+            'modifying it in place'
+        )
+
+    __setitem__ = __delitem__ = _immutable
+    clear = pop = popitem = setdefault = update = _immutable
 
     @classmethod
     def help(cls):
@@ -285,6 +341,88 @@ class SolutionInfo:
     termination: str
 
 
+def warmstart_links(
+    metadata: ModelMetadata, S: nx.Graph
+) -> Iterator[tuple[Any, Any | None, int]]:
+    """Yield ``(link_var, flow_var, flow)`` for every link ``S`` activates.
+
+    Uses ``metadata``'s own link/flow maps as the index, orienting ``S`` the way
+    the flow formulation expects — radializing RINGED rings into directed chains
+    — via :func:`.interarraylib.directed_links`. ``flow_var`` is ``None`` for a
+    ring's closing feeder (a link variable with no flow one). Everything not
+    yielded is inactive (0); each backend seeds that however its warm-start API
+    requires, then applies these.
+
+    Raises:
+        OWNWarmupFailed: ``S`` uses a link the model lacks.
+    """
+    for source, sink, flow in directed_links(S):
+        key = (source, sink)
+        if key not in metadata.link_:
+            raise OWNWarmupFailed(f'warmup_model() failed: model lacks S link {key}')
+        yield (
+            metadata.link_[key],
+            metadata.flow_[key] if key in metadata.flow_ else None,
+            flow,
+        )
+
+
+def _finalize_ringed_mip_S(
+    S: nx.Graph,
+    closing_links: list[tuple[int, int]],
+    A: nx.Graph | None,
+) -> int:
+    """Close decoded MILP paths into canonical rings and recalculate their loads."""
+    rings: list[tuple[int, int, int, int, int, int]] = []
+    for close_root, tail in closing_links:
+        subtree = S.nodes[tail]['subtree']
+        ordered = [tail]
+        prev, curr = None, tail
+        while True:
+            nxts = [n for n in S[curr] if n != prev]
+            if len(nxts) != 1:
+                raise ValueError(
+                    f'RINGED MILP path at terminal {curr} has {len(nxts)} continuations'
+                )
+            nxt = nxts[0]
+            if nxt < 0:
+                head_root = nxt
+                break
+            ordered.append(nxt)
+            prev, curr = curr, nxt
+        ordered.reverse()
+        head, n = ordered[0], len(ordered)
+        if n == 1:
+            if close_root != head_root:
+                S.add_edge(close_root, tail, load=0, reverse=False)
+        else:
+            m = _ring_split_position(ordered, A)
+            u, v = ordered[m - 1], ordered[m]
+            S[u][v].update(load=0, reverse=False)
+            # bfs_subtree_loads overwrites this placeholder with the arm load.
+            S.add_edge(close_root, tail, load=1, reverse=False)
+        rings.append((subtree, head_root, head, close_root, tail, n))
+
+    for nodeD in S.nodes.values():
+        nodeD.pop('load', None)
+    roots = set(range(-S.graph['R'], 0))
+    visited = roots.copy()
+    for root in roots:
+        S.nodes[root]['load'] = 0
+    for subtree, head_root, head, close_root, tail, n in rings:
+        bfs_subtree_loads(S, head_root, [head], subtree, visited)
+        if n > 1:
+            bfs_subtree_loads(S, close_root, [tail], subtree, visited)
+
+    max_load = max(
+        (edgeD['load'] for u, v, edgeD in S.edges(data=True) if u < 0 or v < 0),
+        default=0,
+    )
+    S.graph['max_load'] = max_load
+    S.graph['has_loads'] = True
+    return max_load
+
+
 class Solver(abc.ABC):
     "Common interface to multiple MILP solvers"
 
@@ -313,7 +451,7 @@ class Solver(abc.ABC):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         capacity: int,
-        model_options: ModelOptions,
+        model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
         """Define the problem geometry, available edges and tree properties
@@ -390,23 +528,27 @@ class Solver(abc.ABC):
           Graph topology ``S`` from the solution.
         """
         metadata = self.metadata
-        S = nx.Graph(R=metadata.R, T=metadata.T)
+        topology = metadata.model_options['topology']
+        R = metadata.R
+        S = nx.Graph(R=R, T=metadata.T)
         for key in ('power_scale', 'turbine_power_decimals'):
             if key in self.A.graph:
                 S.graph[key] = self.A.graph[key]
         # ensure roots are added, even if some are not connected
-        S.add_nodes_from(range(-metadata.R, 0))
+        S.add_nodes_from(range(-R, 0))
         # Get active links and if flow is reversed (i.e. from small to big)
         rev_from_link = {
             (u, v): u < v
             for (u, v), var in metadata.link_.items()
             if self._link_val(var)
         }
+        flow_links = {
+            link: reverse
+            for link, reverse in rev_from_link.items()
+            if link in metadata.flow_
+        }
         S.add_weighted_edges_from(
-            (
-                (u, v, self._flow_val(metadata.flow_[u, v]))
-                for (u, v) in rev_from_link.keys()
-            ),
+            ((u, v, self._flow_val(metadata.flow_[u, v])) for u, v in flow_links),
             weight='load',
         )
         nx.set_node_attributes(
@@ -418,12 +560,12 @@ class Solver(abc.ABC):
             },
             'power',
         )
-        # set the 'reverse' edge attribute
-        nx.set_edge_attributes(S, rev_from_link, name='reverse')
-        # propagate loads from edges to nodes
+        nx.set_edge_attributes(S, flow_links, name='reverse')
+        # Propagate the decoded flow-tree attributes for every topology. A RINGED
+        # model is a path forest until its flowless starsʹ links are restored.
         subtree = -1
         max_load = 0
-        for r in range(-metadata.R, 0):
+        for r in range(-R, 0):
             for u, v in nx.edge_dfs(S, r):
                 S.nodes[v]['load'] = S[u][v]['load']
                 if u == r:
@@ -435,7 +577,15 @@ class Solver(abc.ABC):
                 max_load = max(max_load, subtree_load)
                 rootload += subtree_load
             S.nodes[r]['load'] = rootload
+        if topology is Topology.RINGED:
+            closing_links = [
+                link for link in rev_from_link if link not in metadata.flow_
+            ]
+            max_load = _finalize_ringed_mip_S(
+                S, closing_links, getattr(self, 'A', None)
+            )
         S.graph.update(
+            topology=topology,
             capacity=metadata.capacity,
             max_load=max_load,
             has_loads=True,
@@ -466,7 +616,7 @@ class PoolHandler(abc.ABC):
         """Go through the solver's solutions checking which has the shortest length
         after applying the detours with PathFinder."""
         Λ = float('inf')
-        branched = self.model_options['topology'] is Topology.BRANCHED
+        S = G = None
         num_solutions = self.num_solutions
         info(f'Solution pool has {num_solutions} solutions.')
         for i in range(num_solutions):
@@ -477,9 +627,7 @@ class PoolHandler(abc.ABC):
                 )
                 break
             Sʹ = self._topology_from_mip_pool()
-            Gʹ = PathFinder(
-                G_from_S(Sʹ, A), planar=P, A=A, branched=branched
-            ).create_detours()
+            Gʹ = PathFinder(G_from_S(Sʹ, A), planar=P, A=A).create_detours()
             Λʹ = Gʹ.size(weight='length')
             if Λʹ < Λ:
                 S, G, Λ = Sʹ, Gʹ, Λʹ
@@ -487,5 +635,7 @@ class PoolHandler(abc.ABC):
                 info(f'#{i} -> incumbent (objective: {λ:.3f}, length: {Λ:.3f})')
             else:
                 info(f'#{i} discarded (objective: {λ:.3f}, length: {Λ:.3f})')
+        if S is None or G is None:
+            raise ValueError('Solution pool has no usable solution.')
         G.graph['pool_count'] = num_solutions
         return S, G

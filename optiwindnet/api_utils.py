@@ -1,5 +1,5 @@
 import logging
-from typing import Sequence
+from typing import TYPE_CHECKING, Any, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,6 +8,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
 from .interarraylib import total_power
+from .types import Topology
 
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
@@ -65,7 +66,8 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
 
 
 def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC, **kwargs):
-    fig = plt.figure(**({'layout': 'constrained'} | kwargs))
+    kw_fig: dict[str, Any] = {'layout': 'constrained'}
+    fig = plt.figure(**(kw_fig | kwargs))
     ax = fig.add_subplot()
     ax.set_title('Original and Buffered Shapes')
 
@@ -171,9 +173,9 @@ def is_warmstart_eligible(
     if feeder_limit_mode == 'unlimited':
         feeder_limit = float('inf')
     elif feeder_limit_mode == 'exactly':
-        feeder_limit = feeder_exact = model_options.get('max_feeders', 0)
+        feeder_limit = feeder_exact = model_options['max_feeders']
     elif feeder_limit_mode == 'specified':
-        feeder_limit = model_options.get('max_feeders', 0)
+        feeder_limit = model_options['max_feeders']
         if feeder_limit == feeder_minimum:
             feeder_exact = feeder_limit
     elif feeder_limit_mode == 'minimum':
@@ -211,18 +213,21 @@ def is_warmstart_eligible(
             )
 
     # Detour constraint
-    if S_warm_has_detour and model_options.get('feeder_route') == 'straight':
+    if S_warm_has_detour and model_options['feeder_route'] == 'straight':
         reasons.append(
             'segmented feeders are incompatible with model option:'
             ' feeder_route="straight"'
         )
 
-    # Topology constraint
-    branched_nodes = [n for n in S_warm.nodes if n >= 0 and S_warm.degree[n] > 2]
-    if branched_nodes and model_options.get('topology') == 'radial':
-        reasons.append(
-            'branched network incompatible with model option: topology="radial"'
-        )
+    # Topology constraint. Valid seeds: RADIAL→{RADIAL, BRANCHED},
+    # BRANCHED→BRANCHED, RINGED→RINGED (topology read from the label, not the
+    # structure).
+    mt = model_options['topology']
+    # Legacy warmstarts predate the topology label; treat those as matching the
+    # requested forest topology and keep strict checking for labeled graphs.
+    st = S_warm.graph.get('topology', mt)
+    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
+        reasons.append(f'{st} network incompatible with model option: topology="{mt}"')
 
     # Output
     if reasons and verbose_warmstart:
@@ -263,6 +268,14 @@ def parse_cables_input(
             else:
                 raise ValueError(f'Invalid cable values: {cables}')
         return cables_out
+    else:
+        raise ValueError(f'Invalid cable values: {cables}')
+
+
+if TYPE_CHECKING:
+    # IPython injects `get_ipython` into builtins; outside IPython the name is
+    # simply absent, which is what the NameError below detects.
+    def get_ipython() -> Any: ...
 
 
 def enable_ortools_logging_if_jupyter(solver):
@@ -443,7 +456,7 @@ def buffer_border_obs(L, buffer_dist):
     obstaclesC = [V[idx] for idx in obstacles_idx]
 
     pre_buffer = {
-        'borderC': borderC.copy(),
+        'borderC': None if borderC is None else borderC.copy(),
         'obstaclesC': [obs.copy() for obs in obstaclesC],
     }
 

@@ -6,7 +6,9 @@ import logging
 import math
 from bisect import bisect_left
 from collections import defaultdict, namedtuple
+from collections.abc import Generator
 from itertools import chain
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -24,7 +26,7 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
-PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn'.split())
+PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn')
 # Terminology used by PathFinder internals:
 #   wall: one non-traversable mesh segment; route walls are contour edges of
 #     the route, constraint walls are planar constraint edges (borders and
@@ -120,6 +122,43 @@ def _node_dist(VertexC: np.ndarray, u: int, v: int) -> float:
     return math.hypot(ux - vx, uy - vy)
 
 
+def _compact_stunt_clones(
+    G: nx.Graph,
+    *,
+    T: int,
+    B: int,
+    clone_idx: int,
+    clone2prime: list[int],
+    stunts_primes: list[int] | None,
+) -> tuple[nx.Graph, int, int, list[int]]:
+    """Remove stunt-id gaps and map their clones to the original primes.
+
+    ``B`` and ``clone_idx`` use the planar embedding's numbering, in which
+    temporary stunt vertices occupy the end of the constraint-vertex range.
+    Routesets do not retain those vertices, so every contour/detour clone must
+    be shifted down and any clone of a stunt must map to that stunt's original
+    constraint vertex.
+    """
+    if not stunts_primes:
+        return G, B, clone_idx, clone2prime
+
+    num_stunts = len(stunts_primes)
+    first_clone = T + B
+    G = nx.relabel_nodes(
+        G,
+        {clone: clone - num_stunts for clone in range(first_clone, clone_idx)},
+        copy=False,
+    )
+    clone_idx -= num_stunts
+    B -= num_stunts
+
+    stunt2prime = {
+        stunt: prime for stunt, prime in enumerate(stunts_primes, start=T + B)
+    }
+    clone2prime = [stunt2prime.get(prime, prime) for prime in clone2prime]
+    return G, B, clone_idx, clone2prime
+
+
 def _expand_P_paths_edge(
     s: int, t: int, shortcuts: dict[tuple[int, int], list[int]]
 ) -> list[int]:
@@ -211,12 +250,15 @@ class PathFinder:
     Only edges in graph attribute ``'tentative'`` or, lacking that, edges with the
     attribute ``'kind'`` with value ``'tentative'`` are checked for crossings.
 
+    Feeders are rerouted within the topology ``Gʹ`` declares in its mandatory
+    ``'topology'`` graph attribute, which decides where a feeder may re-hook:
+    ``'branched'`` allows any terminal of the subtree, ``'radial'`` only its
+    head or tail, ``'ringed'`` only the current subroot.
+
     Args:
       G: the route set without detours
       P: the planar embedding associated with A
       A: the available links graph
-      branched: if True, any terminal can be linked to root, else only subtrees'
-        heads/tails
       iterations_limit: maximum number of steps in the path-finding process
       traversals_limit: maximum number of times a single portal may be traversed
       bad_streak_limit: limit on how many steps in a row without finding an improved
@@ -242,7 +284,6 @@ class PathFinder:
         planar: nx.PlanarEmbedding,
         A: nx.Graph,
         *,
-        branched: bool = True,
         iterations_limit: int = 15000,
         traversals_limit: int = 3,
         bad_streak_limit: int = 5,
@@ -337,17 +378,21 @@ class PathFinder:
 
         # Single pass over G.edges: non-contour edges contribute their
         # prime pair to `edges_G_primes` directly; contour edges register
-        # their A-edge for later fence emission. G's contour clones may
-        # follow a synthetic (shortcut) prime sequence, so the fence-side
-        # loop below substitutes the fully P-edge-expanded chain for what
-        # those clones would naively project to.
+        # their A-edge for later fence emission. Fully shortened contours have
+        # no contour clones or edge kind, so identify their direct edge through
+        # `shortened_contours`. G's contour clones may follow a synthetic
+        # (shortcut) prime sequence, so the fence-side loop below substitutes
+        # the fully P-edge-expanded chain for what those clones would naively
+        # project to.
         shortened = G.graph.get('shortened_contours') or {}
         contour_A_edges: dict[tuple[int, int], int] = {
             ae: G.nodes[ae[1]]['subtree'] for ae in shortened
         }
         edges_G_primes: set[tuple[int, int]] = set()
         for u, v, d in G.edges(data=True):
-            if d.get('kind') == 'contour':
+            kind = d.get('kind')
+            uv = (u, v) if u < v else (v, u)
+            if kind == 'contour' or (kind is None and uv in shortened):
                 ae = d.get('A_edge')
                 if ae is not None and ae not in contour_A_edges:
                     contour_A_edges[ae] = G.nodes[ae[1]]['subtree']
@@ -556,7 +601,7 @@ class PathFinder:
             Rank if Rank is not None else rankdata(d2roots, method='dense', axis=0)
         )
         self.predetour_length = Gʹ.size(weight='length')
-        self.branched = branched
+        self.topology = Gʹ.graph['topology']
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
         self.stunts_primes = A.graph.get('stunts_primes')
@@ -588,7 +633,9 @@ class PathFinder:
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
 
         self._precompute_sector_lookup(fences)
-        self.best_pn_by_pair_id = [None] * len(self.pair_id_by_prime_sector)
+        self.best_pn_by_pair_id: list[int | None] = [None] * len(
+            self.pair_id_by_prime_sector
+        )
 
         # Build the chain topology: one Chain per route fence, with
         # chain_access mapping
@@ -1636,7 +1683,11 @@ class PathFinder:
         _funnel: list[int],
         wedge_end: list[int],
         bad_streak: int = 0,
-    ):
+    ) -> Generator[Any, Any, None]:
+        # The yielded shape depends on the protocol phase, so it cannot be typed
+        # more precisely than Any: a bare `yield` asks for the next
+        # (portal, side); sending None yields the 6-tuple funnel state; sending
+        # a (portal, side) yields (prio, is_promising).
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
         #     - _node: the index it contains maps to a coordinate in VertexC
@@ -2037,6 +2088,24 @@ class PathFinder:
                     del G[r][n]['kind']
             if 'tentative' in G.graph:
                 del G.graph['tentative']
+
+            R, T, B = (self.A.graph[k] for k in 'RTB')
+            C = G.graph.get('C', 0)
+            clone_idx = T + B + C
+            clone2prime = G.graph['fnT'][T + B : -R].tolist() if C > 0 else []
+            G, B, clone_idx, clone2prime = _compact_stunt_clones(
+                G,
+                T=T,
+                B=B,
+                clone_idx=clone_idx,
+                clone2prime=clone2prime,
+                stunts_primes=self.A.graph.get('stunts_primes'),
+            )
+            if C > 0:
+                fnT = np.arange(R + clone_idx)
+                fnT[T + B : clone_idx] = clone2prime
+                fnT[-R:] = range(-R, 0)
+                G.graph.update(B=B, fnT=fnT)
             debug('<PathFinder: no crossings, detagged all tentative edges.')
             return G
 
@@ -2060,10 +2129,12 @@ class PathFinder:
             subtree_id = subtree_id_from_n[n]
             subtree = subtree_from_subtree_id[subtree_id]
             subtree_load = G.nodes[n]['load']
-            # set of nodes to examine is different depending on `branched`
+            # where a feeder may re-hook depends on the declared topology
             hook_candidates = (
-                [n for n in subtree if n < T]
-                if self.branched
+                [n]
+                if self.topology == 'ringed'
+                else [n for n in subtree if n < T]
+                if self.topology == 'branched'
                 else [n, next(h for h in subtree if len(G._adj[h]) == 1)]  # type: ignore
             )
             debug('hook_candidates: %s', hook_candidates)
@@ -2141,9 +2212,7 @@ class PathFinder:
                 )
                 for _, _, edgeD in G.edges(Clone, data=True):
                     edgeD.update(kind='detour', reverse=True)
-                if added_clones > 0:
-                    # an edge reaching root always has target < source
-                    G[Clone[-1]][path[-1]]['reverse'] = False
+                G[Clone[-1] if Clone else path[-2]][path[-1]]['reverse'] = False
             else:
                 del G[n][r]['kind']
                 debug(
@@ -2185,23 +2254,14 @@ class PathFinder:
 
         D = clone_idx - T - B - C
         detextra = G.size(weight='length') / self.predetour_length - 1
-        if self.stunts_primes is not None:
-            num_stunts = len(self.stunts_primes)
-            G = nx.relabel_nodes(
-                G,
-                {clone: clone - num_stunts for clone in range(T + B, clone_idx)},
-                copy=False,
-            )
-            clone_idx -= num_stunts
-            B -= num_stunts
-            if clone2prime:
-                for stunt, prime in enumerate(self.stunts_primes, start=T + B):
-                    try:
-                        while True:
-                            i = clone2prime.index(stunt)
-                            clone2prime[i] = prime
-                    except ValueError:
-                        continue
+        G, B, clone_idx, clone2prime = _compact_stunt_clones(
+            G,
+            T=T,
+            B=B,
+            clone_idx=clone_idx,
+            clone2prime=clone2prime,
+            stunts_primes=self.stunts_primes,
+        )
 
         fnT = np.arange(R + clone_idx)
         fnT[T + B : clone_idx] = clone2prime

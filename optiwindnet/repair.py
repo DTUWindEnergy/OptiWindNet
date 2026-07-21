@@ -78,6 +78,10 @@ def _find_fix_choices_path(
     How it works:
       * Several node swapping choices are examined within the edges in ``A``.
       * A list where each item is a feasible modification package is returned.
+
+    Each choice is a 6-tuple ``(gateD, tailD, swapD, freeS, edges_del, edges_add)``
+    where ``gateD``/``tailD`` are the post-fix extremes of the dst path and
+    ``swapD``/``freeS`` are the post-fix extremes of the src path.
     """
     i_end = len(dst_path)
     choices = []
@@ -118,7 +122,16 @@ def _find_fix_choices_path(
                                 + edges_add_1
                                 + [(nearD, swapS), (swapS, farD)]
                             )
-                            choices.append((gateD, swapD, freeS, edges_del, edges_add))
+                            choices.append(
+                                (
+                                    gateD,
+                                    dst_path[-1],
+                                    swapD,
+                                    freeS,
+                                    edges_del,
+                                    edges_add,
+                                )
+                            )
                     for hookD, D_gated in (
                         (dst_path_[0], False),
                         (dst_path_[-1], True),
@@ -131,6 +144,7 @@ def _find_fix_choices_path(
                             choices.append(
                                 (
                                     gateD if D_gated else swapS,
+                                    swapS if D_gated else dst_path[-1],
                                     swapD,
                                     freeS,
                                     edges_del,
@@ -142,7 +156,9 @@ def _find_fix_choices_path(
                         # fix found
                         edges_del = edges_del_0 + edges_del_1
                         edges_add = edges_add_0 + [(nearD_, swapS), (swapS, farD_)]
-                        choices.append((gateD, swapD, freeS, edges_del, edges_add))
+                        choices.append(
+                            (gateD, dst_path[-1], swapD, freeS, edges_del, edges_add)
+                        )
                     else:
                         # case (D) – nothing to do
                         continue
@@ -163,6 +179,7 @@ def _find_fix_choices_path(
                         choices.append(
                             (
                                 gateD if D_gated else hookD,
+                                hookD if D_gated else dst_path[-1],
                                 swapD,
                                 freeS,
                                 edges_del,
@@ -176,13 +193,52 @@ def _find_fix_choices_path(
                     choices.append(
                         (
                             gateD if D_gated else swapS,
+                            swapS if D_gated else dst_path[-1],
                             swapD,
                             freeS,
                             edges_del,
                             edges_add,
                         )
                     )
-    return choices  # ((gateD, swapD, freeS, edges_del, edges_add), ...)
+    return choices  # ((gateD, tailD, swapD, freeS, edges_del, edges_add), ...)
+
+
+def _quantify_choices_ringed(S, A, swapS, src_path, dst_path, choices):
+    """Ring-aware counterpart of :func:`_quantify_choices`.
+
+    In a topology destined for rings (closed by :func:`.interarraylib.calcload`
+    when handed ``A``), *both* extremes of every path get a feeder, so the length
+    change prices ``d2roots`` at all four extremes and there is no freedom to flip
+    a gate to a leaf end. The returned ``gates_del``/``gates_add`` still maintain
+    the single-feeder path form: if a path's fed extreme does not survive the fix,
+    its feeder moves to the nearest new extreme (the other extreme's feeder is
+    added later by ``calcload``, so this choice does not affect final cost).
+    """
+    quant_choices = []
+    (rootS,) = (n for n in S[src_path[0]] if n < 0)
+    (rootD,) = (n for n in S[dst_path[0]] if n < 0)
+    d2roots = A.graph['d2roots']
+    for gateD, tailD, swapD, freeS, edges_del, edges_add in choices:
+        gates_del = []
+        gates_add = []
+        src_extremes, dst_extremes = (swapD, freeS), (gateD, tailD)
+        change = sum(A[u][v]['length'] for u, v in edges_add) - sum(
+            A[u][v]['length'] for u, v in edges_del
+        )
+        for root, path, extremes in (
+            (rootS, src_path, src_extremes),
+            (rootD, dst_path, dst_extremes),
+        ):
+            change += (
+                sum(d2roots[n, root] for n in extremes)
+                - d2roots[path[0], root]
+                - d2roots[path[-1], root]
+            )
+            if path[0] not in extremes:
+                gates_del.append((root, path[0]))
+                gates_add.append((root, min(extremes, key=lambda n: d2roots[n, root])))
+        quant_choices.append((change, (edges_del, edges_add, gates_del, gates_add)))
+    return quant_choices
 
 
 def _quantify_choices(S, A, swapS, src_path, dst_path, choices):
@@ -190,7 +246,7 @@ def _quantify_choices(S, A, swapS, src_path, dst_path, choices):
     (rootS,) = (n for n in S[src_path[0]] if n < 0)
     (rootD,) = (n for n in S[dst_path[0]] if n < 0)
     d2roots = A.graph['d2roots']
-    for gateD, swapD, freeS, edges_del, edges_add in choices:
+    for gateD, _, swapD, freeS, edges_del, edges_add in choices:
         gates_del = []
         gates_add = []
         change = 0
@@ -247,7 +303,7 @@ def _apply_choice(
     return S
 
 
-def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
+def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx.Graph:
     # naming: suffix _path as opposed to _tree -> Sʹ is non-branching
     """
 
@@ -257,6 +313,9 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
     Args:
         Sʹ: solution topology that contains non-branching rooted tree(s)
         A: available edges used in creating ``Sʹ``
+        ringed: rank fix choices as if both path extremes get a feeder, for
+            topologies destined for ring form (``Sʹ`` itself must still be in
+            single-feeder path form)
 
     Returns:
         Topology without the crossing in a shallow copy of ``Sʹ``.
@@ -274,8 +333,8 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
 
     def not_crossing(choice):
         # reads from parent scope: diagonals, S, P
-        #  gateD, swapD, freeS, edges_del, edges_add = choice
-        _, _, _, edges_del, edges_add = choice
+        #  gateD, tailD, swapD, freeS, edges_del, edges_add = choice
+        *_, edges_del, edges_add = choice
         edges_del_ = set((u, v) if u < v else (v, u) for u, v in edges_del)
         edges_add_ = set((u, v) if u < v else (v, u) for u, v in edges_add)
         edges_add = edges_add_ - edges_del_
@@ -390,9 +449,8 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph) -> nx.Graph:
             #  print(dst_path)
             choices = _find_fix_choices_path(A, swapS, src_path, dst_path)
             choices = filter(not_crossing, choices)
-            quant_choices.extend(
-                _quantify_choices(S, A, swapS, src_path, dst_path, choices)
-            )
+            quantify = _quantify_choices_ringed if ringed else _quantify_choices
+            quant_choices.extend(quantify(S, A, swapS, src_path, dst_path, choices))
         if not quant_choices:
             info('Repair unsuccessful: crossing marked for removal on HGS rerun.')
             outstanding_crossings.append((uv, st))

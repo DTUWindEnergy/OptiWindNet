@@ -1,6 +1,7 @@
 import copy
 import pickle
 from collections import Counter
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -9,9 +10,11 @@ import numpy as np
 
 from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
 from optiwindnet.api_utils import parse_cables_input
+from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import assign_cables, terse_links_from_S
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import ModelOptions, solver_factory
+from optiwindnet.types import Topology
 
 
 def load_instances(path: Path) -> Any:
@@ -20,7 +23,7 @@ def load_instances(path: Path) -> Any:
     if not path.exists():
         raise FileNotFoundError(
             f'Missing expected test data file: {path}\n\n'
-            'To (re)generate run: python update_expected_values.py\n'
+            'To (re)generate run: python -m tests.update_expected_values\n'
             'Or run pytest with --regen-expected.'
         )
     with path.open('rb') as fh:
@@ -91,11 +94,197 @@ def solve_milp_low_level(router_spec: Dict[str, Any], L: nx.Graph):
     return tuple(terse_links_from_S(S).tolist()), canonical_edges(G)
 
 
+def solver_unavailable(exc: BaseException) -> bool:
+    """Whether ``exc`` means a MILP backend is missing or unlicensed (=> skip).
+
+    Open-source backends (highs/scip/cbc/fscip) raise import/binary errors when
+    absent; commercial ones (gurobi/cplex) raise a license message on machines
+    without a valid license (e.g. the size-limited pip license on a large model).
+    """
+    if isinstance(exc, (FileNotFoundError, ModuleNotFoundError)):
+        return True
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in ('not licensed', 'license', 'token.gurobi.com', 'gurobi model')
+    )
+
+
+def solve_milp_property_metrics(router_spec: Dict[str, Any], L: nx.Graph):
+    """Solve a MILPRouter spec and reduce it to picklable property metrics.
+
+    Worker-safe counterpart of ``solve_milp_low_level`` for the property-based
+    end-to-end tests: it returns ``(metrics, termination, length)`` instead of an
+    exact-topology snapshot, so the caller can assert structural invariants and a
+    gap-tolerant length regression rather than an exact edge set.
+    """
+    params = router_spec['params']
+    cables = parse_cables_input(router_spec['cables'])
+    cables_capacity = max(cables)[0]
+    model_options_dict = params.get('model_options', {})
+    model_options = ModelOptions(**model_options_dict)
+
+    P, A = make_planar_embedding(L)
+    solver = solver_factory(params['solver_name'])
+    solver.set_problem(P, A, capacity=cables_capacity, model_options=model_options)
+    info = solver.solve(
+        time_limit=params['time_limit'],
+        mip_gap=params['mip_gap'],
+        options=params.get('solver_options', {}),
+        verbose=params.get('verbose', False),
+    )
+    S, G = solver.get_solution()
+    assign_cables(G, cables)
+    metrics = solution_property_metrics(S, G, model_options_dict, cables_capacity)
+    return metrics, str(info.termination), metrics['length']
+
+
+def has_cycle(S: nx.Graph) -> bool:
+    """Whether ``S`` carries a cycle once the substations are interconnected.
+
+    The graphs OptiWindNet works with do not represent the substation-to-
+    substation connections of the physical network, so a ring bridging two
+    substations reads as a path between two roots. Linking the roots in a path
+    supplies those connections, so that every ring -- bridging or not -- closes
+    a cycle.
+    """
+    Sx = S.copy()
+    Sx.add_edges_from(pairwise(range(-S.graph['R'], 0)))
+    return not nx.is_forest(Sx)
+
+
+def solution_property_metrics(
+    S: nx.Graph, G: nx.Graph, model_options: Optional[dict], capacity: int
+) -> Dict[str, Any]:
+    """Reduce a solved (S, G) pair to picklable property metrics.
+
+    Returns only primitives so it can run inside the ``ortools_worker``
+    subprocess and be shipped back. ``assert_solution_properties`` consumes the
+    result. Keeping the reduction here (rather than in the test) means the exact
+    same checks apply whether the solve ran in-process or in the worker.
+    """
+    import math
+
+    from optiwindnet.interarraylib import validate_routeset, validate_topology
+
+    R, T = S.graph['R'], S.graph['T']
+    topology = (model_options or {}).get('topology', Topology.BRANCHED)
+
+    edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
+    feeder_edges = [(u, v) for u, v in S.edges if u < 0 or v < 0]
+    feeder_loads = sorted(S[u][v]['load'] for u, v in feeder_edges)
+
+    # a list of strings is picklable, so the whole check crosses the worker
+    # boundary intact
+    S.graph.setdefault('topology', Topology(topology))
+    topology = S.graph['topology']
+    topology_violations = validate_topology(S, capacity)
+
+    return dict(
+        valid_findings=len(validate_routeset(G)),
+        length=float(G.size(weight='length')),
+        max_edge_load=max(edge_loads) if edge_loads else 0,
+        sum_root_load=sum(S.nodes[r]['load'] for r in range(-R, 0)),
+        T=T,
+        R=R,
+        has_cycle=has_cycle(S),
+        num_feeders=len(feeder_edges),
+        feeder_loads=feeder_loads,
+        min_feeders=math.ceil(T / capacity),
+        topology_violations=topology_violations,
+        topology=str(topology),
+    )
+
+
+def assert_solution_properties(
+    metrics: Dict[str, Any], spec: Dict[str, Any], capacity: int
+) -> None:
+    """Assert the invariants a valid solution must satisfy for its options.
+
+    Covers validity, capacity, full connectivity, topology shape (radial /
+    branched / ringed), and -- on single-substation instances where they are
+    unambiguous -- the feeder-count and balanced-load constraints implied by the
+    model options. Objective-length regression is checked separately by the
+    caller against a stored reference.
+    """
+    mo = (
+        spec['params'].get('model_options', {}) if spec['class'] == 'MILPRouter' else {}
+    )
+    topology = metrics['topology']
+    T = metrics['T']
+
+    # --- universal invariants -------------------------------------------------
+    assert metrics['valid_findings'] == 0, 'validate_routeset reported findings'
+    assert metrics['max_edge_load'] <= capacity, 'a cable exceeds capacity'
+    assert metrics['sum_root_load'] == T, 'not every terminal is connected'
+
+    # --- topology shape -------------------------------------------------------
+    # the shape invariants themselves belong to the library (`validate_topology`);
+    # they were reduced to violation strings on the worker side
+    assert metrics['topology_violations'] == []
+    if Topology(topology) is Topology.RINGED and T > 1:
+        assert metrics['has_cycle'], 'a ring closes a cycle'
+
+    # --- feeder-count / balance (single-root, non-ringed: well-defined) -------
+    single_root = metrics['R'] == 1
+    feeder_limit = mo.get('feeder_limit', 'unlimited')
+    min_feeders = metrics['min_feeders']
+    if single_root and Topology(topology) in (Topology.RADIAL, Topology.BRANCHED):
+        nf = metrics['num_feeders']
+        if feeder_limit == 'minimum':
+            assert nf == min_feeders
+        elif feeder_limit == 'min_plus1':
+            assert min_feeders <= nf <= min_feeders + 1
+        elif feeder_limit == 'exactly':
+            assert nf == mo['max_feeders']
+        elif feeder_limit == 'specified':
+            assert min_feeders <= nf <= mo['max_feeders']
+        else:  # unlimited
+            assert nf >= min_feeders
+        if mo.get('balanced'):
+            # pinned feeder count => subtree (feeder) loads differ by at most one
+            loads = metrics['feeder_loads']
+            assert max(loads) - min(loads) <= 1, 'balanced subtrees must differ by <=1'
+
+
+def terminal_terminal_edges(S: nx.Graph) -> list[tuple[int, int]]:
+    """Edges connecting two terminals (i.e. excluding root feeders)."""
+    return [(u, v) for u, v in S.edges if u >= 0 and v >= 0]
+
+
+def terminal_terminal_crossings(
+    S: nx.Graph, VertexC: np.ndarray
+) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """Crossings among terminal-terminal edges (feeders excluded).
+
+    The constructive heuristics guarantee no terminal-terminal crossings (the
+    core feature of `constructor`, ringed or not); straight feeders may still
+    cross and are resolved later by PathFinder, so they are excluded here.
+
+    Brute-force O(n^2) on purpose: it is independent of `A`/`diagonals`, so it
+    checks the heuristic's own guarantee rather than re-deriving it from the
+    same combinatorial data the heuristic used.
+    """
+    edges = terminal_terminal_edges(S)
+    crossings = []
+    for i, (u, v) in enumerate(edges):
+        for s, t in edges[i + 1 :]:
+            if len({u, v, s, t}) < 4:
+                # shared endpoint: not a crossing
+                continue
+            if is_crossing(
+                VertexC[u], VertexC[v], VertexC[s], VertexC[t], touch_is_cross=False
+            ):
+                crossings.append(((u, v), (s, t)))
+    return crossings
+
+
 def assert_graph_equal(
     G1: nx.Graph,
     G2: nx.Graph,
     ignored_graph_keys: Optional[Iterable[str]] = None,
     *,
+    ignored_node_keys: Optional[Iterable[str]] = None,
     rtol: float = 1e-7,
     atol: float = 1e-10,
     max_show: int = 50,
@@ -208,11 +397,10 @@ def assert_graph_equal(
         raise AssertionError(msg)
 
     # --- compare node attributes -------------------------------------------------
+    ignored_node_all = {'label'} | set(ignored_node_keys or ())
     for n in sorted(G1c.nodes):
-        a1 = dict(G1c.nodes[n])
-        a1.pop('label', None)
-        a2 = dict(G2c.nodes[n])
-        a2.pop('label', None)
+        a1 = {k: v for k, v in G1c.nodes[n].items() if k not in ignored_node_all}
+        a2 = {k: v for k, v in G2c.nodes[n].items() if k not in ignored_node_all}
         if a1.keys() != a2.keys():
             diff = sorted(a1.keys() ^ a2.keys())
             raise AssertionError(f'Node {n} attribute keys differ: {diff}')
