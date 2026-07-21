@@ -15,7 +15,7 @@ from pyomo.util.infeasible import (
 )
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
-from ..interarraylib import G_from_S, directed_links, fun_fingerprint
+from ..interarraylib import G_from_S, fun_fingerprint
 from ..pathfinding import PathFinder
 from ._core import (
     FeederLimit,
@@ -29,8 +29,7 @@ from ._core import (
     Topology,
     feeder_and_load_bounds,
     physical_core_count,
-    ringed_warmstart_values,
-    warmstart_topology,
+    warmstart_links,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -624,27 +623,18 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    topology = warmstart_topology(metadata, S)
-    if topology is Topology.RINGED:
-        # A ring is a single directed chain per the flow formulation; derive the
-        # variable values from the (split) ringed solution graph directly and set
-        # only the active links (as the radial branch below does).
-        link_vals, flow_vals = ringed_warmstart_values(metadata, S)
-        for key, value in link_vals.items():
-            if value:
-                model.link_[key] = value
-        for key, value in flow_vals.items():
-            if value:
-                model.flow_[key] = value
-    else:
-        for source, sink, flow in directed_links(S):
-            try:
-                model.link_[source, sink] = 1
-            except KeyError:
-                raise OWNWarmupFailed(
-                    f'warmup_model() failed: model lacks S link ({(source, sink)})'
-                ) from None
-            model.flow_[source, sink] = flow
+    mt = metadata.model_options['topology']
+    st = Topology(S.graph['topology'])
+    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
+        raise OWNWarmupFailed(
+            f'warmup_model() failed: {st} network cannot seed a {mt} model'
+        )
+    # Pyomo Vars are initialize=0, so the inactive baseline is already in place;
+    # only the active links need to be set.
+    for link_var, flow_var, flow in warmstart_links(metadata, S):
+        link_var.value = 1
+        if flow_var is not None:
+            flow_var.value = flow
 
     # check if solution violates any constraints:
     # checking the bounds seem redundant, but the way to do it would be:

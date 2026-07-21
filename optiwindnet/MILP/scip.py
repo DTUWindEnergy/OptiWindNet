@@ -25,8 +25,7 @@ from ._core import (
     Topology,
     feeder_and_load_bounds,
     physical_core_count,
-    ringed_warmstart_values,
-    warmstart_topology,
+    warmstart_links,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -412,51 +411,20 @@ def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    R, T = metadata.R, metadata.T
-    topology = warmstart_topology(metadata, S)
-    if topology is Topology.RINGED:
-        # A ring is a single directed chain per the flow formulation; derive the
-        # variable values from the (split) ringed solution graph directly.
-        link_vals, flow_vals = ringed_warmstart_values(metadata, S)
-        sol = model.createSol()
-        for key, var in metadata.link_.items():
-            model.setSolVal(sol, var, link_vals[key])
-        for key, var in metadata.flow_.items():
-            model.setSolVal(sol, var, flow_vals[key])
-        if not model.addSol(sol):
-            raise OWNWarmupFailed(
-                'warmup_model() failed: S violates some model constraint'
-            )
-        metadata.warmed_by = S.graph['creator']
-        return model
-    in_S_not_in_model = S.edges - metadata.link_.keys()
-    in_S_not_in_model -= {(v, u) for u, v in metadata.linkset[-R * T :]}
-    if in_S_not_in_model:
+    mt = metadata.model_options['topology']
+    st = Topology(S.graph['topology'])
+    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
         raise OWNWarmupFailed(
-            f'warmup_model() failed: model lacks S links ({in_S_not_in_model})'
+            f'warmup_model() failed: {st} network cannot seed a {mt} model'
         )
+    # createSol() zero-initializes every variable, so only the links S
+    # activates need to be set; addSol then validates the complete solution.
     sol = model.createSol()
-    for u, v in metadata.linkset[: (len(metadata.linkset) - R * T) // 2]:
-        edgeD = S.edges.get((u, v))
-        if edgeD is None:
-            model.setSolVal(sol, metadata.link_[u, v], 0)
-            model.setSolVal(sol, metadata.flow_[u, v], 0)
-            model.setSolVal(sol, metadata.link_[v, u], 0)
-            model.setSolVal(sol, metadata.flow_[v, u], 0)
-        else:
-            u, v = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
-            model.setSolVal(sol, metadata.link_[u, v], 1)
-            model.setSolVal(sol, metadata.flow_[u, v], edgeD['load'])
-            model.setSolVal(sol, metadata.link_[v, u], 0)
-            model.setSolVal(sol, metadata.flow_[v, u], 0)
-    for t, r in metadata.linkset[-R * T :]:
-        edgeD = S.edges.get((t, r))
-        model.setSolVal(sol, metadata.link_[t, r], 0 if edgeD is None else 1)
-        model.setSolVal(
-            sol, metadata.flow_[t, r], 0 if edgeD is None else edgeD['load']
-        )
-    accepted = model.addSol(sol)
-    if not accepted:
+    for link_var, flow_var, flow in warmstart_links(metadata, S):
+        model.setSolVal(sol, link_var, 1)
+        if flow_var is not None:
+            model.setSolVal(sol, flow_var, flow)
+    if not model.addSol(sol):
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     metadata.warmed_by = S.graph['creator']
     return model

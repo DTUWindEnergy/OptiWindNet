@@ -8,7 +8,7 @@ from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
-from .MILP._core import warmstart_topology_mismatch
+from .MILP._core import Topology
 
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
@@ -218,10 +218,13 @@ def is_warmstart_eligible(
             ' feeder_route="straight"'
         )
 
-    # Topology constraint
-    topology_mismatch = warmstart_topology_mismatch(model_options['topology'], S_warm)
-    if topology_mismatch:
-        reasons.append(topology_mismatch)
+    # Topology constraint. Valid seeds: RADIAL→{RADIAL, BRANCHED},
+    # BRANCHED→BRANCHED, RINGED→RINGED (topology read from the label, not the
+    # structure).
+    mt = Topology(model_options['topology'])
+    st = Topology(S_warm.graph['topology'])
+    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
+        reasons.append(f'{st} network incompatible with model option: topology="{mt}"')
 
     # Output
     if reasons and verbose_warmstart:

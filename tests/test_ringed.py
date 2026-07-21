@@ -541,8 +541,8 @@ def test_ewrouter_ringed_end_to_end(name, locations):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize('bridging', [False, True], ids=['single_root', 'bridging'])
 @pytest.mark.parametrize('n', range(2, 11))
-def test_ringed_warmstart_values_flow_conservation(n, bridging):
-    """ringed_warmstart_values yields a flow-feasible single-chain assignment.
+def test_ringed_warmstart_links_flow_conservation(n, bridging):
+    """warmstart_links yields a flow-feasible single-chain assignment.
 
     A ring whose two feeders land on different roots radializes the same way: it
     drains through the root feeding the head of the walk and closes on the other.
@@ -550,7 +550,7 @@ def test_ringed_warmstart_values_flow_conservation(n, bridging):
     """
     from types import SimpleNamespace
 
-    from optiwindnet.MILP._core import ringed_warmstart_values
+    from optiwindnet.MILP._core import Topology, warmstart_links
 
     terminals = list(range(n))
     R = 2 if bridging else 1
@@ -559,17 +559,28 @@ def test_ringed_warmstart_values_flow_conservation(n, bridging):
     Ep = [(v, u) for u, v in E]
     stars = [(t, r) for t in terminals for r in roots]
     starsp = [(r, t) for t in terminals for r in roots]
+    # map each variable key to itself, so the "variable" warmstart_links yields
+    # is that link's own key and the assignment can be reconstructed below
+    link_ = {k: k for k in E + Ep + stars + starsp}
+    flow_ = {k: k for k in E + Ep + stars}
     metadata = SimpleNamespace(
         R=R,
-        link_={k: None for k in E + Ep + stars + starsp},
-        flow_={k: None for k in E + Ep + stars},
+        link_=link_,
+        flow_=flow_,
+        model_options={'topology': Topology.RINGED},
     )
 
     S = nx.Graph(R=R, T=n)
     S.add_nodes_from(roots)
     add_ring_to_S(S, (-1, -2) if bridging else (-1, -1), terminals, subtree=0, A=None)
 
-    link_vals, flow_vals = ringed_warmstart_values(metadata, S)
+    # rebuild the complete assignment from the active-link stream
+    link_vals = dict.fromkeys(link_, 0)
+    flow_vals = dict.fromkeys(flow_, 0)
+    for link_var, flow_var, flow in warmstart_links(metadata, S):
+        link_vals[link_var] = 1
+        if flow_var is not None:
+            flow_vals[flow_var] = flow
 
     # exactly one flow feeder (t → r) carries the whole ring (n)
     active_feeders = [(t, r) for t in terminals for r in roots if link_vals[(t, r)]]

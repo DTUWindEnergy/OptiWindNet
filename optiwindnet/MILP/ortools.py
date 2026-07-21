@@ -26,8 +26,7 @@ from ._core import (
     Topology,
     feeder_and_load_bounds,
     physical_core_count,
-    ringed_warmstart_values,
-    warmstart_topology,
+    warmstart_links,
 )
 
 __all__ = ('make_min_length_model', 'warmup_model')
@@ -593,43 +592,21 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    R, T = metadata.R, metadata.T
-    topology = warmstart_topology(metadata, S)
-    if topology is Topology.RINGED:
-        # A ring is a single directed chain per the flow formulation; derive the
-        # variable values from the (split) ringed solution graph directly.
-        link_vals, flow_vals = ringed_warmstart_values(metadata, S)
-        hint_values: dict[Any, float] = {
-            metadata.link_[k]: v for k, v in link_vals.items()
-        }
-        hint_values.update((metadata.flow_[k], v) for k, v in flow_vals.items())
-        metadata.solution_hint = hint_values
-        metadata.warmed_by = S.graph['creator']
-        return model
-    in_S_not_in_model = S.edges - metadata.link_.keys()
-    in_S_not_in_model -= {(v, u) for u, v in metadata.linkset[-R * T :]}
-    if in_S_not_in_model:
+    mt = metadata.model_options['topology']
+    st = Topology(S.graph['topology'])
+    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
         raise OWNWarmupFailed(
-            f'warmup_model() failed: model lacks S links ({in_S_not_in_model})'
+            f'warmup_model() failed: {st} network cannot seed a {mt} model'
         )
-    hint_values = {}
-    for u, v in metadata.linkset[: (len(metadata.linkset) - R * T) // 2]:
-        edgeD = S.edges.get((u, v))
-        if edgeD is None:
-            hint_values[metadata.link_[u, v]] = 0
-            hint_values[metadata.flow_[u, v]] = 0
-            hint_values[metadata.link_[v, u]] = 0
-            hint_values[metadata.flow_[v, u]] = 0
-        else:
-            u, v = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
-            hint_values[metadata.link_[u, v]] = 1
-            hint_values[metadata.flow_[u, v]] = edgeD['load']
-            hint_values[metadata.link_[v, u]] = 0
-            hint_values[metadata.flow_[v, u]] = 0
-    for t, r in metadata.linkset[-R * T :]:
-        edgeD = S.edges.get((t, r))
-        hint_values[metadata.link_[t, r]] = 0 if edgeD is None else 1
-        hint_values[metadata.flow_[t, r]] = 0 if edgeD is None else edgeD['load']
+    # CP-SAT should not have to complete the hint, so seed every variable to 0
+    # and override the ones S activates.
+    hint_values: dict[Any, float] = dict.fromkeys(
+        chain(metadata.link_.values(), metadata.flow_.values()), 0
+    )
+    for link_var, flow_var, flow in warmstart_links(metadata, S):
+        hint_values[link_var] = 1
+        if flow_var is not None:
+            hint_values[flow_var] = flow
     metadata.solution_hint = hint_values
     metadata.warmed_by = S.graph['creator']
     return model
