@@ -4,8 +4,8 @@ Writes ``tests/solutions.pkl`` with two sections:
 
 ``snapshots``
     Exact ``terse_links`` for the deterministic (EWRouter) cases in
-    ``matrix.build_matrix()``. These are compared byte-for-byte by
-    ``test_snapshot_matches``.
+    ``matrix.build_matrix()``, stored as ``(topology, links)`` tuples. These are
+    compared byte-for-byte by ``test_snapshot_matches``.
 
 ``ref_lengths``
     Solver-independent reference optima keyed by ``matrix.problem_key`` -- the
@@ -62,11 +62,11 @@ def generate() -> dict:
         key = matrix.case_key(site, spec)
         L = getattr(locations, site)
         wfn = WindFarmNetwork(L=L, cables=spec['cables'])
-        wfn.optimize(router=router_factory(spec))
+        terse = wfn.optimize(router=router_factory(spec))
         snapshots[key] = {
             'location': site,
             'router_spec': spec,
-            'terse_links': tuple(wfn.terse_links().tolist()),
+            'terse_links': (terse.topology.value, tuple(terse.tolist())),
         }
         print(f'[{i}/{len(snapshot_cases)}] {key}')
 

@@ -25,6 +25,7 @@ from ..interarraylib import (
     directed_links,
 )
 from ..pathfinding import PathFinder
+from ..types import Topology
 
 _lggr = logging.getLogger(__name__)
 error, info, warn = _lggr.error, _lggr.info, _lggr.warning
@@ -75,15 +76,6 @@ class OWNSolutionNotFound(Exception):
     pass
 
 
-class Topology(StrEnum):
-    "Set the topology of subtrees in the solution."
-
-    RADIAL = auto()
-    BRANCHED = auto()
-    RINGED = auto()
-    DEFAULT = BRANCHED
-
-
 class FeederRoute(StrEnum):
     "If feeder routes must be ``'straight'`` or can be detoured (``'segmented'``)."
 
@@ -96,8 +88,7 @@ class FeederLimit(StrEnum):
     """Whether to limit the number of feeders. Both ``'specified'`` (an upper
     bound) and ``'exactly'`` (an exact count) require the additional kwarg
     ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
-    count is pinned to a single value, i.e. ``'minimum'``, ``'exactly'``, or
-    ``'specified'`` with ``'max_feeders'`` at the minimum.
+    count is pinned to a single value, i.e. ``'minimum'`` or ``'exactly'``.
     """
 
     UNLIMITED = auto()
