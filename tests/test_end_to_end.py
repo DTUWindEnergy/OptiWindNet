@@ -25,6 +25,8 @@ import pytest
 
 from optiwindnet.api import WindFarmNetwork
 from optiwindnet.api_utils import parse_cables_input
+from optiwindnet.MILP import ModelOptions
+from optiwindnet.types import Topology
 
 from . import matrix
 from .helpers import (
@@ -38,6 +40,7 @@ from .helpers import (
     solver_unavailable,
 )
 from .paths import SOLUTIONS_FILE
+
 
 # --------------------------------------------------------------------------- #
 # Golden data: deterministic snapshots + optional MILP length references
@@ -62,8 +65,11 @@ def _capacity(spec):
 
 def _cases(determinism):
     """Ordered ``[(key, (site, spec)), ...]`` for one determinism class."""
-    return [(k, sitespec) for k, sitespec in matrix.matrix_by_key().items()
-            if sitespec[1].get('determinism', 'snapshot') == determinism]
+    return [
+        (k, sitespec)
+        for k, sitespec in matrix.matrix_by_key().items()
+        if sitespec[1].get('determinism', 'snapshot') == determinism
+    ]
 
 
 def pytest_generate_tests(metafunc):
@@ -71,10 +77,19 @@ def pytest_generate_tests(metafunc):
         if _EXPECTED is None:
             metafunc.parametrize(
                 'snapshot_case',
-                [pytest.param(None, marks=pytest.mark.skip(
-                    reason=(f'Missing expected test data: {SOLUTIONS_FILE}\n'
-                            'To (re)generate run: python -m tests.update_expected_values\n'
-                            'Or run pytest with --regen-expected.')))],
+                [
+                    pytest.param(
+                        None,
+                        marks=pytest.mark.skip(
+                            reason=(
+                                f'Missing expected test data: {SOLUTIONS_FILE}\n'
+                                'To (re)generate run:\n'
+                                'python -m tests.update_expected_values\n'
+                                'Or run pytest with --regen-expected.'
+                            )
+                        ),
+                    )
+                ],
             )
             return
         snaps = _EXPECTED['snapshots']
@@ -82,8 +97,11 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize('snapshot_case', [snaps[k] for k in keys], ids=keys)
     elif 'property_case' in metafunc.fixturenames:
         cases = _cases('property')
-        metafunc.parametrize('property_case', [sitespec for _, sitespec in cases],
-                             ids=[k for k, _ in cases])
+        metafunc.parametrize(
+            'property_case',
+            [sitespec for _, sitespec in cases],
+            ids=[k for k, _ in cases],
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -130,19 +148,20 @@ def _assert_length_regression(spec, site, termination, length):
         assert ref * (1 - 1e-3) <= length <= ref * (1 + mip_gap)
 
 
-def _expected_topology(spec):
-    """The topology-shape label a router's solution should satisfy."""
+def _expected_topology(spec) -> Topology:
     cls = spec['class']
     if cls == 'MILPRouter':
-        return spec['params'].get('model_options', {}).get('topology', 'branched')
+        return Topology(
+            spec['params'].get('model_options', {}).get('topology', 'branched')
+        )
     if cls == 'HGSRouter':
-        return 'ringed' if spec['params'].get('ringed') else 'radial'
+        return Topology.RINGED if spec['params'].get('ringed') else Topology.RADIAL
     # EWRouter: only ringed reaches the property path (forest methods snapshot);
     # radial_EW is a path forest, the branched methods are trees.
     method = spec['params'].get('method', 'biased_EW')
     if method == 'ringed':
-        return 'ringed'
-    return 'radial' if method == 'radial_EW' else 'branched'
+        return Topology.RINGED
+    return Topology.RADIAL if method == 'radial_EW' else Topology.BRANCHED
 
 
 def test_solution_properties(property_case, locations, ortools_worker):
@@ -180,7 +199,7 @@ def test_solution_properties(property_case, locations, ortools_worker):
         pytest.importorskip('hybgensea')
     wfn = WindFarmNetwork(L=L, cables=spec['cables'])
     wfn.optimize(router=router_factory(spec))
-    model_options = {'topology': _expected_topology(spec)}
+    model_options = ModelOptions(topology=_expected_topology(spec))
     metrics = solution_property_metrics(wfn.S, wfn.G, model_options, capacity)
     assert_solution_properties(metrics, spec, capacity)
 

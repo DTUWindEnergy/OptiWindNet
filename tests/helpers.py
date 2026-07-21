@@ -14,6 +14,7 @@ from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import assign_cables, terse_links_from_S
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import ModelOptions, solver_factory
+from optiwindnet.types import Topology
 
 
 def load_instances(path: Path) -> Any:
@@ -167,7 +168,7 @@ def solution_property_metrics(
     from optiwindnet.interarraylib import validate_routeset, validate_topology
 
     R, T = S.graph['R'], S.graph['T']
-    topology = (model_options or {}).get('topology', 'branched')
+    topology = (model_options or {}).get('topology', Topology.BRANCHED)
 
     edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
     feeder_edges = [(u, v) for u, v in S.edges if u < 0 or v < 0]
@@ -175,7 +176,7 @@ def solution_property_metrics(
 
     # a list of strings is picklable, so the whole check crosses the worker
     # boundary intact
-    S.graph.setdefault('topology', topology)
+    S.graph.setdefault('topology', Topology(topology))
     topology = S.graph['topology']
     topology_violations = validate_topology(S, capacity)
 
@@ -221,14 +222,14 @@ def assert_solution_properties(
     # the shape invariants themselves belong to the library (`validate_topology`);
     # they were reduced to violation strings on the worker side
     assert metrics['topology_violations'] == []
-    if topology == 'ringed' and T > 1:
+    if Topology(topology) is Topology.RINGED and T > 1:
         assert metrics['has_cycle'], 'a ring closes a cycle'
 
     # --- feeder-count / balance (single-root, non-ringed: well-defined) -------
     single_root = metrics['R'] == 1
     feeder_limit = mo.get('feeder_limit', 'unlimited')
     min_feeders = metrics['min_feeders']
-    if single_root and topology in ('radial', 'branched'):
+    if single_root and Topology(topology) in (Topology.RADIAL, Topology.BRANCHED):
         nf = metrics['num_feeders']
         if feeder_limit == 'minimum':
             assert nf == min_feeders

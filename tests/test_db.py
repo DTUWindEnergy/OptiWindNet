@@ -20,6 +20,7 @@ from optiwindnet.db.storage import (
     untersify_to_G,
 )
 from optiwindnet.interarraylib import S_from_G, validate_topology
+from optiwindnet.types import Topology
 
 from .helpers import assert_graph_equal, tiny_wfn
 
@@ -265,27 +266,31 @@ _RINGED = [-1, 0, 1, 2]  # route sequence: any length other than the positional 
     'terse, attrs, expected',
     (
         # the encoding settles RINGED on its own, whatever the metadata says
-        (_RINGED, {}, 'ringed'),
-        (_RINGED, {'creator': 'baselines.hgs'}, 'ringed'),
+        (_RINGED, {}, Topology.RINGED),
+        (_RINGED, {'creator': 'baselines.hgs'}, Topology.RINGED),
         # MILP records name their topology
-        (_FOREST, {'method_options': {'topology': 'radial'}}, 'radial'),
-        (_FOREST, {'method_options': {'topology': 'branched'}}, 'branched'),
+        (_FOREST, {'method_options': {'topology': Topology.RADIAL}}, Topology.RADIAL),
+        (
+            _FOREST,
+            {'method_options': {'topology': Topology.BRANCHED}},
+            Topology.BRANCHED,
+        ),
         # HGS/LKH solve a CVRP: their routes are paths
-        (_FOREST, {'creator': 'baselines.hgs'}, 'radial'),
-        (_FOREST, {'creator': 'baselines.lkh'}, 'radial'),
+        (_FOREST, {'creator': 'baselines.hgs'}, Topology.RADIAL),
+        (_FOREST, {'creator': 'baselines.lkh'}, Topology.RADIAL),
         # the constructor names its method instead
         (
             _FOREST,
             {'creator': 'constructor', 'method_options': {'method': 'radial_EW'}},
-            'radial',
+            Topology.RADIAL,
         ),
         (
             _FOREST,
             {'creator': 'constructor', 'method_options': {'method': 'esau_williams'}},
-            'branched',
+            Topology.BRANCHED,
         ),
         # nothing to go on: the weakest claim any forest satisfies
-        (_FOREST, {}, 'branched'),
+        (_FOREST, {}, Topology.BRANCHED),
     ),
 )
 def test_untersify_infers_topology_of_records_without_one(terse, attrs, expected):
@@ -308,8 +313,8 @@ def test_infer_topology_trusts_a_recorded_ringed_over_the_encoding():
     made only of stubs has no cycles at all. The encoding cannot tell it apart
     from a forest; the recorded topology can, and it is right.
     """
-    G = _bare_G(method_options={'topology': 'ringed'})
-    assert infer_topology(G, _STUBS) == 'ringed'
+    G = _bare_G(method_options={'topology': Topology.RINGED})
+    assert infer_topology(G, _STUBS) is Topology.RINGED
 
     untersify_to_G(G, terse=_STUBS, clone2prime=[])
     # and the label holds up: every terminal is its own single-terminal ring
@@ -322,8 +327,8 @@ def test_a_wrongly_recorded_ringed_is_caught_by_validation():
     Inference reports what the record claims; ``validate_topology`` reads the
     whole graph and rejects the claim, which the encoding length could not do.
     """
-    G = _bare_G(method_options={'topology': 'ringed'})
-    assert infer_topology(G, _FOREST) == 'ringed'
+    G = _bare_G(method_options={'topology': Topology.RINGED})
+    assert infer_topology(G, _FOREST) is Topology.RINGED
 
     untersify_to_G(G, terse=_FOREST, clone2prime=[])
     violations = validate_topology(S_from_G(G))
@@ -357,7 +362,7 @@ def test_inference_recovers_the_topology_of_a_stripped_record(tmp_path):
 
 def test_untersify_keeps_a_stored_topology():
     """A stored 'topology' is authoritative -- inference never overrides it."""
-    G = _bare_G(topology='radial', creator='constructor')
+    G = _bare_G(topology=Topology.RADIAL, creator='constructor')
     untersify_to_G(G, terse=_FOREST, clone2prime=[])
 
-    assert G.graph['topology'] == 'radial'
+    assert G.graph['topology'] is Topology.RADIAL

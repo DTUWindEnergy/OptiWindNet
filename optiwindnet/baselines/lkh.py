@@ -25,6 +25,7 @@ from ..interarraylib import (
     fun_fingerprint,
     split_rings_and_calc_loads,
 )
+from ..types import Topology
 from ..repair import repair_routeset_path
 from ._core import (
     add_branches_to_S,
@@ -1079,10 +1080,10 @@ def lkh3(
         if crossings or over_capacity_clusters:
             warn('Solution remains invalid (max_retries reached)')
     if ringed:
-        S.graph['topology'] = 'ringed'
+        S.graph['topology'] = Topology.RINGED
         split_rings_and_calc_loads(S, A)
     else:
-        S.graph['topology'] = 'radial'
+        S.graph['topology'] = Topology.RADIAL
         calcload(S)
     return S
 

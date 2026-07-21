@@ -13,6 +13,7 @@ import numpy as np
 
 from ..clustering import clusterize
 from ..interarraylib import calcload, fun_fingerprint, split_rings_and_calc_loads
+from ..types import Topology
 from ..repair import repair_routeset_path
 from ._core import (
     add_branches_to_S,
@@ -478,10 +479,10 @@ def hgs_cvrp(
         if crossings:
             _warn('Solution contains crossings (max_retries reached)')
     if ringed:
-        S.graph['topology'] = 'ringed'
+        S.graph['topology'] = Topology.RINGED
         split_rings_and_calc_loads(S, A_orig)
     else:
-        S.graph['topology'] = 'radial'
+        S.graph['topology'] = Topology.RADIAL
         calcload(S)
 
     S.graph.update(

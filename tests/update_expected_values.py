@@ -51,8 +51,7 @@ def generate() -> dict:
     snapshots: dict = {}
     ref_lengths: dict = {}
 
-    snapshot_cases = [(s, sp) for s, sp in cases
-                      if sp.get('determinism') == 'snapshot']
+    snapshot_cases = [(s, sp) for s, sp in cases if sp.get('determinism') == 'snapshot']
     milp = [(s, sp) for s, sp in cases if sp['class'] == 'MILPRouter']
     n_property = sum(1 for _, sp in cases if sp.get('determinism') == 'property')
 

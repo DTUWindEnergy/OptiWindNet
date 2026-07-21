@@ -23,6 +23,7 @@ from ..interarraylib import (
     fun_fingerprint,
     split_rings_and_calc_loads,
 )
+from ..types import Topology
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -980,7 +981,11 @@ def constructor(
             for sr in (rootmask_ & is_subroot_).search(_ONE):
                 S.add_edge(r, sr)
     S.graph['topology'] = (
-        'ringed' if ringed else 'radial' if method == 'radial_EW' else 'branched'
+        Topology.RINGED
+        if ringed
+        else Topology.RADIAL
+        if method == 'radial_EW'
+        else Topology.BRANCHED
     )
     # ringed: close each path subtree into a ring (adds open points); else set loads
     if ringed:

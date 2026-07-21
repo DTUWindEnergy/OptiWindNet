@@ -133,6 +133,6 @@ def test_gate_and_leaf_path_from_interior():
 def test_list_path_leaf_to_gate_order():
     """list_path started from the leaf returns nodes gate-first (load desc)."""
     S = _make_path_S([1, 2, 3])
-    path = list_path(S, 0)   # start from leaf (node 0, load=1)
-    assert path[0] == 2   # gate (highest load) first
+    path = list_path(S, 0)  # start from leaf (node 0, load=1)
+    assert path[0] == 2  # gate (highest load) first
     assert path[-1] == 0  # leaf last

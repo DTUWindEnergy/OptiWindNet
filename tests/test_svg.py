@@ -230,7 +230,11 @@ def test_svgrepr_repr_with_handle_only():
 
 
 def test_svgrepr_repr_name_differs_from_handle():
-    r = repr(SvgRepr('x', {'handle': 'h', 'name': 'Full Name', 'T': 5, 'R': 2, 'capacity': 9}))
+    r = repr(
+        SvgRepr(
+            'x', {'handle': 'h', 'name': 'Full Name', 'T': 5, 'R': 2, 'capacity': 9}
+        )
+    )
     assert "name='Full Name'" in r
     assert 'T=5' in r
     assert 'R=2' in r
@@ -282,7 +286,7 @@ def test_svgplot_wide_aspect_ratio():
     wfn = tiny_wfn()
     G = wfn.G.copy()
     VertexC = G.graph['VertexC'].copy()
-    VertexC[:, 0] *= 20   # stretch x → W/H >> 1.78 (viewport ratio)
+    VertexC[:, 0] *= 20  # stretch x → W/H >> 1.78 (viewport ratio)
     G.graph['VertexC'] = VertexC
     svg = svgplot(G)
     assert isinstance(svg, SvgRepr)
@@ -360,7 +364,7 @@ def test_svgplot_legend_detour_corner():
     """D>0 in G adds a 'corner' entry and shape=='ring' branch to the legend."""
     wfn = tiny_wfn()
     G = wfn.G.copy()
-    G.graph['D'] = 1   # pretend there are detour clones
+    G.graph['D'] = 1  # pretend there are detour clones
     svg = svgplot(G, legend=True)
     assert 'corner' in svg.data
 
@@ -386,6 +390,6 @@ def test_svgpplot_has_loads_removed():
     """If A has has_loads, svgpplot removes it before building the SVG."""
     wfn = tiny_wfn()
     A = wfn.A.copy()
-    A.graph['has_loads'] = True   # artificially inject
+    A.graph['has_loads'] = True  # artificially inject
     svg = svgpplot(wfn.P, A)
     assert isinstance(svg, SvgRepr)

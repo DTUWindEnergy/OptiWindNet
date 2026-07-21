@@ -7,6 +7,7 @@ import optiwindnet.pathfinding as pathfinding
 from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import G_from_S
 from optiwindnet.pathfinding import PathFinder
+from optiwindnet.types import Topology
 
 from .helpers import tiny_wfn
 
@@ -278,7 +279,7 @@ def test_best_paths_overlay_structure():
 def test_pathfinder_radial_topology():
     """A graph declaring topology='radial' hooks only to path endpoints."""
     G_tent, P, A = _make_crossing_case()
-    G_tent.graph['topology'] = 'radial'
+    G_tent.graph['topology'] = Topology.RADIAL
     pf = PathFinder(G_tent, planar=P, A=A)
     G_det = pf.create_detours()
 

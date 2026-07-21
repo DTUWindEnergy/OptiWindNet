@@ -6,7 +6,7 @@ import logging
 import math
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum, auto
 from inspect import cleandoc
@@ -322,85 +322,30 @@ class SolutionInfo:
     termination: str
 
 
-#: topologies of ``S`` that can seed a model of each topology. A radial
-#: solution is a valid warmstart for a branched model, but not the reverse;
-#: ringed is incomparable with both (a ringed model requires two feeders per
-#: subtree, which no radial or branched solution provides).
-_WARMSTART_OK: Mapping[Topology, frozenset[Topology]] = {
-    Topology.RADIAL: frozenset({Topology.RADIAL}),
-    Topology.BRANCHED: frozenset({Topology.RADIAL, Topology.BRANCHED}),
-    Topology.RINGED: frozenset({Topology.RINGED}),
-}
-
-
-def warmstart_topology_mismatch(model_topology: Topology, S: nx.Graph) -> str:
-    """Report whether ``S``'s topology can seed a ``model_topology`` model.
-
-    The topology of ``S`` is read from ``S.graph['topology']``, never inferred
-    from its structure.
-
-    Returns:
-      Human-readable incompatibility, or ``''`` if ``S`` is a valid warmstart.
-    """
-    S_topology = Topology(S.graph['topology'])
-    if S_topology in _WARMSTART_OK[model_topology]:
-        return ''
-    return (
-        f'{S_topology} network incompatible with model option: '
-        f'topology="{model_topology}"'
-    )
-
-
-def warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> Topology:
-    """Topology of the model ``metadata`` describes, checked against ``S``'s.
-
-    Every backend's ``warmup_model()`` opens with this: the topology decides how
-    the warmstart is mapped onto the model's variables, and ``S`` must be a
-    valid seed for it.
-
-    Returns:
-      The model's topology.
-
-    Raises:
-        OWNWarmupFailed: ``S`` is not a valid warmstart for the model.
-    """
-    model_topology = metadata.model_options['topology']
-    mismatch = warmstart_topology_mismatch(model_topology, S)
-    if mismatch:
-        raise OWNWarmupFailed(f'warmup_model() failed: {mismatch}')
-    return model_topology
-
-
-def ringed_warmstart_values(
+def warmstart_links(
     metadata: ModelMetadata, S: nx.Graph
-) -> tuple[dict[_Link, int], dict[_Link, int]]:
-    """Model link/flow variable values to warm-start a RINGED model from ``S``.
+) -> Iterator[tuple[Any, Any | None, int]]:
+    """Yield ``(link_var, flow_var, flow)`` for every link ``S`` activates.
 
-    In the flow formulation a ring is a single directed chain of its ``n``
-    terminals, which is not how the canonical solution graph ``S`` stores it (two
-    arms split at an open point). :func:`.interarraylib.directed_links` does that
-    conversion — radializing the rings; this maps its output onto the model's
-    link/flow variables.
-
-    Returns ``(link_vals, flow_vals)``: complete assignments over
-    ``metadata.link_`` / ``metadata.flow_`` keys (inactive variables set to 0).
+    Uses ``metadata``'s own link/flow maps as the index, orienting ``S`` the way
+    the flow formulation expects — radializing RINGED rings into directed chains
+    — via :func:`.interarraylib.directed_links`. ``flow_var`` is ``None`` for a
+    ring's closing feeder (a link variable with no flow one). Everything not
+    yielded is inactive (0); each backend seeds that however its warm-start API
+    requires, then applies these.
 
     Raises:
-        OWNWarmupFailed: a ring uses a link absent from the model.
+        OWNWarmupFailed: ``S`` uses a link the model lacks.
     """
-    link_vals: dict[_Link, int] = dict.fromkeys(metadata.link_, 0)
-    flow_vals: dict[_Link, int] = dict.fromkeys(metadata.flow_, 0)
     for source, sink, flow in directed_links(S):
         key = (source, sink)
-        if key not in link_vals:
-            # a ring's closing feeder (r→t) is only a model variable under
-            # Topology.RINGED; t→r feeders are there by construction.
-            raise OWNWarmupFailed(f'warmup_model() failed: model lacks ring link {key}')
-        link_vals[key] = 1
-        if key in flow_vals:
-            # a ring's closing feeder is a starsʹ link: it has no flow variable
-            flow_vals[key] = flow
-    return link_vals, flow_vals
+        if key not in metadata.link_:
+            raise OWNWarmupFailed(f'warmup_model() failed: model lacks S link {key}')
+        yield (
+            metadata.link_[key],
+            metadata.flow_[key] if key in metadata.flow_ else None,
+            flow,
+        )
 
 
 def _finalize_ringed_mip_S(
@@ -608,7 +553,7 @@ class Solver(abc.ABC):
                 S, closing_links, getattr(self, 'A', None)
             )
         S.graph.update(
-            topology=topology.name.lower(),
+            topology=topology,
             capacity=metadata.capacity,
             max_load=max_load,
             has_loads=True,

@@ -465,7 +465,7 @@ def add_ring_to_S(
         odd-node rings.
     """
     # the builder declares the shape it establishes
-    S.graph['topology'] = 'ringed'
+    S.graph['topology'] = Topology.RINGED
     r1, r2 = roots
     n = len(ordered)
     if n == 1:
@@ -1523,7 +1523,7 @@ def terse_links_from_S(S):
       1D array ``terse`` encoding ``S``.
     """
     T = S.graph['T']
-    topology = Topology(S.graph['topology'])
+    topology = S.graph['topology']
     if topology is not Topology.RINGED:
         terse_links = np.zeros((T,), dtype=np.int_)
         # convert the graph to array representing the tree (edges i->terse[i])
