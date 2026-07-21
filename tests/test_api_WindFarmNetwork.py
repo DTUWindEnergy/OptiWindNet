@@ -329,17 +329,13 @@ def test_warmstart_eligibility_uses_total_power():
     # T=2 with power quanta [2, 3]: W=5 at capacity 4 pins 2 feeders, which
     # S_warm has; counting terminals instead would pin ceil(2/4) = 1 feeder
     # and wrongly reject this warmstart.
-    S = nx.Graph(R=1, T=2)
+    S = nx.Graph(R=1, T=2, topology=Topology.RADIAL)
     S.add_node(-1, load=5)
     S.add_node(0, power=2, load=2)
     S.add_node(1, power=3, load=3)
     S.add_edge(-1, 0, load=2)
     S.add_edge(-1, 1, load=3)
-    model_options = {
-        'feeder_limit': 'minimum',
-        'topology': 'radial',
-        'feeder_route': 'segmented',
-    }
+    model_options = ModelOptions(feeder_limit='minimum', topology='radial')
 
     ok = U.is_warmstart_eligible(
         S_warm=S,
@@ -357,7 +353,7 @@ def test_warmstart_eligibility_uses_total_power():
 def test_warmstart_balancing_uses_exact_large_integer_ceiling():
     lower_load = 2**52
     upper_load = lower_load + 1
-    S = nx.Graph(R=1, T=2)
+    S = nx.Graph(R=1, T=2, topology=Topology.RADIAL)
     S.add_node(-1, load=lower_load + upper_load)
     S.add_node(0, power=lower_load, load=lower_load)
     S.add_node(1, power=upper_load, load=upper_load)
@@ -367,13 +363,12 @@ def test_warmstart_balancing_uses_exact_large_integer_ceiling():
     assert U.is_warmstart_eligible(
         S_warm=S,
         cables_capacity=upper_load,
-        model_options={
-            'balanced': True,
-            'feeder_limit': 'exactly',
-            'max_feeders': 2,
-            'topology': 'radial',
-            'feeder_route': 'segmented',
-        },
+        model_options=ModelOptions(
+            balanced=True,
+            feeder_limit='exactly',
+            max_feeders=2,
+            topology='radial',
+        ),
         S_warm_has_detour=False,
         solver_name='ortools.cp_sat',
         logger=logging.getLogger(U.__name__),

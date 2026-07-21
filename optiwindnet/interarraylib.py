@@ -1312,8 +1312,7 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
     method_options = G.graph.get('method_options')
     if method_options is not None:
         S.graph['method_options'] = method_options
-    # Routesets created before topology labels were introduced were forests.
-    S.graph['topology'] = G.graph.get('topology', Topology.BRANCHED)
+    S.graph['topology'] = G.graph['topology']
     if has_loads:
         S.graph['has_loads'] = True
     else:

@@ -314,7 +314,14 @@ def test_S_from_G():
     assert 'method_options' not in S2.graph
 
     # Weighted power metadata is preserved and used when loads are calculated.
-    weighted_G = nx.Graph(R=1, T=3, B=0, capacity=6, power_scale=2)
+    weighted_G = nx.Graph(
+        R=1,
+        T=3,
+        B=0,
+        capacity=6,
+        power_scale=2,
+        topology=Topology.BRANCHED,
+    )
     weighted_G.graph['turbine_power_decimals'] = 3
     weighted_G.add_node(-1, kind='oss')
     for turbine, power in enumerate((1, 2, 3)):

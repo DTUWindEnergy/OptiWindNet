@@ -87,8 +87,7 @@ class FeederLimit(StrEnum):
     """Whether to limit the number of feeders. Both ``'specified'`` (an upper
     bound) and ``'exactly'`` (an exact count) require the additional kwarg
     ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
-    count is pinned to a single value, i.e. ``'minimum'``, ``'exactly'``, or
-    ``'specified'`` with ``'max_feeders'`` at the minimum.
+    count is pinned to a single value, i.e. ``'minimum'`` or ``'exactly'``.
 
     For weighted turbine power, ``'minimum'`` and ``'min_plus*'`` are not
     supported because aggregate power does not determine the exact number of
@@ -120,10 +119,12 @@ def feeder_and_load_bounds(
 
     Bounds are returned in units of **subtrees** (the quantity the model's
     feeder-sum constraint counts): one feeder per subtree for radial/branched
-    topologies, but a RINGED subtree is a cycle with two feeders. The caller
-    signals this with ``feeders_per_subtree`` (2 for RINGED), so a user-supplied
-    ``max_feeders`` in physical substation connections can be converted to the
-    subtree count constrained by the model.
+    topologies, but a RINGED subtree is a cycle with two feeders. The
+    caller signals this with ``feeders_per_subtree`` (2 for RINGED), so that a
+    user-supplied ``max_feeders`` — always expressed as the number of physical
+    **substation connections** — is converted to the subtree count the model
+    constrains, and the returned bounds are multiplied back by
+    ``feeders_per_subtree`` for reporting.
 
     ``total_power`` defaults to ``T`` for unit-power terminals. The feeder count
     is bounded below by ``min_feeders = ceil(total_power/capacity)`` regardless

@@ -3,6 +3,7 @@
 
 import logging
 import math
+import warnings
 from itertools import pairwise
 from typing import Callable
 
@@ -57,6 +58,43 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
     return (
         ((point[np.newaxis, :] - RepellerC) ** 2).sum(axis=1) >= repel_radius_sq
     ).all()
+
+
+@nb.njit(cache=True, inline='always')
+def _fully_covered_neighbor(x: float, y: float) -> tuple[int, int]:
+    """Identify a unit-cell edge-neighbor made unreachable by a dart at (x, y).
+
+    A dart thrown at fractional position ``(x, y)`` within its unit cell
+    (cell side = 1, min_dist = sqrt(2), matching the scaled coordinates used
+    by :func:`_poisson_disc_filler_core`) excludes a disc of radius
+    ``sqrt(2)`` around itself. When the dart lands close enough to one side
+    of the cell, that whole disc covers the entirety of the single
+    edge-adjacent neighbor cell across that side, meaning no future dart in
+    that neighbor cell could ever be valid.
+
+    The nearer of the two axis-wise distances to an edge (``ex``, ``ey``)
+    identifies the candidate side; the farther one parametrizes the critical
+    threshold below which the disc reaches the neighbor's farthest corner.
+
+    Args:
+      x: fractional x position within the unit cell, in [0, 1).
+      y: fractional y position within the unit cell, in [0, 1).
+
+    Returns:
+      ``(di, dj)`` offset of the fully-covered neighbor cell, or ``(0, 0)``
+      if none of the four edge-adjacent neighbors is fully covered.
+    """
+    ex = x if x < 0.5 else 1.0 - x
+    ey = y if y < 0.5 else 1.0 - y
+    if ex < ey:
+        h_ref = math.sqrt(1.0 + 2.0 * ey - ey * ey) - 1.0
+        if ex < h_ref:
+            return (1, 0) if x > 0.5 else (-1, 0)
+    else:
+        h_ref = math.sqrt(1.0 + 2.0 * ex - ex * ex) - 1.0
+        if ey < h_ref:
+            return (0, 1) if y > 0.5 else (0, -1)
+    return (0, 0)
 
 
 @nb.njit(cache=True, inline='always')
@@ -174,11 +212,15 @@ def _contains(polyC: CoordPairs, point: CoordPair) -> bool:
 def _poisson_disc_filler_core(
     T: int,
     max_iter: int,
+    single_run: bool,
     i_len: int,
     j_len: int,
     cell_idc: IndexPairs,
     BorderS: CoordPairs,
+    cell_strictly_inside_border: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
     obstacleS__: list[CoordPairs],
+    cell_clear_of_obstacles: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
+    cell_fully_clear: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
     repel_radius_sq: float,
     RepellerS: CoordPairs | None,
     rng: np.random.Generator,
@@ -224,50 +266,170 @@ def _poisson_disc_filler_core(
         ii = cells_window.reshape(mask.size)[np.flatnonzero(mask.flat)]
         return not (((point[None, :] - points[ii]) ** 2).sum(axis=-1) < 2).any()
 
-    out_count = 0
-    idc_list = list(range(len(cell_idc)))
+    # `idc_arr[:avail_count]` holds indices into `cell_idc` for the cells
+    # still available for dart-throwing. `pos_in_list[i, j]` maps a cell
+    # back to its position within `idc_arr` (-1 if unavailable), so both the
+    # just-occupied cell and any neighbor cell that becomes fully covered by
+    # the new point's exclusion disc can be dropped from the pool in O(1)
+    # via swap-with-last, instead of the O(n) `del idc_list[k]` this
+    # replaces.
+    idc_arr = np.arange(len(cell_idc), dtype=np.int64)
+    pos_in_list = np.full((i_len, j_len), -1, dtype=np.int64)
 
-    # dart-throwing loop
-    miss_streak = 0
-    for iter_count in range(1, max_iter + 1):
-        if miss_streak > (max_iter - iter_count) / (T - out_count):
-            # give up if the rate of misses is too high for the amount still
-            # remaining to be placed
-            break
+    iters_per_attempt = []
+
+    def reset_attempt(prev_attempt_iter: int) -> tuple[int, int, float, int]:
+        """Reset all per-attempt state for a fresh attempt.
+
+        Logs how many iterations the just-abandoned attempt took, unless
+        ``prev_attempt_iter`` is negative (the very first attempt, with
+        nothing to log yet). Returns the reset ``(out_count, avail_count,
+        ema_hit_rate, attempt_iter)``.
+        """
+        if prev_attempt_iter >= 0:
+            iters_per_attempt.append(prev_attempt_iter)
+        cells[:, :] = T
+        idc_arr[:] = np.arange(len(cell_idc), dtype=np.int64)
+        for k in range(len(cell_idc)):
+            ci, cj = cell_idc[k]
+            pos_in_list[ci, cj] = k
+        return 0, len(cell_idc), 1.0, 0
+
+    def discard_cell(i: int, j: int, k: int, avail_count: int) -> int:
+        """Remove cell (i, j), found at position k in idc_arr, from the pool."""
+        last = avail_count - 1
+        last_flat = idc_arr[last]
+        idc_arr[k] = last_flat
+        li, lj = cell_idc[last_flat]
+        pos_in_list[li, lj] = k
+        pos_in_list[i, j] = -1
+        return last
+
+    # The EMA tracks the local dart-throw success rate and adapts as the
+    # field fills. It is combined with the number of available cells to
+    # determine whether the current attempt can finish within the budget.
+    # Bound the decay scale to avoid extreme values for small or large T.
+    T_decay = min(max(T, 10), 240)
+    hit_rate_decay = 6.0 / T_decay**2
+    out_count, avail_count, ema_hit_rate, attempt_iter = reset_attempt(-1)
+
+    # Once an attempt is unlikely to complete within the remaining budget,
+    # continue it. ``single_run`` disables restarts.
+    restarts_exhausted = single_run
+
+    best_out_count = 0
+    best_points = np.empty((0, 2), dtype=np.float64)
+    restart_count = 0
+
+    def save_best(out_count: int) -> None:
+        """Snapshot the current attempt's points if it beats the best so far."""
+        nonlocal best_out_count, best_points
+        if out_count > best_out_count:
+            best_out_count = out_count
+            best_points = points[:out_count].copy()
+
+    for remaining_iters in range(max_iter, 1, -1):
+        attempt_iter += 1
+        if not restarts_exhausted:
+            remaining_points = T - out_count
+            pace_limit = min(avail_count, ema_hit_rate * remaining_iters)
+            if remaining_points > pace_limit:
+                # A restart is useful only if enough budget remains to
+                # plausibly complete a new attempt. The threshold is the
+                # longest prior or current attempt, with T as a lower bound.
+                restart_floor = T
+                for a in iters_per_attempt:
+                    if a > restart_floor:
+                        restart_floor = a
+                if attempt_iter > restart_floor:
+                    restart_floor = attempt_iter
+                if remaining_iters > restart_floor:
+                    # Restart with an empty field.
+                    save_best(out_count)
+                    out_count, avail_count, ema_hit_rate, attempt_iter = reset_attempt(
+                        attempt_iter
+                    )
+                    restart_count += 1
+                    continue
+                else:
+                    # Budget too low for a restart; keep improving the current attempt.
+                    restarts_exhausted = True
+
         # pick random empty cell
-        empty_idx = rng.integers(low=0, high=len(idc_list))
-        ij = cell_idc[idc_list[empty_idx]]
+        empty_idx = rng.integers(low=0, high=avail_count)
+        ij = cell_idc[idc_arr[empty_idx]]
         i, j = ij
 
         # dart throw inside cell
-        dartC = ij + rng.random(2)
+        fracC = rng.random(2)
+        dartC = ij + fracC
 
-        # check border, overlap and repel_radius
-        if not _contains(BorderS, dartC):
-            miss_streak += 1
+        miss = False
+        # check border and obstacles; a cell flagged in `cell_fully_clear`
+        # is both entirely inside the border and clear of every obstacle,
+        # so neither containment test is needed for a dart thrown in it.
+        # Otherwise, `cell_strictly_inside_border` and `cell_clear_of_obstacles`
+        # each skip just the one test that does not apply to this cell.
+        if not cell_fully_clear[i, j]:
+            if not cell_strictly_inside_border[i, j] and not _contains(BorderS, dartC):
+                miss = True
+            elif not cell_clear_of_obstacles[i, j]:
+                for obstacleS_ in obstacleS__:
+                    if _contains(obstacleS_, dartC):
+                        miss = True
+                        break
+
+        # check overlap and repel_radius
+        if not miss:
+            if not no_conflict(i, j, dartC):
+                miss = True
+            elif RepellerS is not None and not _clears(
+                RepellerS, repel_radius_sq, dartC
+            ):
+                miss = True
+
+        ema_hit_rate *= 1 - hit_rate_decay
+        if miss:
             continue
-        elif not no_conflict(i, j, dartC):
-            miss_streak += 1
-            continue
-        elif RepellerS is not None:
-            if not _clears(RepellerS, repel_radius_sq, dartC):
-                miss_streak += 1
+        ema_hit_rate += hit_rate_decay
+
+        # add new point and remove its cell from the available pool
+        points[out_count] = dartC
+        cells[i, j] = out_count
+        avail_count = discard_cell(i, j, empty_idx, avail_count)
+
+        # a dart landing close enough to a cell's side fully covers the
+        # single neighbor cell across that side with its exclusion
+        # disc; such a neighbor can never host a valid point, so drop
+        # it from the pool too (if it is still in it)
+        di, dj = _fully_covered_neighbor(fracC[0], fracC[1])
+        if di != 0 or dj != 0:
+            ni, nj = i + di, j + dj
+            if 0 <= ni < i_len and 0 <= nj < j_len:
+                nk = pos_in_list[ni, nj]
+                if nk >= 0:
+                    avail_count = discard_cell(ni, nj, nk, avail_count)
+
+        out_count += 1
+        if out_count == T:
+            break
+        if avail_count == 0:
+            # This layout does not have enough available cells. A fresh layout
+            # may still complete the placement, so restart when allowed.
+            if not restarts_exhausted:
+                save_best(out_count)
+                out_count, avail_count, ema_hit_rate, attempt_iter = reset_attempt(
+                    attempt_iter
+                )
+                restart_count += 1
                 continue
-        for obstacleS_ in obstacleS__:
-            if _contains(obstacleS_, dartC):
-                miss_streak += 1
-                break
-        else:
-            miss_streak = 0
-            # add new point and remove cell from empty list
-            points[out_count] = dartC
-            cells[i, j] = out_count
-            del idc_list[empty_idx]
-            out_count += 1
-            if out_count == T or not idc_list:
-                break
+            break
 
-    return points[:out_count], iter_count
+    if out_count > best_out_count:
+        best_out_count = out_count
+        best_points = points[:out_count]
+
+    return best_points, iters_per_attempt, restart_count
 
 
 def get_shape_to_fill(L: nx.Graph) -> tuple[CoordPairs, CoordPairs]:
@@ -299,16 +461,20 @@ def poisson_disc_filler(
     repel_radius: float = 0.0,
     obstacleC__: list[CoordPairs] = [],
     seed: int | None = None,
-    max_iter: int = 10000,
+    max_iter: int = 30000,
     plot: bool = False,
     partial_fulfilment: bool = True,
-    rounds: int = 1,
+    single_run: bool = False,
 ) -> CoordPairs:
     """Randomly place points inside an area respecting a minimum separation.
 
     Fills the area delimited by ``BorderC`` with ``T`` randomly
     placed points that are at least ``min_dist`` apart and that
     don't fall inside any of the ``RepellerC`` discs or ``obstacles`` areas.
+
+    ``max_iter`` is shared by all attempts. The sampler restarts when the
+    current placement rate cannot meet the remaining target and sufficient
+    budget remains for a new attempt.
 
     Args:
       T: number of points to place.
@@ -317,16 +483,13 @@ def poisson_disc_filler(
       RepellerC: coordinates (R × 2) of the centers of forbidden discs.
       repel_radius: the radius of the forbidden discs.
       obstacleC__: sequence of coordinate arrays (X × 2).
-      iter_max_factor: factor to multiply by ``T`` to limit the number of
-        iterations.
-      rounds: number of times to start from empty while ``T`` is not reached.
-      partial_fulfilment: whether to return less than ``T`` points (``True``) or
-        to raise exception (``False``) if unable to fulfill request.
+      max_iter: total dart-throw iteration budget.
+      partial_fulfilment: whether to return or reject a partial result.
+      single_run: whether to disable adaptive restarts.
 
     Returns:
       coordinates (T, 2) of placed points
     """
-
     # quick check for outrageous densities
     # circle packing efficiency limit: η = π srqt(3)/6 = 0.9069
     # A Simple Proof of Thue's Theorem on Circle Packing
@@ -381,38 +544,60 @@ def poisson_disc_filler(
     cornerS__[..., 0] = np.arange(i_len + 1)[:, np.newaxis]
     cornerS__[..., 1] = np.arange(j_len + 1)[np.newaxis, :]
 
+    def _cell_corners_view(corner_flag_: np.ndarray) -> np.ndarray:
+        corner_flag = corner_flag_.reshape((i_len + 1, j_len + 1), copy=False)
+        return np.lib.stride_tricks.as_strided(
+            corner_flag,
+            shape=(2, 2, i_len, j_len),
+            strides=corner_flag.strides * 2,
+            writeable=False,
+        )
+
     # process the area's border
     is_corner_within_border_ = _contains_np(BorderS, cornerS_)
+    # corners satisfying the border alone (obstacles ignored), used below to
+    # find cells lying entirely within the border so that the per-dart
+    # border containment check can be skipped for darts thrown in them
+    is_corner_within_border_only_ = is_corner_within_border_.copy()
 
+    # a cell is clear of an obstacle if none of its corners lie inside it
+    # and the obstacle's perimeter does not cross it; cells clear of every
+    # obstacle can skip the per-dart obstacle containment loop entirely
+    cell_clear_of_obstacles__ = np.ones((i_len, j_len), dtype=bool)
     for obstacleS_ in obstacleS__:
-        is_corner_within_border_ &= ~_contains_np(obstacleS_, cornerS_)
+        is_corner_in_obstacle_ = _contains_np(obstacleS_, cornerS_)
+        is_corner_within_border_ &= ~is_corner_in_obstacle_
+        cell_clear_of_obstacles__ &= ~_cell_corners_view(is_corner_in_obstacle_).any(
+            axis=(0, 1)
+        )
+        obstacle_cells, _ = _walk_along_perimeter(obstacleS_, i_len + j_len + 1)
+        for oi, oj in obstacle_cells:
+            cell_clear_of_obstacles__[oi, oj] = False
 
     is_corner_within_border = is_corner_within_border_.reshape(
         (i_len + 1, j_len + 1), copy=False
     )
 
-    cell_corners = np.lib.stride_tricks.as_strided(
-        is_corner_within_border,
-        shape=(
-            2,
-            2,
-            is_corner_within_border.shape[0] - 1,
-            is_corner_within_border.shape[1] - 1,
-        ),
-        strides=is_corner_within_border.strides * 2,
-        writeable=False,
-    )
+    cell_corners = _cell_corners_view(is_corner_within_border_)
     cell_covers_polygon__ = cell_corners.any(axis=(0, 1))
     cell_strictly_inside_polygon__ = cell_corners.all(axis=(0, 1))
+
+    cell_strictly_inside_border__ = _cell_corners_view(
+        is_corner_within_border_only_
+    ).all(axis=(0, 1))
 
     cells, points = _walk_along_perimeter(BorderS, i_len + j_len + 1)
     for i, j in cells:
         cell_covers_polygon__[i, j] = True
         cell_strictly_inside_polygon__[i, j] = False
+        cell_strictly_inside_border__[i, j] = False
 
     cell_intercepts_polygon__ = np.logical_and(
         cell_covers_polygon__, ~cell_strictly_inside_polygon__
     )
+
+    # cells needing neither the border nor any obstacle containment test
+    cell_fully_clear__ = cell_strictly_inside_border__ & cell_clear_of_obstacles__
 
     if RepellerS is not None and repel_radius >= min_dist:
         # the cells that contain the repellers can be discarded
@@ -437,41 +622,47 @@ def poisson_disc_filler(
     cell_idc = np.argwhere(cell_covers_polygon__)
 
     rng = np.random.default_rng(seed)
-    best_T = 0
-    iter_counts = []
-    for _ in range(rounds):
-        # point-placing function
-        points, iter_count = _poisson_disc_filler_core(
-            T,
-            max_iter,
-            i_len,
-            j_len,
-            cell_idc,
-            BorderS,
-            obstacleS__,
-            repel_radius_sq,
-            RepellerS,
-            rng,
-        )
-        iter_counts.append(iter_count)
-        if points.shape[0] > best_T:
-            best_T = points.shape[0]
-            best_points = points
-            if best_T == T:
-                break
-    points = best_points
+    points, iters_per_attempt, restart_count = _poisson_disc_filler_core(
+        T,
+        max_iter,
+        single_run,
+        i_len,
+        j_len,
+        cell_idc,
+        BorderS,
+        cell_strictly_inside_border__,
+        obstacleS__,
+        cell_clear_of_obstacles__,
+        cell_fully_clear__,
+        repel_radius_sq,
+        RepellerS,
+        rng,
+    )
+    best_T = points.shape[0]
 
     # check if request was fulfilled
     if best_T < T:
-        warn(
-            'Only %d points generated (requested: %d, efficiency requested: '
-            '%.3f, max_iter: %d). Iterations per round: %s',
-            best_T,
-            T,
-            efficiency,
-            max_iter,
-            iter_counts,
-        )
+        if partial_fulfilment:
+            warn(
+                'Only %d points generated (requested: %d, efficiency '
+                'requested: %.3f, max_iter: %d, iters_per_attempt: %s, restarts: %d).',
+                best_T,
+                T,
+                efficiency,
+                max_iter,
+                iters_per_attempt,
+                restart_count,
+            )
+        else:
+            raise ValueError(
+                f'Only {best_T} points generated (requested: {T}), '
+                f'using max_iter={max_iter} ({iters_per_attempt=} '
+                f'consumed across {restart_count} restarts; requested '
+                f'packing efficiency: {efficiency:.3f}). Increase '
+                f'max_iter, reduce T or min_dist, or set '
+                f'partial_fulfilment=True to accept a partial result '
+                f'instead of raising.'
+            )
 
     return points * cell_size + offsetC
 
@@ -484,15 +675,16 @@ def turbinate(
     root_clearance: float | None = None,
     plot: bool = False,
     max_iter: int = 100_000,
-    rounds: int = 5,
+    rounds: int | None = None,
+    single_run: bool = False,
 ) -> nx.Graph:
     """Fills the location ``L`` with ``T`` turbines spaced at least ``d`` apart.
 
     Only the border and root locations from ``L`` are used.
 
     The placement of turbines is random and some combinations of ``T`` and ``d``
-    will result in fewer placements than requested. Increase ``max_iter`` and
-    ``rounds`` to apply more effort before aborting.
+    will result in fewer placements than requested. Increase ``max_iter`` to
+    apply more effort before aborting.
 
     Args:
       L: reference location (only borders, obstacles and substations are used)
@@ -500,12 +692,22 @@ def turbinate(
       d: minimum spacing between turbines
       root_clearance: minimum spacing from turbine to substation (if not given,
         ``d`` is used)
-      max_iter: maximum number of turbine placement attempts per empty field.
-      rounds: how many times to start from an empty field before aborting.
+      max_iter: total placement iteration budget.
+      rounds: deprecated multiplier for ``max_iter``.
+      single_run: whether to disable adaptive restarts.
 
     Returns:
       A location with randomly placed turbines (the number may be lower than T)
     """
+    if rounds is not None:
+        warnings.warn(
+            'turbinate(rounds=...) is deprecated, pass a higher max_iter '
+            'instead. Increasing max_iter to max_iter*rounds.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        max_iter *= rounds
+
     VertexC = L.graph['VertexC']
     border = L.graph['border']
     R = L.graph['R']
@@ -531,8 +733,9 @@ def turbinate(
             obstacleC__=[rotate(obsC_, -rotation) for obsC_ in obstacleC__],
             repel_radius=(d if root_clearance is None else root_clearance),
             max_iter=max_iter,
-            rounds=rounds,
             plot=plot,
+            single_run=single_run,
+            #  partial_fulfilment=False,
         ),
         rotation,
     )

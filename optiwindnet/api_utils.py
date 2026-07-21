@@ -8,7 +8,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
 from .interarraylib import total_power
-from .types import Topology
+from .MILP._core import Topology
 
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
@@ -165,7 +165,7 @@ def is_warmstart_eligible(
     # Feeder constraints
     # the model constrains the feeder count over all roots, not per root
     feeder_count = sum(S_warm.degree[r] for r in range(-R, 0))
-    feeder_limit_mode = model_options.get('feeder_limit', 'unlimited')
+    feeder_limit_mode = model_options['feeder_limit']
     feeder_minimum = -(-W // capacity)
 
     # feeder_exact is the pinned feeder count, if the mode pins it
@@ -200,7 +200,7 @@ def is_warmstart_eligible(
         )
 
     # Balanced constraint: only enforced by the model if the feeder count is pinned
-    if model_options.get('balanced') and feeder_exact:
+    if model_options['balanced'] and feeder_exact:
         load_lb, load_ub = W // feeder_exact, -(-W // feeder_exact)
         subtree_loads = [
             S_warm.nodes[t]['load'] for r in range(-R, 0) for t in S_warm.neighbors(r)
@@ -223,9 +223,7 @@ def is_warmstart_eligible(
     # BRANCHED→BRANCHED, RINGED→RINGED (topology read from the label, not the
     # structure).
     mt = model_options['topology']
-    # Legacy warmstarts predate the topology label; treat those as matching the
-    # requested forest topology and keep strict checking for labeled graphs.
-    st = S_warm.graph.get('topology', mt)
+    st = S_warm.graph['topology']
     if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
         reasons.append(f'{st} network incompatible with model option: topology="{mt}"')
 
