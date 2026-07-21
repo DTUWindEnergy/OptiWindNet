@@ -593,7 +593,7 @@ def warmup_model(
       OWNWarmupFailed: if some link in S is not available in model.
     """
     mt = metadata.model_options['topology']
-    st = Topology(S.graph['topology'])
+    st = S.graph['topology']
     if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
         raise OWNWarmupFailed(
             f'warmup_model() failed: {st} network cannot seed a {mt} model'

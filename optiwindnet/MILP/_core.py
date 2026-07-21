@@ -553,7 +553,7 @@ class Solver(abc.ABC):
                 S, closing_links, getattr(self, 'A', None)
             )
         S.graph.update(
-            topology=topology.name.lower(),
+            topology=topology,
             capacity=metadata.capacity,
             max_load=max_load,
             has_loads=True,

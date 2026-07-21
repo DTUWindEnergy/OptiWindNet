@@ -14,6 +14,8 @@ from optiwindnet.api import (
     HGSRouter,
     WindFarmNetwork,
 )
+from optiwindnet.MILP import ModelOptions
+from optiwindnet.types import Topology
 
 from .helpers import tiny_wfn
 
@@ -494,13 +496,13 @@ def test_enable_ortools_logging_if_jupyter_sets_callback(monkeypatch):
 )
 def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
     S = tiny_wfn().S
-    model_options = {
-        'feeder_limit': mode,
-        'max_feeders': plus,
-        'topology': 'branched',
-        'feeder_route': 'segmented',
-        'balanced': False,
-    }
+    model_options = ModelOptions(
+        feeder_limit=mode,
+        max_feeders=plus,
+        topology=Topology.BRANCHED,
+        feeder_route='segmented',
+        balanced=False,
+    )
     ok = U.is_warmstart_eligible(
         S_warm=S,
         cables_capacity=4,
@@ -516,13 +518,13 @@ def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
 
 def test_warmstart_feeder_limit_specified_allows(capfd):
     S = tiny_wfn().S
-    model_options = {
-        'feeder_limit': 'specified',
-        'max_feeders': 3,
-        'topology': 'branched',
-        'feeder_route': 'segmented',
-        'balanced': False,
-    }
+    model_options = ModelOptions(
+        feeder_limit='specified',
+        max_feeders=3,
+        topology=Topology.BRANCHED,
+        feeder_route='segmented',
+        balanced=False,
+    )
     ok = U.is_warmstart_eligible(
         S_warm=S,
         cables_capacity=2,
@@ -538,17 +540,18 @@ def test_warmstart_feeder_limit_specified_allows(capfd):
 def _eligible(S, cables_capacity, **model_options):
     # a branched model accepts both radial and branched S: the topology axis is
     # neutral here, so these tests exercise the constraint each one names
+    opts = dict(
+        topology=Topology.BRANCHED,
+        feeder_route='segmented',
+        feeder_limit='unlimited',
+        max_feeders=0,
+        balanced=False,
+    )
+    opts.update(model_options)
     return U.is_warmstart_eligible(
         S_warm=S,
         cables_capacity=cables_capacity,
-        model_options=dict(
-            topology='branched',
-            feeder_route='segmented',
-            feeder_limit='unlimited',
-            max_feeders=0,
-            balanced=False,
-        )
-        | model_options,
+        model_options=ModelOptions(**opts),
         S_warm_has_detour=False,
         solver_name='ortools.cp_sat',
         logger=logging.getLogger(U.__name__),
@@ -567,7 +570,7 @@ def test_warmstart_feeder_limit_exactly(max_feeders, eligible):
 def test_warmstart_blocked_when_loads_are_not_balanced():
     # 5 terminals over 2 feeders: the model would demand loads within [2, 3],
     # but this warmstart splits them 4 + 1
-    S = nx.Graph(T=5, R=1, topology='radial')
+    S = nx.Graph(T=5, R=1, topology=Topology.RADIAL)
     S.add_node(-1, load=5)
     for subtree, branch in enumerate(([0, 1, 2, 3], [4])):
         predecessor = -1
@@ -587,7 +590,7 @@ def _labelled_S(topology):
     Structure is deliberately the same for every label: the compatibility rule
     reads ``S.graph['topology']``, never the shape.
     """
-    S = nx.Graph(T=2, R=1, topology=topology)
+    S = nx.Graph(T=2, R=1, topology=Topology(topology))
     S.add_node(-1, load=2)
     for load, node in ((2, 0), (1, 1)):
         S.add_node(node, load=load, subtree=0)
@@ -599,16 +602,16 @@ def _labelled_S(topology):
 @pytest.mark.parametrize(
     ('model_topology', 'S_topology', 'eligible'),
     [
-        ('radial', 'radial', True),
-        ('radial', 'branched', False),
-        ('radial', 'ringed', False),
+        (Topology.RADIAL, Topology.RADIAL, True),
+        (Topology.RADIAL, Topology.BRANCHED, False),
+        (Topology.RADIAL, Topology.RINGED, False),
         # a radial solution is a valid seed for a branched model, not the reverse
-        ('branched', 'radial', True),
-        ('branched', 'branched', True),
-        ('branched', 'ringed', False),
-        ('ringed', 'radial', False),
-        ('ringed', 'branched', False),
-        ('ringed', 'ringed', True),
+        (Topology.BRANCHED, Topology.RADIAL, True),
+        (Topology.BRANCHED, Topology.BRANCHED, True),
+        (Topology.BRANCHED, Topology.RINGED, False),
+        (Topology.RINGED, Topology.RADIAL, False),
+        (Topology.RINGED, Topology.BRANCHED, False),
+        (Topology.RINGED, Topology.RINGED, True),
     ],
 )
 def test_warmstart_topology_compatibility(model_topology, S_topology, eligible):
@@ -621,9 +624,9 @@ def test_warmstart_topology_read_from_label_not_structure():
 
     The label is the only input to the decision; structure is never inspected.
     """
-    S = _labelled_S('branched')
+    S = _labelled_S(Topology.BRANCHED)
     assert max(S.degree[n] for n in S.nodes if n >= 0) == 2, 'S has no branching'
-    assert _eligible(S, 2, topology='radial') is False
+    assert _eligible(S, 2, topology=Topology.RADIAL) is False
 
 
 def test_parse_cables_input_numpy_ints_and_pairs():

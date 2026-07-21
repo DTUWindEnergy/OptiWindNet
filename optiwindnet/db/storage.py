@@ -16,6 +16,7 @@ import networkx as nx
 import numpy as np
 
 from ..interarraylib import calcload, compress_ring_routes, parse_ring_routes
+from ..types import Topology
 from ..utils import make_handle
 from .model import (
     Machine,
@@ -367,7 +368,7 @@ def terse_pack_from_G(G: nx.Graph) -> PackType:
     return terse_pack
 
 
-def infer_topology(G: nx.Graph, terse: Sequence[int]) -> str:
+def infer_topology(G: nx.Graph, terse: Sequence[int]) -> Topology:
     """Infer the topology of a record stored before ``topology`` was an attribute.
 
     Reads, in order of authority:
@@ -392,24 +393,26 @@ def infer_topology(G: nx.Graph, terse: Sequence[int]) -> str:
       terse: the record's ``edges`` sequence.
 
     Returns:
-      one of ``'ringed'``, ``'radial'`` or ``'branched'``.
+      Topology enum entry (``Topology.{RINGED, RADIAL, BRANCHED}``).
     """
     T = G.graph['T']
     C, D = (G.graph.get(k, 0) for k in 'CD')
     if len(terse) != T + C + D:
-        return 'ringed'
+        return Topology.RINGED
 
     method_options = G.graph.get('method_options') or {}
     topology = method_options.get('topology')
     if topology in ('ringed', 'radial', 'branched'):
-        return topology
+        return Topology(topology)
 
     creator = G.graph.get('creator', '')
     if creator in ('baselines.hgs', 'baselines.lkh'):
-        return 'radial'
+        return Topology.RADIAL
     if creator == 'constructor':
-        return 'radial' if method_options.get('method') == 'radial_EW' else 'branched'
-    return 'branched'
+        if method_options.get('method') == 'radial_EW':
+            return Topology.RADIAL
+        return Topology.BRANCHED
+    return Topology.BRANCHED
 
 
 def untersify_to_G(G: nx.Graph, terse: list, clone2prime: list) -> None:

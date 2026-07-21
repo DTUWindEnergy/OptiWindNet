@@ -530,7 +530,7 @@ def test_tagged_ringed_roundtrip_infers_dimensions():
 
     S2 = S_from_terse_links(terse_links_from_S(S))
 
-    assert S2.graph['topology'] == 'ringed'
+    assert S2.graph['topology'] == Topology.RINGED
     assert S2.graph['R'] == S.graph['R']
     assert S2.graph['T'] == S.graph['T']
     assert _ring_sets(S2) == _ring_sets(S)
@@ -570,8 +570,8 @@ def test_terse_links_forest_still_positional():
 @pytest.mark.parametrize(
     'topology, links',
     [
-        ('radial', [(-1, 0), (0, 1), (1, 2)]),
-        ('branched', [(-1, 0), (0, 1), (0, 2)]),
+        (Topology.RADIAL, [(-1, 0), (0, 1), (1, 2)]),
+        (Topology.BRANCHED, [(-1, 0), (0, 1), (0, 2)]),
     ],
 )
 def test_terse_links_carries_forest_architecture(topology, links):
@@ -610,7 +610,7 @@ def test_terse_links_repr_shows_architecture_and_terse_array():
 # --------------------------------------------------------------------------- #
 def _radial_S(T, links):
     """A radial S over ``links``, with loads and orientation from calcload."""
-    S = nx.Graph(R=1, T=T, topology='radial')
+    S = nx.Graph(R=1, T=T, topology=Topology.RADIAL)
     S.add_edges_from(links)
     calcload(S)
     return S
@@ -650,7 +650,7 @@ def test_validate_topology_rejects_stranded_terminal():
     A stranded terminal sits in its own component without growing a cycle, so
     neither the forest check nor the simple-path one sees it.
     """
-    S = nx.Graph(R=1, T=4, topology='radial', has_loads=True, max_load=3)
+    S = nx.Graph(R=1, T=4, topology=Topology.RADIAL, has_loads=True, max_load=3)
     S.add_edge(-1, 0, load=3, reverse=False)
     S.add_edge(0, 1, load=2, reverse=False)
     S.add_edge(1, 2, load=1, reverse=False)
@@ -668,7 +668,7 @@ def test_validate_topology_rejects_terminal_absent_from_S():
 
     Asking for its degree used to raise instead of reporting.
     """
-    S = nx.Graph(R=1, T=4, topology='radial', has_loads=True, max_load=3)
+    S = nx.Graph(R=1, T=4, topology=Topology.RADIAL, has_loads=True, max_load=3)
     S.add_edge(-1, 0, load=3, reverse=False)
     S.add_edge(0, 1, load=2, reverse=False)
     S.add_edge(1, 2, load=1, reverse=False)
@@ -696,7 +696,7 @@ def test_validate_topology_rejects_misplaced_open_point():
 
 
 def test_validate_topology_reports_every_shape_violation():
-    S = nx.Graph(R=1, T=3, topology='radial', has_loads=True, max_load=3)
+    S = nx.Graph(R=1, T=3, topology=Topology.RADIAL, has_loads=True, max_load=3)
     S.add_edges_from([(-1, 0), (0, 1), (0, 2), (1, 2)], load=1, reverse=False)
     S.nodes[-1]['load'] = 3
     for terminal in range(3):

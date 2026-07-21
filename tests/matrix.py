@@ -27,12 +27,14 @@ product: every axis value appears, with dense cross-coverage on the cheap
 sites. Site handles below must exist in ``tests/sites.py``.
 """
 
+from optiwindnet.types import Topology
+
 # --------------------------------------------------------------------------- #
 # Axes
 # --------------------------------------------------------------------------- #
 EW_METHODS = ('biased_EW', 'radial_EW', 'rootlust', 'esau_williams', 'ringed')
 FEEDER_ROUTES = ('segmented', 'straight')
-TOPOLOGIES = ('branched', 'radial', 'ringed')
+TOPOLOGIES = (Topology.BRANCHED, Topology.RADIAL, Topology.RINGED)
 # feeder-limit values that need no max_feeders (usable site-agnostically)
 FEEDER_LIMITS = ('unlimited', 'minimum', 'min_plus1')
 # every MILP backend optiwindnet exposes; absent ones are skipped by the test.
@@ -105,7 +107,7 @@ def milp_spec(
     solver,
     cables,
     *,
-    topology='branched',
+    topology=Topology.BRANCHED,
     feeder_route='segmented',
     feeder_limit='unlimited',
     balanced=False,
@@ -113,8 +115,9 @@ def milp_spec(
     time_limit=5,
     mip_gap=1e-3,
 ):
+    topology = Topology(topology)
     model_options = {}
-    if topology != 'branched':
+    if topology is not Topology.BRANCHED:
         model_options['topology'] = topology
     if feeder_route != 'segmented':
         model_options['feeder_route'] = feeder_route
@@ -276,7 +279,7 @@ def _milp_cases():
             milp_spec(
                 SWEEP_SOLVER,
                 3,
-                topology='ringed',
+                topology=Topology.RINGED,
                 feeder_limit='minimum',
                 balanced=True,
             ),
@@ -289,16 +292,16 @@ def _milp_cases():
     #     its own get_solution() STRAIGHT path and constraint emission), so the
     #     segmented+unlimited cases alone leave those branches uncovered.
     for solver in MILP_SOLVERS:
-        cases.append((small, milp_spec(solver, 5, topology='branched')))
-        cases.append((small, milp_spec(solver, 5, topology='radial')))
-        cases.append((small, milp_spec(solver, 5, topology='ringed')))
+        cases.append((small, milp_spec(solver, 5, topology=Topology.BRANCHED)))
+        cases.append((small, milp_spec(solver, 5, topology=Topology.RADIAL)))
+        cases.append((small, milp_spec(solver, 5, topology=Topology.RINGED)))
         cases.append(
             (
                 small,
                 milp_spec(
                     solver,
                     5,
-                    topology='radial',
+                    topology=Topology.RADIAL,
                     feeder_route='straight',
                     feeder_limit='minimum',
                 ),
@@ -307,7 +310,7 @@ def _milp_cases():
 
     # --- a couple of larger / multi-substation MILP cases --------------------
     cases.append(
-        ('borkum2', milp_spec(SWEEP_SOLVER, 5, topology='ringed', time_limit=10))
+        ('borkum2', milp_spec(SWEEP_SOLVER, 5, topology=Topology.RINGED, time_limit=10))
     )
     cases.append(('taylor_2023', milp_spec(SWEEP_SOLVER, 8, time_limit=10)))
     return cases

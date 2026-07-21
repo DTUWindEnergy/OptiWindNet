@@ -221,8 +221,8 @@ def is_warmstart_eligible(
     # Topology constraint. Valid seeds: RADIAL→{RADIAL, BRANCHED},
     # BRANCHED→BRANCHED, RINGED→RINGED (topology read from the label, not the
     # structure).
-    mt = Topology(model_options['topology'])
-    st = Topology(S_warm.graph['topology'])
+    mt = model_options['topology']
+    st = S_warm.graph['topology']
     if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
         reasons.append(f'{st} network incompatible with model option: topology="{mt}"')
 

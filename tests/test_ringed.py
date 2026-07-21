@@ -44,6 +44,7 @@ from optiwindnet.interarraylib import (
 )
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
+from optiwindnet.types import Topology
 
 from .helpers import has_cycle, solver_unavailable, terminal_terminal_crossings
 
@@ -163,7 +164,7 @@ def test_has_cycle_sees_through_the_substations():
     assert has_cycle(far)
 
     # a radial forest must not be mistaken for a ring
-    radial = nx.Graph(R=3, T=6, topology='radial')
+    radial = nx.Graph(R=3, T=6, topology=Topology.RADIAL)
     radial.add_nodes_from(range(-3, 0))
     radial.add_edges_from([(-1, 0), (0, 1), (-2, 2), (2, 3), (-3, 4), (4, 5)])
     assert not has_cycle(radial)
