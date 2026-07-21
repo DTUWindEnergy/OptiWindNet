@@ -139,7 +139,7 @@ def _normalize_turbine_power(
 
 
 def _require_uniform_power(A: nx.Graph, router_name: str) -> None:
-    """Raise if ``A`` has non-uniform terminal power (unsupported by heuristics)."""
+    """Raise if ``A`` has non-uniform terminal power."""
     if any(A.nodes[t].get('power', 1) != 1 for t in range(A.graph['T'])):
         raise TypeError(
             f'{router_name} does not support non-uniform turbine_power. '
@@ -245,7 +245,7 @@ class WindFarmNetwork:
             ``turbine_power_decimals`` decimal places and handled internally as
             integer power quanta (see :attr:`power_scale`). Plots and high-level
             exports convert these quanta back to nominal units. Currently
-            supported by :class:`MILPRouter` only; heuristic routers raise
+            supported by :class:`MILPRouter` only; other routers raise
             :class:`TypeError` for non-uniform power.
           turbine_power_decimals: Number of decimal places of ``turbine_power``
             to preserve (default 1). The resulting integer scale depends on the
