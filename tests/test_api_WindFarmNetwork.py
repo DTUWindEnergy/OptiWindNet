@@ -36,7 +36,7 @@ def test_optimize_updates_graphs_smoke():
     terse = wfn.optimize()
     assert wfn.S is not None
     assert wfn.G is not None
-    assert terse.shape[0] == wfn.S.graph['T']
+    assert len(terse) == wfn.S.graph['T']
 
 
 def test_wfn_warns_when_L_and_coordinates_given(caplog):
@@ -156,7 +156,7 @@ def test_terse_links_output():
     terse_expected = np.array([-1, 0, 1, 2])
     wfn = tiny_wfn()
     terse = wfn.terse_links()
-    assert terse.shape[0] == wfn.S.graph['T']
+    assert len(terse) == wfn.S.graph['T']
     assert np.array_equal(wfn.terse_links(), terse_expected)
 
 
@@ -417,7 +417,7 @@ def test_S_and_G_raise_before_optimize():
 def test_wfn_inexact_routers_smoke(router):
     wfn = tiny_wfn()
     terse = wfn.optimize(router=router)
-    assert terse.shape[0] == wfn.S.graph['T']
+    assert len(terse) == wfn.S.graph['T']
 
 
 # ================#

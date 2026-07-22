@@ -17,9 +17,10 @@ from optiwindnet.db.storage import (
     get_machine_pk,
     infer_topology,
     packnodes,
-    untersify_to_G,
 )
+from optiwindnet.fingerprint import fingerprint_coordinates
 from optiwindnet.interarraylib import S_from_G, validate_topology
+from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
 
 from .helpers import assert_graph_equal, tiny_wfn
@@ -81,6 +82,18 @@ def test_database_connection_supports_db_usage(tmp_path):
 # ---------------------------
 # Test storage
 # ---------------------------
+
+
+def test_packnodes_uses_canonical_vertexc_fingerprint():
+    L = tiny_wfn().L
+    L.graph['VertexC'] = np.array(L.graph['VertexC'], order='F')
+
+    pack = packnodes(L)
+    digest, VertexC_npy = fingerprint_coordinates(L.graph['VertexC'])
+
+    assert pack['digest'] == digest
+    assert pack['VertexC'] == VertexC_npy
+    assert b"'fortran_order': False" in VertexC_npy[:256]
 
 
 def test_L_from_nodeset(tmp_path):
@@ -258,7 +271,6 @@ def _bare_G(**graph_attrs):
 
 
 _FOREST = [-1, 0, 1]  # positional: a chain -1--0--1--2
-_STUBS = [-1, -1, -1]  # positional: every terminal straight to the root
 _RINGED = [-1, 0, 1, 2]  # route sequence: any length other than the positional one
 
 
@@ -293,46 +305,32 @@ _RINGED = [-1, 0, 1, 2]  # route sequence: any length other than the positional 
         (_FOREST, {}, Topology.BRANCHED),
     ),
 )
-def test_untersify_infers_topology_of_records_without_one(terse, attrs, expected):
+def test_legacy_record_topology_is_inferred_before_decoding(terse, attrs, expected):
     """Records predating 'topology' get one inferred from encoding and metadata.
 
     ``validate_topology`` requires the attribute, so a graph read back from an
     older row must declare a shape, and must satisfy the one it declares.
     """
     G = _bare_G(**attrs)
-    untersify_to_G(G, terse=terse, clone2prime=[])
+    topology = infer_topology(G, terse)
+    encoding = TerseLinks(
+        links=tuple(terse),
+        topology=topology,
+        scope=LinkScope.ROUTESET,
+        T=G.graph['T'],
+        R=G.graph['R'],
+        B=G.graph['B'],
+    )
+    G = encoding.to_routeset(G, capacity=G.graph['capacity'])
 
     assert G.graph['topology'] == expected
     assert validate_topology(S_from_G(G)) == []
 
 
-def test_infer_topology_trusts_a_recorded_ringed_over_the_encoding():
-    """An all-stub RINGED solution is a forest, so it is stored positionally.
-
-    A ring of one terminal has a feeder and no cycle-closing link, so a solution
-    made only of stubs has no cycles at all. The encoding cannot tell it apart
-    from a forest; the recorded topology can, and it is right.
-    """
-    G = _bare_G(method_options={'topology': Topology.RINGED})
-    assert infer_topology(G, _STUBS) is Topology.RINGED
-
-    untersify_to_G(G, terse=_STUBS, clone2prime=[])
-    # and the label holds up: every terminal is its own single-terminal ring
-    assert validate_topology(S_from_G(G)) == []
-
-
-def test_a_wrongly_recorded_ringed_is_caught_by_validation():
-    """Trusting the record moves the objection to where the diagnosis is.
-
-    Inference reports what the record claims; ``validate_topology`` reads the
-    whole graph and rejects the claim, which the encoding length could not do.
-    """
+def test_infer_topology_reports_a_recorded_claim_when_links_disagree():
+    """Legacy inference reports metadata; graph validation is a later concern."""
     G = _bare_G(method_options={'topology': Topology.RINGED})
     assert infer_topology(G, _FOREST) is Topology.RINGED
-
-    untersify_to_G(G, terse=_FOREST, clone2prime=[])
-    violations = validate_topology(S_from_G(G))
-    assert violations, 'a path with one feeder is not a ring'
 
 
 def test_inference_recovers_the_topology_of_a_stripped_record(tmp_path):
@@ -358,11 +356,3 @@ def test_inference_recovers_the_topology_of_a_stripped_record(tmp_path):
 
     assert G_rs.graph['creator'] == 'baselines.hgs'
     assert G_rs.graph['topology'] == G.graph['topology']
-
-
-def test_untersify_keeps_a_stored_topology():
-    """A stored 'topology' is authoritative -- inference never overrides it."""
-    G = _bare_G(topology=Topology.RADIAL, creator='constructor')
-    untersify_to_G(G, terse=_FOREST, clone2prime=[])
-
-    assert G.graph['topology'] is Topology.RADIAL

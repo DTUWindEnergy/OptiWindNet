@@ -13,6 +13,7 @@ from bitarray.util import ones, zeros
 from scipy.stats import rankdata
 
 from ..crossings import edge_conflicts
+from ..fingerprint import fingerprint_function
 from ..geometric import (
     angle_oracles_factory,
 )
@@ -20,7 +21,6 @@ from ..interarraylib import (
     add_link_blockmap,
     add_terminal_closest_root,
     calcload,
-    fun_fingerprint,
     split_rings_and_calc_loads,
 )
 from ..types import Topology
@@ -1010,4 +1010,4 @@ def constructor(
     return S
 
 
-_constructor_fun_fingerprint = fun_fingerprint(constructor)
+_constructor_fun_fingerprint = fingerprint_function(constructor)

@@ -3,10 +3,7 @@
 
 import logging
 import math
-import pickle
-import sys
-from collections.abc import Iterator, Sequence
-from hashlib import sha256
+from collections.abc import Iterator
 from itertools import chain, pairwise
 
 import networkx as nx
@@ -15,6 +12,7 @@ import numpy as np
 from bitarray import bitarray
 
 from .geometric import CoordPair, angle_helpers, rotate
+from .terse import TerseLinks
 from .types import Topology
 
 _lggr = logging.getLogger(__name__)
@@ -31,8 +29,6 @@ __all__ = (
     'add_ring_to_S',
     'rings_from_S',
     'directed_links',
-    'site_fingerprint',
-    'fun_fingerprint',
     'L_from_site',
     'G_from_S',
     'S_from_G',
@@ -56,47 +52,6 @@ __all__ = (
     'validate_topology',
     'validate_routeset',
 )
-
-
-class TerseLinks(np.ndarray):
-    """Compact links together with the topology architecture they encode.
-
-    This is an :class:`numpy.ndarray` subclass so existing numerical consumers
-    keep working.  The additional ``topology`` attribute is essential metadata:
-    positional links alone cannot distinguish a radial forest from a branched
-    one (and some degenerate ringed solutions are forests too).
-    """
-
-    topology: Topology
-
-    def __new__(cls, terse, topology: Topology | str):
-        topology = Topology(topology)
-        obj = np.asarray(terse, dtype=np.int_).view(cls)
-        if obj.ndim != 1:
-            raise ValueError('terse links must be a 1D array')
-        obj.topology = topology
-        return obj
-
-    def __array_finalize__(self, source):
-        if source is not None:
-            topology = getattr(source, 'topology', None)
-            if topology is not None:
-                self.topology = Topology(topology)
-
-    def __reduce__(self):
-        constructor, args, state = super().__reduce__()
-        return constructor, args, (*state, self.topology)
-
-    def __setstate__(self, state):
-        *array_state, self.topology = state
-        super().__setstate__(tuple(array_state))
-
-    def __repr__(self):
-        prefix = f'TerseLinks(topology={self.topology.value!r}, terse='
-        terse = np.array2string(
-            np.asarray(self), separator=', ', prefix=prefix, suffix=')'
-        )
-        return f'{prefix}{terse})'
 
 
 _essential_graph_attrs = (
@@ -419,6 +374,16 @@ def calcload(G: nx.Graph) -> None:
             subtree += 1
             max_load = max(max_load, G.nodes[subroot]['load'])
         total_load += G.nodes[root]['load']
+    # Clones inside a routed ring's open cable are separated from both arms by
+    # load=0 segments. They intentionally carry no current and are therefore
+    # not reached by the root traversals above.
+    for node, nodeD in G.nodes(data=True):
+        if (
+            node >= T
+            and 'load' not in nodeD
+            and all(G[node][nbr].get('load') == 0 for nbr in G[node])
+        ):
+            nodeD['load'] = 0
     W = total_power(G)
     if total_load != W:
         raise ValueError(f'root loads sum to {total_load}, expected total power = {W}')
@@ -836,31 +801,6 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
         yield tail_root, chain_[-1], 0
         for j in range(n - 1, 0, -1):
             yield chain_[j], chain_[j - 1], n - j
-
-
-def site_fingerprint(
-    VertexC: np.ndarray, boundary: np.ndarray
-) -> tuple[bytes, dict[str, bytes]]:
-    #  VertexCpkl = pickle.dumps(np.round(VertexC, 2))
-    #  boundarypkl = pickle.dumps(np.round(boundary, 2))
-    VertexCpkl = pickle.dumps(VertexC)
-    boundarypkl = pickle.dumps(boundary)
-    return (
-        sha256(VertexCpkl + boundarypkl).digest(),
-        dict(VertexC=VertexCpkl, boundary=boundarypkl),
-    )
-
-
-def fun_fingerprint(fun=None) -> dict[str, bytes | str]:
-    if fun is None:
-        fcode = sys._getframe().f_back.f_code
-    else:
-        fcode = fun.__code__
-    return dict(
-        funhash=sha256(fcode.co_code).digest(),
-        funfile=fcode.co_filename,
-        funname=fcode.co_name,
-    )
 
 
 def L_from_site(
@@ -1356,210 +1296,27 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     return L
 
 
-def compress_ring_routes(routes: list[tuple[int, list[int], int]]) -> list[int]:
-    """Flatten ring routes ``(open_root, walk, close_root)`` into a sequence.
-
-    Each route is written as its ``open_root`` (only when it differs from the
-    running root), its walk, then its ``close_root``. A shared boundary root
-    (``close_i == open_{i+1}``) is therefore written once, so two consecutive
-    negative numbers are always distinct; the last route's ``close`` is elided
-    when it equals its ``open`` (a single-root ring, inferred at end-of-sequence).
-
-    Every route contributes its walk and the first writes a marker, so the
-    sequence always has more entries than walk nodes -- which is what
-    distinguishes a ringed encoding from a positional forest one.
-    """
-    seq: list[int] = []
-    pen = None
-    last = len(routes) - 1
-    for idx, (open_, walk, close) in enumerate(routes):
-        if open_ != pen:
-            seq.append(int(open_))
-        seq.extend(int(x) for x in walk)
-        if idx == last and close == open_:
-            pen = close
-            continue
-        seq.append(int(close))
-        pen = close
-    return seq
-
-
-def parse_ring_routes(seq: Sequence[int]) -> list[tuple[int, list[int], int]]:
-    """Inverse of :func:`compress_ring_routes`: recover ``(open, walk, close)``."""
-    routes: list[tuple[int, list[int], int]] = []
-    seq = [int(x) for x in seq]
-    i, length, pen = 0, len(seq), None
-    while i < length:
-        if seq[i] < 0:
-            open_ = seq[i]
-            i += 1
-        else:
-            open_ = pen
-        walk: list[int] = []
-        while i < length and seq[i] >= 0:
-            walk.append(seq[i])
-            i += 1
-        if i >= length:
-            close = open_  # last route, single-root: close inferred == open
-        else:
-            # a lone marker is the shared close/next-open; two consecutive markers
-            # are this route's close then a distinct next open
-            close = seq[i]
-            i += 1
-        pen = close
-        routes.append((open_, walk, close))
-    return routes
-
-
-def _ring_routes_from_S(S: nx.Graph) -> list[tuple[int, list[int], int]]:
-    """Recover the ring routes ``(open_root, walk, close_root)`` of a ringed ``S``.
-
-    The walk direction of each ring is chosen so that the open point falls where
-    :func:`add_ring_to_S` (called with ``A=None`` on decode) re-derives it: the
-    load midpoint ``ceil(n / 2) - 1``. For a ring with an odd number of terminals
-    the two balanced split edges map one-to-one onto the two walk directions, so
-    this preserves the exact open point without storing it.
-
-    A ring may open and close on different roots, so reversing a walk swaps the
-    two roots along with the ends they feed.
-    """
-    split_pairs = {
-        frozenset((u, v)) for u, v, d in S.edges(data=True) if d.get('load') == 0
-    }
-    routes: list[tuple[int, list[int], int]] = []
-    for root, ordered in rings_from_S(S):
-        open_, close = root
-        n = len(ordered)
-        if n > 1:
-            # locate the open point in the walk and orient so it lands on the
-            # decoder's default split edge (index ceil(n / 2) - 1)
-            j = next(
-                k
-                for k in range(n - 1)
-                if frozenset((ordered[k], ordered[k + 1])) in split_pairs
-            )
-            if j != math.ceil(n / 2) - 1:
-                ordered = ordered[::-1]
-                open_, close = close, open_
-        routes.append((open_, ordered, close))
-    return routes
-
-
 def S_from_terse_links(terse_links, R=None, T=None, topology=None, **kwargs):
-    """Create a solution topology graph ``S`` from its ``terse_links`` encoding.
-
-    Inverse function of :func:`terse_links_from_S`. Handles both encodings:
-
-    * *forest* topologies (radial/branched) are stored positionally – the array
-      has exactly ``T`` entries and ``(i, terse_links[i])`` is a directed link;
-    * *ringed* topologies are stored as a sequence of routes, which has a number
-      of entries different from ``T``.
-
-    :class:`TerseLinks` carries the topology architecture so it survives the
-    round-trip.  Plain arrays from older callers remain supported: their
-    encoding is inferred by comparing the number of entries with ``T`` and a
-    positional forest falls back to ``'branched'`` because radial and branched
-    cannot be distinguished from links alone.
-
-    Args:
-      terse_links: topology encoded as a 1D array.
-      R: number of roots of the problem (inferred when omitted).
-      T: number of terminals of the problem (inferred when omitted).
-      topology: topology architecture. Overrides metadata on ``terse_links``.
-
-    Returns:
-      Solution topology S.
-    """
-    if topology is None:
-        topology = getattr(terse_links, 'topology', None)
-    if topology is not None:
-        topology = Topology(topology)
-    terse_links = np.asarray(terse_links)
-    if terse_links.ndim != 1:
-        raise ValueError('terse links must be a 1D array')
-    n = terse_links.shape[0]
-    if R is None:
-        R = abs(int(terse_links.min())) if n else 1
-    if T is None:
-        # A tagged ring sequence contains every terminal exactly once; legacy
-        # untagged input keeps the historical forest assumption.
-        T = (
-            int(np.count_nonzero(terse_links >= 0))
-            if topology is Topology.RINGED
-            else n
-        )
-    is_ring_sequence = n != T
-    if topology in (Topology.RADIAL, Topology.BRANCHED) and is_ring_sequence:
-        raise ValueError(
-            f'{topology} topology requires {T} positional links; received {n}'
-        )
-    if topology is None:
-        topology = Topology.RINGED if is_ring_sequence else Topology.BRANCHED
-
-    if not is_ring_sequence:
-        # forest encoding: (i, terse_links[i]) is a directed link
-        S = nx.Graph(T=T, R=R, **kwargs)
-        S.add_edges_from(tuple(zip(range(T), terse_links.tolist())))
-        calcload(S)
-        S.graph['topology'] = topology
-        if 'capacity' not in kwargs:
-            S.graph['capacity'] = S.graph['max_load']
-        return S
-    # ringed encoding: rebuild each route as a canonical ring
-    S = nx.Graph(T=T, R=R, topology=topology, **kwargs)
-    S.add_nodes_from(range(-R, 0))
-    routes = parse_ring_routes(terse_links.tolist())
-    max_load = 0
-    for subtree, (open_, ordered, close) in enumerate(routes):
-        add_ring_to_S(S, (open_, close), ordered, subtree, A=None)
-        max_load = max(max_load, math.ceil(len(ordered) / 2))
-    for root in range(-R, 0):
-        # a load=0 feeder carries no current, so it adds nothing to its root
-        S.nodes[root]['load'] = sum(
-            S.nodes[nbr]['load'] for nbr in S[root] if S[root][nbr]['load'] != 0
-        )
-    S.graph['max_load'] = max_load
-    S.graph['has_loads'] = True
-    if 'capacity' not in kwargs:
-        S.graph['capacity'] = max_load
-    return S
+    """Create topology ``S`` from a self-describing or legacy encoding."""
+    if isinstance(terse_links, TerseLinks):
+        encoding = terse_links
+        if topology is not None and Topology(topology) is not encoding.topology:
+            raise ValueError('topology disagrees with the TerseLinks value')
+        if R is not None and R != encoding.R:
+            raise ValueError('R disagrees with the TerseLinks value')
+        if T is not None and T != encoding.T:
+            raise ValueError('T disagrees with the TerseLinks value')
+    else:
+        array = np.asarray(terse_links)
+        if array.ndim != 1:
+            raise ValueError('terse links must be a 1D array')
+        encoding = TerseLinks.from_array(array.tolist(), topology=topology, R=R, T=T)
+    return encoding.to_topology(**kwargs)
 
 
 def terse_links_from_S(S):
-    """Make a terse representation of the topology ``S`` as a 1D array.
-
-    Inverse function of :func:`S_from_terse_links`. A *forest* topology (radial
-    or branched) is stored positionally – ``(i, terse[i])`` are the links, one
-    entry per terminal. A *ringed* topology needs two feeders per ring, which a
-    single parent per node cannot capture, so it is stored instead as a sequence
-    of routes: the terminals of each ring in walking order, with (negative) root
-    numbers marking the roots each route opens and closes on. The two encodings
-    are told apart by their length relative to ``T``.
-
-    The encoding follows ``S.graph['topology']``.
-
-    Args:
-      S: solution topology (a forest, or a canonical ringed topology).
-
-    Returns:
-      1D array ``terse`` encoding ``S``.
-    """
-    T = S.graph['T']
-    topology = S.graph['topology']
-    if topology is not Topology.RINGED:
-        terse_links = np.zeros((T,), dtype=np.int_)
-        # convert the graph to array representing the tree (edges i->terse[i])
-        for u, v, edgeD in S.edges(data=True):
-            u, v = (u, v) if u < v else (v, u)
-            i, target = (u, v) if edgeD['reverse'] else (v, u)
-            terse_links[i] = target
-        return TerseLinks(terse_links, topology=topology)
-    # ringed topology: encode the routes sequentially. Every route contributes
-    # its terminals and the first one always writes a root marker, so a ringed
-    # encoding always has more than T entries and never collides with the
-    # T-entry forest encoding.
-    seq = compress_ring_routes(_ring_routes_from_S(S))
-    return TerseLinks(seq, topology=topology)
+    """Return the self-describing compact representation of topology ``S``."""
+    return TerseLinks.from_topology(S)
 
 
 def as_obstacle_free(Lʹ: nx.Graph) -> nx.Graph:
