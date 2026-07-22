@@ -62,7 +62,8 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         warmstart: nx.Graph | None = None,
     ):
         """
-        This will keep the Gurobi license in use until a call to :meth:`get_solution`.
+        This keeps the Gurobi license in use until a call to
+        :meth:`get_solution` or :meth:`get_incumbent_topology`.
         """
         solver = pyo.SolverFactory(
             'gurobi_persistent',
@@ -118,13 +119,20 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
+    def get_incumbent_topology(self) -> nx.Graph:
+        """Return the best model-objective incumbent, then close the solver."""
+        try:
+            return self._incumbent_topology_from_pool()
+        finally:
+            self.solver.close()
+
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
         P = self.P
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
-                S = self._topology_from_mip_pool()
+                S = self._incumbent_topology_from_pool()
                 G = PathFinder(G_from_S(S, A), P, A).create_detours()
             else:
                 S, G = self._investigate_pool(P, A)

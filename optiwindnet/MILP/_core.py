@@ -412,6 +412,7 @@ class Solver(abc.ABC):
     solver: Any
     options: dict[str, Any]
     stopping: dict[str, Any]
+    model_options: ModelOptions
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
 
@@ -464,6 +465,15 @@ class Solver(abc.ABC):
         Returns:
           General information about the solution search (use ``get_solution()`` for
             the actual solution).
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_incumbent_topology(self) -> nx.Graph:
+        """Return the best model-objective incumbent as topology ``S``.
+
+        This method does not route or rank solution-pool entries by detoured
+        length. Use :meth:`get_solution` for the routed, post-processed result.
         """
         pass
 
@@ -567,6 +577,7 @@ class PoolHandler(abc.ABC):
     name: str
     num_solutions: int
     model_options: ModelOptions
+    solution_info: SolutionInfo
 
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
@@ -577,6 +588,21 @@ class PoolHandler(abc.ABC):
     def _topology_from_mip_pool(self) -> nx.Graph:
         "Build topology from the pool solution at the last requested position"
         pass
+
+    def _incumbent_topology_from_pool(self) -> nx.Graph:
+        """Decode pool entry zero, which must hold the best model objective."""
+        try:
+            expected_objective = self.solution_info.objective
+        except AttributeError as exc:
+            exc.args += ('.solve() must be called before solution retrieval',)
+            raise
+        objective = self._objective_at(0)
+        if not math.isclose(objective, expected_objective, rel_tol=1e-6, abs_tol=1e-6):
+            raise ValueError(
+                'Best solution-pool objective does not agree with solution_info: '
+                f'{objective} != {expected_objective}'
+            )
+        return self._topology_from_mip_pool()
 
     def _investigate_pool(
         self, P: nx.PlanarEmbedding, A: nx.Graph

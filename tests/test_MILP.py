@@ -1,6 +1,7 @@
 import logging
 import math
 
+import networkx as nx
 import numpy as np
 import pytest
 
@@ -38,6 +39,102 @@ def _solve_toy(solver_name, P, A):
     return solution_info, solver.get_solution()
 
 
+def _solve_toy_incumbent(solver_name, P, A, topology):
+    from unittest import mock
+
+    import optiwindnet.MILP.ortools as ortools_milp
+    from optiwindnet.interarraylib import validate_topology
+
+    solver = solver_factory(solver_name)
+    solver.set_problem(
+        P,
+        A,
+        capacity=_CAPACITY,
+        model_options=ModelOptions(topology=topology),
+    )
+    solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
+    with mock.patch.object(
+        ortools_milp.PathFinder,
+        'create_detours',
+        side_effect=AssertionError('incumbent retrieval must not route'),
+    ):
+        S = solver.get_incumbent_topology()
+    return dict(
+        terse=terse_links_from_S(S),
+        violations=validate_topology(S, _CAPACITY),
+        graph=dict(S.graph),
+        objective=solution_info.objective,
+        preserved_objective=solver.solution_info.objective,
+    )
+
+
+def _get_incumbent_before_solve(solver_name, P, A):
+    solver = solver_factory(solver_name)
+    solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
+    return solver.get_incumbent_topology()
+
+
+def _exercise_ortools_retrieval_branch(feeder_route, P, A):
+    """Exercise get_solution() branches with routing and pool work faked out."""
+    from unittest import mock
+
+    import optiwindnet.MILP.ortools as ortools_milp
+
+    solver = ortools_milp.SolverORTools('cp_sat')
+    solver.P, solver.A = P, A
+    solver.model_options = ModelOptions(feeder_route=feeder_route)
+    calls = []
+    S = nx.Graph(source='best-objective')
+    G = nx.Graph()
+
+    def incumbent():
+        calls.append('incumbent')
+        return S
+
+    def investigate(P, A):
+        assert P is solver.P
+        assert A is solver.A
+        calls.append('investigate')
+        return S, G
+
+    solver._incumbent_topology_from_pool = incumbent
+    solver._investigate_pool = investigate
+    solver._make_graph_attributes = lambda: {'solver_details': {}}
+    with (
+        mock.patch.object(ortools_milp, 'G_from_S', return_value=G),
+        mock.patch.object(ortools_milp, 'PathFinder') as pathfinder,
+    ):
+        pathfinder.return_value.create_detours.return_value = G
+        selected, _ = solver.get_solution()
+    return calls, selected.graph['source'], pathfinder.call_count
+
+
+class _FakePool(core.PoolHandler):
+    def __init__(self, candidates: list[tuple[float, str]]):
+        self.candidates = sorted(candidates, key=lambda candidate: candidate[0])
+        self.solution_info = core.SolutionInfo(0.0, 0.0, 1.0, 0.0, 'optimal')
+        self.selected = 0
+        self.objectives_requested: list[int] = []
+        self.decoded: list[str] = []
+        self.investigations = 0
+
+    def _objective_at(self, index: int) -> float:
+        self.objectives_requested.append(index)
+        self.selected = index
+        return self.candidates[index][0]
+
+    def _topology_from_mip_pool(self) -> nx.Graph:
+        label = self.candidates[self.selected][1]
+        self.decoded.append(label)
+        return nx.Graph(candidate=label)
+
+    def _investigate_pool(
+        self, P: nx.PlanarEmbedding, A: nx.Graph
+    ) -> tuple[nx.Graph, nx.Graph]:
+        self.investigations += 1
+        raise AssertionError('incumbent retrieval must not investigate the pool')
+
+
 def _patch_cpu_topology(monkeypatch, affinity, mapping=None):
     class FakePath:
         def __init__(self, path):
@@ -63,6 +160,90 @@ def P_A_toy():
     L = toyfarm()
     P, A = make_planar_embedding(L)
     return P, A
+
+
+def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():
+    pool = _FakePool([(7.0, 'later'), (1.0, 'best'), (4.0, 'middle')])
+
+    S = pool._incumbent_topology_from_pool()
+
+    assert S.graph['candidate'] == 'best'
+    assert pool.objectives_requested == [0]
+    assert pool.decoded == ['best']
+    assert pool.investigations == 0
+
+
+def test_ortools_incumbent_matches_toy_topology_without_routing(
+    P_A_toy, ortools_worker
+):
+    P, A = P_A_toy
+    result = ortools_worker.run(
+        _solve_toy_incumbent,
+        ('ortools.cp_sat', P, A, 'branched'),
+        30 + _RUNTIME,
+    )
+    if isinstance(result, BaseException):
+        raise result
+
+    assert np.array_equal(result['terse'], _terse_toy_farm_5)
+    assert result['violations'] == []
+    assert result['objective'] == result['preserved_objective']
+    assert {
+        'R',
+        'T',
+        'topology',
+        'capacity',
+        'max_load',
+        'has_loads',
+        'creator',
+    } <= result['graph'].keys()
+
+
+@pytest.mark.parametrize('topology', ['radial', 'ringed'])
+def test_ortools_incumbent_decodes_valid_topology(P_A_toy, ortools_worker, topology):
+    P, A = P_A_toy
+    result = ortools_worker.run(
+        _solve_toy_incumbent,
+        ('ortools.cp_sat', P, A, topology),
+        30 + _RUNTIME,
+    )
+    if isinstance(result, BaseException):
+        raise result
+
+    assert result['violations'] == []
+    assert result['graph']['topology'] == topology
+
+
+def test_ortools_incumbent_before_solve_has_useful_error(P_A_toy, ortools_worker):
+    P, A = P_A_toy
+    result = ortools_worker.run(
+        _get_incumbent_before_solve, ('ortools.cp_sat', P, A), 30
+    )
+
+    assert isinstance(result, AttributeError)
+    assert '.solve() must be called before solution retrieval' in str(result)
+
+
+def test_segmented_get_solution_still_investigates_pool(P_A_toy, ortools_worker):
+    P, A = P_A_toy
+    calls, source, pathfinder_calls = ortools_worker.run(
+        _exercise_ortools_retrieval_branch, ('segmented', P, A), 30
+    )
+
+    assert calls == ['investigate']
+    assert source == 'best-objective'
+    assert pathfinder_calls == 0
+
+
+def test_straight_get_solution_starts_from_best_incumbent(P_A_toy, ortools_worker):
+    P, A = P_A_toy
+    calls, source, pathfinder_calls = ortools_worker.run(
+        _exercise_ortools_retrieval_branch, ('straight', P, A), 30
+    )
+
+    assert calls == ['incumbent']
+    assert source == 'best-objective'
+    assert pathfinder_calls == 1
 
 
 @pytest.mark.parametrize(

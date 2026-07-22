@@ -107,6 +107,8 @@ class SolverSCIP(Solver, PoolHandler):
         self._solution_pool = [
             (model.getSolObjVal(sol), sol) for sol in model.getSols()
         ]
+        # PoolHandler relies on index zero being the lowest model objective.
+        self._solution_pool.sort(key=lambda entry: entry[0])
         # Prime _value_map with the best solution so the STRAIGHT get_solution()
         # path (which calls _topology_from_mip_pool without _objective_at) works;
         # the SEGMENTED path resets it per pool entry via _objective_at().
@@ -124,12 +126,16 @@ class SolverSCIP(Solver, PoolHandler):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
+    def get_incumbent_topology(self) -> nx.Graph:
+        """Return the best model-objective incumbent without geometric routing."""
+        return self._incumbent_topology_from_pool()
+
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self._topology_from_mip_pool()
+            S = self._incumbent_topology_from_pool()
             G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
             S, G = self._investigate_pool(P, A)

@@ -165,16 +165,29 @@ class SolverPyomo(Solver):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        P, model = self.P, self.model
-        result = self.result
+    def _load_incumbent_topology(self) -> nx.Graph:
+        model = self.model
+        try:
+            result = self.result
+        except AttributeError as exc:
+            exc.args += ('.solve() must be called before solution retrieval',)
+            raise
         # hack to prevent warning about the solver not reaching the desired mip_gap
         result.solver.status = pyo.SolverStatus.ok
         model.solutions.load_from(result)
-        if A is None:
-            A = self.A
         S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
+        return S
+
+    def get_incumbent_topology(self) -> nx.Graph:
+        """Return the best model-objective incumbent without geometric routing."""
+        return self._load_incumbent_topology()
+
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        P = self.P
+        if A is None:
+            A = self.A
+        S = self._load_incumbent_topology()
         G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -265,15 +278,27 @@ class SolverPyomoAppsi(Solver):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        P = self.P
-        result = self.result
+    def _load_incumbent_topology(self) -> nx.Graph:
+        try:
+            result = self.result
+        except AttributeError as exc:
+            exc.args += ('.solve() must be called before solution retrieval',)
+            raise
         result.solution_loader.load_vars()
         #  model.solutions.load_from(result)
-        if A is None:
-            A = self.A
         S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
+        return S
+
+    def get_incumbent_topology(self) -> nx.Graph:
+        """Return the best model-objective incumbent without geometric routing."""
+        return self._load_incumbent_topology()
+
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        P = self.P
+        if A is None:
+            A = self.A
+        S = self._load_incumbent_topology()
         G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G

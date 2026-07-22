@@ -10,7 +10,7 @@ import pyomo.environ as pyo
 
 from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
-from ._core import FeederRoute, PoolHandler
+from ._core import FeederRoute, OWNSolutionNotFound, PoolHandler
 from .pyomo import SolverPyomo
 
 __all__ = ()
@@ -56,22 +56,34 @@ class SolverCplex(SolverPyomo, PoolHandler):
         super().set_problem(P, A, capacity, model_options, warmstart)
         self.solver.set_instance(self.model)
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+    def _prepare_solution_pool(self) -> None:
         cplex = self.solver._solver_model
         num_solutions = cplex.solution.pool.get_num()
+        if num_solutions == 0:
+            raise OWNSolutionNotFound(
+                f'Unable to find a solution. Solver {self.name} has an empty pool.'
+            )
         self.num_solutions, self.cplex = num_solutions, cplex
         # make the ranked soln list (position 0 holds the lowest objective)
         self.sorted_index_ = sorted(
             range(num_solutions), key=cplex.solution.pool.get_objective_value
         )
         # set the selected (last visited) soln to the best one
-        self.soln = self.sorted_index_[0]
-        self.vars = self.solver._pyomo_var_to_ndx_map.keys()
+        self.vars = tuple(self.solver._pyomo_var_to_ndx_map)
+        self._objective_at(0)
+
+    def get_incumbent_topology(self) -> nx.Graph:
+        """Return the best model-objective incumbent without geometric routing."""
+        self._prepare_solution_pool()
+        return self._incumbent_topology_from_pool()
+
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        self._prepare_solution_pool()
         if A is None:
             A = self.A
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self._topology_from_mip_pool()
+            S = self._incumbent_topology_from_pool()
             G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
             S, G = self._investigate_pool(P, A)

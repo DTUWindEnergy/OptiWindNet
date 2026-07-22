@@ -41,7 +41,8 @@ def solver_factory(solver_name: str) -> Solver:
 
     Args:
       solver_name: one of ``'ortools.cp_sat'``, ``'ortools.gscip'``,
-        ``'ortools.highs'``, ``'cplex'``, ``'gurobi'``, ``'cbc'``, ``'scip'``, ``'highs'``.
+        ``'ortools.highs'``, ``'cplex'``, ``'gurobi'``, ``'cbc'``, ``'scip'``,
+        ``'highs'``.
 
     Returns:
       Solver instance that can produce solutions for the cable routing problem.
