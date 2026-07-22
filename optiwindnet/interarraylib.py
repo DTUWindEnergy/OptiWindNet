@@ -5,7 +5,6 @@ import logging
 import math
 import pickle
 import sys
-from bisect import bisect_left
 from collections.abc import Iterator, Sequence
 from hashlib import sha256
 from itertools import chain, pairwise
@@ -138,30 +137,25 @@ def assign_cables(
         cable entry must be a tuple)
       currency: symbol representing the unit of the cost
     """
-    capacities = [cable[0] for cable in cables]
     capacity = max(cables)[0]
     if G.graph['max_load'] > capacity:
         raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
-    costs = [cable[1] for cable in cables]
-    has_cost = (
-        sum(
-            (cable[0] - previous[0]) * cable[1]
-            for previous, cable in pairwise(chain(((0,),), cables))
-        )
-        > 0
-    )
+    run_len_ = (b[0] - a[0] for a, b in pairwise(chain(((0,),), cables)))
+    kind = [k for k, run_len in enumerate(run_len_) for _ in range(run_len)]
+    cost = [cables[k][1] for k in kind]
+    has_cost = sum(cost) > 0
     for _, _, data in G.edges(data=True):
         if data['load'] == 0:
             # ring open point ('split'): a real cable with no current — assign the
             # thinnest cable type, but no current-carrying capacity is consumed.
             data['cable'] = 0
             if has_cost:
-                data['cost'] = data['length'] * costs[0]
+                data['cost'] = data['length'] * cost[0]
             continue
-        cable = bisect_left(capacities, data['load'])
-        data['cable'] = cable
+        k = data['load'] - 1
+        data['cable'] = kind[k]
         if has_cost:
-            data['cost'] = data['length'] * costs[cable]
+            data['cost'] = data['length'] * cost[k]
     G.graph['cables'] = cables
     if has_cost:
         G.graph['currency'] = currency
