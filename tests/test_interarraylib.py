@@ -29,12 +29,10 @@ from optiwindnet.interarraylib import (
     calcload,
     count_diagonals,
     describe_G,
-    fun_fingerprint,
     make_remap,
     pathdist,
     rings_from_S,
     scaffolded,
-    site_fingerprint,
     terse_links_from_S,
     update_lengths,
     validate_topology,
@@ -154,29 +152,6 @@ def test_calcload():
 
     assert G.graph['has_loads']
     assert G.graph['max_load'] == 4
-
-
-def test_site_fingerprint():
-    VertexC = np.array([[0.0, 0.0], [1.5, -0.5], [10.0, 10.0]])
-    boundary = np.array([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]])
-
-    digest, data_dict = site_fingerprint(VertexC, boundary)
-
-    assert isinstance(digest, (bytes, bytearray))
-    assert isinstance(data_dict, dict)
-    assert 'VertexC' in data_dict and 'boundary' in data_dict
-    assert isinstance(data_dict['VertexC'], (bytes, bytearray))
-    assert isinstance(data_dict['boundary'], (bytes, bytearray))
-
-
-def test_fun_fingerprint():
-    def sample_function(x=1):
-        return x + 1
-
-    fp = fun_fingerprint(sample_function)
-
-    assert isinstance(fp, dict)
-    assert all(k in fp for k in ('funhash', 'funfile', 'funname'))
 
 
 def test_L_from_site():
@@ -518,7 +493,7 @@ def test_terse_links_ringed_roundtrip(R, ringspec):
     terse = terse_links_from_S(S)
     # the ringed encoding always outgrows the T-entry forest one, which is how
     # the two are told apart
-    assert terse.shape[0] > T
+    assert len(terse) > T
     S2 = S_from_terse_links(terse, R=R, T=T)
     assert _ring_sets(S2) == _ring_sets(S)
     # the encoding is a fixed point: re-encoding the decoded S is identical
@@ -562,7 +537,7 @@ def test_terse_links_forest_still_positional():
     """A radial/branched (forest) S keeps the positional one-entry-per-node form."""
     S = tiny_wfn().S
     terse = terse_links_from_S(S)
-    assert terse.shape[0] == S.graph['T']
+    assert len(terse) == S.graph['T']
     S2 = S_from_terse_links(terse)
     assert set(map(frozenset, S2.edges())) == set(map(frozenset, S.edges()))
 
@@ -599,10 +574,13 @@ def test_terse_links_preserves_architecture_when_pickled():
     assert np.array_equal(restored, terse)
 
 
-def test_terse_links_repr_shows_architecture_and_terse_array():
+def test_terse_links_repr_shows_self_describing_value():
     terse = terse_links_from_S(tiny_wfn().S)
 
-    assert repr(terse) == ("TerseLinks(topology='branched', terse=[-1,  0,  1,  2])")
+    assert terse.links == (-1, 0, 1, 2)
+    assert terse.topology is Topology.BRANCHED
+    assert terse.T == 4
+    assert terse.R == 1
 
 
 # --------------------------------------------------------------------------- #

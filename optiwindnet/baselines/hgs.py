@@ -12,9 +12,10 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import clusterize
-from ..interarraylib import calcload, fun_fingerprint, split_rings_and_calc_loads
-from ..types import Topology
+from ..fingerprint import fingerprint_function
+from ..interarraylib import calcload, split_rings_and_calc_loads
 from ..repair import repair_routeset_path
+from ..types import Topology
 from ._core import (
     add_branches_to_S,
     clamp_vehicles_to_min,
@@ -506,4 +507,4 @@ def hgs_cvrp(
     return S
 
 
-_hgs_cvrp_fun_fingerprint = fun_fingerprint(hgs_cvrp)
+_hgs_cvrp_fun_fingerprint = fingerprint_function(hgs_cvrp)

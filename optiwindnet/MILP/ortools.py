@@ -11,7 +11,8 @@ import networkx as nx
 from ortools.math_opt.python import mathopt
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
-from ..interarraylib import G_from_S, fun_fingerprint
+from ..fingerprint import fingerprint_function
+from ..interarraylib import G_from_S
 from ..pathfinding import PathFinder
 from ._core import (
     FeederLimit,
@@ -571,7 +572,7 @@ def make_min_length_model(
     return m, metadata
 
 
-_make_min_length_model_fingerprint = fun_fingerprint(make_min_length_model)
+_make_min_length_model_fingerprint = fingerprint_function(make_min_length_model)
 
 
 def warmup_model(
