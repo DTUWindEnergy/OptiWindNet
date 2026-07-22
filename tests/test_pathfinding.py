@@ -1,15 +1,52 @@
 import math
+import pickle
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
+import pytest
 
 import optiwindnet.pathfinding as pathfinding
+from optiwindnet.fingerprint import fingerprint_coordinates
 from optiwindnet.geometric import is_crossing
-from optiwindnet.interarraylib import G_from_S
+from optiwindnet.importer import load_repository
+from optiwindnet.interarraylib import (
+    G_from_S,
+    S_from_G,
+    as_single_root,
+)
+from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
+from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
 
-from .helpers import tiny_wfn
+from .helpers import canonical_edges, tiny_wfn
+
+PATHFINDER_GOLDEN_FILE = Path(__file__).with_name('pathfinder_golden.pkl')
+
+
+def _load_pathfinder_golden() -> tuple[TerseLinks, ...]:
+    if not PATHFINDER_GOLDEN_FILE.exists():
+        raise FileNotFoundError(
+            f'Missing PathFinder golden data: {PATHFINDER_GOLDEN_FILE}\n'
+            'Regenerate it with: '
+            'python -m tests.update_pathfinder_golden <routesets.sqlite>'
+        )
+    with PATHFINDER_GOLDEN_FILE.open('rb') as file:
+        golden = pickle.load(file)
+    if not isinstance(golden, tuple) or not all(
+        isinstance(case, TerseLinks)
+        and case.scope is LinkScope.ROUTESET
+        and case.nodeset_digest is not None
+        for case in golden
+    ):
+        raise TypeError(
+            'PathFinder golden data must be a tuple of site-bound routed TerseLinks'
+        )
+    return golden
+
+
+PATHFINDER_CASES = _load_pathfinder_golden()
 
 
 def _edges_cross(G):
@@ -47,6 +84,55 @@ def _all_turbines_connected(G):
         if not found_root:
             return False
     return True
+
+
+def _pathfinder_case_id(case: TerseLinks) -> str:
+    assert case.nodeset_digest is not None
+    digest = case.nodeset_digest.hex()[:8]
+    return f'{digest}-T{case.T}-{case.topology.value}-C{case.C}-D{case.D}'
+
+
+@pytest.fixture(scope='module')
+def location_meshes():
+    """Build the navigation mesh for each bundled golden-case location."""
+    wanted = {
+        case.nodeset_digest
+        for case in PATHFINDER_CASES
+        if case.nodeset_digest is not None
+    }
+    locations = load_repository()
+    meshes = {}
+    for original in locations:
+        L = as_single_root(original)
+        digest = fingerprint_coordinates(L.graph['VertexC'])[0]
+        if digest not in wanted:
+            continue
+        P, A = make_planar_embedding(L)
+        meshes[digest] = L, P, A
+    missing = wanted - meshes.keys()
+    assert not missing, f'missing bundled locations for digests: {missing}'
+    return meshes
+
+
+@pytest.mark.parametrize('case', PATHFINDER_CASES, ids=_pathfinder_case_id)
+def test_create_detours_matches_milp_routeset(case, location_meshes):
+    """Reproduce curated stored routesets on their bundled locations."""
+    assert case.nodeset_digest is not None
+    L, P, A = location_meshes[case.nodeset_digest]
+
+    # Decode the stored, detoured routeset on the freshly loaded location, then
+    # discard its geometry to recover only the solver topology S.
+    expected = case.to_routeset(L)
+    expected.graph['capacity'] = expected.graph['max_load']
+    S = S_from_G(expected)
+
+    G = G_from_S(S, A)
+    actual = PathFinder(G, planar=P, A=A).create_detours()
+
+    assert canonical_edges(actual) == canonical_edges(expected)
+    assert actual.graph['topology'] is case.topology
+    assert actual.graph.get('C', 0) == case.C
+    assert actual.graph.get('D', 0) == case.D
 
 
 # ---------- no-crossing scenario (cables=4, single chain) ----------
