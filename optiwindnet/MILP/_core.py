@@ -3,6 +3,7 @@
 
 import abc
 import logging
+import math
 import os
 import sys
 from collections.abc import Iterator, Mapping
@@ -88,11 +89,6 @@ class FeederLimit(StrEnum):
     bound) and ``'exactly'`` (an exact count) require the additional kwarg
     ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
     count is pinned to a single value, i.e. ``'minimum'`` or ``'exactly'``.
-
-    For weighted turbine power, ``'minimum'`` and ``'min_plus*'`` are not
-    supported because aggregate power does not determine the exact number of
-    feeders needed for indivisible turbine loads. Use ``'unlimited'``,
-    ``'exactly'``, or ``'specified'`` instead.
     """
 
     UNLIMITED = auto()
@@ -112,8 +108,6 @@ def feeder_and_load_bounds(
     max_feeders: int,
     balanced: bool,
     feeders_per_subtree: int = 1,
-    *,
-    total_power: int | None = None,
 ) -> tuple[int, int | None, int | None, int | None]:
     """Derive the feeder-count and feeder-load bounds a model must enforce.
 
@@ -126,38 +120,20 @@ def feeder_and_load_bounds(
     constrains, and the returned bounds are multiplied back by
     ``feeders_per_subtree`` for reporting.
 
-    ``total_power`` defaults to ``T`` for unit-power terminals. The feeder count
-    is bounded below by ``min_feeders = ceil(total_power/capacity)`` regardless
-    of ``feeder_limit`` (a valid inequality). ``feeders_ub`` is ``None`` when
-    the count is unbounded above; when it equals ``feeders_lb``, the count is
-    pinned and callers should emit an equality constraint. With explicitly
-    weighted power, modes that derive their count from ``min_feeders`` are
-    rejected because indivisible turbine loads may require additional feeders.
+    The subtree count is bounded below by ``min_feeders = ceil(T/capacity)``
+    regardless of ``feeder_limit`` (a valid inequality). ``feeders_ub`` is
+    ``None`` when the count is unbounded above; when it equals ``feeders_lb``,
+    the count is pinned and callers should emit an equality constraint.
 
     Balanced subtrees (loads differing at most by one unit) are only expressible
     with a pinned feeder count ``F``, in which case the loads must lie in
-    ``{total_power // F, ceil(total_power / F)}``. A load bound of ``None``
-    means "do not emit": either ``balanced`` is off, or it is not enforceable
-    (a warning is issued), or the bound is already implied by the flow
-    variable's own bounds.
+    ``{T // F, ceil(T / F)}``. A load bound of ``None`` means "do not emit":
+    either ``balanced`` is off, or it is not enforceable (a warning is issued),
+    or the bound is already implied by the flow variable's own bounds.
 
     Returns:
         ``(feeders_lb, feeders_ub, load_lb, load_ub)`` in subtree-count units.
     """
-    W = T if total_power is None else total_power
-    derived_minimum = (
-        FeederLimit.MINIMUM,
-        FeederLimit.MIN_PLUS1,
-        FeederLimit.MIN_PLUS2,
-        FeederLimit.MIN_PLUS3,
-    )
-    if total_power is not None and W != T and feeder_limit in derived_minimum:
-        raise ValueError(
-            'weighted turbine power is unsupported for feeder_limit modes '
-            'derived from the minimum; use "unlimited", "exactly", or '
-            '"specified" instead'
-        )
-
     if feeders_per_subtree != 1 and max_feeders:
         if max_feeders % feeders_per_subtree:
             raise ValueError(
@@ -166,7 +142,7 @@ def feeder_and_load_bounds(
                 f'{feeders_per_subtree} substation connections)'
             )
         max_feeders //= feeders_per_subtree
-    min_feeders = -(-W // capacity)
+    min_feeders = math.ceil(T / capacity)
     if feeder_limit is FeederLimit.UNLIMITED:
         feeders_lb, feeders_ub = min_feeders, None
     elif feeder_limit is FeederLimit.MINIMUM:
@@ -181,7 +157,11 @@ def feeder_and_load_bounds(
         if max_feeders < min_feeders:
             raise ValueError('max_feeders is below the minimum necessary')
         feeders_lb, feeders_ub = min_feeders, max_feeders
-    elif feeder_limit in derived_minimum[1:]:
+    elif feeder_limit in (
+        FeederLimit.MIN_PLUS1,
+        FeederLimit.MIN_PLUS2,
+        FeederLimit.MIN_PLUS3,
+    ):
         plus = int(feeder_limit.value[-1])
         feeders_lb, feeders_ub = min_feeders, min_feeders + plus
     else:
@@ -197,7 +177,7 @@ def feeder_and_load_bounds(
         )
         return feeders_lb, feeders_ub, None, None
     F = feeders_lb
-    load_lb, load_ub = W // F, -(-W // F)
+    load_lb, load_ub = T // F, math.ceil(T / F)
     # bounds at the extremes are already implied by the flow variable's bounds
     return (
         feeders_lb,
@@ -434,7 +414,6 @@ class Solver(abc.ABC):
     stopping: dict[str, Any]
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
-    A: nx.Graph
 
     @abc.abstractmethod
     def _link_val(self, var: Any) -> int | bool:
@@ -532,9 +511,6 @@ class Solver(abc.ABC):
         topology = metadata.model_options['topology']
         R = metadata.R
         S = nx.Graph(R=R, T=metadata.T)
-        for key in ('power_scale', 'turbine_power_decimals'):
-            if key in self.A.graph:
-                S.graph[key] = self.A.graph[key]
         # ensure roots are added, even if some are not connected
         S.add_nodes_from(range(-R, 0))
         # Get active links and if flow is reversed (i.e. from small to big)
@@ -551,15 +527,6 @@ class Solver(abc.ABC):
         S.add_weighted_edges_from(
             ((u, v, self._flow_val(metadata.flow_[u, v])) for u, v in flow_links),
             weight='load',
-        )
-        nx.set_node_attributes(
-            S,
-            {
-                t: self.A.nodes[t]['power']
-                for t in range(metadata.T)
-                if 'power' in self.A.nodes[t]
-            },
-            'power',
         )
         nx.set_edge_attributes(S, flow_links, name='reverse')
         # Propagate the decoded flow-tree attributes for every topology. A RINGED

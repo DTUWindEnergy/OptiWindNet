@@ -1,4 +1,5 @@
 import logging
+import math
 from typing import TYPE_CHECKING, Any, Sequence
 
 import matplotlib.pyplot as plt
@@ -7,7 +8,6 @@ from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
 
-from .interarraylib import total_power
 from .MILP._core import Topology
 
 logger = logging.getLogger(__name__)
@@ -156,9 +156,8 @@ def is_warmstart_eligible(
         return False
 
     R = S_warm.graph['R']
+    T = S_warm.graph['T']
     capacity = cables_capacity
-    # W matches the terminal count unless terminals have a 'power' attribute
-    W = total_power(S_warm)
 
     reasons = []
 
@@ -166,7 +165,7 @@ def is_warmstart_eligible(
     # the model constrains the feeder count over all roots, not per root
     feeder_count = sum(S_warm.degree[r] for r in range(-R, 0))
     feeder_limit_mode = model_options['feeder_limit']
-    feeder_minimum = -(-W // capacity)
+    feeder_minimum = math.ceil(T / capacity)
 
     # feeder_exact is the pinned feeder count, if the mode pins it
     feeder_exact = None
@@ -201,7 +200,7 @@ def is_warmstart_eligible(
 
     # Balanced constraint: only enforced by the model if the feeder count is pinned
     if model_options['balanced'] and feeder_exact:
-        load_lb, load_ub = W // feeder_exact, -(-W // feeder_exact)
+        load_lb, load_ub = T // feeder_exact, math.ceil(T / feeder_exact)
         subtree_loads = [
             S_warm.nodes[t]['load'] for r in range(-R, 0) for t in S_warm.neighbors(r)
         ]

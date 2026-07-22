@@ -140,7 +140,7 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     desc = []
     desc.append(f'κ = {capacity / power_scale:g}, T = {T}')
     feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
-    min_feeders = -(-int(total_power(G)) // int(capacity))
+    min_feeders = math.ceil(total_power(G) / capacity)
     excess_feeders = sum(G.degree[-r] for r in roots) - min_feeders
     desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
     length = G.size(weight='length')
@@ -1192,12 +1192,17 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
     for r in range(-R, 0):
         S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']} if has_loads else {}))
     for t in sorted(n for n in G if 0 <= n < T):
-        node_attrs = {'kind': 'wtg'}
-        if 'power' in G.nodes[t]:
-            node_attrs['power'] = G.nodes[t]['power']
         if has_loads:
-            node_attrs.update(load=G.nodes[t]['load'], subtree=G.nodes[t]['subtree'])
-        S.add_node(t, **node_attrs)
+            S.add_node(
+                t, kind='wtg', load=G.nodes[t]['load'], subtree=G.nodes[t]['subtree']
+            )
+        else:
+            S.add_node(t, kind='wtg')
+    nx.set_node_attributes(
+        S,
+        {t: G.nodes[t]['power'] for t in range(T) if 'power' in G.nodes[t]},
+        'power',
+    )
 
     # Links already joining two real nodes carry over verbatim, keeping ``G``'s
     # own orientation: 'reverse' is relative to the stored node order, and the
@@ -1286,11 +1291,15 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
         L.graph['B'] -= len(stunts_primes)
     # END: Legacy compatibility block
 
-    for n in range(T):
-        node_attrs = {'label': G.nodes[n].get('label'), 'kind': 'wtg'}
-        if 'power' in G.nodes[n]:
-            node_attrs['power'] = G.nodes[n]['power']
-        L.add_node(n, **node_attrs)
+    L.add_nodes_from(
+        ((n, {'label': label}) for n, label in G.nodes(data='label') if 0 <= n < T),
+        kind='wtg',
+    )
+    nx.set_node_attributes(
+        L,
+        {t: G.nodes[t]['power'] for t in range(T) if 'power' in G.nodes[t]},
+        'power',
+    )
     for r in range(-R, 0):
         L.add_node(r, label=G.nodes[r].get('label'), kind='oss')
     return L

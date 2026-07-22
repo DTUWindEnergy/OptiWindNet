@@ -51,7 +51,6 @@ def test_weighted_power_input():
         ([1.0, 0.0], 2, 'must be positive'),
         ([1.0, float('nan')], 2, 'must be finite'),
         ([1.0, 1.5], -1, 'non-negative integer'),
-        ([1.0, 1.00000001], 8, 'maximum supported'),
     )
     for powers, decimals, message in invalid:
         with pytest.raises(ValueError, match=message):

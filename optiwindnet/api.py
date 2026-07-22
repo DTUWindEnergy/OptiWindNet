@@ -54,24 +54,15 @@ plt.rcParams['svg.fonttype'] = 'none'
 _logger = logging.getLogger(__name__)
 _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 
-# Largest supported factor between nominal turbine power and integer quanta.
-_MAX_POWER_SCALE = 10_000_000
-
 
 def _validate_power_scale(power_scale: int) -> int:
-    """Return a valid supported power scale as a built-in integer."""
+    """Return a valid power scale as a built-in integer."""
     if (
         not isinstance(power_scale, (int, np.integer))
         or isinstance(power_scale, (bool, np.bool_))
         or power_scale <= 0
     ):
         raise ValueError('power_scale must be a positive integer.')
-    if power_scale > _MAX_POWER_SCALE:
-        raise ValueError(
-            f'power_scale {power_scale} exceeds the maximum supported '
-            f'power_scale {_MAX_POWER_SCALE}. Reduce turbine_power_decimals or '
-            'use turbine_power values with a smaller common scale.'
-        )
     return int(power_scale)
 
 
@@ -125,15 +116,6 @@ def _normalize_turbine_power(
     scaled_powers = [int(power * decimal_scale) for power in rounded_powers]
     common_divisor = gcd(decimal_scale, *scaled_powers)
     power_scale = _validate_power_scale(decimal_scale // common_divisor)
-    if power_scale > 10:
-        _warning(
-            'turbine_power values require a scale factor of %d to be treated as'
-            ' integer power quanta, which may slow down MILP solvers. Consider'
-            ' adjusting the values or decimal precision to obtain a smaller'
-            ' common scale (turbine_power_decimals is currently %d).',
-            power_scale,
-            decimals,
-        )
     power_quanta = [power // common_divisor for power in scaled_powers]
     return power_quanta, power_scale
 
@@ -249,8 +231,7 @@ class WindFarmNetwork:
             :class:`TypeError` for non-uniform power.
           turbine_power_decimals: Number of decimal places of ``turbine_power``
             to preserve (default 1). The resulting integer scale depends on the
-            rounded values; smaller scales are easier on the MILP solvers. The
-            scale may not exceed 10,000,000.
+            rounded values; smaller scales are easier on the MILP solvers.
 
         **Cable Specs** (``capacity`` is in turbine count for unit-power networks
         and in the same nominal units as ``turbine_power`` for weighted networks):
@@ -503,7 +484,7 @@ class WindFarmNetwork:
 
         Raw graph ``'power'``, ``'load'``, and ``'capacity'`` values use quanta;
         plots and high-level exports convert them back to nominal units. The
-        maximum supported value is 10,000,000.
+        scale is reduced to the smallest integer factor representing all powers.
         """
         return self._L.graph.get('power_scale', 1)
 
