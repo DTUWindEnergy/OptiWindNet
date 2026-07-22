@@ -86,7 +86,7 @@ def test_MILP_solvers(P_A_toy, solver_name, ortools_worker):
 
     solution_info, (S, _) = result
     assert solution_info.termination.lower() == 'optimal'
-    assert (terse_links_from_S(S) == _terse_toy_farm_5).all()
+    assert np.array_equal(terse_links_from_S(S), _terse_toy_farm_5)
 
 
 def _solve_toy_balanced(solver_name, P, A, max_feeders):

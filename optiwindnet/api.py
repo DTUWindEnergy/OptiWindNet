@@ -27,7 +27,6 @@ from .importer import load_repository as load_repository
 from .interarraylib import (
     G_from_S,
     S_from_G,
-    S_from_terse_links,
     as_normalized,
     as_stratified_vertices,
     assign_cables,
@@ -38,6 +37,7 @@ from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_fac
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot, svgpplot
+from .terse import LinkScope, TerseLinks
 from .types import Topology
 
 ##################################
@@ -474,34 +474,56 @@ class WindFarmNetwork:
             return gplot(G_tentative, **kwargs)
         return svgplot(G_tentative, **kwargs)
 
-    def terse_links(self):
-        """Get a compact representation of the solution topology.
+    def terse_links(self, *, routed: bool = False) -> TerseLinks:
+        """Get a compact representation of the solution.
 
-        Forest topologies (radial/branched) are encoded positionally (one entry
-        per terminal); ringed topologies are encoded as a sequence of routes.
-        See :func:`optiwindnet.interarraylib.terse_links_from_S`.
+        By default the representation contains topology ``S`` and can be routed
+        again against updated coordinates. With ``routed=True`` it contains the
+        exact routeset ``G``, including contour and detour clone mappings.
         """
-        return terse_links_from_S(self.S)
+        return (
+            TerseLinks.from_routeset(self.G) if routed else terse_links_from_S(self.S)
+        )
 
     def update_from_terse_links(
         self,
-        terse_links: np.ndarray,
+        terse_links: TerseLinks | np.ndarray,
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
         topology: Topology | str | None = None,
     ):
         """Update the network from terse link representation.
 
-        Accepts integers or integer-like floats (e.g., 3.0). ``TerseLinks``
-        values carry their topology architecture. For a plain array, pass
-        ``topology`` explicitly when radial/branched identity must be retained.
+        A topology-scoped value is routed against this network's location; a
+        routeset-scoped value restores its recorded contour and detour paths.
+        Plain arrays remain accepted for topology input and may contain integers
+        or integer-like floats (e.g., 3.0). Pass ``topology`` with a plain array
+        when radial/branched identity must be retained.
         """
         T = self._T
         R = self._R
 
-        if topology is None:
-            topology = getattr(terse_links, 'topology', None)
-        terse_links_ints = np.asarray(terse_links, dtype=np.int64)
+        if isinstance(terse_links, TerseLinks):
+            encoding = terse_links
+            if topology is not None and Topology(topology) is not encoding.topology:
+                raise ValueError('topology disagrees with the TerseLinks value')
+        else:
+            terse_links_ints = np.asarray(terse_links, dtype=np.int64)
+            encoding = TerseLinks.from_array(
+                terse_links_ints.tolist(), topology=topology, R=R, T=T
+            )
+        if encoding.T != T or encoding.R != R:
+            raise ValueError(
+                'TerseLinks dimensions do not match this WindFarmNetwork: '
+                f'(T={encoding.T}, R={encoding.R}) != (T={T}, R={R})'
+            )
+        if encoding.scope is LinkScope.ROUTESET and (
+            turbinesC is not None or substationsC is not None
+        ):
+            raise ValueError(
+                'routed TerseLinks are site-specific; use a topology encoding '
+                'when updating coordinates'
+            )
 
         # Update coordinates if provided
         if turbinesC is not None:
@@ -512,22 +534,18 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
-        # A ringed encoding has a number of entries different from T (see the
-        # convention in interarraylib.terse_links_from_S); a forest encoding has
-        # exactly T. S_from_terse_links decodes accordingly and labels S, which
-        # is what PathFinder then routes within.
-        S = S_from_terse_links(
-            terse_links_ints,
-            R=R,
-            T=T,
-            topology=topology,
-            creator='from_terse_links',
-        )
-
-        G_tentative = G_from_S(S, self.A)
-
-        self._S = S
-        self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
+        if encoding.scope is LinkScope.ROUTESET:
+            self._G = encoding.to_routeset(
+                self.L,
+                capacity=self.cables_capacity,
+                creator='from_terse_links',
+            )
+            self._S = S_from_G(self._G)
+        else:
+            S = encoding.to_topology(creator='from_terse_links')
+            G_tentative = G_from_S(S, self.A)
+            self._S = S
+            self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
 
         assign_cables(self._G, self.cables)
         self._is_stale_SG = False

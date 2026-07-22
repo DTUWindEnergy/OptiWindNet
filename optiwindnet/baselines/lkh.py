@@ -19,14 +19,14 @@ import numpy as np
 from scipy.spatial.distance import pdist, squareform
 
 from ..clustering import clusterize
+from ..fingerprint import fingerprint_function
 from ..interarraylib import (
     add_link_blockmap,
     calcload,
-    fun_fingerprint,
     split_rings_and_calc_loads,
 )
-from ..types import Topology
 from ..repair import repair_routeset_path
+from ..types import Topology
 from ._core import (
     add_branches_to_S,
     clamp_vehicles_to_min,
@@ -706,7 +706,7 @@ def _lkh(
     return S
 
 
-_lkh_fun_fingerprint = fun_fingerprint(_lkh)
+_lkh_fun_fingerprint = fingerprint_function(_lkh)
 
 
 def _no_terminals_output(seed: int) -> dict:
@@ -1088,4 +1088,4 @@ def lkh3(
     return S
 
 
-_lkh3_fun_fingerprint = fun_fingerprint(lkh3)
+_lkh3_fun_fingerprint = fingerprint_function(lkh3)
