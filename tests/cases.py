@@ -12,6 +12,11 @@ from optiwindnet.MILP._core import FeederRoute
 from optiwindnet.types import Topology
 
 
+DEFAULT_BASELINE_TIME_LIMIT: float = 0.2
+DEFAULT_MILP_TIME_LIMIT: float = 1.0
+DEFAULT_MILP_MIP_GAP: float = 1e-3
+
+
 @dataclass(frozen=True, slots=True)
 class ConstructorCase:
     site: str
@@ -30,7 +35,7 @@ class BaselineCase:
     ringed: bool = False
     balanced: bool = False
     seed: int = 0
-    time_limit: float = 0.2
+    time_limit: float = DEFAULT_BASELINE_TIME_LIMIT
 
 
 def expected_topology(case: ConstructorCase | BaselineCase) -> Topology:
@@ -46,8 +51,8 @@ class MILPCase:
     solver_name: str
     capacity: int
     model_options: ModelOptions = field(default_factory=ModelOptions)
-    time_limit: float = 10.0
-    mip_gap: float = 1e-3
+    time_limit: float = DEFAULT_MILP_TIME_LIMIT
+    mip_gap: float = DEFAULT_MILP_MIP_GAP
     exact_golden: bool = False
 
 
@@ -91,7 +96,7 @@ def case_node_id(case: Case) -> str:
             tokens.append('balanced')
         if case.seed:
             tokens.append(f'seed{case.seed}')
-        if case.time_limit != 0.2:
+        if case.time_limit != DEFAULT_BASELINE_TIME_LIMIT:
             tokens.append(f'tl{_token(case.time_limit)}')
         return '-'.join(tokens)
 
@@ -115,9 +120,9 @@ def case_node_id(case: Case) -> str:
             tokens.append(name.replace('_', '-') if value else f'no-{name}')
         else:
             tokens.append(f'{aliases.get(name, name)}{_token(value)}')
-    if case.time_limit != 10.0:
+    if case.time_limit != DEFAULT_MILP_TIME_LIMIT:
         tokens.append(f'tl{_token(case.time_limit)}')
-    if case.mip_gap != 1e-3:
+    if case.mip_gap != DEFAULT_MILP_MIP_GAP:
         tokens.append(f'gap{_token(case.mip_gap)}')
     return '-'.join(tokens)
 
@@ -166,13 +171,15 @@ HGS_CASES = (
     BaselineCase('hgs', 'example_location', 4, balanced=True),
     BaselineCase('hgs', 'example_location', 3, ringed=True),
     BaselineCase('hgs', 'morayeast', 8),
-    BaselineCase('hgs', 'london', 10, ringed=True, time_limit=1.0),
-    BaselineCase('hgs', 'london', 10, time_limit=1.0),
+    BaselineCase('hgs', 'eagle', 4),
+    BaselineCase('hgs', 'london', 10, ringed=True),
+    BaselineCase('hgs', 'london', 10),
 )
 
 LKH_CASES = (
-    BaselineCase('lkh', 'example_location', 3, time_limit=2),
-    BaselineCase('lkh', 'example_location', 3, ringed=True, time_limit=2),
+    BaselineCase('lkh', 'example_location', 3),
+    BaselineCase('lkh', 'example_location', 3, ringed=True),
+    BaselineCase('lkh', 'horns', 10),
 )
 
 MILP_FORMULATION_CASES = tuple(
@@ -235,6 +242,17 @@ MILP_BOUNDARY_CASES = (
         ModelOptions(feeder_limit='exactly', max_feeders=3, balanced=True),
     ),
     MILPCase('toy', 'ortools.cp_sat', 5, ModelOptions(), mip_gap=0.2),
+)
+
+
+ALL_TEST_MATRICES = (
+    CONSTRUCTOR_CASES,
+    HGS_CASES,
+    LKH_CASES,
+    MILP_FORMULATION_CASES,
+    MILP_ADAPTER_CASES,
+    MILP_FAMILY_CASES,
+    MILP_BOUNDARY_CASES,
 )
 
 

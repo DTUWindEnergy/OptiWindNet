@@ -11,7 +11,12 @@ from optiwindnet.baselines.hgs import _balanced_capacity
 from optiwindnet.interarraylib import as_normalized
 from optiwindnet.types import Topology
 
-from .cases import HGS_CASES, case_node_id, expected_topology
+from .cases import (
+    DEFAULT_BASELINE_TIME_LIMIT,
+    HGS_CASES,
+    case_node_id,
+    expected_topology,
+)
 from .helpers import terminal_terminal_crossings
 from .producers import hgs_topology
 from .sitecache import get_bundle
@@ -30,7 +35,12 @@ def test_hgs_real_topology_cases(case):
 @pytest.mark.parametrize('capacity', (1, 12))
 def test_hgs_small_site_capacity_boundaries(capacity):
     A = get_bundle('example_location').A
-    S = hgs_mod.hgs_cvrp(as_normalized(A), capacity=capacity, time_limit=0.2, seed=0)
+    S = hgs_mod.hgs_cvrp(
+        as_normalized(A),
+        capacity=capacity,
+        time_limit=DEFAULT_BASELINE_TIME_LIMIT,
+        seed=0,
+    )
     assert_topology(S, Topology.RADIAL, capacity)
 
 

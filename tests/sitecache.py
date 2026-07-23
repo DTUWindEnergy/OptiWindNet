@@ -35,18 +35,18 @@ class SiteBundle:
     A: nx.Graph
 
 
-SELECTED_HANDLES = (
-    'toy',
-    'example_location',
-    'cazzaro_2022',
-    'morayeast',
-    'albatros',
-    'neart',
-    'london',
-    'taylor_2023',
-    'yi_2019',
-    'borkum2',
-)
+def _derive_selected_handles() -> tuple[str, ...]:
+    from .cases import ALL_TEST_MATRICES
+
+    handles = ['toy', 'example_location']
+    for matrix in ALL_TEST_MATRICES:
+        for case in matrix:
+            if case.site not in handles:
+                handles.append(case.site)
+    return tuple(handles)
+
+
+SELECTED_HANDLES = _derive_selected_handles()
 
 NODESET_DIGEST_LOCATION_MAP_FILE = Path(__file__).with_name(
     'nodeset_digest-location-map.pkl'

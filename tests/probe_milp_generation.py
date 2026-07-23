@@ -18,6 +18,7 @@ import json
 from dataclasses import asdict
 from math import ceil
 from time import perf_counter
+from typing import Any
 from typing import TypedDict
 
 import networkx as nx
@@ -44,6 +45,40 @@ class _HGSOptions(TypedDict):
     max_retries: int
     balanced: bool
     ringed: bool
+
+
+def _count_model_variables(model: Any) -> tuple[int, int]:
+    """Return (num_binary, num_integer) for a Pyomo or OR-Tools model."""
+    if hasattr(model, 'component_data_objects'):
+        from pyomo.environ import Var
+        binaries = sum(
+            1 for v in model.component_data_objects(Var, active=True) if v.is_binary()
+        )
+        integers = sum(
+            1
+            for v in model.component_data_objects(Var, active=True)
+            if v.is_integer() and not v.is_binary()
+        )
+        return binaries, integers
+    elif hasattr(model, 'variables'):
+        binaries = sum(
+            1
+            for v in model.variables()
+            if getattr(v, 'integer', False)
+            and getattr(v, 'lower_bound', None) == 0
+            and getattr(v, 'upper_bound', None) == 1
+        )
+        integers = sum(
+            1
+            for v in model.variables()
+            if getattr(v, 'integer', False)
+            and not (
+                getattr(v, 'lower_bound', None) == 0
+                and getattr(v, 'upper_bound', None) == 1
+            )
+        )
+        return binaries, integers
+    return 0, 0
 
 
 def milp_reference_parser(
@@ -326,7 +361,12 @@ def solve_milp_reference(
     if rejected_warmstarts:
         warmstart_details['rejected'] = rejected_warmstarts
 
+    num_binary, num_integer = _count_model_variables(getattr(solver, 'model', None))
+    print(f'Binary variables: {num_binary}, Integer variables: {num_integer}')
+
     model_stats = {
+        'binary_variables': num_binary,
+        'integer_variables': num_integer,
         'link_variables': len(solver.metadata.link_),
         'flow_variables': len(solver.metadata.flow_),
         'variables': len(solver.metadata.link_) + len(solver.metadata.flow_),
