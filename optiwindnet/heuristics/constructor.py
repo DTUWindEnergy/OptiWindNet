@@ -38,6 +38,14 @@ _DEFAULT_BIAS_MARGIN = 0.02
 # constant in capacity, so unlike _rootlust_coefs it is not a closed form
 _RINGED_ROOTLUST = (0.7, 0.3)
 
+_METHOD_TOPOLOGY = {
+    'esau_williams': Topology.BRANCHED,
+    'biased_EW': Topology.BRANCHED,
+    'rootlust': Topology.BRANCHED,
+    'radial_EW': Topology.RADIAL,
+    'ringed': Topology.RINGED,
+}
+
 # empirically obtained coefficients
 _rootlust_coefs = (
     # rootlust_0 = [0] + [1]/capacity
@@ -980,13 +988,7 @@ def constructor(
         for r, rootmask_ in zip(roots, rootmask__):
             for sr in (rootmask_ & is_subroot_).search(_ONE):
                 S.add_edge(r, sr)
-    S.graph['topology'] = (
-        Topology.RINGED
-        if ringed
-        else Topology.RADIAL
-        if method == 'radial_EW'
-        else Topology.BRANCHED
-    )
+    S.graph['topology'] = _METHOD_TOPOLOGY[method]
     # ringed: close each path subtree into a ring (adds open points); else set loads
     if ringed:
         split_rings_and_calc_loads(S, Aʹ)

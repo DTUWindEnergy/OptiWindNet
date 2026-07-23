@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
+from optiwindnet.heuristics.constructor import _METHOD_TOPOLOGY
 from optiwindnet.MILP import ModelOptions
 from optiwindnet.MILP._core import FeederRoute
 from optiwindnet.types import Topology
@@ -19,19 +20,6 @@ class ConstructorCase:
     feeder_route: FeederRoute = FeederRoute.SEGMENTED
     exact_golden: bool = False
     bias_margin: float | None = None
-
-
-def _constructor_topology(method: str) -> Topology:
-    try:
-        return {
-            'esau_williams': Topology.BRANCHED,
-            'biased_EW': Topology.BRANCHED,
-            'rootlust': Topology.BRANCHED,
-            'radial_EW': Topology.RADIAL,
-            'ringed': Topology.RINGED,
-        }[method]
-    except KeyError as exc:
-        raise ValueError(f'unknown constructor method: {method!r}') from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +36,7 @@ class BaselineCase:
 def expected_topology(case: ConstructorCase | BaselineCase) -> Topology:
     """Derive the expected output topology from producer input options."""
     if isinstance(case, ConstructorCase):
-        return _constructor_topology(case.method)
+        return _METHOD_TOPOLOGY[case.method]
     return Topology.RINGED if case.ringed else Topology.RADIAL
 
 
