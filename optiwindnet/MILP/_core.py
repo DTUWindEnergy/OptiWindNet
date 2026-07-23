@@ -276,8 +276,15 @@ class ModelOptions(dict):
             'modifying it in place'
         )
 
-    __setitem__ = __delitem__ = _immutable
+    __setitem__ = __delitem__ = __ior__ = _immutable
     clear = pop = popitem = setdefault = update = _immutable
+
+    @classmethod
+    def _from_pickle(cls, values):
+        return cls(**values)
+
+    def __reduce__(self):
+        return type(self)._from_pickle, (dict(self),)
 
     @classmethod
     def help(cls):

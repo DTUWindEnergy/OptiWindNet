@@ -665,7 +665,8 @@ def warmup_model(
     # check if solution violates any constraints:
     # checking the bounds seem redundant, but the way to do it would be:
     # next(find_infeasible_bounds(model), False)
-    log_infeasible_constraints(model, log_variables=True)
+    if _lggr.isEnabledFor(logging.INFO):
+        log_infeasible_constraints(model, log_variables=True, logger=_lggr)
     if next(find_infeasible_constraints(model), False):
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
     metadata.warmed_by = S.graph['creator']
