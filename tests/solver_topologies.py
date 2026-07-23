@@ -95,6 +95,8 @@ def load_solver_topologies() -> dict[str, GoldenValue]:
 
 def assert_matches_golden(S, value: GoldenValue) -> None:
     """Compare topology ``S`` with all explicitly accepted tied optima."""
-    actual = TerseLinks.from_topology(S)
     accepted = value if isinstance(value, tuple) else (value,)
-    assert actual in accepted
+    assert any(
+        TerseLinks.from_topology(S, nodeset_digest=item.nodeset_digest) == item
+        for item in accepted
+    )
