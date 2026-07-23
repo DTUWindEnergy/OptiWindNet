@@ -167,7 +167,8 @@ class TerseLinks(Sequence[int]):
     ``RADIAL`` and ``BRANCHED`` values use one parent target per non-root node.
     ``RINGED`` values use the flattened route representation. A topology value
     represents ``S``; a routeset value additionally carries the clone mapping
-    needed to reproduce ``G`` against its location graph.
+    needed to reproduce ``G`` against its location graph. Either scope can be
+    bound to an exact location geometry with ``nodeset_digest``.
     """
 
     links: tuple[int, ...]
@@ -191,11 +192,7 @@ class TerseLinks(Sequence[int]):
         if len(self.clone2prime) != self.C + self.D:
             raise ValueError('clone2prime must have exactly C + D entries')
         if self.scope is LinkScope.TOPOLOGY and (
-            self.B
-            or self.C
-            or self.D
-            or self.clone2prime
-            or self.nodeset_digest is not None
+            self.B or self.C or self.D or self.clone2prime
         ):
             raise ValueError('a topology encoding cannot carry routed nodes')
         if self.topology is not Topology.RINGED:
@@ -299,8 +296,13 @@ class TerseLinks(Sequence[int]):
         )
 
     @classmethod
-    def from_topology(cls, S: nx.Graph) -> 'TerseLinks':
-        """Encode solution topology ``S``."""
+    def from_topology(
+        cls,
+        S: nx.Graph,
+        *,
+        nodeset_digest: bytes | None = None,
+    ) -> 'TerseLinks':
+        """Encode solution topology ``S``, optionally bound to a node set."""
         topology = Topology(S.graph['topology'])
         R, T = (S.graph[key] for key in 'RT')
         if topology is Topology.RINGED:
@@ -313,6 +315,7 @@ class TerseLinks(Sequence[int]):
             scope=LinkScope.TOPOLOGY,
             T=T,
             R=R,
+            nodeset_digest=nodeset_digest,
         )
 
     @classmethod
