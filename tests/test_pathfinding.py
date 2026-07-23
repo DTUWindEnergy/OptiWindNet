@@ -28,7 +28,7 @@ from .cases import (
 )
 from .helpers import canonical_edges, tiny_wfn
 from .producers import hgs_topology
-from .sitecache import get_bundle, pathfinder_site
+from .sitecache import get_bundle, get_bundle_from_nodeset_digest
 from .solver_topologies import load_solver_topologies
 
 PATHFINDER_GOLDEN_FILE = Path(__file__).with_name('pathfinder_golden.pkl')
@@ -110,7 +110,7 @@ def location_meshes():
         for case in PATHFINDER_CASES
         if case.nodeset_digest is not None
     }
-    return {digest: pathfinder_site(digest) for digest in wanted}
+    return {digest: get_bundle_from_nodeset_digest(digest) for digest in wanted}
 
 
 @pytest.mark.parametrize('case', PATHFINDER_CASES, ids=_pathfinder_case_id)

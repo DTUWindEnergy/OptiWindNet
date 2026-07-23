@@ -5,11 +5,18 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import cache
+import pickle
+from pathlib import Path
 
 import networkx as nx
 
 from optiwindnet.fingerprint import fingerprint_coordinates
-from optiwindnet.importer import L_from_yaml, LocationsRepository, load_repository
+from optiwindnet.importer import (
+    L_from_pbf,
+    L_from_yaml,
+    LocationsRepository,
+    load_repository,
+)
 from optiwindnet.interarraylib import as_single_root
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.synthetic import toyfarm
@@ -41,19 +48,9 @@ SELECTED_HANDLES = (
     'borkum2',
 )
 
-# The PathFinder artifact stores coordinate fingerprints rather than handles.
-# These are deliberately explicit: adding a golden site must update this table.
-PATHFINDER_HANDLES_BY_DIGEST = {
-    bytes.fromhex(
-        '03b54af1ae046ed6bd37f02b12cfe03e56c90c29817d755af72340b058cf403f'
-    ): 'cazzaro_2022',
-    bytes.fromhex(
-        '6fcdffd7e2da097f6d8f61a247ca11c4de765eea085cf3f062107fe17f14172a'
-    ): 'yi_2019',
-    bytes.fromhex(
-        '1b74440a745d55b905f2fdd300bcf1e5f3c145414878f0812b0916f3fef5bd38'
-    ): 'taylor_2023',
-}
+NODESET_DIGEST_LOCATION_MAP_FILE = Path(__file__).with_name(
+    'nodeset_digest-location-map.pkl'
+)
 
 
 @cache
@@ -75,6 +72,55 @@ def _repository_by_handle() -> dict[str, nx.Graph]:
     locations = location_repository()
     fields = locations._fields  # pyrefly: ignore[missing-attribute]
     return dict(zip(fields, locations, strict=True))
+
+
+def bundled_location_path(name: str) -> Path:
+    """Resolve a bundled location name to its uniquely named data file."""
+    candidates = (
+        paths.DATA_DIR / f'{name}.yaml',
+        paths.DATA_DIR / f'{name}.osm.pbf',
+    )
+    matches = [path for path in candidates if path.is_file()]
+    if len(matches) != 1:
+        raise ValueError(
+            f'location {name!r} must match exactly one bundled data file; '
+            f'found {matches}'
+        )
+    return matches[0]
+
+
+@cache
+def _base_location_by_name(name: str) -> nx.Graph:
+    path = bundled_location_path(name)
+    L = L_from_pbf(path) if path.suffix == '.pbf' else L_from_yaml(path)
+    if L.graph.get('name') != name:
+        raise ValueError(f'location file {path} contains name {L.graph.get("name")!r}')
+    return L
+
+
+@cache
+def nodeset_digest_location_map() -> dict[bytes, str]:
+    """Load the mapping from coordinate digests to bundled location names."""
+    if not NODESET_DIGEST_LOCATION_MAP_FILE.exists():
+        raise FileNotFoundError(
+            f'Missing nodeset digest map: {NODESET_DIGEST_LOCATION_MAP_FILE}\n'
+            'Regenerate it with: python -m tests.update_nodeset_digest_location_map'
+        )
+    with NODESET_DIGEST_LOCATION_MAP_FILE.open('rb') as file:
+        mapping = pickle.load(file)
+    if not isinstance(mapping, dict) or not all(
+        isinstance(digest, bytes)
+        and len(digest) == 32
+        and isinstance(name, str)
+        and name
+        for digest, name in mapping.items()
+    ):
+        raise TypeError(
+            'nodeset digest map must be a dict from 32-byte digests to names'
+        )
+    for name in set(mapping.values()):
+        bundled_location_path(name)
+    return mapping
 
 
 @cache
@@ -141,19 +187,22 @@ def get_bundle(
     return deepcopy(bundle) if copy else bundle
 
 
-def pathfinder_site(digest: bytes) -> SiteBundle:
-    """Return the explicitly mapped single-root bundle for a PathFinder golden."""
+@cache
+def get_bundle_from_nodeset_digest(digest: bytes) -> SiteBundle:
+    """Return the location variant identified by a coordinate digest."""
     try:
-        handle = PATHFINDER_HANDLES_BY_DIGEST[digest]
+        name = nodeset_digest_location_map()[digest]
     except KeyError as exc:
-        raise KeyError(
-            f'no selected PathFinder site for digest {digest.hex()}'
-        ) from exc
-    bundle = get_bundle(handle, single_root=True)
-    actual = fingerprint_coordinates(bundle.L.graph['VertexC'])[0]
-    if actual != digest:
-        raise AssertionError(
-            f'PathFinder site {bundle.handle} has digest {actual.hex()}, '
-            f'expected {digest.hex()}'
-        )
-    return bundle
+        raise KeyError(f'no location for nodeset digest {digest.hex()}') from exc
+
+    base = _base_location_by_name(name)
+    variants = (False, True) if base.graph['R'] > 1 else (False,)
+    for single_root in variants:
+        L = as_single_root(base) if single_root else base
+        actual = fingerprint_coordinates(L.graph['VertexC'])[0]
+        if actual == digest:
+            P, A = make_planar_embedding(L)
+            return SiteBundle(L.graph['handle'], digest, L, P, A)
+    raise AssertionError(
+        f'location {name!r} does not match mapped nodeset digest {digest.hex()}'
+    )
