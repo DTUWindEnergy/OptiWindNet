@@ -12,7 +12,7 @@ the party vendoring copies of other solvers' libraries.
 
 This module has no pytest dependency so it can be used both from
 `conftest.py` (as the `ortools_worker` fixture) and from plain scripts such as
-`update_expected_values.py`.
+topology-golden generation.
 """
 
 import multiprocessing

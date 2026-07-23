@@ -6,7 +6,45 @@ import numpy as np
 import pytest
 
 import optiwindnet.baselines.hgs as hgs_mod
+from optiwindnet.baselines._core import remove_offending_crossings
 from optiwindnet.baselines.hgs import _balanced_capacity
+from optiwindnet.interarraylib import as_normalized
+from optiwindnet.types import Topology
+
+from .cases import HGS_CASES, case_node_id, expected_topology
+from .helpers import terminal_terminal_crossings
+from .producers import hgs_topology
+from .sitecache import get_bundle
+from .topology_assertions import assert_topology
+
+
+@pytest.mark.parametrize('case', HGS_CASES, ids=case_node_id)
+def test_hgs_real_topology_cases(case):
+    """A compact seeded matrix validates raw HGS topology output."""
+    A = get_bundle(case.site).A
+    S = hgs_topology(case)
+    assert_topology(S, expected_topology(case), case.capacity)
+    assert terminal_terminal_crossings(S, A.graph['VertexC']) == []
+
+
+@pytest.mark.parametrize('capacity', (1, 12))
+def test_hgs_small_site_capacity_boundaries(capacity):
+    A = get_bundle('example_location').A
+    S = hgs_mod.hgs_cvrp(as_normalized(A), capacity=capacity, time_limit=0.2, seed=0)
+    assert_topology(S, Topology.RADIAL, capacity)
+
+
+@pytest.mark.parametrize('capacity', (2, 3, 5))
+def test_hgs_ringed_capacity_boundaries(capacity):
+    A = get_bundle('albatros').A
+    S = hgs_mod.hgs_cvrp(
+        as_normalized(A),
+        capacity=capacity,
+        time_limit=0.5,
+        ringed=True,
+        seed=0,
+    )
+    assert_topology(S, Topology.RINGED, capacity)
 
 
 def _make_A(T: int = 4, R: int = 1, edges=()) -> nx.Graph:
@@ -225,3 +263,59 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
     assert captured['capacity'] == 2
     assert captured['n'] == 5  # no slack nodes
     assert 'capacity_effective' not in S.graph['solver_details']
+
+
+def test_solution_time_falls_back_to_total_runtime():
+    assert hgs_mod._solution_time('Summary total 1.25', objective=999.0) == 1.25
+
+
+def test_unbalanced_vehicle_count_is_clamped_up(monkeypatch):
+    captured = _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
+
+    hgs_mod.hgs_cvrp(
+        _make_A(T=4),
+        capacity=2,
+        time_limit=0.1,
+        seed=1,
+        vehicles=1,
+        repair=False,
+    )
+
+    assert captured['vehicles'] == 2
+
+
+def test_multiroot_nonminimum_vehicle_count_is_reset(monkeypatch, caplog):
+    def fake_multi_root(*args):
+        inputs = (
+            [1, 1],
+            [6, 6],
+            [np.array([-2, *range(6)]), np.array([-1, *range(6, 12)])],
+            [0, 0],
+            [6, 6],
+        )
+        output = ([[1, 2, 3, 4, 5, 6]], 0.1, 0.1, 1.0, '', {})
+        return inputs, [output, output]
+
+    monkeypatch.setattr(hgs_mod, '_solve_multi_root', fake_multi_root)
+    with caplog.at_level('WARNING'):
+        S = hgs_mod.hgs_cvrp(
+            _make_A(T=12, R=2),
+            capacity=6,
+            time_limit=0.1,
+            vehicles=3,
+            seed=None,
+            repair=False,
+        )
+
+    assert S.graph['method_options']['feeders_above_min'] == 0
+    assert 'setting to the minimum' in caplog.text
+
+
+def test_remove_offending_crossing_keeps_absent_diagonal_mapping():
+    A = nx.Graph()
+    A.add_edge(0, 1, length=1.0)
+    A.add_edge(2, 3, length=1.0)
+
+    remove_offending_crossings(A, {}, [((0, 1), (2, 3))])
+
+    assert (0, 1) not in A.edges

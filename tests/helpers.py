@@ -1,97 +1,12 @@
 import copy
-import pickle
 from collections import Counter
-from itertools import pairwise
-from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Iterable, Optional
 
 import networkx as nx
 import numpy as np
 
-from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
-from optiwindnet.api_utils import parse_cables_input
+from optiwindnet.api import WindFarmNetwork
 from optiwindnet.geometric import is_crossing
-from optiwindnet.interarraylib import assign_cables, terse_links_from_S
-from optiwindnet.mesh import make_planar_embedding
-from optiwindnet.MILP import ModelOptions, solver_factory
-from optiwindnet.types import Topology
-
-
-def load_instances(path: Path) -> Any:
-    """Load a pickled instance file; raise FileNotFoundError with
-    regeneration hint if missing."""
-    if not path.exists():
-        raise FileNotFoundError(
-            f'Missing expected test data file: {path}\n\n'
-            'To (re)generate run: python -m tests.update_expected_values\n'
-            'Or run pytest with --regen-expected.'
-        )
-    with path.open('rb') as fh:
-        return pickle.load(fh)
-
-
-def router_factory(spec: Optional[Dict[str, Any]]):
-    """Create an instantiated router from a spec dict
-    (same semantics as your generators)."""
-    if spec is None:
-        return None
-    clsname = spec.get('class')
-    params = dict(spec.get('params', {}))
-    # Expand ModelOptions dict when present
-    if clsname == 'MILPRouter' and isinstance(params.get('model_options'), dict):
-        params['model_options'] = ModelOptions(**params['model_options'])
-    if clsname is None:
-        return None
-    if clsname == 'EWRouter':
-        return EWRouter(**params)
-    if clsname == 'HGSRouter':
-        return HGSRouter(**params)
-    if clsname == 'MILPRouter':
-        return MILPRouter(**params)
-    raise ValueError(f'Unknown router class: {clsname!r}')
-
-
-def needs_process_isolation(router_spec: Dict[str, Any]) -> bool:
-    """'ortools*' solvers bundle a copy of HiGHS/SCIP that collides with the
-    standalone highspy/pyscipopt packages if both load into the same process.
-    Other solvers (cplex, gurobi, 'highs', ...) never touch OR-Tools' native
-    libraries and can run directly in this process."""
-    solver_name = router_spec['params'].get('solver_name', '')
-    return router_spec['class'] == 'MILPRouter' and solver_name.startswith('ortools')
-
-
-def solve_milp_low_level(router_spec: Dict[str, Any], L: nx.Graph):
-    """Solve a `MILPRouter` routed_instance spec via the low-level MILP API,
-    bypassing `MILPRouter`/`WindFarmNetwork`.
-
-    Replicates `MILPRouter.route()`'s non-warmstart sequence directly (see
-    optiwindnet/api.py: `MILPRouter.route`, `WindFarmNetwork.optimize`) so
-    callers don't need a `WindFarmNetwork` -- solver execution (the part that
-    needs process isolation for 'ortools*' solvers) stays free of any
-    high-level API dependency.
-
-    Returns ``(terse_links, canonical_edges)`` for comparison against a
-    routed_instance fixture's expected values.
-    """
-    params = router_spec['params']
-    # cables_capacity and assign_cables() both need the *parsed* cables list,
-    # not the raw int/list stored in router_spec['cables'].
-    cables = parse_cables_input(router_spec['cables'])
-    cables_capacity = max(cables)[0]
-    model_options = ModelOptions(**params.get('model_options', {}))
-
-    P, A = make_planar_embedding(L)
-    solver = solver_factory(params['solver_name'])
-    solver.set_problem(P, A, capacity=cables_capacity, model_options=model_options)
-    solver.solve(
-        time_limit=params['time_limit'],
-        mip_gap=params['mip_gap'],
-        options=params.get('solver_options', {}),
-        verbose=params.get('verbose', False),
-    )
-    S, G = solver.get_solution()
-    assign_cables(G, cables)
-    return tuple(terse_links_from_S(S).tolist()), canonical_edges(G)
 
 
 def solver_unavailable(exc: BaseException) -> bool:
@@ -108,143 +23,6 @@ def solver_unavailable(exc: BaseException) -> bool:
         marker in message
         for marker in ('not licensed', 'license', 'token.gurobi.com', 'gurobi model')
     )
-
-
-def solve_milp_property_metrics(router_spec: Dict[str, Any], L: nx.Graph):
-    """Solve a MILPRouter spec and reduce it to picklable property metrics.
-
-    Worker-safe counterpart of ``solve_milp_low_level`` for the property-based
-    end-to-end tests: it returns ``(metrics, termination, length)`` instead of an
-    exact-topology snapshot, so the caller can assert structural invariants and a
-    gap-tolerant length regression rather than an exact edge set.
-    """
-    params = router_spec['params']
-    cables = parse_cables_input(router_spec['cables'])
-    cables_capacity = max(cables)[0]
-    model_options_dict = params.get('model_options', {})
-    model_options = ModelOptions(**model_options_dict)
-
-    P, A = make_planar_embedding(L)
-    solver = solver_factory(params['solver_name'])
-    solver.set_problem(P, A, capacity=cables_capacity, model_options=model_options)
-    info = solver.solve(
-        time_limit=params['time_limit'],
-        mip_gap=params['mip_gap'],
-        options=params.get('solver_options', {}),
-        verbose=params.get('verbose', False),
-    )
-    S, G = solver.get_solution()
-    assign_cables(G, cables)
-    metrics = solution_property_metrics(S, G, model_options_dict, cables_capacity)
-    return metrics, str(info.termination), metrics['length']
-
-
-def has_cycle(S: nx.Graph) -> bool:
-    """Whether ``S`` carries a cycle once the substations are interconnected.
-
-    The graphs OptiWindNet works with do not represent the substation-to-
-    substation connections of the physical network, so a ring bridging two
-    substations reads as a path between two roots. Linking the roots in a path
-    supplies those connections, so that every ring -- bridging or not -- closes
-    a cycle.
-    """
-    Sx = S.copy()
-    Sx.add_edges_from(pairwise(range(-S.graph['R'], 0)))
-    return not nx.is_forest(Sx)
-
-
-def solution_property_metrics(
-    S: nx.Graph, G: nx.Graph, model_options: Optional[dict], capacity: int
-) -> Dict[str, Any]:
-    """Reduce a solved (S, G) pair to picklable property metrics.
-
-    Returns only primitives so it can run inside the ``ortools_worker``
-    subprocess and be shipped back. ``assert_solution_properties`` consumes the
-    result. Keeping the reduction here (rather than in the test) means the exact
-    same checks apply whether the solve ran in-process or in the worker.
-    """
-    import math
-
-    from optiwindnet.interarraylib import validate_routeset, validate_topology
-
-    R, T = S.graph['R'], S.graph['T']
-    topology = (model_options or {}).get('topology', Topology.BRANCHED)
-
-    edge_loads = [d['load'] for _, _, d in S.edges(data=True)]
-    feeder_edges = [(u, v) for u, v in S.edges if u < 0 or v < 0]
-    feeder_loads = sorted(S[u][v]['load'] for u, v in feeder_edges)
-
-    # a list of strings is picklable, so the whole check crosses the worker
-    # boundary intact
-    S.graph.setdefault('topology', Topology(topology))
-    topology = S.graph['topology']
-    topology_violations = validate_topology(S, capacity)
-
-    return dict(
-        valid_findings=len(validate_routeset(G)),
-        length=float(G.size(weight='length')),
-        max_edge_load=max(edge_loads) if edge_loads else 0,
-        sum_root_load=sum(S.nodes[r]['load'] for r in range(-R, 0)),
-        T=T,
-        R=R,
-        has_cycle=has_cycle(S),
-        num_feeders=len(feeder_edges),
-        feeder_loads=feeder_loads,
-        min_feeders=math.ceil(T / capacity),
-        topology_violations=topology_violations,
-        topology=str(topology),
-    )
-
-
-def assert_solution_properties(
-    metrics: Dict[str, Any], spec: Dict[str, Any], capacity: int
-) -> None:
-    """Assert the invariants a valid solution must satisfy for its options.
-
-    Covers validity, capacity, full connectivity, topology shape (radial /
-    branched / ringed), and -- on single-substation instances where they are
-    unambiguous -- the feeder-count and balanced-load constraints implied by the
-    model options. Objective-length regression is checked separately by the
-    caller against a stored reference.
-    """
-    mo = (
-        spec['params'].get('model_options', {}) if spec['class'] == 'MILPRouter' else {}
-    )
-    topology = metrics['topology']
-    T = metrics['T']
-
-    # --- universal invariants -------------------------------------------------
-    assert metrics['valid_findings'] == 0, 'validate_routeset reported findings'
-    assert metrics['max_edge_load'] <= capacity, 'a cable exceeds capacity'
-    assert metrics['sum_root_load'] == T, 'not every terminal is connected'
-
-    # --- topology shape -------------------------------------------------------
-    # the shape invariants themselves belong to the library (`validate_topology`);
-    # they were reduced to violation strings on the worker side
-    assert metrics['topology_violations'] == []
-    if Topology(topology) is Topology.RINGED and T > 1:
-        assert metrics['has_cycle'], 'a ring closes a cycle'
-
-    # --- feeder-count / balance (single-root, non-ringed: well-defined) -------
-    single_root = metrics['R'] == 1
-    feeder_limit = mo.get('feeder_limit', 'unlimited')
-    min_feeders = metrics['min_feeders']
-    if single_root and Topology(topology) in (Topology.RADIAL, Topology.BRANCHED):
-        nf = metrics['num_feeders']
-        if feeder_limit == 'minimum':
-            assert nf == min_feeders
-        elif feeder_limit == 'min_plus1':
-            assert min_feeders <= nf <= min_feeders + 1
-        elif feeder_limit == 'exactly':
-            assert nf == mo['max_feeders']
-        elif feeder_limit == 'specified':
-            assert min_feeders <= nf <= mo['max_feeders']
-        else:  # unlimited
-            assert nf >= min_feeders
-        if mo.get('balanced'):
-            # pinned feeder count => subtree (feeder) loads differ by at most one
-            loads = metrics['feeder_loads']
-            assert max(loads) - min(loads) <= 1, 'balanced subtrees must differ by <=1'
 
 
 def terminal_terminal_edges(S: nx.Graph) -> list[tuple[int, int]]:
@@ -349,7 +127,9 @@ def assert_graph_equal(
             return all(_eq(x, y) for x, y in zip(a, b))
         # floats
         if isinstance(a, (float, np.floating)) and isinstance(b, (float, np.floating)):
-            return np.isclose(float(a), float(b), rtol=rtol, atol=atol, equal_nan=True)
+            return bool(
+                np.isclose(float(a), float(b), rtol=rtol, atol=atol, equal_nan=True)
+            )
         # ints (exclude bools)
         if (
             isinstance(a, (int, np.integer))
@@ -446,6 +226,7 @@ def canonical_edges(G: nx.Graph) -> Counter:
         n = int(n)
         if n < 0 or n < T + B:
             return n
+        assert fnT is not None
         return int(fnT[n])
 
     edges: Counter = Counter()

@@ -1,8 +1,10 @@
 import networkx as nx
 import numpy as np
 import pytest
+from bidict import bidict
 
 from optiwindnet.crossings import (
+    edge_crossings,
     find_geometric_crossings,
     find_routeset_crossings,
     get_interferences_list,
@@ -10,6 +12,15 @@ from optiwindnet.crossings import (
 from optiwindnet.interarraylib import validate_routeset
 
 from .helpers import tiny_wfn
+
+
+def test_edge_crossings_handles_delaunay_and_diagonal_directions():
+    diagonals = bidict({(0, 2): (1, 3)})
+    G = nx.Graph()
+    G.add_edges_from(((0, 2), (1, 3)))
+
+    assert edge_crossings(0, 2, G, diagonals) == [(1, 3)]
+    assert edge_crossings(3, 1, G, diagonals) == [(0, 2)]
 
 
 def _graph_with_clones(T, B, C, D, VertexC, edges):

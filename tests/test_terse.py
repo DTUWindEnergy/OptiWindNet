@@ -4,11 +4,25 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from optiwindnet.interarraylib import calcload, validate_routeset
+from optiwindnet.interarraylib import add_ring_to_S, calcload, validate_routeset
 from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
 
 from .helpers import canonical_edges, tiny_wfn
+
+
+@pytest.mark.parametrize('n', range(1, 11))
+def test_topology_encoding_preserves_bridging_ring(n):
+    S = nx.Graph(R=2, T=n, topology=Topology.RINGED)
+    S.add_nodes_from((-2, -1))
+    add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
+    calcload(S)
+
+    encoded = TerseLinks.from_topology(S)
+    restored = encoded.to_topology()
+
+    assert set(map(frozenset, restored.edges)) == set(map(frozenset, S.edges))
+    assert TerseLinks.from_topology(restored) == encoded
 
 
 def _ring_with_cloned_open_link() -> tuple[nx.Graph, nx.Graph]:

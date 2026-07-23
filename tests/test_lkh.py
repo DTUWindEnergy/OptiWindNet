@@ -1,7 +1,31 @@
+import shutil
+
 import networkx as nx
 import numpy as np
+import pytest
 
 import optiwindnet.baselines.lkh as lkh_mod
+from optiwindnet.interarraylib import as_normalized
+
+from .cases import LKH_CASES, case_node_id, expected_topology
+from .sitecache import get_bundle
+from .topology_assertions import assert_topology
+
+
+@pytest.mark.parametrize('case', LKH_CASES, ids=case_node_id)
+def test_lkh_real_topology_cases(case):
+    """Run a small optional matrix when the external LKH binary is installed."""
+    if shutil.which('LKH') is None:
+        pytest.skip('LKH executable not on PATH')
+    A = get_bundle(case.site).A
+    S = lkh_mod.lkh3(
+        as_normalized(A),
+        capacity=case.capacity,
+        time_limit=case.time_limit,
+        ringed=case.ringed,
+        seed=case.seed,
+    )
+    assert_topology(S, expected_topology(case), case.capacity)
 
 
 def _make_routeset(branches: list[list[int]], R: int = 1) -> nx.Graph:

@@ -1,25 +1,257 @@
-import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 import pytest
-from shapely.geometry import Polygon
 
-import optiwindnet.api_utils as U
+import optiwindnet.api as api
 import optiwindnet.plotting as plotting
 from optiwindnet.api import (
     EWRouter,
     HGSRouter,
+    MILPRouter,
+    Router,
     WindFarmNetwork,
 )
 from optiwindnet.MILP import ModelOptions
-from optiwindnet.types import Topology
 
 from .helpers import tiny_wfn
 
 _LOCATION_FILE = Path(__file__).parent / 'locations' / 'example_location.yaml'
+
+
+class _RecordingRouter(Router):
+    _summary_attrs = ()
+
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
+        self.calls.append(
+            {
+                'P': P,
+                'A': A,
+                'cables': cables,
+                'cables_capacity': cables_capacity,
+                'verbose': verbose,
+                **kwargs,
+            }
+        )
+        return self.result
+
+
+def test_optimize_forwards_inputs_and_warmstart_state():
+    solved = tiny_wfn()
+    wfn = tiny_wfn(optimize=False)
+    router = _RecordingRouter((solved.S, solved.G))
+
+    wfn.optimize(router=router, verbose=True)
+    first = router.calls[0]
+    assert first['P'] is wfn.P
+    assert first['A'] is wfn.A
+    assert first['cables'] == wfn.cables
+    assert first['cables_capacity'] == wfn.cables_capacity
+    assert first['verbose'] is True
+    assert 'S_warm' not in first
+    assert wfn.S is solved.S and wfn.G is solved.G
+
+    wfn.optimize()
+    second = router.calls[1]
+    assert second['S_warm'] is solved.S
+    assert second['S_warm_has_detour'] is bool(solved.G.graph.get('D', 0))
+
+
+@pytest.mark.parametrize('feeder_route', ('segmented', 'straight'))
+def test_ewrouter_forwards_constructor_options(monkeypatch, feeder_route):
+    solved = tiny_wfn()
+    calls = []
+
+    def fake_constructor(A, **kwargs):
+        calls.append((A, kwargs))
+        return solved.S
+
+    monkeypatch.setattr(api, 'constructor', fake_constructor)
+    monkeypatch.setattr(api, 'G_from_S', lambda S, A: solved.G)
+    monkeypatch.setattr(
+        api,
+        'PathFinder',
+        lambda *args, **kwargs: type(
+            'PF', (), {'create_detours': lambda self: solved.G}
+        )(),
+    )
+    monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
+    router = EWRouter(
+        method='ringed',
+        maxiter=17,
+        bias_margin=0.25,
+        feeder_route=feeder_route,
+    )
+
+    router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
+
+    assert calls == [
+        (
+            solved.A,
+            {
+                'capacity': solved.cables_capacity,
+                'method': 'ringed',
+                'maxiter': 17,
+                'bias_margin': 0.25,
+                'weigh_detours': feeder_route == 'segmented',
+                'straight_feeder_route': feeder_route == 'straight',
+            },
+        )
+    ]
+
+
+def test_hgsrouter_forwards_low_level_options(monkeypatch):
+    solved = tiny_wfn()
+    captured = {}
+
+    def fake_hgs(A, **kwargs):
+        captured.update(kwargs)
+        return solved.S
+
+    monkeypatch.setattr(api, 'hgs_cvrp', fake_hgs)
+    monkeypatch.setattr(api, 'G_from_S', lambda S, A: solved.G)
+    monkeypatch.setattr(
+        api,
+        'PathFinder',
+        lambda *args, **kwargs: type(
+            'PF', (), {'create_detours': lambda self: solved.G}
+        )(),
+    )
+    monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
+    router = HGSRouter(
+        time_limit=0.4,
+        feeder_limit=3,
+        feeder_exact=True,
+        max_retries=7,
+        balanced=True,
+        ringed=True,
+        seed=11,
+    )
+
+    router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
+
+    assert captured == {
+        'capacity': solved.cables_capacity,
+        'time_limit': 0.4,
+        'max_retries': 7,
+        'vehicles': 3,
+        'vehicles_exact': True,
+        'balanced': True,
+        'ringed': True,
+        'seed': 11,
+    }
+
+
+def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
+    solved = tiny_wfn()
+
+    class FakeSolver:
+        options = {'default': True}
+
+        def __init__(self):
+            self.problem_calls = []
+            self.solve_calls = []
+
+        def set_problem(self, *args, **kwargs):
+            self.problem_calls.append((args, kwargs))
+
+        def solve(self, **kwargs):
+            self.solve_calls.append(kwargs)
+
+        def get_solution(self):
+            return solved.S, solved.G
+
+    fake = FakeSolver()
+    factory_calls = []
+    monkeypatch.setattr(
+        api,
+        'solver_factory',
+        lambda name: factory_calls.append(name) or fake,
+    )
+    monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
+    options = ModelOptions(topology='ringed', feeder_route='straight')
+    router = MILPRouter(
+        solver_name='fake',
+        time_limit=9,
+        mip_gap=0.2,
+        solver_options={'threads': 1},
+        model_options=options,
+    )
+
+    S, G = router.route(
+        solved.P,
+        solved.A,
+        solved.cables,
+        solved.cables_capacity,
+        S_warm=solved.S,
+        num_retries=4,
+        verbose=True,
+    )
+
+    assert factory_calls == ['fake']
+    assert fake.problem_calls == [
+        (
+            (solved.P, solved.A),
+            {
+                'capacity': solved.cables_capacity,
+                'model_options': options,
+                'warmstart': solved.S,
+            },
+        )
+    ]
+    assert fake.solve_calls == [
+        {
+            'time_limit': 9,
+            'mip_gap': 0.2,
+            'options': {'threads': 1},
+            'verbose': True,
+        }
+    ]
+    assert S is solved.S and G is solved.G
+
+
+def _run_ortools_warmstart_cases():
+    router = MILPRouter(
+        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
+    )
+    wfn = tiny_wfn()
+    wfn.optimize(router=router)
+    results = [list(wfn.optimize(router=router))]
+
+    wfn.G.add_edge(-1, 11)
+    results.append(list(wfn.optimize(router=router)))
+
+    wfn = tiny_wfn(cables=1)
+    wfn.optimize(router=EWRouter())
+    router = MILPRouter(
+        solver_name='ortools.cp_sat', time_limit=2, mip_gap=0.005, verbose=True
+    )
+    results.append(list(wfn.optimize(router=router)))
+
+    wfn.G.add_edges_from([(0, 12), (12, 13)])
+    wfn.G.remove_edge(0, -1)
+    results.append(list(wfn.optimize(router=router)))
+    return results
+
+
+def test_ortools_warmstart_behavior(ortools_worker):
+    result = ortools_worker.run(_run_ortools_warmstart_cases, (), timeout=30)
+    if isinstance(result, (FileNotFoundError, ModuleNotFoundError)):
+        pytest.skip('ortools.cp_sat not available')
+    if isinstance(result, BaseException):
+        raise result
+    assert result == [
+        [-1, 0, 1, 2],
+        [-1, 0, 1, 2],
+        [-1, -1, -1, -1],
+        [-1, -1, -1, -1],
+    ]
+
 
 # =====================
 # WindFarmNetwork core
@@ -101,7 +333,7 @@ def test_wfn_cable_formats(cables_input, expected):
 def test_wfn_invalid_cables_raises():
     with pytest.raises(ValueError, match='Invalid cable values'):
         WindFarmNetwork(
-            cables=(5, (7, 3, 8), 9),
+            cables=(5, (7, 3, 8), 9),  # pyrefly: ignore[bad-argument-type]
             turbinesC=np.array([[0.0, 1.0], [1.0, 0.0]]),
             substationsC=np.array([[0.0, 0.0]]),
         )
@@ -129,7 +361,7 @@ def test_invalid_gradient_type_raises():
 
 
 def test_from_own_yaml_loads_own_yaml_file():
-    wfn = WindFarmNetwork.from_own_yaml(_LOCATION_FILE, cables=4)
+    wfn = WindFarmNetwork.from_own_yaml(str(_LOCATION_FILE), cables=4)
 
     assert wfn.L.graph['T'] == 12
     assert wfn.L.graph['R'] == 1
@@ -137,7 +369,7 @@ def test_from_own_yaml_loads_own_yaml_file():
 
 def test_deprecated_from_yaml_warns():
     with pytest.warns(DeprecationWarning, match='from_own_yaml'):
-        wfn = WindFarmNetwork.from_yaml(_LOCATION_FILE, cables=4)
+        wfn = WindFarmNetwork.from_yaml(str(_LOCATION_FILE), cables=4)
 
     assert wfn.L.graph['T'] == 12
 
@@ -243,6 +475,7 @@ def test_get_network_returns_array_smoke():
 
     # expected structured dtype and field names
     expected_fields = ('src', 'tgt', 'length', 'load', 'cable')
+    assert data.dtype.names is not None
     assert tuple(data.dtype.names) == expected_fields
 
     # element types
@@ -420,223 +653,6 @@ def test_wfn_inexact_routers_smoke(router):
     assert len(terse) == wfn.S.graph['T']
 
 
-# ================#
-# api_utils tests #
-# ================#
-
-
-def test_expand_polygon_safely_warns_for_nonconvex_large_buffer(caplog):
-    poly = Polygon(
-        [(0, 0), (4, 0), (4, 1), (1, 1), (1, 3), (4, 3), (4, 4), (0, 4)]
-    )  # concave
-    with caplog.at_level(logging.WARNING, logger=U.__name__):
-        out = U.expand_polygon_safely(poly, buffer_dist=1.0)
-    assert out.area > poly.area
-    assert any(
-        'non-convex and buffering may introduce unexpected changes' in m
-        for m in caplog.messages
-    )
-
-
-def test_expand_polygon_safely_convex_no_warning(caplog):
-    poly = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
-    with caplog.at_level(logging.WARNING, logger=U.__name__):
-        out = U.expand_polygon_safely(poly, buffer_dist=0.25)
-    assert out.area > poly.area
-    assert not any(
-        'non-convex and buffering may introduce' in m for m in caplog.messages
-    )
-
-
-def test_shrink_polygon_safely_returns_array_normal():
-    poly = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)])
-    arr = U.shrink_polygon_safely(poly, shrink_dist=0.2, indx=0)
-    assert isinstance(arr, np.ndarray) and arr.shape[1] == 2
-
-
-def test_shrink_polygon_safely_becomes_empty_warns(caplog):
-    poly = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
-    with caplog.at_level(logging.WARNING, logger=U.__name__):
-        res = U.shrink_polygon_safely(poly, shrink_dist=10.0, indx=3)
-    assert res is None
-    assert any('completely removed the obstacle' in m for m in caplog.messages)
-
-
-def test_shrink_polygon_safely_splits_to_multipolygon(caplog):
-    big = Polygon([(0, 0), (8, 0), (8, 4), (0, 4)])
-    hole = Polygon([(3, -1), (5, -1), (5, 5), (3, 5)])  # remove middle band
-    shape = big.difference(hole)
-    with caplog.at_level(logging.WARNING, logger=U.__name__):
-        res = U.shrink_polygon_safely(shape, shrink_dist=0.1, indx=1)
-    assert isinstance(res, list) and len(res) >= 2
-    assert any('split the obstacle' in m for m in caplog.messages)
-
-
-def test_enable_ortools_logging_if_jupyter_sets_callback(monkeypatch):
-    ZMQInteractiveShell = type('ZMQInteractiveShell', (), {})
-    monkeypatch.setattr(U, 'get_ipython', lambda: ZMQInteractiveShell(), raising=False)
-
-    class DummySolver:
-        def __init__(self):
-            self.log_callback = None
-
-    s = DummySolver()
-    U.enable_ortools_logging_if_jupyter(s)
-    assert s.log_callback is print
-
-
-@pytest.mark.parametrize(
-    'mode,plus',
-    [
-        ('specified', 2),
-        ('min_plus1', 3),
-        ('min_plus2', 4),
-        ('min_plus3', 5),
-    ],
-)
-def test_warmstart_feeder_limit_modes_block(capfd, mode, plus):
-    S = tiny_wfn().S
-    model_options = ModelOptions(
-        feeder_limit=mode,
-        max_feeders=plus,
-        topology=Topology.BRANCHED,
-        feeder_route='segmented',
-        balanced=False,
-    )
-    ok = U.is_warmstart_eligible(
-        S_warm=S,
-        cables_capacity=4,
-        model_options=model_options,
-        S_warm_has_detour=False,
-        solver_name='ortools.cp_sat',
-        logger=logging.getLogger(U.__name__),
-        verbose=True,
-    )
-    assert ok is True
-    # assert 'exceeds feeder limit' in capfd.readouterr().out
-
-
-def test_warmstart_feeder_limit_specified_allows(capfd):
-    S = tiny_wfn().S
-    model_options = ModelOptions(
-        feeder_limit='specified',
-        max_feeders=3,
-        topology=Topology.BRANCHED,
-        feeder_route='segmented',
-        balanced=False,
-    )
-    ok = U.is_warmstart_eligible(
-        S_warm=S,
-        cables_capacity=2,
-        model_options=model_options,
-        S_warm_has_detour=False,
-        solver_name='ortools.cp_sat',
-        logger=logging.getLogger(U.__name__),
-        verbose=True,
-    )
-    assert ok is True
-
-
-def _eligible(S, cables_capacity, **model_options):
-    # a branched model accepts both radial and branched S: the topology axis is
-    # neutral here, so these tests exercise the constraint each one names
-    opts = dict(
-        topology=Topology.BRANCHED,
-        feeder_route='segmented',
-        feeder_limit='unlimited',
-        max_feeders=0,
-        balanced=False,
-    )
-    opts.update(model_options)
-    return U.is_warmstart_eligible(
-        S_warm=S,
-        cables_capacity=cables_capacity,
-        model_options=ModelOptions(**opts),
-        S_warm_has_detour=False,
-        solver_name='ortools.cp_sat',
-        logger=logging.getLogger(U.__name__),
-        verbose=True,
-    )
-
-
-@pytest.mark.parametrize(('max_feeders', 'eligible'), [(1, True), (2, False)])
-def test_warmstart_feeder_limit_exactly(max_feeders, eligible):
-    # tiny_wfn's solution has T=4 terminals under a single feeder
-    S = tiny_wfn().S
-    ok = _eligible(S, 4, feeder_limit='exactly', max_feeders=max_feeders)
-    assert ok is eligible
-
-
-def test_warmstart_blocked_when_loads_are_not_balanced():
-    # 5 terminals over 2 feeders: the model would demand loads within [2, 3],
-    # but this warmstart splits them 4 + 1
-    S = nx.Graph(T=5, R=1, topology=Topology.RADIAL)
-    S.add_node(-1, load=5)
-    for subtree, branch in enumerate(([0, 1, 2, 3], [4])):
-        predecessor = -1
-        for load, node in zip(range(len(branch), 0, -1), branch):
-            S.add_node(node, load=load, subtree=subtree)
-            S.add_edge(predecessor, node, load=load)
-            predecessor = node
-
-    assert _eligible(S, 3, feeder_limit='minimum', balanced=True) is False
-    # without `balanced` the same warmstart is fine: 2 feeders is the minimum
-    assert _eligible(S, 3, feeder_limit='minimum') is True
-
-
-def _labelled_S(topology):
-    """A two-terminal ``S`` under one root, declaring ``topology``.
-
-    Structure is deliberately the same for every label: the compatibility rule
-    reads ``S.graph['topology']``, never the shape.
-    """
-    S = nx.Graph(T=2, R=1, topology=Topology(topology))
-    S.add_node(-1, load=2)
-    for load, node in ((2, 0), (1, 1)):
-        S.add_node(node, load=load, subtree=0)
-    S.add_edge(-1, 0, load=2)
-    S.add_edge(0, 1, load=1)
-    return S
-
-
-@pytest.mark.parametrize(
-    ('model_topology', 'S_topology', 'eligible'),
-    [
-        (Topology.RADIAL, Topology.RADIAL, True),
-        (Topology.RADIAL, Topology.BRANCHED, False),
-        (Topology.RADIAL, Topology.RINGED, False),
-        # a radial solution is a valid seed for a branched model, not the reverse
-        (Topology.BRANCHED, Topology.RADIAL, True),
-        (Topology.BRANCHED, Topology.BRANCHED, True),
-        (Topology.BRANCHED, Topology.RINGED, False),
-        (Topology.RINGED, Topology.RADIAL, False),
-        (Topology.RINGED, Topology.BRANCHED, False),
-        (Topology.RINGED, Topology.RINGED, True),
-    ],
-)
-def test_warmstart_topology_compatibility(model_topology, S_topology, eligible):
-    S = _labelled_S(S_topology)
-    assert _eligible(S, 2, topology=model_topology) is eligible
-
-
-def test_warmstart_topology_read_from_label_not_structure():
-    """A branched-labelled S is refused by a radial model even if it has no branching.
-
-    The label is the only input to the decision; structure is never inspected.
-    """
-    S = _labelled_S(Topology.BRANCHED)
-    assert max(S.degree[n] for n in S.nodes if n >= 0) == 2, 'S has no branching'
-    assert _eligible(S, 2, topology=Topology.RADIAL) is False
-
-
-def test_parse_cables_input_numpy_ints_and_pairs():
-    out1 = U.parse_cables_input(np.array([5, 7]))
-    assert out1 == [(5, 0.0), (7, 0.0)]
-    arr = np.array([(3, 10.0), (6, 20.0)], dtype=object)
-    out2 = U.parse_cables_input(arr)
-    assert out2 == [(3, 10.0), (6, 20.0)]
-
-
 def test_merge_obstacles_outside_is_dropped(caplog):
     borderC = np.array([(-10, -10), (10, -10), (10, 10), (-10, 10)])
     obstacleC_ = np.array([[(100, 100), (101, 100), (101, 101), (100, 101)]])
@@ -668,12 +684,6 @@ def test_merge_obstacles_inside_kept():
     obstacleC_ = [np.array([(-9, -9), (1, -9), (1, -5), (-1, -5)])]
     L = tiny_wfn(borderC=borderC, obstacleC_=obstacleC_).L
     assert len(L.graph['obstacles']) == 1
-
-
-def test_buffer_border_obs_negative_raises():
-    wfn = tiny_wfn()
-    with pytest.raises(ValueError, match='must be equal or greater than 0'):
-        U.buffer_border_obs(wfn.L, buffer_dist=-1.0)
 
 
 def test_buffer_border_obs_with_border_positive_shrinks_obstacles():

@@ -227,7 +227,7 @@ def test_svgrepr_repr_no_metadata():
 
 def test_svgrepr_repr_with_handle_only():
     r = repr(SvgRepr('ab', {'handle': 'myfarm'}))
-    assert "[myfarm]" in r
+    assert '[myfarm]' in r
     assert 'name=' not in r
 
 
@@ -245,7 +245,7 @@ def test_svgrepr_repr_name_differs_from_handle():
             },
         )
     )
-    assert "name=Full Name" in r
+    assert 'name=Full Name' in r
     assert 'T=5' in r
     assert 'R=2' in r
     assert 'capacity=9' in r
