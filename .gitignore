@@ -38,6 +38,8 @@ optiwindnet/version.py
 scripts/
 artifacts/
 AGENTS.md
+CLAUDE.md
+GEMINI.md
 .codex
 .claude/
 .antigravitycli/

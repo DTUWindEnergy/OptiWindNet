@@ -33,7 +33,7 @@ requires-python = ">= 3.11"
 dependencies = [
     "bidict >=0.23.1",
     "bitarray >=3.4.2",
-    "condeltri >=0.0.3",
+    "condeltri >=0.0.5",
     "darkdetect >=0.8.0",
     "esy.osm.pbf >=0.1.1",
     "hybgensea >=0.1.1",
