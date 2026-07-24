@@ -1,12 +1,66 @@
 import copy
+import math
+import warnings
 from collections import Counter
-from typing import Iterable, Optional
+from collections.abc import Mapping
+from typing import Any, Iterable, Optional
 
 import networkx as nx
 import numpy as np
 
 from optiwindnet.api import WindFarmNetwork
 from optiwindnet.geometric import is_crossing
+from optiwindnet.MILP import (
+    ModelOptions,
+    OWNSolutionNotFound,
+    SolutionInfo,
+    solver_factory,
+)
+
+
+def run_milp_solve_with_retry(
+    P: nx.PlanarEmbedding,
+    A: nx.Graph,
+    *,
+    solver_name: str,
+    capacity: int,
+    model_options: ModelOptions | Mapping[str, Any],
+    time_limit: float,
+    mip_gap: float,
+    warmstart: nx.Graph | None = None,
+) -> tuple[SolutionInfo, nx.Graph, str]:
+    """Execute solver.solve with retry on OWNSolutionNotFound or non-finite bounds."""
+
+    def _single_solve(limit: float) -> tuple[SolutionInfo, nx.Graph, str]:
+        solver = solver_factory(solver_name)
+        solver.set_problem(
+            P,
+            A,
+            capacity=capacity,
+            model_options=model_options,
+            warmstart=warmstart,
+        )
+        info = solver.solve(time_limit=limit, mip_gap=mip_gap)
+        if not math.isfinite(info.bound) and info.termination.lower() != 'optimal':
+            raise OWNSolutionNotFound(
+                f'Solver {solver_name!r} returned non-finite dual bound '
+                f'({info.bound}) within {limit} s'
+            )
+        S = solver.get_incumbent_topology()
+        return info, S, solver.metadata.warmed_by
+
+    try:
+        return _single_solve(time_limit)
+    except OWNSolutionNotFound:
+        fallback_limit = time_limit * 3.0
+        warnings.warn(
+            f'Solver {solver_name!r} raised OWNSolutionNotFound within '
+            f'{time_limit} s (likely due to high CPU load); '
+            f'retrying with {fallback_limit} s time limit.',
+            UserWarning,
+            stacklevel=2,
+        )
+        return _single_solve(fallback_limit)
 
 
 def solver_unavailable(exc: BaseException) -> bool:

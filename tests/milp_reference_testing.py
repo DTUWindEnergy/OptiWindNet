@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import pickle
-import warnings
 from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -14,10 +13,11 @@ from typing import Any
 import networkx as nx
 
 from optiwindnet.fingerprint import fingerprint_coordinates
-from optiwindnet.MILP import OWNSolutionNotFound, SolutionInfo, solver_factory
+from optiwindnet.MILP import SolutionInfo
 from optiwindnet.terse import LinkScope, TerseLinks
 
 from .cases import MILP_ADAPTER_CASES, MILPCase, case_node_id
+from .helpers import run_milp_solve_with_retry
 from .paths import REPO_ROOT
 from .sitecache import get_bundle_from_nodeset_digest, get_location
 from .topology_assertions import assert_topology
@@ -324,27 +324,13 @@ def solve_milp_reference_execution(
         )
         assert_topology(warmstart, case.model_options['topology'], case.capacity)
 
-    solver = solver_factory(case.solver_name)
-    solver.set_problem(
+    return run_milp_solve_with_retry(
         bundle.P,
         bundle.A,
+        solver_name=case.solver_name,
         capacity=case.capacity,
         model_options=case.model_options,
+        time_limit=TEST_TIME_LIMIT,
+        mip_gap=case.mip_gap,
         warmstart=warmstart,
     )
-    initial_time_limit = TEST_TIME_LIMIT
-    try:
-        info = solver.solve(time_limit=initial_time_limit, mip_gap=case.mip_gap)
-    except OWNSolutionNotFound:
-        fallback_limit = initial_time_limit * 3.0
-        warnings.warn(
-            f'Solver {case.solver_name!r} raised OWNSolutionNotFound within '
-            f'{initial_time_limit} s (likely due to high CPU load); '
-            f'retrying with {fallback_limit} s time limit.',
-            UserWarning,
-            stacklevel=2,
-        )
-        info = solver.solve(time_limit=fallback_limit, mip_gap=case.mip_gap)
-
-    S = solver.get_incumbent_topology()
-    return info, S, solver.metadata.warmed_by
