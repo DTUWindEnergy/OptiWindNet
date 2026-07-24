@@ -21,8 +21,7 @@ __all__ = (
 # projection/runtime drift, but each pair was verified to have matching T/R/B
 # metadata and to generate the same A nodes and edges without renumbering.
 # Values are canonical repository digests, so aliases for single-root variants
-# retain their variant identity. Fecamp is intentionally excluded: its database
-# NodeSet requires a permutation of 69 turbine ids before its A edges match.
+# retain their variant identity.
 #
 # This is a data table: keep each historical/canonical pair together for review.
 # ruff: noqa: E501
@@ -45,6 +44,7 @@ _ALIAS_HEX = {
     '25bfffd1d3c47f081aa1374c39108c7d59c55d6c3b371a596c07cb3718c61e81': ('d551cd458eac8622c595ced94089b6c2179c141f72a21681ab9f7bbe25b8a5f8', 'Dogger Bank C'),
     '230a6b92da72723b6db3d42a8ebbec42ea1156bedd5fc7584a2948347345eb7a': ('79fe1a164f64cc9f3e7531494786163b7ae13e29951ab5821a85ed863ba52f27', 'Northwind'),
     'f60bebda8e899af586844e8dbaa7529249c00334645e7f74b343fce218f85509': ('fb70c98584b6b2239b93706f25aace856e66c6eee0a9c44277fad503b10e5db9', 'Gemini 1'),
+    'd977929d7c9e16e84a6cd537a892c52bdba018f8d7e5f9afced85ccf43d35879': ('7a6ef5ffb79a4c9131d174b360470aade81f3d5b49dde9dbb3ec109bfb032871', 'Fecamp'),
     '8c80457e16a0ea02fb21f8d8df73be8f84f571e3d964b4620bce0a87cab04410': ('4b7a0d6cd12e0cc3434052a0a4838a5e773d671dc7ffc090af3c1f1401771b53', 'Galloper Inner'),
     '2bc88f77402b5f2168ca57641b7cba2d7b4b6ac1ece83642317f587852990040': ('d749569e274072589e0d3d3a9c373a09baf192b36a3979ff07d535da41d8e667', 'Rudong H8'),
     'e19d6004bc4f26ec6bab01dd5ddbbfe0e5c36e8d9aecdbe800f8642a476545eb': ('eb051375746d7e48d873104bed629443cfa0b680f4b863d2fece62e3a3c1ad74', 'Rentel'),
