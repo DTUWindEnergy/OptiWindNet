@@ -263,7 +263,7 @@ def _poisson_disc_filler_core(
         mask = neighbormask[
             2 + p_min - p : 2 + p_max - p, 2 + q_min - q : 2 + q_max - q
         ] & (cells_window < T)
-        ii = cells_window.reshape(mask.size)[np.flatnonzero(mask.flat)]
+        ii = cells_window.reshape(mask.size)[np.where(mask.ravel())[0]]
         return not (((point[None, :] - points[ii]) ** 2).sum(axis=-1) < 2).any()
 
     # `idc_arr[:avail_count]` holds indices into `cell_idc` for the cells
