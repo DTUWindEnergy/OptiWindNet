@@ -962,3 +962,103 @@ def test_set_problem_coerces_a_plain_mapping(P_A_toy):
     from_mapping = ring_var_count({'topology': 'ringed'})
     from_options = ring_var_count(ModelOptions(topology='ringed'))
     assert from_mapping == from_options > 0
+
+
+def test_model_options_help(capsys):
+    ModelOptions.help()
+    captured = capsys.readouterr()
+    assert 'topology' in captured.out
+    assert 'feeder_route' in captured.out
+
+
+def test_calculate_bounds_invalid_max_feeders_ringed():
+    from optiwindnet.MILP._core import feeder_and_load_bounds, FeederLimit
+
+    with pytest.raises(ValueError, match='multiple of'):
+        feeder_and_load_bounds(
+            T=10,
+            capacity=5,
+            feeder_limit=FeederLimit.SPECIFIED,
+            balanced=False,
+            max_feeders=3,
+            feeders_per_subtree=2,
+        )
+
+
+def test_pool_handler_methods():
+    class DummyPoolHandler(core.PoolHandler):
+        def _objective_at(self, index: int) -> float:
+            return 999.0
+
+        def _topology_from_mip_pool(self) -> nx.Graph:
+            return nx.Graph()
+
+    handler = DummyPoolHandler()
+    with pytest.raises(AttributeError, match='must be called before'):
+        handler._incumbent_topology_from_pool()
+
+    handler.solution_info = core.SolutionInfo(
+        runtime=0.1, bound=10.0, objective=10.0, relgap=0.0, termination='optimal'
+    )
+    with pytest.raises(ValueError, match='Best solution-pool objective'):
+        handler._incumbent_topology_from_pool()
+
+
+def test_solver_gurobi_error_branches():
+    from optiwindnet.MILP.gurobi import SolverGurobi, OWNSolutionNotFound
+
+    solver = SolverGurobi()
+    with pytest.raises(AttributeError, match="has no attribute 'model'"):
+        solver.solve(time_limit=1.0, mip_gap=1e-3)
+
+    class FakeGurobiModel:
+        def getAttr(self, attr):
+            return 0
+
+    term = type('Term', (), {'name': 'infeasible'})()
+
+    class FakeSolver:
+        options = {}
+        _solver_model = FakeGurobiModel()
+
+        def solve(self, model, **kwargs):
+            return {'Solver': [{'Termination condition': term}]}
+
+        def close(self):
+            pass
+
+    solver.model = object()  # pyrefly: ignore[bad-assignment]
+    solver.solver = FakeSolver()
+    solver.options = {}
+    solver.solve_kwargs = {}
+    with pytest.raises(OWNSolutionNotFound, match='Unable to find a solution'):
+        solver.solve(time_limit=1.0, mip_gap=1e-3)
+
+
+def test_solver_pyomo_error_branches(monkeypatch):
+    from optiwindnet.MILP.pyomo import SolverPyomo, OWNSolutionNotFound
+
+    solver = SolverPyomo('highs')
+    with pytest.raises(AttributeError, match="has no attribute 'model'"):
+        solver.solve(time_limit=1.0, mip_gap=1e-3)
+
+    with pytest.raises(AttributeError, match="has no attribute 'model'"):
+        solver._load_incumbent_topology()
+
+    term = type('Term', (), {'name': 'infeasible'})()
+
+    class PyomoResult(dict):
+        solution = []
+
+    class FakePyomoSolver:
+        options = {}
+
+        def solve(self, model, **kwargs):
+            return PyomoResult({'Solver': [{'Termination condition': term}]})
+
+    solver.model = object()  # pyrefly: ignore[bad-assignment]
+    solver.solver = FakePyomoSolver()
+    solver.options = {}
+    solver.solve_kwargs = {}
+    with pytest.raises(OWNSolutionNotFound, match='Unable to find a solution'):
+        solver.solve(time_limit=1.0, mip_gap=1e-3)

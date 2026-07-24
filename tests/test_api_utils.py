@@ -219,3 +219,40 @@ def test_buffer_border_obs_negative_raises():
     wfn = tiny_wfn()
     with pytest.raises(ValueError, match='must be equal or greater than 0'):
         api_utils.buffer_border_obs(wfn.L, buffer_dist=-1.0)
+
+
+def test_shrink_polygon_safely_unexpected_geometry_returns_none(caplog):
+    from shapely.geometry import Point
+
+    class FakeGeometry:
+        def buffer(self, dist):
+            return Point(0, 0)
+
+    with caplog.at_level(logging.WARNING, logger=api_utils.__name__):
+        res = api_utils.shrink_polygon_safely(FakeGeometry(), shrink_dist=1.0, indx=5)
+    assert res is None
+    assert any('Unexpected geometry type' in message for message in caplog.messages)
+
+
+def test_buffer_border_obs_empty_obstacle_entry():
+    wfn = tiny_wfn()
+    L = wfn.L.copy()
+    L.graph['obstacles'] = [np.array([], dtype=int)]
+    L_buffered, pre_buf = api_utils.buffer_border_obs(L, buffer_dist=1.0)
+    assert L_buffered is not None
+    assert isinstance(pre_buf, dict)
+
+
+def test_plot_org_buff():
+    import matplotlib.pyplot as plt
+
+    borderC = np.array([(0, 0), (10, 0), (10, 10), (0, 10)])
+    border_bufferedC = np.array([(1, 1), (9, 1), (9, 9), (1, 9)])
+    ax = api_utils.plot_org_buff(
+        borderC=borderC,
+        border_bufferedC=border_bufferedC,
+        obstaclesC=[],
+        obstacles_bufferedC=[],
+    )
+    assert ax is not None
+    plt.close('all')

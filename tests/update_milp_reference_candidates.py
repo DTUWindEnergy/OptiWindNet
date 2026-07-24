@@ -7,8 +7,7 @@ promotes that file without rerunning any solver.
 
 Run one candidate from the repository root, for example::
 
-    NUMBA_CACHE_DIR="$PWD/.numba_cache" \
-        .venv/bin/python -m tests.update_milp_reference_candidates neart 5
+    python -m tests.update_milp_reference_candidates neart 5
 
 For batches, import :func:`update_candidates` and pass multiple
 ``MILPCase`` values. Site bundles are reused by handle, so cases on

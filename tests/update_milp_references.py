@@ -2,8 +2,7 @@
 
 Run from the repository root with::
 
-    NUMBA_CACHE_DIR="$PWD/.numba_cache" \
-        .venv/bin/python -m tests.update_milp_references
+    python -m tests.update_milp_references
 
 The output is a dictionary keyed by the solver-independent problem key. Each
 value keeps the proven bound, objective, and topology together as one atomic

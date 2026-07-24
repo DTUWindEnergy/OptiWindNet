@@ -695,3 +695,66 @@ def test_buffer_border_obs_with_border_positive_shrinks_obstacles():
         isinstance(wfn.L.graph['obstacles'], list)
         and len(wfn.L.graph['obstacles']) == 0
     )
+
+
+def test_wfn_repr_and_repr_svg():
+    unsolved = tiny_wfn(optimize=False)
+    repr_unsolved = repr(unsolved)
+    assert 'WindFarmNetwork' in repr_unsolved
+    assert 'unsolved' in repr_unsolved
+
+    svg_unsolved = unsolved._repr_svg_()
+    assert isinstance(svg_unsolved, str)
+    assert '<svg' in svg_unsolved
+
+    solved = tiny_wfn(optimize=True)
+    repr_solved = repr(solved)
+    assert 'length=' in repr_solved
+
+    svg_solved = solved._repr_svg_()
+    assert isinstance(svg_solved, str)
+    assert '<svg' in svg_solved
+
+
+def test_wfn_solution_info():
+    wfn = tiny_wfn(optimize=True)
+    info = wfn.solution_info()
+    assert isinstance(info, dict)
+    assert info.get('router') == 'EWRouter'
+    assert info.get('capacity') == wfn.cables_capacity
+
+
+def test_milp_router_warmup_fallback_and_retry_exhaustion(monkeypatch):
+    from optiwindnet.MILP import OWNSolutionNotFound, OWNWarmupFailed
+
+    # Create a fake solver that raises OWNWarmupFailed on set_problem with warmstart
+    class FakeSolver:
+        def __init__(self):
+            self.model_options = ModelOptions()
+            self.metadata = type('Meta', (), {'warmed_by': ''})()
+
+        def set_problem(self, P, A, capacity, model_options, warmstart=None):
+            if warmstart is not None and not getattr(self, '_passed_warmup', False):
+                self._passed_warmup = True
+                raise OWNWarmupFailed('Warmup failed')
+
+        def solve(self, **kwargs):
+            raise OWNSolutionNotFound('No solution')
+
+    monkeypatch.setattr(api, 'solver_factory', lambda name: FakeSolver())
+
+    router = MILPRouter(solver_name='ortools.cp_sat', time_limit=0.1, mip_gap=1e-3)
+    solved = tiny_wfn()
+    with pytest.raises(OWNSolutionNotFound, match='after 1 retries'):
+        router.route(
+            solved.P, solved.A, solved.cables, solved.cables_capacity, num_retries=1
+        )
+
+
+def test_wfn_handles_sweep():
+    from .sitecache import SELECTED_HANDLES, get_location
+
+    for handle in SELECTED_HANDLES:
+        wfn = WindFarmNetwork(cables=[(5, 0.0)], L=get_location(handle), handle=handle)
+        assert wfn.handle == handle
+        assert wfn.L.graph['handle'] == handle

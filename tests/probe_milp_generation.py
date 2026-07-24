@@ -2,8 +2,7 @@
 
 Run from the repository root, for example::
 
-    NUMBA_CACHE_DIR="$PWD/.numba_cache" \
-        .venv/bin/python -m tests.probe_milp_generation neart 5
+    python -m tests.probe_milp_generation neart 5
 
 The probe builds the planar mesh, constructs a feasible warm start, attaches
 the model to the selected backend, solves it, and decodes the best

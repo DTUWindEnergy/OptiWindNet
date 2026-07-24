@@ -2,8 +2,7 @@
 
 Run from the repository root with::
 
-    NUMBA_CACHE_DIR="$PWD/.numba_cache" \
-        .venv/bin/python -m tests.update_nodeset_digest_location_map
+    python -m tests.update_nodeset_digest_location_map
 
 Both the original and, where applicable, single-root coordinate sets map to
 the base location name. A location name is its bundled data filename stem.
@@ -21,19 +20,19 @@ from optiwindnet.fingerprint import fingerprint_coordinates
 from optiwindnet.importer import load_repository
 from optiwindnet.interarraylib import as_single_root
 
+from .nodeset_digest_aliases import NODESET_DIGEST_ALIASES
 from .sitecache import (
     NODESET_DIGEST_LOCATION_MAP_FILE,
     bundled_location_path,
 )
 
 
-def _add_location(
+def _add_digest(
     mapping: dict[bytes, str],
-    L: nx.Graph,
+    digest: bytes,
     *,
     name: str,
 ) -> None:
-    digest = fingerprint_coordinates(L.graph['VertexC'])[0]
     previous = mapping.setdefault(digest, name)
     if previous != name:
         raise ValueError(
@@ -42,8 +41,21 @@ def _add_location(
         )
 
 
+def _add_location(
+    mapping: dict[bytes, str],
+    L: nx.Graph,
+    *,
+    name: str,
+) -> None:
+    _add_digest(
+        mapping,
+        fingerprint_coordinates(L.graph['VertexC'])[0],
+        name=name,
+    )
+
+
 def generate() -> dict[bytes, str]:
-    """Map every bundled base and single-root node set to its filename stem."""
+    """Map bundled node sets and verified base-site aliases to filename stems."""
     mapping = {}
     for L in load_repository():
         name = L.graph['name']
@@ -51,6 +63,14 @@ def generate() -> dict[bytes, str]:
         _add_location(mapping, L, name=name)
         if L.graph['R'] > 1:
             _add_location(mapping, as_single_root(L), name=name)
+    for alias, canonical in NODESET_DIGEST_ALIASES.items():
+        try:
+            name = mapping[canonical]
+        except KeyError as exc:
+            raise ValueError(
+                f'alias target is not a canonical bundled digest: {canonical.hex()}'
+            ) from exc
+        _add_digest(mapping, alias, name=name)
     return mapping
 
 

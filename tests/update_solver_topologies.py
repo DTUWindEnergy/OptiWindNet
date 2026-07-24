@@ -2,7 +2,7 @@
 
 Run from the repository root with::
 
-    NUMBA_CACHE_DIR="$PWD/.numba_cache" python -m tests.update_solver_topologies
+    python -m tests.update_solver_topologies
 """
 
 import pickle

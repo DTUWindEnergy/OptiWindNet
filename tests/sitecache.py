@@ -22,6 +22,10 @@ from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.synthetic import toyfarm
 
 from . import paths
+from .nodeset_digest_aliases import (
+    NODESET_DIGEST_ALIASES,
+    nodeset_digest_alias_coordinates,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,8 +194,9 @@ def get_bundle(
 @cache
 def get_bundle_from_nodeset_digest(digest: bytes) -> SiteBundle:
     """Return the location variant identified by a coordinate digest."""
+    mapping = nodeset_digest_location_map()
     try:
-        name = nodeset_digest_location_map()[digest]
+        name = mapping[digest]
     except KeyError as exc:
         raise KeyError(f'no location for nodeset digest {digest.hex()}') from exc
 
@@ -203,6 +208,30 @@ def get_bundle_from_nodeset_digest(digest: bytes) -> SiteBundle:
         if actual == digest:
             P, A = make_planar_embedding(L)
             return SiteBundle(L.graph['handle'], digest, L, P, A)
+
+    try:
+        canonical_digest = NODESET_DIGEST_ALIASES[digest]
+    except KeyError as exc:
+        raise AssertionError(
+            f'location {name!r} does not match mapped digest {digest.hex()}'
+        ) from exc
+    if mapping.get(canonical_digest) != name:
+        raise AssertionError(
+            f'alias target does not map to location {name!r}: {canonical_digest.hex()}'
+        )
+    for single_root in variants:
+        L = as_single_root(base) if single_root else base
+        actual = fingerprint_coordinates(L.graph['VertexC'])[0]
+        if actual == canonical_digest:
+            historical_vertexc = nodeset_digest_alias_coordinates()[digest]
+            if historical_vertexc.shape != L.graph['VertexC'].shape:
+                raise AssertionError(
+                    f'location {name!r} shape does not match alias coordinates'
+                )
+            L = L.copy()
+            L.graph['VertexC'] = historical_vertexc
+            P, A = make_planar_embedding(L)
+            return SiteBundle(L.graph['handle'], digest, L, P, A)
     raise AssertionError(
-        f'location {name!r} does not match mapped nodeset digest {digest.hex()}'
+        f'location {name!r} does not match alias target {canonical_digest.hex()}'
     )

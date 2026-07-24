@@ -179,6 +179,8 @@ HGS_CASES = (
 LKH_CASES = (
     BaselineCase('lkh', 'example_location', 3),
     BaselineCase('lkh', 'example_location', 3, ringed=True),
+    BaselineCase('lkh', 'example_location', 5, balanced=True),
+    BaselineCase('lkh', 'morayeast', 8),
     BaselineCase('lkh', 'horns', 10),
 )
 
@@ -240,6 +242,13 @@ MILP_BOUNDARY_CASES = (
         'ortools.cp_sat',
         5,
         ModelOptions(feeder_limit='exactly', max_feeders=3, balanced=True),
+    ),
+    MILPCase('toy', 'ortools.cp_sat', 5, ModelOptions(feeder_limit='unlimited')),
+    MILPCase(
+        'toy',
+        'ortools.cp_sat',
+        5,
+        ModelOptions(topology='ringed', feeder_route='straight'),
     ),
     MILPCase('toy', 'ortools.cp_sat', 5, ModelOptions(), mip_gap=0.2),
 )
