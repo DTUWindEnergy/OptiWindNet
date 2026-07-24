@@ -55,8 +55,8 @@ _REFERENCE_CASE_INDICES = (0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15)
 # problems are covered; the remaining five executions repeat cases across
 # different adapters.
 _EXECUTION_ASSIGNMENTS = (
-    ('ortools.cp_sat', 1, False),
-    ('ortools.cp_sat', 0, True),
+    ('ortools.cp_sat', 6, False),
+    ('ortools.cp_sat', 1, True),
     ('ortools.gscip', 13, False),
     ('ortools.gscip', 2, True),
     ('ortools.highs', 14, False),
@@ -67,12 +67,12 @@ _EXECUTION_ASSIGNMENTS = (
     ('scip', 8, True),
     ('gurobi', 3, False),
     ('gurobi', 9, True),
-    ('cplex', 6, False),
-    ('cplex', 11, True),
+    ('cplex', 13, False),
+    ('cplex', 15, True),
     ('cbc', 15, False),
     ('cbc', 12, True),
     ('fscip', 13, False),
-    ('fscip', 13, True),
+    ('fscip', 11, True),
 )
 
 
