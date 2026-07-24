@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import pickle
+import warnings
 from pathlib import Path
 
-from optiwindnet.MILP import solver_factory
+from optiwindnet.MILP import OWNSolutionNotFound, solver_factory
 from optiwindnet.terse import LinkScope, TerseLinks
 
 from .cases import (
@@ -33,7 +34,20 @@ def solve_milp_case(case: MILPCase):
         capacity=case.capacity,
         model_options=case.model_options,
     )
-    info = solver.solve(time_limit=case.time_limit, mip_gap=case.mip_gap)
+    initial_time_limit = case.time_limit
+    try:
+        info = solver.solve(time_limit=initial_time_limit, mip_gap=case.mip_gap)
+    except OWNSolutionNotFound:
+        fallback_limit = initial_time_limit * 3.0
+        warnings.warn(
+            f'Solver {case.solver_name!r} raised OWNSolutionNotFound within '
+            f'{initial_time_limit} s (likely due to high CPU load); '
+            f'retrying with {fallback_limit} s time limit.',
+            UserWarning,
+            stacklevel=2,
+        )
+        info = solver.solve(time_limit=fallback_limit, mip_gap=case.mip_gap)
+
     S = solver.get_incumbent_topology()
     return info, S
 

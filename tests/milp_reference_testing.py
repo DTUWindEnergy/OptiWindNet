@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import pickle
+import warnings
 from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -13,7 +14,7 @@ from typing import Any
 import networkx as nx
 
 from optiwindnet.fingerprint import fingerprint_coordinates
-from optiwindnet.MILP import SolutionInfo, solver_factory
+from optiwindnet.MILP import OWNSolutionNotFound, SolutionInfo, solver_factory
 from optiwindnet.terse import LinkScope, TerseLinks
 
 from .cases import MILP_ADAPTER_CASES, MILPCase, case_node_id
@@ -331,6 +332,19 @@ def solve_milp_reference_execution(
         model_options=case.model_options,
         warmstart=warmstart,
     )
-    info = solver.solve(time_limit=TEST_TIME_LIMIT, mip_gap=case.mip_gap)
+    initial_time_limit = TEST_TIME_LIMIT
+    try:
+        info = solver.solve(time_limit=initial_time_limit, mip_gap=case.mip_gap)
+    except OWNSolutionNotFound:
+        fallback_limit = initial_time_limit * 3.0
+        warnings.warn(
+            f'Solver {case.solver_name!r} raised OWNSolutionNotFound within '
+            f'{initial_time_limit} s (likely due to high CPU load); '
+            f'retrying with {fallback_limit} s time limit.',
+            UserWarning,
+            stacklevel=2,
+        )
+        info = solver.solve(time_limit=fallback_limit, mip_gap=case.mip_gap)
+
     S = solver.get_incumbent_topology()
     return info, S, solver.metadata.warmed_by
