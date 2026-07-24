@@ -7,20 +7,29 @@ import numpy as np
 import pytest
 
 import optiwindnet.pathfinding as pathfinding
-from optiwindnet.fingerprint import fingerprint_coordinates
 from optiwindnet.geometric import is_crossing
-from optiwindnet.importer import load_repository
 from optiwindnet.interarraylib import (
     G_from_S,
     S_from_G,
-    as_single_root,
+    add_ring_to_S,
+    assign_cables,
+    calcload,
 )
-from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
 
+from .cases import (
+    CONSTRUCTOR_CASES,
+    HGS_CASES,
+    case_node_id,
+    expected_topology,
+    topology_golden_key,
+)
 from .helpers import canonical_edges, tiny_wfn
+from .producers import hgs_topology
+from .sitecache import get_bundle, get_bundle_from_nodeset_digest
+from .solver_topologies import load_solver_topologies
 
 PATHFINDER_GOLDEN_FILE = Path(__file__).with_name('pathfinder_golden.pkl')
 
@@ -47,6 +56,7 @@ def _load_pathfinder_golden() -> tuple[TerseLinks, ...]:
 
 
 PATHFINDER_CASES = _load_pathfinder_golden()
+SOLVER_TOPOLOGIES = load_solver_topologies()
 
 
 def _edges_cross(G):
@@ -94,31 +104,21 @@ def _pathfinder_case_id(case: TerseLinks) -> str:
 
 @pytest.fixture(scope='module')
 def location_meshes():
-    """Build the navigation mesh for each bundled golden-case location."""
+    """Load only the explicitly mapped sites used by the golden artifact."""
     wanted = {
         case.nodeset_digest
         for case in PATHFINDER_CASES
         if case.nodeset_digest is not None
     }
-    locations = load_repository()
-    meshes = {}
-    for original in locations:
-        L = as_single_root(original)
-        digest = fingerprint_coordinates(L.graph['VertexC'])[0]
-        if digest not in wanted:
-            continue
-        P, A = make_planar_embedding(L)
-        meshes[digest] = L, P, A
-    missing = wanted - meshes.keys()
-    assert not missing, f'missing bundled locations for digests: {missing}'
-    return meshes
+    return {digest: get_bundle_from_nodeset_digest(digest) for digest in wanted}
 
 
 @pytest.mark.parametrize('case', PATHFINDER_CASES, ids=_pathfinder_case_id)
 def test_create_detours_matches_milp_routeset(case, location_meshes):
     """Reproduce curated stored routesets on their bundled locations."""
     assert case.nodeset_digest is not None
-    L, P, A = location_meshes[case.nodeset_digest]
+    bundle = location_meshes[case.nodeset_digest]
+    L, P, A = bundle.L, bundle.P, bundle.A
 
     # Decode the stored, detoured routeset on the freshly loaded location, then
     # discard its geometry to recover only the solver topology S.
@@ -161,6 +161,17 @@ def _make_crossing_case():
     wfn = tiny_wfn(cables=1)
     G_tent = G_from_S(wfn.S, wfn.A)
     return G_tent, wfn.P, wfn.A
+
+
+def test_no_crossing_fast_path_detags_tentative_feeders():
+    G_tentative, P, A = _make_crossing_case()
+    finder = PathFinder(G_tentative, planar=P, A=A)
+    finder.Xings = []
+
+    G = finder.create_detours()
+
+    assert 'tentative' not in G.graph
+    assert all('kind' not in G[root][node] for root, node in finder.tentative)
 
 
 def test_pathfinder_detects_crossings():
@@ -373,23 +384,178 @@ def test_pathfinder_radial_topology():
     assert _edges_cross(G_det) == []
 
 
+def test_get_mesh_endpoint_prefers_the_more_anchored_endpoint():
+    finder = object.__new__(PathFinder)
+
+    assert finder._get_mesh_endpoint((1, 2), {1: {3}, 2: {3, 4}}) == 2
+    assert finder._get_mesh_endpoint((1, 2), {1: {3, 4}, 2: {3}}) == 1
+    assert finder._get_mesh_endpoint((1, 2), {1: {3}, 2: {4}}) == 2
+    assert finder._get_mesh_endpoint((1, 2), {1: {3}}) == 1
+    assert finder._get_mesh_endpoint((1, 2), {}) is None
+
+
+def test_pathfinder_ringed_topology():
+    """Detouring preserves connectivity and open points for a ringed input."""
+    wfn = tiny_wfn()
+    T, R = (wfn.A.graph[key] for key in 'TR')
+    S = nx.Graph(
+        T=T,
+        R=R,
+        topology=Topology.RINGED,
+        creator='synthetic',
+        capacity=3,
+    )
+    S.add_nodes_from(range(-R, 0))
+    for subtree, start in enumerate(range(0, T, 6)):
+        add_ring_to_S(
+            S,
+            (-1, -1),
+            list(range(start, min(start + 6, T))),
+            subtree=subtree,
+            A=wfn.A,
+        )
+    calcload(S)
+
+    G = PathFinder(G_from_S(S, wfn.A), planar=wfn.P, A=wfn.A).create_detours()
+
+    assert G.graph['topology'] is Topology.RINGED
+    assert _all_turbines_connected(G)
+    assert _edges_cross(G) == []
+    assert any(data.get('load') == 0 for *_, data in G.edges(data=True))
+
+
+@pytest.mark.parametrize(
+    'case',
+    [case for case in CONSTRUCTOR_CASES if case.exact_golden],
+    ids=case_node_id,
+)
+def test_pathfinder_routes_curated_constructor_topologies(case):
+    """Route stored producer output here, keeping solver tests topology-only."""
+    bundle = get_bundle(case.site)
+    P, A = bundle.P, bundle.A
+    encoded = SOLVER_TOPOLOGIES[topology_golden_key(case)]
+    assert isinstance(encoded, TerseLinks)
+    S = encoded.to_topology(capacity=case.capacity, creator='golden')
+
+    G = PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
+    assign_cables(G, [(case.capacity, 1.0)])
+
+    assert _all_turbines_connected(G)
+    assert _edges_cross(G) == []
+    assert not any(data.get('kind') == 'tentative' for *_, data in G.edges(data=True))
+
+
+@pytest.mark.parametrize(
+    'case',
+    [case for case in HGS_CASES if case.site == 'london'],
+    ids=case_node_id,
+)
+def test_pathfinder_routes_multiroot_hgs_topology(case):
+    """Exercise detouring on cached multi-root RADIAL and RINGED topologies."""
+    bundle = get_bundle(case.site)
+    P, A = bundle.P, bundle.A
+    S = hgs_topology(case)
+
+    G = PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
+    assign_cables(G, [(case.capacity, 1.0)])
+
+    assert _all_turbines_connected(G)
+    assert _edges_cross(G) == []
+    assert G.graph['topology'] is expected_topology(case)
+
+
+def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
+    """The no-crossing fast path compacts clone ids after stunt removal."""
+    bundle = get_bundle('borkum2')
+    P, A = bundle.P, bundle.A
+    R, T, B_A = (A.graph[key] for key in 'RTB')
+    stunt_primes = set(A.graph['stunts_primes'])
+    stunt_nodes = set(range(T + B_A - len(stunt_primes), T + B_A))
+
+    def minimal_routeset(gate, leaf):
+        S = nx.Graph(
+            R=R,
+            T=T,
+            capacity=T,
+            creator='synthetic',
+            has_loads=True,
+            topology=Topology.RADIAL,
+        )
+        S.add_node(-1, load=2)
+        S.add_node(gate, load=2, subtree=0)
+        S.add_node(leaf, load=1, subtree=0)
+        S.add_edge(-1, gate, load=2, reverse=False)
+        S.add_edge(gate, leaf, load=1, reverse=False)
+        return S
+
+    stunt_edges = [
+        (u, v)
+        for u, v, midpath in A.edges(data='midpath')
+        if 0 <= u < T
+        and 0 <= v < T
+        and midpath
+        and any(node in stunt_nodes for node in midpath)
+    ]
+    for u, v in stunt_edges:
+        for gate, leaf in ((u, v), (v, u)):
+            tentative = G_from_S(minimal_routeset(gate, leaf), A)
+            fnT = tentative.graph.get('fnT')
+            if fnT is None:
+                continue
+            contour_nodes = {
+                node
+                for node, data in tentative.nodes(data=True)
+                if data.get('kind') == 'contour'
+                and (fnT[node] in stunt_nodes or fnT[node] in stunt_primes)
+            }
+            if not contour_nodes:
+                continue
+            assert all(
+                fnT[node] < tentative.graph['VertexC'].shape[0]
+                for node in contour_nodes
+            )
+            finder = PathFinder(tentative, planar=P, A=A)
+            if not finder.Xings:
+                break
+        else:
+            continue
+        break
+    else:
+        pytest.skip('no crossing-free stunt-contour routeset found for borkum2')
+
+    G = finder.create_detours()
+    R, T, B = (G.graph[key] for key in 'RTB')
+    C, D = (G.graph.get(key, 0) for key in 'CD')
+    fnT = G.graph['fnT']
+    contours = {
+        node for node, data in G.nodes(data=True) if data.get('kind') == 'contour'
+    }
+    assert finder.Xings == []
+    assert C > 0
+    assert len(fnT) == T + B + C + D + R
+    assert contours == set(range(T + B, T + B + C))
+    assert all(fnT[node] < T + B for node in contours)
+    assert not any(fnT[node] in stunt_nodes for node in contours)
+
+
 # ---------- route-fence chain scenario (spanning + touching chains) ----------
 
 
-def test_spanning_chain_detours_crossing_free(locations):
+def test_spanning_chain_detours_crossing_free():
     """A real layout whose routeset runs cables along the border builds chains.
 
-    Yi-2019 at capacity 8 yields a spanning route fence (on-constraint segment
+    ``yi_2019`` at capacity 8 yields a spanning route fence (on-constraint segment
     of length >= 2) plus a touching fence, exercising both the spanning-chain
     pairing and the touching-chain construction in `_precompute_chains`. The
     detoured routeset must be crossing-free with every turbine connected.
     """
-    from optiwindnet.api import EWRouter, WindFarmNetwork
+    from optiwindnet.heuristics import constructor
 
-    wfn = WindFarmNetwork(L=locations.yi_2019, cables=[(8, 1.0)], router=EWRouter())
-    wfn.optimize()
-    G_tent = G_from_S(wfn.S, wfn.A)
-    pf = PathFinder(G_tent, planar=wfn.P, A=wfn.A)
+    bundle = get_bundle('yi_2019', single_root=True)
+    P, A = bundle.P, bundle.A
+    S = constructor(A, capacity=8, method='rootlust')
+    G_tent = G_from_S(S, A)
+    pf = PathFinder(G_tent, planar=P, A=A)
 
     # Guard that this config still exercises chain topology (it is the point of
     # the test); if a heuristic change stops producing a spanning fence here,

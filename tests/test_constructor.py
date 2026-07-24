@@ -18,13 +18,19 @@ import networkx as nx
 import pytest
 
 from optiwindnet.heuristics import constructor
-from optiwindnet.importer import L_from_yaml
-from optiwindnet.interarraylib import G_from_S, validate_routeset
-from optiwindnet.mesh import make_planar_embedding
-from optiwindnet.pathfinding import PathFinder
+from optiwindnet.interarraylib import rings_from_S
+from optiwindnet.types import Topology
 
-from . import paths
+from .cases import (
+    CONSTRUCTOR_CASES,
+    case_node_id,
+    expected_topology,
+    topology_golden_key,
+)
 from .helpers import terminal_terminal_crossings
+from .sitecache import get_bundle
+from .solver_topologies import assert_matches_golden, load_solver_topologies
+from .topology_assertions import assert_topology
 
 METHODS = ('esau_williams', 'biased_EW', 'rootlust', 'radial_EW')
 BRANCHED_METHODS = ('esau_williams', 'biased_EW', 'rootlust')
@@ -34,20 +40,21 @@ CAPACITIES = (3, 5, 8)
 # multi-root case (the latter exercises the per-root loops over `roots`,
 # `rootmask__` and `is_root_nb__`). Turbine count is irrelevant: the heuristic
 # is fast even at T~100.
-_LOC_FILES = {
-    'cazzaro_1ss': 'Cazzaro-2022.yaml',  # R=1, T=50
-    'moray_3ss': 'Moray East.yaml',  # R=3, T=100
+_LOCATIONS = {
+    'cazzaro_2022_1ss': 'cazzaro_2022',
+    'morayeast_3ss': 'morayeast',
 }
+_SOLVER_GOLDENS = load_solver_topologies()
 
 
-@pytest.fixture(params=list(_LOC_FILES.values()), ids=list(_LOC_FILES), scope='session')
+@pytest.fixture(params=list(_LOCATIONS.values()), ids=list(_LOCATIONS), scope='session')
 def mesh(request):
     """Planar embedding + available-links graph (P, A) for a data-set location.
 
     Built once per location per session (the mesh is the only slow part).
     """
-    L = L_from_yaml(paths.DATA_DIR / request.param)
-    return make_planar_embedding(L)
+    bundle = get_bundle(request.param)
+    return bundle.P, bundle.A
 
 
 # --------------------------------------------------------------------------- #
@@ -62,18 +69,64 @@ def _each_terminal_reaches_exactly_one_root(S):
     return True
 
 
-def _route_end_to_end(S, P, A):
-    """Mirror EWRouter.route: turn S into a detoured routeset G.
-
-    Feeder rerouting must respect the topology S declares, or PathFinder can
-    hand back a routeset that no longer has the shape it solved for.
-    """
-    return PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
-
-
 # --------------------------------------------------------------------------- #
 # A. structural / capacity invariants on raw S
 # --------------------------------------------------------------------------- #
+@pytest.mark.parametrize('case', CONSTRUCTOR_CASES, ids=case_node_id)
+def test_constructor_topology_cases(case):
+    """The broad constructor matrix validates undetoured topology output."""
+    A = get_bundle(case.site).A
+    S = constructor(
+        A,
+        capacity=case.capacity,
+        method=case.method,
+        bias_margin=case.bias_margin,
+        weigh_detours=case.feeder_route.value == 'segmented',
+        straight_feeder_route=case.feeder_route.value == 'straight',
+    )
+    assert_topology(S, expected_topology(case), case.capacity)
+    assert terminal_terminal_crossings(S, A.graph['VertexC']) == []
+    if case.exact_golden:
+        assert_matches_golden(S, _SOLVER_GOLDENS[topology_golden_key(case)])
+
+
+@pytest.mark.parametrize('capacity', (3, 5, 8))
+def test_constructor_ringed_capacity_sweep(capacity):
+    A = get_bundle('albatros').A
+    S = constructor(A, capacity=capacity, method='ringed')
+    assert_topology(S, Topology.RINGED, capacity)
+    assert all(len(terminals) <= 2 * capacity for _, terminals in rings_from_S(S))
+
+
+def test_constructor_ringed_multi_root_uses_every_root():
+    A = get_bundle('neart').A
+    S = constructor(A, capacity=5, method='ringed')
+    assert_topology(S, Topology.RINGED, 5)
+    roots_used = {root for roots, _ in rings_from_S(S) for root in roots}
+    assert roots_used == set(range(-A.graph['R'], 0))
+
+
+@pytest.mark.parametrize('bias_margin', (0.0, 0.1, 0.5))
+def test_constructor_ringed_bias_margin(bias_margin):
+    A = get_bundle('albatros').A
+    S = constructor(A, capacity=5, method='ringed', bias_margin=bias_margin)
+    assert_topology(S, Topology.RINGED, 5)
+
+
+def test_constructor_ringed_exact_double_capacity_boundary():
+    A = get_bundle('example_location').A
+    S = constructor(A, capacity=6, method='ringed')
+    assert_topology(S, Topology.RINGED, 6)
+    assert max(map(lambda ring: len(ring[1]), rings_from_S(S))) <= 12
+
+
+def test_constructor_ringed_odd_site_exercises_single_terminal_ring():
+    A = get_bundle('london').A
+    S = constructor(A, capacity=1, method='ringed')
+    assert_topology(S, Topology.RINGED, 1)
+    assert any(len(terminals) == 1 for _, terminals in rings_from_S(S))
+
+
 @pytest.mark.parametrize('method', METHODS)
 @pytest.mark.parametrize('capacity', CAPACITIES)
 def test_output_is_capacitated_forest(mesh, method, capacity):
@@ -113,17 +166,6 @@ def test_graph_metadata(mesh, method):
 
 
 # --------------------------------------------------------------------------- #
-# B. end-to-end validity (constructor -> PathFinder -> validate_routeset)
-# --------------------------------------------------------------------------- #
-@pytest.mark.parametrize('method', METHODS)
-def test_end_to_end_routeset_is_valid(mesh, method):
-    P, A = mesh
-    S = constructor(A, capacity=5, method=method)
-    G = _route_end_to_end(S, P, A)
-    assert validate_routeset(G) == []
-
-
-# --------------------------------------------------------------------------- #
 # C. method-specific behaviour
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize('capacity', (3, 4, 5, 6, 7))
@@ -150,12 +192,9 @@ def test_branched_methods_omit_num_insertions(mesh, method):
 @pytest.mark.parametrize('capacity', CAPACITIES)
 def test_rootlust_capacity_sweep_is_valid(mesh, capacity):
     """rootlust over several capacities exercises its triangle-swap fix path."""
-    P, A = mesh
+    _, A = mesh
     S = constructor(A, capacity=capacity, method='rootlust')
-    assert nx.is_forest(S)
-    assert S.graph['max_load'] <= capacity
-    G = _route_end_to_end(S, P, A)
-    assert validate_routeset(G) == []
+    assert_topology(S, Topology.BRANCHED, capacity)
 
 
 def test_custom_rootlust_param(mesh):
@@ -171,12 +210,11 @@ def test_custom_rootlust_param(mesh):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize('method', ('biased_EW', 'rootlust'))
 def test_straight_feeder_route_is_valid(mesh, method):
-    P, A = mesh
+    _, A = mesh
     S = constructor(
         A, capacity=5, method=method, weigh_detours=False, straight_feeder_route=True
     )
-    G = _route_end_to_end(S, P, A)
-    assert validate_routeset(G) == []
+    assert_topology(S, Topology.BRANCHED, 5)
 
 
 def test_straight_feeder_route_with_weigh_detours_warns(mesh, caplog):
@@ -207,3 +245,10 @@ def test_maxiter_failsafe_breaks_and_logs(mesh, caplog):
     assert any('maxiter' in r.getMessage() for r in caplog.records)
     assert nx.is_forest(S)
     assert S.number_of_edges() == A.graph['T']
+
+
+def test_debug_logging_reports_heap_state(caplog):
+    A = get_bundle('example_location').A
+    with caplog.at_level(logging.DEBUG, logger='optiwindnet.heuristics.constructor'):
+        constructor(A, capacity=3, method='rootlust')
+    assert 'heap' in caplog.text

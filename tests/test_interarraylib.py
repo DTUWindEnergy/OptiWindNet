@@ -33,12 +33,87 @@ from optiwindnet.interarraylib import (
     pathdist,
     rings_from_S,
     scaffolded,
+    split_rings_and_calc_loads,
     terse_links_from_S,
     update_lengths,
     validate_topology,
 )
 
 from .helpers import assert_graph_equal, tiny_wfn
+from .sitecache import get_bundle
+
+
+@pytest.mark.parametrize('n', range(1, 13))
+def test_add_ring_to_S_canonical_shape(n):
+    S = nx.Graph(R=1, T=n)
+    S.add_node(-1)
+    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
+
+    feeders = [data['load'] for u, v, data in S.edges(data=True) if min(u, v) < 0]
+    open_points = [(u, v) for u, v, data in S.edges(data=True) if data.get('load') == 0]
+    arm_load = math.ceil(n / 2)
+    assert max(data['load'] for *_, data in S.edges(data=True)) == arm_load
+    if n == 1:
+        assert feeders == [1] and open_points == []
+    else:
+        assert sorted(feeders) == [n - arm_load, arm_load]
+        assert len(open_points) == 1
+    assert sum(S.nodes[t]['load'] for t in S.neighbors(-1)) == n
+    assert {S.nodes[t]['subtree'] for t in range(n)} == {0}
+
+
+@pytest.mark.parametrize('n', range(1, 13))
+@pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
+def test_rings_from_S_roundtrip(n, bridging):
+    R = 2 if bridging else 1
+    S = nx.Graph(R=R, T=n)
+    S.add_nodes_from(range(-R, 0))
+    roots = (-1, -2) if bridging else (-1, -1)
+    add_ring_to_S(S, roots, list(range(n)), subtree=0, A=None)
+
+    recovered_roots, ordered = rings_from_S(S)[0]
+    assert set(recovered_roots) == set(roots)
+    assert set(ordered) == set(range(n))
+
+
+def _path_form_S(R, paths):
+    T = sum(len(path) for _, path in paths)
+    S = nx.Graph(R=R, T=T)
+    S.add_nodes_from(range(-R, 0))
+    for root, ordered in paths:
+        S.add_edge(root, ordered[0])
+        S.add_edges_from(zip(ordered, ordered[1:]))
+    return S
+
+
+def test_split_rings_and_calc_loads_single_and_multi_root():
+    one = _path_form_S(1, [(-1, [0, 1, 2]), (-1, [3, 4])])
+    split_rings_and_calc_loads(one, nx.Graph())
+    assert validate_topology(one, capacity=2) == []
+    assert one.graph['topology'] is Topology.RINGED
+    assert one.nodes[-1]['load'] == 5
+
+    multi = _path_form_S(2, [(-2, [0, 1]), (-1, [2, 3, 4, 5]), (-1, [6])])
+    split_rings_and_calc_loads(multi, nx.Graph())
+    assert validate_topology(multi, capacity=3) == []
+    by_root = {
+        root: {
+            frozenset(ordered)
+            for roots, ordered in rings_from_S(multi)
+            if roots == (root, root)
+        }
+        for root in (-2, -1)
+    }
+    assert by_root[-2] == {frozenset({0, 1})}
+    assert by_root[-1] == {frozenset({2, 3, 4, 5}), frozenset({6})}
+
+
+def test_split_rings_rejects_branching_subtree():
+    S = nx.Graph(R=1, T=3)
+    S.add_edges_from([(-1, 0), (0, 1), (0, 2)])
+    with pytest.raises(ValueError):
+        split_rings_and_calc_loads(S, nx.Graph())
+
 
 # ----------
 # tests
@@ -129,6 +204,17 @@ def test_assign_cables():
     cables4 = [(1, 100.0), (2, 150.0), (5, 200.0)]
     assign_cables(G4, cables4)
     assert G4.graph['capacity'] == 5
+
+
+def test_assign_cables_prices_ring_open_point():
+    G = nx.Graph(max_load=1)
+    G.add_edge(-1, 0, load=1, length=2.0)
+    G.add_edge(0, 1, load=0, length=3.0)
+
+    assign_cables(G, [(1, 4.0)])
+
+    assert G[0][1]['cable'] == 0
+    assert G[0][1]['cost'] == 12.0
 
 
 def test_describe_G():
@@ -349,6 +435,38 @@ def test_G_from_S():
         assert actual_kind == expected_kind
 
 
+def test_G_from_S_expands_a_contoured_ring_open_point():
+    A = get_bundle('borkum2').A
+    T, R = (A.graph[key] for key in 'TR')
+    u, v = next(
+        (u, v)
+        for u, v, midpath in A.edges(data='midpath')
+        if 0 <= u < T and 0 <= v < T and midpath
+    )
+    root = -1
+    S = nx.Graph(
+        T=T,
+        R=R,
+        topology=Topology.RINGED,
+        capacity=1,
+        has_loads=True,
+        creator='synthetic',
+    )
+    S.add_nodes_from(range(-R, 0), load=0)
+    S.add_node(u, load=1, subtree=0)
+    S.add_node(v, load=1, subtree=0)
+    S.add_edge(root, u, load=1, reverse=False)
+    S.add_edge(u, v, load=0, reverse=False)
+    S.add_edge(v, root, load=1, reverse=False)
+
+    G = G_from_S(S, A)
+
+    assert any(
+        data.get('kind') == 'contour' and data['load'] == 0
+        for *_, data in G.edges(data=True)
+    )
+
+
 def test_L_from_G():
     G = tiny_wfn().G
     R = G.graph['R']
@@ -447,8 +565,8 @@ def test_terse_links_from_S():
 def _ringed_S(R, ringspec):
     """Build a canonical ringed S from a list of (root, [terminals]) rings.
 
-    Every ring here has both feeders on one root; rings bridging two roots are
-    covered in ``test_ringed.py``.
+    Every ring here has both feeders on one root; bridging rings are covered by
+    the topology encoding tests.
     """
     S = nx.Graph(R=R, T=sum(len(o) for _, o in ringspec))
     S.add_nodes_from(range(-R, 0))
@@ -1107,6 +1225,28 @@ def test_as_single_root_no_root_in_border():
         L.graph['border'] = np.array([0, 1], dtype=int)  # turbine indices, also fine
     L_out = as_single_root(L)
     assert L_out.graph['R'] == 1
+
+
+def test_as_single_root_transfers_repeated_border_roots():
+    L = nx.Graph(
+        T=1,
+        R=3,
+        B=1,
+        VertexC=np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [2.0, 1.0]]),
+        border=np.array([-3, 1, -3, -2]),
+        name='roots-in-border',
+        handle='roots_in_border',
+    )
+    L.add_node(0, kind='wtg')
+    L.add_nodes_from(range(-3, 0), kind='oss')
+
+    result = as_single_root(L)
+
+    assert result.graph['R'] == 1
+    assert result.graph['B'] == 3
+    border = result.graph['border']
+    assert border[0] == border[2]
+    assert set(border) == {1, 2, 3}
 
 
 # --- add_terminal_closest_root ---

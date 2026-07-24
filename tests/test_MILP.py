@@ -1,24 +1,41 @@
+import importlib
 import logging
 import math
+import pickle
 
 import networkx as nx
-import numpy as np
 import pytest
 
 import optiwindnet.MILP as MILP
 import optiwindnet.MILP._core as core
 from optiwindnet.interarraylib import terse_links_from_S
-from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import ModelOptions, solver_factory
-from optiwindnet.synthetic import toyfarm
+from optiwindnet.terse import TerseLinks
+from optiwindnet.types import Topology
 
 from .helpers import solver_unavailable
+from .isolation import should_isolate
+from .sitecache import get_bundle
+from .cases import (
+    MILP_ADAPTER_CASES,
+    MILP_BOUNDARY_CASES,
+    MILP_FAMILY_CASES,
+    MILP_FORMULATION_CASES,
+    case_node_id,
+    topology_golden_key,
+)
+from .solver_topologies import (
+    assert_matches_golden,
+    load_solver_topologies,
+    solve_milp_case,
+)
+from .topology_assertions import assert_topology
 
 # topology in terse links for toy_farm at capacity=5
-_terse_toy_farm_5 = np.array([2, -1, 1, 2, -1, -1, 3, 4, -1, 5, 8, 8])
 _CAPACITY = 5
 _RUNTIME = 10
 _GAP = 0.001
+_SOLVER_GOLDENS = load_solver_topologies()
 
 
 # ortools.math_opt bundles its own copies of HiGHS/SCIP that collide with the
@@ -32,19 +49,14 @@ _GAP = 0.001
 # `ortools_worker` re-imports this module in its persistent worker process to
 # unpickle whichever job function it's given, and that worker process must
 # stay ortools-only (never load standalone highspy/pyscipopt).
-def _solve_toy(solver_name, P, A):
-    solver = solver_factory(solver_name)
-    solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
-    solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
-    return solution_info, solver.get_solution()
-
-
-def _solve_toy_incumbent(solver_name, P, A, topology):
+def _solve_toy_incumbent(solver_name, topology):
     from unittest import mock
 
     import optiwindnet.MILP.ortools as ortools_milp
     from optiwindnet.interarraylib import validate_topology
 
+    bundle = get_bundle('toy')
+    P, A = bundle.P, bundle.A
     solver = solver_factory(solver_name)
     solver.set_problem(
         P,
@@ -68,18 +80,22 @@ def _solve_toy_incumbent(solver_name, P, A, topology):
     )
 
 
-def _get_incumbent_before_solve(solver_name, P, A):
+def _get_incumbent_before_solve(solver_name):
+    bundle = get_bundle('toy')
+    P, A = bundle.P, bundle.A
     solver = solver_factory(solver_name)
     solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
     return solver.get_incumbent_topology()
 
 
-def _exercise_ortools_retrieval_branch(feeder_route, P, A):
+def _exercise_ortools_retrieval_branch(feeder_route):
     """Exercise get_solution() branches with routing and pool work faked out."""
     from unittest import mock
 
     import optiwindnet.MILP.ortools as ortools_milp
 
+    bundle = get_bundle('toy')
+    P, A = bundle.P, bundle.A
     solver = ortools_milp.SolverORTools('cp_sat')
     solver.P, solver.A = P, A
     solver.model_options = ModelOptions(feeder_route=feeder_route)
@@ -157,9 +173,8 @@ def _patch_cpu_topology(monkeypatch, affinity, mapping=None):
 
 @pytest.fixture(scope='module')
 def P_A_toy():
-    L = toyfarm()
-    P, A = make_planar_embedding(L)
-    return P, A
+    bundle = get_bundle('toy')
+    return bundle.P, bundle.A
 
 
 def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():
@@ -173,19 +188,85 @@ def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():
     assert pool.investigations == 0
 
 
-def test_ortools_incumbent_matches_toy_topology_without_routing(
-    P_A_toy, ortools_worker
-):
+def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
+    from types import SimpleNamespace
+
+    fake = SimpleNamespace(
+        name='fake',
+        metadata=SimpleNamespace(
+            fun_fingerprint={'funhash': b'x'},
+            model_options=ModelOptions(feeder_limit='exactly', max_feeders=3),
+            warmed_by='constructor',
+        ),
+        solution_info=core.SolutionInfo(1.0, 1.0, 0.0, 0.1, 'optimal'),
+        applied_options={'threads': 1},
+        stopping={'time_limit': 1, 'mip_gap': 0.01},
+    )
+
+    attributes = core.Solver._make_graph_attributes(
+        fake  # pyrefly: ignore[bad-argument-type]
+    )
+
+    assert attributes['warmstart'] == 'constructor'
+    assert attributes['solver_details']['max_feeders'] == 3
+    assert 'max_feeders' not in attributes['method_options']
+
+    fake.metadata.warmed_by = None
+    assert 'warmstart' not in core.Solver._make_graph_attributes(
+        fake  # pyrefly: ignore[bad-argument-type]
+    )
+
+
+def test_pool_investigation_ranks_routed_candidates(monkeypatch, P_A_toy):
+    class Pool(core.PoolHandler):
+        num_solutions = 3
+
+        def __init__(self):
+            self.index = 0
+
+        def _objective_at(self, index):
+            self.index = index
+            return (1.0, 2.0, 10.0)[index]
+
+        def _topology_from_mip_pool(self):
+            return nx.Graph(candidate=self.index)
+
+    pool = Pool()
+    lengths = (5.0, 6.0, 1.0)
+    monkeypatch.setattr(core, 'G_from_S', lambda S, A: S)
+
+    class FakePathFinder:
+        def __init__(self, S, **kwargs):
+            self.S = S
+
+        def create_detours(self):
+            G = nx.Graph()
+            G.add_edge(0, 1, length=lengths[self.S.graph['candidate']])
+            return G
+
+    monkeypatch.setattr(core, 'PathFinder', FakePathFinder)
     P, A = P_A_toy
+
+    S, G = pool._investigate_pool(P, A)
+
+    assert S.graph['candidate'] == 0
+    assert G.graph['pool_entry'] == (0, 1.0)
+    assert G.graph['pool_count'] == 3
+
+
+def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     result = ortools_worker.run(
         _solve_toy_incumbent,
-        ('ortools.cp_sat', P, A, 'branched'),
+        ('ortools.cp_sat', 'branched'),
         30 + _RUNTIME,
     )
     if isinstance(result, BaseException):
         raise result
 
-    assert np.array_equal(result['terse'], _terse_toy_farm_5)
+    case = next(case for case in MILP_FORMULATION_CASES if case.exact_golden)
+    golden = _SOLVER_GOLDENS[topology_golden_key(case)]
+    assert isinstance(golden, TerseLinks)
+    assert tuple(result['terse']) == golden.links
     assert result['violations'] == []
     assert result['objective'] == result['preserved_objective']
     assert {
@@ -200,11 +281,10 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(
 
 
 @pytest.mark.parametrize('topology', ['radial', 'ringed'])
-def test_ortools_incumbent_decodes_valid_topology(P_A_toy, ortools_worker, topology):
-    P, A = P_A_toy
+def test_ortools_incumbent_decodes_valid_topology(ortools_worker, topology):
     result = ortools_worker.run(
         _solve_toy_incumbent,
-        ('ortools.cp_sat', P, A, topology),
+        ('ortools.cp_sat', topology),
         30 + _RUNTIME,
     )
     if isinstance(result, BaseException):
@@ -214,20 +294,143 @@ def test_ortools_incumbent_decodes_valid_topology(P_A_toy, ortools_worker, topol
     assert result['graph']['topology'] == topology
 
 
-def test_ortools_incumbent_before_solve_has_useful_error(P_A_toy, ortools_worker):
-    P, A = P_A_toy
-    result = ortools_worker.run(
-        _get_incumbent_before_solve, ('ortools.cp_sat', P, A), 30
-    )
+def test_ortools_incumbent_before_solve_has_useful_error(ortools_worker):
+    result = ortools_worker.run(_get_incumbent_before_solve, ('ortools.cp_sat',), 30)
 
     assert isinstance(result, AttributeError)
     assert '.solve() must be called before solution retrieval' in str(result)
 
 
-def test_segmented_get_solution_still_investigates_pool(P_A_toy, ortools_worker):
-    P, A = P_A_toy
+@pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
+@pytest.mark.parametrize('n', range(2, 11))
+def test_ringed_warmstart_links_conserve_flow(n, bridging):
+    from types import SimpleNamespace
+
+    from optiwindnet.interarraylib import add_ring_to_S
+    from optiwindnet.MILP._core import warmstart_links
+
+    terminals = list(range(n))
+    R = 2 if bridging else 1
+    roots = list(range(-R, 0))
+    E = [(u, v) for u in terminals for v in terminals if u < v]
+    Ep = [(v, u) for u, v in E]
+    stars = [(t, r) for t in terminals for r in roots]
+    starsp = [(r, t) for t in terminals for r in roots]
+    link_ = {key: key for key in E + Ep + stars + starsp}
+    flow_ = {key: key for key in E + Ep + stars}
+    metadata = SimpleNamespace(
+        R=R,
+        link_=link_,
+        flow_=flow_,
+        model_options={'topology': Topology.RINGED},
+    )
+    S = nx.Graph(R=R, T=n)
+    S.add_nodes_from(roots)
+    add_ring_to_S(
+        S,
+        (-1, -2) if bridging else (-1, -1),
+        terminals,
+        subtree=0,
+        A=None,
+    )
+
+    link_values = dict.fromkeys(link_, 0)
+    flow_values = dict.fromkeys(flow_, 0)
+    for link_var, flow_var, flow in warmstart_links(
+        metadata,  # pyrefly: ignore[bad-argument-type]
+        S,
+    ):
+        link_values[link_var] = 1
+        if flow_var is not None:
+            flow_values[flow_var] = flow
+
+    active_feeders = [key for key in stars if link_values[key]]
+    assert len(active_feeders) == 1
+    assert flow_values[active_feeders[0]] == n
+    assert sum(link_values[key] for key in starsp) == 1
+    for terminal in terminals:
+        outgoing = [
+            key for key, active in link_values.items() if active and key[0] == terminal
+        ]
+        incoming = [
+            key for key, active in link_values.items() if active and key[1] == terminal
+        ]
+        assert len(outgoing) == len(incoming) == 1
+        assert (
+            sum(flow_values.get(key, 0) for key in outgoing)
+            - sum(flow_values.get(key, 0) for key in incoming)
+            == 1
+        )
+
+
+@pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
+@pytest.mark.parametrize('n', range(1, 11))
+def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
+    from types import SimpleNamespace
+
+    head_root = -1
+    close_root = -2 if bridging else head_root
+    R = 2 if bridging else 1
+    flows = {(0, head_root): n}
+    flows.update({(terminal, terminal - 1): n - terminal for terminal in range(1, n)})
+    closing_link = (close_root, n - 1)
+    links = dict.fromkeys((*flows, closing_link), True)
+    metadata = SimpleNamespace(
+        R=R,
+        T=n,
+        capacity=math.ceil(n / 2),
+        model_options={'topology': Topology.RINGED},
+        link_=links,
+        flow_=flows,
+    )
+    A = nx.path_graph(n)
+    nx.set_edge_attributes(A, {edge: 1.0 for edge in A.edges}, 'length')
+
+    class FakeSolver:
+        name = 'fake'
+        A: nx.Graph
+        metadata: object
+
+        @staticmethod
+        def _link_val(value):
+            return value
+
+        @staticmethod
+        def _flow_val(value):
+            return value
+
+    fake = FakeSolver()
+    fake.A = A
+    fake.metadata = metadata
+    S = core.Solver._topology_from_mip_sol(
+        fake  # pyrefly: ignore[bad-argument-type]
+    )
+
+    assert_topology(S, Topology.RINGED, metadata.capacity)
+
+
+def test_ringed_warmstart_is_accepted_by_scip():
+    bundle = get_bundle('albatros')
+    P, A = bundle.P, bundle.A
+    options = ModelOptions(topology='ringed')
+    try:
+        seed = solver_factory('scip')
+        seed.set_problem(P, A, capacity=3, model_options=options)
+        seed.solve(time_limit=10, mip_gap=0.05)
+        S = seed.get_incumbent_topology()
+    except BaseException as exc:
+        if solver_unavailable(exc):
+            pytest.skip(f'scip unavailable: {exc}')
+        raise
+
+    solver = solver_factory('scip')
+    solver.set_problem(P, A, capacity=3, model_options=options, warmstart=S)
+    assert solver.metadata.warmed_by == S.graph['creator']
+
+
+def test_segmented_get_solution_still_investigates_pool(ortools_worker):
     calls, source, pathfinder_calls = ortools_worker.run(
-        _exercise_ortools_retrieval_branch, ('segmented', P, A), 30
+        _exercise_ortools_retrieval_branch, ('segmented',), 30
     )
 
     assert calls == ['investigate']
@@ -235,10 +438,9 @@ def test_segmented_get_solution_still_investigates_pool(P_A_toy, ortools_worker)
     assert pathfinder_calls == 0
 
 
-def test_straight_get_solution_starts_from_best_incumbent(P_A_toy, ortools_worker):
-    P, A = P_A_toy
+def test_straight_get_solution_starts_from_best_incumbent(ortools_worker):
     calls, source, pathfinder_calls = ortools_worker.run(
-        _exercise_ortools_retrieval_branch, ('straight', P, A), 30
+        _exercise_ortools_retrieval_branch, ('straight',), 30
     )
 
     assert calls == ['incumbent']
@@ -247,31 +449,146 @@ def test_straight_get_solution_starts_from_best_incumbent(P_A_toy, ortools_worke
 
 
 @pytest.mark.parametrize(
-    'solver_name',
-    ['ortools.cp_sat', 'gurobi', 'cplex', 'highs', 'scip', 'cbc', 'fscip'],
+    ('module_name', 'class_name'),
+    (
+        ('optiwindnet.MILP.pyomo', 'SolverPyomo'),
+        ('optiwindnet.MILP.pyomo', 'SolverPyomoAppsi'),
+    ),
 )
-def test_MILP_solvers(P_A_toy, solver_name, ortools_worker):
+def test_pyomo_solution_retrieval_glue(monkeypatch, module_name, class_name, P_A_toy):
+    module = importlib.import_module(module_name)
+    solver = object.__new__(getattr(module, class_name))
     P, A = P_A_toy
-    if solver_name.startswith('ortools'):
-        result = ortools_worker.run(_solve_toy, (solver_name, P, A), 30 + _RUNTIME)
+    S, G_tentative, G = nx.Graph(), nx.Graph(), nx.Graph()
+    solver.P, solver.A = P, A
+    solver._load_incumbent_topology = lambda: S
+    solver._make_graph_attributes = lambda: {'retrieved': True}
+    monkeypatch.setattr(module, 'G_from_S', lambda actual, available: G_tentative)
+
+    class FakePathFinder:
+        def __init__(self, tentative, planar, available):
+            assert (tentative, planar, available) == (G_tentative, P, A)
+
+        def create_detours(self):
+            return G
+
+    monkeypatch.setattr(module, 'PathFinder', FakePathFinder)
+
+    assert solver.get_solution() == (S, G)
+    assert G.graph['retrieved'] is True
+
+
+@pytest.mark.parametrize(
+    ('module_name', 'class_name', 'prepare'),
+    (
+        ('optiwindnet.MILP.scip', 'SolverSCIP', False),
+        ('optiwindnet.MILP.cplex', 'SolverCplex', True),
+        ('optiwindnet.MILP.fscip', 'SolverFSCIP', False),
+    ),
+)
+@pytest.mark.parametrize('feeder_route', ('segmented', 'straight'))
+def test_pool_backend_solution_retrieval_branches(
+    monkeypatch, module_name, class_name, prepare, feeder_route, P_A_toy
+):
+    module = importlib.import_module(module_name)
+    solver = object.__new__(getattr(module, class_name))
+    P, A = P_A_toy
+    S, G_tentative, G = nx.Graph(), nx.Graph(), nx.Graph()
+    calls = []
+    solver.P, solver.A = P, A
+    solver.model_options = ModelOptions(feeder_route=feeder_route)
+    solver._incumbent_topology_from_pool = lambda: calls.append('incumbent') or S
+    solver._investigate_pool = lambda planar, available: (
+        calls.append('investigate') or (S, G)
+    )
+    solver._make_graph_attributes = lambda: {'retrieved': True}
+    if prepare:
+        solver._prepare_solution_pool = lambda: calls.append('prepare')
+    monkeypatch.setattr(module, 'G_from_S', lambda actual, available: G_tentative)
+
+    class FakePathFinder:
+        def __init__(self, tentative, planar, available):
+            assert (tentative, planar, available) == (G_tentative, P, A)
+
+        def create_detours(self):
+            return G
+
+    monkeypatch.setattr(module, 'PathFinder', FakePathFinder)
+
+    assert solver.get_solution() == (S, G)
+    expected = ['prepare'] if prepare else []
+    expected.append('incumbent' if feeder_route == 'straight' else 'investigate')
+    assert calls == expected
+    assert G.graph['retrieved'] is True
+
+
+@pytest.mark.parametrize('case', MILP_ADAPTER_CASES, ids=case_node_id)
+def test_milp_adapter_topology_golden(case, ortools_worker):
+    if should_isolate(case.solver_name):
+        result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
     else:
         try:
-            result = _solve_toy(solver_name, P, A)
+            result = solve_milp_case(case)
         except BaseException as exc:
             result = exc
 
     if isinstance(result, BaseException) and solver_unavailable(result):
-        pytest.skip(f'{solver_name} not available')
+        pytest.skip(f'{case.solver_name} not available')
     if isinstance(result, BaseException):
         raise result
 
-    solution_info, (S, _) = result
+    solution_info, S = result
     assert solution_info.termination.lower() == 'optimal'
-    assert np.array_equal(terse_links_from_S(S), _terse_toy_farm_5)
+    assert_topology(S, case.model_options['topology'], case.capacity)
+    assert_matches_golden(S, _SOLVER_GOLDENS[topology_golden_key(case)])
 
 
-def _solve_toy_balanced(solver_name, P, A, max_feeders):
-    """Solve toyfarm with the feeder count pinned to ``max_feeders`` and balanced."""
+@pytest.mark.parametrize('case', MILP_FORMULATION_CASES, ids=case_node_id)
+def test_milp_required_formulation_topologies(case, ortools_worker):
+    result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
+    if isinstance(result, BaseException):
+        raise result
+    info, S = result
+    assert info.termination in ('OPTIMAL', 'FEASIBLE')
+    assert_topology(S, case.model_options['topology'], case.capacity)
+    if case.exact_golden:
+        assert_matches_golden(S, _SOLVER_GOLDENS[topology_golden_key(case)])
+
+
+@pytest.mark.parametrize('case', MILP_FAMILY_CASES, ids=case_node_id)
+def test_milp_distinct_formulation_families(case, ortools_worker):
+    if should_isolate(case.solver_name):
+        result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
+    else:
+        try:
+            result = solve_milp_case(case)
+        except BaseException as exc:
+            result = exc
+
+    if isinstance(result, BaseException) and solver_unavailable(result):
+        pytest.skip(f'{case.solver_name} unavailable: {result}')
+    if isinstance(result, BaseException):
+        raise result
+
+    info, S = result
+    assert info.termination.lower() in ('optimal', 'feasible', 'gaplimit')
+    assert_topology(S, case.model_options['topology'], case.capacity)
+
+
+@pytest.mark.parametrize('case', MILP_BOUNDARY_CASES, ids=case_node_id)
+def test_milp_required_boundary_solves(case, ortools_worker):
+    result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
+    if isinstance(result, BaseException):
+        raise result
+    info, S = result
+    assert info.bound <= info.objective * (1 + 1e-6)
+    assert_topology(S, case.model_options['topology'], case.capacity)
+
+
+def _solve_toy_balanced(solver_name, max_feeders):
+    """Solve ``toy`` with the feeder count pinned and balanced."""
+    bundle = get_bundle('toy')
+    P, A = bundle.P, bundle.A
     solver = solver_factory(solver_name)
     solver.set_problem(
         P,
@@ -282,7 +599,7 @@ def _solve_toy_balanced(solver_name, P, A, max_feeders):
         ),
     )
     solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
-    S, _ = solver.get_solution()
+    S = solver.get_incumbent_topology()
     R = S.graph['R']
     return sorted(S.nodes[t]['load'] for r in range(-R, 0) for t in S.neighbors(r))
 
@@ -299,13 +616,12 @@ def _solve_toy_balanced(solver_name, P, A, max_feeders):
     ],
 )
 def test_balanced_pins_loads_to_floor_and_ceil(
-    P_A_toy, solver_name, max_feeders, expected_loads, ortools_worker
+    solver_name, max_feeders, expected_loads, ortools_worker
 ):
-    # toyfarm has T=12, so pinning the feeder count to a non-divisor makes the
+    # ``toy`` has T=12, so pinning the feeder count to a non-divisor makes the
     # loads span the two values {T // F, ceil(T / F)}.
-    P, A = P_A_toy
-    args = (solver_name, P, A, max_feeders)
-    if solver_name.startswith('ortools'):
+    args = (solver_name, max_feeders)
+    if should_isolate(solver_name):
         result = ortools_worker.run(_solve_toy_balanced, args, 30 + _RUNTIME)
     else:
         try:
@@ -619,6 +935,24 @@ def test_model_options_is_immutable(mutate):
     assert opts['topology'] is core.Topology.BRANCHED
 
 
+def test_model_options_pickle_roundtrip_preserves_values_and_immutability():
+    options = ModelOptions(
+        topology='ringed',
+        feeder_route='straight',
+        feeder_limit='exactly',
+        balanced=True,
+        max_feeders=3,
+    )
+
+    restored = pickle.loads(pickle.dumps(options))
+
+    assert type(restored) is ModelOptions
+    assert restored == options
+    assert restored['topology'] is Topology.RINGED
+    with pytest.raises(TypeError, match='immutable'):
+        restored['balanced'] = False
+
+
 def test_set_problem_coerces_a_plain_mapping(P_A_toy):
     """A plain dict builds the same model as the ModelOptions equivalent.
 
@@ -637,3 +971,103 @@ def test_set_problem_coerces_a_plain_mapping(P_A_toy):
     from_mapping = ring_var_count({'topology': 'ringed'})
     from_options = ring_var_count(ModelOptions(topology='ringed'))
     assert from_mapping == from_options > 0
+
+
+def test_model_options_help(capsys):
+    ModelOptions.help()
+    captured = capsys.readouterr()
+    assert 'topology' in captured.out
+    assert 'feeder_route' in captured.out
+
+
+def test_calculate_bounds_invalid_max_feeders_ringed():
+    from optiwindnet.MILP._core import feeder_and_load_bounds, FeederLimit
+
+    with pytest.raises(ValueError, match='multiple of'):
+        feeder_and_load_bounds(
+            T=10,
+            capacity=5,
+            feeder_limit=FeederLimit.SPECIFIED,
+            balanced=False,
+            max_feeders=3,
+            feeders_per_subtree=2,
+        )
+
+
+def test_pool_handler_methods():
+    class DummyPoolHandler(core.PoolHandler):
+        def _objective_at(self, index: int) -> float:
+            return 999.0
+
+        def _topology_from_mip_pool(self) -> nx.Graph:
+            return nx.Graph()
+
+    handler = DummyPoolHandler()
+    with pytest.raises(AttributeError, match='must be called before'):
+        handler._incumbent_topology_from_pool()
+
+    handler.solution_info = core.SolutionInfo(
+        runtime=0.1, bound=10.0, objective=10.0, relgap=0.0, termination='optimal'
+    )
+    with pytest.raises(ValueError, match='Best solution-pool objective'):
+        handler._incumbent_topology_from_pool()
+
+
+def test_solver_gurobi_error_branches():
+    from optiwindnet.MILP.gurobi import SolverGurobi, OWNSolutionNotFound
+
+    solver = SolverGurobi()
+    with pytest.raises(AttributeError, match="has no attribute 'model'"):
+        solver.solve(time_limit=1.0, mip_gap=1e-3)
+
+    class FakeGurobiModel:
+        def getAttr(self, attr):
+            return 0
+
+    term = type('Term', (), {'name': 'infeasible'})()
+
+    class FakeSolver:
+        options = {}
+        _solver_model = FakeGurobiModel()
+
+        def solve(self, model, **kwargs):
+            return {'Solver': [{'Termination condition': term}]}
+
+        def close(self):
+            pass
+
+    solver.model = object()  # pyrefly: ignore[bad-assignment]
+    solver.solver = FakeSolver()
+    solver.options = {}
+    solver.solve_kwargs = {}
+    with pytest.raises(OWNSolutionNotFound, match='Unable to find a solution'):
+        solver.solve(time_limit=1.0, mip_gap=1e-3)
+
+
+def test_solver_pyomo_error_branches(monkeypatch):
+    from optiwindnet.MILP.pyomo import SolverPyomo, OWNSolutionNotFound
+
+    solver = SolverPyomo('highs')
+    with pytest.raises(AttributeError, match="has no attribute 'model'"):
+        solver.solve(time_limit=1.0, mip_gap=1e-3)
+
+    with pytest.raises(AttributeError, match="has no attribute 'model'"):
+        solver._load_incumbent_topology()
+
+    term = type('Term', (), {'name': 'infeasible'})()
+
+    class PyomoResult(dict):
+        solution = []
+
+    class FakePyomoSolver:
+        options = {}
+
+        def solve(self, model, **kwargs):
+            return PyomoResult({'Solver': [{'Termination condition': term}]})
+
+    solver.model = object()  # pyrefly: ignore[bad-assignment]
+    solver.solver = FakePyomoSolver()
+    solver.options = {}
+    solver.solve_kwargs = {}
+    with pytest.raises(OWNSolutionNotFound, match='Unable to find a solution'):
+        solver.solve(time_limit=1.0, mip_gap=1e-3)

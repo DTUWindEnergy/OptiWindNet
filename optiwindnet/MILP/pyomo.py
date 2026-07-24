@@ -154,11 +154,16 @@ class SolverPyomo(Solver):
             objective = result['Solver'][0]['Primal bound']
             bound = result['Solver'][0]['Dual bound']
             runtime = result['Solver'][0]['Time']
+        relgap = (
+            1.0 - bound / objective
+            if bound is not None and objective is not None and objective != 0
+            else float('nan')
+        )
         solution_info = SolutionInfo(
             runtime=runtime,
             bound=bound,
             objective=objective,
-            relgap=1.0 - bound / objective,
+            relgap=relgap,
             termination=termination,
         )
         self.solution_info, self.applied_options = solution_info, applied_options

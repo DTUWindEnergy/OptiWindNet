@@ -79,13 +79,28 @@ class SolverSCIP(Solver, PoolHandler):
         options: dict[str, Any] = {},
         verbose: bool = False,
     ) -> SolutionInfo:
-        """Wrapper for Model.solveConcurrent()."""
+        """Run SCIP search via concurrent multi-threading or standard optimization.
+
+        Options:
+          concurrent (bool):
+            If ``True`` (default), launches SCIP's multi-threaded concurrent
+            solvers via ``Model.solveConcurrent()``. Pass
+            ``options={'concurrent': False}`` to run standard single-threaded
+            ``Model.optimize()``.
+
+        Note for Windows users:
+          Invoking ``solveConcurrent()`` multiple times sequentially within the
+          same Python process on Windows may cause an access violation due to
+          an uncleaned native C thread pool state in SCIP. Set ``concurrent=False``
+          or run consecutive solves in isolated subprocesses on Windows.
+        """
         try:
             model = self.model
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = self.options | options
+        use_concurrent = applied_options.pop('concurrent', True)
         # this would be ideal for displaying the log in notebooks, but is killing python
         # model.redirectOutput()
         model.setParams(applied_options)
@@ -95,7 +110,10 @@ class SolverSCIP(Solver, PoolHandler):
         if not verbose:
             model.setParam('display/verblevel', 1)  # 1: warnings; 0: no output
         info('>>> SCIP parameters <<<\n%s\n', model.getParams())
-        model.solveConcurrent()
+        if use_concurrent:
+            model.solveConcurrent()
+        else:
+            model.optimize()
         num_solutions = model.getNSols()
         if num_solutions == 0:
             raise OWNSolutionNotFound(

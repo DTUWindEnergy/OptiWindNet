@@ -50,7 +50,12 @@ ROUTESET_IDS = (
     37439,
     21890,
     37376,
+    223,
+    191,
+    3179,
+    208,
 )
+
 
 DEFAULT_OUTPUT = Path(__file__).with_name('pathfinder_golden.pkl')
 

@@ -1,7 +1,31 @@
+import shutil
+
 import networkx as nx
 import numpy as np
+import pytest
 
 import optiwindnet.baselines.lkh as lkh_mod
+from optiwindnet.interarraylib import as_normalized
+
+from .cases import LKH_CASES, case_node_id, expected_topology
+from .sitecache import get_bundle
+from .topology_assertions import assert_topology
+
+
+@pytest.mark.parametrize('case', LKH_CASES, ids=case_node_id)
+def test_lkh_real_topology_cases(case):
+    """Run a small optional matrix when the external LKH binary is installed."""
+    if shutil.which('LKH') is None:
+        pytest.skip('LKH executable not on PATH')
+    A = get_bundle(case.site).A
+    S = lkh_mod.lkh3(
+        as_normalized(A),
+        capacity=case.capacity,
+        time_limit=case.time_limit,
+        ringed=case.ringed,
+        seed=case.seed,
+    )
+    assert_topology(S, expected_topology(case), case.capacity)
 
 
 def _make_routeset(branches: list[list[int]], R: int = 1) -> nx.Graph:
@@ -308,3 +332,39 @@ def test_build_weight_matrix_single_root_shape_and_depot_column():
     assert L[2, -1] == 30
     # missing edges stay at w_clip
     assert L[0, 2] == 999
+
+
+def test_route_from_tour_parses_tour_file(tmp_path):
+    tour_file = tmp_path / 'test.tour'
+    tour_file.write_text(
+        'NAME : test\nTYPE : TOUR\nDIMENSION : 4\nTOUR_SECTION\n1\n2\n3\n4\n-1\nEOF\n'
+    )
+    L = np.array(
+        [
+            [0, 10, 50, 5],
+            [10, 0, 10, 50],
+            [50, 10, 0, 10],
+            [5, 50, 10, 0],
+        ]
+    )
+    route, cost = lkh_mod._route_from_tour(str(tour_file), L)
+    assert isinstance(route, list)
+    assert isinstance(cost, (int, float))
+    assert set(route) == {0, 1, 2}
+
+
+def test_lkh_lower_level_function(monkeypatch):
+    A = _make_A(T=4)
+    warnings_seen = []
+    monkeypatch.setattr(lkh_mod, 'warn', warnings_seen.append)
+
+    def fake_do_lkh(L, **kwargs):
+        return _fake_output(routes=[[0, 1], [2, 3]], vehicles=2)
+
+    monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
+    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
+
+    S = lkh_mod._lkh(A, capacity=2, vehicles=1, time_limit=0.1)
+    assert any('too low' in str(w) for w in warnings_seen)
+    assert S.graph.get('has_loads') is True
+    assert S.nodes[-1]['load'] == 4

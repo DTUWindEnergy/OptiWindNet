@@ -180,66 +180,107 @@ class SolverFSCIP(Solver, PoolHandler):
             # rather than by a fixed count.
             var_from_name = self.var_from_name
             objective = float('inf')
-            with open(os.path.join(tmpdir, sol_path), 'r') as f:
-                solution = None
-                for line in f:
-                    if line in ('\n', '[ Final Solution ]\n'):
-                        # block separator: finalize the previous block, start a new one
-                        if solution is not None:
-                            model.addSol(solution)
-                        solution = model.createOrigSol()
-                        continue
-                    m = self._regexp_objective.match(line)
-                    if m is not None:
-                        objective = float(m.group(1))
-                        continue
-                    m = self._regexp_var_value.match(line)
-                    if m is not None:
-                        name, value = m.groups()
-                        model.setSolVal(
-                            solution, var_from_name[name], round(float(value))
-                        )
-                    else:
-                        error('Unexpected line in %s:\n%s', sol_path, line)
-                if solution is not None:
-                    model.addSol(solution)
-            num_solutions = model.getNSols()
-            if num_solutions == 0:
-                raise OWNSolutionNotFound(
-                    f'Unable to find a solution. Solver {self.name} terminated'
-                    f' with: {model.getStatus()}'
-                )
+            num_fscip_sols = 0
+            if os.path.exists(sol_path):
+                with open(sol_path, 'r') as f:
+                    solution = None
+                    solution_has_vars = False
+                    for line in f:
+                        if line in ('\n', '[ Final Solution ]\n'):
+                            # block separator: finalize previous block, start new one
+                            if solution is not None and solution_has_vars:
+                                model.addSol(solution)
+                                num_fscip_sols += 1
+                            solution = model.createOrigSol()
+                            solution_has_vars = False
+                            continue
+                        m = self._regexp_objective.match(line)
+                        if m is not None:
+                            objective = float(m.group(1))
+                            solution_has_vars = True
+                            continue
+                        m = self._regexp_var_value.match(line)
+                        if m is not None:
+                            name, value = m.groups()
+                            model.setSolVal(
+                                solution, var_from_name[name], round(float(value))
+                            )
+                            solution_has_vars = True
+                        elif line.strip() in ('No Solution', ''):
+                            pass
+                        else:
+                            error('Unexpected line in %s:\n%s', sol_path, line)
+                    if solution is not None and solution_has_vars:
+                        model.addSol(solution)
+                        num_fscip_sols += 1
+
             termination = 'unknown'
             solving_time = float('nan')
-            with open(os.path.join(tmpdir, 'problem_LC0_T.status'), 'r') as f:
-                last_data_row = ''
-                messages = []
-                for line in f:
-                    if not line.endswith('%\n'):
-                        messages.append(line)
-                        continue
-                    last_data_row = line
-                # look for summary fields in messages
-                for line in messages:
-                    if line.startswith('SCIP Status        : '):
-                        status = line[21:].strip()
-                        termination = self._termination_from_status.get(status, status)
-                        continue
-                    elif line.startswith('Total Time         : '):
-                        solving_time = float(line[21:])
-                        continue
-                    elif line.startswith('  Dual Bound       : '):
-                        bound = float(line[21:])
-                        break
-                else:
-                    # summary was not saved in status file, use data from the last row
-                    termination = 'truncated after ramp up'
-                    col_offset = int(last_data_row[0] == '*')
-                    last_status = last_data_row.split()
-                    solving_time = float(last_status[0 + col_offset])
-                    bound = float(last_status[5 + col_offset])
-                for line in messages:
-                    print(line)
+            bound = -float('inf')
+
+            status_path = os.path.join(tmpdir, 'problem_LC0_T.status')
+            if os.path.exists(status_path):
+                with open(status_path, 'r') as f:
+                    last_data_row = ''
+                    messages = []
+                    for line in f:
+                        if not line.endswith('%\n'):
+                            messages.append(line)
+                            continue
+                        last_data_row = line
+                    found_summary = False
+                    for line in messages:
+                        if line.startswith('SCIP Status        : '):
+                            found_summary = True
+                            status = line[21:].strip()
+                            termination = self._termination_from_status.get(
+                                status, status
+                            )
+                        elif line.startswith('Total Time         : '):
+                            found_summary = True
+                            val = line[21:].strip()
+                            if val and val != '-':
+                                try:
+                                    solving_time = float(val)
+                                except ValueError:
+                                    pass
+                        elif line.startswith('  Dual Bound       : '):
+                            found_summary = True
+                            val = line[21:].strip()
+                            if val and val != '-':
+                                try:
+                                    bound = float(val)
+                                except ValueError:
+                                    pass
+
+                    if not found_summary:
+                        # summary was not saved in status file, use last row
+                        termination = 'truncated after ramp up'
+                        if last_data_row:
+                            col_offset = int(last_data_row[0] == '*')
+                            last_status = last_data_row.split()
+                            if len(last_status) > col_offset:
+                                try:
+                                    solving_time = float(last_status[0 + col_offset])
+                                except ValueError:
+                                    pass
+                            if len(last_status) > 5 + col_offset:
+                                val = last_status[5 + col_offset]
+                                if val != '-':
+                                    try:
+                                        bound = float(val)
+                                    except ValueError:
+                                        pass
+                    for line in messages:
+                        print(line)
+
+            if num_fscip_sols == 0:
+                raise OWNSolutionNotFound(
+                    f'Unable to find a solution. Solver {self.name} terminated'
+                    f' with: {termination}'
+                )
+
+            num_solutions = model.getNSols()
         solution_pool = [(model.getSolObjVal(sol), sol) for sol in model.getSols()]
         # PoolHandler relies on index zero being the lowest model objective.
         solution_pool.sort(key=lambda entry: entry[0])

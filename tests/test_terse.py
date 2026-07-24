@@ -4,11 +4,26 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from optiwindnet.interarraylib import calcload, validate_routeset
+from optiwindnet.fingerprint import fingerprint_coordinates
+from optiwindnet.interarraylib import add_ring_to_S, calcload, validate_routeset
 from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
 
 from .helpers import canonical_edges, tiny_wfn
+
+
+@pytest.mark.parametrize('n', range(1, 11))
+def test_topology_encoding_preserves_bridging_ring(n):
+    S = nx.Graph(R=2, T=n, topology=Topology.RINGED)
+    S.add_nodes_from((-2, -1))
+    add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
+    calcload(S)
+
+    encoded = TerseLinks.from_topology(S)
+    restored = encoded.to_topology()
+
+    assert set(map(frozenset, restored.edges)) == set(map(frozenset, S.edges))
+    assert TerseLinks.from_topology(restored) == encoded
 
 
 def _ring_with_cloned_open_link() -> tuple[nx.Graph, nx.Graph]:
@@ -52,6 +67,17 @@ def test_topology_encoding_keeps_unused_roots():
     assert encoding.R == 3
     assert set(range(-3, 0)) <= restored.nodes
     assert set(map(frozenset, restored.edges)) == set(map(frozenset, S.edges))
+
+
+def test_topology_encoding_roundtrips_nodeset_digest():
+    source = tiny_wfn()
+    digest = fingerprint_coordinates(source.L.graph['VertexC'])[0]
+
+    encoding = TerseLinks.from_topology(source.S, nodeset_digest=digest)
+    restored = TerseLinks.from_dict(json.loads(json.dumps(encoding.to_dict())))
+
+    assert encoding.nodeset_digest == digest
+    assert restored == encoding
 
 
 def test_repr_summarizes_topology_encoding():

@@ -35,7 +35,7 @@ def test_length_matrix_complete_no_inf():
     T, R = A.graph['T'], A.graph['R']
     assert L.shape == (T + R, T + R)
     # off-diagonal entries should all be finite (complete graph)
-    off_diag = L[np.eye(T + R, dtype=bool) == False]
+    off_diag = L[~np.eye(T + R, dtype=bool)]
     assert np.all(np.isfinite(off_diag))
 
 
