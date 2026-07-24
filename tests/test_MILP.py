@@ -14,6 +14,7 @@ from optiwindnet.terse import TerseLinks
 from optiwindnet.types import Topology
 
 from .helpers import solver_unavailable
+from .isolation import should_isolate
 from .sitecache import get_bundle
 from .cases import (
     MILP_ADAPTER_CASES,
@@ -523,7 +524,7 @@ def test_pool_backend_solution_retrieval_branches(
 
 @pytest.mark.parametrize('case', MILP_ADAPTER_CASES, ids=case_node_id)
 def test_milp_adapter_topology_golden(case, ortools_worker):
-    if case.solver_name.startswith('ortools'):
+    if should_isolate(case.solver_name):
         result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
     else:
         try:
@@ -555,13 +556,21 @@ def test_milp_required_formulation_topologies(case, ortools_worker):
 
 
 @pytest.mark.parametrize('case', MILP_FAMILY_CASES, ids=case_node_id)
-def test_milp_distinct_formulation_families(case):
-    try:
-        info, S = solve_milp_case(case)
-    except BaseException as exc:
-        if solver_unavailable(exc):
-            pytest.skip(f'{case.solver_name} unavailable: {exc}')
-        raise
+def test_milp_distinct_formulation_families(case, ortools_worker):
+    if should_isolate(case.solver_name):
+        result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
+    else:
+        try:
+            result = solve_milp_case(case)
+        except BaseException as exc:
+            result = exc
+
+    if isinstance(result, BaseException) and solver_unavailable(result):
+        pytest.skip(f'{case.solver_name} unavailable: {result}')
+    if isinstance(result, BaseException):
+        raise result
+
+    info, S = result
     assert info.termination.lower() in ('optimal', 'feasible', 'gaplimit')
     assert_topology(S, case.model_options['topology'], case.capacity)
 
@@ -612,7 +621,7 @@ def test_balanced_pins_loads_to_floor_and_ceil(
     # ``toy`` has T=12, so pinning the feeder count to a non-divisor makes the
     # loads span the two values {T // F, ceil(T / F)}.
     args = (solver_name, max_feeders)
-    if solver_name.startswith('ortools'):
+    if should_isolate(solver_name):
         result = ortools_worker.run(_solve_toy_balanced, args, 30 + _RUNTIME)
     else:
         try:

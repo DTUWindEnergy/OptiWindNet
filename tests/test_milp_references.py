@@ -7,6 +7,7 @@ import math
 import pytest
 
 from .helpers import solver_unavailable
+from .isolation import should_isolate
 from .milp_reference_testing import (
     MILP_REFERENCE_EXECUTIONS,
     load_milp_references,
@@ -31,7 +32,7 @@ def milp_references():
 def test_milp_reference_execution(execution, milp_references, ortools_worker):
     case = execution.case
     reference = milp_references[reference_problem_key(case)]
-    if case.solver_name.startswith('ortools.'):
+    if should_isolate(case.solver_name):
         result = ortools_worker.run(
             solve_milp_reference_execution,
             (execution, reference),

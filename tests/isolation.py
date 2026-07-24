@@ -18,6 +18,23 @@ topology-golden generation.
 import multiprocessing
 import multiprocessing.queues
 import queue
+import sys
+
+
+def should_isolate(solver_name: str) -> bool:
+    """Whether a solver test execution should run in the isolated worker process.
+
+    OR-Tools always requires process isolation (DLL symbol collision with
+    highspy/pyscipopt). SCIP and FSCIP on Windows also require process isolation
+    because consecutive calls to SCIP's native C concurrent solver
+    (solveConcurrent()) can trigger an access violation in C thread state on
+    msvcrt.
+    """
+    if solver_name.startswith('ortools'):
+        return True
+    if sys.platform == 'win32' and solver_name in ('scip', 'fscip'):
+        return True
+    return False
 
 
 def _job_dispatcher_loop(job_queue, result_queue) -> None:
