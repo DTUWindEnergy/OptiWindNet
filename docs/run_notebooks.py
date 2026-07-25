@@ -173,17 +173,19 @@ def merge_adjacent_stream_outputs(cell: nbformat.NotebookNode) -> None:
 
 
 def clean_notebook(nb: nbformat.NotebookNode, scrolled_threshold: int) -> None:
-    """Strip transient metadata in-place; mark long-output cells as scrolled."""
+    """Keep semantic metadata in-place; mark long-output cells as scrolled."""
     nb.metadata = nbformat.from_dict({'language_info': {'name': 'python'}})
     for cell in nb.cells:
         merge_adjacent_stream_outputs(cell)
-        meta = cell.get('metadata', {}) or {}
-        meta.pop('execution', None)
-        if cell.get('cell_type') == 'code':
-            if count_text_lines(cell) > scrolled_threshold:
-                meta['scrolled'] = True
-            else:
-                meta.pop('scrolled', None)
+        old_meta = cell.get('metadata', {}) or {}
+        meta = {key: old_meta[key] for key in ('tags',) if key in old_meta}
+        if cell.get('cell_type') == 'raw' and 'format' in old_meta:
+            meta['format'] = old_meta['format']
+        if (
+            cell.get('cell_type') == 'code'
+            and count_text_lines(cell) > scrolled_threshold
+        ):
+            meta['scrolled'] = True
         cell['metadata'] = meta
 
 
