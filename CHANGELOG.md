@@ -1,19 +1,20 @@
 # v0.3
 
+This release adds library-wide support for ringed cable networks (those with cable cycles or "loops") – check the documentation for details.
+
 ## Important Changes
-- **Multi-Root Clustering Rewritten**: `clusterize()` partitions the terminals among the substations before the metaheuristic baselines (`hgs_cvrp()`, `lkh3()`) solve each cluster. Its one requirement is that clustering must not cost the location an extra feeder, but it enforced something stronger — that at most *one* cluster may hold a partly filled feeder — which is sufficient but not necessary. Feeder-minimality actually allows several clusters to hold partly filled feeders, as long as their remainders together need no more feeders than they occupy. The old rule ruled out the obvious partition in such cases and had to drag terminals to a distant substation to satisfy a constraint nothing was asking for, sometimes draining a substation of every terminal (`moraywest` at `capacity=30` came out as `[60, 0]` rather than `[30, 30]`). Clusters now start at the closest substation and shed only the wasted feeders, choosing what to move by exact assignment. Across the 560 bundled multi-root `(location, capacity)` pairs, this leaves the partition unchanged on 156 and improves it on the other 404; the total terminal-to-substation distance now sits 0.45% above the (feeder-blind) closest-substation bound, down from 2.89%.
-- **`clusterize()` Signature**: it now returns just the list of clusters. The second return value (`num_slack_`) was already ignored by both call sites, and cannot be reconstructed from a single global figure now that the slack may be spread over several clusters.
-- **`terse_links` Encodes RINGED Topologies**: the terse encoding predates the RINGED topology and could only represent forests (one parent per node), silently losing a ring's second feeder and its open point. `terse_links_from_S()`/`S_from_terse_links()` (and `WindFarmNetwork.terse_links()`/`update_from_terse_links()`) now detect a ringed solution and encode it as a *sequence of routes*: each route is entered as its (negative) root number followed by its ring's terminals in walking order, so the root number both ends the previous route and names the next one. Forest topologies keep the original positional one-entry-per-node form; because every ringed route carries its own leading root number, a ringed encoding always has more than `T` entries and is told apart from the `T`-entry forest encoding by length alone. The walk direction of each ring is chosen so the open point is recovered exactly on decode -- lossless even for the odd-terminal rings whose two balanced split edges would otherwise be indistinguishable -- without storing it. The database uses the same route-sequence idea for a ringed routeset: its `edges` field lists each ring's node walk (terminals and detour/contour clones) bracketed by its two feeder roots, with a shared boundary root written once (so two consecutive root numbers are always distinct). Because the clone index ranges are known, the decoder counts the real terminals along each walk to place the open point at the ring's load midpoint, exactly as at the topology level. This handles a routed ring whose two feeders reach different substations, and lets ringed solutions round-trip through `store_G()`/`G_from_routeset()` with no extra side table.
 
-- **`validate_routeset()` Moved and Returns Violations**: it now lives in `optiwindnet.interarraylib` (alongside `validate_topology()`, whose role it shares) and returns `list[str]` — one line per violation, empty when the routeset is valid. It previously lived in `optiwindnet.crossings`, returned only the crossing tuples, and signalled every *topology* violation by `assert`, so the two halves of one question travelled by two different channels and the richer half was the one no caller read. It is now an orchestrator over three specific checkers: the loads are verified, `validate_topology()` checks the declared shape, and the new `crossings.find_routeset_crossings()` — the extracted crossing/branch-split half, still returning `(u, v, s, t)` tuples, with `crossings.describe_crossings()` rendering them as text. There is no compatibility shim: the import path and the return type both change. This also leaves `optiwindnet.crossings` purely geometric, with no import from `interarraylib`.
-- **Loads Are Verified, Not Recomputed**: `validate_routeset()` used to call `calcload()` on the routeset it was handed, which deletes every node load and overwrites every edge load. Every routeset producer already emits correct loads, so this did no work in the normal case and, in the abnormal one, silently repaired the very defect it was meant to report. It now recomputes on a copy and compares — reporting any load, `max_load` or `reverse` flag that disagrees with what the links imply — and leaves the caller's graph untouched, `capacity` defaulting included.
+- Solution graphs now carry a mandatory `topology` attribute. The new `Topology`, `ModelOptions`, and self-describing `TerseLinks` types make solver configuration, warm starts, and solution exchange topology-aware; MILP users can also retrieve an incumbent topology when a solve ends before optimality.
+- Multi-root clustering was rewritten to keep turbines closer to their substations without adding feeders. HGS and LKH-3 now handle empty clusters, while LKH-3 is more reliable for clusters that fit within one cable's capacity.
+- Validation now reports topology, load, capacity, and crossing violations without modifying the graph. `validate_routeset()` moved from `optiwindnet.crossings` to `optiwindnet.interarraylib` and now returns `list[str]`; `clusterize()` now returns only the cluster list.
+- Planar-embedding generation is about 1.5 times faster, and Poisson-disc site generation avoids more unnecessary border and obstacle checks.
+- Solver recovery and retry handling was improved for SCIP and FiberSCIP, including concurrent SCIP use on Windows. Documentation now includes dedicated guides for topology choices, ringed networks, and multi-substation clustering.
 
-## Bug Fixes
-- **`validate_topology()` Passed Solutions It Could Not Represent**: a topology could satisfy every shape check and still fail to round-trip through its own `terse_links` encoding — and so fail to be stored or to warm-start a MILP. The shape checks were incomplete in four ways, each now checked directly: a terminal connected to no root (a forest strands one without ever growing a cycle, so neither `is_forest` nor the radial simple-path check saw it); a terminal missing from `S` altogether, which made the radial degree check raise `NetworkXError` rather than report; a forest whose links carry no `'reverse'` flag, which the positional encoding and the flow formulations both read; and a ring whose open point sits somewhere other than where its node loads split the arms, which kept the open-point count, the arm balance and the arm-head totals all intact and so passed every existing ring check. That a validated topology round-trips unchanged is now a property of the test suite rather than a runtime check: it follows from the invariants, instead of standing in for them.
-- **Loads Are Mandatory**: `validate_topology()` gated its universal invariants and the whole load-dependent half of its RINGED checks behind `S.graph['has_loads']`, silently skipping them for a topology that did not carry loads. Since every producer sets them, a topology without loads is unfinished rather than leaner: it is now reported as a violation and the gates are gone, so the ring checks always run. `validate_routeset()` applies the same rule to `G`.
-- **Topology and Capacity Violations Vanished Under `python -O`**: `validate_routeset()` reported them via `assert`, which the optimizer strips, so it computed the full violation list and discarded it — returning its documented "valid" signal for a routeset with the wrong topology or over-capacity cables. Violations are now returned as data. Relatedly, `calcload()` reported a terminal count mismatch by `assert` and detected no cycles at all: it recursed until the stack died (`RecursionError`) on a graph holding one. It now raises `ValueError` in both cases, and threads a shared visited set through `bfs_subtree_loads()` that also catches a node reachable from two roots.
-- **`lkh3()` Pinned a Within-Capacity Cluster to a Single Feeder**: a cluster that fits within `capacity` needs only one feeder, and `lkh3()` used to pass exactly that to LKH. But one feeder means one route, and one route over the sparse (near-planar) link set `A` means a *Hamiltonian path* — which frequently does not exist, all the more so after `_prune_links()` discards links that would block feeders (a rationale that is vacuous when there is only one feeder to block). LKH then returned no solution at all and `lkh3()` died on `AssertionError: ERROR: root node load does not match T.` Such a cluster is now offered `min(T_c, 5)` vehicles instead of being pinned to 1 (`VEHICLES` is only an upper bound here — LKH-3 ignores `MTSP_MIN_SIZE` for `TYPE=OVRP` and leaves surplus routes empty). The extra feeders cost nothing: with capacity to spare, the routes can be joined into one subtree at the root, keeping the layout radial. Nor are they used gratuitously — with capacity inactive, a feeder only beats a terminal-terminal link when it leaves the root at a distinctly different angle, and only about four such directions fit around a root; of the 85 single-root bundled locations solved at `capacity = T`, just one (`horns3`) profits from a 5th feeder and none from a 6th. Of the 84 single-feeder clusters among the bundled locations at capacities 3..30, 10 crashed and now solve (`morayeast` 20, `walneyext` 29, `cazzaro_2022G140` 28..30, `mermaid` 27..30, `riffgat` 30); the other 74 already solved but were paying for the pin, and come out 4.1% shorter on average (up to 12.6%).
-- **Empty Cluster Crashed the Multi-Root Solvers**: a substation can legitimately end up with no terminals — most often because none is closest to it (`yunlin`'s second substation is farther from every terminal than the first one is), but also when there are simply fewer feeders to hand out than substations (`ceil(T / capacity) < R`). Both baselines dispatched the empty cluster to the solver anyway: `hgs_cvrp()` died inside HGS-CVRP on the resulting 1x1 distance matrix (`SystemError: nanobind::detail::nb_func_error_except()`) and `lkh3()` on LKH's (`ValueError: expected a positive input`). Empty clusters are now skipped, keeping the substation in the solution with no feeders attached. This affected 31 of the 560 bundled multi-root `(location, capacity)` pairs; 28 remain empty-clustered and now solve cleanly, and the other 3 were the degenerate partitions fixed above.
+## Removed Deprecated APIs
+
+- The legacy EW implementations and `optiwindnet.interface` were removed; use `heuristics.constructor()` or the `WindFarmNetwork` router API.
+- `hgs_multiroot()` and `iterative_hgs_cvrp()` were removed in favor of `hgs_cvrp()`; `lkh()` and `iterative_lkh()` were removed in favor of `lkh3()`.
+- The new implementations are more capable than the ones they replace, please report if you find a regression.
 
 # v0.2.3
 
@@ -22,24 +23,27 @@
 Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still available and still emit `DeprecationWarning`; they are scheduled for removal in v0.3.
 
 ## Important Changes
+
 - **Balanced Subtrees Actually Balanced (MILP and HGS)**: `balanced=True` promises subtree loads differing at most by one unit, but both solver families only bounded those loads from below, letting a subtree grow up to `capacity`. This is now fixed consistently on both sides:
-  - *MILP*: the upper bound `ceil(T / feeders)` is now enforced across the pyomo, SCIP and OR-Tools model builders.
-  - *HGS*: `hgs_cvrp()` used to request more slack nodes than there were routes whenever `T < feeders * (capacity - 1)`, forcing the surplus through clipped `inf` arcs and inflating the reported objective. The balanced sub-problem is now solved at `capacity_effective = ceil(T / feeders)`, reported in `solver_details`.
+  - _MILP_: the upper bound `ceil(T / feeders)` is now enforced across the pyomo, SCIP and OR-Tools model builders.
+  - _HGS_: `hgs_cvrp()` used to request more slack nodes than there were routes whenever `T < feeders * (capacity - 1)`, forcing the surplus through clipped `inf` arcs and inflating the reported objective. The balanced sub-problem is now solved at `capacity_effective = ceil(T / feeders)`, reported in `solver_details`.
 - **Exact Feeder Count (MILP and HGS)**: a new, mirrored way to pin the feeder count instead of only bounding it from above. Because `balanced` is only expressible once the feeder count is pinned, this makes balanced solutions reachable above the minimum feeder count.
-  - *MILP*: `feeder_limit="exactly"` pins the feeder count to `max_feeders` (whereas `"specified"` remains an upper bound).
-  - *HGS*: `hgs_cvrp(vehicles=F, vehicles_exact=True)` — exposed as `HGSRouter(feeder_limit=F, feeder_exact=True)` — pins the feeder count to `F`, whereas `vehicles` alone remains an upper bound that HGS-CVRP normally undershoots. It currently requires `balanced=True` and a single substation; `F` must lie between `ceil(T / capacity)` and `T`.
+  - _MILP_: `feeder_limit="exactly"` pins the feeder count to `max_feeders` (whereas `"specified"` remains an upper bound).
+  - _HGS_: `hgs_cvrp(vehicles=F, vehicles_exact=True)` — exposed as `HGSRouter(feeder_limit=F, feeder_exact=True)` — pins the feeder count to `F`, whereas `vehicles` alone remains an upper bound that HGS-CVRP normally undershoots. It currently requires `balanced=True` and a single substation; `F` must lie between `ceil(T / capacity)` and `T`.
 - **Reversible lat/lon Coordinates**: `L_from_yaml()` and `L_from_pbf()` now project all coordinates into the single UTM zone holding the most turbines (instead of the zone of the first point), minimizing distortion for the bulk of the layout, and retain that zone as the graph attributes `utm_zone_number` and `utm_zone_letter`. This makes `VertexC` reversible back to lat/lon via `utm.to_latlon()`. Multi-zone `.yaml` input no longer raises an assertion.
 - **Tunable `EWRouter`**: the `method` and `bias_margin` parameters of `heuristics.constructor()` are now exposed on `EWRouter`, giving access to the `esau_williams`, `biased_EW`, `rootlust` and `radial_EW` methods from the high-level API.
 - **Concurrent HiGHS**: the pyomo HiGHS solver now runs a concurrent branch-and-bound tree search, in line with the other MILP backends. This speedup requires `highspy` v1.15 or newer; older versions accept the setting but run the search serially.
 - **New Locations**: added Revolution, Sunrise, Hornsea 2, Norfolk Vanguard West, East Anglia 3 and Hollandse Kust Noord.
 
 ## Bug Fixes
+
 - **Multi-Root Warmstart Eligibility**: `is_warmstart_eligible()` compared only the first root's feeder count against the feeder limit, while the model constrains the total across all roots.
 - **`PathFinder` Malformed Chain**: two spanning fences of the same subtree meeting at a single chain-end vertex form a dead-end pocket, which could leave a chain short an access cone. Chain detection is now keyed on the subtree alone within a chain-end vertex.
 - **`scaffolded()` Correctness**: fence hops and shortened-contour hops are now converted to primed edges (in both `PathFinder.scaffolded()` and `interarraylib.scaffolded()`), and a supertriangle/clone id collision was fixed.
 - **Sexagesimal Coordinate Parsing**: `_translate_latlonstr()` failed to reset minutes/seconds between coordinates, corrupting the parsed values.
 
 ## Deprecated
+
 - `WindFarmNetwork.from_yaml()` is renamed to `WindFarmNetwork.from_own_yaml()`; the old name still works and emits a `DeprecationWarning`.
 - Reminder — the following remain available in this release and will be removed in v0.3. Users are advised to migrate now:
   - Standalone EW heuristics (`ClassicEW`, `CPEW`, `NBEW`, `OBEW`, `EW_presolver`) → `heuristics.constructor()` (or the high-level `WindFarmNetwork`/`EWRouter`). See the [Legacy heuristics migration guide](https://optiwindnet.readthedocs.io/stable/notebooks/14-Legacy_heuristics.html), which pairs each legacy call with its `constructor()` equivalent.
@@ -48,6 +52,7 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
   - LKH entry points `lkh()` / `iterative_lkh()` → `lkh3()`.
 
 ## Refactoring & Maintenance
+
 - **Docstrings**: project-wide docstring formatting pass — standardized markup of string values for Sphinx rendering, unicode arrows, and docstrings for the database model.
 - **Test Coverage**: expanded coverage for `geometric`, `interarraylib`, `plotting`, `svg`, `repair`, `themes` and `baselines.utils`.
 - **CI**: isolated OR-Tools in a shared subprocess to resolve solver DLL conflicts, switched SCIP download to GitHub, bumped SCIPOptSuite, installed python tooling from conda, and added manual-dispatch pipeline targets.
@@ -57,9 +62,11 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 [Commit history since v0.2.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.1...v0.2.2)
 
 ## Breaking Changes
+
 - **Advanced API Cleanups**: Helper functions for root-assignment and link-blockage moved from `optiwindnet.geometric` to `optiwindnet.interarraylib`. Users should import `add_terminal_closest_root()`, `add_link_blockmap()`, and `add_link_cosines()` from `optiwindnet.interarraylib`.
 
 ## Important Changes
+
 - **Default Vector SVG Plotting**: High-level `WindFarmNetwork` plotting methods (`plot()`, `plot_location()`, `plot_available_links()`, `plot_navigation_mesh()`, and `plot_selected_links()`) now use a modern, interactive vector SVG plotting backend (`svgplot`/`svgpplot`) by default. This delivers clean, high-resolution inline displays in Jupyter notebooks. The legacy Matplotlib-based backend remains fully accessible by passing an explicit `ax` argument (including `ax=None` to dynamically instantiate Matplotlib figures).
 - **svgplot() matches gplot()'s features**: SVG plots now support node labeling, boundary/obstacle vertex tagging, and figure legend.
 - **Informative String Representations**: Added descriptive, debugger-safe string representations (`__repr__`) for `WindFarmNetwork` and `Router` subclasses (`EWRouter`, `HGSRouter`, `MILPRouter`) displaying key configuration parameters and solved network metrics.
@@ -70,10 +77,12 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 - **Robust PathFinder Detours**: Major robustness improvements when routing detours among cable routes that follow boundaries or exclusion zones, significantly reducing cable use on sites with many obstacles.
 
 ## Deprecated
+
 - Standalone EW heuristics (`ClassicEW`, `CPEW`, `NBEW`, `OBEW`, and `EW_presolver`) are deprecated and will be removed in v0.3. They are superseded by the new unified `heuristics.constructor()`. Note that `constructor` expects the available-links graph `A`, not the location graph `L`.
 - The legacy `optiwindnet.interface` module (`heuristic_wrapper()`, `HeuristicFactory`) is deprecated and will be removed in v0.3; use `WindFarmNetwork`/`EWRouter` instead.
 
 ## Fixes
+
 - **Pathfinder Robustness**: Resolved fatal crashes (`KeyError` and triangulation flip failures) when constructing detours.
 - **Diagonal Mesh Exclusion**: Prevented invalid diagonal paths by skipping edges in the site's boundary polygon during navigation mesh generation.
 - **Logging & Diagnostics**: Replaced all remaining raw `print()` statements across the API and utility modules with standard Python logging.
@@ -82,6 +91,7 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 - **Crossing Detection**: Fixed shared-route overlap crossing detection and added geometric handling for route intersections not expressible as available-edge crossings.
 
 ## Refactoring & Maintenance
+
 - **Python 3.11–3.14 Support**: Explicitly declared support for Python 3.11 through 3.14 with standard Trove classifiers on PyPI.
 - **Updated OR-Tools Floor**: Aligned OR-Tools requirements in `pyproject.toml` to `>=9.14.6206` for consistency across development and production environments.
 - **Strict Deprecation Testing**: Test suite configured to treat `DeprecationWarning` as errors to guarantee API health.
@@ -93,14 +103,17 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 [Commit history since v0.2.0](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.0...v0.2.1)
 
 ## Breaking Changes
+
 - `optiwindnet.db` module only: **RouteSet schema slimmed (v4)**: `num_gates` was renamed to `feeders_per_root`; the unused `valid`, `is_normalized`, and `stuntC` columns were removed. The `python -m optiwindnet.db.migrate` script now writes the v4 schema and accepts both v2 (Pony ORM) and v3 (Peewee) source databases.
 
 ## Important Changes
-- **OR-Tools MILP backend switched to MathOpt API** (replacing `cp_model`), enabling multiple backends through a unified wrapper. No impact on use through either API. 
+
+- **OR-Tools MILP backend switched to MathOpt API** (replacing `cp_model`), enabling multiple backends through a unified wrapper. No impact on use through either API.
 - **Pyomo CPLEX/Gurobi solvers switched to the persistent interfaces** (`cplex_persistent`, `gurobi_persistent`). Relevant for successive calls to solver.solve().
 - **`PathFinder`**: `A` is now a mandatory argument, it is relied upon to inform about tentative feeder crossings (saves the repeated check done before); default options were updated; search heuristics improved.
 
 ## Features
+
 - LKH improvements: iterations are also triggered on capacity violations, new `warmstart` argument.
 - Better estimation of obstructed feeder lengths pre-optimization (make_planar_embedding).
 - Default thread count for MathOpt solvers set to the number of physical cores; non-OR-Tools solvers also use `physical_core_count()`.
@@ -110,6 +123,7 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 - Informative string repr for `SvgRepr`.
 
 ## Fixes
+
 - Multiple PathFinder robustness fixes: collinear vertices in funnel apex update, expansion of `P_paths` shortcuts when building contour clones, shortcut provenance tracking for barriers, cumulative turning check for dropping traversers, and `bad_streak` decay on first arrival.
 - `make_planar_embedding` fixes: constraint checks and line-of-sight tagging now use Shapely's `STRtree`, proper handling of diagonal promotion conflicts in concave meshes, string-pulling skipped when only one border vertex is on the path (enabled by STRtree check).
 - `validate_routeset()`: corrected detour index range; touchpoint set as bunch-split corner apex.
@@ -120,12 +134,14 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 - Fixed `migrate.py` ImportError.
 
 ## Refactoring & Maintenance
+
 - Replaced `dill` with `pickle` everywhere it was used in tests.
 - Removed `stuntC` from the routeset saving path.
 - CI now runs a test matrix covering Python 3.11–3.14 (default bumped to 3.14); release requires passing on all versions.
 - Increased test coverage and added topology-aware routeset comparison to prevent spurious failures.
 
 ## Documentation
+
 - Major refactor of the Topfarm integration example (now including substation trajectory); several notebook updates.
 - Added links to TOPFARM and Ard, updated preamble with Jupyter tutorial links.
 - Acknowledged the DFF grant in README and doc index.
@@ -136,16 +152,19 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 [Commit history since v0.1.6](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.6...v0.2.0)
 
 ## Breaking Changes
+
 - **HGS-CVRP interface unified**: `baselines.hgs` functions `hgs_multiroot()` and `iterative_hgs_cvrp()` are deprecated; `hgs_cvrp()` replaces them with no loss in functionality. Users of HGSRouter from the Network/Router API will not notice the change.
 - **Database format updated to v3**: Switched from Pony ORM (incompatible with Python 3.13+) to Peewee. Use `python -m optiwindnet.db.migrate input.v2.sqlite output.v3.sqlite` to migrate existing databases.
 
 ## Features
+
 - Obstacles are now supported in `turbinate()` and `poisson_disc_filler()`.
 - `as_normalized()` now works also with `L`.
 - Replaced `multiprocessing.Pool` with `concurrent.futures.ThreadPoolExecutor` in HGS-CVRP calls, enabling concurrent solver instances without the quirks of the multiprocessing module. This requires a new version (v0.1.1+) of dependency hybgensea.
 - Removed dependency `py`.
 
 ## Fixes
+
 - Fixed potential infinite loop in `PathFinder` for inconsistent graphs.
 
 # v0.1.6
@@ -153,6 +172,7 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 [Commit history since v0.1.5](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.5...v0.1.6)
 
 Drop-in replacement for v0.1.5. This release provides maily two important fixes:
+
 - fix bugs caused by ortools v9.15.6755 released on 2026-01-12
 - remove a duplicate turbine from the included location Gangkou 2
 
@@ -165,6 +185,7 @@ In addition, the graph attribute 'creator' of solutions produced by OWN was reve
 Drop-in replacement for v0.1.4.
 
 ## Features
+
 - Added new offshore wind locations: Dogger Bank B/C, Coastal Virginia, Inch Cape, Changhua 1, Gangkou 1/2, Yunlin, Noirmoutier, Tréport, Borkum Riffgrund 3, He Dreiht.
 - Experimental **FiberSCIP (fscip)** solver support (system call, file-based interface).
 - Improved automatic `landscape_angle` calculation
@@ -172,7 +193,8 @@ Drop-in replacement for v0.1.4.
 - `.osm.pbf` parsing now prioritizes tag `ref` over `name` for node labels.
 
 ## Fixes
--  Fixed dangling reference in diagonals (`make_planar_embedding()`) which could cause errors when checking for crossings.
+
+- Fixed dangling reference in diagonals (`make_planar_embedding()`) which could cause errors when checking for crossings.
 - Applied rounding in `_link_val()`/`_flow_val()` for MILP Solvers CPLEX and SCIP to eliminate tiny non-zero values (error manifested as cyclic solutions).
 - Corrected setting of `B` in `L_from_windIO()`.
 - Resolved `_hull_processor()` edge case (wrong P for Yunlin).
@@ -181,7 +203,6 @@ Drop-in replacement for v0.1.4.
 - Updated deprecated Shapely `buffer()` argument name.
 - Adjusted graph attributes in MILP solvers.
 - Multiple robustness improvements in tests and solver handling.
-
 
 # v0.1.4
 
@@ -223,6 +244,7 @@ Minor version bump to enable conda-forge recipe to work.
 [Commit history since v0.1.0](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.1.0...v0.1.1)
 
 ## 📦 Packaging
+
 - drop Python 3.10 support (v0.1.0 had an inconsistency due to NetworkX v3.5)
 - minor syntax fix in pyproject.toml to make conda-forge package possible
 
@@ -231,6 +253,7 @@ Minor version bump to enable conda-forge recipe to work.
 [Commit history since v0.0.6](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.0.6...v0.1.0)
 
 ## ✨ New Features
+
 - **Thor Offshore Wind Farm**: Added to location repository.
 - **Lin-Kernighan-Helsgaun Meta-Heuristics solver (Advanced API only)**:
   - Introduced `iterative_lkh()` to deal with crossings.
@@ -238,6 +261,7 @@ Minor version bump to enable conda-forge recipe to work.
   - Automatic prunning poor links from the available choices given to LKH.
 
 ## 🛠️ Fixes & Improvements
+
 - Fixed runtime reporting for solver HiGHS.
 - Adapted MILP code to Pyomo API v2.
 - Enforced radial topology in HGSRouter.
@@ -248,17 +272,20 @@ Minor version bump to enable conda-forge recipe to work.
 - Improved handling of scaling parameters and significant digits.
 
 ## 🔧 Refactoring & Code Quality
+
 - Removed `**kwargs` from key initializers.
 - Improved consistency across HGS and LKH meta-heurists functions.
 - Cleaned up angle helper utilities.
 - Increased test coverage.
 
 ## 📚 Documentation
+
 - Added advanced example notebook for LKH.
 - Fixed typos and improved clarity in README and notebooks.
 - Updated figures and notebook outlines for better HTML rendering.
 
 ## 📦 Dependencies
+
 - Removed `pyyaml-include` dependency.
 - Bumped `numba` version and removed `numpy` version cap.
 
