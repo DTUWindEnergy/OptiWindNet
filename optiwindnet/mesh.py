@@ -869,7 +869,7 @@ def make_planar_embedding(
                         # TODO: make this test more robust
                         if len(hull_concave) < len(hull_pruned):
                             # this likely means an islanded subgraph was found
-                            debug('islanded hull_concave', hull_concave)
+                            debug('islanded hull_concave: %s', hull_concave)
                             hull_concave.clear()
                             u, v = v, hull_pruned[i]
                             end = u
