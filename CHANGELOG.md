@@ -1,20 +1,28 @@
-# v0.3
+# v0.3.0
 
-This release adds library-wide support for ringed cable networks (those with cable cycles or "loops") – check the documentation for details.
+[Commit history since v0.2.3](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.3...v0.3.0)
+
+This release adds library-wide support for **ringed** cable networks (those with cable cycles or "loops") – check the documentation for details.
 
 ## Important Changes
 
-- Solution graphs now carry a mandatory `topology` attribute. The new `Topology`, `ModelOptions`, and self-describing `TerseLinks` types make solver configuration, warm starts, and solution exchange topology-aware; MILP users can also retrieve an incumbent topology when a solve ends before optimality.
-- Multi-root clustering was rewritten to keep turbines closer to their substations without adding feeders. HGS and LKH-3 now handle empty clusters, while LKH-3 is more reliable for clusters that fit within one cable's capacity.
+- New `topology=` alternative: `'ringed'` or `Topology.RINGED`. 
+- Solution graphs now carry a mandatory `topology` attribute. The new `Topology`, `ModelOptions`, and self-describing `TerseLinks` types make solver configuration, warm starts, and solution exchange topology-aware.
+- MILP users can now retrieve an incumbent topology skipping `PathFinder` calls with `.get_incumbent_topology()`.
+- Multi-root clustering was rewritten to keep turbines closer to their substations without adding feeders. HGS and LKH-3 now handle empty clusters.
 - Validation now reports topology, load, capacity, and crossing violations without modifying the graph. `validate_routeset()` moved from `optiwindnet.crossings` to `optiwindnet.interarraylib` and now returns `list[str]`; `clusterize()` now returns only the cluster list.
 - Planar-embedding generation is about 1.5 times faster, and Poisson-disc site generation avoids more unnecessary border and obstacle checks.
 - Solver recovery and retry handling was improved for SCIP and FiberSCIP, including concurrent SCIP use on Windows. Documentation now includes dedicated guides for topology choices, ringed networks, and multi-substation clustering.
 
 ## Removed Deprecated APIs
 
-- The legacy EW implementations and `optiwindnet.interface` were removed; use `heuristics.constructor()` or the `WindFarmNetwork` router API.
+- The legacy EW implementations (`ClassicEW`, `CPEW`, `NBEW`, `OBEW`, `EW_presolver`) and `optiwindnet.interface` were removed; use `heuristics.constructor()` or the `WindFarmNetwork` router API.
 - `hgs_multiroot()` and `iterative_hgs_cvrp()` were removed in favor of `hgs_cvrp()`; `lkh()` and `iterative_lkh()` were removed in favor of `lkh3()`.
 - The new implementations are more capable than the ones they replace, please report if you find a regression.
+
+## Refactoring & Maintenance
+
+- Major overhaul of the test scripts.
 
 # v0.2.3
 
