@@ -22,3 +22,5 @@ The [**Advanced API**](low_level_api) (low level) offers fine-grained control of
 * Allows picking and choosing exactly what is needed from *OptiWindNet*;
 * May perform faster by avoiding unecessary checks and offering more tuning options.
 * The API to use for extending *OptiWindNet* with custom algorithms, models, objective functions or constraints.
+
+These lower-level interfaces are developer-facing and may evolve independently of the Network/Router API; keep advanced integrations pinned to a tested OptiWindNet version.
