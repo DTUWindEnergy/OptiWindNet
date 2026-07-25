@@ -222,7 +222,7 @@ class Drawable:
                 # detours are drawn separately as polylines
                 continue
             if edgeD.get('load') == 0:
-                # ring open point: keep geometry, draw with the 'split' style
+                # ring zero-load link: keep geometry, draw with the 'split' style
                 kind = 'split'
             u, v = (u, v) if u < v else (v, u)
             (x1, y1), (x2, y2) = VertexS[fnT[u]], VertexS[fnT[v]]
@@ -558,8 +558,8 @@ class Drawable:
         if G.graph.get('D', 0) > 0:
             legend_items.append(('node', 'corner', 'corner', 'none', 'ring'))
 
-        # 4. Edges (collect unique kinds from G and overlay if any). A ring open
-        # point (load == 0) is drawn with the 'split' style regardless of its
+        # 4. Edges (collect unique kinds from G and overlay if any). A ring
+        # zero-load link is drawn with the 'split' style regardless of its
         # geometry kind, so it contributes 'split' to the legend.
         def _legend_kind(d):
             if d.get('load') == 0:

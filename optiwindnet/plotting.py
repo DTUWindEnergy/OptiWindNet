@@ -171,8 +171,8 @@ def gplot(
     edges_width = 1.0
     edges_capstyle = 'round'
 
-    # draw edges. A ring open point (``load == 0``) keeps its geometry ``kind``
-    # but is drawn with the 'split' style, so it reads as an open point whether
+    # draw edges. A ring zero-load link (``load == 0``) keeps its geometry ``kind``
+    # but is drawn with the 'split' style, so it reads as a zero-load link whether
     # it is a straight edge or follows a contour.
     for graph, edge_kind in product((G, G.graph.get('overlay')), c.kind2style):
         if graph is None:

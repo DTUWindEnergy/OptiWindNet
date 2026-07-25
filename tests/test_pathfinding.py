@@ -395,7 +395,7 @@ def test_get_mesh_endpoint_prefers_the_more_anchored_endpoint():
 
 
 def test_pathfinder_ringed_topology():
-    """Detouring preserves connectivity and open points for a ringed input."""
+    """Detouring preserves connectivity and zero-load links for a ringed input."""
     wfn = tiny_wfn()
     T, R = (wfn.A.graph[key] for key in 'TR')
     S = nx.Graph(
