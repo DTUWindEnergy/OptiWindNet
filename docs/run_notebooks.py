@@ -12,25 +12,47 @@ because they can take several minutes; pass ``--milp`` (or explicit paths)
 to include them. A notebook is classified as MILP if any code cell mentions
 ``MILPRouter``, ``solver_factory``, ``ortools.cp_sat``, or other MILP
 solver tags from ``MILP_PATTERN``.
+
+Pass ``--changed`` to select only notebooks that differ from the current
+branch's HEAD or are untracked.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
+import subprocess
 import sys
 import time
+import warnings
 from pathlib import Path
+from typing import Any
 
 import nbformat
+from jupyter_client import AsyncKernelClient, AsyncKernelManager
 from nbclient import NotebookClient
 from nbclient.exceptions import CellExecutionError
+from nbformat.validator import normalize
+from traitlets.config import Config
 
 HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parent
 NB_DIR = HERE / 'notebooks'
 DEFAULT_TIMEOUT = 600
 DEFAULT_SCROLLED_THRESHOLD = 24
+
+
+class CurveKernelManager(AsyncKernelManager):
+    """Keep manager-provisioned CurveZMQ keys as bytes for the kernel client."""
+
+    def client(self, **kwargs: Any) -> AsyncKernelClient:
+        if self.curve_publickey is not None:
+            kwargs.setdefault('curve_publickey', self.curve_publickey)
+            kwargs.setdefault('curve_secretkey', self.curve_secretkey)
+        return super().client(**kwargs)
+
 
 MILP_PATTERN = re.compile(
     r'\b(?:MILPRouter|solver_factory|ortools\.cp_sat|gurobipy|'
@@ -39,12 +61,13 @@ MILP_PATTERN = re.compile(
 MPL_PATTERN = re.compile(
     r'\b(?:gplot|pplot|matplotlib|pyplot|plt\.[a-zA-Z_]|mpl\.rcParams)'
 )
-MPL_SETUP_CODE = """\
-# transient setup injected by docs/run_notebooks.py for stable SVG output
-import matplotlib as mpl
-mpl.rcParams.update({"svg.hashsalt": "fixed-salt-for-this-project"})
-%config InlineBackend.print_figure_kwargs = {"metadata": {"Date": None, "Creator": "OptiWindNet"}}
-"""
+MPL_SETUP_CODE = (
+    '# transient setup injected by docs/run_notebooks.py for stable SVG output\n'
+    'import matplotlib as mpl\n'
+    'mpl.rcParams.update({"svg.hashsalt": "fixed-salt-for-this-project"})\n'
+    '%config InlineBackend.print_figure_kwargs = '
+    '{"metadata": {"Date": None, "Creator": "OptiWindNet"}}\n'
+)
 
 
 def cell_source(cell: nbformat.NotebookNode) -> str:
@@ -52,8 +75,30 @@ def cell_source(cell: nbformat.NotebookNode) -> str:
     return ''.join(src) if isinstance(src, list) else src
 
 
+def read_notebook(path: Path) -> nbformat.NotebookNode:
+    """Read, normalize, convert, and validate a notebook.
+
+    Load the raw JSON before using nbformat so missing cell IDs can be repaired
+    before validation. Future nbformat releases are expected to reject these
+    notebooks during validation instead of repairing them transparently.
+    """
+    with path.open(encoding='utf8') as stream:
+        raw_nb = json.load(stream)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'ignore',
+            message=r'Cell is missing an id field.*',
+        )
+        _, normalized_nb = normalize(raw_nb)
+    # Parse the normalized JSON through nbformat's reader so split-line fields
+    # such as cell sources and stream output are rejoined into strings.
+    nb = nbformat.reads(json.dumps(normalized_nb), as_version=4)
+    nbformat.validate(nb)
+    return nb
+
+
 def is_milp(path: Path) -> bool:
-    nb = nbformat.read(path, as_version=4)
+    nb = read_notebook(path)
     for cell in nb.cells:
         if cell.get('cell_type') == 'code' and MILP_PATTERN.search(cell_source(cell)):
             return True
@@ -142,16 +187,44 @@ def clean_notebook(nb: nbformat.NotebookNode, scrolled_threshold: int) -> None:
         cell['metadata'] = meta
 
 
+def changed_notebook_paths() -> set[Path]:
+    """Return tracked changes from HEAD plus untracked, non-ignored notebooks."""
+    commands = (
+        ('diff', '--name-only', '--diff-filter=ACMR', '-z', 'HEAD', '--'),
+        ('ls-files', '--others', '--exclude-standard', '-z', '--'),
+    )
+    paths: set[Path] = set()
+    for command in commands:
+        result = subprocess.run(
+            ('git', *command),
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode:
+            detail = os.fsdecode(result.stderr).strip()
+            sys.exit(f'git {" ".join(command)} failed: {detail}')
+        paths.update(
+            (REPO_ROOT / os.fsdecode(name)).resolve()
+            for name in result.stdout.split(b'\0')
+            if name and Path(os.fsdecode(name)).suffix == '.ipynb'
+        )
+    return paths
+
+
 def select_notebooks(args: argparse.Namespace) -> list[Path]:
     if args.notebooks:
         paths = [Path(p).resolve() for p in args.notebooks]
     else:
         paths = sorted(NB_DIR.glob('*.ipynb'))
-        if not args.milp:
-            paths = [p for p in paths if not is_milp(p)]
     missing = [p for p in paths if not p.is_file()]
     if missing:
         sys.exit(f'not found: {", ".join(str(p) for p in missing)}')
+    if args.changed:
+        changed = changed_notebook_paths()
+        paths = [p for p in paths if p in changed]
+    if not args.notebooks and not args.milp:
+        paths = [p for p in paths if not is_milp(p)]
     return paths
 
 
@@ -161,6 +234,7 @@ def run(args: argparse.Namespace) -> int:
         print('no notebooks selected')
         return 0
 
+    kernel_config = Config({'KernelManager': {'transport_encryption': 'auto'}})
     failures: list[tuple[Path, str]] = []
     for path in paths:
         rel = path.relative_to(NB_DIR) if path.is_relative_to(NB_DIR) else path.name
@@ -168,7 +242,7 @@ def run(args: argparse.Namespace) -> int:
         t0 = time.monotonic()
         injected = False
         try:
-            nb = nbformat.read(path, as_version=4)
+            nb = read_notebook(path)
             if not args.no_mpl_setup and uses_matplotlib(nb):
                 nb.cells.insert(0, nbformat.v4.new_code_cell(MPL_SETUP_CODE))
                 injected = True
@@ -177,6 +251,8 @@ def run(args: argparse.Namespace) -> int:
                 timeout=args.timeout,
                 kernel_name=args.kernel,
                 resources={'metadata': {'path': str(NB_DIR)}},
+                config=kernel_config,
+                kernel_manager_class=CurveKernelManager,
             )
             client.execute()
         except CellExecutionError as exc:
@@ -227,9 +303,14 @@ def main() -> int:
         help='specific .ipynb paths (default: all in docs/notebooks)',
     )
     p.add_argument(
+        '--changed',
+        action='store_true',
+        help='only run notebooks changed from HEAD or untracked by Git',
+    )
+    p.add_argument(
         '--milp',
         action='store_true',
-        help='include MILP notebooks (skipped by default; ignored when paths are given)',
+        help='include MILP notebooks (skipped by default; ignored if paths given)',
     )
     p.add_argument(
         '-n',

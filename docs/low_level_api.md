@@ -1,5 +1,7 @@
 # Advanced API
 
+These numbered notebooks are developer-facing examples that import lower-level modules directly. Their interfaces offer fine control but are not covered by the compatibility guarantees of the Network/Router API.
+
 ```{toctree}
 :glob:
 :titlesonly:

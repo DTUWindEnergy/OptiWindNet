@@ -12,7 +12,13 @@ These notebooks demonstrate how to use the *OptiWindNet*'s **high-level API** vi
 
 Users only need to provide input data and call a few intuitive methods to perform routing and access results.
 
-The notebooks demonstrating the **Network/Router API** of *OptiWindNet* have filenames starting with a letter.
+The notebooks demonstrating the **Network/Router API** of *OptiWindNet* have filenames starting with a letter:
+- `a01_data_input.ipynb` to `a11_clustering_multi_substation.ipynb`: Data handling, plotting, options, sub-station clustering, and workflows
+- `b01_EWRouter.ipynb`: Esau-Williams heuristic router
+- `b02_HGSRouter.ipynb`: Hybrid Genetic Search meta-heuristic router
+- `b03_MILPRouter.ipynb`: MILP exact optimization router
+- `b04_ringed_topology.ipynb`: Ringed topology cable routing across routers
+- `c01_Simple_Topfarm_optiwindnet.ipynb`: TopFarm integration
 
 > ✅ Use these if you want fast prototyping or plan to integrate `OptiWindNet` into a larger workflow.
 
