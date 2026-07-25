@@ -152,7 +152,7 @@ def test_G_from_routeset_ringed(tmp_path, locations):
 
     The rings are stored as a sequence of routes in ``edges`` (roots interleaved
     with each ring's node walk), so it is longer than the one-entry-per-non-root
-    -node forest encoding; the open points are re-derived at the load midpoint on
+    -node forest encoding; the zero-load links are re-derived at the load midpoint on
     read, not stored. The derived ``subtree`` node attribute is recomputed by
     ``calcload`` with a per-arm convention, so it is excluded from the
     comparison, as are the contour/detour counters that are ``None`` before
@@ -164,7 +164,7 @@ def test_G_from_routeset_ringed(tmp_path, locations):
     with database_connection(dbfile, create_db=True):
         get_machine_pk()
 
-        # capacity 5 yields both rings (split open points) and detour clones, so
+        # capacity 5 yields both rings (split zero-load links) and detour clones, so
         # this exercises the ring route-sequence together with the clone nodes.
         capacity = 5
         wfn = WindFarmNetwork(cables=capacity, L=locations.albatros)
@@ -203,7 +203,7 @@ def test_G_from_routeset_ringed(tmp_path, locations):
     )
     # the reloaded routeset is a genuine ring set, not a forest
     split_edges = [(u, v) for u, v, d in G_rs.edges(data=True) if d.get('load') == 0]
-    assert split_edges, 'split open points must be restored on read'
+    assert split_edges, 'split zero-load links must be restored on read'
     assert all(G_rs[u][v]['load'] == 0 for u, v in split_edges)
 
 

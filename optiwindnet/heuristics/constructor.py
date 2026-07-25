@@ -101,7 +101,7 @@ def constructor(
       ``'ringed'``
         Grows simple-path subtrees that are closed into rings at finalization:
         each endpoint connects to its nearest root (two feeders, which may bridge
-        two roots), joined at an open point (``load=0``, no current).
+        two roots), joined at a zero-load link (``load=0``, no current).
         ``capacity`` is the per-arm limit, so a ring holds up to ``2 * capacity``
         terminals. Unions are ranked by their total saving — the feeders shed at
         the two joined endpoints minus the connecting edge's length (Clarke-Wright
@@ -146,7 +146,7 @@ def constructor(
         # A ring is two radial arms sharing one root, joined at their tails. Build
         # a simple path of up to 2*capacity terminals (each arm holds at most
         # `capacity`); the path is closed into a ring at finalization, with the
-        # open point placed at the load midpoint so neither arm exceeds capacity.
+        # zero-load link placed at the load midpoint so neither arm exceeds capacity.
         capacity *= 2
     VertexC = Aʹ.graph['VertexC']
     diagonals = Aʹ.graph['diagonals']
@@ -989,7 +989,7 @@ def constructor(
             for sr in (rootmask_ & is_subroot_).search(_ONE):
                 S.add_edge(r, sr)
     S.graph['topology'] = _METHOD_TOPOLOGY[method]
-    # ringed: close each path subtree into a ring (adds open points); else set loads
+    # ringed: close each path subtree into a ring (adds zero-load links); else set loads
     if ringed:
         split_rings_and_calc_loads(S, Aʹ)
     else:

@@ -50,14 +50,16 @@ def test_add_ring_to_S_canonical_shape(n):
     add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
 
     feeders = [data['load'] for u, v, data in S.edges(data=True) if min(u, v) < 0]
-    open_points = [(u, v) for u, v, data in S.edges(data=True) if data.get('load') == 0]
+    zero_load_links = [
+        (u, v) for u, v, data in S.edges(data=True) if data.get('load') == 0
+    ]
     arm_load = math.ceil(n / 2)
     assert max(data['load'] for *_, data in S.edges(data=True)) == arm_load
     if n == 1:
-        assert feeders == [1] and open_points == []
+        assert feeders == [1] and zero_load_links == []
     else:
         assert sorted(feeders) == [n - arm_load, arm_load]
-        assert len(open_points) == 1
+        assert len(zero_load_links) == 1
     assert sum(S.nodes[t]['load'] for t in S.neighbors(-1)) == n
     assert {S.nodes[t]['subtree'] for t in range(n)} == {0}
 
@@ -206,7 +208,7 @@ def test_assign_cables():
     assert G4.graph['capacity'] == 5
 
 
-def test_assign_cables_prices_ring_open_point():
+def test_assign_cables_prices_ring_zero_load_link():
     G = nx.Graph(max_load=1)
     G.add_edge(-1, 0, load=1, length=2.0)
     G.add_edge(0, 1, load=0, length=3.0)
@@ -435,7 +437,7 @@ def test_G_from_S():
         assert actual_kind == expected_kind
 
 
-def test_G_from_S_expands_a_contoured_ring_open_point():
+def test_G_from_S_expands_a_contoured_ring_zero_load_link():
     A = get_bundle('borkum2').A
     T, R = (A.graph[key] for key in 'TR')
     u, v = next(
@@ -629,13 +631,13 @@ def test_tagged_ringed_roundtrip_infers_dimensions():
     assert _ring_sets(S2) == _ring_sets(S)
 
 
-@pytest.mark.parametrize('longer, expected_open', [(0, (0, 1)), (1, (1, 2))])
-def test_terse_links_ringed_preserves_open_point(longer, expected_open):
-    """An odd-terminal ring's open point survives the round-trip losslessly.
+@pytest.mark.parametrize('longer, expected_zero_load_link', [(0, (0, 1)), (1, (1, 2))])
+def test_terse_links_ringed_preserves_zero_load_link(longer, expected_zero_load_link):
+    """An odd-terminal ring's zero-load link survives the round-trip losslessly.
 
     The two balanced split edges of an odd ring map onto the two walk
-    directions, so the encoder orients the walk to reproduce the exact open
-    point that ``add_ring_to_S`` chose from ``A`` -- without storing it.
+    directions, so the encoder orients the walk to reproduce the exact zero-load
+    link that ``add_ring_to_S`` chose from ``A`` -- without storing it.
     """
     A = nx.Graph()
     A.add_edge(0, 1, length=10.0 if longer == 0 else 1.0)
@@ -647,8 +649,10 @@ def test_terse_links_ringed_preserves_open_point(longer, expected_open):
 
     terse = terse_links_from_S(S)
     S2 = S_from_terse_links(terse, R=1, T=3)
-    open_point = next({u, v} for u, v, d in S2.edges(data=True) if d.get('load') == 0)
-    assert open_point == set(expected_open)
+    zero_load_link = next(
+        {u, v} for u, v, d in S2.edges(data=True) if d.get('load') == 0
+    )
+    assert zero_load_link == set(expected_zero_load_link)
 
 
 def test_terse_links_forest_still_positional():
@@ -775,10 +779,10 @@ def test_validate_topology_rejects_terminal_absent_from_S():
     assert 'terminals not connected to any root: [3]' in validate_topology(S)
 
 
-def test_validate_topology_rejects_misplaced_open_point():
-    """A ring's open point must sit where its node loads split the arms.
+def test_validate_topology_rejects_misplaced_zero_load_link():
+    """A ring's zero-load link must sit where its node loads split the arms.
 
-    Moving it while leaving every node load alone keeps the open-point count,
+    Moving it while leaving every node load alone keeps the zero-load-link count,
     the arm balance and the arm-head totals all intact, so only comparing the
     link loads against the node loads catches it.
     """

@@ -94,7 +94,7 @@ def assign_cables(
     has_cost = sum(cost) > 0
     for _, _, data in G.edges(data=True):
         if data['load'] == 0:
-            # ring open point ('split'): a real cable with no current — assign the
+            # ring zero-load link ('split'): a real cable with no current — assign the
             # thinnest cable type, but no current-carrying capacity is consumed.
             data['cable'] = 0
             if has_cost:
@@ -221,7 +221,7 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 # ``reverse = source < sink``. Beware of writing ``load[u] < load[v]`` instead: it
 # only matches while ``u < v`` holds, and silently mis-orients links stored the
 # other way round. Feeders are never reversed, the sink being a root and a root's
-# id negative; links carrying ``load=0`` (a ring's open point) have no current and
+# id negative; links carrying ``load=0`` (a ring's zero-load link) have no current and
 # so no direction to encode.
 def bfs_subtree_loads(G, parent, children, subtree, visited=None):
     """Recurse down the subtree, updating edge and node attributes.
@@ -259,7 +259,7 @@ def bfs_subtree_loads(G, parent, children, subtree, visited=None):
             raise ValueError(f'node {child} reached twice: not a tree below {parent}')
         visited.add(child)
         G.nodes[child]['subtree'] = subtree
-        # a load=0 link is a ring open point: never traverse across it
+        # a load=0 link is a ring zero-load link: never traverse across it
         grandchildren = {n for n in G[child] if G[child][n].get('load') != 0} - {parent}
         childload = bfs_subtree_loads(G, child, grandchildren, subtree, visited)
         # the child sources the current, the parent sinks it (towards the root)
@@ -274,18 +274,18 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
 
     Only the ringed builders (HGS, LKH and the ``method='ringed'`` constructor)
     call this, on a solution ``S`` that is still a set of simple
-    ``root → … → root`` paths missing their open points. Each path is walked and
-    closed into a canonical ring (see :func:`add_ring_to_S`), using ``A`` to pick
-    the longer open-point edge on odd-length rings; a tail already touching a root
-    bridges two roots ``(r1, r2)``. Every ring receives exactly one open-point
-    link (``load=0``, no current flows through it), and each node's subtree id and
-    load, the edges' loads, and the graph's ``max_load`` / ``has_loads`` / root
-    loads are set.
+    ``root → … → root`` paths missing their zero-load links. Each path is walked
+    and closed into a canonical ring (see :func:`add_ring_to_S`), using ``A`` to
+    pick the longer zero-load link on odd-length rings; a tail already touching
+    a root bridges two roots ``(r1, r2)``. Every ring receives exactly one
+    zero-load link (``load=0``, no current flows through it), and each node's
+    subtree id and load, the edges' loads, and the graph's ``max_load`` /
+    ``has_loads`` / root loads are set.
 
     All ringed solvers must call this before returning a solution, so that every
     ringed ``S`` carries exactly one ``load=0`` link per ring.
     """
-    # Ring construction: S is path-form (no open points yet). Walk each root's
+    # Ring construction: S is path-form (no zero-load links yet). Walk each root's
     # single-feeder path to its tail, then close it into a canonical ring; a tail
     # already touching a root bridges two roots (r1, r2).
     R = S.graph['R']
@@ -323,7 +323,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
         # a load=0 feeder carries no current, so it adds nothing to its root
-        # (the open point of a bridging stub is a feeder, not an interior link)
+        # (the zero-load link of a bridging stub is a feeder, not an interior link)
         S.nodes[root]['load'] = sum(
             S.nodes[n]['load'] for n in S[root] if S[root][n]['load'] != 0
         )
@@ -335,8 +335,8 @@ def calcload(G: nx.Graph) -> None:
     """Calculate link loads and update edge and node attributes of ``G``.
 
     ``G`` must already be in final form (a forest, or a ring-form graph whose
-    ``load=0`` open points are present). A breadth-first traversal of each root's
-    subtree propagates the loads, treating ``load=0`` links (ring open points) as
+    ``load=0`` zero-load links are present). A breadth-first traversal of each root's
+    subtree propagates the loads, treating ``load=0`` links (ring zero-load links) as
     breaks. Each node's subtree id and outgoing load land on its ``'subtree'`` /
     ``'load'`` attributes, the edges' ``'load'`` attributes are updated, and the
     graph's ``'max_load'``, ``'has_loads'`` and root loads are set.
@@ -357,7 +357,8 @@ def calcload(G: nx.Graph) -> None:
     for root in range(-R, 0):
         G.nodes[root]['load'] = 0
         for subroot in G[root]:
-            # a load=0 feeder (degenerate multi-root ring open point) carries no load
+            # A load=0 feeder (degenerate multi-root ring zero-load link) carries
+            # no load.
             if G[root][subroot].get('load') == 0:
                 continue
             _ = bfs_subtree_loads(G, root, [subroot], subtree, visited)
@@ -407,15 +408,15 @@ def add_ring_to_S(
     at their tail ends; it bridges two substations when ``r1 != r2``. ``ordered``
     is the terminal sequence ``[t1, ..., tn]`` walked along the ring, so that
     ``t1`` and ``tn`` are the feeder-connected terminals. Both feeders
-    ``(r1, t1)`` and ``(r2, tn)`` are real, load-bearing cables; the single open
-    point of the ring is the edge at the load midpoint, marked by ``load=0`` (a
-    real cable, no current flows through it).
+    ``(r1, t1)`` and ``(r2, tn)`` are real, load-bearing cables; the ring's single
+    zero-load link is the edge at the load midpoint, marked by ``load=0`` (a real
+    cable, no current flows through it).
 
     Arm 1 (the ``t1`` side) gets ``m = ceil(n / 2)`` terminals, so each arm holds at
     most ``ceil(n / 2)`` — i.e. half of the doubled ring capacity. When the ring has
     an even number of nodes (odd ``n``), the middle terminal has two candidate split
     edges yielding balanced arms; if ``A`` is provided, the longer of the two is
-    chosen as the open point.
+    chosen as the zero-load link.
 
     Node ``'load'``/``'subtree'`` and edge ``'load'``/``'reverse'`` are all set
     here; the caller is responsible for the root node's aggregate load.
@@ -452,7 +453,7 @@ def add_ring_to_S(
     for i in range(n - 1):
         u, v = ordered[i], ordered[i + 1]
         if i == m - 1:
-            # open point of the ring: real cable, no current (marked by load=0),
+            # zero-load link of the ring: real cable, no current (marked by load=0),
             # so it has no flow direction to encode
             S.add_edge(u, v, load=0, reverse=False)
         else:
@@ -555,7 +556,7 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
             violations.append(
                 f'ring at {roots} spans {n} terminals, but its arm heads carry {heads}'
             )
-        # exactly one open point per ring: a real cable with no current through it
+        # exactly one zero-load link per ring: a real cable with no current through it
         opens = [
             i
             for i, (u, v) in enumerate(zip(ordered, ordered[1:]))
@@ -563,11 +564,11 @@ def _validate_ringed(S: nx.Graph, capacity: int | None) -> list[str]:
         ]
         if len(opens) != (1 if n > 1 else 0):
             violations.append(
-                f'ring at {roots} has {len(opens)} open points, expected '
+                f'ring at {roots} has {len(opens)} zero-load links, expected '
                 f'{1 if n > 1 else 0}'
             )
         elif opens:
-            # the open point splits the ring where the node loads say it does:
+            # the zero-load link splits the ring where the node loads say it does:
             # arm 1 takes `arm` terminals, and an odd-terminal ring has a second
             # balanced split one link earlier (see :func:`add_ring_to_S`). Both
             # walk directions are covered: the two indices map onto each other.
@@ -756,12 +757,12 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     link's load.
 
     A RINGED ``S`` -- as declared by ``S.graph['topology']`` -- stores each ring
-    split into two arms at a load-0 open point, which is not how a flow
+    split into two arms at a zero-load link, which is not how a flow
     formulation sees it: there a ring is one directed chain of its ``n``
     terminals, fed by a flowless closing feeder at one end and draining through
     a feeder carrying the whole ring at the other. Such rings are *radialized*
-    into that chain here (walking across the open point with
-    :func:`rings_from_S`), so the open point becomes an ordinary
+    into that chain here (walking across the zero-load link with
+    :func:`rings_from_S`), so the zero-load link becomes an ordinary
     flow-carrying link.
 
     A ring bridging two roots drains through the one feeding the head of the
@@ -899,8 +900,8 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         num_diagonals += AedgeD['kind'] == 'extended' and s >= 0
         midpath = AedgeD.get('midpath')
 
-        # split edges are ring open points (load=0: no current flows). The open
-        # point keeps its geometry kind — it may follow a contour like any edge.
+        # Split edges are ring zero-load links (load=0: no current flows). The
+        # link keeps its geometry kind — it may follow a contour like any edge.
         if is_split:
             load = S[s][t]['load']
             st_reverse = False
