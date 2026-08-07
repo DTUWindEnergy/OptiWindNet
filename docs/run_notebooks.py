@@ -6,6 +6,8 @@ metadata so the result matches the clean state checked into the repository.
 
 Cells whose accumulated text output exceeds ``--scrolled-line-threshold``
 lines get ``metadata.scrolled = true`` (aimed at MILP solver logs).
+SVG figure outputs are prettified by default; pass ``--no-prettify-svg`` to
+leave their XML unchanged.
 
 By default, notebooks that invoke a MILP / OR-tools solver are skipped
 because they can take several minutes; pass ``--milp`` (or explicit paths)
@@ -29,6 +31,7 @@ import time
 import warnings
 from pathlib import Path
 from typing import Any
+from xml.dom import Node, minidom
 
 import nbformat
 from jupyter_client import AsyncKernelClient, AsyncKernelManager
@@ -42,6 +45,9 @@ REPO_ROOT = HERE.parent
 NB_DIR = HERE / 'notebooks'
 DEFAULT_TIMEOUT = 600
 DEFAULT_SCROLLED_THRESHOLD = 24
+SVG_TEXT_ELEMENTS = frozenset(
+    {'foreignObject', 'script', 'style', 'text', 'textPath', 'tspan'}
+)
 
 
 class CurveKernelManager(AsyncKernelManager):
@@ -172,7 +178,84 @@ def merge_adjacent_stream_outputs(cell: nbformat.NotebookNode) -> None:
     cell['outputs'] = merged
 
 
-def clean_notebook(nb: nbformat.NotebookNode, scrolled_threshold: int) -> None:
+def prettify_svg(svg: str) -> str:
+    """Format an SVG document with one space per XML nesting level."""
+    document = minidom.parseString(svg)
+
+    def indent_element(
+        element: minidom.Element,
+        depth: int,
+        preserve_text: bool = False,
+    ) -> None:
+        preserve_text = preserve_text or (
+            element.getAttribute('xml:space') == 'preserve'
+            or element.localName in SVG_TEXT_ELEMENTS
+        )
+        children = list(element.childNodes)
+        structural_children = [
+            child
+            for child in children
+            if child.nodeType
+            in (Node.ELEMENT_NODE, Node.COMMENT_NODE, Node.PROCESSING_INSTRUCTION_NODE)
+        ]
+        has_text = any(
+            child.nodeType in (Node.TEXT_NODE, Node.CDATA_SECTION_NODE)
+            and child.data.strip()
+            for child in children
+        )
+
+        for child in children:
+            if child.nodeType == Node.ELEMENT_NODE:
+                indent_element(child, depth + 1, preserve_text)
+
+        if preserve_text or has_text or not structural_children:
+            return
+
+        for child in children:
+            if child.nodeType == Node.TEXT_NODE and not child.data.strip():
+                element.removeChild(child)
+                child.unlink()
+
+        for child in list(element.childNodes):
+            element.insertBefore(
+                document.createTextNode(f'\n{" " * (depth + 1)}'), child
+            )
+        element.appendChild(document.createTextNode(f'\n{" " * depth}'))
+
+    root = document.documentElement
+    if root is None:
+        raise ValueError('SVG output has no document element')
+    indent_element(root, 0)
+    declaration = re.match(r'\s*(<\?xml\b.*?\?>)', svg, flags=re.IGNORECASE)
+    parts = [
+        child.toxml()
+        for child in document.childNodes
+        if child.nodeType != Node.TEXT_NODE or child.data.strip()
+    ]
+    if declaration:
+        parts.insert(0, declaration.group(1))
+    return '\n'.join(parts) + '\n'
+
+
+def prettify_svg_outputs(nb: nbformat.NotebookNode) -> None:
+    """Prettify every SVG MIME output in a notebook in place."""
+    for cell in nb.cells:
+        for output in cell.get('outputs', ()):
+            data = output.get('data', {})
+            if 'image/svg+xml' not in data:
+                continue
+            svg = data['image/svg+xml']
+            if isinstance(svg, list):
+                svg = ''.join(svg)
+            data['image/svg+xml'] = prettify_svg(svg)
+
+
+def clean_notebook(
+    nb: nbformat.NotebookNode,
+    scrolled_threshold: int,
+    *,
+    prettify_svgs: bool = True,
+) -> None:
     """Keep semantic metadata in-place; mark long-output cells as scrolled."""
     nb.metadata = nbformat.from_dict({'language_info': {'name': 'python'}})
     for cell in nb.cells:
@@ -187,6 +270,8 @@ def clean_notebook(nb: nbformat.NotebookNode, scrolled_threshold: int) -> None:
         ):
             meta['scrolled'] = True
         cell['metadata'] = meta
+    if prettify_svgs:
+        prettify_svg_outputs(nb)
 
 
 def changed_notebook_paths() -> set[Path]:
@@ -271,7 +356,11 @@ def run(args: argparse.Namespace) -> int:
         if injected:
             nb.cells.pop(0)
             renumber_execution_counts(nb)
-        clean_notebook(nb, args.scrolled_line_threshold)
+        clean_notebook(
+            nb,
+            args.scrolled_line_threshold,
+            prettify_svgs=args.prettify_svg,
+        )
         elapsed = time.monotonic() - t0
 
         if args.dry_run:
@@ -290,7 +379,7 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
+def argument_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description='Refresh notebook outputs in docs/notebooks via nbclient.'
     )
@@ -332,6 +421,12 @@ def main() -> int:
         help='skip injection of matplotlib SVG-stability setup',
     )
     p.add_argument(
+        '--prettify-svg',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='prettify SVG figure outputs (default: enabled)',
+    )
+    p.add_argument(
         '--scrolled-line-threshold',
         type=int,
         default=DEFAULT_SCROLLED_THRESHOLD,
@@ -340,7 +435,11 @@ def main() -> int:
             f'metadata.scrolled=true (default: {DEFAULT_SCROLLED_THRESHOLD})'
         ),
     )
-    return run(p.parse_args())
+    return p
+
+
+def main() -> int:
+    return run(argument_parser().parse_args())
 
 
 if __name__ == '__main__':
