@@ -17,6 +17,9 @@ from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
 from scipy.spatial.distance import cdist
 
 __all__ = (
+    'CoordPair',
+    'CoordPairs',
+    'IndexPairs',
     'triangle_AR',
     'point_d2line',
     'is_same_side',
@@ -49,8 +52,14 @@ __all__ = (
 NULL = np.iinfo(int).min
 
 CoordPair = np.ndarray[tuple[Literal[2]], np.dtype[np.float64]]
+"""Coordinates of a single point, as a float array of shape ``(2,)``."""
+
 CoordPairs = np.ndarray[tuple[int, Literal[2]], np.dtype[np.float64]]
+"""Coordinates of multiple points, as a float array of shape ``(N, 2)``."""
+
 IndexPairs = np.ndarray[tuple[int, Literal[2]], np.dtype[np.int_]]
+"""Vertex index pairs, such as edges, as an int array of shape ``(N, 2)``."""
+
 Indices = np.ndarray[tuple[int], np.dtype[np.int_]]
 
 
