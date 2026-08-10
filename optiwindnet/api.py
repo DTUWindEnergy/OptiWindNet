@@ -445,11 +445,13 @@ class WindFarmNetwork:
         """Plot the optimized network.
 
         By default, this method utilizes the modern vector SVG-based plotting
-        backend (:func:`svgplot`) which returns an :class:`SvgRepr` suitable for clean
-        interactive inline displays in Jupyter notebooks.
+        backend (:func:`~optiwindnet.svg.svgplot`) which returns an
+        :class:`~optiwindnet.svg.SvgRepr` suitable for clean interactive inline
+        displays in Jupyter notebooks.
 
-        To switch to the Matplotlib-based plotting backend (:func:`gplot`), specify the
-        ``ax`` parameter as a keyword argument.
+        To switch to the Matplotlib-based plotting backend
+        (:func:`~optiwindnet.plotting.gplot`), specify the ``ax`` parameter as a
+        keyword argument.
 
         Note:
           Passing ``ax=None`` explicitly routes to the Matplotlib backend and
