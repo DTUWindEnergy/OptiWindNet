@@ -36,10 +36,10 @@ def get_interferences_list(
     Should be used when edges are not limited to the expanded Delaunay set.
 
     Returns:
-      list of interferences, where each interference is:
-        ((4 vertices of the two edges involved), one of the vertices or ``None``)
-        the last tuple element indicates the index (0..3) of the vertex that
-        lays exactly on the edge in cases of touching (not crossing)
+      List of interferences. Each interference is a tuple ``((4 vertices of the
+      two edges involved), one of the vertices or None)``, whose last element
+      indicates the index (0..3) of the vertex that lays exactly on the edge in
+      cases of touching (not crossing).
     """
     crossings = []
     if fnT is None:
@@ -686,7 +686,7 @@ def find_geometric_crossings(
         coincident with a path endpoint, shared node, or detour-split prime.
 
     Returns:
-      One dict per finding, with keys:
+      One dict per finding, with the keys described below.
 
       - ``'kind'``: one of
           - ``'cross'``: two polylines cross at one or more isolated points;

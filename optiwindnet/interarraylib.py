@@ -120,9 +120,10 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     Args:
       G: route set instance
       significant_digits: minimum number of significant digits used for total length
+
     Returns:
-      Text lines: capacity and T, excess feeders and feeders per root, total length,
-        total cost.
+      Text lines with capacity and T, excess feeders and feeders per root, total
+      length and total cost.
     """
     R = G.graph['R']
     T = G.graph['T']

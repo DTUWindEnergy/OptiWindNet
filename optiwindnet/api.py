@@ -397,7 +397,7 @@ class WindFarmNetwork:
         """Concise one-line summary for console/debugging.
 
         Defensive by design: instance attributes are getattr-guarded so the repr
-        never raises, even on a partially-initialized instance (e.g. if :meth:`__init__`
+        never raises, even on a partially-initialized instance (e.g. if ``__init__``
         aborted before ``_T``/``_R`` were set). The solved-network branch is reached
         only when ``_is_stale_SG`` is ``False``, which guarantees ``_G`` exists.
         """

@@ -74,7 +74,7 @@ def clusterize(A: nx.Graph, capacity: int) -> list[set[int]]:
     :func:`.mesh.make_planar_embedding`), which minimizes the total terminal-to-root
     distance but may waste up to ``R - 1`` feeders. The wasted feeders are then shed:
     each way of doing so is a feeder budget (few of them, the waste being at most
-    ``R - 1``), and :func:`_assign` deals the terminals out exactly for each. The
+    ``R - 1``), and ``_assign()`` deals the terminals out exactly for each. The
     cheapest one wins.
 
     That distance is only a proxy for cable length -- it has each terminal reach its

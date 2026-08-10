@@ -136,7 +136,10 @@ class RouteSet(BaseModel):
     """Short identifier of the routeset origin."""
 
     detextra = FloatField(null=True)
-    """Relative length increase due to detour: length = (1+detextra)*undetoured."""
+    """Relative length increase due to detour.
+
+    ``length = (1 + detextra) * undetoured``
+    """
 
     num_diagonals = IntegerField(null=True)
     """Number of diagonal crossing structures."""
