@@ -12,7 +12,24 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
+import glob
+import os
+import shutil
 from importlib.metadata import version as get_version
+
+# nbsphinx converts notebook markdown cells by shelling out to a `pandoc` executable
+# (via nbconvert), so pandoc must be on PATH. pypandoc-binary ships one inside the
+# package, but pypandoc only exposes it to its own subprocess calls - it never touches
+# the ambient environment - so put it on PATH here for nbconvert's benefit.
+if shutil.which('pandoc') is None:
+    try:
+        import pypandoc
+    except ImportError:
+        pass
+    else:
+        _bundled = os.path.join(os.path.dirname(pypandoc.__file__), 'files')
+        if glob.glob(os.path.join(_bundled, 'pandoc*')):
+            os.environ['PATH'] += os.pathsep + _bundled
 
 release: str = get_version('optiwindnet')
 # for example take major/minor
