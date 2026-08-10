@@ -630,9 +630,9 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
         violations.append(f'root loads sum to {total}, expected T = {T}')
 
     # --- topology shape ------------------------------------------------------
-    if topology == 'ringed':
+    if topology is Topology.RINGED:
         violations += _validate_ringed(S, capacity)
-    elif topology in ('radial', 'branched'):
+    elif topology in (Topology.RADIAL, Topology.BRANCHED):
         if not nx.is_forest(S):
             violations.append(f'{topology} topology must be a forest')
         # every terminal is served by some root: a forest may leave a terminal
@@ -653,12 +653,10 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
         )
         if unoriented:
             violations.append(f'links missing the "reverse" flag: {unoriented}')
-        if topology == 'radial':
-            # a terminal absent from S has no degree to ask for; it is already
-            # reported as stranded above
-            degrees = [S.degree(t) for t in range(T) if S.has_node(t)]
-            if max(degrees, default=0) > 2:
-                violations.append('radial subtrees must be simple paths')
+        if topology is Topology.RADIAL and any(
+            deg > 2 for _, deg in S.degree(served - roots)
+        ):
+            violations.append('radial subtrees must be simple paths')
     else:
         raise ValueError(f'unknown topology: {topology!r}')
 
