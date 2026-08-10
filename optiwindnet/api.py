@@ -51,6 +51,19 @@ plt.rcParams['svg.fonttype'] = 'none'
 _logger = logging.getLogger(__name__)
 _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 
+# `ModelOptions` and `load_repository` are defined elsewhere but belong to this module's
+# surface: the notebooks reach for them as `from optiwindnet.api import ...`. Naming
+# them here puts them in this page's outline, pointing at where they are documented.
+__all__ = (
+    'Router',
+    'WindFarmNetwork',
+    'EWRouter',
+    'HGSRouter',
+    'MILPRouter',
+    'ModelOptions',
+    'load_repository',
+)
+
 
 class Router(ABC):
     """Abstract base class for routing algorithms in OptiWindNet.
@@ -908,7 +921,7 @@ class MILPRouter(Router):
           mip_gap: Relative MIP optimality gap tolerance.
           solver_options: Extra solver-specific options.
           model_options: Options for the MILP model. A plain mapping is coerced
-            into a :class:`.ModelOptions`.
+            into a :class:`~optiwindnet.MILP.ModelOptions`.
           verbose: Enable verbose logging.
         """
         super().__init__(**kwargs)
