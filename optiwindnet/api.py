@@ -51,6 +51,19 @@ plt.rcParams['svg.fonttype'] = 'none'
 _logger = logging.getLogger(__name__)
 _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 
+# `ModelOptions` and `load_repository` are defined elsewhere but belong to this module's
+# surface: the notebooks reach for them as `from optiwindnet.api import ...`. Naming
+# them here puts them in this page's outline, pointing at where they are documented.
+__all__ = (
+    'Router',
+    'WindFarmNetwork',
+    'EWRouter',
+    'HGSRouter',
+    'MILPRouter',
+    'ModelOptions',
+    'load_repository',
+)
+
 
 class Router(ABC):
     """Abstract base class for routing algorithms in OptiWindNet.
@@ -432,11 +445,13 @@ class WindFarmNetwork:
         """Plot the optimized network.
 
         By default, this method utilizes the modern vector SVG-based plotting
-        backend (:func:`svgplot`) which returns an :class:`SvgRepr` suitable for clean
-        interactive inline displays in Jupyter notebooks.
+        backend (:func:`~optiwindnet.svg.svgplot`) which returns an
+        :class:`~optiwindnet.svg.SvgRepr` suitable for clean interactive inline
+        displays in Jupyter notebooks.
 
-        To switch to the Matplotlib-based plotting backend (:func:`gplot`), specify the
-        ``ax`` parameter as a keyword argument.
+        To switch to the Matplotlib-based plotting backend
+        (:func:`~optiwindnet.plotting.gplot`), specify the ``ax`` parameter as a
+        keyword argument.
 
         Note:
           Passing ``ax=None`` explicitly routes to the Matplotlib backend and
@@ -908,7 +923,7 @@ class MILPRouter(Router):
           mip_gap: Relative MIP optimality gap tolerance.
           solver_options: Extra solver-specific options.
           model_options: Options for the MILP model. A plain mapping is coerced
-            into a :class:`.ModelOptions`.
+            into a :class:`~optiwindnet.MILP.ModelOptions`.
           verbose: Enable verbose logging.
         """
         super().__init__(**kwargs)
