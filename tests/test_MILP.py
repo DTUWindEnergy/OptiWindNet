@@ -719,7 +719,14 @@ def _job_make_solve_params(backend, physical_core_count_value, kwargs):
         solve_params = ortools_milp.SolverORTools(backend)._make_solve_parameters(
             **kwargs
         )
-    return solve_params, kwargs['applied_options']
+    # only plain values may cross back: unpickling an ortools object would load
+    # ortools' native libraries into the parent process
+    probed = dict(threads=solve_params.threads)
+    if backend == 'cp_sat':
+        probed['log_search_progress'] = solve_params.cp_sat.log_search_progress
+    else:
+        probed['highs_threads'] = solve_params.highs.int_options['threads']
+    return probed, kwargs['applied_options']
 
 
 @pytest.mark.parametrize(
@@ -738,28 +745,33 @@ def test_make_solve_parameters_thread_defaults(
         applied_options={},
         verbose=verbose,
     )
-    solve_params, applied_options = ortools_worker.run(
+    probed, applied_options = ortools_worker.run(
         _job_make_solve_params, (backend, 6, kwargs), 30
     )
 
-    assert solve_params.threads is expected_threads
+    assert probed['threads'] is expected_threads
     assert applied_options == {}
     if backend == 'cp_sat':
-        assert solve_params.cp_sat.log_search_progress is True
+        assert probed['log_search_progress'] is True
     else:
-        assert solve_params.highs.int_options['threads'] == 6
+        assert probed['highs_threads'] == 6
 
 
 def _job_gscip_native_params(applied_options):
     import optiwindnet.MILP.ortools as ortools_milp
 
     solver = ortools_milp.SolverORTools('gscip')
-    return solver._make_solve_parameters(
+    gscip = solver._make_solve_parameters(
         time_limit=3.0,
         mip_gap=0.001,
         applied_options=applied_options,
         verbose=False,
-    )
+    ).gscip
+    # see _job_make_solve_params: keep ortools objects inside this process
+    return {
+        kind: dict(getattr(gscip, f'{kind}_params'))
+        for kind in ('int', 'bool', 'real', 'char', 'string')
+    }
 
 
 def test_make_solve_parameters_gscip_routes_native_parameter_types(ortools_worker):
@@ -772,14 +784,14 @@ def test_make_solve_parameters_gscip_routes_native_parameter_types(ortools_worke
         'visual/vbcfilename': 'trace.vbc',
     }
 
-    solve_params = ortools_worker.run(_job_gscip_native_params, (applied_options,), 30)
+    gscip = ortools_worker.run(_job_gscip_native_params, (applied_options,), 30)
 
-    assert solve_params.gscip.int_params['limits/nodes'] == 12
-    assert solve_params.gscip.int_params['display/verblevel'] == 4
-    assert solve_params.gscip.bool_params['parallel/mode'] is True
-    assert solve_params.gscip.real_params['numerics/epsilon'] == 0.25
-    assert solve_params.gscip.char_params['misc/branchdir'] == 'u'
-    assert solve_params.gscip.string_params['visual/vbcfilename'] == 'trace.vbc'
+    assert gscip['int']['limits/nodes'] == 12
+    assert gscip['int']['display/verblevel'] == 4
+    assert gscip['bool']['parallel/mode'] is True
+    assert gscip['real']['numerics/epsilon'] == 0.25
+    assert gscip['char']['misc/branchdir'] == 'u'
+    assert gscip['string']['visual/vbcfilename'] == 'trace.vbc'
 
 
 def _job_gscip_rejects_unsupported():
