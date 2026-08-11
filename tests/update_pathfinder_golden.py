@@ -71,7 +71,7 @@ def generate(database: Path, routeset_ids: Sequence[int]) -> tuple[TerseLinks, .
             G = G_from_routeset(RouteSet.get_by_id(routeset_id))
             if G.graph['capacity'] != G.graph['max_load']:
                 raise ValueError(
-                    f'route set {routeset_id} does not use its full cable capacity; '
+                    f'routeset {routeset_id} does not use its full cable capacity; '
                     'capacity cannot be represented by TerseLinks'
                 )
             golden.append(TerseLinks.from_routeset(G))

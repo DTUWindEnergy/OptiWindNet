@@ -265,7 +265,7 @@ def assert_graph_equal(
 def canonical_edges(G: nx.Graph) -> Counter:
     """Edge multiset of G where detour clones are replaced by their primes.
 
-    Two route sets with equal canonical edge multisets are topologically
+    Two routesets with equal canonical edge multisets are topologically
     equivalent even if their detour clones have different numbering.
 
     Multiplicity matters: two independent feeders touching the same border

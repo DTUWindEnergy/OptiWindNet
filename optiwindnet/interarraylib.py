@@ -118,7 +118,7 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     integer part has fewer significant digits than ``significant_digits``.
 
     Args:
-      G: route set instance
+      G: routeset instance
       significant_digits: minimum number of significant digits used for total length
 
     Returns:

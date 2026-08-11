@@ -244,7 +244,7 @@ class PathFinder:
 
     PathFinder finds the shortest segmented (or detoured) routes for tentative feeders
     (i.e. those that were created without a check for crossings of other routes). The
-    path-finding is performed when the instance is initialized, but a route set is
+    path-finding is performed when the instance is initialized, but a routeset is
     returned only with a call to method :meth:`create_detours`.
 
     Only edges in graph attribute ``'tentative'`` or, lacking that, edges with the
@@ -256,7 +256,7 @@ class PathFinder:
     head or tail, ``'ringed'`` only the current subroot.
 
     Args:
-      G: the route set without detours
+      G: the routeset without detours
       P: the planar embedding associated with A
       A: the available links graph
       iterations_limit: maximum number of steps in the path-finding process
@@ -268,7 +268,7 @@ class PathFinder:
 
       P, A = make_planar_embedding(L)  # L represents the geometry of the location
       S = some_solver(A, ...)  # S is a topology
-      G_tentative = G_from_S(S, A)  # G_tentative is almost a route set
+      G_tentative = G_from_S(S, A)  # G_tentative is almost a routeset
       G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
     Note:

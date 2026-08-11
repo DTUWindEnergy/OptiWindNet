@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
-"""Database model v3 for storage of locations and route sets (Peewee).
+"""Database model v3 for storage of locations and routesets (Peewee).
 
 Tables:
   - NodeSet: location definition

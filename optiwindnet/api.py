@@ -105,7 +105,7 @@ class Router(ABC):
           **kwargs : Additional router-specific parameters.
 
         Returns:
-          Tuple of (solution topology (selected links), optimized route set).
+          Tuple of (solution topology (selected links), optimized routeset).
         """
         pass
 
