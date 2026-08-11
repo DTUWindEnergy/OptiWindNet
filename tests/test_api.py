@@ -59,7 +59,7 @@ def test_optimize_forwards_inputs_and_warmstart_state():
     wfn.optimize()
     second = router.calls[1]
     assert second['S_warm'] is solved.S
-    assert second['S_warm_has_detour'] is bool(solved.G.graph.get('D', 0))
+    assert 'S_warm_has_detour' not in second
 
 
 @pytest.mark.parametrize('feeder_route', ('segmented', 'straight'))
@@ -145,6 +145,35 @@ def test_hgsrouter_forwards_low_level_options(monkeypatch):
         'ringed': True,
         'seed': 11,
     }
+
+
+@pytest.mark.parametrize(
+    ('solver_name', 'verbose', 'enabled'),
+    [
+        # 'ortools' is the legacy alias, the dotted names are the current ones: all of
+        # them carry the log_callback, so all of them must reach the helper
+        ('ortools', True, True),
+        ('ortools.cp_sat', True, True),
+        ('ortools.gscip', True, True),
+        ('ortools.cp_sat', False, False),
+        ('scip', True, False),
+    ],
+)
+def test_milprouter_enables_jupyter_logging_for_every_ortools_backend(
+    monkeypatch, solver_name, verbose, enabled
+):
+    class FakeSolver:
+        options = {}
+
+    calls = []
+    monkeypatch.setattr(api, 'solver_factory', lambda name: FakeSolver())
+    monkeypatch.setattr(
+        api, 'enable_ortools_logging_if_jupyter', lambda solver: calls.append(solver)
+    )
+
+    MILPRouter(solver_name=solver_name, time_limit=1, mip_gap=0.01, verbose=verbose)
+
+    assert len(calls) == int(enabled)
 
 
 def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):

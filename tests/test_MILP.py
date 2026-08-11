@@ -428,6 +428,100 @@ def test_ringed_warmstart_is_accepted_by_scip():
     assert solver.metadata.warmed_by == S.graph['creator']
 
 
+def _warmup_toy_with(feeder_limit, warm_source):
+    """Warm-start a toy model, reporting what MathOpt's warmup_model() decided."""
+    import math
+
+    from optiwindnet.baselines.hgs import hgs_cvrp
+    from optiwindnet.heuristics import constructor
+    from optiwindnet.interarraylib import S_from_G, as_normalized
+    from optiwindnet.MILP import OWNWarmupFailed
+    from optiwindnet.MILP.ortools import make_min_length_model, warmup_model
+
+    A = get_bundle('toy').A
+    if warm_source == 'constructor':
+        S = S_from_G(constructor(A, capacity=_CAPACITY, method='rootlust'))
+    else:
+        S = hgs_cvrp(
+            as_normalized(A),
+            capacity=_CAPACITY,
+            time_limit=0.2,
+            vehicles=math.ceil(A.graph['T'] / _CAPACITY),
+        )
+    feeders = sum(S.degree[r] for r in range(-A.graph['R'], 0))
+    model, metadata = make_min_length_model(
+        A, _CAPACITY, **ModelOptions(feeder_limit=feeder_limit)
+    )
+    try:
+        warmup_model(model, metadata, S)
+    except OWNWarmupFailed as exc:
+        return feeders, None, str(exc)
+    return feeders, metadata.warmed_by, None
+
+
+@pytest.mark.parametrize(
+    ('feeder_limit', 'warm_source', 'accepted'),
+    [
+        ('unlimited', 'constructor', True),
+        # toy needs 3 feeders at capacity 5, but the constructor uses 4: a model
+        # pinning the minimum cannot take that warm start, while HGS held to
+        # `vehicles=minimum` produces one it can (see MILPRouter.route).
+        ('minimum', 'constructor', False),
+        ('minimum', 'hgs', True),
+    ],
+)
+def test_warmup_rejects_hints_that_violate_the_model(
+    ortools_worker, feeder_limit, warm_source, accepted
+):
+    feeders, warmed_by, error = ortools_worker.run(
+        _warmup_toy_with, (feeder_limit, warm_source), 60
+    )
+
+    assert feeders == (4 if warm_source == 'constructor' else 3)
+    if accepted:
+        assert error is None
+        assert warmed_by == (
+            'constructor' if warm_source == 'constructor' else 'baselines.hgs'
+        )
+    else:
+        assert warmed_by is None
+        assert 'violates model constraint feeder_limit_eq' in error
+
+
+def test_scip_warmstart_rejects_pinned_feeder_mismatch():
+    """SCIP's checkSol() must catch what addSol() alone would accept."""
+    from optiwindnet.heuristics import constructor
+    from optiwindnet.interarraylib import S_from_G
+
+    # imported here, not at module scope: `ortools_worker` re-imports this module in
+    # its own process, which must never load pyscipopt (see the note at the top)
+    from optiwindnet.MILP.scip import warmup_model
+
+    bundle = get_bundle('toy')
+    A = bundle.A
+    S = S_from_G(constructor(A, capacity=_CAPACITY, method='rootlust'))
+    # toy needs 3 feeders at capacity 5 and the constructor uses 4
+    assert sum(S.degree[r] for r in range(-A.graph['R'], 0)) == 4
+
+    try:
+        solver = solver_factory('scip')
+    except BaseException as exc:
+        if solver_unavailable(exc):
+            pytest.skip(f'scip unavailable: {exc}')
+        raise
+
+    solver.set_problem(
+        bundle.P,
+        A,
+        capacity=_CAPACITY,
+        model_options=ModelOptions(feeder_limit='minimum'),
+    )
+    with pytest.raises(MILP.OWNWarmupFailed, match='violates some model constraint'):
+        warmup_model(solver.model, solver.metadata, S)
+    assert solver.model.getNSols() == 0
+    assert solver.metadata.warmed_by == ''
+
+
 def test_segmented_get_solution_still_investigates_pool(ortools_worker):
     calls, source, pathfinder_calls = ortools_worker.run(
         _exercise_ortools_retrieval_branch, ('segmented',), 30

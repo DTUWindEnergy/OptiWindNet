@@ -1,5 +1,4 @@
 import logging
-import math
 from typing import TYPE_CHECKING, Any, Sequence
 
 import matplotlib.pyplot as plt
@@ -7,8 +6,6 @@ import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.validation import explain_validity
-
-from .MILP._core import Topology
 
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
@@ -137,111 +134,6 @@ def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC, **
     ax.legend()
     ax.set_axis_off()
     return ax
-
-
-def is_warmstart_eligible(
-    S_warm,
-    cables_capacity,
-    model_options,
-    S_warm_has_detour,
-    solver_name,
-    logger,
-    verbose=False,
-):
-    verbose_warmstart = verbose or logger.isEnabledFor(logging.INFO)
-
-    if S_warm is None:
-        if verbose_warmstart:
-            warning('No solution is available for warmstarting.')
-        return False
-
-    R = S_warm.graph['R']
-    T = S_warm.graph['T']
-    capacity = cables_capacity
-
-    reasons = []
-
-    # Feeder constraints
-    # the model constrains the feeder count over all roots, not per root
-    feeder_count = sum(S_warm.degree[r] for r in range(-R, 0))
-    feeder_limit_mode = model_options['feeder_limit']
-    feeder_minimum = math.ceil(T / capacity)
-
-    # feeder_exact is the pinned feeder count, if the mode pins it
-    feeder_exact = None
-    if feeder_limit_mode == 'unlimited':
-        feeder_limit = float('inf')
-    elif feeder_limit_mode == 'exactly':
-        feeder_limit = feeder_exact = model_options['max_feeders']
-    elif feeder_limit_mode == 'specified':
-        feeder_limit = model_options['max_feeders']
-        if feeder_limit == feeder_minimum:
-            feeder_exact = feeder_limit
-    elif feeder_limit_mode == 'minimum':
-        feeder_limit = feeder_exact = feeder_minimum
-    elif feeder_limit_mode == 'min_plus1':
-        feeder_limit = feeder_minimum + 1
-    elif feeder_limit_mode == 'min_plus2':
-        feeder_limit = feeder_minimum + 2
-    elif feeder_limit_mode == 'min_plus3':
-        feeder_limit = feeder_minimum + 3
-    else:
-        feeder_limit = float('inf')
-
-    if feeder_exact is not None and feeder_count != feeder_exact:
-        reasons.append(
-            f'number of feeders ({feeder_count}) differs from the feeder count'
-            f' the model pins ({feeder_exact})'
-        )
-    elif feeder_count > feeder_limit:
-        reasons.append(
-            f'number of feeders ({feeder_count}) exceeds feeder limit ({feeder_limit})'
-        )
-
-    # Balanced constraint: only enforced by the model if the feeder count is pinned
-    if model_options['balanced'] and feeder_exact:
-        load_lb, load_ub = T // feeder_exact, math.ceil(T / feeder_exact)
-        subtree_loads = [
-            S_warm.nodes[t]['load'] for r in range(-R, 0) for t in S_warm.neighbors(r)
-        ]
-        if any(load < load_lb or load > load_ub for load in subtree_loads):
-            reasons.append(
-                f'subtree loads {sorted(subtree_loads)} are not balanced: model'
-                f' option <balanced = True> requires them within'
-                f' [{load_lb}, {load_ub}]'
-            )
-
-    # Detour constraint
-    if S_warm_has_detour and model_options['feeder_route'] == 'straight':
-        reasons.append(
-            'segmented feeders are incompatible with model option:'
-            ' feeder_route="straight"'
-        )
-
-    # Topology constraint. Valid seeds: RADIAL→{RADIAL, BRANCHED},
-    # BRANCHED→BRANCHED, RINGED→RINGED (topology read from the label, not the
-    # structure).
-    mt = model_options['topology']
-    st = S_warm.graph['topology']
-    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
-        reasons.append(f'{st} network incompatible with model option: topology="{mt}"')
-
-    # Output
-    if reasons and verbose_warmstart:
-        warning(
-            'No warmstarting (even though a solution is available) due to: %s',
-            '; '.join(reasons),
-        )
-        return False
-    elif solver_name != 'scip':
-        if verbose_warmstart:
-            info(
-                'Using warm start: the model is initialized with the'
-                ' provided solution S.'
-            )
-        return True
-    else:
-        return False
 
 
 def parse_cables_input(

@@ -2,7 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import timedelta
 from itertools import chain
 from typing import Any
@@ -580,6 +580,37 @@ def make_min_length_model(
 _make_min_length_model_fingerprint = fingerprint_function(make_min_length_model)
 
 
+def _hint_violations(
+    model: mathopt.Model, hint_values: Mapping[Any, float], tol: float = 1e-6
+) -> Iterator[tuple[str, float, float, float]]:
+    """Yield (constraint, value, lower_bound, upper_bound) per violated constraint.
+
+    MathOpt only checks that hint values are finite numbers (at solve time), so an
+    infeasible hint is silently repaired or dropped by the solver. This walks the
+    model like Pyomo's ``find_infeasible_constraints()`` does, which is what the
+    other backends rely on to reject a warm start.
+
+    Args:
+      model: model whose linear constraints are to be checked.
+      hint_values: value for every variable appearing in the constraints.
+      tol: slack allowed on each bound.
+
+    Yields:
+      One tuple per violated constraint, in creation order.
+    """
+    for constraint in model.linear_constraints():
+        value = sum(
+            term.coefficient * hint_values[term.variable] for term in constraint.terms()
+        )
+        if not (constraint.lower_bound - tol <= value <= constraint.upper_bound + tol):
+            yield (
+                str(constraint),
+                value,
+                constraint.lower_bound,
+                constraint.upper_bound,
+            )
+
+
 def warmup_model(
     model: mathopt.Model, metadata: ModelMetadata, S: nx.Graph
 ) -> mathopt.Model:
@@ -613,6 +644,17 @@ def warmup_model(
         hint_values[link_var] = 1
         if flow_var is not None:
             hint_values[flow_var] = flow
+
+    # check if the hint violates any constraint (CP-SAT would silently drop it)
+    violations = _hint_violations(model, hint_values)
+    first = next(violations, None)
+    if first is not None:
+        if _lggr.isEnabledFor(logging.INFO):
+            for name, value, lb, ub in chain((first,), violations):
+                info('hint violates %s: %g outside [%g, %g]', name, value, lb, ub)
+        raise OWNWarmupFailed(
+            f'warmup_model() failed: S violates model constraint {first[0]}'
+        )
     metadata.solution_hint = hint_values
     metadata.warmed_by = S.graph['creator']
     return model

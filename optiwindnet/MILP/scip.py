@@ -7,7 +7,7 @@ from itertools import chain
 from typing import Any
 
 import networkx as nx
-from pyscipopt import Model
+from pyscipopt import SCIP_STAGE, Model
 
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
 from ..fingerprint import fingerprint_function
@@ -101,6 +101,11 @@ class SolverSCIP(Solver, PoolHandler):
             raise
         applied_options = self.options | options
         use_concurrent = applied_options.pop('concurrent', True)
+        if model.getStage() != SCIP_STAGE.PROBLEM:
+            # SCIP refuses to (re)solve unless the model is back in the PROBLEM
+            # stage; callers may solve the same model more than once (e.g. the
+            # retry loop in api.py). Solutions added by warmup_model() survive.
+            model.freeTransform()
         # this would be ideal for displaying the log in notebooks, but is killing python
         # model.redirectOutput()
         model.setParams(applied_options)
@@ -442,14 +447,28 @@ def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
         raise OWNWarmupFailed(
             f'warmup_model() failed: {st} network cannot seed a {mt} model'
         )
-    # createSol() zero-initializes every variable, so only the links S
-    # activates need to be set; addSol then validates the complete solution.
+    # createSol() zero-initializes every variable, so only the links S activates
+    # need to be set.
     sol = model.createSol()
     for link_var, flow_var, flow in warmstart_links(metadata, S):
         model.setSolVal(sol, link_var, 1)
         if flow_var is not None:
             model.setSolVal(sol, flow_var, flow)
-    if not model.addSol(sol):
+
+    # addSol() alone would take a solution that violates the model (e.g. a warm
+    # start whose feeder count differs from the one the model pins), leaving SCIP
+    # to search from an infeasible point, so check it against the original problem.
+    if not model.checkSol(sol, printreason=False, original=True):
+        if _lggr.isEnabledFor(logging.INFO):
+            # re-check to get the diagnosis: SCIP prints the violations to its own
+            # output and `completely` keeps it going past the first one
+            model.checkSol(sol, printreason=True, completely=True, original=True)
+        model.freeSol(sol)
         raise OWNWarmupFailed('warmup_model() failed: S violates some model constraint')
+
+    if not model.addSol(sol):
+        raise OWNWarmupFailed(
+            'warmup_model() failed: the feasible solution was not stored'
+        )
     metadata.warmed_by = S.graph['creator']
     return model

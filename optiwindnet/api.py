@@ -1,4 +1,5 @@
 import logging
+import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from itertools import pairwise
@@ -15,7 +16,6 @@ from .api_utils import (
     buffer_border_obs,
     enable_ortools_logging_if_jupyter,
     extract_network_as_array,
-    is_warmstart_eligible,
     merge_obs_into_border,
     parse_cables_input,
     plot_org_buff,
@@ -679,13 +679,7 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
-        if not self._is_stale_SG:
-            warmstart = dict(
-                S_warm=self._S,
-                S_warm_has_detour=self._G.graph.get('D', 0) > 0,
-            )
-        else:
-            warmstart = {}
+        warmstart = {} if self._is_stale_SG else dict(S_warm=self._S)
 
         self._S, self._G = router.route(
             P=self.P,
@@ -939,7 +933,9 @@ class MILPRouter(Router):
         except AttributeError:
             self.optiwindnet_default_options = {}
 
-        if verbose and solver_name == 'ortools':
+        # 'ortools' is the legacy alias for 'ortools.cp_sat': match the whole family,
+        # since every MathOpt backend carries the log_callback this sets
+        if verbose and solver_name.startswith('ortools'):
             enable_ortools_logging_if_jupyter(self.solver)
 
     def route(
@@ -950,24 +946,14 @@ class MILPRouter(Router):
         cables_capacity,
         verbose=False,
         S_warm=None,
-        S_warm_has_detour=False,
         num_retries: int = 2,
         **kwargs,
     ):
         verbose = verbose or self.verbose
 
-        if self.solver_name == 'ortools':
-            # pyomo-based solvers already do a thorough feasibility check on warmstarts
-            is_warmstart_eligible(
-                S_warm=S_warm,
-                cables_capacity=cables_capacity,
-                model_options=self.model_options,
-                S_warm_has_detour=S_warm_has_detour,
-                solver_name=self.solver_name,
-                logger=_logger,
-                verbose=verbose,
-            )
-
+        # No eligibility pre-check: every backend's warmup_model() rejects a warm start
+        # the model cannot take (topology, missing links, violated constraints) and the
+        # loop below then warm-starts the model some other way.
         solver = self.solver
 
         for _ in range(2):
@@ -981,7 +967,20 @@ class MILPRouter(Router):
                 )
                 break
             except OWNWarmupFailed:
-                if self.model_options['topology'] == 'branched':
+                if (
+                    self.model_options['topology'] == 'branched'
+                    and self.model_options['feeder_limit'] == 'minimum'
+                ):
+                    # the constructor heuristics overshoot the feeder minimum, which
+                    # this model pins; HGS-CVRP can be held down to it
+                    S_warm = hgs_cvrp(
+                        as_normalized(A),
+                        capacity=cables_capacity,
+                        time_limit=min(self.time_limit, 0.2),
+                        vehicles=math.ceil(A.graph['T'] / cables_capacity),
+                        repair=True,
+                    )
+                elif self.model_options['topology'] == 'branched':
                     # 'feeder_route' is binary: 'straight' or 'segmented'
                     straight = self.model_options['feeder_route'] == 'straight'
                     constructor_args = dict(
@@ -1004,7 +1003,12 @@ class MILPRouter(Router):
                     )
 
         else:
-            raise OWNWarmupFailed('Unable to warm-start model.')
+            # No available solution can warm-start this model, so solve it cold
+            # rather than give up: a warm start is an optimization, not a requirement.
+            _warning('Unable to warm-start model: solving without a warm start.')
+            solver.set_problem(
+                P, A, capacity=cables_capacity, model_options=self.model_options
+            )
 
         for _ in range(num_retries + 1):
             try:
