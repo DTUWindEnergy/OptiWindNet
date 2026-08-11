@@ -220,7 +220,7 @@ make_pages:
   image: python:$PYTHON_VERSION_FOR_TOOLS
   tags: [linux]
   pages: true
-  allow_failure: true
+  allow_failure: false
   rules:
     # Manual dispatch: pick run=docs in the "Run pipeline" form (no file changes required)
     - if: $RUN == "docs"
