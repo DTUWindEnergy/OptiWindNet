@@ -255,10 +255,11 @@ def make_min_length_model(
     link_ |= {(t, r): m.addVar(f'link_{t}~r{-r}', 'B') for t, r in stars}
     if topology is Topology.RINGED:
         link_ |= {(r, t): m.addVar(f'link_r{-r}~{t}', 'B') for r, t in starsʹ}
+    # 'M' (implied integral): single_out_link + flow_conserv pin flows to integers.
     flow_ = {
-        (u, v): m.addVar(f'flow_{u}~{v}', 'I', lb=0, ub=k - 1) for u, v in chain(E, Eʹ)
+        (u, v): m.addVar(f'flow_{u}~{v}', 'M', lb=0, ub=k - 1) for u, v in chain(E, Eʹ)
     }
-    flow_ |= {(t, r): m.addVar(f'flow_{t}~r{-r}', lb=0, ub=k) for t, r in stars}
+    flow_ |= {(t, r): m.addVar(f'flow_{t}~r{-r}', 'M', lb=0, ub=k) for t, r in stars}
 
     ###############
     # Constraints #
@@ -458,6 +459,10 @@ def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
     # addSol() alone would take a solution that violates the model (e.g. a warm
     # start whose feeder count differs from the one the model pins), leaving SCIP
     # to search from an infeasible point, so check it against the original problem.
+    # checkSol() covers bounds and integrality too (both default to True), on top of
+    # the constraints -- although the bounds are already implied here: every flow var
+    # has a linking constraint `flow_ub_*` (f <= M*link) with M no looser than the
+    # var's own ub, and the solution sets flow > 0 only where link is 1.
     if not model.checkSol(sol, printreason=False, original=True):
         if _lggr.isEnabledFor(logging.INFO):
             # re-check to get the diagnosis: SCIP prints the violations to its own

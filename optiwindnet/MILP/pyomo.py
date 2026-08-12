@@ -395,9 +395,10 @@ def make_min_length_model(
     def flow_bounds(m, u, v):
         return (0, (m.k if v < 0 else m.k - 1))
 
+    # continuous: cons_single_out_link + cons_flow_conserv pin flows to integers.
     m.flow_ = pyo.Var(
         m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
-        domain=pyo.NonNegativeIntegers,
+        domain=pyo.NonNegativeReals,
         bounds=flow_bounds,
         initialize=0,
     )
@@ -667,9 +668,9 @@ def warmup_model(
         if flow_var is not None:
             flow_var.value = flow
 
-    # check if solution violates any constraints:
-    # checking the bounds seem redundant, but the way to do it would be:
-    # next(find_infeasible_bounds(model), False)
+    # Check if the solution violates any constraint. Bounds need no separate check:
+    # every flow var has a linking constraint `cons_flow_ub` (f <= M*link_) with M no
+    # looser than the var's own ub, and the hint sets flow > 0 only where link_ is 1.
     if _lggr.isEnabledFor(logging.INFO):
         log_infeasible_constraints(model, log_variables=True, logger=_lggr)
     if next(find_infeasible_constraints(model), False):

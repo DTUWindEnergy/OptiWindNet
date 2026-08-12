@@ -388,13 +388,13 @@ def make_min_length_model(
         link_ |= {
             (r, t): m.add_binary_variable(name=f'link_r{-r}~{t}') for r, t in starsʹ
         }
+    # continuous: single_out_link + flow_conserv pin flows to integers.
     flow_ = {
-        (u, v): m.add_integer_variable(lb=0, ub=k - 1, name=f'flow_{u}~{v}')
+        (u, v): m.add_variable(lb=0, ub=k - 1, name=f'flow_{u}~{v}')
         for u, v in chain(E, Eʹ)
     }
     flow_ |= {
-        (t, r): m.add_integer_variable(lb=0, ub=k, name=f'flow_{t}~r{-r}')
-        for t, r in stars
+        (t, r): m.add_variable(lb=0, ub=k, name=f'flow_{t}~r{-r}') for t, r in stars
     }
 
     ###############
@@ -645,7 +645,10 @@ def warmup_model(
         if flow_var is not None:
             hint_values[flow_var] = flow
 
-    # check if the hint violates any constraint (CP-SAT would silently drop it)
+    # check if the hint violates any constraint (CP-SAT would silently drop it).
+    # Bounds need no separate check: every flow var has a linking constraint
+    # `flow_zero_*` (f <= M*link) with M no looser than the var's own ub, and the
+    # hint sets flow > 0 only where link is 1.
     violations = _hint_violations(model, hint_values)
     first = next(violations, None)
     if first is not None:
