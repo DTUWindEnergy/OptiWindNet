@@ -633,9 +633,9 @@ def warmup_model(
     st = S.graph['topology']
     if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
         raise OWNWarmupFailed(
-            f'warmup_model() failed: {st} network cannot seed a {mt} model'
+            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
         )
-    # CP-SAT should not have to complete the hint, so seed every variable to 0
+    # CP-SAT should not have to complete the hint, so initialize every variable to 0
     # and override the ones S activates.
     hint_values: dict[Any, float] = dict.fromkeys(
         chain(metadata.link_.values(), metadata.flow_.values()), 0

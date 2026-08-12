@@ -204,7 +204,7 @@ def build_milp_warmstart(
         from optiwindnet.baselines.hgs import hgs_cvrp
 
         S = hgs_cvrp(as_normalized(A), **hgs_kwargs)
-        # A radial topology is a valid seed for the less restrictive branched
+        # A radial topology is a valid warm start for the less restrictive branched
         # model; warmup_model() explicitly supports this relationship.
         warmstart_topology = (
             Topology.RADIAL if topology is Topology.BRANCHED else topology

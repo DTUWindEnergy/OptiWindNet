@@ -414,10 +414,10 @@ def test_ringed_warmstart_is_accepted_by_scip():
     P, A = bundle.P, bundle.A
     options = ModelOptions(topology='ringed')
     try:
-        seed = solver_factory('scip')
-        seed.set_problem(P, A, capacity=3, model_options=options)
-        seed.solve(time_limit=10, mip_gap=0.05)
-        S = seed.get_incumbent_topology()
+        warm_solver = solver_factory('scip')
+        warm_solver.set_problem(P, A, capacity=3, model_options=options)
+        warm_solver.solve(time_limit=10, mip_gap=0.05)
+        S = warm_solver.get_incumbent_topology()
     except BaseException as exc:
         if solver_unavailable(exc):
             pytest.skip(f'scip unavailable: {exc}')

@@ -931,7 +931,7 @@ def lkh3(
         precision: LKH precision parameter.
         complete: make the full graph over A available (missing edges assumed
             direct).
-        warmstart: optional previous solution graph used to seed the initial
+        warmstart: optional previous solution graph used to initialize the
             tour. For multi-root instances each cluster receives the portion of
             the warmstart attached to its root.
 

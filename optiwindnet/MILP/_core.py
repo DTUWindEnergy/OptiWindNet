@@ -338,7 +338,7 @@ def warmstart_links(
     the flow formulation expects — radializing RINGED rings into directed chains
     — via :func:`.interarraylib.directed_links`. ``flow_var`` is ``None`` for a
     ring's closing feeder (a link variable with no flow one). Everything not
-    yielded is inactive (0); each backend seeds that however its warm-start API
+    yielded is inactive (0); each backend initializes that however its warm-start API
     requires, then applies these.
 
     Raises:

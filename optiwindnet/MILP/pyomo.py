@@ -658,7 +658,7 @@ def warmup_model(
     st = S.graph['topology']
     if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
         raise OWNWarmupFailed(
-            f'warmup_model() failed: {st} network cannot seed a {mt} model'
+            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
         )
     # Pyomo Vars are initialize=0, so the inactive baseline is already in place;
     # only the active links need to be set.

@@ -445,7 +445,7 @@ def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
     st = S.graph['topology']
     if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
         raise OWNWarmupFailed(
-            f'warmup_model() failed: {st} network cannot seed a {mt} model'
+            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
         )
     # createSol() zero-initializes every variable, so only the links S activates
     # need to be set.
