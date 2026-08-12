@@ -1,7 +1,5 @@
 """Cross-backend MILP checks against deployed proven-optimal references."""
 
-from __future__ import annotations
-
 import math
 
 import pytest

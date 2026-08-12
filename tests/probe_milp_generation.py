@@ -10,8 +10,6 @@ model-objective topology. It does not route the solution through PathFinder or
 write a golden artifact.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 from dataclasses import asdict
@@ -29,7 +27,7 @@ from optiwindnet.terse import TerseLinks
 from optiwindnet.types import Topology
 
 from .cases import MILPCase
-from .sitecache import get_bundle, SiteBundle
+from .sitecache import SiteBundle, get_bundle
 from .topology_assertions import assert_topology
 
 

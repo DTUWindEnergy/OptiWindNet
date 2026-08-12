@@ -8,8 +8,6 @@ Both the original and, where applicable, single-root coordinate sets map to
 the base location name. A location name is its bundled data filename stem.
 """
 
-from __future__ import annotations
-
 import argparse
 import pickle
 from pathlib import Path

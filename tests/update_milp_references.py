@@ -9,8 +9,6 @@ value keeps the proven bound, objective, and topology together as one atomic
 reference record.
 """
 
-from __future__ import annotations
-
 import argparse
 import pickle
 from pathlib import Path

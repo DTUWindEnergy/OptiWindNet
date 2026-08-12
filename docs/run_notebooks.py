@@ -19,8 +19,6 @@ Pass ``--changed`` to select only notebooks that differ from the current
 branch's HEAD or are untracked.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os

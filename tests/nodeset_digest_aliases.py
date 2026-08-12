@@ -1,9 +1,7 @@
 """Verified historical aliases for bundled location coordinate digests."""
 
-from __future__ import annotations
-
-from functools import cache
 import pickle
+from functools import cache
 from pathlib import Path
 
 import numpy as np

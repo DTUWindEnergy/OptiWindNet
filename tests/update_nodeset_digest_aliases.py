@@ -6,8 +6,6 @@ Run from the repository root with::
         docs/notebooks/optiwindnet-routesets-r26.05-v4.sqlite
 """
 
-from __future__ import annotations
-
 import argparse
 import pickle
 from pathlib import Path
@@ -23,9 +21,9 @@ from optiwindnet.interarraylib import as_single_root
 from optiwindnet.mesh import make_planar_embedding
 
 from .nodeset_digest_aliases import (
-    NODESET_DIGEST_ALIASES,
     NODESET_DIGEST_ALIAS_COORDINATES_FILE,
     NODESET_DIGEST_ALIAS_NAMES,
+    NODESET_DIGEST_ALIASES,
 )
 
 

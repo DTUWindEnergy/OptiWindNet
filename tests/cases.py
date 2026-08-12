@@ -1,7 +1,5 @@
 """Typed low-level producer cases with attribute-derived names and golden keys."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
@@ -10,7 +8,6 @@ from optiwindnet.heuristics.constructor import _METHOD_TOPOLOGY
 from optiwindnet.MILP import ModelOptions
 from optiwindnet.MILP._core import FeederRoute
 from optiwindnet.types import Topology
-
 
 DEFAULT_BASELINE_TIME_LIMIT: float = 0.2
 DEFAULT_MILP_TIME_LIMIT: float = 1.0

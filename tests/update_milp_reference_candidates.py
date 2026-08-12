@@ -14,8 +14,6 @@ For batches, import :func:`update_candidates` and pass multiple
 the same location share their ``L``, ``P``, and ``A`` objects.
 """
 
-from __future__ import annotations
-
 import json
 from collections.abc import Iterable
 from pathlib import Path
@@ -30,7 +28,7 @@ from .probe_milp_generation import (
     milp_reference_parser,
     solve_milp_reference,
 )
-from .sitecache import get_bundle, SiteBundle
+from .sitecache import SiteBundle, get_bundle
 
 DEFAULT_OUTPUT = REPO_ROOT / 'artifacts' / 'milp_reference_candidates.json'
 _SCHEMA_VERSION = 1

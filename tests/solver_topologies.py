@@ -1,10 +1,7 @@
 """Strict loader and low-level solve helpers for topology goldens."""
 
-from __future__ import annotations
-
 import pickle
 from pathlib import Path
-
 
 from optiwindnet.terse import LinkScope, TerseLinks
 

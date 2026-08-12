@@ -1,11 +1,9 @@
 """Process-local cache of reusable test locations and navigation meshes."""
 
-from __future__ import annotations
-
+import pickle
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import cache
-import pickle
 from pathlib import Path
 
 import networkx as nx
