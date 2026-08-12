@@ -88,7 +88,7 @@ class Drawable:
         self.R, self.T, self.B = R, T, B
         name = G.graph.get('name')
         self.handle = G.graph.get('handle', name if name is not None else '')
-        self.metadata = {
+        self.metadata = {'handle': self.handle} | {
             key: G.graph[key]
             for key in ('name', 'T', 'R', 'capacity', 'topology')
             if key in G.graph
