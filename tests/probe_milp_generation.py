@@ -34,7 +34,7 @@ from .topology_assertions import assert_topology
 
 
 class _HGSOptions(TypedDict):
-    capacity: float
+    capacity: int
     time_limit: float
     vehicles: int | None
     vehicles_exact: bool

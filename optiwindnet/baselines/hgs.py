@@ -4,8 +4,8 @@
 import logging
 import math
 import random
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Sequence
 
 import hybgensea
 import networkx as nx
@@ -283,7 +283,7 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
         solver_details=dict(
             vehicles=vehicles_ if R > 1 else vehicles_[0],
             **(
-                dict(capacity_effective=capacity_ if R > 1 else capacity_[0])
+                {'capacity_effective': capacity_ if R > 1 else capacity_[0]}
                 if balanced
                 else {}
             ),
@@ -314,7 +314,7 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
 def hgs_cvrp(
     A: nx.Graph,
     *,
-    capacity: float,
+    capacity: int,
     time_limit: float,
     vehicles: int | None = None,
     vehicles_exact: bool = False,
@@ -430,10 +430,10 @@ def hgs_cvrp(
 
     if seed is None:
         seed = random.randrange(0, 2**31)
-    hgs_options = dict(
-        timeLimit=time_limit,
-        seed=seed,
-    )
+    hgs_options = {
+        'timeLimit': time_limit,
+        'seed': seed,
+    }
 
     def _solve():
         solve = _solve_single_root if R == 1 else _solve_multi_root

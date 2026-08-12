@@ -1,10 +1,10 @@
 import logging
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -55,14 +55,16 @@ _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 # surface: the notebooks reach for them as `from optiwindnet.api import ...`. Naming
 # them here puts them in this page's outline, pointing at where they are documented.
 __all__ = (
-    'Router',
-    'WindFarmNetwork',
     'EWRouter',
     'HGSRouter',
     'MILPRouter',
     'ModelOptions',
+    'Router',
+    'WindFarmNetwork',
     'load_repository',
 )
+
+_EMPTY_BORDER = np.empty((0, 2), dtype=np.float64)
 
 
 class Router(ABC):
@@ -107,7 +109,6 @@ class Router(ABC):
         Returns:
           Tuple of (solution topology (selected links), optimized routeset).
         """
-        pass
 
 
 class WindFarmNetwork:
@@ -132,7 +133,7 @@ class WindFarmNetwork:
         cables: int | list[int] | list[tuple[int, float | int]] | np.ndarray,
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
-        borderC: np.ndarray = np.empty((0, 2), dtype=np.float64),
+        borderC: np.ndarray = _EMPTY_BORDER,
         obstacleC_: Sequence[np.ndarray] = [],
         name: str = '',
         handle: str = '',
@@ -565,8 +566,6 @@ class WindFarmNetwork:
         assign_cables(self._G, self.cables)
         self._is_stale_SG = False
 
-        return
-
     def get_network(self):
         """Export the optimized network as a structured array."""
         return extract_network_as_array(self.G)
@@ -679,7 +678,7 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
-        warmstart = {} if self._is_stale_SG else dict(S_warm=self._S)
+        warmstart = {} if self._is_stale_SG else {'S_warm': self._S}
 
         self._S, self._G = router.route(
             P=self.P,
@@ -773,7 +772,10 @@ class EWRouter(Router):
         self.bias_margin = bias_margin
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
-        constructor_args = dict(method=self.method, maxiter=self.maxiter)
+        constructor_args: dict[str, Any] = {
+            'method': self.method,
+            'maxiter': self.maxiter,
+        }
         if self.bias_margin is not None:
             constructor_args['bias_margin'] = self.bias_margin
         if self.feeder_route == 'segmented':
@@ -983,11 +985,11 @@ class MILPRouter(Router):
                 elif self.model_options['topology'] == 'branched':
                     # 'feeder_route' is binary: 'straight' or 'segmented'
                     straight = self.model_options['feeder_route'] == 'straight'
-                    constructor_args = dict(
-                        method=self.default_heuristic,
-                        weigh_detours=not straight,
-                        straight_feeder_route=straight,
-                    )
+                    constructor_args = {
+                        'method': self.default_heuristic,
+                        'weigh_detours': not straight,
+                        'straight_feeder_route': straight,
+                    }
                     S_warm = S_from_G(
                         constructor(A, capacity=cables_capacity, **constructor_args)
                     )
