@@ -655,7 +655,7 @@ def _lkh(
     if (vehicles is None) or (vehicles <= vehicles_min):
         if vehicles is not None and vehicles < vehicles_min:
             warn(
-                f'Vehicle number ({vehicles}) too low for feasibilty '
+                f'Vehicle number ({vehicles}) too low for feasibility '
                 f'with capacity ({capacity}). Setting to {vehicles_min}.'
             )
         vehicles = vehicles_min

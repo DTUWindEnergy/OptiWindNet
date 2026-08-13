@@ -16,7 +16,7 @@ def clamp_vehicles_to_min(vehicles: int, vehicles_min: int, capacity: int) -> in
     """Warn about and clamp a vehicles request below the feasible minimum."""
     if vehicles < vehicles_min:
         _warn(
-            'Vehicles (feeders) number (%d) too low for feasibilty '
+            'Vehicles (feeders) number (%d) too low for feasibility '
             'with given capacity (%d). Setting to %d.',
             vehicles,
             capacity,
