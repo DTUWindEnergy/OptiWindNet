@@ -134,6 +134,33 @@ def test_validate_routeset_reports_wrong_loads_instead_of_fixing_them():
     assert G[u][v]['load'] == stated
 
 
+def test_validate_routeset_still_checks_topology_when_loads_are_missing():
+    G = tiny_wfn().G
+    G.graph['has_loads'] = False
+    G.graph['topology'] = 'unknown'
+
+    violations = validate_routeset(G)
+
+    assert 'routeset carries no loads' in violations
+    assert "unknown topology: 'unknown'" in violations
+
+
+def test_validate_routeset_uses_full_polyline_crossing_check(monkeypatch):
+    finding = {
+        'kind': 'overlap_cross',
+        'path_a': (0, 1),
+        'path_b': (2, 3),
+        'geometry': 'LINESTRING (0 0, 1 0)',
+    }
+    monkeypatch.setattr(
+        'optiwindnet.crossings.find_geometric_crossings', lambda _G: [finding]
+    )
+
+    violations = validate_routeset(tiny_wfn().G)
+
+    assert any('(overlap_cross)' in violation for violation in violations)
+
+
 def test_find_geometric_crossings_detects_simple_cross():
     """Two feeders from a single root cross once at a non-vertex point."""
     G = nx.Graph(
@@ -165,6 +192,39 @@ def test_find_geometric_crossings_detects_simple_cross():
     assert finding['geometry'] == 'POINT (1 1)'
 
 
+def test_find_geometric_crossings_detects_cross_at_border_waypoint():
+    """A crossing at an internal nonterminal route vertex is still a cross."""
+    G = _graph_with_clones(
+        T=3,
+        B=1,
+        C=0,
+        D=0,
+        VertexC=[(1, 1), (0, -1), (0, 1), (0, 0), (-2, 0)],
+        edges=[(-1, 3), (3, 0), (-1, 1), (1, 2)],
+    )
+
+    crossings = find_geometric_crossings(G)
+
+    assert [
+        (crossing['kind'], crossing['path_a'], crossing['path_b'], crossing['geometry'])
+        for crossing in crossings
+    ] == [('cross', (2, 1), (3, 0), 'POINT (0 0)')]
+
+
+def test_find_geometric_crossings_ignores_non_crossing_at_border_waypoint():
+    """A route passing through a bend's outer sector only touches the bend."""
+    G = _graph_with_clones(
+        T=3,
+        B=1,
+        C=0,
+        D=0,
+        VertexC=[(1, 1), (-1.732, -1), (1.732, 1), (0, 0), (-2, 0)],
+        edges=[(-1, 3), (3, 0), (-1, 1), (1, 2)],
+    )
+
+    assert find_geometric_crossings(G) == []
+
+
 def test_find_geometric_crossings_multi_root():
     """Crossings between feeders rooted at different substations are detected."""
     G = nx.Graph(
@@ -191,6 +251,90 @@ def test_find_geometric_crossings_multi_root():
     crossings = find_geometric_crossings(G)
     kinds = sorted(c['kind'] for c in crossings)
     assert kinds == ['cross', 'cross']
+
+
+def test_find_geometric_crossings_detects_self_crossing_feeder():
+    G = _graph_with_clones(
+        T=4,
+        B=0,
+        C=0,
+        D=0,
+        VertexC=[(2, 2), (0, 2), (2, 0), (3, 0), (0, 0)],
+        edges=[(-1, 0), (0, 1), (1, 2), (2, 3)],
+    )
+
+    crossings = find_geometric_crossings(G)
+
+    assert [
+        (crossing['kind'], crossing['path_a'], crossing['geometry'])
+        for crossing in crossings
+    ] == [('self_cross', (3, 2, 1, 0), 'POINT (1 1)')]
+
+
+def test_find_geometric_crossings_detects_route_splitting_branch():
+    G = _graph_with_clones(
+        T=5,
+        B=0,
+        C=0,
+        D=0,
+        VertexC=[
+            (0, 0),
+            (-0.7, 1.2),
+            (-0.7, -1.2),
+            (-2, 0),
+            (2, 0),
+            (-2, 2),
+        ],
+        edges=[(-1, 0), (0, 1), (0, 2), (-1, 3), (3, 4)],
+    )
+
+    crossings = find_geometric_crossings(G)
+
+    assert [
+        (crossing['kind'], crossing['path_a'], crossing['split_node'])
+        for crossing in crossings
+    ] == [('branch_split', (4, 3), 0)]
+
+    # A route touching a branch from which every ray leaves on the same side
+    # does not split it.
+    G.graph['VertexC'] = G.graph['VertexC'].copy()
+    G.graph['VertexC'][2] = (-0.7, 0.4)
+    assert find_geometric_crossings(G) == []
+
+
+def test_find_geometric_crossings_detects_route_crossing_radial_vertex():
+    G = _graph_with_clones(
+        T=4,
+        B=0,
+        C=0,
+        D=0,
+        VertexC=[(0, 0), (0, -1), (-2, 0), (2, 0), (-2, 2)],
+        edges=[(-1, 0), (0, 1), (-1, 2), (2, 3)],
+    )
+
+    crossings = find_geometric_crossings(G)
+
+    assert len(crossings) == 1
+    assert crossings[0]['kind'] == 'branch_split'
+    assert crossings[0]['split_node'] == 0
+
+
+def test_find_geometric_crossings_reports_degenerate_route():
+    G = _graph_with_clones(
+        T=1,
+        B=0,
+        C=0,
+        D=0,
+        VertexC=[(0, 0), (-1, 0)],
+        edges=[(-1, 0), (0, 0)],
+    )
+
+    crossings = find_geometric_crossings(G)
+
+    assert any(crossing['kind'] == 'degenerate' for crossing in crossings)
+    G.graph.update(capacity=1, topology='branched', has_loads=False)
+    violations = validate_routeset(G)
+    assert any('has degenerate geometry' in violation for violation in violations)
 
 
 def test_find_geometric_crossings_include_touches_clean_case():
@@ -318,7 +462,11 @@ def test_find_geometric_crossings_detects_detour_branch_split():
 
     crossings = find_geometric_crossings(G)
 
-    assert [
-        (crossing['kind'], crossing['path_a'], crossing['path_b'])
-        for crossing in crossings
-    ] == [('branch_split', (4, 1), (1, 1, 3, 2))]
+    assert len(crossings) == 1
+    crossing = crossings[0]
+    assert (crossing['kind'], crossing['path_a'], crossing['split_node']) == (
+        'branch_split',
+        (4, 1),
+        1,
+    )
+    assert set(crossing['path_b'][2:]) == {2, 3}

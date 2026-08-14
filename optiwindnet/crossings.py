@@ -1,6 +1,7 @@
 import math
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from itertools import combinations, pairwise
 from typing import Any
 
 import networkx as nx
@@ -12,7 +13,8 @@ from .geometric import (
     angle_helpers,
     is_bunch_split_by_corner,
     is_same_side,
-    polylines_cross_at_point,
+    polyline_rays_at_point,
+    rays_alternate,
 )
 
 
@@ -524,14 +526,55 @@ def _shared_run_swaps_sides(coords_a: np.ndarray, coords_b: np.ndarray) -> bool:
     return approach_sign != 0 and approach_sign == separation_sign
 
 
-def _detour_splits(
-    G: nx.Graph, fnT: np.ndarray, VertexC: np.ndarray
-) -> dict[int, tuple[int, tuple[int, int]]]:
-    """Map each detour clone whose route splits its prime's branch.
+def _split_branch_nodes(
+    G: nx.Graph,
+    prime: int,
+    route_coords: np.ndarray,
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+    *,
+    tol: float,
+    angle_tol: float,
+) -> tuple[int, int] | None:
+    """Return two neighbours of ``prime`` in ``G`` separated by ``route_coords``."""
+    pC = VertexC[prime]
+    route_rays = polyline_rays_at_point(route_coords, pC, tol=tol, angle_tol=angle_tol)
+    if len(route_rays) != 2:
+        return None
 
-    Returns ``{detour_node: (prime, (inside_neighbor, outside_neighbor))}``. A
-    detour clone splits a branch when its incoming/outgoing rays put the prime's
-    other neighbours on opposite sides of the corner the detour cuts.
+    branch_rays = []
+    for nb in G[prime]:
+        nb_ = int(fnT[nb])
+        ray = VertexC[nb_] - pC
+        norm = np.hypot(*ray)
+        if norm <= tol:
+            continue
+        unit = ray / norm
+        if any(
+            abs(unit[0] * route_ray[1] - unit[1] * route_ray[0]) <= angle_tol
+            and np.dot(unit, route_ray) > 0
+            for route_ray in route_rays
+        ):
+            continue
+        branch_rays.append((nb_, unit))
+    for (a, ray_a), (b, ray_b) in combinations(branch_rays, 2):
+        if rays_alternate(route_rays, [ray_a, ray_b]):
+            return a, b
+    return None
+
+
+def _detour_splits(
+    G: nx.Graph,
+    fnT: np.ndarray,
+    VertexC: np.ndarray,
+    *,
+    endpoint_tol: float,
+    angle_tol: float,
+) -> dict[int, tuple[int, tuple[int, int]]]:
+    """Map detour clones in ``G`` that separate rays at their prime terminal.
+
+    Returns ``{detour_node: (prime, (neighbor_a, neighbor_b))}``, where the two
+    neighbours lie in different sectors defined by the detour route.
     """
     T, B = (G.graph[k] for k in 'TB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
@@ -545,12 +588,19 @@ def _detour_splits(
         if G.degree[prime] == 1 or G.degree[d] != 2:
             continue
         dA, dB = (int(fnT[nb]) for nb in G[d])
-        bunch = [int(fnT[nb]) for nb in G[prime]]
-        is_split, insideI, outsideI = is_bunch_split_by_corner(
-            VertexC[bunch], *VertexC[[dA, prime, dB]]
+        route_coords = VertexC[[dA, prime, dB]]
+        scale = np.linalg.norm(np.diff(route_coords, axis=0), axis=1).max(initial=1.0)
+        split_nodes = _split_branch_nodes(
+            G,
+            prime,
+            route_coords,
+            fnT,
+            VertexC,
+            tol=endpoint_tol * scale,
+            angle_tol=angle_tol,
         )
-        if is_split:
-            splits[d] = (prime, (bunch[insideI[0]], bunch[outsideI[0]]))
+        if split_nodes is not None:
+            splits[d] = (prime, split_nodes)
     return splits
 
 
@@ -561,7 +611,7 @@ def _branch_split_findings(
     fnT: np.ndarray,
     VertexC: np.ndarray,
 ) -> list[dict[str, Any]]:
-    """Emit one finding per polyline that traverses a detour-split prime."""
+    """Return findings for polylines that traverse mapped detour splits."""
     if not splits:
         return []
     findings: list[dict[str, Any]] = []
@@ -649,6 +699,56 @@ def _intersection_only_at_excluded(
     return bool(np.all(np.any(dists <= endpoint_tol, axis=1)))
 
 
+def _self_intersection_findings(
+    polyline: _RoutePolyline,
+    prime_path: tuple[int, ...],
+    coords: np.ndarray,
+    line,
+    *,
+    length_tol: float,
+) -> list[dict[str, Any]]:
+    """Return segment intersections except adjacent segments' shared endpoint."""
+    if line.is_simple:
+        return []
+
+    segments = [shp.LineString(segment) for segment in pairwise(coords)]
+    tree = shp.STRtree(segments)
+    findings = []
+    seen = set()
+    for i, segment_a in enumerate(segments):
+        for j in tree.query(segment_a, predicate='intersects').tolist():
+            if j <= i:
+                continue
+            intersection = segment_a.intersection(segments[j])
+            if intersection.is_empty:
+                continue
+            if (
+                j == i + 1
+                and intersection.geom_type == 'Point'
+                and intersection.equals(shp.Point(coords[j]))
+            ):
+                continue
+            key = intersection.wkb
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(
+                {
+                    'kind': (
+                        'self_overlap'
+                        if intersection.length > length_tol
+                        else 'self_cross'
+                    ),
+                    'path_nodes_a': polyline.nodes,
+                    'path_nodes_b': polyline.nodes,
+                    'path_a': prime_path,
+                    'path_b': prime_path,
+                    'geometry': intersection,
+                }
+            )
+    return findings
+
+
 def find_geometric_crossings(
     G: nx.Graph,
     *,
@@ -657,26 +757,17 @@ def find_geometric_crossings(
     angle_tol: float = 1e-10,
     endpoint_tol: float = 1e-9,
 ) -> list[dict]:
-    """Find route intersections in a routeset using Shapely geometries.
+    """Find invalid route intersections in routeset ``G`` using route polylines.
 
-    Geometry-first diagnostic complement to :func:`find_routeset_crossings` and
-    :func:`list_edge_crossings`. Unlike :func:`list_edge_crossings`, which only
-    detects crossings between extended-Delaunay edges (i.e. it requires a
-    routeset built from ``A``, OptiWindNet's available-edges graph), this
-    routine works on **any** routeset graph that exposes ``VertexC`` (and
-    ``fnT`` if it carries contour or detour clones). It can therefore validate
-    routes produced by external tools, hand-built test graphs, or post-edited
-    OptiWindNet results. Unlike :func:`find_routeset_crossings`, which tests
-    each edge as a straight segment, it assembles whole polylines and so also
-    reports collinear overlaps and touches — at the cost of a heavier check.
-
-    Polylines are extracted from ``G`` (one per feeder, plus one per
-    junction-to-junction link) and translated through ``fnT`` so that contour
-    and detour clones are tested at their prime coordinates.
+    The route decomposition contains one polyline per feeder and one per
+    section between non-root nodes whose degree is not two. Clone nodes are
+    translated through ``fnT`` to their prime coordinates. The checks cover
+    intersections between polylines, self-intersections, coincident runs,
+    routes that separate a terminal's incident rays, and degenerate geometry.
 
     Args:
-      G: routeset graph. Must have graph attributes ``'T'``, ``'R'``, ``'B'``, and
-        ``'VertexC'``; ``'fnT'`` is required iff ``C > 0`` or ``D > 0``.
+      G: routeset graph with ``T``, ``R``, ``B`` and ``VertexC`` graph
+        attributes. ``fnT`` is required when ``C > 0`` or ``D > 0``.
       include_touches: also report point contacts that are not proper crossings
         (otherwise touches are silently dropped).
       length_tol: collinear overlaps shorter than this are not classified.
@@ -693,13 +784,18 @@ def find_geometric_crossings(
           - ``'overlap_cross'``: two polylines share a sub-run and exit the
             overlap on opposite sides at both ends (a true cross expressed as
             a coincident segment);
-          - ``'branch_split'``: a detour-clone whose prime is a real terminal
-            cuts that terminal's subtree into pieces;
+          - ``'branch_split'``: a route through a real terminal's coordinate
+            separates that terminal's incident topology rays;
+          - ``'self_cross'``: non-adjacent segments of one route cross;
+          - ``'self_overlap'``: one route retraces part of itself;
+          - ``'degenerate'``: a route lacks two finite distinct coordinates;
           - ``'touch'`` (only when ``include_touches=True``): point contact
             that is not classified as a cross (e.g. tangent kiss).
-      - ``path_nodes_a``, ``path_nodes_b``: the raw polyline node sequences.
-      - ``path_a``, ``path_b``: canonical prime-path tuples (sorted so that
-        ``path_a < path_b`` lexicographically).
+      - ``path_nodes_a``, ``path_nodes_b``: raw node sequences or the separated
+        neighbour pair for a branch split.
+      - ``path_a``, ``path_b``: prime-coordinate path descriptions. For a
+        branch split, ``path_a`` is the passing route and ``path_b`` identifies
+        the split terminal and two separated neighbours.
       - ``geometry``: WKT string of the offending Shapely geometry (Point,
         MultiPoint, LineString, MultiLineString, …).
     """
@@ -709,32 +805,145 @@ def find_geometric_crossings(
     paths = [polyline.nodes for polyline in polylines]
     prime_paths = [_canonical_prime_path(G, path, fnT) for path in paths]
     path_coords = [_polyline_coords(VertexC, fnT, path) for path in paths]
-    splits = _detour_splits(G, fnT, VertexC)
+    path_primes = [{int(fnT[node]) for node in path} for path in paths]
+    splits = _detour_splits(
+        G,
+        fnT,
+        VertexC,
+        endpoint_tol=endpoint_tol,
+        angle_tol=angle_tol,
+    )
 
     findings = _branch_split_findings(splits, polylines, prime_paths, fnT, VertexC)
 
-    lines = [shp.LineString(coords) for coords in path_coords]
-    tree = shp.STRtree(lines)
+    path_terminals = [
+        {node for node in path if 0 <= node < G.graph['T']} for path in paths
+    ]
+    split_primes = [
+        terminal
+        for terminal in range(G.graph['T'])
+        if terminal in G and G.degree[terminal] > 1
+    ]
+    split_points = [shp.Point(VertexC[terminal].tolist()) for terminal in split_primes]
+    split_tree = shp.STRtree(split_points)
 
-    for i, line_a in enumerate(lines):
-        for j in tree.query(line_a, predicate='intersects').tolist():
-            if j <= i:
+    lines = []
+    line_paths = []
+    for path_i, (polyline, prime_path, coords) in enumerate(
+        zip(polylines, prime_paths, path_coords)
+    ):
+        if len(coords) < 2 or not np.isfinite(coords).all():
+            geometry = (
+                shp.Point(coords[0].tolist())
+                if len(coords) and np.isfinite(coords[0]).all()
+                else shp.GeometryCollection()
+            )
+            findings.append(
+                {
+                    'kind': 'degenerate',
+                    'path_nodes_a': polyline.nodes,
+                    'path_nodes_b': polyline.nodes,
+                    'path_a': prime_path,
+                    'path_b': prime_path,
+                    'geometry': geometry,
+                }
+            )
+            continue
+        try:
+            line = shp.LineString(coords)
+        except (shp.errors.GEOSException, ValueError):
+            findings.append(
+                {
+                    'kind': 'degenerate',
+                    'path_nodes_a': polyline.nodes,
+                    'path_nodes_b': polyline.nodes,
+                    'path_a': prime_path,
+                    'path_b': prime_path,
+                    'geometry': shp.GeometryCollection(),
+                }
+            )
+            continue
+        findings += _self_intersection_findings(
+            polyline, prime_path, coords, line, length_tol=length_tol
+        )
+        lines.append(line)
+        line_paths.append(path_i)
+
+    tree = shp.STRtree(lines)
+    seen_splits: set[tuple[int, int]] = set()
+
+    for line_i, line_a in enumerate(lines):
+        path_i = line_paths[line_i]
+        for line_j in tree.query(line_a, predicate='intersects').tolist():
+            if line_j <= line_i:
                 continue
-            intersection = line_a.intersection(lines[j])
+            path_j = line_paths[line_j]
+            intersection = line_a.intersection(lines[line_j])
             if intersection.is_empty:
                 continue
-            excluded = _exclusion_coords(paths[i], paths[j], fnT, VertexC, splits)
+
+            classified_split_points = []
+            for split_i in split_tree.query(
+                intersection, predicate='intersects'
+            ).tolist():
+                prime = split_primes[split_i]
+                in_i = prime in path_terminals[path_i]
+                in_j = prime in path_terminals[path_j]
+                if in_i == in_j:
+                    continue
+                route_path = path_j if in_i else path_i
+                route_coords = path_coords[route_path]
+                scale = np.linalg.norm(np.diff(route_coords, axis=0), axis=1).max(
+                    initial=1.0
+                )
+                tol = endpoint_tol * scale
+                key = route_path, prime
+                if prime in path_primes[route_path]:
+                    continue
+                if key in seen_splits:
+                    classified_split_points.append(VertexC[prime])
+                    continue
+                split_nodes = _split_branch_nodes(
+                    G,
+                    prime,
+                    route_coords,
+                    fnT,
+                    VertexC,
+                    tol=tol,
+                    angle_tol=angle_tol,
+                )
+                if split_nodes is None:
+                    continue
+                classified_split_points.append(VertexC[prime])
+                seen_splits.add(key)
+                findings.append(
+                    {
+                        'kind': 'branch_split',
+                        'path_nodes_a': paths[route_path],
+                        'path_nodes_b': split_nodes,
+                        'path_a': prime_paths[route_path],
+                        'path_b': (prime, prime, *split_nodes),
+                        'split_node': prime,
+                        'geometry': split_points[split_i],
+                    }
+                )
+
+            excluded = _exclusion_coords(
+                paths[path_i], paths[path_j], fnT, VertexC, splits
+            )
+            if classified_split_points:
+                excluded = np.vstack((excluded, classified_split_points))
             if _intersection_only_at_excluded(
                 intersection, excluded, endpoint_tol=endpoint_tol
             ):
                 continue
 
-            path_a, path_b = prime_paths[i], prime_paths[j]
+            path_a, path_b = prime_paths[path_i], prime_paths[path_j]
             kind: str | None = None
             geometry = intersection
 
             if intersection.length > length_tol and _shared_run_swaps_sides(
-                path_coords[i], path_coords[j]
+                path_coords[path_i], path_coords[path_j]
             ):
                 kind = 'overlap_cross'
 
@@ -742,8 +951,8 @@ def find_geometric_crossings(
                 crossings = _filter_crossing_points(
                     intersection,
                     excluded,
-                    path_coords[i],
-                    path_coords[j],
+                    path_coords[path_i],
+                    path_coords[path_j],
                     angle_tol=angle_tol,
                     endpoint_tol=endpoint_tol,
                 )
@@ -759,7 +968,7 @@ def find_geometric_crossings(
                 else:
                     continue
 
-            path_nodes_a, path_nodes_b = paths[i], paths[j]
+            path_nodes_a, path_nodes_b = paths[path_i], paths[path_j]
             if path_b < path_a:
                 path_nodes_a, path_nodes_b = path_nodes_b, path_nodes_a
                 path_a, path_b = path_b, path_a
@@ -789,7 +998,8 @@ def _filter_crossing_points(
     """Return point-intersections that are genuine X-crossings.
 
     Drops points near any excluded coord (shared nodes, polyline endpoints,
-    detour-split primes) and points where local rays don't alternate.
+    detour-split primes) and points where the two routes' local rays don't
+    alternate. Non-excluded route vertices are classified by their local rays.
     """
     P = np.asarray(list(_iter_points(intersection)))
     if len(P) == 0:
@@ -807,18 +1017,15 @@ def _filter_crossing_points(
         np.linalg.norm(np.diff(coords_b, axis=0), axis=1).max(initial=1.0),
     )
     tol = endpoint_tol * scale
-    return [
-        P[k]
-        for k in range(len(P))
-        if not near_excluded[k]
-        and polylines_cross_at_point(
-            coords_a,
-            coords_b,
-            P[k],
-            tol=tol,
-            angle_tol=angle_tol,
-        )
-    ]
+    crossings = []
+    for k, point in enumerate(P):
+        if near_excluded[k]:
+            continue
+        rays_a = polyline_rays_at_point(coords_a, point, tol=tol, angle_tol=angle_tol)
+        rays_b = polyline_rays_at_point(coords_b, point, tol=tol, angle_tol=angle_tol)
+        if rays_alternate(rays_a, rays_b):
+            crossings.append(point)
+    return crossings
 
 
 def list_edge_crossings(

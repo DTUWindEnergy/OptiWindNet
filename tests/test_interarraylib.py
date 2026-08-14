@@ -335,6 +335,7 @@ def test_S_from_G():
 
     assert check_nodes(S, expected_nodes)
     assert check_edges(S, expected_edges)
+    assert S.graph['max_load'] == 4
 
     # test other branches
     G.graph['has_loads'] = False
@@ -347,6 +348,14 @@ def test_S_from_G():
     assert S2.graph['has_loads']
     assert 'creator' not in S2.graph
     assert 'method_options' not in S2.graph
+
+
+def test_S_from_G_rejects_a_route_node_that_is_not_part_of_a_chain():
+    G = nx.Graph(R=1, T=2, capacity=2, topology=Topology.BRANCHED)
+    G.add_edges_from([(0, 2), (2, 1), (2, -1)])
+
+    with pytest.raises(ValueError, match='route from -1 is not a chain at 2'):
+        S_from_G(G)
 
 
 def test_G_from_S():
@@ -578,6 +587,7 @@ def _ringed_S(R, ringspec):
         S.nodes[r]['load'] = sum(S.nodes[n]['load'] for n in S[r])
     # add_ring_to_S sets every load but leaves the flag to its caller
     S.graph['has_loads'] = True
+    S.graph['max_load'] = max(data['load'] for _, _, data in S.edges(data=True))
     return S
 
 
@@ -721,6 +731,13 @@ def test_validate_topology_accepts_valid_topologies():
     assert validate_topology(_ringed_S(1, [(-1, [0, 1, 2, 3]), (-1, [4, 5])])) == []
 
 
+def test_validate_topology_accepts_string_declaration():
+    S = _ringed_S(1, [(-1, [0, 1, 2])])
+    S.graph['topology'] = 'ringed'
+
+    assert validate_topology(S) == []
+
+
 def test_validate_topology_requires_loads():
     """Every producer sets loads, so a topology without them is unfinished.
 
@@ -731,6 +748,16 @@ def test_validate_topology_requires_loads():
     S.graph['has_loads'] = False
 
     assert validate_topology(S) == ['topology carries no loads']
+
+
+def test_validate_topology_checks_shape_without_loads():
+    S = nx.Graph(R=1, T=3, topology=Topology.RADIAL, has_loads=False)
+    S.add_edges_from([(-1, 0), (0, 1), (1, 2), (0, 2)])
+
+    violations = validate_topology(S)
+
+    assert 'topology carries no loads' in violations
+    assert 'radial topology must be a forest' in violations
 
 
 def test_validate_topology_rejects_forest_without_reverse():
@@ -791,8 +818,15 @@ def test_validate_topology_rejects_misplaced_zero_load_link():
     S[0][1]['load'], S[1][2]['load'] = 0, 1
 
     violations = validate_topology(S)
-    assert len(violations) == 1
-    assert 'opens between 0 and 1' in violations[0]
+    assert any('opens between 0 and 1' in violation for violation in violations)
+    assert any('states load' in violation for violation in violations)
+
+
+def test_validate_topology_rejects_a_component_with_two_roots():
+    S = nx.Graph(R=2, T=2, topology=Topology.BRANCHED, has_loads=False)
+    S.add_edges_from([(-2, 0), (0, 1), (1, -1)])
+
+    assert 'component contains multiple roots: [-2, -1]' in validate_topology(S)
 
 
 def test_validate_topology_reports_every_shape_violation():
