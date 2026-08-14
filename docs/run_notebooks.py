@@ -29,7 +29,6 @@ import time
 import warnings
 from pathlib import Path
 from typing import Any
-from xml.dom import Node, minidom
 
 import nbformat
 from jupyter_client import AsyncKernelClient, AsyncKernelManager
@@ -38,14 +37,16 @@ from nbclient.exceptions import CellExecutionError
 from nbformat.validator import normalize
 from traitlets.config import Config
 
+if __package__:
+    from .svg_utils import prettify_svg
+else:
+    from svg_utils import prettify_svg  # pyrefly: ignore[missing-import]
+
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parent
 NB_DIR = HERE / 'notebooks'
 DEFAULT_TIMEOUT = 600
 DEFAULT_SCROLLED_THRESHOLD = 24
-SVG_TEXT_ELEMENTS = frozenset(
-    {'foreignObject', 'script', 'style', 'text', 'textPath', 'tspan'}
-)
 
 
 class CurveKernelManager(AsyncKernelManager):
@@ -176,65 +177,6 @@ def merge_adjacent_stream_outputs(cell: nbformat.NotebookNode) -> None:
     cell['outputs'] = merged
 
 
-def prettify_svg(svg: str) -> str:
-    """Format an SVG document with one space per XML nesting level."""
-    document = minidom.parseString(svg)
-
-    def indent_element(
-        element: minidom.Element,
-        depth: int,
-        preserve_text: bool = False,
-    ) -> None:
-        preserve_text = preserve_text or (
-            element.getAttribute('xml:space') == 'preserve'
-            or element.localName in SVG_TEXT_ELEMENTS
-        )
-        children = list(element.childNodes)
-        structural_children = [
-            child
-            for child in children
-            if child.nodeType
-            in (Node.ELEMENT_NODE, Node.COMMENT_NODE, Node.PROCESSING_INSTRUCTION_NODE)
-        ]
-        has_text = any(
-            child.nodeType in (Node.TEXT_NODE, Node.CDATA_SECTION_NODE)
-            and child.data.strip()
-            for child in children
-        )
-
-        for child in children:
-            if child.nodeType == Node.ELEMENT_NODE:
-                indent_element(child, depth + 1, preserve_text)
-
-        if preserve_text or has_text or not structural_children:
-            return
-
-        for child in children:
-            if child.nodeType == Node.TEXT_NODE and not child.data.strip():
-                element.removeChild(child)
-                child.unlink()
-
-        for child in list(element.childNodes):
-            element.insertBefore(
-                document.createTextNode(f'\n{" " * (depth + 1)}'), child
-            )
-        element.appendChild(document.createTextNode(f'\n{" " * depth}'))
-
-    root = document.documentElement
-    if root is None:
-        raise ValueError('SVG output has no document element')
-    indent_element(root, 0)
-    declaration = re.match(r'\s*(<\?xml\b.*?\?>)', svg, flags=re.IGNORECASE)
-    parts = [
-        child.toxml()
-        for child in document.childNodes
-        if child.nodeType != Node.TEXT_NODE or child.data.strip()
-    ]
-    if declaration:
-        parts.insert(0, declaration.group(1))
-    return '\n'.join(parts) + '\n'
-
-
 def prettify_svg_outputs(nb: nbformat.NotebookNode) -> None:
     """Prettify every SVG MIME output in a notebook in place."""
     for cell in nb.cells:
@@ -324,6 +266,7 @@ def run(args: argparse.Namespace) -> int:
     for path in paths:
         rel = path.relative_to(NB_DIR) if path.is_relative_to(NB_DIR) else path.name
         label = f'[{"DRY" if args.dry_run else "RUN"}] {rel}'
+        print(f'\n{label} ...', flush=True)
         t0 = time.monotonic()
         injected = False
         try:
@@ -342,12 +285,12 @@ def run(args: argparse.Namespace) -> int:
             client.execute()
         except CellExecutionError as exc:
             elapsed = time.monotonic() - t0
-            print(f'{label}  FAIL  {elapsed:6.1f}s  {exc.ename}: {exc.evalue}')
+            print(f'  -> {rel}  FAIL  {elapsed:6.1f}s  {exc.ename}: {exc.evalue}')
             failures.append((path, f'{exc.ename}: {exc.evalue}'))
             continue
         except Exception as exc:
             elapsed = time.monotonic() - t0
-            print(f'{label}  FAIL  {elapsed:6.1f}s  {type(exc).__name__}: {exc}')
+            print(f'  -> {rel}  FAIL  {elapsed:6.1f}s  {type(exc).__name__}: {exc}')
             failures.append((path, f'{type(exc).__name__}: {exc}'))
             continue
 
@@ -362,12 +305,12 @@ def run(args: argparse.Namespace) -> int:
         elapsed = time.monotonic() - t0
 
         if args.dry_run:
-            print(f'{label}   OK   {elapsed:6.1f}s  (not written)')
+            print(f'  -> {rel}    OK  {elapsed:6.1f}s  (not written)')
         else:
             tmp = path.with_suffix('.ipynb.tmp')
             nbformat.write(nb, tmp)
             os.replace(tmp, path)
-            print(f'{label}   OK   {elapsed:6.1f}s')
+            print(f'  -> {rel}    OK  {elapsed:6.1f}s')
 
     if failures:
         print(f'\n{len(failures)} failure(s):')

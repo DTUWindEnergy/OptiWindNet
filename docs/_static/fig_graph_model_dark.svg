@@ -1,0 +1,348 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3290 2414">
+ <style>.caption{font:82px sans-serif;fill:#a3a3a3}</style>
+ <text class="caption" x="41" y="82">L — location</text>
+ <svg x="0" y="127" width="1645" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1645 1080">
+   <defs>
+    <circle stroke="none" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#111" stroke-width="2" id="oss" width="21" height="21" fill="lawngreen"/>
+   </defs>
+   <g id="kfA">
+    <path stroke="silver" stroke-dasharray="15 7" stroke-width="2" id="border" d="M30 623 52 338 76 30 465 217 697 86 1119 220 1522 30 1615 70 1493 383 1316 715 1109 1050 670 1021 291 812z" fill-rule="evenodd" fill="#111"/>
+    <g id="WTGgrp">
+     <g fill="#9edae5">
+      <use href="#wtg" x="500" y="370"/>
+      <use href="#wtg" x="798" y="959"/>
+      <use href="#wtg" x="812" y="451"/>
+      <use href="#wtg" x="356" y="318"/>
+      <use href="#wtg" x="925" y="561"/>
+      <use href="#wtg" x="658" y="945"/>
+      <use href="#wtg" x="682" y="419"/>
+      <use href="#wtg" x="130" y="123"/>
+      <use href="#wtg" x="1195" y="791"/>
+      <use href="#wtg" x="233" y="227"/>
+      <use href="#wtg" x="1316" y="586"/>
+      <use href="#wtg" x="1537" y="103"/>
+      <use href="#wtg" x="1082" y="682"/>
+      <use href="#wtg" x="103" y="587"/>
+      <use href="#wtg" x="1438" y="358"/>
+      <use href="#wtg" x="569" y="860"/>
+      <use href="#wtg" x="1082" y="977"/>
+      <use href="#wtg" x="335" y="748"/>
+      <use href="#wtg" x="938" y="972"/>
+      <use href="#wtg" x="107" y="417"/>
+      <use href="#wtg" x="454" y="799"/>
+      <use href="#wtg" x="1334" y="277"/>
+      <use href="#wtg" x="231" y="667"/>
+      <use href="#wtg" x="1127" y="411"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="680.5" y="146.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+ <text class="caption" x="1686" y="82">A — available links</text>
+ <svg x="1645" y="127" width="1645" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1645 1080">
+   <defs>
+    <circle stroke="none" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#111" stroke-width="2" id="oss" width="21" height="21" fill="lawngreen"/>
+   </defs>
+   <g id="kfA">
+    <path stroke="silver" stroke-dasharray="15 7" stroke-width="2" id="border" d="M30 623 52 338 76 30 465 217 697 86 1119 220 1522 30 1615 70 1493 383 1316 715 1109 1050 670 1021 291 812z" fill-rule="evenodd" fill="#111"/>
+    <g stroke="darkcyan" stroke-width="4" id="edges_delaunay">
+     <line x1="691" y1="157" x2="500" y2="370"/>
+     <line x1="500" y1="370" x2="454" y2="799"/>
+     <line x1="500" y1="370" x2="231" y2="667"/>
+     <line x1="500" y1="370" x2="682" y2="419"/>
+     <line x1="500" y1="370" x2="335" y2="748"/>
+     <line x1="500" y1="370" x2="356" y2="318"/>
+     <line x1="798" y1="959" x2="569" y2="860"/>
+     <line x1="798" y1="959" x2="658" y2="945"/>
+     <line x1="798" y1="959" x2="938" y2="972"/>
+     <line x1="798" y1="959" x2="925" y2="561"/>
+     <line x1="812" y1="451" x2="925" y2="561"/>
+     <line x1="691" y1="157" x2="812" y2="451"/>
+     <line x1="812" y1="451" x2="682" y2="419"/>
+     <line x1="812" y1="451" x2="569" y2="860"/>
+     <line x1="812" y1="451" x2="1127" y2="411"/>
+     <line x1="356" y1="318" x2="231" y2="667"/>
+     <line x1="356" y1="318" x2="107" y2="417"/>
+     <line x1="356" y1="318" x2="233" y2="227"/>
+     <line x1="691" y1="157" x2="356" y2="318"/>
+     <line x1="925" y1="561" x2="1127" y2="411"/>
+     <line x1="925" y1="561" x2="938" y2="972"/>
+     <line x1="925" y1="561" x2="569" y2="860"/>
+     <line x1="925" y1="561" x2="1082" y2="682"/>
+     <line x1="658" y1="945" x2="454" y2="799"/>
+     <line x1="658" y1="945" x2="569" y2="860"/>
+     <line x1="658" y1="945" x2="335" y2="748"/>
+     <line x1="682" y1="419" x2="454" y2="799"/>
+     <line x1="682" y1="419" x2="569" y2="860"/>
+     <line x1="691" y1="157" x2="682" y2="419"/>
+     <line x1="130" y1="123" x2="107" y2="417"/>
+     <line x1="130" y1="123" x2="233" y2="227"/>
+     <line x1="1195" y1="791" x2="1316" y2="586"/>
+     <line x1="1195" y1="791" x2="1082" y2="682"/>
+     <line x1="1195" y1="791" x2="1082" y2="977"/>
+     <line x1="233" y1="227" x2="107" y2="417"/>
+     <line x1="1316" y1="586" x2="1082" y2="682"/>
+     <line x1="1316" y1="586" x2="1334" y2="277"/>
+     <line x1="1316" y1="586" x2="1438" y2="358"/>
+     <line x1="1316" y1="586" x2="1127" y2="411"/>
+     <line x1="1537" y1="103" x2="1438" y2="358"/>
+     <line x1="1537" y1="103" x2="1334" y2="277"/>
+     <line x1="1082" y1="682" x2="938" y2="972"/>
+     <line x1="1082" y1="682" x2="1127" y2="411"/>
+     <line x1="1082" y1="682" x2="1082" y2="977"/>
+     <line x1="103" y1="587" x2="335" y2="748"/>
+     <line x1="103" y1="587" x2="107" y2="417"/>
+     <line x1="103" y1="587" x2="231" y2="667"/>
+     <line x1="1438" y1="358" x2="1334" y2="277"/>
+     <line x1="569" y1="860" x2="454" y2="799"/>
+     <line x1="1082" y1="977" x2="938" y2="972"/>
+     <line x1="335" y1="748" x2="454" y2="799"/>
+     <line x1="335" y1="748" x2="231" y2="667"/>
+     <line x1="107" y1="417" x2="231" y2="667"/>
+     <line x1="1334" y1="277" x2="1127" y2="411"/>
+     <line x1="691" y1="157" x2="1334" y2="277"/>
+     <line x1="691" y1="157" x2="1127" y2="411"/>
+    </g>
+    <g stroke="darkcyan" stroke-dasharray="18 15" stroke-width="4" id="edges_extended">
+     <line x1="500" y1="370" x2="107" y2="417"/>
+     <line x1="500" y1="370" x2="569" y2="860"/>
+     <line x1="500" y1="370" x2="812" y2="451"/>
+     <line x1="798" y1="959" x2="812" y2="451"/>
+     <line x1="798" y1="959" x2="1082" y2="682"/>
+     <line x1="812" y1="451" x2="454" y2="799"/>
+     <line x1="812" y1="451" x2="1334" y2="277"/>
+     <line x1="812" y1="451" x2="1082" y2="682"/>
+     <line x1="356" y1="318" x2="335" y2="748"/>
+     <line x1="356" y1="318" x2="682" y2="419"/>
+     <line x1="356" y1="318" x2="130" y2="123"/>
+     <line x1="356" y1="318" x2="103" y2="587"/>
+     <line x1="925" y1="561" x2="658" y2="945"/>
+     <line x1="691" y1="157" x2="925" y2="561"/>
+     <line x1="925" y1="561" x2="1082" y2="977"/>
+     <line x1="925" y1="561" x2="1316" y2="586"/>
+     <line x1="925" y1="561" x2="682" y2="419"/>
+     <line x1="682" y1="419" x2="335" y2="748"/>
+     <line x1="682" y1="419" x2="1127" y2="411"/>
+     <line x1="1195" y1="791" x2="938" y2="972"/>
+     <line x1="1195" y1="791" x2="1127" y2="411"/>
+     <line x1="233" y1="227" x2="231" y2="667"/>
+     <line x1="1316" y1="586" x2="1082" y2="977"/>
+     <line x1="1316" y1="586" x2="1537" y2="103"/>
+     <line x1="1082" y1="682" x2="1334" y2="277"/>
+     <line x1="1438" y1="358" x2="1127" y2="411"/>
+     <line x1="569" y1="860" x2="938" y2="972"/>
+     <line x1="569" y1="860" x2="335" y2="748"/>
+     <line x1="938" y1="972" x2="1127" y2="411"/>
+     <line x1="454" y1="799" x2="231" y2="667"/>
+     <line x1="691" y1="157" x2="454" y2="799"/>
+     <line x1="691" y1="157" x2="231" y2="667"/>
+    </g>
+    <g stroke="green" stroke-width="4" id="edges_contour_delaunay">
+     <line x1="691" y1="157" x2="130" y2="123"/>
+     <line x1="691" y1="157" x2="233" y2="227"/>
+     <line x1="691" y1="157" x2="1537" y2="103"/>
+    </g>
+    <g id="WTGgrp">
+     <g fill="#9edae5">
+      <use href="#wtg" x="500" y="370"/>
+      <use href="#wtg" x="798" y="959"/>
+      <use href="#wtg" x="812" y="451"/>
+      <use href="#wtg" x="356" y="318"/>
+      <use href="#wtg" x="925" y="561"/>
+      <use href="#wtg" x="658" y="945"/>
+      <use href="#wtg" x="682" y="419"/>
+      <use href="#wtg" x="130" y="123"/>
+      <use href="#wtg" x="1195" y="791"/>
+      <use href="#wtg" x="233" y="227"/>
+      <use href="#wtg" x="1316" y="586"/>
+      <use href="#wtg" x="1537" y="103"/>
+      <use href="#wtg" x="1082" y="682"/>
+      <use href="#wtg" x="103" y="587"/>
+      <use href="#wtg" x="1438" y="358"/>
+      <use href="#wtg" x="569" y="860"/>
+      <use href="#wtg" x="1082" y="977"/>
+      <use href="#wtg" x="335" y="748"/>
+      <use href="#wtg" x="938" y="972"/>
+      <use href="#wtg" x="107" y="417"/>
+      <use href="#wtg" x="454" y="799"/>
+      <use href="#wtg" x="1334" y="277"/>
+      <use href="#wtg" x="231" y="667"/>
+      <use href="#wtg" x="1127" y="411"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="680.5" y="146.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+ <text class="caption" x="41" y="1289">S — solution topology</text>
+ <svg x="0" y="1334" width="1645" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1645 1080">
+   <defs>
+    <circle stroke="none" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#111" stroke-width="2" id="oss" width="21" height="21" fill="lawngreen"/>
+   </defs>
+   <g id="kfA">
+    <path stroke="silver" stroke-dasharray="15 7" stroke-width="2" id="border" d="M30 623 52 338 76 30 465 217 697 86 1119 220 1522 30 1615 70 1493 383 1316 715 1109 1050 670 1021 291 812z" fill-rule="evenodd" fill="#111"/>
+    <g stroke="crimson" stroke-width="4" id="edges_unspecified">
+     <line x1="691" y1="157" x2="1127" y2="411"/>
+     <line x1="691" y1="157" x2="500" y2="370"/>
+     <line x1="691" y1="157" x2="682" y2="419"/>
+     <line x1="691" y1="157" x2="812" y2="451"/>
+     <line x1="682" y1="419" x2="569" y2="860"/>
+     <line x1="658" y1="945" x2="569" y2="860"/>
+     <line x1="798" y1="959" x2="658" y2="945"/>
+     <line x1="798" y1="959" x2="938" y2="972"/>
+     <line x1="812" y1="451" x2="925" y2="561"/>
+     <line x1="925" y1="561" x2="1082" y2="682"/>
+     <line x1="1195" y1="791" x2="1082" y2="682"/>
+     <line x1="1195" y1="791" x2="1082" y2="977"/>
+     <line x1="1316" y1="586" x2="1127" y2="411"/>
+     <line x1="1316" y1="586" x2="1438" y2="358"/>
+     <line x1="1438" y1="358" x2="1334" y2="277"/>
+     <line x1="1537" y1="103" x2="1334" y2="277"/>
+     <line x1="500" y1="370" x2="356" y2="318"/>
+     <line x1="356" y1="318" x2="233" y2="227"/>
+     <line x1="130" y1="123" x2="233" y2="227"/>
+     <line x1="103" y1="587" x2="107" y2="417"/>
+     <line x1="103" y1="587" x2="231" y2="667"/>
+     <line x1="335" y1="748" x2="231" y2="667"/>
+     <line x1="335" y1="748" x2="454" y2="799"/>
+    </g>
+    <g stroke="red" stroke-dasharray="18 15" stroke-width="4" id="edges_tentative">
+     <line x1="691" y1="157" x2="107" y2="417"/>
+    </g>
+    <g id="WTGgrp">
+     <g fill="#1f77b4">
+      <use href="#wtg" x="682" y="419"/>
+      <use href="#wtg" x="569" y="860"/>
+      <use href="#wtg" x="658" y="945"/>
+      <use href="#wtg" x="798" y="959"/>
+      <use href="#wtg" x="938" y="972"/>
+     </g>
+     <g fill="#aec7e8">
+      <use href="#wtg" x="812" y="451"/>
+      <use href="#wtg" x="925" y="561"/>
+      <use href="#wtg" x="1082" y="682"/>
+      <use href="#wtg" x="1195" y="791"/>
+      <use href="#wtg" x="1082" y="977"/>
+     </g>
+     <g fill="#ff7f0e">
+      <use href="#wtg" x="1127" y="411"/>
+      <use href="#wtg" x="1316" y="586"/>
+      <use href="#wtg" x="1438" y="358"/>
+      <use href="#wtg" x="1334" y="277"/>
+      <use href="#wtg" x="1537" y="103"/>
+     </g>
+     <g fill="#ffbb78">
+      <use href="#wtg" x="500" y="370"/>
+      <use href="#wtg" x="356" y="318"/>
+      <use href="#wtg" x="233" y="227"/>
+      <use href="#wtg" x="130" y="123"/>
+     </g>
+     <g fill="#2ca02c">
+      <use href="#wtg" x="107" y="417"/>
+      <use href="#wtg" x="103" y="587"/>
+      <use href="#wtg" x="231" y="667"/>
+      <use href="#wtg" x="335" y="748"/>
+      <use href="#wtg" x="454" y="799"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="680.5" y="146.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+ <text class="caption" x="1686" y="1289">G — routeset</text>
+ <svg x="1645" y="1334" width="1645" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1645 1080">
+   <defs>
+    <circle stroke="orange" stroke-opacity="0.3" stroke-width="4" id="dt" r="23" fill="none"/>
+    <circle stroke="none" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#111" stroke-width="2" id="oss" width="21" height="21" fill="lawngreen"/>
+   </defs>
+   <g id="kfA">
+    <path stroke="silver" stroke-dasharray="15 7" stroke-width="2" id="border" d="M30 623 52 338 76 30 465 217 697 86 1119 220 1522 30 1615 70 1493 383 1316 715 1109 1050 670 1021 291 812z" fill-rule="evenodd" fill="#111"/>
+    <g stroke="crimson" stroke-width="4" id="edges_unspecified">
+     <line x1="691" y1="157" x2="1127" y2="411"/>
+     <line x1="691" y1="157" x2="500" y2="370"/>
+     <line x1="691" y1="157" x2="682" y2="419"/>
+     <line x1="691" y1="157" x2="812" y2="451"/>
+     <line x1="682" y1="419" x2="569" y2="860"/>
+     <line x1="658" y1="945" x2="569" y2="860"/>
+     <line x1="798" y1="959" x2="658" y2="945"/>
+     <line x1="798" y1="959" x2="938" y2="972"/>
+     <line x1="812" y1="451" x2="925" y2="561"/>
+     <line x1="925" y1="561" x2="1082" y2="682"/>
+     <line x1="1195" y1="791" x2="1082" y2="682"/>
+     <line x1="1195" y1="791" x2="1082" y2="977"/>
+     <line x1="1316" y1="586" x2="1127" y2="411"/>
+     <line x1="1316" y1="586" x2="1438" y2="358"/>
+     <line x1="1438" y1="358" x2="1334" y2="277"/>
+     <line x1="1537" y1="103" x2="1334" y2="277"/>
+     <line x1="500" y1="370" x2="356" y2="318"/>
+     <line x1="356" y1="318" x2="233" y2="227"/>
+     <line x1="130" y1="123" x2="233" y2="227"/>
+     <line x1="103" y1="587" x2="107" y2="417"/>
+     <line x1="103" y1="587" x2="231" y2="667"/>
+     <line x1="335" y1="748" x2="231" y2="667"/>
+     <line x1="335" y1="748" x2="454" y2="799"/>
+    </g>
+    <g stroke="darkorange" stroke-dasharray="18 15" stroke-width="4" id="detours" fill="none">
+     <polyline points="691 157 500 370 107 417"/>
+    </g>
+    <g id="DTgrp">
+     <use href="#dt" x="500" y="370"/>
+    </g>
+    <g id="WTGgrp">
+     <g fill="#1f77b4">
+      <use href="#wtg" x="682" y="419"/>
+      <use href="#wtg" x="569" y="860"/>
+      <use href="#wtg" x="658" y="945"/>
+      <use href="#wtg" x="798" y="959"/>
+      <use href="#wtg" x="938" y="972"/>
+     </g>
+     <g fill="#aec7e8">
+      <use href="#wtg" x="812" y="451"/>
+      <use href="#wtg" x="925" y="561"/>
+      <use href="#wtg" x="1082" y="682"/>
+      <use href="#wtg" x="1195" y="791"/>
+      <use href="#wtg" x="1082" y="977"/>
+     </g>
+     <g fill="#ff7f0e">
+      <use href="#wtg" x="1127" y="411"/>
+      <use href="#wtg" x="1316" y="586"/>
+      <use href="#wtg" x="1438" y="358"/>
+      <use href="#wtg" x="1334" y="277"/>
+      <use href="#wtg" x="1537" y="103"/>
+     </g>
+     <g fill="#ffbb78">
+      <use href="#wtg" x="500" y="370"/>
+      <use href="#wtg" x="356" y="318"/>
+      <use href="#wtg" x="233" y="227"/>
+      <use href="#wtg" x="130" y="123"/>
+     </g>
+     <g fill="#2ca02c">
+      <use href="#wtg" x="107" y="417"/>
+      <use href="#wtg" x="103" y="587"/>
+      <use href="#wtg" x="231" y="667"/>
+      <use href="#wtg" x="335" y="748"/>
+      <use href="#wtg" x="454" y="799"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="680.5" y="146.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+</svg>
