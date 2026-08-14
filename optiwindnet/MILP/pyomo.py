@@ -49,6 +49,8 @@ _optkey = {
 # usage: _optname[solver_name].mipgap
 
 _default_options = dict(
+    # Only options whose value improves on CBC's default are listed; any option
+    # absent here uses CBC's default.
     cbc=dict(
         threads=physical_core_count(),
         timeMode='elapsed',
@@ -59,20 +61,12 @@ _default_options = dict(
         Dins='on',
         VndVariableNeighborhoodSearch='on',
         Rens='on',
-        Rins='on',
-        pivotAndComplement='off',
-        proximitySearch='off',
         # Cuts
-        gomoryCuts='on',
         mixedIntegerRoundingCuts='on',
         flowCoverCuts='on',
         cliqueCuts='off',
-        twoMirCuts='off',
         knapsackCuts='off',
-        probingCuts='off',
         zeroHalfCuts='off',
-        liftAndProjectCuts='off',
-        residualCapacityCuts='off',
     ),
     highs=dict(
         parallel='on',
