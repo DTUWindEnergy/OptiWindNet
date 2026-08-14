@@ -6,7 +6,6 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from optiwindnet.MILP import Topology
 from optiwindnet.interarraylib import (
     G_from_S,
     L_from_G,
@@ -38,6 +37,7 @@ from optiwindnet.interarraylib import (
     update_lengths,
     validate_topology,
 )
+from optiwindnet.MILP import Topology
 
 from .helpers import assert_graph_equal, tiny_wfn
 from .sitecache import get_bundle

@@ -16,8 +16,8 @@ from .cases import (
     expected_topology,
     topology_golden_key,
 )
-from .solver_topologies import SOLVER_TOPOLOGIES_FILE, solve_milp_case
 from .sitecache import get_bundle
+from .solver_topologies import SOLVER_TOPOLOGIES_FILE, solve_milp_case
 from .topology_assertions import assert_topology
 
 

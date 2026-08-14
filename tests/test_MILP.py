@@ -13,9 +13,6 @@ from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.terse import TerseLinks
 from optiwindnet.types import Topology
 
-from .helpers import solver_unavailable
-from .isolation import should_isolate
-from .sitecache import get_bundle
 from .cases import (
     MILP_ADAPTER_CASES,
     MILP_BOUNDARY_CASES,
@@ -24,6 +21,9 @@ from .cases import (
     case_node_id,
     topology_golden_key,
 )
+from .helpers import solver_unavailable
+from .isolation import should_isolate
+from .sitecache import get_bundle
 from .solver_topologies import (
     assert_matches_golden,
     load_solver_topologies,
@@ -1087,7 +1087,7 @@ def test_model_options_help(capsys):
 
 
 def test_calculate_bounds_invalid_max_feeders_ringed():
-    from optiwindnet.MILP._core import feeder_and_load_bounds, FeederLimit
+    from optiwindnet.MILP._core import FeederLimit, feeder_and_load_bounds
 
     with pytest.raises(ValueError, match='multiple of'):
         feeder_and_load_bounds(
@@ -1120,7 +1120,7 @@ def test_pool_handler_methods():
 
 
 def test_solver_gurobi_error_branches():
-    from optiwindnet.MILP.gurobi import SolverGurobi, OWNSolutionNotFound
+    from optiwindnet.MILP.gurobi import OWNSolutionNotFound, SolverGurobi
 
     solver = SolverGurobi()
     with pytest.raises(AttributeError, match="has no attribute 'model'"):
@@ -1151,7 +1151,7 @@ def test_solver_gurobi_error_branches():
 
 
 def test_solver_pyomo_error_branches(monkeypatch):
-    from optiwindnet.MILP.pyomo import SolverPyomo, OWNSolutionNotFound
+    from optiwindnet.MILP.pyomo import OWNSolutionNotFound, SolverPyomo
 
     solver = SolverPyomo('highs')
     with pytest.raises(AttributeError, match="has no attribute 'model'"):
