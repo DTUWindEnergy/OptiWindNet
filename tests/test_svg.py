@@ -258,6 +258,46 @@ def test_svgrepr_repr_name_equals_handle():
     assert 'name=' not in r
 
 
+def test_svgrepr_repr_solution_line():
+    """A routeset gets a second line with the solution-dependent properties."""
+    wfn = tiny_wfn(cables=[(2, 10.0), (3, 15.0), (4, 18.0)])
+    svg = svgplot(wfn.G)
+    static, _, solution = repr(svg).partition('\n')
+    assert 'cables=2|3|4' in static
+    assert 'feeders' not in static
+    assert solution.startswith(' feeders = 1; C = 2; D = 0; Σλ = ')
+    assert 'Σ¤ = ' in solution
+    assert solution.endswith(f'; {len(svg.data)} chars>')
+    # metadata values are unformatted
+    assert svg.metadata['feeders'] == (1,)
+    assert svg.metadata['cables'] == (2, 3, 4)
+    assert svg.metadata['length'] == wfn.G.size(weight='length')
+
+
+def test_svgrepr_repr_single_line_without_solution():
+    """Graphs that are not routesets keep the single-line repr."""
+    wfn = tiny_wfn(optimize=False)
+    for r in (repr(svgplot(wfn.L)), repr(svgpplot(wfn.P, wfn.A))):
+        assert '\n' not in r
+        assert 'feeders' not in r
+        assert 'Σλ' not in r
+
+
+def test_svgrepr_repr_no_cost_without_currency():
+    """Zero-cost cables set no 'currency', hence no Σ¤ in the repr."""
+    wfn = tiny_wfn(cables=[(4, 0.0)])
+    r = repr(svgplot(wfn.G))
+    assert 'cables=4' in r
+    assert 'Σλ = ' in r
+    assert 'Σ¤' not in r
+
+
+def test_svgrepr_repr_bad_metadata_does_not_raise():
+    """A formatter that fails falls back to the default rendering."""
+    r = repr(SvgRepr('x', {'handle': 'h', 'feeders': None}))
+    assert 'feeders = None' in r
+
+
 # ─────────────────────────────────────────────
 # SvgRepr.save  (lines 54-57)
 # ─────────────────────────────────────────────

@@ -10,10 +10,27 @@ import numpy as np
 import svg
 
 from .geometric import rotate
-from .interarraylib import describe_G
+from .interarraylib import _format_length, describe_G
 from .themes import Colors
 
 __all__ = ('SvgRepr', 'svgplot', 'svgpplot')
+
+# SvgRepr's repr, first line: problem and configuration properties
+_STATIC_KEYS = ('name', 'T', 'R', 'capacity', 'topology', 'cables')
+# SvgRepr's repr, second line: properties that change with the solution
+_SOLUTION_KEYS = ('feeders', 'C', 'D', 'length', 'cost')
+# keys used only by other keys' formatters
+_ANCILLARY_KEYS = ('currency',)
+# keys not rendered as '«key»«sep»«value»'
+_KEY_FORMATTER = {
+    'cables': lambda meta: 'cables=' + '|'.join(str(c) for c in meta['cables']),
+    'feeders': lambda meta: 'feeders = ' + '|'.join(str(f) for f in meta['feeders']),
+    'length': lambda meta: 'Σλ = ' + _format_length(meta['length']) + ' m',
+    'cost': lambda meta: (
+        'Σ¤ = {:_.0f} '.format(meta['cost']) + meta.get('currency', '')
+    ).rstrip(),
+}
+_KNOWN_KEYS = frozenset(_STATIC_KEYS + _SOLUTION_KEYS + _ANCILLARY_KEYS)
 
 _NODE_RADII = 12, 20
 _RING_RADII = 23, 28
@@ -24,9 +41,25 @@ _NODE_EDGE_WIDTH = 2
 _DETOUR_RING_WIDTH = 4
 
 
+def _render(key: str, metadata: dict[str, Any], sep: str = '=') -> str:
+    """Render metadata entry ``key`` for SvgRepr's repr (never raises)."""
+    formatter = _KEY_FORMATTER.get(key)
+    if formatter is not None:
+        try:
+            return formatter(metadata)
+        except (TypeError, ValueError, KeyError):
+            # unexpected value type: fall back to the default rendering
+            pass
+    return f'{key}{sep}{metadata[key]}'
+
+
 class SvgRepr:
     """
     Helper class to get IPython to display the SVG figure encoded in data.
+
+    ``metadata`` holds unformatted values, so that instances may be compared
+    programmatically. Its repr renders ``_STATIC_KEYS`` in the first line and
+    ``_SOLUTION_KEYS`` in the second.
     """
 
     def __init__(self, data: str, metadata: dict[str, Any] = {}):
@@ -40,9 +73,26 @@ class SvgRepr:
         return self.data
 
     def __repr__(self) -> str:
-        parts = [f'{key}={value}' for key, value in self.metadata.items()]
-        parts.append(f'{len(self.data)} chars')
-        return f'<SvgRepr[{self.handle}]: ' + '; '.join(parts) + '>'
+        metadata = self.metadata
+        static = [_render(key, metadata) for key in _STATIC_KEYS if key in metadata]
+        # unrecognized keys go to the first line
+        static.extend(
+            _render(key, metadata) for key in metadata if key not in _KNOWN_KEYS
+        )
+        solution = [
+            _render(key, metadata, ' = ') for key in _SOLUTION_KEYS if key in metadata
+        ]
+        # markup size changes with the solution
+        solution.append(f'{len(self.data)} chars')
+        if len(solution) == 1:
+            return f'<SvgRepr[{self.handle}]: ' + '; '.join(static + solution) + '>'
+        return (
+            f'<SvgRepr[{self.handle}]: '
+            + '; '.join(static)
+            + '\n '
+            + '; '.join(solution)
+            + '>'
+        )
 
     def save(self, filepath: str) -> None:
         """Write SVG to file ``filepath``."""
@@ -93,6 +143,19 @@ class Drawable:
             for key in ('name', 'T', 'R', 'capacity', 'topology')
             if key in G.graph
         }
+        if 'cables' in G.graph:
+            self.metadata['cables'] = tuple(κ for κ, _ in G.graph['cables'])
+        if G.graph.get('has_loads'):
+            # routeset: add the solution properties
+            self.metadata['feeders'] = tuple(G.degree[r] for r in range(-1, -R - 1, -1))
+            self.metadata['C'] = G.graph.get('C', 0)
+            self.metadata['D'] = G.graph.get('D', 0)
+            length = G.size(weight='length')
+            if length > 0:
+                self.metadata['length'] = length
+            if 'currency' in G.graph:
+                self.metadata['cost'] = G.size(weight='cost')
+                self.metadata['currency'] = G.graph['currency']
         self.c = c = Colors(dark)
         fnT = G.graph.get('fnT')
         if fnT is None:

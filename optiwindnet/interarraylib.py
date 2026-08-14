@@ -111,6 +111,16 @@ def assign_cables(
         G.graph['capacity'] = capacity
 
 
+def _format_length(length: float, significant_digits: int = 5) -> str:
+    """Format ``length`` with '_' as thousands separator.
+
+    ``significant_digits`` is a minimum, enforced through fraction digits only.
+    """
+    intdigits = int(np.floor(np.log10(length))) + 1
+    fracdigits = max(0, significant_digits - intdigits)
+    return f'{{:_.{fracdigits}f}}'.format(round(length, fracdigits))
+
+
 def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     """Create a 3-4 line summary of G's properties.
 
@@ -137,12 +147,10 @@ def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
     desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
     length = G.size(weight='length')
     if length > 0:
-        intdigits = int(np.floor(np.log10(length))) + 1
-        fracdigits = max(0, significant_digits - intdigits)
         desc.append(
-            f'Σλ = {{:_.{fracdigits}f}}\u00a0m'.format(
-                round(length, fracdigits)
-            ).replace('_', '\u202f')
+            'Σλ = '
+            + _format_length(length, significant_digits).replace('_', '\u202f')
+            + '\u00a0m'
         )
     if 'currency' in G.graph:
         desc.append(
