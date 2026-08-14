@@ -2,6 +2,13 @@
 docs/notebooks/mplstyles/
 docs/notebooks/*.sqlite
 docs/notebooks/XML/
+docs/milp_formulation/fonts-full/
+docs/milp_formulation/problem_formulation.aux
+docs/milp_formulation/problem_formulation.log
+docs/milp_formulation/problem_formulation.pdf
+docs/milp_formulation/problem_formulation.svg
+docs/milp_formulation/problem_formulation_standalone.html
+docs/milp_formulation/texput.log
 .numba_cache/
 .mplconfig/
 

@@ -1,0 +1,46 @@
+\documentclass[crop,border=2pt]{standalone}
+\usepackage[svgnames]{xcolor}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{fontspec}
+\usepackage[math-style=ISO]{unicode-math}
+\setmathfont{STIXTwoMath-Regular}[
+	Extension={.otf}]
+\setmainfont{STIXTwoText}[
+	Extension={.otf},
+	UprightFont={*-Regular},
+	BoldFont={*-SemiBold},
+	ItalicFont={*-Italic},
+	BoldItalicFont={*-SemiBoldItalic}]
+\usepackage{realscripts} % Access OpenType subscript and superscript glyphs
+\begin{document}
+\fontsize{14pt}{20pt}\selectfont
+\(
+\displaystyle
+\begin{aligned}
+\textbf{given} \quad &\\
+\\
+	\textrm{set of turbines} \quad & T \subset \mathbb{N}\\
+	\textrm{set of substations} \quad & R \subset \mathbb{N} \setminus T\\
+\textrm{set of nodes} \quad & N = T \cup R\\
+	\textrm{max. cable capacity} \quad & \kappa \in \mathbb{N}^\ast\\
+\textrm{link used variables} \quad & x_{i, j} \in \{0, 1\}, \quad (i, j) \in T \times N, \quad i \neq j\\
+\textrm{length of links} \quad & w_{i, j} = w_{j, i} \in \mathbb{R}^\ast_+\\
+\textrm{link exported power} \quad & f_{i, j} \in \mathbb{R}_+ \leq \kappa, \quad (i, j) \in T \times N, \quad i \neq j\\
+	& \phantom{X}\\
+	& \phantom{X}\\
+	\mathbf{\min_{x}} \quad & \sum_{i, j \in N} w_{i, j} \cdot x_{i, j}\\
+	& \phantom{X}\\
+	& \phantom{X}\\
+\textbf{subject to} \quad &\\
+\\
+	\textrm{flow balance} \quad & \sum_{j \in N} f_{i, j} = 1 + \sum_{k \in T} f_{k, i} \leq \kappa \quad \forall \, i \in T\\
+	\textrm{feeders carry all power} \quad & \sum_{j \in R} \sum_{i \in T} f_{i, j} = |T|\\
+	\textrm{bind}\quad x \quad \textrm{and} \quad f \quad & x_{i, j} \leq f_{i, j} \leq \kappa \cdot x_{i, j}, \quad \forall \, (i, j) \in T \times N\\
+	\textrm{no bidirectional links} \quad & x_{i, j} + x_{j, i} \leq 1, \quad \forall \, (i, j) \in T \times T, \quad i < j\\
+	\textrm{single export per turbine} \quad & \sum_{j \in N} x_{i, j} = 1 \quad \forall \, i \in T\\
+	\textrm{no crossings (pairs)} \quad & x_{i, j} + x_{j, i} + x_{k, l} + x_{l, k} \leq 1 \quad \forall \, \text{diagonal} \; \overline{ij} \; \text{and its Delaunay}  \; \overline{kl}\\
+	\textrm{no crossings (triplets)} \quad & x_{i, j} + x_{j, i} + x_{k, l} + x_{l, k} + x_{m, n} + x_{n, m} \leq 1 \quad \forall \, \overline{ij},\,\overline{kl},\,\overline{mn} \; \text{diagonals of triangle}\; \{i,k, m\}
+\end{aligned}
+\)
+\end{document}
