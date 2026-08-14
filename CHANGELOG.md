@@ -6,7 +6,7 @@ This release adds library-wide support for **ringed** cable networks (those with
 
 ## Important Changes
 
-- New `topology=` alternative: `'ringed'` or `Topology.RINGED`. 
+- New `topology=` alternative: `'ringed'` or `Topology.RINGED`.
 - Solution graphs now carry a mandatory `topology` attribute. The new `Topology`, `ModelOptions`, and self-describing `TerseLinks` types make solver configuration, warm starts, and solution exchange topology-aware.
 - MILP users can now retrieve an incumbent topology skipping `PathFinder` calls with `.get_incumbent_topology()`.
 - Multi-root clustering was rewritten to keep turbines closer to their substations without adding feeders. HGS and LKH-3 now handle empty clusters.
