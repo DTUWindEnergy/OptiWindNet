@@ -21,8 +21,11 @@ build:
 
 
 # Build documentation in the "docs/" directory with Sphinx
+# Read the Docs invokes sphinx-build directly, bypassing docs/Makefile, so the
+# -W set in SPHINXOPTS there does not apply here; fail_on_warning is its equivalent.
 sphinx:
   configuration: docs/conf.py
+  fail_on_warning: true
 
 # Optionally, but recommended,
 # declare the Python requirements required to build your documentation

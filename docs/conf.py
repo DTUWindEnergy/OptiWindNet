@@ -13,9 +13,12 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import glob
+import importlib
 import os
+import re
 import shutil
 from importlib.metadata import version as get_version
+from pathlib import Path
 
 # nbsphinx converts notebook markdown cells by shelling out to a `pandoc` executable
 # (via nbconvert), so pandoc must be on PATH. pypandoc-binary ships one inside the
@@ -57,7 +60,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     #  'sphinx.ext.autosectionlabel',
-    #  'sphinx.ext.intersphinx',
+    'sphinx.ext.intersphinx',
     'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
@@ -67,14 +70,39 @@ extensions = [
     # 'sphinx.ext.imgconverter',
 ]
 
-myst_enable_extensions = ['html_image']
+# `deflist` renders the `term` / `: definition` blocks on the Task Index, Validation,
+# Results and Input pages; without it they reach the reader as paragraphs opening with
+# a stray colon.
+myst_enable_extensions = ['deflist', 'html_image']
 myst_heading_anchors = 3
 
-#  intersphinx_mapping = {
-#      'python': ('https://docs.python.org/3/', None),
-#      'numpy': ('https://numpy.org/doc/stable/', None),
-#      'scipy': ('https://docs.scipy.org/doc/scipy/', None),
-#  }
+# Resolve type annotations in the autoapi-generated pages against upstream docs.
+# Without these, nitpicky mode (-n) reports several hundred unresolvable references,
+# dominated by networkx.Graph and numpy.ndarray.
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3/', None),  # 597 links
+    'networkx': ('https://networkx.org/documentation/stable/', None),  # 122
+    'numpy': ('https://numpy.org/doc/stable/', None),  # 41
+    'matplotlib': ('https://matplotlib.org/stable/', None),  # 4
+    'bidict': ('https://bidict.readthedocs.io/en/main/', None),  # 4
+    'peewee': ('https://docs.peewee-orm.com/en/latest/', None),  # 1
+    'shapely': ('https://shapely.readthedocs.io/en/stable/', None),  # 2
+}
+# Every host here is a build dependency: with -W, an unreachable inventory fails the
+# build, and the warning carries no subtype so it cannot be suppressed selectively.
+# scipy and pyomo were dropped after measuring - they resolved nothing.
+intersphinx_timeout = 15
+
+# autoapi renders `tuple[int, ...]` as `tuple[int, Ellipsis]`, and `Ellipsis` has no
+# py:class target. The annotations are correct; only their rendering is not.
+#
+# optiwindnet.db.model.BaseModel only carries the Meta that binds the tables to
+# database_proxy. optiwindnet.db does not re-export it, so it has no page, but
+# 'show-inheritance' still names it on each table class.
+nitpick_ignore = [
+    ('py:class', 'Ellipsis'),
+    ('py:obj', 'BaseModel'),
+]
 
 # Add any paths that contain templates here, relative to this directory.
 #  templates_path = ['_templates']
@@ -90,7 +118,17 @@ autoapi_options = [
     'imported-members',
 ]
 autoapi_python_class_content = 'both'
-#  autoapi_add_toctree_entry = False
+# Named explicitly: the handlers below derive page names from it.
+autoapi_root = 'autoapi'
+# This also controls whether autoapi writes autoapi/index.rst at all, which index.md
+# points its Reference toctree at, so it cannot be turned off: with it False the page is
+# never generated and a build from a clean tree fails on the dangling reference. The
+# appending it is named after does not happen anyway - autoapi skips that when a toctree
+# already names an autoapi document, which index.md does - so placement stays explicit.
+autoapi_add_toctree_entry = True
+# keep the generated .rst in the source tree so notebooks can link to it
+# (nbsphinx only resolves links whose target exists as a source file)
+autoapi_keep_files = True
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -111,6 +149,10 @@ language = 'en'
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = [
+    # Maintainer notes, not pages. '*/README.md' does not match a file at the source
+    # root, so docs/README.md needs its own entry; without it the build would fail
+    # under -W with "document isn't included in any toctree".
+    'README.md',
     '*/README.md',
     # Slow notebook:
     # 'notebooks/neural_network_with_tfds_data.ipynb',
@@ -118,6 +160,9 @@ exclude_patterns = [
     'notebooks/.ipynb_checkpoints/*.ipynb',
     'notebooks/figure_notebooks/*.ipynb',
     'build/*',
+    # figuredata/ contains figure inputs and generation scripts, not documentation pages.
+    # See figuredata/README.md.
+    'figuredata/*',
 ]
 
 # The name of the Pygments (syntax highlighting) style to use.
@@ -235,6 +280,10 @@ html_theme = 'furo'
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+html_css_files = [
+    'apilinks.css',
+    'milp_formulation/problem_formulation.css',
+]
 html_theme_options = {
     'light_logo': 'OptiWindNet_boxed.svg',
     'dark_logo': 'OptiWindNet.svg',
@@ -344,5 +393,163 @@ def skip_empty_all_submodules(app, what, name, obj, skip, options):
     return None  # Use default behavior otherwise
 
 
+# Objects re-exported by a package are documented under the package, but autoapi writes
+# annotations with the path of the module that defines them. Users import from the
+# package - the notebooks all do `from optiwindnet.db import RouteSet` - so the module
+# path names something nobody types and, being hidden, has no page to link to either.
+# Rewriting the generated pages rather than the resolved reference is deliberate: it
+# corrects the path the reader sees, which a missing-reference handler cannot do.
+_REEXPORTED_PATHS = (
+    ('optiwindnet.db.model.', 'optiwindnet.db.'),
+    # optiwindnet.MILP._core is private and undocumented, while every type it defines is
+    # exported and documented by optiwindnet.MILP. autoapi spells the private module
+    # qualified on the backend pages and relative to the package on the package's own,
+    # so both renderings are rewritten.
+    ('optiwindnet.MILP._core.', 'optiwindnet.MILP.'),
+    ('_core.Solver', 'Solver'),
+)
+
+
+def use_reexported_paths(app, docname, source):
+    """Name re-exported objects by the path they are documented under and imported by."""
+    if not docname.startswith(f'{autoapi_root}/'):
+        return
+    text = source[0]
+    for defining, documented in _REEXPORTED_PATHS:
+        text = text.replace(defining, documented)
+    entries = _REEXPORTS.get(docname)
+    if entries:
+        # autoapi has already rendered every page by the time source-read fires, so the
+        # skips recorded above are complete. Placing the stubs directly under the
+        # heading puts them at the head of the outline rather than after the members.
+        stubs = _reexport_stubs(entries)
+        text, substituted = _MODULE_CONTENTS_RE.subn(
+            lambda m: m.group(1) + '\n' + stubs, text, count=1
+        )
+        if not substituted and stubs:
+            # A module whose every member is re-exported gets no member section from
+            # autoapi, leaving a page with nothing on it but its title.
+            text = f'{text.rstrip()}\n\nModule Contents\n---------------\n\n{stubs}'
+    source[0] = text
+
+
+def skip_reexports_of_documented_modules(app, what, name, obj, skip, options):
+    """Describe a re-exported object only on the page of the module that defines it.
+
+    A module with a non-empty __all__ is documented by skip_empty_all_submodules
+    above, so its members already have a page. Without this, 'imported-members' would
+    describe them a second time wherever a package re-exports them - one class as both
+    optiwindnet.db.model.NodeSet and optiwindnet.db.NodeSet - which is two pages to
+    keep in step and two names to choose between when linking. Keep the definition and
+    drop the copy, so every reference resolves to the same place.
+    """
+    if skip or what == 'module' or not getattr(obj, 'imported', False):
+        # A member autoapi already drops is not this handler's to announce: it stays
+        # hidden either way, and claiming it would stub names with no page anywhere.
+        return None
+    origin = obj.obj.get('original_path', '')
+    if not origin.startswith('optiwindnet.'):
+        # Third-party imports are documented in their own project, not in this tree.
+        return None
+    defining_name, _, origin_name = origin.rpartition('.')
+    try:
+        defining = importlib.import_module(defining_name)
+    except ImportError:
+        return None
+    exported = getattr(defining, '__all__', ())
+    if not exported:
+        return None
+    if origin_name in exported:
+        # Only then does the definition get a page for the stub below to point at.
+        parent, _, short_name = name.rpartition('.')
+        docname = f'{autoapi_root}/{parent.replace(".", "/")}/index'
+        _REEXPORTS.setdefault(docname, []).append((what, short_name, origin))
+    return True
+
+
+# Suppressing the copy silently would leave the name off the page a reader is on, even
+# though it is importable from there. Each one instead gets a stub carrying a link to
+# the entry that documents it. ':no-index-entry:' is what makes the stub a full member
+# of the Module Contents outline while keeping the general index down to one entry per
+# object; ':no-index:' would drop it from the outline too, which defeats the purpose.
+_REEXPORTS: dict[str, list[tuple[str, str, str]]] = {}
+
+_STUB_DIRECTIVE = {
+    'class': 'py:class',
+    'data': 'py:data',
+    'exception': 'py:exception',
+    'function': 'py:function',
+}
+
+_MODULE_CONTENTS_RE = re.compile(r'^(Module Contents\n-+\n)', re.MULTILINE)
+
+
+def _reexport_stubs(entries):
+    lines = ['.. rubric:: Re-exported', '']
+    for what, short_name, origin in entries:
+        directive = _STUB_DIRECTIVE.get(what)
+        if directive is None:
+            continue
+        lines += [
+            f'.. {directive}:: {short_name}',
+            '   :no-index-entry:',
+            '',
+            f'   Importable from this module. Documented at :py:obj:`{origin}`.',
+            '',
+        ]
+    return '\n'.join(lines) + '\n' if len(lines) > 2 else ''
+
+
+# Upstream projects whose inventories are mapped above and whose names may need the
+# fixups below. Extend this together with intersphinx_mapping.
+_INTERSPHINX_ROOTS = ('numpy', 'networkx', 'matplotlib', 'bidict', 'peewee', 'shapely')
+
+# networkx re-exports PlanarEmbedding at the top level but documents it under the
+# module that defines it, so that is the only name in its objects.inv. peewee is the
+# other way round: it documents its classes unqualified, with no package prefix at all.
+# Runtime importability does not enter into it: intersphinx matches the target exactly.
+_INVENTORY_RENAMES = {
+    'networkx.PlanarEmbedding': 'networkx.algorithms.planarity.PlanarEmbedding',
+    'peewee.DatabaseProxy': 'DatabaseProxy',
+    'peewee.Model': 'Model',
+    'peewee.SqliteDatabase': 'SqliteDatabase',
+}
+
+
+def retarget_upstream_types(app, env, node, contnode):
+    """Fix up unresolved upstream annotations, leaving the lookup to intersphinx.
+
+    Annotations are emitted as py:class references, which resolve only class,
+    exception and type objects. numpy publishes numpy.typing.NDArray as py:data and
+    numpy.float64 as py:attribute, so they are in the inventory but invisible to a
+    class-only lookup; py:obj resolves every objtype and finds them.
+    """
+    target = node.get('reftarget', '')
+    if node.get('refdomain') != 'py' or node.get('reftype') != 'class':
+        return None
+    if target.partition('.')[0] not in _INTERSPHINX_ROOTS:
+        # Leave project-local misses reported as py:class.
+        return None
+    node['reftarget'] = _INVENTORY_RENAMES.get(target, target)
+    node['reftype'] = 'obj'
+    return None  # intersphinx, at priority 500, resolves the rewritten node
+
+
+def copy_milp_formulation_assets(app, exception):
+    """Copy the formulation CSS and fonts without invoking its Makefile."""
+    if exception is not None or app.builder.format != 'html':
+        return
+    source = Path(__file__).parent / 'milp_formulation'
+    target = Path(app.outdir) / '_static' / 'milp_formulation'
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source / 'problem_formulation.css', target)
+    shutil.copytree(source / 'fonts', target / 'fonts', dirs_exist_ok=True)
+
+
 def setup(app):
     app.connect('autoapi-skip-member', skip_empty_all_submodules)
+    app.connect('autoapi-skip-member', skip_reexports_of_documented_modules)
+    app.connect('source-read', use_reexported_paths)
+    # Ahead of intersphinx's own missing-reference handler, which runs at 500.
+    app.connect('missing-reference', retarget_upstream_types, priority=400)
+    app.connect('build-finished', copy_milp_formulation_assets)

@@ -1,0 +1,12 @@
+/* Notebook markdown cells cannot hold a code span inside a link: nbsphinx converts
+   them with pandoc, reStructuredText has no nested inline markup, and `[`name`](url)`
+   reaches docutils as a literal containing the raw URL - the link is lost. References
+   into the API Reference are therefore written as plain-text links, and this restores
+   the monospace they would otherwise give up.
+
+   The selector matches only links to an object anchor, never the page-level links a
+   toctree or the sidebar makes to the same pages. */
+a.reference[href*="#optiwindnet."] {
+  font-family: var(--font-stack--monospace);
+  font-size: 0.9em;
+}
