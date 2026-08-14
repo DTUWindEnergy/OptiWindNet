@@ -20,7 +20,7 @@ Tool for designing and optimizing the electrical cable network of offshore wind 
 |<ul><li>[Quickstart][quick]</li><li>[Download the Jupyter notebooks][down] used in the documentation.</li><li>[Report an issue][issue] (at GitHub mirror)</li><li>[API Reference][api]</li><li>[How to Cite][cite]</li></ul>|![FancyWindFarm](docs/_static/OptiWindNet_windfarm.svg)|
 
 [docs]: https://optiwindnet.readthedocs.io
-[quick]: https://optiwindnet.readthedocs.io/stable/notebooks/quickstart_high.html
+[quick]: https://optiwindnet.readthedocs.io/stable/notebooks/hi00_quickstart.html
 [down]: https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks
 [issue]: https://github.com/DTUWindEnergy/OptiWindNet/issues
 [api]: https://optiwindnet.readthedocs.io/stable/autoapi/index.html

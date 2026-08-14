@@ -54,7 +54,7 @@ Drop-in replacement for v0.2.2. The APIs deprecated in v0.2.2 are still availabl
 
 - `WindFarmNetwork.from_yaml()` is renamed to `WindFarmNetwork.from_own_yaml()`; the old name still works and emits a `DeprecationWarning`.
 - Reminder — the following remain available in this release and will be removed in v0.3. Users are advised to migrate now:
-  - Standalone EW heuristics (`ClassicEW`, `CPEW`, `NBEW`, `OBEW`, `EW_presolver`) → `heuristics.constructor()` (or the high-level `WindFarmNetwork`/`EWRouter`). See the [Legacy heuristics migration guide](https://optiwindnet.readthedocs.io/stable/notebooks/14-Legacy_heuristics.html), which pairs each legacy call with its `constructor()` equivalent.
+  - Standalone EW heuristics (`ClassicEW`, `CPEW`, `NBEW`, `OBEW`, `EW_presolver`) → `heuristics.constructor()` (or the high-level `WindFarmNetwork`/`EWRouter`). See the [Legacy heuristics migration guide](https://optiwindnet.readthedocs.io/stable/notebooks/lo34_legacy_heuristics.html), which pairs each legacy call with its `constructor()` equivalent.
   - `optiwindnet.interface` (`heuristic_wrapper()`, `HeuristicFactory`) → `WindFarmNetwork`/`EWRouter`.
   - HGS aliases `hgs_multiroot()` / `iterative_hgs_cvrp()` → `hgs_cvrp()`.
   - LKH entry points `lkh()` / `iterative_lkh()` → `lkh3()`.

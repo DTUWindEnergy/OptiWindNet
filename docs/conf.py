@@ -68,6 +68,7 @@ extensions = [
 ]
 
 myst_enable_extensions = ['html_image']
+myst_heading_anchors = 3
 
 #  intersphinx_mapping = {
 #      'python': ('https://docs.python.org/3/', None),
