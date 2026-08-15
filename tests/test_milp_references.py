@@ -5,7 +5,6 @@ import math
 import pytest
 
 from .helpers import solver_unavailable
-from .isolation import should_isolate
 from .milp_reference_testing import (
     MILP_REFERENCE_EXECUTIONS,
     load_milp_references,
@@ -27,21 +26,15 @@ def milp_references():
     MILP_REFERENCE_EXECUTIONS,
     ids=reference_execution_id,
 )
-def test_milp_reference_execution(execution, milp_references, ortools_worker):
+def test_milp_reference_execution(execution, milp_references, run_isolated):
     case = execution.case
     reference = milp_references[reference_problem_key(case)]
-    if should_isolate(case.solver_name):
-        result = ortools_worker.run(
-            solve_milp_reference_execution,
-            (execution, reference),
-            timeout=30 + case.time_limit,
-        )
-    else:
-        try:
-            result = solve_milp_reference_execution(execution, reference)
-        except BaseException as exc:
-            result = exc
-
+    result = run_isolated(
+        case.solver_name,
+        solve_milp_reference_execution,
+        (execution, reference),
+        30 + case.time_limit,
+    )
     if isinstance(result, BaseException) and solver_unavailable(result):
         pytest.skip(f'{case.solver_name} unavailable: {result}')
     if isinstance(result, BaseException):

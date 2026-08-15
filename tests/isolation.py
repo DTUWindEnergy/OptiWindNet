@@ -1,18 +1,29 @@
 # tests/isolation.py
 """
-Isolated subprocess worker for solver code that cannot share a process with
+Isolated subprocess workers for solver code that cannot share a process with
 other solvers.
 
 ``ortools.math_opt`` bundles its own copies of HiGHS and SCIP under the same
 soname as the standalone highspy/pyscipopt packages; loading ortools and one
 of those standalone packages into the same process breaks whichever one loads
-second (undefined native symbols). Rather than isolate every solver
-defensively, only `ortools` ever needs to be pushed into a subprocess -- it's
-the party vendoring copies of other solvers' libraries.
+second (undefined native symbols) -- and `solver_factory()` refuses the second
+one outright. Rather than isolate every solver defensively, only `ortools` is
+pushed into a subprocess for that reason -- it's the party vendoring copies of
+other solvers' libraries.
+
+Windows adds a second, unrelated reason to isolate: consecutive calls to SCIP's
+native concurrent solver (solveConcurrent()) can trigger an access violation in
+C thread state on msvcrt. That one is not solved by *a* subprocess but by a
+*fresh* one per job -- and never by the ortools worker, which holds precisely
+the package pyscipopt must not meet.
+
+Hence two shapes of isolation, one per hazard:
+ - `'ortools'`: one persistent, pre-warmed worker, reused across jobs;
+ - `'scip'`: a throwaway worker per job (`run_disposable`).
 
 This module has no pytest dependency so it can be used both from
-`conftest.py` (as the `ortools_worker` fixture) and from plain scripts such as
-topology-golden generation.
+`conftest.py` (as the `ortools_worker` and `run_isolated` fixtures) and from
+plain scripts such as topology-golden generation.
 """
 
 import multiprocessing
@@ -21,20 +32,24 @@ import queue
 import sys
 
 
-def should_isolate(solver_name: str) -> bool:
-    """Whether a solver test execution should run in the isolated worker process.
+def worker_kind(solver_name: str) -> str | None:
+    """Which isolated worker family a solver's test execution needs, if any.
+
+    Returns:
+      ``'ortools'``, ``'scip'``, or None if the solver may run in-process.
 
     OR-Tools always requires process isolation (DLL symbol collision with
     highspy/pyscipopt). SCIP and FSCIP on Windows also require process isolation
     because consecutive calls to SCIP's native C concurrent solver
     (solveConcurrent()) can trigger an access violation in C thread state on
-    msvcrt.
+    msvcrt -- but they need a *different* process from the ortools one, since
+    pyscipopt and ortools cannot share an interpreter instance.
     """
     if solver_name.startswith('ortools'):
-        return True
+        return 'ortools'
     if sys.platform == 'win32' and solver_name in ('scip', 'fscip'):
-        return True
-    return False
+        return 'scip'
+    return None
 
 
 def _job_dispatcher_loop(job_queue, result_queue) -> None:
@@ -129,6 +144,9 @@ _WARMUP_TIMEOUT = 120
 def ortools_worker_factory() -> IsolatedWorker:
     """Spawn a fresh `IsolatedWorker` on a 'spawn' multiprocessing context,
     pre-warmed so its first real job isn't also paying import-time cost.
+
+    The worker is ortools-only: no job that loads highspy or pyscipopt may be
+    sent to it (see `worker_kind`).
     """
     worker = IsolatedWorker(multiprocessing.get_context('spawn'))
     # Return value ignored: if ortools is simply unavailable this comes back
@@ -137,3 +155,18 @@ def ortools_worker_factory() -> IsolatedWorker:
     # the desired outcome (fail fast in setup rather than once per test).
     worker.run(_warmup_ortools, (), _WARMUP_TIMEOUT)
     return worker
+
+
+def run_disposable(func, args: tuple, timeout: float):
+    """Run one job in a throwaway worker process, then dispose of it.
+
+    Used for the SCIP family on Windows, where the point is not just "some
+    other process" but a *pristine* one: no ortools (which pyscipopt cannot
+    share an interpreter instance with) and no earlier SCIP solve (whose
+    solveConcurrent() thread state is what faults on the next call).
+    """
+    worker = IsolatedWorker(multiprocessing.get_context('spawn'))
+    try:
+        return worker.run(func, args, timeout)
+    finally:
+        worker.shutdown()

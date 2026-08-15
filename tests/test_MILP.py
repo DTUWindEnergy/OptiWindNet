@@ -22,7 +22,6 @@ from .cases import (
     topology_golden_key,
 )
 from .helpers import solver_unavailable
-from .isolation import should_isolate
 from .sitecache import get_bundle
 from .solver_topologies import (
     assert_matches_golden,
@@ -40,15 +39,17 @@ _SOLVER_GOLDENS = load_solver_topologies()
 
 # ortools.math_opt bundles its own copies of HiGHS/SCIP that collide with the
 # standalone highspy/pyscipopt packages if loaded into the same process (DLL
-# hell). Only 'ortools*' work is dispatched to the shared `ortools_worker`
-# subprocess fixture (see tests/conftest.py); every other solver runs directly
-# in this process.
+# hell). 'ortools*' work is dispatched to the shared `ortools_worker`
+# subprocess fixture (see tests/conftest.py); solver-parametrized tests go
+# through the `run_isolated` fixture, which picks the process each solver is
+# allowed to use -- the ortools worker, a throwaway one (SCIP on Windows), or
+# this one.
 #
-# Note: this module must not import optiwindnet.MILP.ortools (or anything else
-# that transitively loads ortools' native libraries) at module scope --
-# `ortools_worker` re-imports this module in its persistent worker process to
-# unpickle whichever job function it's given, and that worker process must
-# stay ortools-only (never load standalone highspy/pyscipopt).
+# Note: this module must not import optiwindnet.MILP.ortools or
+# optiwindnet.MILP.scip (or anything else that transitively loads either one's
+# native libraries) at module scope -- every worker re-imports this module to
+# unpickle whichever job function it's given, and each worker process must
+# stay single-solver-family.
 def _solve_toy_incumbent(solver_name, topology):
     from unittest import mock
 
@@ -617,15 +618,10 @@ def test_pool_backend_solution_retrieval_branches(
 
 
 @pytest.mark.parametrize('case', MILP_ADAPTER_CASES, ids=case_node_id)
-def test_milp_adapter_topology_golden(case, ortools_worker):
-    if should_isolate(case.solver_name):
-        result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
-    else:
-        try:
-            result = solve_milp_case(case)
-        except BaseException as exc:
-            result = exc
-
+def test_milp_adapter_topology_golden(case, run_isolated):
+    result = run_isolated(
+        case.solver_name, solve_milp_case, (case,), 30 + case.time_limit
+    )
     if isinstance(result, BaseException) and solver_unavailable(result):
         pytest.skip(f'{case.solver_name} not available')
     if isinstance(result, BaseException):
@@ -638,8 +634,10 @@ def test_milp_adapter_topology_golden(case, ortools_worker):
 
 
 @pytest.mark.parametrize('case', MILP_FORMULATION_CASES, ids=case_node_id)
-def test_milp_required_formulation_topologies(case, ortools_worker):
-    result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
+def test_milp_required_formulation_topologies(case, run_isolated):
+    result = run_isolated(
+        case.solver_name, solve_milp_case, (case,), 30 + case.time_limit
+    )
     if isinstance(result, BaseException):
         raise result
     info, S = result
@@ -650,15 +648,10 @@ def test_milp_required_formulation_topologies(case, ortools_worker):
 
 
 @pytest.mark.parametrize('case', MILP_FAMILY_CASES, ids=case_node_id)
-def test_milp_distinct_formulation_families(case, ortools_worker):
-    if should_isolate(case.solver_name):
-        result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
-    else:
-        try:
-            result = solve_milp_case(case)
-        except BaseException as exc:
-            result = exc
-
+def test_milp_distinct_formulation_families(case, run_isolated):
+    result = run_isolated(
+        case.solver_name, solve_milp_case, (case,), 30 + case.time_limit
+    )
     if isinstance(result, BaseException) and solver_unavailable(result):
         pytest.skip(f'{case.solver_name} unavailable: {result}')
     if isinstance(result, BaseException):
@@ -670,8 +663,10 @@ def test_milp_distinct_formulation_families(case, ortools_worker):
 
 
 @pytest.mark.parametrize('case', MILP_BOUNDARY_CASES, ids=case_node_id)
-def test_milp_required_boundary_solves(case, ortools_worker):
-    result = ortools_worker.run(solve_milp_case, (case,), 30 + case.time_limit)
+def test_milp_required_boundary_solves(case, run_isolated):
+    result = run_isolated(
+        case.solver_name, solve_milp_case, (case,), 30 + case.time_limit
+    )
     if isinstance(result, BaseException):
         raise result
     info, S = result
@@ -710,19 +705,13 @@ def _solve_toy_balanced(solver_name, max_feeders):
     ],
 )
 def test_balanced_pins_loads_to_floor_and_ceil(
-    solver_name, max_feeders, expected_loads, ortools_worker
+    solver_name, max_feeders, expected_loads, run_isolated
 ):
     # ``toy`` has T=12, so pinning the feeder count to a non-divisor makes the
     # loads span the two values {T // F, ceil(T / F)}.
-    args = (solver_name, max_feeders)
-    if should_isolate(solver_name):
-        result = ortools_worker.run(_solve_toy_balanced, args, 30 + _RUNTIME)
-    else:
-        try:
-            result = _solve_toy_balanced(*args)
-        except BaseException as exc:
-            result = exc
-
+    result = run_isolated(
+        solver_name, _solve_toy_balanced, (solver_name, max_feeders), 30 + _RUNTIME
+    )
     if isinstance(result, BaseException) and solver_unavailable(result):
         pytest.skip(f'{solver_name} not available')
     if isinstance(result, BaseException):
