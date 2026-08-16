@@ -523,6 +523,27 @@ def test_scip_warmstart_rejects_pinned_feeder_mismatch():
     assert solver.metadata.warmed_by == ''
 
 
+def test_scip_backend_option_defaults_are_scip_parameters():
+    """A typo in fscip's options would surface only as an fscip run gone wrong:
+    they are written to a settings file for another process to read, not applied
+    to a model that would reject an unknown name.
+    """
+    pytest.importorskip('pyscipopt')
+    # imported here, not at module scope: `ortools_worker` re-imports this module in
+    # its own process, which must never load pyscipopt (see the note at the top)
+    from pyscipopt import Model
+
+    from optiwindnet.MILP.fscip import SolverFSCIP
+    from optiwindnet.MILP.scip import SolverSCIP
+
+    known = set(Model().getParams())
+    for solver in (SolverSCIP(), SolverFSCIP()):
+        unknown = solver.options.keys() - known
+        assert not unknown, f'{solver.name}: unknown SCIP parameters {sorted(unknown)}'
+        # both leave the root once separation stalls, rather than after 10 rounds
+        assert solver.options['separating/maxstallroundsroot'] == 1
+
+
 def test_segmented_get_solution_still_investigates_pool(ortools_worker):
     calls, source, pathfinder_calls = ortools_worker.run(
         _exercise_ortools_retrieval_branch, ('segmented',), 30
