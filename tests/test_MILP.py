@@ -921,6 +921,59 @@ def test_make_solve_parameters_gscip_rejects_unsupported_native_param_type(
     assert 'Unsupported type list' in str(result)
 
 
+def _job_highs_option_types(applied_options):
+    import optiwindnet.MILP.ortools as ortools_milp
+
+    solver = ortools_milp.SolverORTools('highs')
+    highs = solver._make_solve_parameters(
+        time_limit=3.0,
+        mip_gap=0.001,
+        applied_options=applied_options,
+        verbose=False,
+    ).highs
+    # see _job_make_solve_params: keep ortools objects inside this process
+    return {
+        kind: dict(getattr(highs, f'{kind}_options'))
+        for kind in ('int', 'bool', 'double', 'string')
+    }
+
+
+def test_make_solve_parameters_highs_routes_option_types(ortools_worker):
+    applied_options = {
+        'mip_max_leaves': 5,
+        'output_flag': True,
+        'mip_rel_gap': 0.02,
+        'presolve': 'on',
+    }
+
+    highs = ortools_worker.run(_job_highs_option_types, (applied_options,), 30)
+
+    assert highs['int']['mip_max_leaves'] == 5
+    # bool must route to bool_options, not int_options (bool subclasses int)
+    assert highs['bool']['output_flag'] is True
+    assert 'output_flag' not in highs['int']
+    assert highs['double']['mip_rel_gap'] == 0.02
+    assert highs['string']['presolve'] == 'on'
+
+
+def _job_highs_rejects_unsupported():
+    import optiwindnet.MILP.ortools as ortools_milp
+
+    solver = ortools_milp.SolverORTools('highs')
+    solver._make_solve_parameters(
+        time_limit=3.0,
+        mip_gap=0.001,
+        applied_options={'mip_rel_gap': [0.1, 0.2]},
+        verbose=False,
+    )
+
+
+def test_make_solve_parameters_highs_rejects_unsupported_option_type(ortools_worker):
+    result = ortools_worker.run(_job_highs_rejects_unsupported, (), 30)
+    assert isinstance(result, TypeError)
+    assert 'Unsupported type list' in str(result)
+
+
 def _bounds(T, capacity, feeder_limit, max_feeders=0, balanced=True):
     return core.feeder_and_load_bounds(
         T, capacity, core.FeederLimit(feeder_limit), max_feeders, balanced

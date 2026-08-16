@@ -294,7 +294,22 @@ class SolverORTools(Solver, PoolHandler):
             case 'highs':
                 solve_params.highs.int_options['threads'] = threads
                 for key, val in applied_options.items():
-                    setattr(solve_params.highs, key, val)
+                    # HighsOptionsProto exposes no scalar fields: every option is
+                    # a key in one of its typed maps, routed here by value type.
+                    match val:
+                        case bool():
+                            solve_params.highs.bool_options[key] = val
+                        case int():
+                            solve_params.highs.int_options[key] = val
+                        case float():
+                            solve_params.highs.double_options[key] = val
+                        case str():
+                            solve_params.highs.string_options[key] = val
+                        case _:
+                            raise TypeError(
+                                f'Unsupported type {type(val).__name__}'
+                                f' for HiGHS option {key!r}'
+                            )
             case _:
                 raise ValueError(
                     f'Unsupported OR-Tools MathOpt backend: {self.backend}'
