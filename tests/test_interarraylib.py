@@ -843,7 +843,7 @@ def test_validate_topology_reports_every_shape_violation():
 
 # --------------------------------------------------------------------------- #
 # A topology that validates is representable: it survives its own encoding.
-# The invariants live in validate_topology; this pins that they are sufficient.
+# The validity rules live in validate_topology; this confirms they are sufficient.
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     'build',

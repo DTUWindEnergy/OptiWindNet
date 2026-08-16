@@ -619,7 +619,7 @@ def constructor(
 
     def enqueue_best_union(subroot):
         _debug('<enqueue_best_union> starting... subroot = <%d>', subroot)
-        # invariant upkeep: clear the previous-target membership before retargeting
+        # Keep target bookkeeping consistent: clear the old membership first.
         prev_entry = pq.tags.get(subroot)
         if prev_entry is not None:
             drop_target(subroot, prev_entry[-1])

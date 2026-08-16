@@ -285,8 +285,8 @@ def _P_from_halfedge_pack(
     """
     halfedges, ref_is_cw_ = halfedge_pack
     P = nx.PlanarEmbedding()
-    # This inlines nx.PlanarEmbedding.add_half_edge() (including its invariant
-    # of keeping the leftmost neighbor as the last key of `succ[u]`), which is
+    # This inlines nx.PlanarEmbedding.add_half_edge() (including its rule of
+    # keeping the leftmost neighbor as the last key of `succ[u]`), which is
     # ~6x faster than calling it, as the reference node is always valid here.
     # pyrefly: ignore[missing-attribute]
     succ, pred, node = P._succ, P._pred, P._node

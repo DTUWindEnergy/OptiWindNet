@@ -62,8 +62,8 @@ def test_repository_has_multiroot_instances(multiroot_instances):
     assert len(multiroot_instances) > 10
 
 
-def test_feeder_invariant_over_repository(multiroot_instances):
-    """The invariant must hold for every bundled multi-root location."""
+def test_feeder_guarantee_over_repository(multiroot_instances):
+    """The feeder-count guarantee must hold for every bundled multi-root location."""
     for handle, A in multiroot_instances.items():
         for capacity in CAPACITIES:
             cluster_ = clusterize(A, capacity)

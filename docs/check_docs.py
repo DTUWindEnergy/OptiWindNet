@@ -1,4 +1,4 @@
-"""Check documentation invariants that the Sphinx build cannot see.
+"""Check documentation requirements that the Sphinx build cannot see.
 
 The Sphinx build already catches broken cross-references, and does so for every
 link style used in this project: ``{doc}``/``{ref}``/``{term}`` roles in ``.md``

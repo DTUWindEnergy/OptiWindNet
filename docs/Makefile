@@ -26,7 +26,7 @@ BUILDDIR      = build
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-# Documentation invariants the Sphinx build cannot see; see check_docs.py, plus
+# Documentation requirements the Sphinx build cannot see; see check_docs.py, plus
 # the Markdown format itself. Prettier runs from the repository root, where its
 # .prettierrc is, and the glob covers every Markdown page in the project.
 # It needs node, which the docs extra does not install, so a missing prettier

@@ -1459,9 +1459,9 @@ class PathFinder:
         for fence in fences:
             mp = fence.primes_on_constraint
             if len(mp) >= 2:
-                # The split invariant (see docstring) makes both chain-step
-                # neighbors constraint neighbors of their chain-ends, so the
-                # fence spans at both ends.
+                # Splitting fences as described in the docstring makes both
+                # chain-step neighbors constraint neighbors of their chain-ends,
+                # so the fence spans at both ends.
                 spanning_at[mp[0]].append((fence, 'start'))
                 spanning_at[mp[-1]].append((fence, 'end'))
             else:
@@ -1542,7 +1542,8 @@ class PathFinder:
                 register(v, keys_b, ch, 1)
 
         # Pair each spanning chain's two end-cones (one per fence end) into a
-        # Chain. By the split invariant every chain_key has exactly 2 entries.
+        # Chain. Because fences are split this way, every chain_key has exactly
+        # 2 entries.
         for chain_key, entries in spanning_by_chain.items():
             subtree = chain_key[0]
             if len(entries) != 2:

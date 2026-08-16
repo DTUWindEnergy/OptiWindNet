@@ -5,11 +5,11 @@ methods ('esau_williams', 'biased_EW', 'rootlust', 'radial_EW') and the flags
 `weigh_detours` and `straight_feeder_route`. The production routers only ever
 reach `biased_EW`, so the other methods/flags need direct coverage here.
 
-Strategy (per the agreed plan): structural/capacity *invariants* on the raw
+Strategy (per the agreed plan): structural and capacity checks on the raw
 solution topology `S` for every method, plus a few end-to-end checks running the
 realistic `constructor -> G_from_S -> PathFinder` pipeline and asserting
-`validate_routeset(G) == []`. Invariants are preferred over golden snapshots so
-the suite survives ongoing heuristic retuning.
+`validate_routeset(G) == []`. Property-based checks are preferred over golden
+snapshots so the suite survives ongoing heuristic retuning.
 """
 
 import logging
@@ -70,7 +70,7 @@ def _each_terminal_reaches_exactly_one_root(S):
 
 
 # --------------------------------------------------------------------------- #
-# A. structural / capacity invariants on raw S
+# A. structural and capacity checks on raw S
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize('case', CONSTRUCTOR_CASES, ids=case_node_id)
 def test_constructor_topology_cases(case):

@@ -631,7 +631,7 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     except (TypeError, ValueError):
         return [f'unknown topology: {S.graph["topology"]!r}']
 
-    # --- universal invariants ------------------------------------------------
+    # --- checks required for every topology ----------------------------------
     roots = set(range(-R, 0))
     terminals = set(range(T))
     expected_nodes = roots | terminals
@@ -737,7 +737,7 @@ def _load_mismatches(G: nx.Graph, Gʹ: nx.Graph) -> list[str]:
 
 
 def validate_routeset(G: nx.Graph) -> list[str]:
-    """Check electrical, topological and geometric invariants of routeset ``G``.
+    """Check the electrical, topological and geometric validity of routeset ``G``.
 
     Stored loads and orientations are compared with values calculated on a
     copy. The routeset is reduced to a solution topology and passed to
