@@ -221,6 +221,8 @@ make_pages:
   tags: [linux]
   pages: true
   allow_failure: false
+  variables:
+    GIT_DEPTH: "20"
   rules:
     # Manual dispatch: pick run=docs in the "Run pipeline" form (no file changes required)
     - if: $RUN == "docs"
@@ -231,6 +233,15 @@ make_pages:
         - optiwindnet/**/*.py
       when: manual
   script:
+    - git fetch --tags --force
+    - |
+      while ! git describe --tags --abbrev=0 HEAD >/dev/null 2>&1; do
+        if [ "$(git rev-parse --is-shallow-repository)" != "true" ]; then
+          echo "ERROR: No version tag is reachable from $CI_COMMIT_SHA"
+          exit 1
+        fi
+        git fetch --deepen=20 origin "$CI_COMMIT_REF_NAME"
+      done
     - apt-get update
     - apt-get -yq install make pandoc graphviz
     - pip install --progress-bar off .[docs] --upgrade
