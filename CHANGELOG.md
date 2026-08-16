@@ -1,3 +1,11 @@
+# v0.3.1 (unreleased)
+
+## Important Changes
+
+- **`MILPRouter` warm-start controls, with a default behavior change.** Two new parameters expose warm-starting explicitly: `warmup` (default `True`) is a master switch, and `warmup_time` (default `0.2` s) is the time budget for *building* a warm start with the heuristic (replacing a previously hardcoded value).
+  - **Behavior change:** with `warmup=True` (the default), a *fresh* MILP solve now builds a warm start via HGS/constructor before solving, where it previously solved cold. Reusing the solution carried across successive `WindFarmNetwork.optimize()` calls is unchanged. Pass `warmup=False` to force a fully cold solve (any stored or supplied solution is then ignored).
+  - Warm-start construction now also covers the `feeder_limit` values `'exactly'` (with `balanced`), `'min_plus1/2/3'`, and `'minimum'`+`balanced` across the `branched`, `radial`, and `ringed` topologies; these previously fell back to a cold solve.
+
 # v0.3.0
 
 [Commit history since v0.2.3](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.3...v0.3.0)

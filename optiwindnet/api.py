@@ -898,7 +898,7 @@ class MILPRouter(Router):
 
     default_heuristic = 'rootlust'
     _summary_attrs = ('runtime', 'bound', 'objective', 'relgap', 'termination')
-    _repr_attrs = ('solver_name', 'time_limit', 'mip_gap')
+    _repr_attrs = ('solver_name', 'time_limit', 'mip_gap', 'warmup', 'warmup_time')
 
     def __init__(
         self,
@@ -907,6 +907,8 @@ class MILPRouter(Router):
         mip_gap: float,
         solver_options: dict | None = None,
         model_options: Mapping[str, Any] | None = None,
+        warmup: bool = True,
+        warmup_time: float = 0.2,
         verbose: bool = False,
         **kwargs,
     ) -> None:
@@ -920,14 +922,27 @@ class MILPRouter(Router):
           solver_options: Extra solver-specific options.
           model_options: Options for the MILP model. A plain mapping is coerced
             into a :class:`~optiwindnet.MILP.ModelOptions`.
+          warmup: Whether to warm-start the model. When ``True`` (the default), the
+              solver is primed with an available solution -- the one carried across
+              successive :meth:`WindFarmNetwork.optimize` calls, or one built by a
+              fast heuristic when none is available or it no longer fits the model.
+              When ``False``, the model is solved cold, ignoring any stored solution.
+          warmup_time: Time budget (seconds) for *building* a warm start with the
+              heuristic (only used when ``warmup`` is ``True`` and a warm start must
+              be built). Capped by ``time_limit``. Building uses HGS-CVRP with crossing
+              repair, so the worst-case build time can reach a few times this value.
           verbose: Enable verbose logging.
         """
         super().__init__(**kwargs)
+        if warmup_time <= 0:
+            raise ValueError('warmup_time must be positive')
         self.time_limit = time_limit
         self.mip_gap = mip_gap
         self.solver_name = solver_name
         self.solver_options = solver_options or {}
         self.model_options = ModelOptions(**(model_options or {}))
+        self.warmup = warmup
+        self.warmup_time = warmup_time
         self.verbose = verbose
         self.solver = solver_factory(solver_name)
         try:
@@ -958,6 +973,13 @@ class MILPRouter(Router):
         # loop below then warm-starts the model some other way.
         solver = self.solver
 
+        if not self.warmup:
+            # master switch off: solve cold, ignoring any carried/provided solution
+            S_warm = None
+        elif S_warm is None:
+            # warm-starting on, nothing to reuse: build a warm start
+            S_warm = self._make_warmstart(A, cables_capacity)
+
         for _ in range(2):
             try:
                 solver.set_problem(
@@ -969,40 +991,7 @@ class MILPRouter(Router):
                 )
                 break
             except OWNWarmupFailed:
-                if (
-                    self.model_options['topology'] == 'branched'
-                    and self.model_options['feeder_limit'] == 'minimum'
-                ):
-                    # the constructor heuristics overshoot the feeder minimum, which
-                    # this model pins; HGS-CVRP can be held down to it
-                    S_warm = hgs_cvrp(
-                        as_normalized(A),
-                        capacity=cables_capacity,
-                        time_limit=min(self.time_limit, 0.2),
-                        vehicles=math.ceil(A.graph['T'] / cables_capacity),
-                        repair=True,
-                    )
-                elif self.model_options['topology'] == 'branched':
-                    # 'feeder_route' is binary: 'straight' or 'segmented'
-                    straight = self.model_options['feeder_route'] == 'straight'
-                    constructor_args = {
-                        'method': self.default_heuristic,
-                        'weigh_detours': not straight,
-                        'straight_feeder_route': straight,
-                    }
-                    S_warm = S_from_G(
-                        constructor(A, capacity=cables_capacity, **constructor_args)
-                    )
-                else:
-                    # a RINGED model warmstarts from a ringed solution, a radial
-                    # model from a radial one
-                    S_warm = hgs_cvrp(
-                        as_normalized(A),
-                        capacity=cables_capacity,
-                        time_limit=min(self.time_limit, 0.2),
-                        repair=True,
-                        ringed=self.model_options['topology'] == 'ringed',
-                    )
+                S_warm = self._make_warmstart(A, cables_capacity)
 
         else:
             # No available solution can warm-start this model, so solve it cold
@@ -1034,3 +1023,93 @@ class MILPRouter(Router):
         assign_cables(G, cables)
 
         return S, G
+
+    def _make_warmstart(self, A, capacity):
+        """Build a warm start matched to the model's topology and feeder limit.
+
+        Called (only when ``warmup`` is enabled) to obtain a warm start the model
+        can take: either proactively, for a fresh solve with no solution to reuse,
+        or to rebuild one when the solution carried across
+        :class:`WindFarmNetwork` optimizations no longer fits the new model. The
+        latter matters because a small problem change usually leaves the previous
+        optimum close to the new one, so a short solve suffices -- but if that
+        change also breaks the warm start's feasibility, a cold solve might not
+        reach a feasible solution within the same budget. The build itself is
+        given ``warmup_time`` (capped by ``time_limit``).
+
+        HGS-CVRP gives a radial solution (or a ringed one for a RINGED model),
+        and, unlike the constructor heuristics, its feeder count can be controlled
+        -- which is what a pinned or tightly-bounded ``feeder_limit`` needs. The
+        counts here are in *subtrees* (HGS's ``vehicles``): a RINGED subtree is a
+        cycle using two of the model's feeders, so its ``max_feeders`` is halved.
+
+        Feeder counts HGS cannot reproduce fall through to the loose default: the
+        branched constructor (a closer warm start for a branched model) or a plain
+        HGS solution. A RINGED model has no exact-vehicles mode, so ``exactly``
+        above the minimum stays there -- and, like every un-reproducible case,
+        ends up solving cold.
+        """
+        mo = self.model_options
+        feeder_limit = mo['feeder_limit']
+        balanced = mo['balanced']
+        # a built warm start must not outlast the solve it primes
+        time_limit = min(self.time_limit, self.warmup_time)
+        ringed = mo['topology'] == 'ringed'
+        single_root = A.graph['R'] == 1
+        per_subtree = 2 if ringed else 1
+        min_subtrees = math.ceil(A.graph['T'] / (per_subtree * capacity))
+
+        def _hgs(vehicles, *, exact=False, balance=False):
+            return hgs_cvrp(
+                as_normalized(A),
+                capacity=capacity,
+                time_limit=time_limit,
+                vehicles=vehicles,
+                vehicles_exact=exact,
+                balanced=balance,
+                repair=True,
+                ringed=ringed,
+            )
+
+        if feeder_limit == 'minimum':
+            pinned = min_subtrees
+        elif feeder_limit == 'exactly':
+            pinned = mo['max_feeders'] // per_subtree
+        else:
+            pinned = None
+
+        if pinned is not None:
+            # With the count pinned to a single value, `balanced` is enforceable.
+            # A RINGED solve has no exact-vehicles mode, so only a pin at the
+            # minimum is reproducible (its upper bound already yields the minimum),
+            # though balance can still be requested. Radial/branched can pin any
+            # value, but exactly only together with balance (single root, or when
+            # the pin is the minimum).
+            if ringed:
+                if pinned == min_subtrees:
+                    return _hgs(pinned, balance=balanced)
+            else:
+                exact = balanced and (single_root or pinned == min_subtrees)
+                if exact or pinned == min_subtrees:
+                    return _hgs(pinned, exact=exact, balance=exact)
+            # an exact count HGS cannot pin: fall through to the loose default.
+        elif feeder_limit in ('min_plus1', 'min_plus2', 'min_plus3'):
+            # cap the count at min + n (an upper bound HGS honors single-root;
+            # multi-root it settles at the minimum, still within the allowed range)
+            plus = int(feeder_limit[-1])
+            return _hgs(min_subtrees + plus if single_root else None)
+
+        # unlimited / specified (or an un-pinnable 'exactly'): a branched model
+        # takes the constructor's branched layout; radial/ringed take plain HGS.
+        if mo['topology'] == 'branched':
+            straight = mo['feeder_route'] == 'straight'
+            return S_from_G(
+                constructor(
+                    A,
+                    capacity=capacity,
+                    method=self.default_heuristic,
+                    weigh_detours=not straight,
+                    straight_feeder_route=straight,
+                )
+            )
+        return _hgs(None)
