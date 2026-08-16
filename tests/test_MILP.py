@@ -489,6 +489,139 @@ def test_warmup_rejects_hints_that_violate_the_model(
         assert 'violates model constraint feeder_limit_eq' in error
 
 
+def _make_warmstart_toy(topology, feeder_limit, balanced, max_feeders):
+    """Warm-start a toy model via MILPRouter._make_warmstart, reporting whether
+    MathOpt's warmup_model() accepted it (``warmed_by``, empty when rejected)."""
+    from optiwindnet.api import MILPRouter
+    from optiwindnet.MILP.ortools import make_min_length_model, warmup_model
+
+    A = get_bundle('toy').A
+    options = ModelOptions(
+        topology=topology,
+        feeder_limit=feeder_limit,
+        balanced=balanced,
+        max_feeders=max_feeders,
+    )
+    router = MILPRouter(
+        solver_name='ortools', time_limit=1, mip_gap=0.01, model_options=options
+    )
+    S = router._make_warmstart(A, _CAPACITY)
+    model, metadata = make_min_length_model(A, _CAPACITY, **options)
+    warmup_model(model, metadata, S)
+    return metadata.warmed_by
+
+
+@pytest.mark.parametrize(
+    ('topology', 'feeder_limit', 'balanced', 'max_feeders'),
+    [
+        # toy: T=12, capacity=5 -> 3 radial feeders minimum (2 rings minimum).
+        # These feeder limits used to drop to a cold solve; the fallback now
+        # rebuilds a warm start HGS can reproduce, so warmup_model() accepts it.
+        #
+        # pinned + balanced: reproducible by HGS for radial and branched
+        ('branched', 'minimum', True, 0),
+        ('radial', 'minimum', True, 0),
+        ('branched', 'exactly', True, 4),
+        ('radial', 'exactly', True, 4),
+        # tightly bounded count (min + n): an upper bound HGS honours
+        ('branched', 'min_plus1', False, 0),
+        ('radial', 'min_plus1', False, 0),
+        # RINGED reproduces a pin only at the minimum, but can still balance there
+        ('ringed', 'minimum', True, 0),
+        ('ringed', 'min_plus1', False, 0),
+    ],
+)
+def test_make_warmstart_matches_feeder_limit(
+    ortools_worker, topology, feeder_limit, balanced, max_feeders
+):
+    warmed_by = ortools_worker.run(
+        _make_warmstart_toy,
+        (topology, feeder_limit, balanced, max_feeders),
+        60,
+    )
+    if isinstance(warmed_by, BaseException):
+        raise warmed_by
+    assert warmed_by
+
+
+def _warmup_switch_toy(warmup, reoptimize):
+    """Optimize the toy through the full `optimize()` path and report `warmed_by`
+    after the first solve (and after a re-optimize, which reuses the stored one)."""
+    from optiwindnet.api import MILPRouter, WindFarmNetwork
+
+    L = get_bundle('toy').L
+    wfn = WindFarmNetwork(cables=_CAPACITY, L=L)
+    router = MILPRouter(
+        solver_name='ortools', time_limit=2, mip_gap=0.05, warmup=warmup
+    )
+    wfn.optimize(router=router)
+    warmed = [router.solver.metadata.warmed_by]
+    if reoptimize:
+        wfn.optimize(router=router)
+        warmed.append(router.solver.metadata.warmed_by)
+    return warmed
+
+
+@pytest.mark.parametrize('reoptimize', [False, True])
+@pytest.mark.parametrize('warmup', [True, False])
+def test_warmup_switch_gates_warmstarting(ortools_worker, warmup, reoptimize):
+    warmed = ortools_worker.run(_warmup_switch_toy, (warmup, reoptimize), 60)
+    if isinstance(warmed, BaseException):
+        raise warmed
+    if warmup:
+        # fresh solve builds a warm start; a re-optimize reuses the stored solution
+        assert all(warmed), warmed
+    else:
+        # master switch off: cold both times, carried solution ignored
+        assert warmed == [''] * len(warmed)
+
+
+def _warmup_time_budget_toy(warmup_time):
+    """Capture the `time_limit` MILPRouter._make_warmstart hands to HGS."""
+    from optiwindnet import api
+    from optiwindnet.api import MILPRouter
+
+    captured = {}
+    original = api.hgs_cvrp
+
+    def spy(*args, **kwargs):
+        captured['time_limit'] = kwargs.get('time_limit')
+        return original(*args, **kwargs)
+
+    api.hgs_cvrp = spy
+    try:
+        A = get_bundle('toy').A
+        router = MILPRouter(
+            solver_name='ortools',
+            time_limit=2,
+            mip_gap=0.05,
+            warmup_time=warmup_time,
+            model_options=ModelOptions(feeder_limit='minimum'),
+        )
+        router._make_warmstart(A, _CAPACITY)
+    finally:
+        api.hgs_cvrp = original
+    return captured.get('time_limit')
+
+
+@pytest.mark.parametrize(
+    ('warmup_time', 'expected'),
+    [(1.0, 1.0), (5.0, 2.0)],  # capped by time_limit=2
+)
+def test_warmup_time_is_the_build_budget(ortools_worker, warmup_time, expected):
+    time_limit = ortools_worker.run(_warmup_time_budget_toy, (warmup_time,), 60)
+    if isinstance(time_limit, BaseException):
+        raise time_limit
+    assert time_limit == expected
+
+
+def test_milprouter_rejects_nonpositive_warmup_time():
+    from optiwindnet.api import MILPRouter
+
+    with pytest.raises(ValueError, match='warmup_time'):
+        MILPRouter(solver_name='ortools', time_limit=1, mip_gap=0.01, warmup_time=0)
+
+
 def test_scip_warmstart_rejects_pinned_feeder_mismatch():
     """SCIP's checkSol() must catch what addSol() alone would accept."""
     from optiwindnet.heuristics import constructor
