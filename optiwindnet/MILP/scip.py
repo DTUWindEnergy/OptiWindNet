@@ -41,14 +41,6 @@ class SolverSCIP(Solver, PoolHandler):
 
     def __init__(self):
         self.options = {
-            # SCIP allows 10 stalled separation rounds before it leaves the root
-            # node, against 1 at every other node. The flow variables are implied
-            # integral, which feeds the aggregation separator enough cuts that the
-            # root loop seldom looks stalled: it can grind for seconds over cuts
-            # instead of branching (mermaid at capacity 5: 1 node and ~9 s to prove
-            # optimality at the default, against ~6 s here and better bounds on
-            # larger instances, which reach optimality that the default does not).
-            'separating/maxstallroundsroot': 1,
             'parallel/maxnthreads': physical_core_count(),
             'concurrent/scip-feas/prefprio': 0.6,
             'concurrent/scip/prefprio': 0.3,

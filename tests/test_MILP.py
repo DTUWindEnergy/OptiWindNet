@@ -21,7 +21,7 @@ from .cases import (
     case_node_id,
     topology_golden_key,
 )
-from .helpers import solver_unavailable
+from .helpers import TEST_ONLY_SOLVER_OPTIONS, solver_unavailable
 from .sitecache import get_bundle
 from .solver_topologies import (
     assert_matches_golden,
@@ -523,10 +523,12 @@ def test_scip_warmstart_rejects_pinned_feeder_mismatch():
     assert solver.metadata.warmed_by == ''
 
 
-def test_scip_backend_option_defaults_are_scip_parameters():
+def test_scip_family_option_names_are_scip_parameters():
     """A typo in fscip's options would surface only as an fscip run gone wrong:
     they are written to a settings file for another process to read, not applied
-    to a model that would reject an unknown name.
+    to a model that would reject an unknown name. Guard both the solvers' own
+    default options and the test-only options injected for the SCIP family
+    (see TEST_ONLY_SOLVER_OPTIONS in tests.helpers).
     """
     pytest.importorskip('pyscipopt')
     # imported here, not at module scope: `ortools_worker` re-imports this module in
@@ -537,11 +539,12 @@ def test_scip_backend_option_defaults_are_scip_parameters():
     from optiwindnet.MILP.scip import SolverSCIP
 
     known = set(Model().getParams())
+    for solver_name in ('scip', 'fscip', 'ortools.gscip'):
+        unknown = TEST_ONLY_SOLVER_OPTIONS.get(solver_name, {}).keys() - known
+        assert not unknown, f'{solver_name}: unknown injected params {sorted(unknown)}'
     for solver in (SolverSCIP(), SolverFSCIP()):
         unknown = solver.options.keys() - known
         assert not unknown, f'{solver.name}: unknown SCIP parameters {sorted(unknown)}'
-        # both leave the root once separation stalls, rather than after 10 rounds
-        assert solver.options['separating/maxstallroundsroot'] == 1
 
 
 def test_segmented_get_solution_still_investigates_pool(ortools_worker):

@@ -18,6 +18,22 @@ from optiwindnet.MILP import (
 )
 
 
+# Leave the root after one stalled separation round instead of SCIP's default 10.
+# At these short budgets the implied-integral flows keep the root separator busy,
+# so SCIP can burn the whole budget there -- and fscip then reports no dual bound,
+# tripping the retry below. Production keeps the default (better on long budgets).
+_SCIP_LEAVE_ROOT_EARLY = {'separating/maxstallroundsroot': 1}
+
+# Test-only options keyed by solver name, merged into every test solve of that
+# backend but kept out of production defaults. Add an entry to give another backend
+# its own; each is solver-native, so it only reaches the backend it is keyed under.
+TEST_ONLY_SOLVER_OPTIONS: dict[str, dict[str, Any]] = {
+    'scip': _SCIP_LEAVE_ROOT_EARLY,
+    'fscip': _SCIP_LEAVE_ROOT_EARLY,
+    'ortools.gscip': _SCIP_LEAVE_ROOT_EARLY,
+}
+
+
 def run_milp_solve_with_retry(
     P: nx.PlanarEmbedding,
     A: nx.Graph,
@@ -30,6 +46,7 @@ def run_milp_solve_with_retry(
     warmstart: nx.Graph | None = None,
 ) -> tuple[SolutionInfo, nx.Graph, str]:
     """Execute solver.solve with retry on OWNSolutionNotFound or non-finite bounds."""
+    solve_options = TEST_ONLY_SOLVER_OPTIONS.get(solver_name, {})
 
     def _single_solve(limit: float) -> tuple[SolutionInfo, nx.Graph, str]:
         solver = solver_factory(solver_name)
@@ -40,7 +57,7 @@ def run_milp_solve_with_retry(
             model_options=model_options,
             warmstart=warmstart,
         )
-        info = solver.solve(time_limit=limit, mip_gap=mip_gap)
+        info = solver.solve(time_limit=limit, mip_gap=mip_gap, options=solve_options)
         if not math.isfinite(info.bound) and info.termination.lower() != 'optimal':
             raise OWNSolutionNotFound(
                 f'Solver {solver_name!r} returned non-finite dual bound '

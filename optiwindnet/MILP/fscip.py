@@ -42,11 +42,7 @@ class SolverFSCIP(Solver, PoolHandler):
     }
 
     def __init__(self):
-        # options reach the SCIP instances fscip runs through the settings file
-        # passed as '-s' (see solve). Leaving the root after a single stalled
-        # separation round is worth more here than in-process: fscip reports a
-        # dual bound only for a run that gets that far (see SolverSCIP.__init__).
-        self.options = {'separating/maxstallroundsroot': 1}
+        self.options = {}
 
     def _link_val(self, var: Any) -> int:
         # work-around for SCIP: use round() to coerce link_ value (should be binary)
