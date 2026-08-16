@@ -1,10 +1,8 @@
-# Paper
+# Framework Paper
 
-The methodology implemented in *OptiWindNet* is described in the peer-reviewed scientific article:
-- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis,
-_Flexible cable routing framework for wind farm collection system optimization_,
-European Journal of Operational Research,
-2025, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
+The methodology implemented in _OptiWindNet_ is described in the peer-reviewed scientific article:
+
+- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis, _Flexible cable routing framework for wind farm collection system optimization_, European Journal of Operational Research, 329(3):1037-1051, 2026, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
 
 ```{code-block} bib
 @article{SOUZADEALENCAR20261037,
@@ -22,11 +20,13 @@ European Journal of Operational Research,
 }
 ```
 
-If you arrived here looking for the *OptiWindNet* software package, please proceed either to the [](setup.md) (how to install) or to the [Quick Start](notebooks/quickstart_high) (how to use). Continue here to explore the computational experiments of the paper.
+If you arrived here looking for the _OptiWindNet_ software package, please proceed either to {doc}`/install` or to the {doc}`Quick Start </notebooks/hi00_quickstart>`. Continue here to explore the computational experiments of the paper. A second article, covered in {doc}`/dataset`, introduces the open database of routing solutions produced with _OptiWindNet_.
 
-The plots and tables in the paper were generated with [this OptiWindNet version](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/cf8420fd1f5ef64e089c9d96012789eaaf0b4e86) (notebooks are inside the project folder **paper**). This section contains the results and the code to reproduce the computational experiments with the **current OptiWindNet version**. Some small differences with respect to the paper data/figures may be observed, but the results still support the same analysis and conclusions reached there. 
+The plots and tables in the paper were generated with [this OptiWindNet version](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/cf8420fd1f5ef64e089c9d96012789eaaf0b4e86) (notebooks are inside the project folder **paper**).
 
-Alternatively, the notebooks (40 series), along with the required *data* folder, can be [downloaded here](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks/).
+This section contains the results and the code to reproduce the computational experiments with the **current OptiWindNet version**. Some small differences with respect to the paper data/figures may be observed, but the results still support the same analysis and conclusions reached there.
+
+Alternatively, the notebooks (`p` series), along with the required _data_ folder, can be [downloaded here](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks/).
 
 ```{admonition} Important
 :class: important
@@ -38,5 +38,5 @@ Many of the jupyter notebooks provided here have SVG figures as cell outputs, wh
 :glob:
 :maxdepth: 1
 
-notebooks/4*
+notebooks/p0*
 ```

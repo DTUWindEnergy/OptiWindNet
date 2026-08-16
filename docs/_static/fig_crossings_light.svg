@@ -1,0 +1,321 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2270 1168">
+ <style>.caption{font:57px sans-serif;fill:#5a5a5a}</style>
+ <text class="caption" x="28" y="57">S — straight feeders</text>
+ <svg x="0" y="88" width="1135" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1135 1080">
+   <defs>
+    <circle stroke="black" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#eee" stroke-width="2" id="oss" width="21" height="21" fill="black"/>
+   </defs>
+   <g id="cazzaro_2022">
+    <path stroke="dimgray" stroke-dasharray="15 7" stroke-width="2" id="border" d="M856 909 1105 553 896 108 828 55 858 30 559 120 516 42 404 135 379 174 202 30 112 255 30 279 111 866 245 953 428 879 515 1050z M248 367 361 310 392 410z M524 542 745 541 750 616 606 592 367 500 353 446z M509 284 512 254 564 311z M646 317 760 242 796 314 706 373z M835 139 813 178 777 167 769 130z M830 280 854 249 896 260 893 303 856 311z" fill-rule="evenodd" fill="#eee"/>
+    <g stroke="black" stroke-width="4" id="edges_unspecified">
+     <line x1="636" y1="127" x2="544" y2="283"/>
+     <line x1="636" y1="127" x2="590" y2="142"/>
+     <line x1="636" y1="127" x2="680" y2="84"/>
+     <line x1="636" y1="127" x2="790" y2="239"/>
+     <line x1="394" y1="719" x2="440" y2="580"/>
+     <line x1="445" y1="906" x2="394" y2="719"/>
+     <line x1="265" y1="941" x2="347" y2="900"/>
+     <line x1="606" y1="740" x2="654" y2="601"/>
+     <line x1="567" y1="864" x2="606" y2="740"/>
+     <line x1="601" y1="1002" x2="567" y2="864"/>
+     <line x1="520" y1="1046" x2="601" y2="1002"/>
+     <line x1="810" y1="614" x2="709" y2="404"/>
+     <line x1="763" y1="754" x2="810" y2="614"/>
+     <line x1="780" y1="926" x2="763" y2="754"/>
+     <line x1="700" y1="969" x2="780" y2="926"/>
+     <line x1="942" y1="556" x2="866" y2="418"/>
+     <line x1="976" y1="735" x2="942" y2="556"/>
+     <line x1="912" y1="826" x2="976" y2="735"/>
+     <line x1="855" y1="902" x2="912" y2="826"/>
+     <line x1="1054" y1="447" x2="1004" y2="342"/>
+     <line x1="1089" y1="546" x2="1054" y2="447"/>
+     <line x1="1041" y1="645" x2="1089" y2="546"/>
+     <line x1="680" y1="84" x2="769" y2="66"/>
+     <line x1="769" y1="66" x2="843" y2="41"/>
+     <line x1="953" y1="237" x2="902" y2="130"/>
+     <line x1="434" y1="128" x2="516" y2="44"/>
+     <line x1="295" y1="121" x2="212" y2="40"/>
+     <line x1="172" y1="123" x2="212" y2="40"/>
+     <line x1="132" y1="205" x2="172" y2="123"/>
+     <line x1="167" y1="386" x2="371" y2="259"/>
+     <line x1="53" y1="412" x2="167" y2="386"/>
+     <line x1="71" y1="543" x2="53" y2="412"/>
+     <line x1="89" y1="674" x2="71" y2="543"/>
+     <line x1="268" y1="556" x2="323" y2="399"/>
+     <line x1="221" y1="697" x2="268" y2="556"/>
+     <line x1="107" y1="804" x2="221" y2="697"/>
+     <line x1="150" y1="885" x2="107" y2="804"/>
+    </g>
+    <g stroke="darkorange" stroke-dasharray="18 15" stroke-width="4" id="edges_tentative">
+     <line x1="636" y1="127" x2="709" y2="404"/>
+     <line x1="636" y1="127" x2="866" y2="418"/>
+     <line x1="636" y1="127" x2="440" y2="580"/>
+     <line x1="636" y1="127" x2="323" y2="399"/>
+     <line x1="636" y1="127" x2="654" y2="601"/>
+     <line x1="636" y1="127" x2="371" y2="259"/>
+     <line x1="636" y1="127" x2="295" y2="121"/>
+    </g>
+    <g stroke="black" stroke-width="4" id="edges_contour">
+     <line x1="445" y1="906" x2="428" y2="879"/>
+     <line x1="347" y1="900" x2="428" y2="879"/>
+     <line x1="790" y1="239" x2="856" y2="311"/>
+     <line x1="1004" y1="342" x2="856" y2="311"/>
+     <line x1="843" y1="41" x2="828" y2="55"/>
+     <line x1="902" y1="130" x2="828" y2="55"/>
+     <line x1="590" y1="142" x2="559" y2="120"/>
+     <line x1="516" y1="44" x2="559" y2="120"/>
+     <line x1="132" y1="205" x2="112" y2="255"/>
+     <line x1="36" y1="281" x2="112" y2="255"/>
+     <line x1="544" y1="283" x2="564" y2="311"/>
+     <line x1="496" y1="423" x2="564" y2="311"/>
+    </g>
+    <g id="WTGgrp">
+     <g fill="#1f77b4">
+      <use href="#wtg" x="440" y="580"/>
+      <use href="#wtg" x="394" y="719"/>
+      <use href="#wtg" x="445" y="906"/>
+      <use href="#wtg" x="347" y="900"/>
+      <use href="#wtg" x="265" y="941"/>
+     </g>
+     <g fill="#aec7e8">
+      <use href="#wtg" x="654" y="601"/>
+      <use href="#wtg" x="606" y="740"/>
+      <use href="#wtg" x="567" y="864"/>
+      <use href="#wtg" x="601" y="1002"/>
+      <use href="#wtg" x="520" y="1046"/>
+     </g>
+     <g fill="#ff7f0e">
+      <use href="#wtg" x="709" y="404"/>
+      <use href="#wtg" x="810" y="614"/>
+      <use href="#wtg" x="763" y="754"/>
+      <use href="#wtg" x="780" y="926"/>
+      <use href="#wtg" x="700" y="969"/>
+     </g>
+     <g fill="#ffbb78">
+      <use href="#wtg" x="866" y="418"/>
+      <use href="#wtg" x="942" y="556"/>
+      <use href="#wtg" x="976" y="735"/>
+      <use href="#wtg" x="912" y="826"/>
+      <use href="#wtg" x="855" y="902"/>
+     </g>
+     <g fill="#2ca02c">
+      <use href="#wtg" x="790" y="239"/>
+      <use href="#wtg" x="1004" y="342"/>
+      <use href="#wtg" x="1054" y="447"/>
+      <use href="#wtg" x="1089" y="546"/>
+      <use href="#wtg" x="1041" y="645"/>
+     </g>
+     <g fill="#98df8a">
+      <use href="#wtg" x="680" y="84"/>
+      <use href="#wtg" x="769" y="66"/>
+      <use href="#wtg" x="843" y="41"/>
+      <use href="#wtg" x="902" y="130"/>
+      <use href="#wtg" x="953" y="237"/>
+     </g>
+     <g fill="#d62728">
+      <use href="#wtg" x="590" y="142"/>
+      <use href="#wtg" x="516" y="44"/>
+      <use href="#wtg" x="434" y="128"/>
+     </g>
+     <g fill="#ff9896">
+      <use href="#wtg" x="295" y="121"/>
+      <use href="#wtg" x="212" y="40"/>
+      <use href="#wtg" x="172" y="123"/>
+      <use href="#wtg" x="132" y="205"/>
+      <use href="#wtg" x="36" y="281"/>
+     </g>
+     <g fill="#9467bd">
+      <use href="#wtg" x="371" y="259"/>
+      <use href="#wtg" x="167" y="386"/>
+      <use href="#wtg" x="53" y="412"/>
+      <use href="#wtg" x="71" y="543"/>
+      <use href="#wtg" x="89" y="674"/>
+     </g>
+     <g fill="#c5b0d5">
+      <use href="#wtg" x="323" y="399"/>
+      <use href="#wtg" x="268" y="556"/>
+      <use href="#wtg" x="221" y="697"/>
+      <use href="#wtg" x="107" y="804"/>
+      <use href="#wtg" x="150" y="885"/>
+     </g>
+     <g fill="#8c564b">
+      <use href="#wtg" x="544" y="283"/>
+      <use href="#wtg" x="496" y="423"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="625.5" y="116.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+ <text class="caption" x="1163" y="57">G — feeders after path-finding</text>
+ <svg x="1135" y="88" width="1135" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1135 1080">
+   <defs>
+    <circle stroke="deepskyblue" stroke-opacity="0.3" stroke-width="4" id="dt" r="23" fill="none"/>
+    <circle stroke="black" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#eee" stroke-width="2" id="oss" width="21" height="21" fill="black"/>
+   </defs>
+   <g id="cazzaro_2022">
+    <path stroke="dimgray" stroke-dasharray="15 7" stroke-width="2" id="border" d="M856 909 1105 553 896 108 828 55 858 30 559 120 516 42 404 135 379 174 202 30 112 255 30 279 111 866 245 953 428 879 515 1050z M248 367 361 310 392 410z M524 542 745 541 750 616 606 592 367 500 353 446z M509 284 512 254 564 311z M646 317 760 242 796 314 706 373z M835 139 813 178 777 167 769 130z M830 280 854 249 896 260 893 303 856 311z" fill-rule="evenodd" fill="#eee"/>
+    <g stroke="black" stroke-width="4" id="edges_unspecified">
+     <line x1="636" y1="127" x2="544" y2="283"/>
+     <line x1="636" y1="127" x2="590" y2="142"/>
+     <line x1="636" y1="127" x2="680" y2="84"/>
+     <line x1="636" y1="127" x2="790" y2="239"/>
+     <line x1="636" y1="127" x2="371" y2="259"/>
+     <line x1="394" y1="719" x2="440" y2="580"/>
+     <line x1="445" y1="906" x2="394" y2="719"/>
+     <line x1="265" y1="941" x2="347" y2="900"/>
+     <line x1="606" y1="740" x2="654" y2="601"/>
+     <line x1="567" y1="864" x2="606" y2="740"/>
+     <line x1="601" y1="1002" x2="567" y2="864"/>
+     <line x1="520" y1="1046" x2="601" y2="1002"/>
+     <line x1="810" y1="614" x2="709" y2="404"/>
+     <line x1="763" y1="754" x2="810" y2="614"/>
+     <line x1="780" y1="926" x2="763" y2="754"/>
+     <line x1="700" y1="969" x2="780" y2="926"/>
+     <line x1="942" y1="556" x2="866" y2="418"/>
+     <line x1="976" y1="735" x2="942" y2="556"/>
+     <line x1="912" y1="826" x2="976" y2="735"/>
+     <line x1="855" y1="902" x2="912" y2="826"/>
+     <line x1="1054" y1="447" x2="1004" y2="342"/>
+     <line x1="1089" y1="546" x2="1054" y2="447"/>
+     <line x1="1041" y1="645" x2="1089" y2="546"/>
+     <line x1="680" y1="84" x2="769" y2="66"/>
+     <line x1="769" y1="66" x2="843" y2="41"/>
+     <line x1="953" y1="237" x2="902" y2="130"/>
+     <line x1="434" y1="128" x2="516" y2="44"/>
+     <line x1="295" y1="121" x2="212" y2="40"/>
+     <line x1="172" y1="123" x2="212" y2="40"/>
+     <line x1="132" y1="205" x2="172" y2="123"/>
+     <line x1="167" y1="386" x2="371" y2="259"/>
+     <line x1="53" y1="412" x2="167" y2="386"/>
+     <line x1="71" y1="543" x2="53" y2="412"/>
+     <line x1="89" y1="674" x2="71" y2="543"/>
+     <line x1="268" y1="556" x2="323" y2="399"/>
+     <line x1="221" y1="697" x2="268" y2="556"/>
+     <line x1="107" y1="804" x2="221" y2="697"/>
+     <line x1="150" y1="885" x2="107" y2="804"/>
+    </g>
+    <g stroke="black" stroke-width="4" id="edges_contour">
+     <line x1="445" y1="906" x2="428" y2="879"/>
+     <line x1="347" y1="900" x2="428" y2="879"/>
+     <line x1="790" y1="239" x2="856" y2="311"/>
+     <line x1="1004" y1="342" x2="856" y2="311"/>
+     <line x1="843" y1="41" x2="828" y2="55"/>
+     <line x1="902" y1="130" x2="828" y2="55"/>
+     <line x1="590" y1="142" x2="559" y2="120"/>
+     <line x1="516" y1="44" x2="559" y2="120"/>
+     <line x1="132" y1="205" x2="112" y2="255"/>
+     <line x1="36" y1="281" x2="112" y2="255"/>
+     <line x1="544" y1="283" x2="564" y2="311"/>
+     <line x1="496" y1="423" x2="564" y2="311"/>
+    </g>
+    <g stroke="royalblue" stroke-dasharray="18 15" stroke-width="4" id="detours" fill="none">
+     <polyline points="636 127 760 242 866 418"/>
+     <polyline points="636 127 512 254 392 410 353 446 367 500 440 580"/>
+     <polyline points="636 127 512 254 392 410 323 399"/>
+     <polyline points="636 127 646 317 709 404"/>
+     <polyline points="636 127 646 317 745 541 750 616 654 601"/>
+     <polyline points="636 127 590 142 379 174 295 121"/>
+    </g>
+    <g id="DTgrp">
+     <use href="#dt" x="760" y="242"/>
+     <use href="#dt" x="367" y="500"/>
+     <use href="#dt" x="353" y="446"/>
+     <use href="#dt" x="392" y="410"/>
+     <use href="#dt" x="512" y="254"/>
+     <use href="#dt" x="392" y="410"/>
+     <use href="#dt" x="512" y="254"/>
+     <use href="#dt" x="646" y="317"/>
+     <use href="#dt" x="750" y="616"/>
+     <use href="#dt" x="745" y="541"/>
+     <use href="#dt" x="646" y="317"/>
+     <use href="#dt" x="379" y="174"/>
+     <use href="#dt" x="590" y="142"/>
+    </g>
+    <g id="WTGgrp">
+     <g fill="#1f77b4">
+      <use href="#wtg" x="440" y="580"/>
+      <use href="#wtg" x="394" y="719"/>
+      <use href="#wtg" x="445" y="906"/>
+      <use href="#wtg" x="347" y="900"/>
+      <use href="#wtg" x="265" y="941"/>
+     </g>
+     <g fill="#aec7e8">
+      <use href="#wtg" x="654" y="601"/>
+      <use href="#wtg" x="606" y="740"/>
+      <use href="#wtg" x="567" y="864"/>
+      <use href="#wtg" x="601" y="1002"/>
+      <use href="#wtg" x="520" y="1046"/>
+     </g>
+     <g fill="#ff7f0e">
+      <use href="#wtg" x="709" y="404"/>
+      <use href="#wtg" x="810" y="614"/>
+      <use href="#wtg" x="763" y="754"/>
+      <use href="#wtg" x="780" y="926"/>
+      <use href="#wtg" x="700" y="969"/>
+     </g>
+     <g fill="#ffbb78">
+      <use href="#wtg" x="866" y="418"/>
+      <use href="#wtg" x="942" y="556"/>
+      <use href="#wtg" x="976" y="735"/>
+      <use href="#wtg" x="912" y="826"/>
+      <use href="#wtg" x="855" y="902"/>
+     </g>
+     <g fill="#2ca02c">
+      <use href="#wtg" x="790" y="239"/>
+      <use href="#wtg" x="1004" y="342"/>
+      <use href="#wtg" x="1054" y="447"/>
+      <use href="#wtg" x="1089" y="546"/>
+      <use href="#wtg" x="1041" y="645"/>
+     </g>
+     <g fill="#98df8a">
+      <use href="#wtg" x="680" y="84"/>
+      <use href="#wtg" x="769" y="66"/>
+      <use href="#wtg" x="843" y="41"/>
+      <use href="#wtg" x="902" y="130"/>
+      <use href="#wtg" x="953" y="237"/>
+     </g>
+     <g fill="#d62728">
+      <use href="#wtg" x="590" y="142"/>
+      <use href="#wtg" x="516" y="44"/>
+      <use href="#wtg" x="434" y="128"/>
+     </g>
+     <g fill="#ff9896">
+      <use href="#wtg" x="295" y="121"/>
+      <use href="#wtg" x="212" y="40"/>
+      <use href="#wtg" x="172" y="123"/>
+      <use href="#wtg" x="132" y="205"/>
+      <use href="#wtg" x="36" y="281"/>
+     </g>
+     <g fill="#9467bd">
+      <use href="#wtg" x="371" y="259"/>
+      <use href="#wtg" x="167" y="386"/>
+      <use href="#wtg" x="53" y="412"/>
+      <use href="#wtg" x="71" y="543"/>
+      <use href="#wtg" x="89" y="674"/>
+     </g>
+     <g fill="#c5b0d5">
+      <use href="#wtg" x="323" y="399"/>
+      <use href="#wtg" x="268" y="556"/>
+      <use href="#wtg" x="221" y="697"/>
+      <use href="#wtg" x="107" y="804"/>
+      <use href="#wtg" x="150" y="885"/>
+     </g>
+     <g fill="#8c564b">
+      <use href="#wtg" x="544" y="283"/>
+      <use href="#wtg" x="496" y="423"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="625.5" y="116.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+</svg>

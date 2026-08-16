@@ -1,0 +1,61 @@
+@font-face {
+  font-family: "STIX Two Text";
+  src: url("fonts/stix-two-text-latin-400-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "STIX Two Text";
+  src: url("fonts/stix-two-text-latin-400-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "STIX Two Text";
+  src: url("fonts/stix-two-text-latin-600-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "STIX Two Text";
+  src: url("fonts/stix-two-text-latin-600-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "STIX Two Math";
+  src: url("fonts/stix-two-math-latin-400-normal.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+body:has(> header#title-block-header),
+.milp-formulation {
+  font-family: "STIX Two Text", serif;
+  overflow-x: auto;
+}
+
+body:has(> header#title-block-header) math,
+.milp-formulation math {
+  font-family: "STIX Two Math", math;
+  font-size: 140%;
+}
+
+body:has(> header#title-block-header) math mtext,
+.milp-formulation math mtext {
+  font-family: "STIX Two Text", "STIX Two Math", serif;
+}
+
+body:has(> header#title-block-header) p:has(> math),
+.milp-formulation p:has(> math) {
+  overflow-x: auto;
+}

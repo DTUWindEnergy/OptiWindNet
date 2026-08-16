@@ -1,0 +1,12 @@
+# Prettier finds this file by walking up from whatever it formats, so it applies
+# to every Markdown file in the project, from the command line or from an editor.
+#
+# proseWrap: never unwraps paragraphs that arrive hard-wrapped at a column, which
+# is the point: contributions wrapped at 80 columns normalize to the same shape as
+# everything else, and an edit to a paragraph no longer reflows its neighbours.
+#
+# There is no .prettierignore: .gitignore already covers the generated and scratch
+# directories, and Prettier reads it. Notebooks are not Markdown files to Prettier
+# -- it has no .ipynb parser -- so a directory sweep skips them, and their markdown
+# cells are formatted by docs/format_notebook_prose.py.
+proseWrap: 'never'

@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2613 1148">
+ <style>.caption{font:44px sans-serif;fill:#a3a3a3}</style>
+ <text class="caption" x="22" y="44">Branched</text>
+ <svg x="0" y="68" width="871" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 871 1080">
+   <defs>
+    <circle stroke="none" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#111" stroke-width="2" id="oss" width="21" height="21" fill="lawngreen"/>
+   </defs>
+   <g id="toy">
+    <path stroke="silver" stroke-dasharray="15 7" stroke-width="2" id="border" d="M360 30 259 345 141 624 30 888 280 1050 592 949 703 674 841 440 699 252z" fill-rule="evenodd" fill="#111"/>
+    <g stroke="crimson" stroke-width="4" id="edges_unspecified">
+     <line x1="335" y1="547" x2="141" y2="624"/>
+     <line x1="335" y1="547" x2="259" y2="345"/>
+     <line x1="335" y1="547" x2="528" y2="490"/>
+     <line x1="360" y1="30" x2="478" y2="254"/>
+     <line x1="259" y1="345" x2="478" y2="254"/>
+     <line x1="478" y1="254" x2="699" y2="252"/>
+     <line x1="841" y1="440" x2="703" y2="674"/>
+     <line x1="528" y1="490" x2="703" y2="674"/>
+     <line x1="703" y1="674" x2="592" y2="949"/>
+     <line x1="141" y1="624" x2="381" y2="794"/>
+     <line x1="381" y1="794" x2="280" y2="1050"/>
+     <line x1="141" y1="624" x2="30" y2="888"/>
+    </g>
+    <g id="WTGgrp">
+     <g fill="#1f77b4">
+      <use href="#wtg" x="360" y="30"/>
+      <use href="#wtg" x="478" y="254"/>
+      <use href="#wtg" x="259" y="345"/>
+      <use href="#wtg" x="699" y="252"/>
+     </g>
+     <g fill="#ff7f0e">
+      <use href="#wtg" x="841" y="440"/>
+      <use href="#wtg" x="703" y="674"/>
+      <use href="#wtg" x="528" y="490"/>
+      <use href="#wtg" x="592" y="949"/>
+     </g>
+     <g fill="#aec7e8">
+      <use href="#wtg" x="381" y="794"/>
+      <use href="#wtg" x="141" y="624"/>
+      <use href="#wtg" x="30" y="888"/>
+      <use href="#wtg" x="280" y="1050"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="324.5" y="536.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+ <text class="caption" x="893" y="44">Radial</text>
+ <svg x="871" y="68" width="871" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 871 1080">
+   <defs>
+    <circle stroke="none" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#111" stroke-width="2" id="oss" width="21" height="21" fill="lawngreen"/>
+   </defs>
+   <g id="toy">
+    <path stroke="silver" stroke-dasharray="15 7" stroke-width="2" id="border" d="M360 30 259 345 141 624 30 888 280 1050 592 949 703 674 841 440 699 252z" fill-rule="evenodd" fill="#111"/>
+    <g stroke="crimson" stroke-width="4" id="edges_unspecified">
+     <line x1="335" y1="547" x2="381" y2="794"/>
+     <line x1="335" y1="547" x2="141" y2="624"/>
+     <line x1="335" y1="547" x2="528" y2="490"/>
+     <line x1="360" y1="30" x2="478" y2="254"/>
+     <line x1="259" y1="345" x2="478" y2="254"/>
+     <line x1="259" y1="345" x2="141" y2="624"/>
+     <line x1="699" y1="252" x2="841" y2="440"/>
+     <line x1="841" y1="440" x2="703" y2="674"/>
+     <line x1="528" y1="490" x2="703" y2="674"/>
+     <line x1="30" y1="888" x2="280" y2="1050"/>
+     <line x1="280" y1="1050" x2="592" y2="949"/>
+     <line x1="381" y1="794" x2="592" y2="949"/>
+    </g>
+    <g id="WTGgrp">
+     <g fill="#1f77b4">
+      <use href="#wtg" x="360" y="30"/>
+      <use href="#wtg" x="478" y="254"/>
+      <use href="#wtg" x="259" y="345"/>
+      <use href="#wtg" x="141" y="624"/>
+     </g>
+     <g fill="#aec7e8">
+      <use href="#wtg" x="699" y="252"/>
+      <use href="#wtg" x="841" y="440"/>
+      <use href="#wtg" x="703" y="674"/>
+      <use href="#wtg" x="528" y="490"/>
+     </g>
+     <g fill="#ff7f0e">
+      <use href="#wtg" x="30" y="888"/>
+      <use href="#wtg" x="280" y="1050"/>
+      <use href="#wtg" x="592" y="949"/>
+      <use href="#wtg" x="381" y="794"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="324.5" y="536.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+ <text class="caption" x="1764" y="44">Ringed</text>
+ <svg x="1742" y="68" width="871" height="1080">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 871 1080">
+   <defs>
+    <circle stroke="none" stroke-width="2" id="wtg" r="12"/>
+    <rect stroke="#111" stroke-width="2" id="oss" width="21" height="21" fill="lawngreen"/>
+   </defs>
+   <g id="toy">
+    <path stroke="silver" stroke-dasharray="15 7" stroke-width="2" id="border" d="M360 30 259 345 141 624 30 888 280 1050 592 949 703 674 841 440 699 252z" fill-rule="evenodd" fill="#111"/>
+    <g stroke="crimson" stroke-width="4" id="edges_unspecified">
+     <line x1="335" y1="547" x2="381" y2="794"/>
+     <line x1="335" y1="547" x2="141" y2="624"/>
+     <line x1="335" y1="547" x2="259" y2="345"/>
+     <line x1="335" y1="547" x2="528" y2="490"/>
+     <line x1="360" y1="30" x2="259" y2="345"/>
+     <line x1="360" y1="30" x2="478" y2="254"/>
+     <line x1="528" y1="490" x2="703" y2="674"/>
+     <line x1="841" y1="440" x2="703" y2="674"/>
+     <line x1="381" y1="794" x2="592" y2="949"/>
+     <line x1="478" y1="254" x2="699" y2="252"/>
+     <line x1="141" y1="624" x2="30" y2="888"/>
+     <line x1="30" y1="888" x2="280" y2="1050"/>
+    </g>
+    <g stroke="orangered" stroke-dasharray="24 8 4 8" stroke-width="4" id="edges_split">
+     <line x1="280" y1="1050" x2="592" y2="949"/>
+     <line x1="699" y1="252" x2="841" y2="440"/>
+    </g>
+    <g id="WTGgrp">
+     <g fill="#1f77b4">
+      <use href="#wtg" x="360" y="30"/>
+      <use href="#wtg" x="259" y="345"/>
+      <use href="#wtg" x="528" y="490"/>
+      <use href="#wtg" x="703" y="674"/>
+      <use href="#wtg" x="478" y="254"/>
+      <use href="#wtg" x="699" y="252"/>
+      <use href="#wtg" x="841" y="440"/>
+     </g>
+     <g fill="#aec7e8">
+      <use href="#wtg" x="381" y="794"/>
+      <use href="#wtg" x="592" y="949"/>
+      <use href="#wtg" x="30" y="888"/>
+      <use href="#wtg" x="141" y="624"/>
+      <use href="#wtg" x="280" y="1050"/>
+     </g>
+    </g>
+    <g id="OSSgrp">
+     <use href="#oss" x="324.5" y="536.5"/>
+    </g>
+   </g>
+  </svg>
+ </svg>
+</svg>

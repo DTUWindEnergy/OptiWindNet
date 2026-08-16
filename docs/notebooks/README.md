@@ -1,35 +1,88 @@
 # Example Notebooks Overview
 
-This repository includes a set of example notebooks to demonstrate how to use `OptiWindNet` for wind farm electrical network optimization. There are **two categories** of notebooks:
+These notebooks are the worked examples of the _OptiWindNet_ documentation. They show **how to call** the package; what the tool computes, what it accepts as input, and which routers and options exist are covered by the API-agnostic pages one level up.
 
-## 📦 Network/Router API (Recommended for Most Users)
+Worth reading once, whichever of the two APIs you use:
 
-These notebooks demonstrate how to use the *OptiWindNet*'s **high-level API** via the `WindFarmNetwork` and `Router` classes. This approach is:
+- [`../problem.md`](../problem.md) — the optimization problem, the graph model, the plot views and the network topologies
+- [`../routers.md`](../routers.md) — the optimization approaches, warm-starting and how to choose
 
-* **Simple** to use
-* **Suitable for integration** with tools like **TopFarm**
-* Focused on productivity and ease of interaction
+Worth consulting as needed:
 
-Users only need to provide input data and call a few intuitive methods to perform routing and access results.
+- [`../reference/tasks.md`](../reference/tasks.md) — a task-oriented index into all of the above
+- [`../reference/glossary.md`](../reference/glossary.md) — the vocabulary used throughout
+- [`../reference/input_formats.md`](../reference/input_formats.md) — input formats and location repositories
+- [`../reference/solvers.md`](../reference/solvers.md) — the MILP backends and how to install them
 
-The notebooks demonstrating the **Network/Router API** of *OptiWindNet* have filenames starting with a letter:
-- `a01_data_input.ipynb` to `a11_clustering_multi_substation.ipynb`: Data handling, plotting, options, sub-station clustering, and workflows
-- `b01_EWRouter.ipynb`: Esau-Williams heuristic router
-- `b02_HGSRouter.ipynb`: Hybrid Genetic Search meta-heuristic router
-- `b03_MILPRouter.ipynb`: MILP exact optimization router
-- `b04_ringed_topology.ipynb`: Ringed topology cable routing across routers
-- `c01_Simple_Topfarm_optiwindnet.ipynb`: TopFarm integration
+## Naming scheme
 
-> ✅ Use these if you want fast prototyping or plan to integrate `OptiWindNet` into a larger workflow.
+`<api><band><n>_<topic>`
 
-## 🛠️ Advanced API Examples
+| Prefix | Meaning                                               |
+| ------ | ----------------------------------------------------- |
+| `hi`   | Network/Router API — the high-level path              |
+| `lo`   | Advanced API — direct use of the internal modules     |
+| `p`    | Reproduction of the paper's computational experiments |
 
-These notebooks show how to use *OptiWindNet* by directly importing its internal modules and functions. This approach:
+The band digit means the same thing in both API sections, and paired notebooks share the band, the index and the topic stem — so `hi21_hgs` and `lo21_hgs` are the same task through the two APIs.
 
-* Exposes more customization and internal logic
-* Requires calling several intermediate steps (e.g., preprocessing, initial tree generation, optimization, result processing)
-* Is useful for **advanced users**, researchers, or developers who want fine control or want to extend the code
+| Band | Contents                  |
+| ---- | ------------------------- |
+| `0`  | quickstart                |
+| `1`  | input data and inspection |
+| `2`  | routers                   |
+| `3`  | shaping the solution      |
+| `4`  | worked examples           |
+| `5`  | integration               |
+| `9`  | appendix                  |
 
-The notebooks demonstrating **Advanced API** of *OptiWindNet* are those with filenames starting with a number.
+## Network/Router API (recommended for most users)
 
-> 🔍 Use these if you're exploring the algorithm, debugging, or building on top of the library internals.
+Drives _OptiWindNet_ through the `WindFarmNetwork` and `Router` classes: provide input data, call a few intuitive methods, read the results.
+
+- `hi00_quickstart`: minimum steps to optimize a network
+- `hi10_windfarmnetwork`, `hi11_data_input`, `hi12_locations`, `hi13_border_obstacles`, `hi14_plotting`, `hi15_debugging`
+- `hi20_heuristic`, `hi21_hgs`, `hi23_milp`: the three optimization approaches
+- `hi30_topologies`, `hi31_options`: shaping the solution
+- `hi40_example_taylor_2023`, `hi41_example_iea_wind_task_55`: worked examples
+- `hi50_gradient`, `hi51_topfarm`: integration with an outer optimization loop
+
+> Use these if you want fast prototyping or plan to integrate `OptiWindNet` into a larger workflow.
+
+## Advanced API
+
+Imports the internal modules directly, calling each intermediate step (mesh generation, warm start, optimization, routing) explicitly.
+
+- `lo00_quickstart`: the `L` → `P`,`A` → `S` → `G` pipeline
+- `lo11_data_input`, `lo12_locations`, `lo14_plotting`
+- `lo20_heuristic`, `lo21_hgs`, `lo22_lkh`: the constructive-heuristic and meta-heuristic routers
+- `lo23_milp_ortools`–`lo28_milp_cbc`: one notebook per MILP backend
+- `lo30_topologies`: topologies and validation
+- `lo32_clustering`: automatic vs. manual substation clustering
+- `lo40_example_taylor_2023`, `lo41_example_iea_wind_task_55`: worked examples
+- `lo90_removed_heuristics`: migration from removed entry points
+
+> Use these if you're exploring the algorithm, debugging, or building on top of the library internals.
+
+## Paper reproduction
+
+`p01`–`p07` reproduce the computational experiments of the paper; each notebook's title carries the section number it corresponds to.
+
+## Paired examples
+
+| Task | Network/Router API | Advanced API |
+| --- | --- | --- |
+| Minimal working example | `hi00_quickstart` | `lo00_quickstart` |
+| Loading input data | `hi11_data_input` | `lo11_data_input` |
+| Bundled locations | `hi12_locations` | `lo12_locations` |
+| Plotting | `hi14_plotting` | `lo14_plotting` |
+| Constructive heuristic | `hi20_heuristic` | `lo20_heuristic` |
+| Meta-heuristic | `hi21_hgs` | `lo21_hgs` |
+| Exact optimization | `hi23_milp` | `lo23_milp_ortools` |
+| Topologies | `hi30_topologies` | `lo30_topologies` |
+| Example: Taylor 2023 | `hi40_example_taylor_2023` | `lo40_example_taylor_2023` |
+| Example: IEA Wind Task 55 | `hi41_example_iea_wind_task_55` | `lo41_example_iea_wind_task_55` |
+
+Learning **one** of the two APIs is enough to start using _OptiWindNet_.
+
+> **Note:** many of these notebooks have SVG figures as cell outputs, which JupyterLab and Jupyter Notebook only display if the notebook is marked as **trusted** (in JupyterLab: `Ctrl+Shift+C` → **Trust Notebook**).

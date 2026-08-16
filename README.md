@@ -1,3 +1,4 @@
+<!-- prettier-ignore -->
 [![PyPi](https://img.shields.io/pypi/v/optiwindnet)](https://pypi.org/project/optiwindnet/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18388438.svg)](https://doi.org/10.5281/zenodo.18388438)
 [![License](https://img.shields.io/pypi/l/optiwindnet)](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/blob/main/LICENSE.txt)
@@ -14,13 +15,12 @@ OptiWindNet
 
 Tool for designing and optimizing the electrical cable network of offshore wind farms.
 
-
-|Documentation:<br>[optiwindnet.readthedocs.io][docs]||
-|:--|:-:|
-|<ul><li>[Quickstart][quick]</li><li>[Download the Jupyter notebooks][down] used in the documentation.</li><li>[Report an issue][issue] (at GitHub mirror)</li><li>[API Reference][api]</li><li>[How to Cite][cite]</li></ul>|![FancyWindFarm](docs/_static/OptiWindNet_windfarm.svg)|
+| Documentation:<br>[optiwindnet.readthedocs.io][docs] |  |
+| :-- | :-: |
+| <ul><li>[Quickstart][quick]</li><li>[Download the Jupyter notebooks][down] used in the documentation.</li><li>[Report an issue][issue] (at GitHub mirror)</li><li>[API Reference][api]</li><li>[How to Cite][cite]</li></ul> | ![FancyWindFarm](docs/_static/OptiWindNet_windfarm.svg) |
 
 [docs]: https://optiwindnet.readthedocs.io
-[quick]: https://optiwindnet.readthedocs.io/stable/notebooks/quickstart_high.html
+[quick]: https://optiwindnet.readthedocs.io/stable/notebooks/hi00_quickstart.html
 [down]: https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/docs/notebooks
 [issue]: https://github.com/DTUWindEnergy/OptiWindNet/issues
 [api]: https://optiwindnet.readthedocs.io/stable/autoapi/index.html
@@ -32,7 +32,9 @@ Installation
 ```
 pip install optiwindnet
 ```
+
 or
+
 ```
 conda install --channel conda-forge optiwindnet
 ```
@@ -42,22 +44,21 @@ Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stabl
 Requirements
 ------------
 
-*OptiWindNet* requires Python version 3.11+ (tested with 3.11-14). The last version to support Python 3.10 was v0.0.6.
+_OptiWindNet_ requires Python version 3.11+ (tested with 3.11-14). The last version to support Python 3.10 was v0.0.6.
 
 The use of a Python virtual environment is recommended. OptiWindNet's dependencies (except for MILP solvers, see docs) will be installed automatically when using `pip install optiwindnet` or `conda install optiwindnet`.
 
 One may **optionally** pre-install the dependencies in a python environment by using either:
+
 - [requirements.txt](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/requirements.txt?ref_type=heads&inline=false): `pip install -r requirements.txt`
-- [environment.yml](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/environment.yml?ref_type=heads&inline=false): `conda env create -f environment.yml` (name: *optiwindnet_env*)
+- [environment.yml](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/raw/main/environment.yml?ref_type=heads&inline=false): `conda env create -f environment.yml` (name: _optiwindnet_env_)
 
-Paper
------
+Papers
+------
 
-The methodology implemented in *OptiWindNet* is described in the peer-reviewed scientific article:
-- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis,
-_Flexible cable routing framework for wind farm collection system optimization_,
-European Journal of Operational Research,
-2025, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
+The methodology implemented in _OptiWindNet_ is described in the peer-reviewed scientific article:
+
+- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis, _Flexible cable routing framework for wind farm collection system optimization_, European Journal of Operational Research, 2025, ISSN 0377-2217, <https://doi.org/10.1016/j.ejor.2025.07.069>.
 
 ```{code-block} bib
 @article{SOUZADEALENCAR20261037,
@@ -75,14 +76,33 @@ European Journal of Operational Research,
 }
 ```
 
+A second article introduces **OptiWindNet RouteSets**, an open database of cable-routing solutions produced with _OptiWindNet_ ([Zenodo](https://doi.org/10.5281/zenodo.20053479)). It is under review; the preprint is open-access:
+
+- Mauricio Souza de Alencar, Tuhfe Göçmen, Nicolaos A. Cutululis, _OptiWindNet RouteSets: a solver-diverse benchmark dataset for the offshore wind-farm cable routing problem_, Wind Energy Science Discussions [preprint], 2026, <https://doi.org/10.5194/wes-2026-124>, in review.
+
+```{code-block} bib
+@Article{wes-2026-124,
+  author = {Souza de Alencar, M. and G\"o\c{c}men, T. and Cutululis, N. A.},
+  title = {OptiWindNet RouteSets: a solver-diverse benchmark dataset for the offshore wind-farm cable routing problem},
+  journal = {Wind Energy Science Discussions},
+  volume = {2026},
+  year = {2026},
+  pages = {1--13},
+  url = {https://wes.copernicus.org/preprints/wes-2026-124/},
+  doi = {10.5194/wes-2026-124},
+}
+```
+
+Details on the database and its analyses are in [Dataset Paper](https://optiwindnet.readthedocs.io/stable/dataset.html).
+
 Citing OptiWindNet
 ------------------
 
 The OptiWindNet software package can be cited (unversioned) as:
+
 > Souza de Alencar, M., Arasteh, A., & Friis-Møller, M. (2026). OptiWindNet by DTU Wind Energy. Zenodo. https://doi.org/10.5281/zenodo.18388438
 
 To cite a specific version, get the version-specific DOI at [OptiWindNet's entry at Zenodo](https://doi.org/10.5281/zenodo.18388438). Select the desired version on the right column and use one of the ready-to-use citation formats available at the bottom right of that page.
-
 
 Acknowledgements
 ----------------

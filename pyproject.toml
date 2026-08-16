@@ -122,3 +122,9 @@ quote-style = "single"
 [tool.ruff.lint]
 # This keeps all the defaults AND adds your new line-length rules
 extend-select = ["E501", "W505"]
+
+[tool.ruff.lint.per-file-ignores]
+# docs/conf.py embeds HTML and Jinja templates (nbsphinx_prolog) as raw strings,
+# where a line break would alter the emitted markup and `# noqa` would be inserted
+# into it verbatim. Line length is not meaningful there.
+"docs/conf.py" = ["E501"]
