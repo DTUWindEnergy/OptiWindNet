@@ -19,38 +19,38 @@ _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 
 __all__ = (
-    'assign_cables',
-    'describe_G',
-    'pathdist',
-    'count_diagonals',
-    'bfs_subtree_loads',
-    'calcload',
-    'split_rings_and_calc_loads',
-    'add_ring_to_S',
-    'rings_from_S',
-    'directed_links',
-    'L_from_site',
     'G_from_S',
-    'S_from_G',
     'L_from_G',
-    'TerseLinks',
+    'L_from_site',
+    'S_from_G',
     'S_from_terse_links',
-    'terse_links_from_S',
-    'as_obstacle_free',
-    'as_single_root',
-    'as_normalized',
-    'as_rescaled',
-    'as_undetoured',
-    'as_hooked_to_nearest',
-    'as_hooked_to_head',
-    'as_stratified_vertices',
-    'add_terminal_closest_root',
+    'TerseLinks',
     'add_link_blockmap',
     'add_link_cosines',
+    'add_ring_to_S',
+    'add_terminal_closest_root',
+    'as_hooked_to_head',
+    'as_hooked_to_nearest',
+    'as_normalized',
+    'as_obstacle_free',
+    'as_rescaled',
+    'as_single_root',
+    'as_stratified_vertices',
+    'as_undetoured',
+    'assign_cables',
+    'bfs_subtree_loads',
+    'calcload',
+    'count_diagonals',
+    'describe_G',
+    'directed_links',
     'make_remap',
+    'pathdist',
+    'rings_from_S',
     'scaffolded',
-    'validate_topology',
+    'split_rings_and_calc_loads',
+    'terse_links_from_S',
     'validate_routeset',
+    'validate_topology',
 )
 
 
@@ -1952,10 +1952,10 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
     """
     scaff = P.to_undirected()
     scaff.graph.update(G.graph)
-    for attr in 'fnT C'.split():
+    for attr in ['fnT', 'C']:
         if attr in scaff.graph:
             del scaff.graph[attr]
-    R, T, B, C, D = (G.graph.get(k, 0) for k in 'R T B C D'.split())
+    R, T, B, C, D = (G.graph.get(k, 0) for k in ['R', 'T', 'B', 'C', 'D'])
     nx.set_edge_attributes(scaff, 'scaffold', name='kind')
     constraints = P.graph.get('constraint_edges', [])
     for edge in constraints:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # Configuration file for the Sphinx documentation builder.
 #
@@ -526,13 +525,13 @@ def retarget_upstream_types(app, env, node, contnode):
     """
     target = node.get('reftarget', '')
     if node.get('refdomain') != 'py' or node.get('reftype') != 'class':
-        return None
+        return
     if target.partition('.')[0] not in _INTERSPHINX_ROOTS:
         # Leave project-local misses reported as py:class.
-        return None
+        return
     node['reftarget'] = _INVENTORY_RENAMES.get(target, target)
     node['reftype'] = 'obj'
-    return None  # intersphinx, at priority 500, resolves the rewritten node
+    return  # intersphinx, at priority 500, resolves the rewritten node
 
 
 def copy_milp_formulation_assets(app, exception):

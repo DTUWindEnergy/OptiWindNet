@@ -18,15 +18,15 @@ from ._core import (
 )
 
 __all__ = (
+    'FeederLimit',
+    'FeederRoute',
+    'ModelMetadata',
+    'ModelOptions',
+    'OWNSolutionNotFound',
+    'OWNWarmupFailed',
+    'SolutionInfo',
     'Solver',
     'Topology',
-    'FeederRoute',
-    'FeederLimit',
-    'ModelOptions',
-    'ModelMetadata',
-    'OWNWarmupFailed',
-    'OWNSolutionNotFound',
-    'SolutionInfo',
     'solver_factory',
 )
 

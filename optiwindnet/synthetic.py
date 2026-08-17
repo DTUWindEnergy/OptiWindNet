@@ -43,8 +43,8 @@ def toyfarm():
         name='toy',
         handle='toy',
     )
-    G.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
-    G.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
+    G.add_nodes_from((n, {'kind': 'wtg'}) for n in range(T))
+    G.add_nodes_from((r, {'kind': 'oss'}) for r in range(-R, 0))
     return G
 
 
@@ -86,8 +86,8 @@ def L_from_synthetic(
     L = nx.Graph(
         R=R, T=T, B=B, VertexC=VertexC, border=border, name=name, handle=handle
     )
-    L.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from((n, {'kind': 'wtg'}) for n in range(T))
+    L.add_nodes_from((r, {'kind': 'oss'}) for r in range(-R, 0))
     return L
 
 

@@ -213,7 +213,7 @@ class Drawable:
             # draw an opaque canvas the same size as the viewport
             self.toplevelE.append(svg.Rect(fill=c.bg_color, width=w, height=h))
         border, obstacles, landscape_angle = (
-            G.graph.get(k) for k in 'border obstacles landscape_angle'.split()
+            G.graph.get(k) for k in ['border', 'obstacles', 'landscape_angle']
         )
         # prepare obstacles
         draw_obstacles = []

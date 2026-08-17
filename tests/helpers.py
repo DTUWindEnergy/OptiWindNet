@@ -2,8 +2,8 @@ import copy
 import math
 import warnings
 from collections import Counter
-from collections.abc import Mapping
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -16,7 +16,6 @@ from optiwindnet.MILP import (
     SolutionInfo,
     solver_factory,
 )
-
 
 # Leave the root after one stalled separation round instead of SCIP's default 10.
 # At these short budgets the implied-integral flows keep the root separator busy,
@@ -131,9 +130,9 @@ def terminal_terminal_crossings(
 def assert_graph_equal(
     G1: nx.Graph,
     G2: nx.Graph,
-    ignored_graph_keys: Optional[Iterable[str]] = None,
+    ignored_graph_keys: Iterable[str] | None = None,
     *,
-    ignored_node_keys: Optional[Iterable[str]] = None,
+    ignored_node_keys: Iterable[str] | None = None,
     rtol: float = 1e-7,
     atol: float = 1e-10,
     max_show: int = 50,

@@ -39,9 +39,8 @@ def test_open_database(tmp_path):
         dbfile.unlink()
 
     # Expect OSError when trying to open a non-existent DB without create flag
-    with pytest.raises(OSError):
-        with database_connection(str(dbfile), create_db=False):
-            pass
+    with pytest.raises(OSError), database_connection(str(dbfile), create_db=False):
+        pass
 
     # create the DB
     try:

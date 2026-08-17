@@ -394,7 +394,6 @@ def test_G_from_S():
     assert 'kind' not in G[0][2]
     assert (0, 2) in G.graph['shortened_contours']
 
-    #
     edges_to_test = [(0, 1), (0, 2), (0, 3), (-1, 2)]
 
     for s, t in edges_to_test:
@@ -423,7 +422,6 @@ def test_G_from_S():
         actual_kind = G[s][t].get('kind')
         assert actual_kind == expected_kind
 
-    #
     edges_to_test = [(1, 3), (-1, 1)]
 
     for s, t in edges_to_test:

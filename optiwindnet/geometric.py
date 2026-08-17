@@ -4,9 +4,10 @@
 import math
 import operator
 from collections import defaultdict
+from collections.abc import Callable
 from itertools import combinations, pairwise
 from math import isclose
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import networkx as nx
 import numba as nb
@@ -20,33 +21,33 @@ __all__ = (
     'CoordPair',
     'CoordPairs',
     'IndexPairs',
-    'triangle_AR',
-    'point_d2line',
-    'is_same_side',
-    'any_pairs_opposite_edge',
-    'rotate',
-    'angle_numpy',
     'angle',
     'angle_helpers',
+    'angle_numpy',
     'angle_oracles_factory',
-    'find_edges_bbox_overlaps',
-    'is_crossing_numpy',
-    'is_crossing_no_bbox',
-    'is_crossing',
-    'is_bunch_split_by_corner',
-    'point_to_segment_distance',
-    'unique_rays',
-    'polyline_rays_at_point',
-    'rays_alternate',
-    'polylines_cross_at_point',
-    'is_triangle_pair_a_convex_quadrilateral',
-    'perimeter',
-    'get_crossings_map',
-    'complete_graph',
-    'minimum_spanning_forest',
-    'rotation_checkers_factory',
-    'rotating_calipers',
+    'any_pairs_opposite_edge',
     'area_from_polygon_vertices',
+    'complete_graph',
+    'find_edges_bbox_overlaps',
+    'get_crossings_map',
+    'is_bunch_split_by_corner',
+    'is_crossing',
+    'is_crossing_no_bbox',
+    'is_crossing_numpy',
+    'is_same_side',
+    'is_triangle_pair_a_convex_quadrilateral',
+    'minimum_spanning_forest',
+    'perimeter',
+    'point_d2line',
+    'point_to_segment_distance',
+    'polyline_rays_at_point',
+    'polylines_cross_at_point',
+    'rays_alternate',
+    'rotate',
+    'rotating_calipers',
+    'rotation_checkers_factory',
+    'triangle_AR',
+    'unique_rays',
 )
 
 NULL = np.iinfo(int).min
@@ -790,8 +791,8 @@ def complete_graph(
     if include_roots:
         # mask root-root edges
         offset = 0
-        for i in range(0, R - 1):
-            for j in range(0, R - i - 1):
+        for i in range(R - 1):
+            for j in range(R - i - 1):
                 mask[offset + j] = True
             offset += V - i - 1
 
@@ -968,7 +969,6 @@ def rotating_calipers(
         # Rotate all supporting lines by angle delta
         caliper_angles -= angle_deltas[pivot]
 
-        #
         angle = caliper_angles[np.abs(caliper_angles).argmin()]
         c, s = np.cos(angle), np.sin(angle)
         calipers_rot = convex_hull[calipers] @ np.array(((c, -s), (s, c)))

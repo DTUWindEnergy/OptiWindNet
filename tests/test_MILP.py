@@ -6,8 +6,8 @@ import pickle
 import networkx as nx
 import pytest
 
-import optiwindnet.MILP as MILP
 import optiwindnet.MILP._core as core
+from optiwindnet import MILP
 from optiwindnet.interarraylib import terse_links_from_S
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.terse import TerseLinks

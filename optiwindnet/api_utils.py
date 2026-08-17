@@ -1,5 +1,6 @@
 import logging
-from typing import TYPE_CHECKING, Any, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -218,7 +219,6 @@ def merge_obs_into_border(L):
     # To print only once even if multiple obstacles are intersecting with border
     border_subtraction_verbose = True
 
-    #
     border_polygon = Polygon(borderC)
 
     remaining_obstaclesC = []

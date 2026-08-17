@@ -2178,17 +2178,15 @@ class PathFinder:
             clone2prime.extend(path[1:-1])
             G.add_nodes_from(
                 (
-                    (
-                        c,
-                        {
-                            'label': str(c),
-                            'kind': 'detour',
-                            'subtree': subtree_id,
-                            'load': subtree_load,
-                        },
-                    )
-                    for c in Clone
+                    c,
+                    {
+                        'label': str(c),
+                        'kind': 'detour',
+                        'subtree': subtree_id,
+                        'load': subtree_load,
+                    },
                 )
+                for c in Clone
             )
             if [n, r] != path:
                 # TODO: adapt this for contoured feeders

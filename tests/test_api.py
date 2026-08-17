@@ -4,8 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-import optiwindnet.api as api
-import optiwindnet.plotting as plotting
+from optiwindnet import api, plotting
 from optiwindnet.api import (
     EWRouter,
     HGSRouter,

@@ -27,9 +27,9 @@ _lggr = logging.getLogger(__name__)
 _info, _warn = _lggr.info, _lggr.warning
 
 __all__ = (
-    'L_from_yaml',
     'L_from_pbf',
     'L_from_windIO',
+    'L_from_yaml',
     'LocationsRepository',
     'load_repository',
 )

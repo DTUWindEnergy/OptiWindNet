@@ -3,7 +3,7 @@ import networkx as nx
 import numpy as np
 import pytest
 
-import optiwindnet.repair as repair
+from optiwindnet import repair
 from optiwindnet.api import WindFarmNetwork
 from optiwindnet.interarraylib import calcload
 from optiwindnet.repair import gate_and_leaf_path, list_path

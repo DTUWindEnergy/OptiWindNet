@@ -151,7 +151,6 @@ def _halfedges_from_triangulation(
                 break
             ref = succ
         nodes_done.add(pivot)
-    return
 
 
 def _edges_and_hull_from_cdt(
@@ -430,7 +429,7 @@ def make_planar_embedding(
     # O) Calculate the area of the concave hull.
     # P) Set A's graph attributes.
 
-    R, T, B, VertexCʹ = (L.graph[k] for k in 'R T B VertexC'.split())
+    R, T, B, VertexCʹ = (L.graph[k] for k in ['R', 'T', 'B', 'VertexC'])
     border = L.graph.get('border', ())
     obstacles = L.graph.get('obstacles', ())
 

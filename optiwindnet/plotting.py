@@ -95,7 +95,7 @@ def gplot(
     VertexC = G.graph['VertexC']
     C, D = (G.graph.get(k, 0) for k in 'CD')
     border, obstacles, landscape_angle = (
-        G.graph.get(k) for k in 'border obstacles landscape_angle'.split()
+        G.graph.get(k) for k in ['border', 'obstacles', 'landscape_angle']
     )
     if landscape and landscape_angle:
         # landscape_angle is not None and not 0

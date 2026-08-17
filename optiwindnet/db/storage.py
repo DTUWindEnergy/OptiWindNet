@@ -4,12 +4,12 @@
 import base64
 import io
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from functools import partial
 from hashlib import sha256
 from itertools import chain, pairwise
 from socket import getfqdn, gethostname
-from typing import Any, Mapping
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -134,8 +134,8 @@ def L_from_nodeset(nodeset: NodeSet, handle: str | None = None) -> nx.Graph:
                 for a, b in pairwise(obstacle_idx)
             ]
         )
-    L.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from((n, {'kind': 'wtg'}) for n in range(T))
+    L.add_nodes_from((r, {'kind': 'oss'}) for r in range(-R, 0))
     return L
 
 

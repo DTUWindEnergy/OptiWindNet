@@ -426,12 +426,10 @@ class Solver(abc.ABC):
     @abc.abstractmethod
     def _link_val(self, var: Any) -> int | bool:
         "Get the value of a link variable from the current solution."
-        pass
 
     @abc.abstractmethod
     def _flow_val(self, var: Any) -> int:
         "Get the value of a flow variable from the current solution."
-        pass
 
     @abc.abstractmethod
     def set_problem(
@@ -451,7 +449,6 @@ class Solver(abc.ABC):
           model_options: tree properties - see ModelOptions.help()
           warmstart: initial feasible solution to pass to solver
         """
-        pass
 
     @abc.abstractmethod
     def solve(
@@ -473,7 +470,6 @@ class Solver(abc.ABC):
           General information about the solution search (use ``get_solution()`` for
             the actual solution).
         """
-        pass
 
     @abc.abstractmethod
     def get_incumbent_topology(self) -> nx.Graph:
@@ -482,7 +478,6 @@ class Solver(abc.ABC):
         This method does not route or rank solution-pool entries by detoured
         length. Use :meth:`get_solution` for the routed, post-processed result.
         """
-        pass
 
     @abc.abstractmethod
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
@@ -494,7 +489,6 @@ class Solver(abc.ABC):
         Returns:
           Topology graph S and routeset G.
         """
-        pass
 
     def _make_graph_attributes(self) -> dict[str, Any]:
         metadata, solution_info = self.metadata, self.solution_info
@@ -589,12 +583,10 @@ class PoolHandler(abc.ABC):
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
         "Get objective value from solution pool at position ``index``"
-        pass
 
     @abc.abstractmethod
     def _topology_from_mip_pool(self) -> nx.Graph:
         "Build topology from the pool solution at the last requested position"
-        pass
 
     def _incumbent_topology_from_pool(self) -> nx.Graph:
         """Decode pool entry zero, which must hold the best model objective."""

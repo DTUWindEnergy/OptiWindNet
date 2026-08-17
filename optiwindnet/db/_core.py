@@ -9,4 +9,4 @@ def _naive_utc_now():
 
     This does the equivalent of the deprecated datetime.datetime.utcnow().
     """
-    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)

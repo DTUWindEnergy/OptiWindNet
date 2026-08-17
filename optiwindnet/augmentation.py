@@ -4,8 +4,8 @@
 import logging
 import math
 import warnings
+from collections.abc import Callable
 from itertools import pairwise
-from typing import Callable
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -339,10 +339,8 @@ def _poisson_disc_filler_core(
                 # longest prior or current attempt, with T as a lower bound.
                 restart_floor = T
                 for a in iters_per_attempt:
-                    if a > restart_floor:
-                        restart_floor = a
-                if attempt_iter > restart_floor:
-                    restart_floor = attempt_iter
+                    restart_floor = max(restart_floor, a)
+                restart_floor = max(restart_floor, attempt_iter)
                 if remaining_iters > restart_floor:
                     # Restart with an empty field.
                     save_best(out_count)
@@ -381,10 +379,10 @@ def _poisson_disc_filler_core(
 
         # check overlap and repel_radius
         if not miss:
-            if not no_conflict(i, j, dartC):
-                miss = True
-            elif RepellerS is not None and not _clears(
-                RepellerS, repel_radius_sq, dartC
+            if (
+                not no_conflict(i, j, dartC)
+                or RepellerS is not None
+                and not _clears(RepellerS, repel_radius_sq, dartC)
             ):
                 miss = True
 
