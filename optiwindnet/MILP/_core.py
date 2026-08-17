@@ -203,14 +203,18 @@ class ModelOptions(dict):
         'balanced': (
             bool,
             False,
-            'Whether to enforce balanced subtrees (subtree loads differ at most '
-            'by one unit).',
+            (
+                'Whether to enforce balanced subtrees (subtree loads differ at most '
+                'by one unit).'
+            ),
         ),
         'max_feeders': (
             int,
             0,
-            'Number of feeders: the maximum if <feeder_limit = "specified">, '
-            'the exact count if <feeder_limit = "exactly">',
+            (
+                'Number of feeders: the maximum if <feeder_limit = "specified">, '
+                'the exact count if <feeder_limit = "exactly">'
+            ),
         ),
     }
 
@@ -350,7 +354,9 @@ def warmstart_links(
             raise OWNWarmupFailed(f'warmup_model() failed: model lacks S link {key}')
         yield (
             metadata.link_[key],
-            metadata.flow_[key] if key in metadata.flow_ else None,
+            # not `.get()`: `flow_` may be a Pyomo IndexedVar, which supports
+            # `in` and `[]` but is not a Mapping
+            metadata.flow_[key] if key in metadata.flow_ else None,  # noqa: SIM401
             flow,
         )
 

@@ -683,7 +683,7 @@ class Drawable:
                 elif shape == 'ring':
                     elements.append(svg.Use(href='#dt', x=x_pos + 20, y=y_pos))
             elif item_type == 'edge':
-                _, name, label, color, dash = item
+                _, _name, label, color, dash = item
                 attrs = {
                     'x1': x_pos,
                     'y1': y_pos,

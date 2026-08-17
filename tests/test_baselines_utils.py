@@ -31,7 +31,7 @@ def test_length_matrix_complete_no_inf():
     """complete=True builds a full dense matrix with no inf entries."""
     wfn = tiny_wfn()
     A = wfn.A
-    L, len_max = length_matrix_single_depot_from_G(A, scale=1.0, complete=True)
+    L, _len_max = length_matrix_single_depot_from_G(A, scale=1.0, complete=True)
     T, R = A.graph['T'], A.graph['R']
     assert L.shape == (T + R, T + R)
     # off-diagonal entries should all be finite (complete graph)

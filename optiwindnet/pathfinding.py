@@ -7,7 +7,7 @@ import math
 from bisect import bisect_left
 from collections import defaultdict, namedtuple
 from collections.abc import Generator
-from itertools import chain
+from itertools import chain, pairwise
 from typing import Any
 
 import networkx as nx
@@ -175,7 +175,7 @@ def _expand_P_paths_edge(
     if path[0] != s:
         path = path[::-1]
     expanded = [path[0]]
-    for u, v in zip(path[:-1], path[1:]):
+    for u, v in pairwise(path):
         expanded.extend(_expand_P_paths_edge(u, v, shortcuts)[1:])
     return expanded
 
@@ -185,7 +185,7 @@ def _expand_P_paths_path(
 ) -> list[int]:
     """Expand every shortcut hop along ``path`` into its underlying P-edges."""
     expanded = [path[0]]
-    for s, t in zip(path[:-1], path[1:]):
+    for s, t in pairwise(path):
         expanded.extend(_expand_P_paths_edge(s, t, shortcuts)[1:])
     return expanded
 
@@ -326,9 +326,9 @@ class PathFinder:
             tentative = []
             hooks_by_root = []
             for r in range(-R, 0):
-                feeders = set(
+                feeders = {
                     n for n in G.neighbors(r) if G[r][n].get('kind') == 'tentative'
-                )
+                }
                 tentative.extend((r, n) for n in feeders)
                 hooks_by_root.append(
                     np.fromiter(feeders, count=len(feeders), dtype=int)
@@ -463,7 +463,7 @@ class PathFinder:
             )
             for ae, (subtree, mp) in contour_mps.items():
                 chain_seq = (ae[0], *mp, ae[1])
-                for pos, (a, b) in enumerate(zip(chain_seq[:-1], chain_seq[1:])):
+                for pos, (a, b) in enumerate(pairwise(chain_seq)):
                     egp.add((a, b) if a < b else (b, a))
                     if not planar.has_edge(a, b):
                         diag_locs[(a, b) if a < b else (b, a)].append((ae, pos))
@@ -499,7 +499,7 @@ class PathFinder:
         contour_diags = set()
         for ae, (subtree, mp) in contour_mps.items():
             chain_seq = (ae[0], *mp, ae[1])
-            for a, b in zip(chain_seq[:-1], chain_seq[1:]):
+            for a, b in pairwise(chain_seq):
                 if not planar.has_edge(a, b):
                     contour_diags.add((a, b) if a < b else (b, a))
 
@@ -546,13 +546,16 @@ class PathFinder:
             for d2 in contour_diags:
                 if d1 < d2:
                     b1, b2 = base_edge.get(d1), base_edge.get(d2)
-                    if b1 is not None and b2 is not None:
-                        if (
+                    if (
+                        b1 is not None
+                        and b2 is not None
+                        and (
                             b1 == b2
                             or b1 in quad_sides.get(d2, ())
                             or b2 in quad_sides.get(d1, ())
-                        ):
-                            conflicts.add((d1, d2))
+                        )
+                    ):
+                        conflicts.add((d1, d2))
 
         # 4. Resolve conflicts directly by scheduling de-shortcuts
         to_deshortcut = {}
@@ -576,7 +579,7 @@ class PathFinder:
             contour_diag_locs = defaultdict(list)
             for ae, (subtree, mp) in contour_mps.items():
                 chain_seq = (ae[0], *mp, ae[1])
-                for pos, (a, b) in enumerate(zip(chain_seq[:-1], chain_seq[1:])):
+                for pos, (a, b) in enumerate(pairwise(chain_seq)):
                     k = (a, b) if a < b else (b, a)
                     if k in to_deshortcut:
                         contour_diag_locs[k].append((ae, pos))
@@ -612,7 +615,7 @@ class PathFinder:
         # clearly, rather than cryptically deep in the chain builder.
         for fence in fences:
             seq = (fence.endpoints[0], *fence.primes_on_constraint, fence.endpoints[1])
-            for a, b in zip(seq[:-1], seq[1:]):
+            for a, b in pairwise(seq):
                 if not P.has_edge(a, b):
                     raise ValueError(
                         'PathFinder: fence for subtree %d (A-edge %s) hop %d-%d '
@@ -1630,7 +1633,7 @@ class PathFinder:
             x_1, x_k = spokes[0], spokes[-1]
             _launch(w, x_1, 1)
             _launch(x_k, w, 0)
-            for xi, xj in zip(spokes, spokes[1:]):
+            for xi, xj in pairwise(spokes):
                 if (xi, xj) in portal_set:
                     _launch(xi, xj, 1)
         else:
@@ -2033,7 +2036,7 @@ class PathFinder:
         """
         get_best_path = self.get_best_path
         for n in range(self.T):
-            path, dists = get_best_path(n)
+            path, _dists = get_best_path(n)
             nx.add_path(G, path, kind='virtual')
 
     def best_paths_overlay(self) -> nx.Graph:
@@ -2067,7 +2070,7 @@ class PathFinder:
         scaff = scaffolded(self.G, P=self.P)
         for endpoints, primes_on_constraint, _ in self.fences:
             chain = (endpoints[0], *primes_on_constraint, endpoints[1])
-            for a, b in zip(chain[:-1], chain[1:]):
+            for a, b in pairwise(chain):
                 st = (a, b) if a < b else (b, a)
                 if st in scaff.edges and 'kind' in scaff.edges[st]:
                     del scaff.edges[st]['kind']

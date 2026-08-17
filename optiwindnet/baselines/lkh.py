@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from itertools import chain
+from itertools import chain, pairwise
 from pathlib import Path
 from typing import Any
 
@@ -206,7 +206,7 @@ def _route_from_tour(tour_fpath: str, L: np.ndarray) -> tuple[list[int], int]:
     depot = L.shape[0]  # 1-based id of the depot (last matrix index + 1)
     cut = nodes.index(depot)
     seq = [n - 1 for n in chain(nodes[cut + 1 :], nodes[:cut])]
-    hops = sum(int(L[u, v]) for u, v in zip(seq[:-1], seq[1:]))
+    hops = sum(int(L[u, v]) for u, v in pairwise(seq))
     cost_fwd = int(L[seq[0], -1]) + hops
     cost_rev = int(L[seq[-1], -1]) + hops
     if cost_rev < cost_fwd:
@@ -945,12 +945,11 @@ def lkh3(
     solve_capacity = 2 * capacity if ringed else capacity
     if vehicles is not None:
         vehicles_min = math.ceil(T / solve_capacity)
-        if vehicles != vehicles_min:
-            if R > 1:
-                warn(
-                    'For multi-root instances, the parameter vehicles (feeders) can '
-                    'only be None or the minimum feasible: setting to the minimum.'
-                )
+        if vehicles != vehicles_min and R > 1:
+            warn(
+                'For multi-root instances, the parameter vehicles (feeders) can '
+                'only be None or the minimum feasible: setting to the minimum.'
+            )
         vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
         feeders_above_min = vehicles - vehicles_min
     else:

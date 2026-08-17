@@ -276,7 +276,7 @@ def gplot(
         pos,
         ax=ax,
         font_color={
-            n: (c.root_edge if n < 0 else 'k') for n in label_options['labels'].keys()
+            n: (c.root_edge if n < 0 else 'k') for n in label_options['labels']
         },
         **label_options,
     )
@@ -374,7 +374,7 @@ def compare(positional=None, **title2G_dict):
             }
         else:
             title2G_dict[''] = positional
-    fig, axes = plt.subplots(1, len(title2G_dict), squeeze=False)
+    _fig, axes = plt.subplots(1, len(title2G_dict), squeeze=False)
     for ax, (title, G) in zip(axes.ravel(), title2G_dict.items()):
         gplot(G, ax=ax, node_tag=None)
         creator = G.graph.get('creator', 'no edges')

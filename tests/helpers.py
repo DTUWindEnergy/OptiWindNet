@@ -184,7 +184,7 @@ def assert_graph_equal(
         if isinstance(a, dict) and isinstance(b, dict):
             if a.keys() != b.keys():
                 return False
-            return all(_eq(a[k], b[k]) for k in a.keys())
+            return all(_eq(a[k], b[k]) for k in a)
         # numpy arrays
         if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
             if a.dtype.kind == 'f' or b.dtype.kind == 'f':

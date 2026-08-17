@@ -521,7 +521,7 @@ def test_get_network_returns_array_smoke():
     assert np.all((data['cable'] >= 0) & (data['cable'] < max(1, n_cables)))
 
     # consistency with graph edges: every (src,tgt) should exist in wfn.G (undirected)
-    edges_in_G = set(tuple(sorted(e)) for e in wfn.G.edges())
+    edges_in_G = {tuple(sorted(e)) for e in wfn.G.edges()}
     for row in data:
         pair = tuple(sorted((int(row['src']), int(row['tgt']))))
         assert pair in edges_in_G, (

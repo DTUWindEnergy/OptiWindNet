@@ -178,7 +178,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         turbines_latlon = _translate_latlonstr(parsed_dict['TURBINES'])
         zone_tally = _utm_zone_tally((lat, lon) for _label, lat, lon in turbines_latlon)
         (zone_number, zone_letter), _ = zone_tally.most_common(1)[0]
-    Border, BorderLabel = coordinate_parser[format](
+    Border, _BorderLabel = coordinate_parser[format](
         parsed_dict['EXTENTS'], zone_number, zone_letter
     )
     Root, RootLabel = coordinate_parser[format](
@@ -221,7 +221,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         # obstacle has to be a list of arrays, so parsing is a bit different
         indices = []
         for obstacle_entry in parsed_dict['OBSTACLES']:
-            obstacleC, poly_tag = coordinate_parser[format](
+            obstacleC, _poly_tag = coordinate_parser[format](
                 obstacle_entry, zone_number, zone_letter
             )
 

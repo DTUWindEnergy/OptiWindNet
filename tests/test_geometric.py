@@ -311,19 +311,19 @@ def test_complete_graph_no_prune():
 
 def test_rotating_calipers_square():
     hull = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-    calipers, angle_val, metric, bbox = rotating_calipers(hull, metric='height')
+    _calipers, _angle_val, metric, _bbox = rotating_calipers(hull, metric='height')
     assert np.isclose(metric, 1.0)
 
 
 def test_rotating_calipers_rectangle():
     hull = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]])
-    calipers, angle_val, metric, bbox = rotating_calipers(hull, metric='height')
+    _calipers, _angle_val, metric, _bbox = rotating_calipers(hull, metric='height')
     assert np.isclose(metric, 1.0)
 
 
 def test_rotating_calipers_area_metric():
     hull = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]])
-    calipers, angle_val, metric, bbox = rotating_calipers(hull, metric='area')
+    _calipers, _angle_val, metric, _bbox = rotating_calipers(hull, metric='area')
     assert np.isclose(metric, 2.0)
 
 
@@ -486,5 +486,5 @@ def test_is_bunch_split_by_corner_false():
     b = np.array([1.0, -1.0])
     # both points outside the rightward cone
     bunch = np.array([[-1.0, 0.5], [-1.0, -0.5]])
-    split, inside, outside = is_bunch_split_by_corner(bunch, a, o, b)
+    split, _inside, _outside = is_bunch_split_by_corner(bunch, a, o, b)
     assert not split

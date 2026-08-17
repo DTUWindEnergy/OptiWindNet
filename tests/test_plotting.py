@@ -20,7 +20,7 @@ def test_gplot_returns_axes(wfn):
 
 def test_gplot_with_provided_axes(wfn):
     """When an existing Axes is passed, gplot reuses it and returns the same object."""
-    fig, ax = plt.subplots()
+    _fig, ax = plt.subplots()
     result = gplot(wfn.G, ax=ax)
     assert result is ax
     plt.close('all')

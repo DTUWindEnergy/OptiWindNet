@@ -603,7 +603,7 @@ def constructor(
     if use_blockage or straight_feeder_route:
         add_link_blockmap(A)
         angle__, angle_rank__ = A.graph['angle__'], A.graph['angle_rank__']
-        union_limits, angle_ccw = angle_oracles_factory(angle__, angle_rank__)
+        union_limits, _angle_ccw = angle_oracles_factory(angle__, angle_rank__)
 
     def drop_target(subroot, payload):
         """Drop ``subroot`` from the ``who_targets_`` set of the peer it targets in

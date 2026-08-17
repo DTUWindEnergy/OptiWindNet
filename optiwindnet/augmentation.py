@@ -378,13 +378,12 @@ def _poisson_disc_filler_core(
                         break
 
         # check overlap and repel_radius
-        if not miss:
-            if (
-                not no_conflict(i, j, dartC)
-                or RepellerS is not None
-                and not _clears(RepellerS, repel_radius_sq, dartC)
-            ):
-                miss = True
+        if not miss and (
+            not no_conflict(i, j, dartC)
+            or RepellerS is not None
+            and not _clears(RepellerS, repel_radius_sq, dartC)
+        ):
+            miss = True
 
         ema_hit_rate *= 1 - hit_rate_decay
         if miss:
@@ -604,7 +603,7 @@ def poisson_disc_filler(
 
     # useful plot for debugging purposes only
     if plot:
-        fig, ax = plt.subplots(layout='constrained')
+        _fig, ax = plt.subplots(layout='constrained')
         ax.pcolormesh(cell_covers_polygon__.T + 2 * cell_intercepts_polygon__.T)
         ax.plot(*np.vstack((BorderS, BorderS[:1])).T, 'k', lw=1)
         for obstacleS_ in obstacleS__:
@@ -824,6 +823,6 @@ def iCDF_factory(
 
         Maps from ``u ~ uniform(0, 1)`` to random variable ``T ~ custom_PDF()``.
         """
-        return int(round(integral_inv(u * area_under_curve + offset)))
+        return round(integral_inv(u * area_under_curve + offset))
 
     return iCDF

@@ -1,4 +1,5 @@
 import copy
+import itertools
 import math
 import pickle
 
@@ -84,7 +85,7 @@ def _path_form_S(R, paths):
     S.add_nodes_from(range(-R, 0))
     for root, ordered in paths:
         S.add_edge(root, ordered[0])
-        S.add_edges_from(zip(ordered, ordered[1:]))
+        S.add_edges_from(itertools.pairwise(ordered))
     return S
 
 

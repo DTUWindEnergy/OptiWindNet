@@ -629,7 +629,7 @@ def polyline_rays_at_point(
       the polyline at ``pC``.
     """
     rays = []
-    for aC, bC in zip(coords[:-1], coords[1:]):
+    for aC, bC in pairwise(coords):
         if point_to_segment_distance(pC, aC, bC) > tol:
             continue
         if np.hypot(*(aC - pC)).item() > tol:

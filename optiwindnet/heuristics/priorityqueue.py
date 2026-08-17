@@ -43,7 +43,7 @@ class PriorityQueue(list):
 
     def top(self):
         "Return the payload with lowest priority."
-        priority, count, tag, payload = heappop(self)
+        priority, _count, tag, payload = heappop(self)
         del self.tags[tag]
         self.strip()
         return priority, tag, payload

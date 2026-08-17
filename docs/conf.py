@@ -385,10 +385,9 @@ epub_exclude_files = ['search.html']
 
 def skip_empty_all_submodules(app, what, name, obj, skip, options):
     # Only consider modules
-    if what == 'module':
-        if obj.all is not None and len(obj.all) == 0:
-            # __all__ is empty -> do not document this module
-            return True
+    if what == 'module' and obj.all is not None and len(obj.all) == 0:
+        # __all__ is empty -> do not document this module
+        return True
     return None  # Use default behavior otherwise
 
 

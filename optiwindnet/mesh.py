@@ -269,7 +269,7 @@ def _planar_from_cdt_triangles(
     halfedges = np.empty((num_half_edges, 3), dtype=np.int_)
     ref_is_cw_ = np.empty((num_half_edges,), dtype=np.bool_)
     _halfedges_from_triangulation(triangleI, neighborI, halfedges, ref_is_cw_)
-    edges = set((u.item(), v.item()) for u, v in halfedges[:, :2] if u < v)
+    edges = {(u.item(), v.item()) for u, v in halfedges[:, :2] if u < v}
     # create triangles ordered list
 
     return (halfedges, ref_is_cw_), edges, triangles
@@ -1098,7 +1098,7 @@ def make_planar_embedding(
         cw_or_ccw = 'ccw' if ring.is_ccw else 'cw'
         vertices = tuple(border_vertex_from_xy[xy] for xy in ring.coords)
         rev = vertices[-2]
-        for cur, fwd in zip(vertices[:-1], vertices[1:]):
+        for cur, fwd in pairwise(vertices):
             while P[cur][fwd][cw_or_ccw] != rev:
                 u, v = cur, P[cur][fwd][cw_or_ccw]
                 P.remove_edge(u, v)
@@ -1109,7 +1109,7 @@ def make_planar_embedding(
     #  changes_super = _flip_triangles_obstacles_super(
     #          P, T, B + 3, VertexC, max_tri_AR=max_tri_AR)
 
-    convex_hull, to_remove, conc_outer_edges = _hull_processor(
+    _convex_hull, to_remove, conc_outer_edges = _hull_processor(
         P, T, supertriangle, vertex2conc_id_map, num_holes
     )
     P.remove_edges_from(to_remove)
@@ -1175,7 +1175,7 @@ def make_planar_embedding(
     # this adds diagonals to P_paths, but not diagonals that cross constraints
     border_edges = set()
     if len(border) > 2:
-        for s, t in ((border[-1], border[0]), *zip(border[:-1], border[1:])):
+        for s, t in ((border[-1], border[0]), *pairwise(border)):
             border_edges.add((s, t) if s < t else (t, s))
 
     P_diags_ = {}
