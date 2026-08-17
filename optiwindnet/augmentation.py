@@ -235,15 +235,13 @@ def _poisson_disc_filler_core(
 
     # mask for the 20 neighbors
     # (5x5 grid excluding corners and center)
-    neighbormask = np.array(
-        (
-            (False, True, True, True, False),
-            (True, True, True, True, True),
-            (True, True, False, True, True),
-            (True, True, True, True, True),
-            (False, True, True, True, False),
-        )
-    )
+    neighbormask = np.array((
+        (False, True, True,  True, False),
+        (True,  True, True,  True, True),
+        (True,  True, False, True, True),
+        (True,  True, True,  True, True),
+        (False, True, True,  True, False),
+    ))  # fmt: skip
 
     # points to be returned by this function
     points = np.empty((T, 2), dtype=np.float64)
