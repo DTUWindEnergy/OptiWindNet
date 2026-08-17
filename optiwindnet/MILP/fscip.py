@@ -113,34 +113,34 @@ class SolverFSCIP(Solver, PoolHandler):
             if 'ubiquity_generator' in applied_options:
                 ug_params = applied_options.pop('ubiquity_generator')
             else:
-                ug_params = dict(
-                    Quiet='FALSE',
+                ug_params = {
+                    'Quiet': 'FALSE',
                     #  OutputParaParams = 2,
-                    OutputParaParams=0,
-                    OutputTabularSolvingStatus='TRUE',
-                    TabularSolvingStatusInterval=1,
-                    LogSolvingStatus='TRUE',
+                    'OutputParaParams': 0,
+                    'OutputTabularSolvingStatus': 'TRUE',
+                    'TabularSolvingStatusInterval': 1,
+                    'LogSolvingStatus': 'TRUE',
                     # There is a bug with fscip in scipoptsuite 10.0.0:
                     #   When the ramp-up process ends, the program terminates.
                     #   The only way to make it search for a given duration
                     #   is to skip the ramp up entirely. Quite poor performance
                     #   when compared to SCIP's solveConcurrent().
-                    RampUpPhaseProcess=0,
+                    'RampUpPhaseProcess': 0,
                     #  RacingRampUpTerminationCriteria=1,
                     #  StopRacingTimeLimit=15,
-                    RacingStatBranching='FALSE',
+                    'RacingStatBranching': 'FALSE',
                     # not clear how TRUE and FALSE in LocalBranching compare
                     #  LocalBranching='TRUE',
-                    LogSolvingStatusFilePath='"./"',
-                    LogTasksTransferFilePath='"./"',
-                    SolutionFilePath='"./"',
-                    CheckpointFilePath='"./"',
-                    TempFilePath='"./"',
-                )
+                    'LogSolvingStatusFilePath': '"./"',
+                    'LogTasksTransferFilePath': '"./"',
+                    'SolutionFilePath': '"./"',
+                    'CheckpointFilePath': '"./"',
+                    'TempFilePath': '"./"',
+                }
             ug_params['TimeLimit'] = str(time_limit)
             with open(ug_params_path, 'w') as f:
                 f.write('\n'.join(f'{k} = {v}' for k, v in ug_params.items()))
-            options_lc = dict()
+            options_lc = {}
             options_lc['limits/gap'] = str(mip_gap)
             with open(lc_settings_path, 'w') as f:
                 f.write('\n'.join(f'{k} = {v}' for k, v in options_lc.items()))
@@ -298,7 +298,7 @@ class SolverFSCIP(Solver, PoolHandler):
             relgap=1.0 - bound / objective,
             termination=termination,
         )
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info

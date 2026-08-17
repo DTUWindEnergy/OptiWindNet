@@ -199,20 +199,20 @@ class ModelOptions(dict):
         for kind in (Topology, FeederRoute, FeederLimit)
     }
     # this has to be kept in sync with make_min_length_model()
-    simple = dict(
-        balanced=(
+    simple = {
+        'balanced': (
             bool,
             False,
             'Whether to enforce balanced subtrees (subtree loads differ at most '
             'by one unit).',
         ),
-        max_feeders=(
+        'max_feeders': (
             int,
             0,
             'Number of feeders: the maximum if <feeder_limit = "specified">, '
             'the exact count if <feeder_limit = "exactly">',
         ),
-    )
+    }
 
     # `with_signature` rewrites `__init__` at import time so that `help()`,
     # `inspect.signature` and IDE introspection show the real options. Type

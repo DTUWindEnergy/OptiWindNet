@@ -63,18 +63,18 @@ def _make_A(T: int = 4, R: int = 1, edges=()) -> nx.Graph:
 
 
 def _fake_output(routes, *, cost=1.0, vehicles=2):
-    return dict(
-        routes=routes,
-        penalty=0,
-        minimum=str(int(cost * 1e5)),
-        cost=cost,
-        log='',
-        stderr='',
-        elapsed_time=0.01,
-        solution_time=0.0,
-        vehicles=vehicles,
-        seed=0,
-    )
+    return {
+        'routes': routes,
+        'penalty': 0,
+        'minimum': str(int(cost * 1e5)),
+        'cost': cost,
+        'log': '',
+        'stderr': '',
+        'elapsed_time': 0.01,
+        'solution_time': 0.0,
+        'vehicles': vehicles,
+        'seed': 0,
+    }
 
 
 def test_initial_tours_from_warmstart_walked_in_branch_order():

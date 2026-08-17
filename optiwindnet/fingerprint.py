@@ -39,8 +39,8 @@ def fingerprint_function(function: FunctionType) -> dict[str, bytes | str]:
     unchanged.
     """
     code = function.__code__
-    return dict(
-        funhash=sha256(code.co_code).digest(),
-        funfile=code.co_filename,
-        funname=code.co_name,
-    )
+    return {
+        'funhash': sha256(code.co_code).digest(),
+        'funfile': code.co_filename,
+        'funname': code.co_name,
+    }

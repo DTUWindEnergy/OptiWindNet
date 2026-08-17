@@ -111,7 +111,7 @@ class SolverSCIP(Solver, PoolHandler):
         model.setParams(applied_options)
         model.setParam('limits/gap', mip_gap)
         model.setParam('limits/time', time_limit)
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         if not verbose:
             model.setParam('display/verblevel', 1)  # 1: warnings; 0: no output
         info('>>> SCIP parameters <<<\n%s\n', model.getParams())
@@ -402,13 +402,13 @@ def make_min_length_model(
     # Store metadata #
     ##################
 
-    model_options = dict(
-        topology=topology,
-        feeder_route=feeder_route,
-        feeder_limit=feeder_limit,
-        max_feeders=max_feeders,
-        balanced=balanced,
-    )
+    model_options = {
+        'topology': topology,
+        'feeder_route': feeder_route,
+        'feeder_limit': feeder_limit,
+        'max_feeders': max_feeders,
+        'balanced': balanced,
+    }
     metadata = ModelMetadata(
         R,
         T,

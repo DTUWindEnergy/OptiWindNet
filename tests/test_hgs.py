@@ -219,14 +219,14 @@ def test_balanced_exact_vehicles_with_slack(monkeypatch):
 @pytest.mark.parametrize(
     ('kwargs', 'exception', 'match'),
     [
-        (dict(vehicles=None), ValueError, 'requires `vehicles` to be set'),
-        (dict(vehicles=3, balanced=False), NotImplementedError, '`balanced`=True'),
-        (dict(vehicles=1), ValueError, 'below the minimum necessary'),
-        (dict(vehicles=13), ValueError, 'above the number of terminals'),
+        ({'vehicles': None}, ValueError, 'requires `vehicles` to be set'),
+        ({'vehicles': 3, 'balanced': False}, NotImplementedError, '`balanced`=True'),
+        ({'vehicles': 1}, ValueError, 'below the minimum necessary'),
+        ({'vehicles': 13}, ValueError, 'above the number of terminals'),
     ],
 )
 def test_exact_vehicles_validation(kwargs, exception, match):
-    kwargs = dict(balanced=True) | kwargs
+    kwargs = {'balanced': True} | kwargs
     with pytest.raises(exception, match=re.escape(match)):
         hgs_mod.hgs_cvrp(
             _make_A(T=12),

@@ -198,7 +198,7 @@ class Drawable:
         VertexS[:, 1] = h - VertexS[:, 1]
         VertexS = VertexS.round().astype(int)
         self.VertexS = VertexS
-        self.bottom_right_anchor = dict(x=round(W * scale + margin), y=h - margin)
+        self.bottom_right_anchor = {'x': round(W * scale + margin), 'y': h - margin}
         self.h_orig = h
         if self.legend:
             h = h + 80
@@ -307,7 +307,7 @@ class Drawable:
             else:
                 # single grouping level
                 edgesE = edges_super_group
-                extra_attrs = dict(stroke_width=_LINK_WIDTH)
+                extra_attrs = {'stroke_width': _LINK_WIDTH}
             for edge_kind, lines in edge_lines.items():
                 edgesE.append(
                     self._kind_group(
@@ -379,11 +379,11 @@ class Drawable:
                 points__[G[s][t].get('cable', None)].append(
                     ' '.join(str(c) for c in VertexS[hops].flat)
                 )
-        common_attr: dict[str, Any] = dict(
-            stroke=c.kind2color['detour'],
-            stroke_dasharray=[18, 15],
-            fill='none',
-        )
+        common_attr: dict[str, Any] = {
+            'stroke': c.kind2color['detour'],
+            'stroke_dasharray': [18, 15],
+            'fill': 'none',
+        }
         if None in points__:
             detours = [
                 svg.G(

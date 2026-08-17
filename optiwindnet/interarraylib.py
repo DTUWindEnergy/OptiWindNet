@@ -1600,7 +1600,7 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     # mappings to quickly obtain all nodes on a subtree
     num_subtree = sum(G.degree[r] for r in range(-R, 0))
     nodes_from_subtree_id = np.fromiter(
-        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+        ([] for _ in range(num_subtree)), count=num_subtree, dtype=object
     )
     subtree_from_node = np.empty((T,), dtype=object)
     for n, subtree_id in G.nodes(data='subtree'):
@@ -1668,11 +1668,11 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     S_T = nx.subgraph_view(Sʹ, filter_node=lambda n: n >= 0)
     num_subtree = sum(S.degree[r] for r in range(-R, 0))
     nodes_from_subtree_id = np.fromiter(
-        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+        ([] for _ in range(num_subtree)), count=num_subtree, dtype=object
     )
     subtree_from_node = np.empty((T,), dtype=object)
     headtail_from_subtree_id = np.fromiter(
-        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+        ([] for _ in range(num_subtree)), count=num_subtree, dtype=object
     )
     headtail_from_node = np.empty((T,), dtype=object)
     for n, subtree_id in S.nodes(data='subtree'):

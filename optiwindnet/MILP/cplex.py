@@ -22,10 +22,10 @@ error, info = _lggr.error, _lggr.info
 class SolverCplex(SolverPyomo, PoolHandler):
     name: str = 'pyomo.cplex'
     # default options to pass to Pyomo solver
-    options: dict = dict(
+    options: dict = {
         # default solution pool size limit is 2100000000
         # mip_pool_replace=1,  # irrelevant with the default pool size
-        parallel=-1,  # opportunistic parallelism (non-deterministic)
+        'parallel': -1,  # opportunistic parallelism (non-deterministic)
         # emphasis_mip:
         #   0|BALANCED|(default) Balance optimality and feasibility; default
         #   1|FEASIBILITY|Emphasize feasibility over optimality
@@ -33,8 +33,8 @@ class SolverCplex(SolverPyomo, PoolHandler):
         #   3|BESTBOUND|Emphasize moving best bound
         #   4|HIDDENFEAS|Emphasize finding hidden feasible solutions
         #   5|HEURISTIC|Emphasize finding high quality feasible solutions earlier
-        emphasis_mip=4,
-    )
+        'emphasis_mip': 4,
+    }
 
     def __init__(self) -> None:
         self.solver = pyo.SolverFactory('cplex_persistent')

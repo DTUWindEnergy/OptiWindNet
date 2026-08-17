@@ -157,13 +157,13 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
         handle=routeset.handle,
         capacity=routeset.capacity,
         creator=routeset.creator,
-        method=dict(
-            solver_name=routeset.method.solver_name,
-            timestamp=routeset.method.timestamp,
-            funname=routeset.method.funname,
-            funfile=routeset.method.funfile,
-            funhash=routeset.method.funhash,
-        ),
+        method={
+            'solver_name': routeset.method.solver_name,
+            'timestamp': routeset.method.timestamp,
+            'funname': routeset.method.funname,
+            'funfile': routeset.method.funfile,
+            'funhash': routeset.method.funhash,
+        },
         runtime=routeset.runtime,
         method_options=routeset.method.options,
         **misc,
@@ -210,19 +210,19 @@ def packnodes(G: nx.Graph) -> PackType:
     constraint_vertices = list(
         chain((G.graph.get('border', ()),), G.graph.get('obstacles', ()))
     )
-    pack = dict(
-        T=T,
-        R=R,
-        B=B,
-        name=name,
-        VertexC=VertexC_npy,
-        constraint_groups=[p.shape[0] for p in constraint_vertices],
-        constraint_vertices=np.concatenate(
+    pack = {
+        'T': T,
+        'R': R,
+        'B': B,
+        'name': name,
+        'VertexC': VertexC_npy,
+        'constraint_groups': [p.shape[0] for p in constraint_vertices],
+        'constraint_vertices': np.concatenate(
             constraint_vertices, dtype=int, casting='unsafe'
         ).tolist(),
-        landscape_angle=G.graph.get('landscape_angle', 0.0),
-        digest=digest,
-    )
+        'landscape_angle': G.graph.get('landscape_angle', 0.0),
+        'digest': digest,
+    }
     return pack
 
 
@@ -334,20 +334,20 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     handle = G.graph.get('handle')
     if handle is None:
         handle = make_handle(G.graph['name'])
-    packed_G = dict(
-        R=R,
-        T=T,
-        C=C,
-        D=D,
-        handle=handle,
-        capacity=G.graph['capacity'],
-        length=length,
-        creator=G.graph['creator'],
-        runtime=G.graph['runtime'],
-        feeders_per_root=[len(G[root]) for root in range(-R, 0)],
-        misc=misc,
-        edges=terse.tolist(),
-    )
+    packed_G = {
+        'R': R,
+        'T': T,
+        'C': C,
+        'D': D,
+        'handle': handle,
+        'capacity': G.graph['capacity'],
+        'length': length,
+        'creator': G.graph['creator'],
+        'runtime': G.graph['runtime'],
+        'feeders_per_root': [len(G[root]) for root in range(-R, 0)],
+        'misc': misc,
+        'edges': terse.tolist(),
+    }
     # Optional fields
     if C + D > 0:
         packed_G['clone2prime'] = list(terse.clone2prime)

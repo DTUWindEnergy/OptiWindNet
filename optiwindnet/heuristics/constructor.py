@@ -588,13 +588,13 @@ def constructor(
         return detour_increase, union_span_, changes
 
     try:
-        find_union = dict(
-            esau_williams=find_union_esau_williams_tradeoff,
-            biased_EW=find_union_biased_EW_tradeoff,
-            rootlust=find_union_rootlust_tradeoff,
-            radial_EW=find_union_radial_EW_tradeoff,
-            ringed=find_union_ringed_tradeoff,
-        )[method]
+        find_union = {
+            'esau_williams': find_union_esau_williams_tradeoff,
+            'biased_EW': find_union_biased_EW_tradeoff,
+            'rootlust': find_union_rootlust_tradeoff,
+            'radial_EW': find_union_radial_EW_tradeoff,
+            'ringed': find_union_ringed_tradeoff,
+        }[method]
     except KeyError:
         raise ValueError(f'Unsupported constructor method: {method!r}')
     #  use_blockage = weigh_detours and method in ('rootlust', 'radial_EW')
@@ -1000,10 +1000,10 @@ def constructor(
         capacity=capacity_report,
         creator='constructor',
         iterations=i,
-        method_options=dict(
-            method=method,
-            fun_fingerprint=_constructor_fun_fingerprint,
-        ),
+        method_options={
+            'method': method,
+            'fun_fingerprint': _constructor_fun_fingerprint,
+        },
     )
     if radial_like:
         S.graph['num_insertions'] = num_insertions

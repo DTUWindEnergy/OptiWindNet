@@ -48,32 +48,32 @@ _optkey = {
 }
 # usage: _optname[solver_name].mipgap
 
-_default_options = dict(
+_default_options = {
     # Only options whose value improves on CBC's default are listed; any option
     # absent here uses CBC's default.
-    cbc=dict(
-        threads=physical_core_count(),
-        timeMode='elapsed',
+    'cbc': {
+        'threads': physical_core_count(),
+        'timeMode': 'elapsed',
         # the parameters below and more can be experimented with
         # http://www.decom.ufop.br/haroldo/files/cbcCommandLine.pdf
-        nodeStrategy='downFewest',
+        'nodeStrategy': 'downFewest',
         # Heuristics
-        Dins='on',
-        VndVariableNeighborhoodSearch='on',
-        Rens='on',
+        'Dins': 'on',
+        'VndVariableNeighborhoodSearch': 'on',
+        'Rens': 'on',
         # Cuts
-        mixedIntegerRoundingCuts='on',
-        flowCoverCuts='on',
-        cliqueCuts='off',
-        knapsackCuts='off',
-        zeroHalfCuts='off',
-    ),
-    highs=dict(
-        parallel='on',
+        'mixedIntegerRoundingCuts': 'on',
+        'flowCoverCuts': 'on',
+        'cliqueCuts': 'off',
+        'knapsackCuts': 'off',
+        'zeroHalfCuts': 'off',
+    },
+    'highs': {
+        'parallel': 'on',
         # threads=0,  # 0 means automatic and is HiGHS's default
-    ),
-    scip={},
-)
+    },
+    'scip': {},
+}
 
 
 class SolverPyomo(Solver):
@@ -121,7 +121,7 @@ class SolverPyomo(Solver):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = self.options | options
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         solver.options.update(applied_options)
         solver.options.update(
             {
@@ -607,13 +607,13 @@ def make_min_length_model(
     # Store metadata #
     ##################
 
-    model_options = dict(
-        topology=topology,
-        feeder_route=feeder_route,
-        feeder_limit=feeder_limit,
-        max_feeders=max_feeders,
-        balanced=balanced,
-    )
+    model_options = {
+        'topology': topology,
+        'feeder_route': feeder_route,
+        'feeder_limit': feeder_limit,
+        'max_feeders': max_feeders,
+        'balanced': balanced,
+    }
     metadata = ModelMetadata(
         R,
         T,

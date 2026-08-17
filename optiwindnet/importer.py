@@ -125,10 +125,10 @@ def _parser_planar(entry_list, force_zone_number=None, force_zone_letter=None):
     return np.array(coords, dtype=float), (labels if any(labels) else ())
 
 
-coordinate_parser = dict(
-    latlon=_parser_latlon,
-    planar=_parser_planar,
-)
+coordinate_parser = {
+    'latlon': _parser_latlon,
+    'planar': _parser_planar,
+}
 
 
 def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:

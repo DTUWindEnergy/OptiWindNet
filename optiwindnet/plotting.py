@@ -82,11 +82,11 @@ def gplot(
     c = Colors(dark)
 
     if node_tag is None:
-        kw_axes = dict(aspect='equal', xmargin=0.005, ymargin=0.005)
+        kw_axes = {'aspect': 'equal', 'xmargin': 0.005, 'ymargin': 0.005}
         root_size = node_size = NODESIZE
         detour_size = NODESIZE_DETOUR
     else:
-        kw_axes = dict(aspect='equal', xmargin=0.01, ymargin=0.01)
+        kw_axes = {'aspect': 'equal', 'xmargin': 0.01, 'ymargin': 0.01}
         root_size = NODESIZE_LABELED_ROOT
         detour_size = NODESIZE_LABELED_DETOUR
         node_size = NODESIZE_LABELED
@@ -103,19 +103,19 @@ def gplot(
 
     if ax is None:
         dpi = max(min_dpi, plt.rcParams['figure.dpi'])
-        kw_fig: dict[str, Any] = dict(frameon=False, layout='constrained', dpi=dpi)
+        kw_fig: dict[str, Any] = {'frameon': False, 'layout': 'constrained', 'dpi': dpi}
         fig = plt.figure(**(kw_fig | kwargs))
         ax = fig.add_subplot(**kw_axes)
     else:
         ax.set(**kw_axes)
     ax.set_axis_off()
     # draw farm border
-    border_opt = dict(
-        facecolor=c.border_face,
-        linestyle='dashed',
-        edgecolor=c.kind2color['border'],
-        linewidth=0.7,
-    )
+    border_opt = {
+        'facecolor': c.border_face,
+        'linestyle': 'dashed',
+        'edgecolor': c.kind2color['border'],
+        'linewidth': 0.7,
+    }
     if border is not None:
         borderC = VertexC[border]
 
@@ -244,33 +244,33 @@ def gplot(
     # draw labels
     label_options: dict[str, Any]
     if 'has_loads' in G.graph and node_tag == 'load':
-        label_options = dict(
-            labels={n: G.nodes[n].get('load', '-') for n in range(-R, T)},
-            font_size=(
+        label_options = {
+            'labels': {n: G.nodes[n].get('load', '-') for n in range(-R, T)},
+            'font_size': (
                 {t: FONTSIZE_LOAD for t in range(T)}
                 | {r: FONTSIZE_LABEL for r in range(-R, 0)}
             ),
-        )
+        }
     elif isinstance(node_tag, str):
         # 'label' or some other node attr from node_tag
-        label_options = dict(
-            labels={n: G.nodes[n].get(node_tag, '') for n in range(-R, T)},
-            font_size=(
+        label_options = {
+            'labels': {n: G.nodes[n].get(node_tag, '') for n in range(-R, T)},
+            'font_size': (
                 {t: FONTSIZE_LABEL for t in range(T)}
                 | {r: FONTSIZE_ROOT_LABEL for r in range(-R, 0)}
             ),
-        )
+        }
     elif node_tag is True:
         # use the node number as label
-        label_options = dict(
-            labels={n: str(n) for n in range(-R, T)},
-            font_size=(
+        label_options = {
+            'labels': {n: str(n) for n in range(-R, T)},
+            'font_size': (
                 {t: FONTSIZE_LABEL for t in range(T)}
                 | {r: FONTSIZE_LOAD for r in range(-R, 0)}
             ),
-        )
+        }
     else:
-        label_options = dict(labels={})
+        label_options = {'labels': {}}
     arts = nx.draw_networkx_labels(
         G,
         pos,

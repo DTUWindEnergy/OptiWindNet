@@ -72,13 +72,13 @@ def _solve_toy_incumbent(solver_name, topology):
         side_effect=AssertionError('incumbent retrieval must not route'),
     ):
         S = solver.get_incumbent_topology()
-    return dict(
-        terse=terse_links_from_S(S),
-        violations=validate_topology(S, _CAPACITY),
-        graph=dict(S.graph),
-        objective=solution_info.objective,
-        preserved_objective=solver.solution_info.objective,
-    )
+    return {
+        'terse': terse_links_from_S(S),
+        'violations': validate_topology(S, _CAPACITY),
+        'graph': dict(S.graph),
+        'objective': solution_info.objective,
+        'preserved_objective': solver.solution_info.objective,
+    }
 
 
 def _get_incumbent_before_solve(solver_name):
@@ -961,7 +961,7 @@ def _job_make_solve_params(backend, physical_core_count_value, kwargs):
         )
     # only plain values may cross back: unpickling an ortools object would load
     # ortools' native libraries into the parent process
-    probed = dict(threads=solve_params.threads)
+    probed = {'threads': solve_params.threads}
     if backend == 'cp_sat':
         probed['log_search_progress'] = solve_params.cp_sat.log_search_progress
     else:
@@ -979,12 +979,12 @@ def _job_make_solve_params(backend, physical_core_count_value, kwargs):
 def test_make_solve_parameters_thread_defaults(
     ortools_worker, backend, verbose, time_limit, mip_gap, expected_threads
 ):
-    kwargs = dict(
-        time_limit=time_limit,
-        mip_gap=mip_gap,
-        applied_options={},
-        verbose=verbose,
-    )
+    kwargs = {
+        'time_limit': time_limit,
+        'mip_gap': mip_gap,
+        'applied_options': {},
+        'verbose': verbose,
+    }
     probed, applied_options = ortools_worker.run(
         _job_make_solve_params, (backend, 6, kwargs), 30
     )
@@ -1210,8 +1210,8 @@ def test_model_options_materializes_every_default():
 @pytest.mark.parametrize(
     ('kwargs', 'expected'),
     [
-        (dict(max_feeders='3'), 'max_feeders must be int'),
-        (dict(balanced='yes'), 'balanced must be bool'),
+        ({'max_feeders': '3'}, 'max_feeders must be int'),
+        ({'balanced': 'yes'}, 'balanced must be bool'),
     ],
 )
 def test_model_options_rejects_wrong_scalar_type(kwargs, expected):

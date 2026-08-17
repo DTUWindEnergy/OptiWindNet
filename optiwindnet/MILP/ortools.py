@@ -145,7 +145,7 @@ class SolverORTools(Solver, PoolHandler):
             },
         )
         applied_options = self.options | options
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         solve_params = self._make_solve_parameters(
             time_limit, mip_gap, applied_options, verbose
         )
@@ -158,17 +158,17 @@ class SolverORTools(Solver, PoolHandler):
                 else []
             ),
         )
-        solve_kwargs = dict(
-            opt_model=model,
-            solver_type=_SOLVER_TYPES[self.backend],
-            params=solve_params,
-            model_params=model_params,
+        solve_kwargs = {
+            'opt_model': model,
+            'solver_type': _SOLVER_TYPES[self.backend],
+            'params': solve_params,
+            'model_params': model_params,
             # HiGHS triggers a deprecation warning when msg_cb is used
             # (setLogCallback → setCallback), so skip it for that backend.
-            msg_cb=self._msg_cb
+            'msg_cb': self._msg_cb
             if self.log_callback is not None and self.backend != 'highs'
             else None,
-        )
+        }
         if self.backend in _CALLBACK_BACKENDS:
             solve_kwargs['callback_reg'] = mathopt.CallbackRegistration(
                 events={mathopt.Event.MIP_SOLUTION},
@@ -570,13 +570,13 @@ def make_min_length_model(
     # Store metadata #
     ##################
 
-    model_options = dict(
-        topology=topology,
-        feeder_route=feeder_route,
-        feeder_limit=feeder_limit,
-        max_feeders=max_feeders,
-        balanced=balanced,
-    )
+    model_options = {
+        'topology': topology,
+        'feeder_route': feeder_route,
+        'feeder_limit': feeder_limit,
+        'max_feeders': max_feeders,
+        'balanced': balanced,
+    }
     metadata = ModelMetadata(
         R,
         T,

@@ -39,9 +39,9 @@ class SolverGurobi(SolverPyomo, PoolHandler):
 
     name: str = 'pyomo.gurobi'
     # default options to pass to Pyomo solver
-    options: dict = dict(
-        mipfocus=1,
-    )
+    options: dict = {
+        'mipfocus': 1,
+    }
 
     def __init__(self):
         # dummy attribute `solver` to be used by SolverPyomo.set_problem()
@@ -88,12 +88,12 @@ class SolverGurobi(SolverPyomo, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = self.options | options
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
         result = solver.solve(
             model,
             **self.solve_kwargs,
-            options=applied_options | dict(timelimit=time_limit, mipgap=mip_gap),
+            options=applied_options | {'timelimit': time_limit, 'mipgap': mip_gap},
             tee=verbose,
             load_solutions=False,
         )
