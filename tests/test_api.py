@@ -398,9 +398,11 @@ def test_deprecated_from_yaml_warns():
     assert wfn.L.graph['T'] == 12
 
 
-def test_from_own_yaml_invalid_path():
+def test_from_own_yaml_missing_path(tmp_path):
+    # A name that is legal on every platform: on Windows '>' and '*' are rejected by
+    # the filesystem itself, which reports EINVAL (a bare OSError) instead of ENOENT.
     with pytest.raises(FileNotFoundError):
-        WindFarmNetwork.from_own_yaml(r'not>a*path')
+        WindFarmNetwork.from_own_yaml(str(tmp_path / 'no_such_site.yaml'))
 
 
 def test_from_pbf_invalid_path():
