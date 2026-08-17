@@ -423,6 +423,8 @@ class Solver(abc.ABC):
 
     name: str
     metadata: ModelMetadata
+    # backend-native objects: every concrete solver sets both in `set_problem()`
+    model: Any
     solver: Any
     options: dict[str, Any]
     stopping: dict[str, Any]

@@ -99,7 +99,9 @@ def read_notebook(path: Path) -> nbformat.NotebookNode:
     # such as cell sources and stream output are rejoined into strings.
     nb = nbformat.reads(json.dumps(normalized_nb), as_version=4)
     nbformat.validate(nb)
-    return nb
+    # `reads` is typed as returning any of the versioned node types, but
+    # `as_version=4` pins it to a v4 NotebookNode
+    return nb  # pyrefly: ignore[bad-return]
 
 
 def is_milp(path: Path) -> bool:

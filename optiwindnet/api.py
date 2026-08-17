@@ -218,10 +218,10 @@ class WindFarmNetwork:
                 R=substationsC.shape[0],
                 T=T,
                 B=border_sizes.sum().item(),
-                **(
-                    {'border': np.arange(T, T + borderC.shape[0])}
+                border=(
+                    np.arange(T, T + borderC.shape[0])
                     if (borderC is not None and borderC.shape[0] >= 3)
-                    else {}
+                    else None
                 ),
                 obstacles=[np.arange(a, b) for a, b in obstacle_slicelims],
                 name=name,
@@ -243,7 +243,7 @@ class WindFarmNetwork:
         if polygon is not None:
             # check if any of the new turbine coordinates lie outside the polygon
             if isinstance(polygon, shp.Polygon):
-                out_of_bounds = shp.MultiPoint(self._VertexC[: self._T]) - self.polygon
+                out_of_bounds = shp.MultiPoint(self._VertexC[: self._T]) - polygon
             else:
                 # polygon is a Multipolygon of the obstacles
                 out_of_bounds = polygon & shp.MultiPoint(self._VertexC[: self._T])

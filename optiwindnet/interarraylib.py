@@ -929,7 +929,8 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         {n: label for n, label in A.nodes(data='label') if label is not None},
         'label',
     )
-    nx.set_node_attributes(G, 'wtg', 'kind')
+    # a scalar `values` is applied to every node; the stubs only cover mappings
+    nx.set_node_attributes(G, 'wtg', 'kind')  # pyrefly: ignore[no-matching-overload]
     for r in range(-R, 0):
         G.nodes[r]['kind'] = 'oss'
     if 'is_normalized' in A.graph:
@@ -1956,6 +1957,8 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
         if attr in scaff.graph:
             del scaff.graph[attr]
     R, T, B, C, D = (G.graph.get(k, 0) for k in ['R', 'T', 'B', 'C', 'D'])
+    # a scalar `values` is applied to every edge; the stubs only cover mappings
+    # pyrefly: ignore[no-matching-overload]
     nx.set_edge_attributes(scaff, 'scaffold', name='kind')
     constraints = P.graph.get('constraint_edges', [])
     for edge in constraints:

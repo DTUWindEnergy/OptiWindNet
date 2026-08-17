@@ -6,6 +6,7 @@ import math
 import warnings
 from collections.abc import Callable, Sequence
 from itertools import pairwise
+from typing import cast
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -55,9 +56,9 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
     Returns:
       ``True`` if ``point`` clears all discs centered on ``RepellerC``.
     """
-    return (
-        ((point[np.newaxis, :] - RepellerC) ** 2).sum(axis=1) >= repel_radius_sq
-    ).all()
+    return bool(
+        (((point[np.newaxis, :] - RepellerC) ** 2).sum(axis=1) >= repel_radius_sq).all()
+    )
 
 
 @nb.njit(cache=True, inline='always')
@@ -224,8 +225,12 @@ def _poisson_disc_filler_core(
     repel_radius_sq: float,
     RepellerS: CoordPairs | None,
     rng: np.random.Generator,
-) -> CoordPairs:
-    """This is the numba-compilable core called by :func:`poisson_disc_filler`."""
+) -> tuple[CoordPairs, list[int], int]:
+    """This is the numba-compilable core called by :func:`poisson_disc_filler`.
+
+    Returns:
+      ``(points, iters_per_attempt, restart_count)``
+    """
     # [Poisson-Disc Sampling](https://www.jasondavies.com/poisson-disc/)
 
     # mask for the 20 neighbors
@@ -354,7 +359,7 @@ def _poisson_disc_filler_core(
                     restarts_exhausted = True
 
         # pick random empty cell
-        empty_idx = rng.integers(low=0, high=avail_count)
+        empty_idx = int(rng.integers(low=0, high=avail_count))
         ij = cell_idc[idc_arr[empty_idx]]
         i, j = ij
 
@@ -426,7 +431,9 @@ def _poisson_disc_filler_core(
         best_out_count = out_count
         best_points = points[:out_count]
 
-    return best_points, iters_per_attempt, restart_count
+    # numpy does not carry the `Literal[2]` second axis of `CoordPairs` through
+    # slicing, and `typing.cast` is not available inside a numba-compiled function
+    return best_points, iters_per_attempt, restart_count  # pyrefly: ignore[bad-return]
 
 
 def get_shape_to_fill(L: nx.Graph) -> tuple[CoordPairs, CoordPairs]:
@@ -616,7 +623,7 @@ def poisson_disc_filler(
         ax.set_aspect('equal')
 
     # Sequence of (i, j) of cells that overlap with the polygon
-    cell_idc = np.argwhere(cell_covers_polygon__)
+    cell_idc = cast('IndexPairs', np.argwhere(cell_covers_polygon__))
 
     rng = np.random.default_rng(seed)
     points, iters_per_attempt, restart_count = _poisson_disc_filler_core(

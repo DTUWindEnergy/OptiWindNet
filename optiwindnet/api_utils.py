@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon as MplPolygon
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import Polygon
 from shapely.validation import explain_validity
 
 logger = logging.getLogger(__name__)
@@ -277,14 +277,15 @@ def merge_obs_into_border(L):
                 )
                 border_subtraction_verbose = False
 
-            # If the subtraction results in multiple pieces (MultiPolygon), raise error
-            if isinstance(new_border_polygon, MultiPolygon):
+            # The subtraction must leave a single piece: anything else (typically a
+            # MultiPolygon) means the obstacle cut the border in two.
+            if isinstance(new_border_polygon, Polygon):
+                border_polygon = new_border_polygon
+            else:
                 raise ValueError(
                     'Obstacle subtraction resulted in multiple pieces'
-                    ' (MultiPolygon) — check your geometry.'
+                    f' ({new_border_polygon.geom_type}) — check your geometry.'
                 )
-            else:
-                border_polygon = new_border_polygon
 
     # Update the border as a NumPy array of exterior coordinates
     new_borderC = np.array(border_polygon.exterior.coords[:-1])

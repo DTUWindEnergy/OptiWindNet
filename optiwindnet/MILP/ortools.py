@@ -176,7 +176,9 @@ class SolverORTools(Solver, PoolHandler):
                 mip_solution_filter=mathopt.VariableFilter(filtered_items=tracked_vars),
             )
             solve_kwargs['cb'] = storer.on_solution_callback
-        result = mathopt.solve(**solve_kwargs)
+        # `solve_kwargs` is heterogeneous, so each value is checked against every
+        # parameter it could land in rather than just its own
+        result = mathopt.solve(**solve_kwargs)  # pyrefly: ignore[bad-argument-type]
         self._solve_result = result
         if len(storer.solutions) == 0 and result.has_primal_feasible_solution():
             solution = {

@@ -5,7 +5,7 @@ import math
 from bisect import bisect_left
 from collections import defaultdict
 from itertools import chain, combinations, pairwise, tee
-from typing import Literal, NewType
+from typing import Literal, NewType, cast
 
 import condeltri as cdt
 import networkx as nx
@@ -61,7 +61,8 @@ def _build_edge_line_tree(
     if not edges_:
         return edges_, np.empty(0, dtype=object), None
     edge_idx = np.asarray(edges_, dtype=int)
-    lines = shp.linestrings(VertexC[edge_idx])
+    # `linestrings` is typed as scalar-or-array; a 3-D coordinate array yields an array
+    lines = cast('np.ndarray', shp.linestrings(VertexC[edge_idx]))
     return edges_, lines, shp.STRtree(lines)
 
 
@@ -246,8 +247,10 @@ def _planar_from_cdt_triangles(
       planar embedding
     """
     num_tri = mesh.triangles_count()
-    triangleI = np.empty((num_tri, 3), dtype=np.int_)
-    neighborI = np.empty((num_tri, 3), dtype=np.int_)
+    # numpy cannot infer the `Literal[3]` second axis from the shape tuple, so the
+    # `IndexTrios` invariant has to be asserted at each array's creation.
+    triangleI = cast('IndexTrios', np.empty((num_tri, 3), dtype=np.int_))
+    neighborI = cast('IndexTrios', np.empty((num_tri, 3), dtype=np.int_))
 
     for i, tri in enumerate(mesh.triangles):
         vertices = vertmap[tri.vertices]
@@ -266,7 +269,7 @@ def _planar_from_cdt_triangles(
     # H = 3 since CDT's Hull is always the supertriangle
     # and because we count half-edges, use expression × 2
     num_half_edges = 6 * mesh.vertices_count() - 12
-    halfedges = np.empty((num_half_edges, 3), dtype=np.int_)
+    halfedges = cast('IndexTrios', np.empty((num_half_edges, 3), dtype=np.int_))
     ref_is_cw_ = np.empty((num_half_edges,), dtype=np.bool_)
     _halfedges_from_triangulation(triangleI, neighborI, halfedges, ref_is_cw_)
     edges = {(u.item(), v.item()) for u, v in halfedges[:, :2] if u < v}
@@ -459,7 +462,10 @@ def make_planar_embedding(
     node_xy_ = tuple(
         (x.item(), y.item()) for (x, y) in chain(VertexS[:T], VertexS[-R:])
     )
-    node_vertex_from_xy = dict(zip(node_xy_, chain(range(T), range(-R, 0))))
+    # keyed by shapely coordinate tuples, which `.coords` yields as `tuple[float, ...]`
+    node_vertex_from_xy: dict[tuple[float, ...], int] = dict(
+        zip(node_xy_, chain(range(T), range(-R, 0)))
+    )
     terminal_xy_ = set(node_xy_[:-R])
     root_pts = shp.MultiPoint(node_xy_[-R:])
 
@@ -498,7 +504,9 @@ def make_planar_embedding(
         # create a hull_poly that includes roots outside of border_poly
         # TODO: move this to a location sanitization pre-make_planar_embedding
         out_root_pts = root_pts - border_poly
-        hull_poly = (border_poly | out_root_pts).convex_hull
+        # shapely's set operators are typed as returning `BaseGeometry`; the convex
+        # hull of a polygon plus points is always a Polygon.
+        hull_poly = cast('shp.Polygon', (border_poly | out_root_pts).convex_hull)
         hull_ring = hull_poly.boundary
 
         hull_border_xy_ = {
@@ -508,15 +516,19 @@ def make_planar_embedding(
 
         # check for nodes on the border, but that do not define the border
         border_ring = border_poly.exterior
+        # MultiPoint accepts a CoordinateSequence; the stub omits it from `points`
         nodes_on_the_border = border_ring & shp.MultiPoint(node_xy_) - shp.MultiPoint(
-            border_ring.coords
+            border_ring.coords  # pyrefly: ignore[bad-argument-type]
         )
         if not nodes_on_the_border.is_empty:
             u = border[-1]
             intersects = []
             for i, v in enumerate(border):
                 edge_line = shp.LineString(VertexS[(u, v),])
-                intersection = edge_line & nodes_on_the_border
+                # a non-empty line/points intersection is a Point or a MultiPoint
+                intersection = cast(
+                    'shp.Point | shp.MultiPoint', edge_line & nodes_on_the_border
+                )
                 if not intersection.is_empty:
                     if isinstance(intersection, shp.Point):
                         intersects.append((i, intersection.coords[0]))
@@ -543,7 +555,10 @@ def make_planar_embedding(
             border_poly = shp.Polygon(shell=VertexS[aux_border])
 
         # Turn the main border's concave zones into concavity polygons.
-        hull_minus_border = hull_poly - border_poly
+        # difference of two polygons: a Polygon or a MultiPolygon (possibly empty)
+        hull_minus_border = cast(
+            'shp.Polygon | shp.MultiPolygon', hull_poly - border_poly
+        )
 
     concavities = []
     if hull_minus_border.is_empty:
@@ -552,7 +567,8 @@ def make_planar_embedding(
         # MultiPolygon
         for p in hull_minus_border.geoms:
             if p.intersects(out_root_pts):
-                border_poly |= p
+                # p intersects border_poly, so the union stays a single Polygon
+                border_poly = cast('shp.Polygon', border_poly | p)
             else:
                 concavities.append(p.exterior)
     elif out_root_pts.is_empty:
@@ -822,9 +838,11 @@ def make_planar_embedding(
     debug('hull_pruned: %s', hull_pruned)
     debug('hull_pruned_edges: %s', hull_pruned_edges)
 
-    A = nx.Graph()
+    A: nx.Graph[int] = nx.Graph()
     A.add_nodes_from(L.nodes(data=True))
     A.add_edges_from(P_A_edges)
+    # a scalar `values` is applied to every edge; the stubs only cover mappings
+    # pyrefly: ignore[no-matching-overload]
     nx.set_edge_attributes(A, 'delaunay', name='kind')
 
     # Extend A with diagonals.
@@ -1037,8 +1055,9 @@ def make_planar_embedding(
         sorted(constraint_edges - set(obstacle_constraint_edges))
     )
     if extra_constraint_edges:
-        extra_constraint_lines = shp.linestrings(
-            VertexS[np.asarray(extra_constraint_edges, dtype=int)]
+        extra_constraint_lines = cast(
+            'np.ndarray',
+            shp.linestrings(VertexS[np.asarray(extra_constraint_edges, dtype=int)]),
         )
         constraint_los_lines = (
             np.concatenate((obstacle_constraint_lines, extra_constraint_lines))
@@ -1155,7 +1174,7 @@ def make_planar_embedding(
     # #################
     debug('PART L')
     P_edges.difference_update((u, v) for v in supertriangle for u in P[v])
-    P_paths = nx.Graph(P_edges)
+    P_paths: nx.Graph[int] = nx.Graph(P_edges)
     P_paths_shortcuts = {}
 
     def expand_P_paths_edge(s, t):
@@ -1244,7 +1263,10 @@ def make_planar_embedding(
     for u, v in A.edges - P_paths.edges:
         # For the edges in A that are not in P, we find their corresponding
         # shortest path in P_path and update the length attribute in A.
-        length, path = nx.bidirectional_dijkstra(P_paths, u, v, weight='length')
+        length, path = cast(
+            'tuple[float, list[int]]',
+            nx.bidirectional_dijkstra(P_paths, u, v, weight='length'),
+        )
         debug('A_edge: %d–%d length: %.3f; path: %s', u, v, length, path)
         uv_uniq = (u, v) if u < v else (v, u)
         if any(n < T for n in path[1:-1]):
@@ -1433,7 +1455,12 @@ def make_planar_embedding(
             if crossing_pairs.size == 0:
                 continue
             los_crossing_nodes = set(crossing_pairs[0].tolist())
-            lengths, paths = nx.single_source_dijkstra(P_paths, r, weight='length')
+            # The stub's return type is a union over the `target` argument it does
+            # not overload on; without `target` only the mapping variant applies.
+            lengths, paths = cast(
+                'tuple[dict[int, float], dict[int, list[int]]]',
+                nx.single_source_dijkstra(P_paths, r, weight='length'),
+            )
             for n in los_crossing_nodes:
                 path = paths[n]
                 if all(p < T for p in path[1:-1]):

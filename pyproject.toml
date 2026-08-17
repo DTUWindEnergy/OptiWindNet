@@ -131,3 +131,11 @@ ignore = ["N999"]
 # where a line break would alter the emitted markup and `# noqa` would be inserted
 # into it verbatim. Line length is not meaningful there.
 "docs/conf.py" = ["E501"]
+
+[tool.pyrefly]
+infer-with-first-use = false
+# Notebooks are linted and formatted by ruff, which is notebook-aware, but not
+# type-checked. Their errors are dominated by peewee backrefs, IPython's injected
+# `display`, and optional dependencies (topfarm, py_wake, costmodels) that are not
+# installed here. `project-excludes` appends to pyrefly's own defaults.
+project-excludes = ["docs/notebooks/**"]

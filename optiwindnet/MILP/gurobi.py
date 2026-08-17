@@ -73,7 +73,9 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         )
         self.solver = solver
         super().set_problem(P, A, capacity, model_options, warmstart)
-        self.solver.set_instance(self.model)
+        # `set_instance` is specific to pyomo's persistent solvers, which the
+        # `SolverFactory` stub types as the base `OptSolver`
+        self.solver.set_instance(self.model)  # pyrefly: ignore[missing-attribute]
 
     def solve(
         self,

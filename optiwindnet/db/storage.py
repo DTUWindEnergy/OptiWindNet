@@ -430,8 +430,8 @@ def G_by_method(G: nx.Graph, method: Method) -> nx.Graph:
 
 
 def Gs_from_attrs(
-    farm: object,
-    methods: Method | Sequence[object],
+    farm: NodeSet,
+    methods: Method | Sequence[Method],
     capacities: int | Sequence[int],
 ) -> list[tuple[nx.Graph]]:
     """Fetch from the database a list (one per capacity) of tuples (one per

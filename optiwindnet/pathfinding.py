@@ -1224,7 +1224,7 @@ class PathFinder:
         # fence ends at `v`). All spanning fences at `v` must agree on it.
         if spanning_endings:
             f0, side0 = spanning_endings[0]
-            chain_step_nbr: int | None = (
+            chain_step_nbr: int = (
                 f0.primes_on_constraint[1]
                 if side0 == 'start'
                 else f0.primes_on_constraint[-2]
@@ -1680,7 +1680,8 @@ class PathFinder:
         if sub_cw == sub_ccw:
             return sub_cw if sub_cw is not None else NULL
         if sub_cw is None:
-            return sub_ccw
+            # the `sub_cw == sub_ccw` case returned above, so sub_ccw is not None
+            return sub_ccw  # pyrefly: ignore[bad-return]
         if sub_ccw is None:
             return sub_cw
         # overlapping fences: the two adjacent cones host different chains and

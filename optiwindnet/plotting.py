@@ -165,8 +165,9 @@ def gplot(
 
     # default value for subtree (i.e. color for unconnected nodes)
     # is the last color of the tab20 colormap (i.e. 19)
-    subtrees = G.nodes(data='subtree', default=19)
-    node_colors = [c.colors[subtrees[n] % len(c.colors)] for n in range(T)]
+    node_colors = [
+        c.colors[G.nodes[n].get('subtree', 19) % len(c.colors)] for n in range(T)
+    ]
 
     edges_width = 1.0
     edges_capstyle = 'round'
@@ -275,7 +276,9 @@ def gplot(
         G,
         pos,
         ax=ax,
-        font_color={
+        # networkx accepts a per-node color mapping; the stub's mapping variant
+        # is typed `Mapping[int, Colormap]` instead of node-to-color
+        font_color={  # pyrefly: ignore[bad-argument-type]
             n: (c.root_edge if n < 0 else 'k') for n in label_options['labels']
         },
         **label_options,

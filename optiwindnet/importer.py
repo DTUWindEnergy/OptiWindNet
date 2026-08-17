@@ -570,7 +570,7 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         T=T,
         B=B,
         VertexC=np.vstack((terminalC, borderC, rootC)),
-        **({'border': np.arange(T, T + B)} if (borderC is not None and B >= 3) else {}),
+        border=np.arange(T, T + B) if (borderC is not None and B >= 3) else None,
         name=name,
         handle=handle,
     )

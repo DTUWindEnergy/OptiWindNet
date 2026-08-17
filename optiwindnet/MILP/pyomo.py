@@ -619,9 +619,12 @@ def make_min_length_model(
         R,
         T,
         ring_capacity,
-        m.linkset,
-        m.link_,
-        m.flow_,
+        # pyomo types model attribute access as `Component | IndexedComponent`;
+        # these three are the Set and Vars built above, which support the
+        # mapping protocol ModelMetadata needs
+        m.linkset,  # pyrefly: ignore[bad-argument-type]
+        m.link_,  # pyrefly: ignore[bad-argument-type]
+        m.flow_,  # pyrefly: ignore[bad-argument-type]
         model_options,
         _make_min_length_model_fingerprint,
     )
