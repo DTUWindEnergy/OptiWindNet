@@ -65,7 +65,8 @@ def _job_dispatcher_loop(job_queue, result_queue) -> None:
         func, args = job
         try:
             result = func(*args)
-        except BaseException as exc:
+        # sent across the process boundary, so nothing may escape
+        except BaseException as exc:  # noqa: BLE001
             result_queue.put(exc)
         else:
             result_queue.put(result)

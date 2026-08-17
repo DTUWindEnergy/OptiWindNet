@@ -254,10 +254,10 @@ def assert_graph_equal(
         if a1.keys() != a2.keys():
             diff = sorted(a1.keys() ^ a2.keys())
             raise AssertionError(f'Node {n} attribute keys differ: {diff}')
-        for k in a1:
-            if not _eq(a1[k], a2[k]):
+        for k, v1 in a1.items():
+            if not _eq(v1, a2[k]):
                 raise AssertionError(
-                    f"Node {n} attribute '{k}' differs: {a1[k]!r} != {a2[k]!r}"
+                    f"Node {n} attribute '{k}' differs: {v1!r} != {a2[k]!r}"
                 )
 
     # --- compare graph-level attributes ----------------------------------------

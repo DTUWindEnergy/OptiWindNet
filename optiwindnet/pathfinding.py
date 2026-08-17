@@ -513,19 +513,22 @@ class PathFinder:
             found = False
             for s in common:
                 for c in common:
-                    if s < c and planar.has_edge(s, c):
+                    if (
+                        s < c
+                        and planar.has_edge(s, c)
                         # Verify s-c is the base edge currently present in
                         # the triangulation
-                        if {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}:
-                            base_edge[d] = (s, c)
-                            quad_sides[d] = {
-                                (u, s) if u < s else (s, u),
-                                (s, v) if s < v else (v, s),
-                                (v, c) if v < c else (c, v),
-                                (c, u) if c < u else (u, c),
-                            }
-                            found = True
-                            break
+                        and {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}
+                    ):
+                        base_edge[d] = (s, c)
+                        quad_sides[d] = {
+                            (u, s) if u < s else (s, u),
+                            (s, v) if s < v else (v, s),
+                            (v, c) if v < c else (c, v),
+                            (c, u) if c < u else (u, c),
+                        }
+                        found = True
+                        break
                 if found:
                     break
 
@@ -618,10 +621,10 @@ class PathFinder:
             for a, b in pairwise(seq):
                 if not P.has_edge(a, b):
                     raise ValueError(
-                        'PathFinder: fence for subtree %d (A-edge %s) hop %d-%d '
-                        'is absent from the flipped navigation mesh — an '
-                        'unresolved contour-diagonal conflict.'
-                        % (fence.subtree, fence.endpoints, a, b)
+                        f'PathFinder: fence for subtree {fence.subtree} '
+                        f'(A-edge {fence.endpoints}) hop {a}-{b} is absent from '
+                        f'the flipped navigation mesh — an unresolved '
+                        f'contour-diagonal conflict.'
                     )
 
         # Precompute everything that depends only on (P, edges_G_primes,
@@ -660,15 +663,18 @@ class PathFinder:
         common = [w for w in planar.neighbors(u) if planar.has_edge(v, w)]
         for s in common:
             for c in common:
-                if s < c and planar.has_edge(s, c):
+                if (
+                    s < c
+                    and planar.has_edge(s, c)
                     # Verify s-c is the base edge currently present in the triangulation
-                    if {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}:
-                        return (s, c), {
-                            (u, s) if u < s else (s, u),
-                            (s, v) if s < v else (v, s),
-                            (v, c) if v < c else (c, v),
-                            (c, u) if c < u else (u, c),
-                        }
+                    and {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}
+                ):
+                    return (s, c), {
+                        (u, s) if u < s else (s, u),
+                        (s, v) if s < v else (v, s),
+                        (v, c) if v < c else (c, v),
+                        (c, u) if c < u else (u, c),
+                    }
         return None
 
     def _get_mesh_endpoint(
@@ -812,9 +818,12 @@ class PathFinder:
         prime_adj = G._adj.get(prime, {})  # type: ignore
         nbr = P[prime][opposite]['ccw']
         for _ in range(len(P._adj[prime])):  # type: ignore
-            if nbr < T and nbr in prime_adj:
-                if nbr >= 0 or (nbr, prime) not in tentative:
-                    return nbr
+            if (
+                nbr < T
+                and nbr in prime_adj
+                and (nbr >= 0 or (nbr, prime) not in tentative)
+            ):
+                return nbr
             nbr = P[prime][nbr]['ccw']
         # could not find a non-tentative G edge around prime
         return NULL

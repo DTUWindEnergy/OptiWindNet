@@ -145,7 +145,7 @@ class SolverORTools(Solver, PoolHandler):
                 )
             },
         )
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
         self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         solve_params = self._make_solve_parameters(
             time_limit, mip_gap, applied_options, verbose

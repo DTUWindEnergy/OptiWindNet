@@ -404,12 +404,12 @@ def test_deprecated_from_yaml_warns():
 
 
 def test_from_own_yaml_invalid_path():
-    with pytest.raises(Exception):
+    with pytest.raises(FileNotFoundError):
         WindFarmNetwork.from_own_yaml(r'not>a*path')
 
 
 def test_from_pbf_invalid_path():
-    with pytest.raises(Exception):
+    with pytest.raises(AssertionError):
         WindFarmNetwork.from_pbf(r'not>a*path')
 
 

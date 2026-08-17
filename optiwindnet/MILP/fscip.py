@@ -87,7 +87,7 @@ class SolverFSCIP(Solver, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
 
         #  tmpdir = './log/'
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -173,7 +173,7 @@ class SolverFSCIP(Solver, PoolHandler):
                 )
                 model.writeBestSol(isol_path)
                 cmd.extend(['-isol', isol_path])
-            subprocess.run(cmd, cwd=tmpdir)
+            subprocess.run(cmd, cwd=tmpdir, check=False)  # output is parsed instead
             # The number of non-zero variables per solution block is not fixed:
             # radial/branched topologies have T link_ + T flow_ vars, but RINGED
             # topologies emit extra link_ vars (closed rings / dual feeders), so

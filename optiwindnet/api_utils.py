@@ -159,7 +159,9 @@ def parse_cables_input(
                 raise ValueError(f'Invalid cable values: {cables}')
         return cables_out
     else:
-        raise ValueError(f'Invalid cable values: {cables}')
+        raise TypeError(
+            f'Invalid cable values: {cables} — expected an int, a sequence or an array'
+        )
 
 
 if TYPE_CHECKING:

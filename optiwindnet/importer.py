@@ -163,7 +163,8 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     if isinstance(filepath, str):
         filepath = Path(filepath)
     # read wind power plant site YAML file
-    parsed_dict = yaml.safe_load(open(filepath, 'r', encoding='utf8'))
+    with open(filepath, encoding='utf8') as f:
+        parsed_dict = yaml.safe_load(f)
     name = filepath.stem
     handle = parsed_dict.get('HANDLE')
     if handle is None:

@@ -100,7 +100,7 @@ class SolverSCIP(Solver, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
         use_concurrent = applied_options.pop('concurrent', True)
         if model.getStage() != SCIP_STAGE.PROBLEM:
             # SCIP refuses to (re)solve unless the model is back in the PROBLEM

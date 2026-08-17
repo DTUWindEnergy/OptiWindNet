@@ -351,7 +351,9 @@ def _do_lkh(
             '\n'.join((f'{k} = {v}' if v is not None else k) for k, v in params.items())
         )
         start_time = time.perf_counter()
-        result = subprocess.run(['LKH', params_fpath], capture_output=True)
+        result = subprocess.run(
+            ['LKH', params_fpath], capture_output=True, check=False
+        )  # LKH's exit code is not a reliable success signal; output is parsed instead
         elapsed_time = time.perf_counter() - start_time
         output_fpath = os.path.join(tmpdir, output_fname)
         tour_fpath = os.path.join(tmpdir, tour_fname)

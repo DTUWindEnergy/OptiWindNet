@@ -31,7 +31,6 @@ from .helpers import assert_graph_equal, tiny_wfn
 
 
 def test_open_database(tmp_path):
-    """ """
     dbfile = tmp_path / 'db_test.sqlite'
 
     # ensure file is not present

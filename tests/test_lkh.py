@@ -33,15 +33,13 @@ def _make_routeset(branches: list[list[int]], R: int = 1) -> nx.Graph:
     S = nx.Graph(T=T, R=R)
     for r in range(-R, 0):
         S.add_node(r, load=0)
-    subtree = 0
     # all branches share the first root by default
-    for branch in branches:
+    for subtree, branch in enumerate(branches):
         predecessor = -1
         for load, node in zip(range(len(branch), 0, -1), branch):
             S.add_node(node, load=load, subtree=subtree)
             S.add_edge(predecessor, node, load=load)
             predecessor = node
-        subtree += 1
     S.nodes[-1]['load'] = T
     return S
 

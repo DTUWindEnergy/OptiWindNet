@@ -535,12 +535,10 @@ def make_planar_embedding(
             info('INTERSECTS: %s', intersects)
             info('border: %s', border)
             aux_border = border.tolist()
-            offset = 0
-            for i, xy in intersects:
+            for offset, (i, xy) in enumerate(intersects):
                 n = node_vertex_from_xy[xy]
                 aux_border.insert(i + offset, n)
                 border_vertex_from_xy[xy] = n
-                offset += 1
             info('aux_border: %s', aux_border)
             border_poly = shp.Polygon(shell=VertexS[aux_border])
 

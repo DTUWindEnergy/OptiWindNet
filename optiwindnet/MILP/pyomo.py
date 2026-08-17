@@ -121,7 +121,7 @@ class SolverPyomo(Solver):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
         self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         solver.options.update(applied_options)
         solver.options.update(
@@ -241,7 +241,7 @@ class SolverPyomoAppsi(Solver):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
         for key, value in applied_options.items():
             if key in solver.config:
                 solver.config[key] = value

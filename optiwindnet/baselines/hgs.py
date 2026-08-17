@@ -117,7 +117,7 @@ def _length_matrices(
     indices_ = []
     for r, (cluster, num_slack) in enumerate(zip(cluster_, num_slack_), start=-R):
         n_from_i = np.array([r] + sorted(cluster) + [r] * num_slack, dtype=int)
-        A_clu = nx.subgraph_view(A, filter_node=lambda n: n in cluster)
+        A_clu = nx.subgraph_view(A, filter_node=lambda n, cluster=cluster: n in cluster)
         W = _length_matrix(A_clu, r, num_slack, n_from_i, closed=closed)
         W_.append(W)
         indices_.append(n_from_i)

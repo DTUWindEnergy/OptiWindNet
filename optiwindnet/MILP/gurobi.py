@@ -88,7 +88,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
         self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
         result = solver.solve(
@@ -137,9 +137,6 @@ class SolverGurobi(SolverPyomo, PoolHandler):
                 G = PathFinder(G_from_S(S, A), P, A).create_detours()
             else:
                 S, G = self._investigate_pool(P, A)
-        except Exception as exc:
-            raise exc
-        else:
             G.graph.update(self._make_graph_attributes())
             return S, G
         finally:

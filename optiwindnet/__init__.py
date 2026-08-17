@@ -19,5 +19,7 @@ try:  # pragma: no cover
 
     __version__ = version.__version__
     __release__ = version.__version__
-except BaseException:  # pragma: no cover
+# `version.py` only exists in an installed tree; running from a source
+# checkout without it simply leaves the version attributes undefined.
+except ImportError:  # pragma: no cover
     pass

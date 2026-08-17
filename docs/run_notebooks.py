@@ -288,7 +288,7 @@ def run(args: argparse.Namespace) -> int:
             print(f'  -> {rel}  FAIL  {elapsed:6.1f}s  {exc.ename}: {exc.evalue}')
             failures.append((path, f'{exc.ename}: {exc.evalue}'))
             continue
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- report any notebook failure
             elapsed = time.monotonic() - t0
             print(f'  -> {rel}  FAIL  {elapsed:6.1f}s  {type(exc).__name__}: {exc}')
             failures.append((path, f'{type(exc).__name__}: {exc}'))

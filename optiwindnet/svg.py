@@ -66,7 +66,7 @@ class SvgRepr:
 
     def __init__(self, data: str, metadata: Mapping[str, Any] = MappingProxyType({})):
         self.data = data
-        self.metadata = metadata.copy()
+        self.metadata = dict(metadata)
         self.handle = self.metadata.pop('handle', '')
         if self.handle == self.metadata.get('name'):
             del self.metadata['name']
@@ -669,7 +669,7 @@ class Drawable:
             label = ''
 
             if item_type == 'node':
-                _, name, label, color, shape = item
+                _, _name, label, color, shape = item
                 if shape == 'circle':
                     elements.append(
                         svg.Use(href='#wtg', x=x_pos + 20, y=y_pos, fill=color)

@@ -22,8 +22,13 @@ from .api_utils import (
 )
 from .baselines.hgs import hgs_cvrp
 from .heuristics import constructor
-from .importer import L_from_pbf, L_from_site, L_from_windIO, L_from_yaml
-from .importer import load_repository as load_repository
+from .importer import (
+    L_from_pbf,
+    L_from_site,
+    L_from_windIO,
+    L_from_yaml,
+    load_repository,
+)
 from .interarraylib import (
     G_from_S,
     S_from_G,
