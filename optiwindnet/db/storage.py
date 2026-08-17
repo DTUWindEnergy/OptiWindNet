@@ -31,22 +31,16 @@ __all__ = ()
 PackType = Mapping[str, Any]
 
 # Set of not-to-store keys commonly found in G routesets (they are either
-# already stored in database fields or are cheap to regenerate or too big.
+# already stored in database fields, or are cheap to regenerate, or too big).
 _misc_not = {
-    'VertexC', 'anglesYhp', 'anglesXhp', 'anglesRank', 'angles',
-    'd2rootsRank', 'd2roots', 'name', 'boundary', 'capacity',
-    'B', 'runtime', 'runtime_unit', 'edges_fun', 'D',
-    'DetourC', 'fnT', 'landscape_angle', 'Root', 'creation_options',
-    'G_nodeset', 'T', 'non_A_gates', 'funfile', 'funhash',
-    'funname', 'diagonals', 'planar', 'has_loads', 'R',
-    'Subtree', 'handle', 'non_A_edges', 'max_load', 'fun_fingerprint',
-    'hull', 'solver_log', 'length_mismatch_on_db_read', 'gnT', 'C',
-    'border', 'obstacles', 'num_diagonals', 'crossings_map', 'tentative',
-    'method_options', 'is_normalized', 'norm_scale', 'norm_offset', 'detextra',
-    'rogue', 'clone2prime', 'valid', 'path_in_P', 'shortened_contours',
-    'nonAedges', 'method', 'num_stunts', 'crossings', 'creator',
-    'inter_terminal_clearance_min', 'inter_terminal_clearance_safe',
-    'stunts_primes',
+    'VertexC', 'd2rootsRank', 'd2roots', 'name', 'capacity', 'B', 'runtime', 'D', 'fnT',
+    'landscape_angle', 'T', 'funfile', 'funhash', 'funname', 'diagonals', 'planar',
+    'has_loads', 'R', 'handle', 'max_load', 'fun_fingerprint', 'hull',
+    'length_mismatch_on_db_read', 'C', 'border', 'obstacles', 'num_diagonals',
+    'crossings_map', 'tentative', 'method_options', 'is_normalized', 'norm_scale',
+    'norm_offset', 'detextra', 'rogue', 'clone2prime', 'valid', 'shortened_contours',
+    'method', 'num_stunts', 'crossings', 'creator', 'inter_terminal_clearance_min',
+    'inter_terminal_clearance_safe', 'stunts_primes',
 }  # fmt: skip
 
 
