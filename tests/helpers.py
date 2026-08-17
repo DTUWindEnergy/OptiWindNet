@@ -212,12 +212,10 @@ def assert_graph_equal(
 
     # --- prepare ignored paths --------------------------------------------------
     default_ignored = {
-        'bound',
-        'relgap',
-        'solver_details',
+        'bound', 'relgap', 'solver_details',
         'method_options.fun_fingerprint.funfile',
         'method_options.fun_fingerprint.funhash',
-    }
+    }  # fmt: skip
     ignored_all = set(default_ignored)
     if ignored_graph_keys:
         ignored_all |= set(ignored_graph_keys)

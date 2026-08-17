@@ -10,15 +10,9 @@ import optiwindnet.augmentation as aug
 
 
 def _square(w=10.0, h=10.0, x0=0.0, y0=0.0):
-    return np.array(
-        [
-            [x0, y0],
-            [x0 + w, y0],
-            [x0 + w, y0 + h],
-            [x0, y0 + h],
-        ],
-        dtype=float,
-    )
+    return np.array([
+        [x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h],
+    ], dtype=float)  # fmt: skip
 
 
 def _pairwise_min_dist(P):

@@ -131,17 +131,10 @@ def test_G_from_routeset(tmp_path):
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {
-        'bound',
-        'method_options',
-        'relgap',
-        'solver_details',
-        'D',
-        'landscape_angle',
-        'method',
-        'norm_offset',
-        'norm_scale',
-        'num_diagonals',
-    }
+        'bound', 'method_options', 'relgap', 'solver_details',
+        'D', 'landscape_angle', 'method',
+        'norm_offset', 'norm_scale', 'num_diagonals',
+    }  # fmt: skip
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 
 
@@ -180,18 +173,10 @@ def test_G_from_routeset_ringed(tmp_path, locations):
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {
-        'bound',
-        'method_options',
-        'relgap',
-        'solver_details',
-        'C',
-        'D',
-        'landscape_angle',
-        'method',
-        'norm_offset',
-        'norm_scale',
-        'num_diagonals',
-    }
+        'bound', 'method_options', 'relgap', 'solver_details',
+        'C', 'D', 'landscape_angle', 'method',
+        'norm_offset', 'norm_scale', 'num_diagonals',
+    }  # fmt: skip
     assert_graph_equal(
         G_rs,
         G,
@@ -242,17 +227,10 @@ def test_G_from_routeset_detours(tmp_path):
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {
-        'bound',
-        'method_options',
-        'relgap',
-        'solver_details',
-        'D',
-        'landscape_angle',
-        'method',
-        'norm_offset',
-        'norm_scale',
-        'num_diagonals',
-    }
+        'bound', 'method_options', 'relgap', 'solver_details',
+        'D', 'landscape_angle', 'method',
+        'norm_offset', 'norm_scale', 'num_diagonals',
+    }  # fmt: skip
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 
 

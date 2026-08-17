@@ -880,17 +880,10 @@ def test_as_single_root():
 
     # 2) L with 3 roots
     T, R = 4, 3
-    VertexC = np.array(
-        [
-            [0, 0],
-            [1, 0],
-            [2, 0],
-            [3, 0],
-            [0, 1],
-            [1, 1],
-            [2, 1],
-        ]
-    )  # Roots -3, -2, -1
+    # the last R=3 rows are the roots -3, -2, -1
+    VertexC = np.array([
+        [0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [1, 1], [2, 1],
+    ])  # fmt: skip
     L_prime = nx.Graph(
         T=T, R=R, B=0, VertexC=VertexC, name='Site', handle='site_handle'
     )
@@ -1063,23 +1056,13 @@ def test_as_stratified_vertices():
 
     # --- Case B: border-vertices are NOT in the B-range of VertexC
     L0.graph['border'] = np.array([0, 5, 6, 7])
-    expected_VertexC = np.array(
-        [
-            [1.0, 0.0],
-            [2.0, 0.0],
-            [2.0, 1.0],
-            [2.0, 3.0],
-            [1.0, 0.0],
-            [2.0, -2.0],
-            [2.0, 4.0],
-            [-2.0, 4.0],
-            [1.2, -0.5],
-            [1.2, 1.0],
-            [1.8, 0.5],
-            [1.5, -0.5],
-            [0.0, 0.0],
-        ]
-    )
+    # strata: 4 terminals, 4 border, 4 obstacle, 1 root
+    expected_VertexC = np.array([
+        [1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [2.0, 3.0],
+        [1.0, 0.0], [2.0, -2.0], [2.0, 4.0], [-2.0, 4.0],
+        [1.2, -0.5], [1.2, 1.0], [1.8, 0.5], [1.5, -0.5],
+        [0.0, 0.0],
+    ])  # fmt: skip
     L2 = as_stratified_vertices(L0)
     assert np.array_equal(L2.graph['VertexC'], expected_VertexC)
 

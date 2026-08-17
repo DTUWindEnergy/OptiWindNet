@@ -196,17 +196,10 @@ MILP_FORMULATION_CASES = tuple(
 MILP_ADAPTER_CASES = tuple(
     MILPCase('toy', solver, 5, ModelOptions(), exact_golden=True)
     for solver in (
-        'ortools.cp_sat',
-        'ortools.gscip',
-        'ortools.highs',
-        'highs',
-        'scip',
-        'gurobi',
-        'cplex',
-        'cbc',
-        'fscip',
+        'ortools.cp_sat', 'ortools.gscip', 'ortools.highs',
+        'highs', 'scip', 'gurobi', 'cplex', 'cbc', 'fscip',
     )
-)
+)  # fmt: skip
 
 MILP_FAMILY_CASES = (
     MILPCase(

@@ -272,14 +272,8 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     assert result['violations'] == []
     assert result['objective'] == result['preserved_objective']
     assert {
-        'R',
-        'T',
-        'topology',
-        'capacity',
-        'max_load',
-        'has_loads',
-        'creator',
-    } <= result['graph'].keys()
+        'R', 'T', 'topology', 'capacity', 'max_load', 'has_loads', 'creator',
+    } <= result['graph'].keys()  # fmt: skip
 
 
 @pytest.mark.parametrize('topology', ['radial', 'ringed'])
@@ -1200,12 +1194,8 @@ def test_model_options_coerces_strings_to_enums():
 
 def test_model_options_materializes_every_default():
     assert set(ModelOptions()) == {
-        'topology',
-        'feeder_route',
-        'feeder_limit',
-        'balanced',
-        'max_feeders',
-    }
+        'topology', 'feeder_route', 'feeder_limit', 'balanced', 'max_feeders',
+    }  # fmt: skip
 
 
 @pytest.mark.parametrize(

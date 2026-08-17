@@ -274,12 +274,7 @@ def test_ortools_warmstart_behavior(ortools_worker):
         pytest.skip('ortools.cp_sat not available')
     if isinstance(result, BaseException):
         raise result
-    assert result == [
-        [-1, 0, 1, 2],
-        [-1, 0, 1, 2],
-        [-1, -1, -1, -1],
-        [-1, -1, -1, -1],
-    ]
+    assert result == [[-1, 0, 1, 2], [-1, 0, 1, 2], [-1, -1, -1, -1], [-1, -1, -1, -1]]
 
 
 # =====================
