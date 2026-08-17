@@ -1049,7 +1049,7 @@ class MILPRouter(Router):
         balanced = mo['balanced']
         # a built warm start must not outlast the solve it primes
         time_limit = min(self.time_limit, self.warmup_time)
-        ringed = mo['topology'] == 'ringed'
+        ringed = mo['topology'] is Topology.RINGED
         single_root = A.graph['R'] == 1
         per_subtree = 2 if ringed else 1
         min_subtrees = math.ceil(A.graph['T'] / (per_subtree * capacity))
@@ -1096,7 +1096,7 @@ class MILPRouter(Router):
 
         # unlimited / specified (or an un-pinnable 'exactly'): a branched model
         # takes the constructor's branched layout; radial/ringed take plain HGS.
-        if mo['topology'] == 'branched':
+        if mo['topology'] is Topology.BRANCHED:
             straight = mo['feeder_route'] == 'straight'
             return S_from_G(
                 constructor(

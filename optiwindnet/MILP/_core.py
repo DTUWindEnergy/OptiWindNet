@@ -332,6 +332,55 @@ class SolutionInfo:
     termination: str
 
 
+def check_model_enums(
+    topology: Topology, feeder_route: FeederRoute, feeder_limit: FeederLimit
+) -> None:
+    """Reject a model option that is not a member of its enum.
+
+    The builders branch on identity, so an equal ``str`` selects the default
+    model and reaches ``ModelMetadata`` unnoticed. Pass the member;
+    :class:`ModelOptions` is where a ``str`` is coerced.
+
+    Raises:
+        TypeError: an option is not a member of its enum.
+    """
+    for value, kind in (
+        (topology, Topology),
+        (feeder_route, FeederRoute),
+        (feeder_limit, FeederLimit),
+    ):
+        if not isinstance(value, kind):
+            raise TypeError(
+                f'{_identifier_from_class_name(kind)} must be a {kind.__name__} '
+                f'member, got {type(value).__name__}: {value!r}'
+            )
+
+
+def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
+    """Reject a warm start whose topology the model cannot start from.
+
+    A model accepts its own topology, plus RADIAL into BRANCHED (a path is a
+    tree). The comparison is by identity, and ``S`` comes from the caller, so its
+    topology is checked for being a :class:`.Topology`: an equal ``str`` is a
+    type error, not a mismatch.
+
+    Raises:
+        OWNWarmupFailed: ``S``'s topology is one this model cannot start from, or
+          is not a ``Topology``.
+    """
+    mt = metadata.model_options['topology']
+    st = S.graph['topology']
+    if not isinstance(st, Topology):
+        raise OWNWarmupFailed(
+            f"warmup_model() failed: S.graph['topology'] must be a Topology "
+            f'member, got {type(st).__name__}: {st!r}'
+        )
+    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
+        raise OWNWarmupFailed(
+            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
+        )
+
+
 def warmstart_links(
     metadata: ModelMetadata, S: nx.Graph
 ) -> Iterator[tuple[Any, Any | None, int]]:

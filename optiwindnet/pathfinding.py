@@ -19,6 +19,7 @@ from .crossings import gateXing_iter
 from .geometric import rotation_checkers_factory
 from .interarraylib import bfs_subtree_loads, scaffolded
 from .mesh import planar_flipped_by_routeset
+from .types import Topology
 
 __all__ = ('PathFinder',)
 
@@ -251,9 +252,9 @@ class PathFinder:
     attribute ``'kind'`` with value ``'tentative'`` are checked for crossings.
 
     Feeders are rerouted within the topology ``Gʹ`` declares in its mandatory
-    ``'topology'`` graph attribute, which decides where a feeder may re-hook:
-    ``'branched'`` allows any terminal of the subtree, ``'radial'`` only its
-    head or tail, ``'ringed'`` only the current subroot.
+    ``'topology'`` graph attribute (a :class:`.Topology` member), which decides
+    where a feeder may re-hook: BRANCHED allows any terminal of the subtree,
+    RADIAL only its head or tail, RINGED only the current subroot.
 
     Args:
       G: the routeset without detours
@@ -2146,9 +2147,9 @@ class PathFinder:
             # where a feeder may re-hook depends on the declared topology
             hook_candidates = (
                 [n]
-                if self.topology == 'ringed'
+                if self.topology is Topology.RINGED
                 else [n for n in subtree if n < T]
-                if self.topology == 'branched'
+                if self.topology is Topology.BRANCHED
                 else [n, next(h for h in subtree if len(G._adj[h]) == 1)]  # type: ignore
             )
             debug('hook_candidates: %s', hook_candidates)

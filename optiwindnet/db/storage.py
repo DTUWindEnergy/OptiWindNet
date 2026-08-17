@@ -95,7 +95,10 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
     """
     nodeset = routeset.nodes
     G = L_from_nodeset(nodeset)
-    misc = routeset.misc if routeset.misc is not None else {}
+    misc = dict(routeset.misc) if routeset.misc is not None else {}
+    # `misc` round-trips through JSON, so a stored topology arrives as a plain
+    # str: withhold it here and restore it as the enum below
+    stored_topology = misc.pop('topology', None)
     G.graph.update(
         C=routeset.C,
         D=routeset.D,
@@ -117,8 +120,11 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
     if routeset.detextra is not None:
         G.graph['detextra'] = routeset.detextra
 
-    if 'topology' not in G.graph:
-        G.graph['topology'] = infer_topology(G, routeset.edges)
+    G.graph['topology'] = (
+        infer_topology(G, routeset.edges)
+        if stored_topology is None
+        else Topology(stored_topology)
+    )
     encoding = TerseLinks(
         links=tuple(routeset.edges),
         topology=G.graph['topology'],
@@ -221,7 +227,7 @@ def infer_topology(G: nx.Graph, terse: Sequence[int]) -> Topology:
     * ``creator``: HGS and LKH solve a CVRP, whose routes are paths, so their
       non-ringed output is RADIAL. The constructor names its method instead.
 
-    Falls back to ``'branched'``, the weakest claim any forest satisfies, when a
+    Falls back to BRANCHED, the weakest claim any forest satisfies, when a
     record carries none of these.
 
     Args:
@@ -238,8 +244,13 @@ def infer_topology(G: nx.Graph, terse: Sequence[int]) -> Topology:
 
     method_options = G.graph.get('method_options') or {}
     topology = method_options.get('topology')
-    if topology in ('ringed', 'radial', 'branched'):
-        return Topology(topology)
+    if topology is not None:
+        # stored records are outside this library's control: an unrecognized
+        # value falls through to the signals below
+        try:
+            return Topology(topology)
+        except ValueError:
+            pass
 
     creator = G.graph.get('creator', '')
     if creator in ('baselines.hgs', 'baselines.lkh'):

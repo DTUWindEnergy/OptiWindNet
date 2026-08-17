@@ -29,6 +29,8 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    check_model_enums,
+    check_warmstart_topology,
     feeder_and_load_bounds,
     physical_core_count,
     warmstart_links,
@@ -332,6 +334,7 @@ def make_min_length_model(
       max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
         exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
     """
+    check_model_enums(topology, feeder_route, feeder_limit)
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -565,7 +568,7 @@ def make_min_length_model(
                     == 1
                 )
             ),
-            name='radial',
+            name='ringed',
         )
 
     # assert all nodes are connected to some root
@@ -653,12 +656,7 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    mt = metadata.model_options['topology']
-    st = S.graph['topology']
-    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
-        raise OWNWarmupFailed(
-            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
-        )
+    check_warmstart_topology(metadata, S)
     # Pyomo Vars are initialize=0, so the inactive baseline is already in place;
     # only the active links need to be set.
     for link_var, flow_var, flow in warmstart_links(metadata, S):

@@ -577,8 +577,8 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     consistent calculated loads and cable capacity.
 
     Args:
-      S: topology graph to check. ``S.graph['topology']`` is mandatory: it is
-        one of ``'ringed'``, ``'radial'`` or ``'branched'``. Loads are
+      S: topology graph to check. ``S.graph['topology']`` is mandatory: it is a
+        :class:`.Topology` member (or its ``str`` value). Loads are
         mandatory too -- ``S`` without them is reported as a violation, while
         structural checks that do not need them still run.
       capacity: cable capacity; defaults to ``S.graph['capacity']``. Capacity
@@ -802,7 +802,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
       ``(source, sink, flow)`` per link, current flowing ``source`` -> ``sink``.
       ``flow`` is 0 for links carrying no current: a ring's closing feeder.
     """
-    if S.graph['topology'] != 'ringed':
+    if S.graph['topology'] is not Topology.RINGED:
         for u, v, edgeD in S.edges(data=True):
             source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
             yield source, sink, edgeD['load']
@@ -1163,8 +1163,8 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
 
     If using ``S`` to warm-start a MILP model, call after :func:`S_from_G`:
 
-    - :func:`as_hooked_to_nearest` for ``topology='branched'``;
-    - :func:`as_hooked_to_head` for ``topology='radial'``.
+    - :func:`as_hooked_to_nearest` for ``Topology.BRANCHED``;
+    - :func:`as_hooked_to_head` for ``Topology.RADIAL``.
 
     This makes a radial ``S`` feasible and avoids a trivially suboptimal
     branched ``S``. For RINGED routesets, cycle-closing links are retained, so

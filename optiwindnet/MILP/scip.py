@@ -25,6 +25,8 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    check_model_enums,
+    check_warmstart_topology,
     feeder_and_load_bounds,
     physical_core_count,
     warmstart_links,
@@ -202,6 +204,7 @@ def make_min_length_model(
       max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
         exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
     """
+    check_model_enums(topology, feeder_route, feeder_limit)
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -443,12 +446,7 @@ def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    mt = metadata.model_options['topology']
-    st = S.graph['topology']
-    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
-        raise OWNWarmupFailed(
-            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
-        )
+    check_warmstart_topology(metadata, S)
     # createSol() zero-initializes every variable, so only the links S activates
     # need to be set.
     sol = model.createSol()

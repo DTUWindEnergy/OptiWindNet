@@ -303,7 +303,7 @@ class TerseLinks(Sequence[int]):
         nodeset_digest: bytes | None = None,
     ) -> 'TerseLinks':
         """Encode solution topology ``S``, optionally bound to a node set."""
-        topology = Topology(S.graph['topology'])
+        topology = S.graph['topology']
         R, T = (S.graph[key] for key in 'RT')
         if topology is Topology.RINGED:
             links = _compress_ring_routes(_ring_routes_from_graph(S, R, T))
@@ -326,7 +326,7 @@ class TerseLinks(Sequence[int]):
             from .interarraylib import calcload
 
             calcload(G)
-        topology = Topology(G.graph['topology'])
+        topology = G.graph['topology']
         R, T, B = (G.graph[key] for key in 'RTB')
         C, D = (G.graph.get(key, 0) or 0 for key in 'CD')
         if topology is Topology.RINGED:
