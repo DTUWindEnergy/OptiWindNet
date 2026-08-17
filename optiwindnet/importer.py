@@ -607,8 +607,11 @@ def load_repository(path: Path | str | None = None) -> 'LocationsRepository':
       Named tuple which has the location handles as attribute identifiers.
     """
     if path is None:
+        # `__package__` is set for any imported submodule (PEP 366), but its declared
+        # type allows None, which `files()` rejects on the minimum supported Python
+        anchor = __package__ or __name__.rpartition('.')[0]
         # the bundled data always lives on the filesystem
-        root = Path(str(files(__package__) / 'data'))
+        root = Path(str(files(anchor) / 'data'))
     else:
         root = Path(path)
     locations = [L_from_yaml(file) for file in root.glob('*.yaml')]
