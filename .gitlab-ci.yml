@@ -141,7 +141,9 @@ lint_typecheck:
       when: never
     - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
   before_script:
-    - pip install --progress-bar off -e .[test]
+    # The `docs` extra too: pyrefly checks docs/conf.py and docs/run_notebooks.py, and
+    # cannot resolve their imports without it.
+    - pip install --progress-bar off -e .[test,docs]
     - python3 --version
     - prek --version
     - pyrefly --version
