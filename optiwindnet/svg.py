@@ -2,7 +2,9 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 from collections import defaultdict
+from collections.abc import Mapping
 from itertools import chain
+from types import MappingProxyType
 from typing import Any
 
 import networkx as nx
@@ -62,7 +64,7 @@ class SvgRepr:
     ``_SOLUTION_KEYS`` in the second.
     """
 
-    def __init__(self, data: str, metadata: dict[str, Any] = {}):
+    def __init__(self, data: str, metadata: Mapping[str, Any] = MappingProxyType({})):
         self.data = data
         self.metadata = metadata.copy()
         self.handle = self.metadata.pop('handle', '')

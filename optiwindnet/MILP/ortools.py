@@ -5,6 +5,7 @@ import logging
 from collections.abc import Iterator, Mapping
 from datetime import timedelta
 from itertools import chain
+from types import MappingProxyType
 from typing import Any
 
 import networkx as nx
@@ -119,7 +120,7 @@ class SolverORTools(Solver, PoolHandler):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         """Wrapper for MathOpt solve() that saves all solutions.

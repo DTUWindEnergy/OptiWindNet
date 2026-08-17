@@ -311,7 +311,7 @@ def tiny_wfn(
     substationsC=None,
     borderC=None,
     obstacleC_=None,
-    cables=[(4, 10.0)],
+    cables=None,
     optimize=True,
     router=None,
 ):
@@ -327,6 +327,9 @@ def tiny_wfn(
     - optimize : if True, call wfn.optimize() before returning (default False).
     """
     # defaults
+    if cables is None:
+        cables = [(4, 10.0)]
+
     if turbinesC is None:
         turbinesC = np.array([[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [2.0, 3.0]], float)
     else:

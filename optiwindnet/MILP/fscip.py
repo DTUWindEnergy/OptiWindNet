@@ -8,7 +8,8 @@ import subprocess
 import tempfile
 from collections.abc import Mapping
 from itertools import chain
-from typing import Any
+from types import MappingProxyType
+from typing import Any, ClassVar
 
 import networkx as nx
 
@@ -36,7 +37,7 @@ class SolverFSCIP(Solver, PoolHandler):
     _solution_pool: list[tuple[float, dict]]
     _regexp_objective = re.compile(r'^objective value:\s+([0-9]+(?:\.[0-9]+)?)$')
     _regexp_var_value = re.compile(r'^(\S+)\s+([0-9]+(?:\.[0-9]+)?)\s+\(obj:\S+\)$')
-    _termination_from_status = {
+    _termination_from_status: ClassVar[dict[str, str]] = {
         # fscip has a very non-standard status description
         'problem is solved': 'optimal',
     }
@@ -77,7 +78,7 @@ class SolverFSCIP(Solver, PoolHandler):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         """Wrapper that calls the fscip executable."""

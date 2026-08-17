@@ -13,7 +13,8 @@ from inspect import cleandoc
 from itertools import chain
 from pathlib import Path
 from textwrap import indent
-from typing import TYPE_CHECKING, Any
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import networkx as nx
 from makefun import with_signature
@@ -194,12 +195,12 @@ class ModelOptions(dict):
     values. Use ModelOptions() without any parameters to use the defaults.
     """
 
-    hints = {
+    hints: ClassVar[dict[str, type]] = {
         _identifier_from_class_name(kind): kind
         for kind in (Topology, FeederRoute, FeederLimit)
     }
     # this has to be kept in sync with make_min_length_model()
-    simple = {
+    simple: ClassVar[dict[str, tuple]] = {
         'balanced': (
             bool,
             False,
@@ -461,7 +462,7 @@ class Solver(abc.ABC):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         """Run the MILP solver search.

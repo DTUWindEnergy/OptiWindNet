@@ -5,6 +5,7 @@ import logging
 from collections import namedtuple
 from collections.abc import Mapping
 from itertools import chain
+from types import MappingProxyType
 from typing import Any
 
 import networkx as nx
@@ -112,7 +113,7 @@ class SolverPyomo(Solver):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         try:
@@ -232,7 +233,7 @@ class SolverPyomoAppsi(Solver):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         try:

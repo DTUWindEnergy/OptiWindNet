@@ -4,7 +4,7 @@
 import logging
 import math
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from itertools import pairwise
 
 import matplotlib.pyplot as plt
@@ -456,7 +456,7 @@ def poisson_disc_filler(
     BorderC: CoordPairs,
     RepellerC: CoordPairs | None = None,
     repel_radius: float = 0.0,
-    obstacleC__: list[CoordPairs] = [],
+    obstacleC__: Sequence[CoordPairs] = (),
     seed: int | None = None,
     max_iter: int = 30000,
     plot: bool = False,

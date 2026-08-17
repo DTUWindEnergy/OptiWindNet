@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -162,7 +163,7 @@ def test_milprouter_enables_jupyter_logging_for_every_ortools_backend(
     monkeypatch, solver_name, verbose, enabled
 ):
     class FakeSolver:
-        options = {}
+        options: ClassVar[dict] = {}
 
     calls = []
     monkeypatch.setattr(api, 'solver_factory', lambda name: FakeSolver())
@@ -179,7 +180,7 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
     solved = tiny_wfn()
 
     class FakeSolver:
-        options = {'default': True}
+        options: ClassVar[dict] = {'default': True}
 
         def __init__(self):
             self.problem_calls = []

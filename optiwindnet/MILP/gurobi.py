@@ -3,7 +3,7 @@
 
 import logging
 from collections.abc import Mapping
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 import networkx as nx
@@ -38,12 +38,13 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     """
 
     name: str = 'pyomo.gurobi'
-    # default options to pass to Pyomo solver
-    options: dict = {
-        'mipfocus': 1,
-    }
+    options: dict[str, Any]
 
     def __init__(self):
+        # default options to pass to Pyomo solver
+        self.options = {
+            'mipfocus': 1,
+        }
         # dummy attribute `solver` to be used by SolverPyomo.set_problem()
         self.solver = SimpleNamespace(warm_start_capable=lambda: True)
 
@@ -78,7 +79,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         model, solver = self.model, self.solver

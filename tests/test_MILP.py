@@ -2,6 +2,7 @@ import importlib
 import logging
 import math
 import pickle
+from typing import ClassVar
 
 import networkx as nx
 import pytest
@@ -1332,7 +1333,7 @@ def test_solver_gurobi_error_branches():
     term = type('Term', (), {'name': 'infeasible'})()
 
     class FakeSolver:
-        options = {}
+        options: ClassVar[dict] = {}
         _solver_model = FakeGurobiModel()
 
         def solve(self, model, **kwargs):
@@ -1362,10 +1363,10 @@ def test_solver_pyomo_error_branches(monkeypatch):
     term = type('Term', (), {'name': 'infeasible'})()
 
     class PyomoResult(dict):
-        solution = []
+        solution: ClassVar[list] = []
 
     class FakePyomoSolver:
-        options = {}
+        options: ClassVar[dict] = {}
 
         def solve(self, model, **kwargs):
             return PyomoResult({'Solver': [{'Termination condition': term}]})

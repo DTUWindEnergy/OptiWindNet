@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import re
+from typing import ClassVar
 
 __all__ = ()
 
@@ -13,7 +14,7 @@ def make_handle(s):
 class NodeTagger:
     # 50 digits, 'I' and 'l' were dropped
     alphabet = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNOPQRSTUVWXYZ'
-    value = {c: i for i, c in enumerate(alphabet)}
+    value: ClassVar[dict[str, int]] = {c: i for i, c in enumerate(alphabet)}
 
     def __getattr__(self, b50):
         dec = 0
