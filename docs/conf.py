@@ -110,12 +110,9 @@ nitpick_ignore = [
 autoapi_dirs = ['../optiwindnet']
 #  autoapi_options = [ 'members', 'undoc-members', 'private-members', 'show-inheritance', 'show-module-summary', 'special-members', 'imported-members', ]
 autoapi_options = [
-    'members',
-    'undoc-members',
-    'show-inheritance',
-    'special-members',
-    'imported-members',
-]
+    'members', 'undoc-members', 'show-inheritance',
+    'special-members', 'imported-members',
+]  # fmt: skip
 autoapi_python_class_content = 'both'
 # Named explicitly: the handlers below derive page names from it.
 autoapi_root = 'autoapi'
@@ -327,14 +324,9 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (
-        master_doc,
-        'OptiWindNet.tex',
-        'OptiWindNet Documentation',
-        'DTU Wind Energy',
-        'manual',
-    ),
-]
+    (master_doc, 'OptiWindNet.tex', 'OptiWindNet Documentation',
+     'DTU Wind Energy', 'manual'),
+]  # fmt: skip
 
 
 # -- Options for manual page output ------------------------------------------
@@ -350,16 +342,9 @@ man_pages = [(master_doc, 'optiwindnet', 'OptiWindNet Documentation', [author], 
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (
-        master_doc,
-        'OptiWindNet',
-        'OptiWindNet Documentation',
-        author,
-        'OptiWindNet',
-        'One line description of project.',
-        'Miscellaneous',
-    ),
-]
+    (master_doc, 'OptiWindNet', 'OptiWindNet Documentation', author,
+     'OptiWindNet', 'One line description of project.', 'Miscellaneous'),
+]  # fmt: skip
 
 
 # -- Options for Epub output -------------------------------------------------

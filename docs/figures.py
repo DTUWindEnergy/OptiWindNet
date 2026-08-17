@@ -178,11 +178,9 @@ def graph_model(location: str = 'kfA', capacity: int = 5) -> Panels:
             'would be identical — pick another location or capacity.'
         )
     return 2, [
-        ('L — location', L),
-        ('A — available links', A),
-        ('S — solution topology', straight),
-        ('G — routeset', detoured),
-    ]
+        ('L — location', L), ('A — available links', A),
+        ('S — solution topology', straight), ('G — routeset', detoured),
+    ]  # fmt: skip
 
 
 def crossings(location: str = 'cazzaro_2022', capacity: int = 5) -> Panels:

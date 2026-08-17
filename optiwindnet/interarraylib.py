@@ -19,54 +19,26 @@ _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 
 __all__ = (
-    'G_from_S',
-    'L_from_G',
-    'L_from_site',
-    'S_from_G',
-    'S_from_terse_links',
+    'G_from_S', 'L_from_G', 'L_from_site', 'S_from_G', 'S_from_terse_links',
     'TerseLinks',
-    'add_link_blockmap',
-    'add_link_cosines',
-    'add_ring_to_S',
+    'add_link_blockmap', 'add_link_cosines', 'add_ring_to_S',
     'add_terminal_closest_root',
-    'as_hooked_to_head',
-    'as_hooked_to_nearest',
-    'as_normalized',
-    'as_obstacle_free',
-    'as_rescaled',
-    'as_single_root',
-    'as_stratified_vertices',
-    'as_undetoured',
-    'assign_cables',
-    'bfs_subtree_loads',
-    'calcload',
-    'count_diagonals',
-    'describe_G',
-    'directed_links',
-    'make_remap',
-    'pathdist',
-    'rings_from_S',
-    'scaffolded',
-    'split_rings_and_calc_loads',
-    'terse_links_from_S',
-    'validate_routeset',
-    'validate_topology',
-)
+    'as_hooked_to_head', 'as_hooked_to_nearest', 'as_normalized',
+    'as_obstacle_free', 'as_rescaled', 'as_single_root',
+    'as_stratified_vertices', 'as_undetoured',
+    'assign_cables', 'bfs_subtree_loads', 'calcload', 'count_diagonals',
+    'describe_G', 'directed_links', 'make_remap', 'pathdist', 'rings_from_S',
+    'scaffolded', 'split_rings_and_calc_loads', 'terse_links_from_S',
+    'validate_routeset', 'validate_topology',
+)  # fmt: skip
 
 
 _essential_graph_attrs = (
-    'R',
-    'T',
-    'B',
-    'VertexC',
-    'name',
-    'handle',
-    'border',  # required
-    'obstacles',
-    'landscape_angle',  # optional
-    'norm_scale',
-    'norm_offset',  # optional
-)
+    # required
+    'R', 'T', 'B', 'VertexC', 'name', 'handle', 'border',
+    # optional
+    'obstacles', 'landscape_angle', 'norm_scale', 'norm_offset',
+)  # fmt: skip
 
 
 def assign_cables(
@@ -900,17 +872,11 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         A.graph[k] for k in ('VertexC', 'd2roots', 'diagonals')
     )
     G = nx.create_empty_copy(S)
-    for k in (
-        'B',
-        'border',
-        'obstacles',
-        'name',
-        'handle',
-        'landscape_angle',
-        'norm_scale',
-        'norm_offset',
-        'is_normalized',
-    ):
+    carry_over = (
+        'B', 'border', 'obstacles', 'name', 'handle',
+        'landscape_angle', 'norm_scale', 'norm_offset', 'is_normalized',
+    )  # fmt: skip
+    for k in carry_over:
         value = A.graph.get(k)
         if value is not None:
             G.graph[k] = value

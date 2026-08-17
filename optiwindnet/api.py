@@ -60,14 +60,9 @@ _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 # surface: the notebooks reach for them as `from optiwindnet.api import ...`. Naming
 # them here puts them in this page's outline, pointing at where they are documented.
 __all__ = (
-    'EWRouter',
-    'HGSRouter',
-    'MILPRouter',
-    'ModelOptions',
-    'Router',
-    'WindFarmNetwork',
-    'load_repository',
-)
+    'EWRouter', 'HGSRouter', 'MILPRouter', 'ModelOptions', 'Router',
+    'WindFarmNetwork', 'load_repository',
+)  # fmt: skip
 
 _EMPTY_BORDER = np.empty((0, 2), dtype=np.float64)
 
@@ -817,14 +812,9 @@ class HGSRouter(Router):
 
     _summary_attrs = ('runtime',)
     _repr_attrs = (
-        'time_limit',
-        'feeder_limit',
-        'feeder_exact',
-        'max_retries',
-        'balanced',
-        'ringed',
-        'seed',
-    )
+        'time_limit', 'feeder_limit', 'feeder_exact', 'max_retries',
+        'balanced', 'ringed', 'seed',
+    )  # fmt: skip
 
     def __init__(
         self,

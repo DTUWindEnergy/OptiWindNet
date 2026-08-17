@@ -153,20 +153,13 @@ class SolverFSCIP(Solver, PoolHandler):
                     '\n'.join(f'{k} = {v}\n' for k, v in applied_options.items())
                 )
             cmd = [
-                'fscip',
-                ug_params_file,
-                problem_file,
-                '-sl',
-                lc_settings_file,
-                #  '-sr',
-                #  root_settings_file,
-                '-s',
-                settings_file,
-                '-sth',
-                str(n_threads),  # number of parallel scip instances
-                '-fsol',
-                sol_file,
-            ]
+                'fscip', ug_params_file, problem_file,
+                '-sl', lc_settings_file,
+                #  '-sr', root_settings_file,
+                '-s', settings_file,
+                '-sth', str(n_threads),  # number of parallel scip instances
+                '-fsol', sol_file,
+            ]  # fmt: skip
             if model.getNSols() > 0:
                 isol_path = str(os.path.join(tmpdir, 'warmstart.sol')).replace(
                     '\\', '/'

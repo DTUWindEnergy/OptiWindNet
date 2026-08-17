@@ -159,10 +159,8 @@ def feeder_and_load_bounds(
             raise ValueError('max_feeders is below the minimum necessary')
         feeders_lb, feeders_ub = min_feeders, max_feeders
     elif feeder_limit in (
-        FeederLimit.MIN_PLUS1,
-        FeederLimit.MIN_PLUS2,
-        FeederLimit.MIN_PLUS3,
-    ):
+        FeederLimit.MIN_PLUS1, FeederLimit.MIN_PLUS2, FeederLimit.MIN_PLUS3,
+    ):  # fmt: skip
         plus = int(feeder_limit.value[-1])
         feeders_lb, feeders_ub = min_feeders, min_feeders + plus
     else:

@@ -18,37 +18,17 @@ from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
 from scipy.spatial.distance import cdist
 
 __all__ = (
-    'CoordPair',
-    'CoordPairs',
-    'IndexPairs',
-    'angle',
-    'angle_helpers',
-    'angle_numpy',
-    'angle_oracles_factory',
-    'any_pairs_opposite_edge',
-    'area_from_polygon_vertices',
-    'complete_graph',
-    'find_edges_bbox_overlaps',
-    'get_crossings_map',
-    'is_bunch_split_by_corner',
-    'is_crossing',
-    'is_crossing_no_bbox',
-    'is_crossing_numpy',
-    'is_same_side',
-    'is_triangle_pair_a_convex_quadrilateral',
-    'minimum_spanning_forest',
-    'perimeter',
-    'point_d2line',
-    'point_to_segment_distance',
-    'polyline_rays_at_point',
-    'polylines_cross_at_point',
-    'rays_alternate',
-    'rotate',
-    'rotating_calipers',
-    'rotation_checkers_factory',
-    'triangle_AR',
-    'unique_rays',
-)
+    'CoordPair', 'CoordPairs', 'IndexPairs',
+    'angle', 'angle_helpers', 'angle_numpy', 'angle_oracles_factory',
+    'any_pairs_opposite_edge', 'area_from_polygon_vertices', 'complete_graph',
+    'find_edges_bbox_overlaps', 'get_crossings_map', 'is_bunch_split_by_corner',
+    'is_crossing', 'is_crossing_no_bbox', 'is_crossing_numpy', 'is_same_side',
+    'is_triangle_pair_a_convex_quadrilateral', 'minimum_spanning_forest',
+    'perimeter', 'point_d2line', 'point_to_segment_distance',
+    'polyline_rays_at_point', 'polylines_cross_at_point', 'rays_alternate',
+    'rotate', 'rotating_calipers', 'rotation_checkers_factory',
+    'triangle_AR', 'unique_rays',
+)  # fmt: skip
 
 NULL = np.iinfo(int).min
 
