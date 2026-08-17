@@ -76,6 +76,18 @@ test  = [
     "psutil",  # memory profiling
     "memory_profiler",  # memory profiling
     "line_profiler",  # to check speed
+    "prek",  # runs the checks in .pre-commit-config.yaml, locally and in CI
+    # pyrefly and the third-party stub packages it needs, pinned exactly: a new stub
+    # release routinely changes which errors are reported, and the `# pyrefly: ignore`
+    # comments in the source are written against these versions. Type checking lives
+    # here rather than in an extra of its own because it needs the same environment
+    # the tests do -- it covers `tests/` and imports through `optiwindnet.MILP`.
+    # ruff is deliberately absent: its version is pinned once, in the pre-commit
+    # `rev:`, and prek supplies it.
+    "pyrefly ==1.2.0",
+    "types-networkx ==3.6.1.20260728",
+    "types-peewee ==4.3.0.20260807",
+    "types-shapely ==2.1.0.20260728",
     "optiwindnet[solvers]",
 ]
 docs = [
@@ -134,6 +146,10 @@ ignore = ["N999"]
 
 [tool.pyrefly]
 infer-with-first-use = false
+# Check against the minimum supported Python rather than whatever interpreter happens
+# to be active, so CI does not drift when its image is upgraded. Verified clean on
+# 3.11 through 3.14.
+python-version = "3.11"
 # Notebooks are linted and formatted by ruff, which is notebook-aware, but not
 # type-checked. Their errors are dominated by peewee backrefs, IPython's injected
 # `display`, and optional dependencies (topfarm, py_wake, costmodels) that are not

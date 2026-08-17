@@ -1,3 +1,6 @@
+# Single source of truth for the code checks: the CI `lint_typecheck` job runs
+# `prek run --all-files`, so anything added here is enforced there too, and ruff's
+# version is pinned only once (the `rev:` below).
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
   # Ruff version.
@@ -10,3 +13,19 @@ repos:
     # Run the formatter.
     - id: ruff-format
       types_or: [ python, pyi, jupyter ]
+
+- repo: local
+  hooks:
+    - id: pyrefly
+      name: pyrefly
+      # `language: system` runs the pyrefly from the active environment, which is
+      # pinned in the `test` extra. A managed hook venv would hold only pyrefly
+      # itself, leaving it unable to resolve numpy/networkx/shapely or the stub
+      # packages, so nearly every import would be reported as missing.
+      language: system
+      entry: pyrefly check
+      # Whole-project analysis: trigger on Python edits, but always check everything.
+      # Notebooks are excluded from pyrefly via `project-excludes` in pyproject.toml.
+      types_or: [ python, pyi ]
+      pass_filenames: false
+      require_serial: true
