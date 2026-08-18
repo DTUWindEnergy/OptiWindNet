@@ -252,9 +252,9 @@ class PathFinder:
     attribute ``'kind'`` with value ``'tentative'`` are checked for crossings.
 
     Feeders are rerouted within the topology ``Gʹ`` declares in its mandatory
-    ``'topology'`` graph attribute (a :class:`.Topology` member), which decides
-    where a feeder may re-hook: BRANCHED allows any terminal of the subtree,
-    RADIAL only its head or tail, RINGED only the current subroot.
+    ``'topology'`` graph attribute (a :class:`~optiwindnet.types.Topology` member),
+    which decides where a feeder may re-hook: BRANCHED allows any terminal of the
+    subtree, RADIAL only its head or tail, RINGED only the current subroot.
 
     Args:
       G: the routeset without detours

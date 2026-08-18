@@ -406,14 +406,50 @@ def use_reexported_paths(app, docname, source):
         # skips recorded above are complete. Placing the stubs directly under the
         # heading puts them at the head of the outline rather than after the members.
         stubs = _reexport_stubs(entries)
-        text, substituted = _MODULE_CONTENTS_RE.subn(
+        text, substituted = _CONTENTS_RE.subn(
             lambda m: m.group(1) + '\n' + stubs, text, count=1
         )
         if not substituted and stubs:
             # A module whose every member is re-exported gets no member section from
             # autoapi, leaving a page with nothing on it but its title.
-            text = f'{text.rstrip()}\n\nModule Contents\n---------------\n\n{stubs}'
+            heading = 'Package Contents' if _is_package(docname) else 'Module Contents'
+            rule = '-' * len(heading)
+            text = f'{text.rstrip()}\n\n{heading}\n{rule}\n\n{stubs}'
     source[0] = text
+
+
+def _exports(path):
+    """The ``__all__`` of the module named in `path`, or None when it has no usable one.
+
+    A module with a non-empty ``__all__`` is the one skip_empty_all_submodules keeps,
+    so it is the only kind with a page a stub can point at.
+    """
+    module_name, _, _ = path.rpartition('.')
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        return None
+    return getattr(module, '__all__', ()) or None
+
+
+def _definition_path(origin):
+    """Follow a re-export chain from `origin` down to where the object is defined."""
+    module_name, _, origin_name = origin.rpartition('.')
+    try:
+        obj = getattr(importlib.import_module(module_name), origin_name)
+    except (ImportError, AttributeError):
+        return origin
+    home = getattr(obj, '__module__', None)
+    if not isinstance(home, str) or not home.startswith('optiwindnet.'):
+        # Plain data carries no __module__, so autoapi's one hop is all there is.
+        return origin
+    try:
+        if getattr(importlib.import_module(home), origin_name, None) is not obj:
+            # Re-exported under a name other than the one it is defined by.
+            return origin
+    except ImportError:
+        return origin
+    return f'{home}.{origin_name}'
 
 
 def skip_reexports_of_documented_modules(app, what, name, obj, skip, options):
@@ -434,15 +470,19 @@ def skip_reexports_of_documented_modules(app, what, name, obj, skip, options):
     if not origin.startswith('optiwindnet.'):
         # Third-party imports are documented in their own project, not in this tree.
         return None
-    defining_name, _, origin_name = origin.rpartition('.')
-    try:
-        defining = importlib.import_module(defining_name)
-    except ImportError:
+    exported = _exports(origin)
+    if exported is None:
+        # autoapi records original_path one hop back - the module the importing one
+        # named, which may itself have imported the object. optiwindnet.MILP takes
+        # Topology from the private MILP._core, which takes it from optiwindnet.types,
+        # and only the last of the three publishes it. Follow the chain when the hop
+        # autoapi recorded turns out not to be a documented module, but only then:
+        # the nearest module that does publish the name is the one to link to.
+        origin = _definition_path(origin)
+        exported = _exports(origin)
+    if exported is None:
         return None
-    exported = getattr(defining, '__all__', ())
-    if not exported:
-        return None
-    if origin_name in exported:
+    if origin.rpartition('.')[2] in exported:
         # Only then does the definition get a page for the stub below to point at.
         parent, _, short_name = name.rpartition('.')
         docname = f'{autoapi_root}/{parent.replace(".", "/")}/index'
@@ -464,7 +504,19 @@ _STUB_DIRECTIVE = {
     'function': 'py:function',
 }
 
-_MODULE_CONTENTS_RE = re.compile(r'^(Module Contents\n-+\n)', re.MULTILINE)
+# autoapi heads the member section 'Module Contents' on a module and 'Package
+# Contents' on a package, and optiwindnet.MILP is one of the latter.
+_CONTENTS_RE = re.compile(r'^((?:Module|Package) Contents\n-+\n)', re.MULTILINE)
+
+
+def _is_package(docname):
+    """Whether the page named by `docname` documents a package rather than a module."""
+    module_name = docname[len(autoapi_root) + 1 : -len('/index')].replace('/', '.')
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        return False
+    return hasattr(module, '__path__')
 
 
 def _reexport_stubs(entries):

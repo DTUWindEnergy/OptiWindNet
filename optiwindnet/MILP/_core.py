@@ -361,8 +361,8 @@ def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
 
     A model accepts its own topology, plus RADIAL into BRANCHED (a path is a
     tree). The comparison is by identity, and ``S`` comes from the caller, so its
-    topology is checked for being a :class:`.Topology`: an equal ``str`` is a
-    type error, not a mismatch.
+    topology is checked for being a :class:`~optiwindnet.types.Topology`: an equal
+    ``str`` is a type error, not a mismatch.
 
     Raises:
         OWNWarmupFailed: ``S``'s topology is one this model cannot start from, or
