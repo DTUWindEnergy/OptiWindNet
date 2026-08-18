@@ -101,7 +101,7 @@ with database_connection('optiwindnet-routesets-r26.05-v4.sqlite'):
 gplot(G)
 ```
 
-A location alone, without a solution, comes from {py:func}`L_from_nodeset() <optiwindnet.db.L_from_nodeset>`. Both functions rebuild the graph metadata the rest of the library expects — see [](/problem.md#the-graph-model) — which a raw SQL query would leave behind.
+A location alone, without a solution, comes from {py:func}`L_from_nodeset() <optiwindnet.db.L_from_nodeset>`. Both functions rebuild the graph metadata the rest of the library expects — see [](/problem.md#graph-representations) — which a raw SQL query would leave behind.
 
 ## What the article reports
 

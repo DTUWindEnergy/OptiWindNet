@@ -41,7 +41,7 @@ A task-oriented index into the rest of the documentation. Each entry names the c
 
 | Goal | Read | Network/Router | Advanced |
 | --- | --- | --- | --- |
-| Plot a location or a result | [](/problem.md#the-graph-model) | {doc}`/notebooks/hi14_plotting` | {doc}`/notebooks/lo14_plotting` |
+| Plot a location or a result | [](/problem.md#graph-representations) | {doc}`/notebooks/hi14_plotting` | {doc}`/notebooks/lo14_plotting` |
 | Label the turbines in a figure | — | {doc}`/notebooks/hi14_plotting` | {doc}`/notebooks/lo14_plotting` |
 | See why a route bends the way it does | [](/problem.md#crossings-contours-and-detours) | {doc}`/notebooks/hi14_plotting` | {doc}`/notebooks/lo14_plotting` |
 | Check that a solution is valid | [Validation](/reference/validation.md#validation) | — | {doc}`/notebooks/lo30_topologies` |

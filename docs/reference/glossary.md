@@ -37,7 +37,7 @@ crossing
   Two cable routes intersecting at a point that is not a shared node. Crossings are forbidden in a valid routeset.
 
 routeset
-  The solution as physical cable routes — the graph `G` of [](/problem.md#the-graph-model). It carries the contours and detours that path-finding added, and optionally a cable type per link, so its total length is at least that of the topology `S` it came from.
+  The solution as physical cable routes — the graph `G` of [](/problem.md#graph-representations). It carries the contours and detours that path-finding added, and optionally a cable type per link, so its total length is at least that of the topology `S` it came from.
 
 router
   An algorithm that turns a problem instance into a solution topology. The three optimization approaches — constructive heuristic, meta-heuristic and exact optimization — are described in {doc}`/routers`. The Network/Router API wraps each approach in a {py:class}`Router <optiwindnet.api.Router>` subclass; the Advanced API calls the same algorithms as functions.

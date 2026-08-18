@@ -2,7 +2,7 @@
 
 These notebooks are developer-facing examples that import lower-level modules directly. Those modules may evolve independently of the Network/Router API, so pin an integration built on them to a tested _OptiWindNet_ version.
 
-The graphs these notebooks pass between functions — `L`, `P`, `A`, `S` and `G` — are described in [](/problem.md#the-graph-model); the routers they call, and the model and solver options they pass, are in {doc}`/routers`. Checking a result is covered by {doc}`/reference/validation`.
+The graphs these notebooks pass between functions — `L`, `P`, `A`, `S` and `G` — are described in [](/problem.md#graph-representations); the routers they call, and the model and solver options they pass, are in {doc}`/routers`. Checking a result is covered by {doc}`/reference/validation`.
 
 [](/reference/tasks.md#paired-examples) maps each notebook here to its counterpart in the {doc}`/high_level_api`, and the {doc}`/reference/tasks` indexes them by goal. Complete signatures are in the generated {doc}`API Reference </autoapi/index>`.
 
