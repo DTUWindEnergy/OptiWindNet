@@ -127,6 +127,33 @@ variables:
     paths:
       - downloads
 
+# ===== Lint and type-check =====
+# Cheap gate: no solver binaries and no apt packages, so it finishes long before the
+# test jobs. Runs on every branch and merge request, with no `changes:` filter --
+# the point is that enforcement no longer depends on each developer having installed
+# the pre-commit hook.
+lint_typecheck:
+  # stage: base
+  image: python:$PYTHON_VERSION_FOR_TOOLS
+  tags: [linux]
+  rules:
+    - if: $RUN != "ci"
+      when: never
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+  before_script:
+    # The `docs` extra too: pyrefly checks docs/conf.py and docs/run_notebooks.py, and
+    # cannot resolve their imports without it.
+    - pip install --progress-bar off -e .[test,docs]
+    - python3 --version
+    - prek --version
+    - pyrefly --version
+  script:
+    # Runs exactly the hooks in .pre-commit-config.yaml, so this job needs no
+    # knowledge of which checks exist or which ruff version to use. The ruff hooks
+    # rewrite files rather than only reporting, so a failure here means the committed
+    # tree was not linted/formatted; the diff shows precisely what the hooks changed.
+    - prek run --all-files --show-diff-on-failure
+
 # ===== Test OptiWindNet on Linux =====
 test_linux:
   extends: .test_linux_base

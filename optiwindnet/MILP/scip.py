@@ -4,6 +4,7 @@
 import logging
 from collections.abc import Mapping
 from itertools import chain
+from types import MappingProxyType
 from typing import Any
 
 import networkx as nx
@@ -24,6 +25,8 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    check_model_enums,
+    check_warmstart_topology,
     feeder_and_load_bounds,
     physical_core_count,
     warmstart_links,
@@ -76,7 +79,7 @@ class SolverSCIP(Solver, PoolHandler):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         """Run SCIP search via concurrent multi-threading or standard optimization.
@@ -99,7 +102,7 @@ class SolverSCIP(Solver, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
         use_concurrent = applied_options.pop('concurrent', True)
         if model.getStage() != SCIP_STAGE.PROBLEM:
             # SCIP refuses to (re)solve unless the model is back in the PROBLEM
@@ -111,7 +114,7 @@ class SolverSCIP(Solver, PoolHandler):
         model.setParams(applied_options)
         model.setParam('limits/gap', mip_gap)
         model.setParam('limits/time', time_limit)
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         if not verbose:
             model.setParam('display/verblevel', 1)  # 1: warnings; 0: no output
         info('>>> SCIP parameters <<<\n%s\n', model.getParams())
@@ -201,6 +204,7 @@ def make_min_length_model(
       max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
         exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
     """
+    check_model_enums(topology, feeder_route, feeder_limit)
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -402,13 +406,13 @@ def make_min_length_model(
     # Store metadata #
     ##################
 
-    model_options = dict(
-        topology=topology,
-        feeder_route=feeder_route,
-        feeder_limit=feeder_limit,
-        max_feeders=max_feeders,
-        balanced=balanced,
-    )
+    model_options = {
+        'topology': topology,
+        'feeder_route': feeder_route,
+        'feeder_limit': feeder_limit,
+        'max_feeders': max_feeders,
+        'balanced': balanced,
+    }
     metadata = ModelMetadata(
         R,
         T,
@@ -442,12 +446,7 @@ def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    mt = metadata.model_options['topology']
-    st = S.graph['topology']
-    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
-        raise OWNWarmupFailed(
-            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
-        )
+    check_warmstart_topology(metadata, S)
     # createSol() zero-initializes every variable, so only the links S activates
     # need to be set.
     sol = model.createSol()

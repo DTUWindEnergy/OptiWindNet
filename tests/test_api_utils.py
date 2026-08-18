@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from shapely.geometry import Polygon
 
-import optiwindnet.api_utils as api_utils
+from optiwindnet import api_utils
 
 from .helpers import tiny_wfn
 

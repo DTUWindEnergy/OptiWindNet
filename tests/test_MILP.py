@@ -2,12 +2,13 @@ import importlib
 import logging
 import math
 import pickle
+from typing import ClassVar
 
 import networkx as nx
 import pytest
 
-import optiwindnet.MILP as MILP
 import optiwindnet.MILP._core as core
+from optiwindnet import MILP
 from optiwindnet.interarraylib import terse_links_from_S
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.terse import TerseLinks
@@ -50,6 +51,53 @@ _SOLVER_GOLDENS = load_solver_topologies()
 # native libraries) at module scope -- every worker re-imports this module to
 # unpickle whichever job function it's given, and each worker process must
 # stay single-solver-family.
+def _build_toy_ringed_then_offer_a_str(module_name):
+    """Build the toy RINGED model from the enum, then offer the ``str`` value.
+
+    Returns ``(ring_vars, stored_the_enum, str_outcome)``.
+    """
+    make_min_length_model = importlib.import_module(module_name).make_min_length_model
+    A = get_bundle('toy').A
+
+    _, metadata = make_min_length_model(A, _CAPACITY, topology=Topology.RINGED)
+    ring_vars = sum(1 for u, _ in metadata.linkset if u < 0)
+    stored_enum = metadata.model_options['topology'] is Topology.RINGED
+
+    try:
+        make_min_length_model(A, _CAPACITY, topology='ringed')
+    except TypeError as exc:
+        return ring_vars, stored_enum, str(exc)
+    return ring_vars, stored_enum, 'accepted'
+
+
+def _warmup_with_uncoerced_topology():
+    """Warm-start a BRANCHED model with a RADIAL S, then with its str spelling.
+
+    Returns the distinguishing fragment of the second attempt's message.
+    """
+    from optiwindnet.heuristics import constructor
+    from optiwindnet.interarraylib import S_from_G
+    from optiwindnet.MILP._core import OWNWarmupFailed
+    from optiwindnet.MILP.ortools import make_min_length_model, warmup_model
+
+    A = get_bundle('toy').A
+    S = S_from_G(constructor(A, capacity=_CAPACITY, method='radial_EW'))
+    model, metadata = make_min_length_model(A, _CAPACITY, topology=Topology.BRANCHED)
+    warmup_model(model, metadata, S)  # RADIAL warm-starts a BRANCHED model
+
+    S.graph['topology'] = str(S.graph['topology'])
+    try:
+        warmup_model(model, metadata, S)
+    except OWNWarmupFailed as exc:
+        message = str(exc)
+        return (
+            'must be a Topology member'
+            if 'must be a Topology member' in message
+            else message
+        )
+    return 'accepted'
+
+
 def _solve_toy_incumbent(solver_name, topology):
     from unittest import mock
 
@@ -72,13 +120,13 @@ def _solve_toy_incumbent(solver_name, topology):
         side_effect=AssertionError('incumbent retrieval must not route'),
     ):
         S = solver.get_incumbent_topology()
-    return dict(
-        terse=terse_links_from_S(S),
-        violations=validate_topology(S, _CAPACITY),
-        graph=dict(S.graph),
-        objective=solution_info.objective,
-        preserved_objective=solver.solution_info.objective,
-    )
+    return {
+        'terse': terse_links_from_S(S),
+        'violations': validate_topology(S, _CAPACITY),
+        'graph': dict(S.graph),
+        'objective': solution_info.objective,
+        'preserved_objective': solver.solution_info.objective,
+    }
 
 
 def _get_incumbent_before_solve(solver_name):
@@ -271,14 +319,8 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     assert result['violations'] == []
     assert result['objective'] == result['preserved_objective']
     assert {
-        'R',
-        'T',
-        'topology',
-        'capacity',
-        'max_load',
-        'has_loads',
-        'creator',
-    } <= result['graph'].keys()
+        'R', 'T', 'topology', 'capacity', 'max_load', 'has_loads', 'creator',
+    } <= result['graph'].keys()  # fmt: skip
 
 
 @pytest.mark.parametrize('topology', ['radial', 'ringed'])
@@ -961,7 +1003,7 @@ def _job_make_solve_params(backend, physical_core_count_value, kwargs):
         )
     # only plain values may cross back: unpickling an ortools object would load
     # ortools' native libraries into the parent process
-    probed = dict(threads=solve_params.threads)
+    probed = {'threads': solve_params.threads}
     if backend == 'cp_sat':
         probed['log_search_progress'] = solve_params.cp_sat.log_search_progress
     else:
@@ -979,12 +1021,12 @@ def _job_make_solve_params(backend, physical_core_count_value, kwargs):
 def test_make_solve_parameters_thread_defaults(
     ortools_worker, backend, verbose, time_limit, mip_gap, expected_threads
 ):
-    kwargs = dict(
-        time_limit=time_limit,
-        mip_gap=mip_gap,
-        applied_options={},
-        verbose=verbose,
-    )
+    kwargs = {
+        'time_limit': time_limit,
+        'mip_gap': mip_gap,
+        'applied_options': {},
+        'verbose': verbose,
+    }
     probed, applied_options = ortools_worker.run(
         _job_make_solve_params, (backend, 6, kwargs), 30
     )
@@ -1199,19 +1241,15 @@ def test_model_options_coerces_strings_to_enums():
 
 def test_model_options_materializes_every_default():
     assert set(ModelOptions()) == {
-        'topology',
-        'feeder_route',
-        'feeder_limit',
-        'balanced',
-        'max_feeders',
-    }
+        'topology', 'feeder_route', 'feeder_limit', 'balanced', 'max_feeders',
+    }  # fmt: skip
 
 
 @pytest.mark.parametrize(
     ('kwargs', 'expected'),
     [
-        (dict(max_feeders='3'), 'max_feeders must be int'),
-        (dict(balanced='yes'), 'balanced must be bool'),
+        ({'max_feeders': '3'}, 'max_feeders must be int'),
+        ({'balanced': 'yes'}, 'balanced must be bool'),
     ],
 )
 def test_model_options_rejects_wrong_scalar_type(kwargs, expected):
@@ -1278,6 +1316,51 @@ def test_set_problem_coerces_a_plain_mapping(P_A_toy):
     assert from_mapping == from_options > 0
 
 
+@pytest.mark.parametrize(
+    ('module_name', 'solver_name'),
+    [
+        ('optiwindnet.MILP.ortools', 'ortools.cp_sat'),
+        ('optiwindnet.MILP.scip', 'scip'),
+        ('optiwindnet.MILP.pyomo', 'highs'),
+    ],
+    ids=('ortools', 'scip', 'pyomo'),
+)
+def test_make_min_length_model_rejects_an_off_contract_str(
+    run_isolated, module_name, solver_name
+):
+    """The builders take the enums, and say so instead of building the default.
+
+    They branch on ``is`` and record the result in ``ModelMetadata``, so an
+    accepted ``'ringed'`` would yield a *branched* model with no root-to-terminal
+    ring variables, and a bare str for ``warmup_model`` to read.
+    """
+    result = run_isolated(
+        solver_name, _build_toy_ringed_then_offer_a_str, (module_name,), 60
+    )
+    if isinstance(result, BaseException):
+        if solver_unavailable(result):
+            pytest.skip(f'{solver_name} unavailable: {result}')
+        raise result
+
+    ring_vars, stored_enum, str_outcome = result
+    assert ring_vars > 0
+    assert stored_enum
+    assert 'topology must be a Topology member' in str_outcome
+
+
+def test_warmup_model_rejects_an_uncoerced_topology(ortools_worker):
+    """A str in S is reported as a type error, not as a topology mismatch.
+
+    RADIAL warm-starts a BRANCHED model, so a message about that pair would
+    contradict itself.
+    """
+    result = ortools_worker.run(_warmup_with_uncoerced_topology, (), 60)
+    if isinstance(result, BaseException):
+        raise result
+
+    assert result == 'must be a Topology member'
+
+
 def test_model_options_help(capsys):
     ModelOptions.help()
     captured = capsys.readouterr()
@@ -1332,7 +1415,7 @@ def test_solver_gurobi_error_branches():
     term = type('Term', (), {'name': 'infeasible'})()
 
     class FakeSolver:
-        options = {}
+        options: ClassVar[dict] = {}
         _solver_model = FakeGurobiModel()
 
         def solve(self, model, **kwargs):
@@ -1362,10 +1445,10 @@ def test_solver_pyomo_error_branches(monkeypatch):
     term = type('Term', (), {'name': 'infeasible'})()
 
     class PyomoResult(dict):
-        solution = []
+        solution: ClassVar[list] = []
 
     class FakePyomoSolver:
-        options = {}
+        options: ClassVar[dict] = {}
 
         def solve(self, model, **kwargs):
             return PyomoResult({'Solver': [{'Termination condition': term}]})

@@ -117,7 +117,7 @@ def test_constructor_ringed_exact_double_capacity_boundary():
     A = get_bundle('example_location').A
     S = constructor(A, capacity=6, method='ringed')
     assert_topology(S, Topology.RINGED, 6)
-    assert max(map(lambda ring: len(ring[1]), rings_from_S(S))) <= 12
+    assert max(len(ring[1]) for ring in rings_from_S(S)) <= 12
 
 
 def test_constructor_ringed_odd_site_exercises_single_terminal_ring():

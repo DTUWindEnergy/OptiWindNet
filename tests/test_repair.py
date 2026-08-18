@@ -3,7 +3,7 @@ import networkx as nx
 import numpy as np
 import pytest
 
-import optiwindnet.repair as repair
+from optiwindnet import repair
 from optiwindnet.api import WindFarmNetwork
 from optiwindnet.interarraylib import calcload
 from optiwindnet.repair import gate_and_leaf_path, list_path
@@ -19,19 +19,9 @@ from .helpers import assert_graph_equal
 def LA():
     """Small deterministic site: 1 substation + 8 turbines on a grid."""
     substationsC = np.array([[0.0, 0.0]])
-    turbinesC = np.array(
-        [
-            [0, 1],
-            [0, 2],
-            [1, 2],
-            [2, 2],
-            [2, 1],
-            [2, 0],
-            [1, 0],
-            [1, 1],
-        ],
-        dtype=float,
-    )
+    turbinesC = np.array([
+        [0, 1], [0, 2], [1, 2], [2, 2], [2, 1], [2, 0], [1, 0], [1, 1],
+    ], dtype=float)  # fmt: skip
     wfn = WindFarmNetwork(turbinesC=turbinesC, substationsC=substationsC, cables=5)
     return wfn.L, wfn.A  # (L has nodes/attrs incl. -1; A is available links)
 

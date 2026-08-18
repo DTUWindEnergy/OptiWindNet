@@ -5,6 +5,7 @@
 - **`MILPRouter` warm-start controls, with a default behavior change.** Two new parameters expose warm-starting explicitly: `warmup` (default `True`) is a master switch, and `warmup_time` (default `0.2` s) is the time budget for *building* a warm start with the heuristic (replacing a previously hardcoded value).
   - **Behavior change:** with `warmup=True` (the default), a *fresh* MILP solve now builds a warm start via HGS/constructor before solving, where it previously solved cold. Reusing the solution carried across successive `WindFarmNetwork.optimize()` calls is unchanged. Pass `warmup=False` to force a fully cold solve (any stored or supplied solution is then ignored).
   - Warm-start construction now also covers the `feeder_limit` values `'exactly'` (with `balanced`), `'min_plus1/2/3'`, and `'minimum'`+`balanced` across the `branched`, `radial`, and `ringed` topologies; these previously fell back to a cold solve.
+- **`make_min_length_model()` now rejects the `str` spelling of its enum options (`topology`, `feeder_route`, `feeder_limit`).** It raises `TypeError` rather than defaulting silently or failing deeper in the build; `ModelOptions` continues to accept the `str` spelling.
 
 # v0.3.0
 

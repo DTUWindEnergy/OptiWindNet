@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from itertools import chain
+from itertools import chain, pairwise
 from pathlib import Path
 from typing import Any
 
@@ -206,7 +206,7 @@ def _route_from_tour(tour_fpath: str, L: np.ndarray) -> tuple[list[int], int]:
     depot = L.shape[0]  # 1-based id of the depot (last matrix index + 1)
     cut = nodes.index(depot)
     seq = [n - 1 for n in chain(nodes[cut + 1 :], nodes[:cut])]
-    hops = sum(int(L[u, v]) for u, v in zip(seq[:-1], seq[1:]))
+    hops = sum(int(L[u, v]) for u, v in pairwise(seq))
     cost_fwd = int(L[seq[0], -1]) + hops
     cost_rev = int(L[seq[-1], -1]) + hops
     if cost_rev < cost_fwd:
@@ -257,26 +257,28 @@ def _do_lkh(
     initial_tour_fname = 'initial.tour'
 
     distance_cap = _distance_cap(L, capacity=capacity, scale=scale)
-    specs: dict[str, str | int | float] = dict(
-        NAME=name,
-        TYPE='CVRP' if ringed else 'OVRP',
-        DIMENSION=N,  # CVRP number of nodes and depots
+    specs: dict[str, str | int | float] = {
+        'NAME': name,
+        'TYPE': 'CVRP' if ringed else 'OVRP',
+        'DIMENSION': N,  # CVRP number of nodes and depots
         # For CAPACITY to be enforced, a DEMAND section is required.
         # MTSP_MAX_SIZE should work for unitary demand, but did not.
-        CAPACITY=capacity,
-        EDGE_WEIGHT_TYPE='EXPLICIT',
-        EDGE_WEIGHT_FORMAT='UPPER_ROW',
-    )
+        'CAPACITY': capacity,
+        'EDGE_WEIGHT_TYPE': 'EXPLICIT',
+        'EDGE_WEIGHT_FORMAT': 'UPPER_ROW',
+    }
     if not ringed and not math.isinf(distance_cap):
         # LKH treats DISTANCE as a hard constraint: too low and it reports the
         # problem infeasible and returns no solution at all. The cap is
         # calibrated for open (radial) routes; a closed ring pays a second feeder
         # leg, so the cap is not imposed for ringed solves.
         specs['DISTANCE'] = distance_cap  # maximum route length
-    data = dict(
-        EDGE_WEIGHT_SECTION=edge_weights,
-        DEMAND_SECTION='\n'.join(chain((f'{i + 1} 1' for i in range(T)), (f'{N} 0',))),
-    )
+    data = {
+        'EDGE_WEIGHT_SECTION': edge_weights,
+        'DEMAND_SECTION': '\n'.join(
+            chain((f'{i + 1} 1' for i in range(T)), (f'{N} 0',))
+        ),
+    }
     params = dict(
         # SPECIAL is a shorthand for a bundle of large-neighborhood move settings
         # (MOVE_TYPE='5 SPECIAL', MAX_SWAPS=0, ...). It segfaults LKH-3 on
@@ -349,7 +351,9 @@ def _do_lkh(
             '\n'.join((f'{k} = {v}' if v is not None else k) for k, v in params.items())
         )
         start_time = time.perf_counter()
-        result = subprocess.run(['LKH', params_fpath], capture_output=True)
+        result = subprocess.run(
+            ['LKH', params_fpath], capture_output=True, check=False
+        )  # LKH's exit code is not a reliable success signal; output is parsed instead
         elapsed_time = time.perf_counter() - start_time
         output_fpath = os.path.join(tmpdir, output_fname)
         tour_fpath = os.path.join(tmpdir, tour_fname)
@@ -377,18 +381,18 @@ def _do_lkh(
             routes = []
 
     log = result.stdout.decode('utf8')
-    output: dict[str, Any] = dict(
-        routes=routes,
-        penalty=int(penalty),
-        minimum=minimum,
-        cost=float(minimum) / scale,
-        log=log,
-        stderr=result.stderr.decode('utf8'),
-        elapsed_time=elapsed_time,
-        solution_time=_solution_time(log, minimum),
-        vehicles=vehicles,
-        seed=seed,
-    )
+    output: dict[str, Any] = {
+        'routes': routes,
+        'penalty': int(penalty),
+        'minimum': minimum,
+        'cost': float(minimum) / scale,
+        'log': log,
+        'stderr': result.stderr.decode('utf8'),
+        'elapsed_time': elapsed_time,
+        'solution_time': _solution_time(log, minimum),
+        'vehicles': vehicles,
+        'seed': seed,
+    }
 
     if not solution_parsed or result.stderr:
         info('===stdout===\n%s', log)
@@ -683,15 +687,15 @@ def _lkh(
         name=A.graph.get('name', 'unnamed'),
     )
 
-    method_options = dict(
-        solver_name='LKH-3',
-        time_limit=time_limit,
-        scale=scale,
-        runs=runs,
-        per_run_limit=per_run_limit,
-        complete=complete,
-        fun_fingerprint=_lkh_fun_fingerprint,
-    )
+    method_options = {
+        'solver_name': 'LKH-3',
+        'time_limit': time_limit,
+        'scale': scale,
+        'runs': runs,
+        'per_run_limit': per_run_limit,
+        'complete': complete,
+        'fun_fingerprint': _lkh_fun_fingerprint,
+    }
     S = _build_solution(
         A,
         capacity=capacity,
@@ -699,7 +703,7 @@ def _lkh(
         terminals_=[terminals],
         keep_log=keep_log,
         method_options=method_options,
-        solver_details_extra=dict(seed=seed),
+        solver_details_extra={'seed': seed},
     )
     assert S.nodes[-1]['load'] == T, 'ERROR: root node load does not match T.'
     S.graph['has_loads'] = True
@@ -711,18 +715,18 @@ _lkh_fun_fingerprint = fingerprint_function(_lkh)
 
 def _no_terminals_output(seed: int) -> dict:
     """Stand-in for :func:`_do_lkh`'s output on a root that got no terminals."""
-    return dict(
-        routes=[],
-        penalty=0,
-        minimum='0',
-        cost=0.0,
-        log='',
-        stderr='',
-        elapsed_time=0.0,
-        solution_time=0.0,
-        vehicles=0,
-        seed=seed,
-    )
+    return {
+        'routes': [],
+        'penalty': 0,
+        'minimum': '0',
+        'cost': 0.0,
+        'log': '',
+        'stderr': '',
+        'elapsed_time': 0.0,
+        'solution_time': 0.0,
+        'vehicles': 0,
+        'seed': seed,
+    }
 
 
 def _run_lkh_per_cluster(
@@ -753,21 +757,21 @@ def _run_lkh_per_cluster(
     """
     R = len(L_)
     job_kwargs_ = [
-        dict(
-            L=L,
-            capacity=capacity,
-            vehicles=vehicles_c,
-            balanced=balanced,
-            time_limit=time_limit,
-            scale=scale,
-            runs=runs,
-            per_run_limit=per_run_limit,
-            precision=precision,
-            seed=seed,
-            initial_tour_nodes=init_tour,
-            name=name if R == 1 else f'{name}_root{r}',
-            ringed=ringed,
-        )
+        {
+            'L': L,
+            'capacity': capacity,
+            'vehicles': vehicles_c,
+            'balanced': balanced,
+            'time_limit': time_limit,
+            'scale': scale,
+            'runs': runs,
+            'per_run_limit': per_run_limit,
+            'precision': precision,
+            'seed': seed,
+            'initial_tour_nodes': init_tour,
+            'name': name if R == 1 else f'{name}_root{r}',
+            'ringed': ringed,
+        }
         for r, L, vehicles_c, init_tour in zip(
             range(-R, 0), L_, vehicles_, warmstart_tours
         )
@@ -943,12 +947,11 @@ def lkh3(
     solve_capacity = 2 * capacity if ringed else capacity
     if vehicles is not None:
         vehicles_min = math.ceil(T / solve_capacity)
-        if vehicles != vehicles_min:
-            if R > 1:
-                warn(
-                    'For multi-root instances, the parameter vehicles (feeders) can '
-                    'only be None or the minimum feasible: setting to the minimum.'
-                )
+        if vehicles != vehicles_min and R > 1:
+            warn(
+                'For multi-root instances, the parameter vehicles (feeders) can '
+                'only be None or the minimum feasible: setting to the minimum.'
+            )
         vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
         feeders_above_min = vehicles - vehicles_min
     else:
@@ -957,17 +960,17 @@ def lkh3(
     if seed is None:
         seed = random.randrange(0, 2**31)
 
-    method_options = dict(
-        solver_name='LKH-3',
-        time_limit=time_limit,
-        scale=scale,
-        runs=runs,
-        per_run_limit=per_run_limit,
-        complete=complete,
-        feeders_above_min=feeders_above_min,
-        fun_fingerprint=_lkh3_fun_fingerprint,
-    )
-    solver_details_extra = dict(seed=seed)
+    method_options = {
+        'solver_name': 'LKH-3',
+        'time_limit': time_limit,
+        'scale': scale,
+        'runs': runs,
+        'per_run_limit': per_run_limit,
+        'complete': complete,
+        'feeders_above_min': feeders_above_min,
+        'fun_fingerprint': _lkh3_fun_fingerprint,
+    }
+    solver_details_extra = {'seed': seed}
 
     A_iter = A.copy()
     diagonals = A.graph['diagonals'].copy()

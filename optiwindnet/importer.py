@@ -27,12 +27,9 @@ _lggr = logging.getLogger(__name__)
 _info, _warn = _lggr.info, _lggr.warning
 
 __all__ = (
-    'L_from_yaml',
-    'L_from_pbf',
-    'L_from_windIO',
-    'LocationsRepository',
-    'load_repository',
-)
+    'L_from_pbf', 'L_from_windIO', 'L_from_yaml',
+    'LocationsRepository', 'load_repository',
+)  # fmt: skip
 
 
 _coord_sep = r',\s*|;\s*|\s{1,}|,|;'
@@ -125,10 +122,10 @@ def _parser_planar(entry_list, force_zone_number=None, force_zone_letter=None):
     return np.array(coords, dtype=float), (labels if any(labels) else ())
 
 
-coordinate_parser = dict(
-    latlon=_parser_latlon,
-    planar=_parser_planar,
-)
+coordinate_parser = {
+    'latlon': _parser_latlon,
+    'planar': _parser_planar,
+}
 
 
 def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
@@ -163,7 +160,8 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     if isinstance(filepath, str):
         filepath = Path(filepath)
     # read wind power plant site YAML file
-    parsed_dict = yaml.safe_load(open(filepath, 'r', encoding='utf8'))
+    with open(filepath, encoding='utf8') as f:
+        parsed_dict = yaml.safe_load(f)
     name = filepath.stem
     handle = parsed_dict.get('HANDLE')
     if handle is None:
@@ -178,7 +176,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         turbines_latlon = _translate_latlonstr(parsed_dict['TURBINES'])
         zone_tally = _utm_zone_tally((lat, lon) for _label, lat, lon in turbines_latlon)
         (zone_number, zone_letter), _ = zone_tally.most_common(1)[0]
-    Border, BorderLabel = coordinate_parser[format](
+    Border, _BorderLabel = coordinate_parser[format](
         parsed_dict['EXTENTS'], zone_number, zone_letter
     )
     Root, RootLabel = coordinate_parser[format](
@@ -221,7 +219,7 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         # obstacle has to be a list of arrays, so parsing is a bit different
         indices = []
         for obstacle_entry in parsed_dict['OBSTACLES']:
-            obstacleC, poly_tag = coordinate_parser[format](
+            obstacleC, _poly_tag = coordinate_parser[format](
                 obstacle_entry, zone_number, zone_letter
             )
 
@@ -569,7 +567,7 @@ def L_from_windIO(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         T=T,
         B=B,
         VertexC=np.vstack((terminalC, borderC, rootC)),
-        **({'border': np.arange(T, T + B)} if (borderC is not None and B >= 3) else {}),
+        border=np.arange(T, T + B) if (borderC is not None and B >= 3) else None,
         name=name,
         handle=handle,
     )
@@ -606,8 +604,11 @@ def load_repository(path: Path | str | None = None) -> 'LocationsRepository':
       Named tuple which has the location handles as attribute identifiers.
     """
     if path is None:
+        # `__package__` is set for any imported submodule (PEP 366), but its declared
+        # type allows None, which `files()` rejects on the minimum supported Python
+        anchor = __package__ or __name__.rpartition('.')[0]
         # the bundled data always lives on the filesystem
-        root = Path(str(files(__package__) / 'data'))
+        root = Path(str(files(anchor) / 'data'))
     else:
         root = Path(path)
     locations = [L_from_yaml(file) for file in root.glob('*.yaml')]

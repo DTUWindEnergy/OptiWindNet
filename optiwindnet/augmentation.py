@@ -4,8 +4,9 @@
 import logging
 import math
 import warnings
+from collections.abc import Callable, Sequence
 from itertools import pairwise
-from typing import Callable
+from typing import cast
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -55,9 +56,9 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
     Returns:
       ``True`` if ``point`` clears all discs centered on ``RepellerC``.
     """
-    return (
-        ((point[np.newaxis, :] - RepellerC) ** 2).sum(axis=1) >= repel_radius_sq
-    ).all()
+    return bool(
+        (((point[np.newaxis, :] - RepellerC) ** 2).sum(axis=1) >= repel_radius_sq).all()
+    )
 
 
 @nb.njit(cache=True, inline='always')
@@ -224,21 +225,23 @@ def _poisson_disc_filler_core(
     repel_radius_sq: float,
     RepellerS: CoordPairs | None,
     rng: np.random.Generator,
-) -> CoordPairs:
-    """This is the numba-compilable core called by :func:`poisson_disc_filler`."""
+) -> tuple[CoordPairs, list[int], int]:
+    """This is the numba-compilable core called by :func:`poisson_disc_filler`.
+
+    Returns:
+      ``(points, iters_per_attempt, restart_count)``
+    """
     # [Poisson-Disc Sampling](https://www.jasondavies.com/poisson-disc/)
 
     # mask for the 20 neighbors
     # (5x5 grid excluding corners and center)
-    neighbormask = np.array(
-        (
-            (False, True, True, True, False),
-            (True, True, True, True, True),
-            (True, True, False, True, True),
-            (True, True, True, True, True),
-            (False, True, True, True, False),
-        )
-    )
+    neighbormask = np.array((
+        (False, True, True,  True, False),
+        (True,  True, True,  True, True),
+        (True,  True, False, True, True),
+        (True,  True, True,  True, True),
+        (False, True, True,  True, False),
+    ))  # fmt: skip
 
     # points to be returned by this function
     points = np.empty((T, 2), dtype=np.float64)
@@ -339,10 +342,8 @@ def _poisson_disc_filler_core(
                 # longest prior or current attempt, with T as a lower bound.
                 restart_floor = T
                 for a in iters_per_attempt:
-                    if a > restart_floor:
-                        restart_floor = a
-                if attempt_iter > restart_floor:
-                    restart_floor = attempt_iter
+                    restart_floor = max(restart_floor, a)
+                restart_floor = max(restart_floor, attempt_iter)
                 if remaining_iters > restart_floor:
                     # Restart with an empty field.
                     save_best(out_count)
@@ -356,7 +357,7 @@ def _poisson_disc_filler_core(
                     restarts_exhausted = True
 
         # pick random empty cell
-        empty_idx = rng.integers(low=0, high=avail_count)
+        empty_idx = int(rng.integers(low=0, high=avail_count))
         ij = cell_idc[idc_arr[empty_idx]]
         i, j = ij
 
@@ -380,13 +381,12 @@ def _poisson_disc_filler_core(
                         break
 
         # check overlap and repel_radius
-        if not miss:
-            if not no_conflict(i, j, dartC):
-                miss = True
-            elif RepellerS is not None and not _clears(
-                RepellerS, repel_radius_sq, dartC
-            ):
-                miss = True
+        if not miss and (
+            not no_conflict(i, j, dartC)
+            or RepellerS is not None
+            and not _clears(RepellerS, repel_radius_sq, dartC)
+        ):
+            miss = True
 
         ema_hit_rate *= 1 - hit_rate_decay
         if miss:
@@ -429,7 +429,9 @@ def _poisson_disc_filler_core(
         best_out_count = out_count
         best_points = points[:out_count]
 
-    return best_points, iters_per_attempt, restart_count
+    # numpy does not carry the `Literal[2]` second axis of `CoordPairs` through
+    # slicing, and `typing.cast` is not available inside a numba-compiled function
+    return best_points, iters_per_attempt, restart_count  # pyrefly: ignore[bad-return]
 
 
 def get_shape_to_fill(L: nx.Graph) -> tuple[CoordPairs, CoordPairs]:
@@ -459,7 +461,7 @@ def poisson_disc_filler(
     BorderC: CoordPairs,
     RepellerC: CoordPairs | None = None,
     repel_radius: float = 0.0,
-    obstacleC__: list[CoordPairs] = [],
+    obstacleC__: Sequence[CoordPairs] = (),
     seed: int | None = None,
     max_iter: int = 30000,
     plot: bool = False,
@@ -606,7 +608,7 @@ def poisson_disc_filler(
 
     # useful plot for debugging purposes only
     if plot:
-        fig, ax = plt.subplots(layout='constrained')
+        _fig, ax = plt.subplots(layout='constrained')
         ax.pcolormesh(cell_covers_polygon__.T + 2 * cell_intercepts_polygon__.T)
         ax.plot(*np.vstack((BorderS, BorderS[:1])).T, 'k', lw=1)
         for obstacleS_ in obstacleS__:
@@ -619,7 +621,7 @@ def poisson_disc_filler(
         ax.set_aspect('equal')
 
     # Sequence of (i, j) of cells that overlap with the polygon
-    cell_idc = np.argwhere(cell_covers_polygon__)
+    cell_idc = cast('IndexPairs', np.argwhere(cell_covers_polygon__))
 
     rng = np.random.default_rng(seed)
     points, iters_per_attempt, restart_count = _poisson_disc_filler_core(
@@ -826,6 +828,6 @@ def iCDF_factory(
 
         Maps from ``u ~ uniform(0, 1)`` to random variable ``T ~ custom_PDF()``.
         """
-        return int(round(integral_inv(u * area_under_curve + offset)))
+        return round(integral_inv(u * area_under_curve + offset))
 
     return iCDF

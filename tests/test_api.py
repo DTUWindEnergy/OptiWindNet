@@ -1,11 +1,11 @@
 from pathlib import Path
+from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-import optiwindnet.api as api
-import optiwindnet.plotting as plotting
+from optiwindnet import api, plotting
 from optiwindnet.api import (
     EWRouter,
     HGSRouter,
@@ -163,7 +163,7 @@ def test_milprouter_enables_jupyter_logging_for_every_ortools_backend(
     monkeypatch, solver_name, verbose, enabled
 ):
     class FakeSolver:
-        options = {}
+        options: ClassVar[dict] = {}
 
     calls = []
     monkeypatch.setattr(api, 'solver_factory', lambda name: FakeSolver())
@@ -180,7 +180,7 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
     solved = tiny_wfn()
 
     class FakeSolver:
-        options = {'default': True}
+        options: ClassVar[dict] = {'default': True}
 
         def __init__(self):
             self.problem_calls = []
@@ -274,12 +274,7 @@ def test_ortools_warmstart_behavior(ortools_worker):
         pytest.skip('ortools.cp_sat not available')
     if isinstance(result, BaseException):
         raise result
-    assert result == [
-        [-1, 0, 1, 2],
-        [-1, 0, 1, 2],
-        [-1, -1, -1, -1],
-        [-1, -1, -1, -1],
-    ]
+    assert result == [[-1, 0, 1, 2], [-1, 0, 1, 2], [-1, -1, -1, -1], [-1, -1, -1, -1]]
 
 
 # =====================
@@ -403,13 +398,15 @@ def test_deprecated_from_yaml_warns():
     assert wfn.L.graph['T'] == 12
 
 
-def test_from_own_yaml_invalid_path():
-    with pytest.raises(Exception):
-        WindFarmNetwork.from_own_yaml(r'not>a*path')
+def test_from_own_yaml_missing_path(tmp_path):
+    # A name that is legal on every platform: on Windows '>' and '*' are rejected by
+    # the filesystem itself, which reports EINVAL (a bare OSError) instead of ENOENT.
+    with pytest.raises(FileNotFoundError):
+        WindFarmNetwork.from_own_yaml(str(tmp_path / 'no_such_site.yaml'))
 
 
 def test_from_pbf_invalid_path():
-    with pytest.raises(Exception):
+    with pytest.raises(AssertionError):
         WindFarmNetwork.from_pbf(r'not>a*path')
 
 
@@ -522,7 +519,7 @@ def test_get_network_returns_array_smoke():
     assert np.all((data['cable'] >= 0) & (data['cable'] < max(1, n_cables)))
 
     # consistency with graph edges: every (src,tgt) should exist in wfn.G (undirected)
-    edges_in_G = set(tuple(sorted(e)) for e in wfn.G.edges())
+    edges_in_G = {tuple(sorted(e)) for e in wfn.G.edges()}
     for row in data:
         pair = tuple(sorted((int(row['src']), int(row['tgt']))))
         assert pair in edges_in_G, (

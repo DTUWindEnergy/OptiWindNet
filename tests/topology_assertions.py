@@ -10,7 +10,9 @@ def assert_topology(S: nx.Graph, expected: Topology, capacity: int) -> None:
     """Validate the common topology contract without invoking PathFinder."""
     expected = Topology(expected)
     R, T = (S.graph[key] for key in 'RT')
-    assert Topology(S.graph['topology']) is expected
+    # identity, not equality: producers store the enum member, so consumers may
+    # branch on `is`; an equal 'ringed' str would take the branched path
+    assert S.graph['topology'] is expected
     assert S.graph['capacity'] == capacity
     assert S.graph['has_loads']
     assert validate_topology(S, capacity) == []

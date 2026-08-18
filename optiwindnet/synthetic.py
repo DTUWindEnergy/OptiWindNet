@@ -11,25 +11,16 @@ __all__ = ('L_from_synthetic', 'equidistant')
 
 
 def toyfarm():
-    VertexC = np.array(
-        [
-            # Terminals
-            [49.0, 993.0],  # row 0
-            [-145.0, 388.0],  # row 1
-            [275.0, 562.0],
-            [699.0, 566.0],
-            [-371.0, -147.0],  # row 2
-            [371.0, 109.0],
-            [972.0, 206.0],
-            [-585.0, -655.0],  # row 3
-            [90.0, -475.0],
-            [707.0, -244.0],
-            [-104.0, -966.0],  # row 4
-            [494.0, -772.0],
-            # Root
-            [0.0, 0.0],  # OSS
-        ]
-    )
+    VertexC = np.array([
+        # terminals, one grid row per line
+        [49.0, 993.0],
+        [-145.0, 388.0], [275.0, 562.0], [699.0, 566.0],
+        [-371.0, -147.0], [371.0, 109.0], [972.0, 206.0],
+        [-585.0, -655.0], [90.0, -475.0], [707.0, -244.0],
+        [-104.0, -966.0], [494.0, -772.0],
+        # root
+        [0.0, 0.0],  # OSS
+    ])  # fmt: skip
     R = 1
     T = 12
     B = 0
@@ -43,8 +34,8 @@ def toyfarm():
         name='toy',
         handle='toy',
     )
-    G.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
-    G.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
+    G.add_nodes_from((n, {'kind': 'wtg'}) for n in range(T))
+    G.add_nodes_from((r, {'kind': 'oss'}) for r in range(-R, 0))
     return G
 
 
@@ -86,8 +77,8 @@ def L_from_synthetic(
     L = nx.Graph(
         R=R, T=T, B=B, VertexC=VertexC, border=border, name=name, handle=handle
     )
-    L.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from((n, {'kind': 'wtg'}) for n in range(T))
+    L.add_nodes_from((r, {'kind': 'oss'}) for r in range(-R, 0))
     return L
 
 

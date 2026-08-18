@@ -103,14 +103,9 @@ def migrate(src_path, v4_path):
 
         # JSON columns in RouteSet (`num_gates` is the legacy v2/v3 name)
         json_cols = {
-            'num_gates',
-            'feeders_per_root',
-            'edges',
-            'tentative',
-            'rogue',
-            'clone2prime',
-            'misc',
-        }
+            'num_gates', 'feeders_per_root', 'edges',
+            'tentative', 'rogue', 'clone2prime', 'misc',
+        }  # fmt: skip
 
         for row in src_rows:
             row_dict = dict(row)

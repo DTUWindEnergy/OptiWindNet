@@ -176,7 +176,6 @@ dmypy.json
 
 # checkers configuration
 pyrightconfig.json
-pyrefly.toml
 
 # Pyre type checker
 .pyre/

@@ -5,6 +5,7 @@ import logging
 from collections import namedtuple
 from collections.abc import Mapping
 from itertools import chain
+from types import MappingProxyType
 from typing import Any
 
 import networkx as nx
@@ -28,6 +29,8 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    check_model_enums,
+    check_warmstart_topology,
     feeder_and_load_bounds,
     physical_core_count,
     warmstart_links,
@@ -48,32 +51,32 @@ _optkey = {
 }
 # usage: _optname[solver_name].mipgap
 
-_default_options = dict(
+_default_options = {
     # Only options whose value improves on CBC's default are listed; any option
     # absent here uses CBC's default.
-    cbc=dict(
-        threads=physical_core_count(),
-        timeMode='elapsed',
+    'cbc': {
+        'threads': physical_core_count(),
+        'timeMode': 'elapsed',
         # the parameters below and more can be experimented with
         # http://www.decom.ufop.br/haroldo/files/cbcCommandLine.pdf
-        nodeStrategy='downFewest',
+        'nodeStrategy': 'downFewest',
         # Heuristics
-        Dins='on',
-        VndVariableNeighborhoodSearch='on',
-        Rens='on',
+        'Dins': 'on',
+        'VndVariableNeighborhoodSearch': 'on',
+        'Rens': 'on',
         # Cuts
-        mixedIntegerRoundingCuts='on',
-        flowCoverCuts='on',
-        cliqueCuts='off',
-        knapsackCuts='off',
-        zeroHalfCuts='off',
-    ),
-    highs=dict(
-        parallel='on',
+        'mixedIntegerRoundingCuts': 'on',
+        'flowCoverCuts': 'on',
+        'cliqueCuts': 'off',
+        'knapsackCuts': 'off',
+        'zeroHalfCuts': 'off',
+    },
+    'highs': {
+        'parallel': 'on',
         # threads=0,  # 0 means automatic and is HiGHS's default
-    ),
-    scip={},
-)
+    },
+    'scip': {},
+}
 
 
 class SolverPyomo(Solver):
@@ -112,7 +115,7 @@ class SolverPyomo(Solver):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         try:
@@ -120,8 +123,8 @@ class SolverPyomo(Solver):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        applied_options = {**self.options, **options}
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         solver.options.update(applied_options)
         solver.options.update(
             {
@@ -232,7 +235,7 @@ class SolverPyomoAppsi(Solver):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         try:
@@ -240,7 +243,7 @@ class SolverPyomoAppsi(Solver):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
         for key, value in applied_options.items():
             if key in solver.config:
                 solver.config[key] = value
@@ -331,6 +334,7 @@ def make_min_length_model(
       max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
         exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
     """
+    check_model_enums(topology, feeder_route, feeder_limit)
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -564,7 +568,7 @@ def make_min_length_model(
                     == 1
                 )
             ),
-            name='radial',
+            name='ringed',
         )
 
     # assert all nodes are connected to some root
@@ -607,20 +611,23 @@ def make_min_length_model(
     # Store metadata #
     ##################
 
-    model_options = dict(
-        topology=topology,
-        feeder_route=feeder_route,
-        feeder_limit=feeder_limit,
-        max_feeders=max_feeders,
-        balanced=balanced,
-    )
+    model_options = {
+        'topology': topology,
+        'feeder_route': feeder_route,
+        'feeder_limit': feeder_limit,
+        'max_feeders': max_feeders,
+        'balanced': balanced,
+    }
     metadata = ModelMetadata(
         R,
         T,
         ring_capacity,
-        m.linkset,
-        m.link_,
-        m.flow_,
+        # pyomo types model attribute access as `Component | IndexedComponent`;
+        # these three are the Set and Vars built above, which support the
+        # mapping protocol ModelMetadata needs
+        m.linkset,  # pyrefly: ignore[bad-argument-type]
+        m.link_,  # pyrefly: ignore[bad-argument-type]
+        m.flow_,  # pyrefly: ignore[bad-argument-type]
         model_options,
         _make_min_length_model_fingerprint,
     )
@@ -649,12 +656,7 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    mt = metadata.model_options['topology']
-    st = S.graph['topology']
-    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
-        raise OWNWarmupFailed(
-            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
-        )
+    check_warmstart_topology(metadata, S)
     # Pyomo Vars are initialize=0, so the inactive baseline is already in place;
     # only the active links need to be set.
     for link_var, flow_var, flow in warmstart_links(metadata, S):

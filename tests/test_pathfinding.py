@@ -6,7 +6,7 @@ import networkx as nx
 import numpy as np
 import pytest
 
-import optiwindnet.pathfinding as pathfinding
+from optiwindnet import pathfinding
 from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import (
     G_from_S,

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import itertools
 import logging
 
 import networkx as nx
@@ -112,7 +113,7 @@ def _find_fix_choices_path(
                     edges_add_1 = [(nearD_, farD_)]
                     dst_path_ = dst_path[:i] + dst_path[i + 1 :]
                     # case (A)
-                    for nearD, farD in zip(dst_path_[:-1], dst_path_[1:]):
+                    for nearD, farD in itertools.pairwise(dst_path_):
                         # loop through mid-positions in dst_path_ (insert)
                         if nearD in A[swapS] and farD in A[swapS]:
                             # fix found
@@ -170,7 +171,7 @@ def _find_fix_choices_path(
                     else (dst_path[:-1], dst_path[-2], True)
                 )
                 edges_del_1 = [(swapD, hookD)]
-                for nearD, farD in zip(dst_path_[:-1], dst_path_[1:]):
+                for nearD, farD in itertools.pairwise(dst_path_):
                     # loop through mid-positions in dst_path_ (to insert)
                     if nearD in A[swapS] and farD in A[swapS]:
                         # fix found
@@ -335,8 +336,8 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx
         # reads from parent scope: diagonals, S, P
         #  gateD, tailD, swapD, freeS, edges_del, edges_add = choice
         *_, edges_del, edges_add = choice
-        edges_del_ = set((u, v) if u < v else (v, u) for u, v in edges_del)
-        edges_add_ = set((u, v) if u < v else (v, u) for u, v in edges_add)
+        edges_del_ = {(u, v) if u < v else (v, u) for u, v in edges_del}
+        edges_add_ = {(u, v) if u < v else (v, u) for u, v in edges_add}
         edges_add = edges_add_ - edges_del_
         edges_del = edges_del_ - edges_add_
         for u, v in edges_add:

@@ -18,17 +18,10 @@ from ._core import (
 )
 
 __all__ = (
-    'Solver',
-    'Topology',
-    'FeederRoute',
-    'FeederLimit',
-    'ModelOptions',
-    'ModelMetadata',
-    'OWNWarmupFailed',
-    'OWNSolutionNotFound',
-    'SolutionInfo',
-    'solver_factory',
-)
+    'FeederLimit', 'FeederRoute', 'ModelMetadata', 'ModelOptions',
+    'OWNSolutionNotFound', 'OWNWarmupFailed', 'SolutionInfo', 'Solver',
+    'Topology', 'solver_factory',
+)  # fmt: skip
 
 
 def _reject_loaded_rivals(solver_name: str, package: str, *rivals: str) -> None:

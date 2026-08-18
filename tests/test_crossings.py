@@ -164,21 +164,11 @@ def test_validate_routeset_uses_full_polyline_crossing_check(monkeypatch):
 def test_find_geometric_crossings_detects_simple_cross():
     """Two feeders from a single root cross once at a non-vertex point."""
     G = nx.Graph(
-        T=4,
-        B=0,
-        C=0,
-        D=0,
-        R=1,
-        VertexC=np.array(
-            [
-                [0.0, 0.0],
-                [2.0, 2.0],
-                [0.0, 2.0],
-                [2.0, 0.0],
-                [-3.0, 0.0],
-            ]
-        ),
-    )
+        T=4, B=0, C=0, D=0, R=1,
+        VertexC=np.array([
+            [0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0], [-3.0, 0.0],
+        ]),
+    )  # fmt: skip
     G.add_node(-1, kind='oss')
     G.add_nodes_from(range(4), kind='wtg')
     G.add_edges_from([(-1, 0), (0, 1), (-1, 2), (2, 3)])
@@ -228,22 +218,12 @@ def test_find_geometric_crossings_ignores_non_crossing_at_border_waypoint():
 def test_find_geometric_crossings_multi_root():
     """Crossings between feeders rooted at different substations are detected."""
     G = nx.Graph(
-        T=4,
-        B=0,
-        C=0,
-        D=0,
-        R=2,
-        VertexC=np.array(
-            [
-                [1.0, 1.0],
-                [1.0, -1.0],
-                [-1.0, 1.0],
-                [-1.0, -1.0],
-                [-2.0, 0.0],
-                [2.0, 0.0],
-            ]
-        ),
-    )
+        T=4, B=0, C=0, D=0, R=2,
+        VertexC=np.array([
+            [1.0, 1.0], [1.0, -1.0], [-1.0, 1.0], [-1.0, -1.0],
+            [-2.0, 0.0], [2.0, 0.0],
+        ]),
+    )  # fmt: skip
     G.add_nodes_from([-2, -1], kind='oss')
     G.add_nodes_from(range(4), kind='wtg')
     G.add_edges_from([(-2, 0), (-2, 1), (-1, 2), (-1, 3)])
@@ -278,15 +258,10 @@ def test_find_geometric_crossings_detects_route_splitting_branch():
         C=0,
         D=0,
         VertexC=[
-            (0, 0),
-            (-0.7, 1.2),
-            (-0.7, -1.2),
-            (-2, 0),
-            (2, 0),
-            (-2, 2),
+            (0, 0), (-0.7, 1.2), (-0.7, -1.2), (-2, 0), (2, 0), (-2, 2),
         ],
         edges=[(-1, 0), (0, 1), (0, 2), (-1, 3), (3, 4)],
-    )
+    )  # fmt: skip
 
     crossings = find_geometric_crossings(G)
 
@@ -366,18 +341,10 @@ def test_find_geometric_crossings_detects_broken_routeset():
 
 def test_find_geometric_crossings_detects_clone_overlap():
     T, B, C, D, R = 4, 3, 3, 3, 1
-    VertexC = np.array(
-        [
-            [-1.0, -0.2],
-            [3.0, 0.2],
-            [3.0, -0.2],
-            [-1.0, 0.2],
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [2.0, 0.0],
-            [-2.0, -0.2],
-        ]
-    )
+    VertexC = np.array([
+        [-1.0, -0.2], [3.0, 0.2], [3.0, -0.2], [-1.0, 0.2],
+        [0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [-2.0, -0.2],
+    ])  # fmt: skip
     G = nx.Graph(T=T, B=B, C=C, D=D, R=R, VertexC=VertexC)
     G.add_nodes_from(range(T), kind='wtg')
     G.add_nodes_from(range(T, T + B), kind='border')
@@ -442,22 +409,14 @@ def test_find_geometric_crossings_detects_detour_branch_split():
         C=0,
         D=1,
         VertexC=[
-            [0.0, -1.0],
-            [0.0, 0.0],
-            [-1.0, 1.0],
-            [1.0, -1.0],
-            [1.0, 1.0],
-            [0.0, -2.0],
+            [0.0, -1.0], [0.0, 0.0], [-1.0, 1.0],
+            [1.0, -1.0], [1.0, 1.0], [0.0, -2.0],
         ],
         edges=[
-            (-1, 0),
-            (0, 1),
-            (1, 2),
-            (1, 3),
-            (5, -1, {'kind': 'detour'}),
-            (5, 4, {'kind': 'detour'}),
+            (-1, 0), (0, 1), (1, 2), (1, 3),
+            (5, -1, {'kind': 'detour'}), (5, 4, {'kind': 'detour'}),
         ],
-    )
+    )  # fmt: skip
     G.graph['fnT'] = np.array([0, 1, 2, 3, 4, 1, -1])
 
     crossings = find_geometric_crossings(G)

@@ -4,12 +4,12 @@
 import base64
 import io
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from functools import partial
 from hashlib import sha256
 from itertools import chain, pairwise
 from socket import getfqdn, gethostname
-from typing import Any, Mapping
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -31,72 +31,17 @@ __all__ = ()
 PackType = Mapping[str, Any]
 
 # Set of not-to-store keys commonly found in G routesets (they are either
-# already stored in database fields or are cheap to regenerate or too big.
+# already stored in database fields, or are cheap to regenerate, or too big).
 _misc_not = {
-    'VertexC',
-    'anglesYhp',
-    'anglesXhp',
-    'anglesRank',
-    'angles',
-    'd2rootsRank',
-    'd2roots',
-    'name',
-    'boundary',
-    'capacity',
-    'B',
-    'runtime',
-    'runtime_unit',
-    'edges_fun',
-    'D',
-    'DetourC',
-    'fnT',
-    'landscape_angle',
-    'Root',
-    'creation_options',
-    'G_nodeset',
-    'T',
-    'non_A_gates',
-    'funfile',
-    'funhash',
-    'funname',
-    'diagonals',
-    'planar',
-    'has_loads',
-    'R',
-    'Subtree',
-    'handle',
-    'non_A_edges',
-    'max_load',
-    'fun_fingerprint',
-    'hull',
-    'solver_log',
-    'length_mismatch_on_db_read',
-    'gnT',
-    'C',
-    'border',
-    'obstacles',
-    'num_diagonals',
-    'crossings_map',
-    'tentative',
-    'method_options',
-    'is_normalized',
-    'norm_scale',
-    'norm_offset',
-    'detextra',
-    'rogue',
-    'clone2prime',
-    'valid',
-    'path_in_P',
-    'shortened_contours',
-    'nonAedges',
-    'method',
-    'num_stunts',
-    'crossings',
-    'creator',
-    'inter_terminal_clearance_min',
-    'inter_terminal_clearance_safe',
-    'stunts_primes',
-}
+    'VertexC', 'd2rootsRank', 'd2roots', 'name', 'capacity', 'B', 'runtime', 'D', 'fnT',
+    'landscape_angle', 'T', 'funfile', 'funhash', 'funname', 'diagonals', 'planar',
+    'has_loads', 'R', 'handle', 'max_load', 'fun_fingerprint', 'hull',
+    'length_mismatch_on_db_read', 'C', 'border', 'obstacles', 'num_diagonals',
+    'crossings_map', 'tentative', 'method_options', 'is_normalized', 'norm_scale',
+    'norm_offset', 'detextra', 'rogue', 'clone2prime', 'valid', 'shortened_contours',
+    'method', 'num_stunts', 'crossings', 'creator', 'inter_terminal_clearance_min',
+    'inter_terminal_clearance_safe', 'stunts_primes',
+}  # fmt: skip
 
 
 def L_from_nodeset(nodeset: NodeSet, handle: str | None = None) -> nx.Graph:
@@ -134,8 +79,8 @@ def L_from_nodeset(nodeset: NodeSet, handle: str | None = None) -> nx.Graph:
                 for a, b in pairwise(obstacle_idx)
             ]
         )
-    L.add_nodes_from(((n, {'kind': 'wtg'}) for n in range(T)))
-    L.add_nodes_from(((r, {'kind': 'oss'}) for r in range(-R, 0)))
+    L.add_nodes_from((n, {'kind': 'wtg'}) for n in range(T))
+    L.add_nodes_from((r, {'kind': 'oss'}) for r in range(-R, 0))
     return L
 
 
@@ -150,20 +95,23 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
     """
     nodeset = routeset.nodes
     G = L_from_nodeset(nodeset)
-    misc = routeset.misc if routeset.misc is not None else {}
+    misc = dict(routeset.misc) if routeset.misc is not None else {}
+    # `misc` round-trips through JSON, so a stored topology arrives as a plain
+    # str: withhold it here and restore it as the enum below
+    stored_topology = misc.pop('topology', None)
     G.graph.update(
         C=routeset.C,
         D=routeset.D,
         handle=routeset.handle,
         capacity=routeset.capacity,
         creator=routeset.creator,
-        method=dict(
-            solver_name=routeset.method.solver_name,
-            timestamp=routeset.method.timestamp,
-            funname=routeset.method.funname,
-            funfile=routeset.method.funfile,
-            funhash=routeset.method.funhash,
-        ),
+        method={
+            'solver_name': routeset.method.solver_name,
+            'timestamp': routeset.method.timestamp,
+            'funname': routeset.method.funname,
+            'funfile': routeset.method.funfile,
+            'funhash': routeset.method.funhash,
+        },
         runtime=routeset.runtime,
         method_options=routeset.method.options,
         **misc,
@@ -172,8 +120,11 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
     if routeset.detextra is not None:
         G.graph['detextra'] = routeset.detextra
 
-    if 'topology' not in G.graph:
-        G.graph['topology'] = infer_topology(G, routeset.edges)
+    G.graph['topology'] = (
+        infer_topology(G, routeset.edges)
+        if stored_topology is None
+        else Topology(stored_topology)
+    )
     encoding = TerseLinks(
         links=tuple(routeset.edges),
         topology=G.graph['topology'],
@@ -210,19 +161,19 @@ def packnodes(G: nx.Graph) -> PackType:
     constraint_vertices = list(
         chain((G.graph.get('border', ()),), G.graph.get('obstacles', ()))
     )
-    pack = dict(
-        T=T,
-        R=R,
-        B=B,
-        name=name,
-        VertexC=VertexC_npy,
-        constraint_groups=[p.shape[0] for p in constraint_vertices],
-        constraint_vertices=np.concatenate(
+    pack = {
+        'T': T,
+        'R': R,
+        'B': B,
+        'name': name,
+        'VertexC': VertexC_npy,
+        'constraint_groups': [p.shape[0] for p in constraint_vertices],
+        'constraint_vertices': np.concatenate(
             constraint_vertices, dtype=int, casting='unsafe'
         ).tolist(),
-        landscape_angle=G.graph.get('landscape_angle', 0.0),
-        digest=digest,
-    )
+        'landscape_angle': G.graph.get('landscape_angle', 0.0),
+        'digest': digest,
+    }
     return pack
 
 
@@ -276,7 +227,7 @@ def infer_topology(G: nx.Graph, terse: Sequence[int]) -> Topology:
     * ``creator``: HGS and LKH solve a CVRP, whose routes are paths, so their
       non-ringed output is RADIAL. The constructor names its method instead.
 
-    Falls back to ``'branched'``, the weakest claim any forest satisfies, when a
+    Falls back to BRANCHED, the weakest claim any forest satisfies, when a
     record carries none of these.
 
     Args:
@@ -293,8 +244,13 @@ def infer_topology(G: nx.Graph, terse: Sequence[int]) -> Topology:
 
     method_options = G.graph.get('method_options') or {}
     topology = method_options.get('topology')
-    if topology in ('ringed', 'radial', 'branched'):
-        return Topology(topology)
+    if topology is not None:
+        # stored records are outside this library's control: an unrecognized
+        # value falls through to the signals below
+        try:
+            return Topology(topology)
+        except ValueError:
+            pass
 
     creator = G.graph.get('creator', '')
     if creator in ('baselines.hgs', 'baselines.lkh'):
@@ -334,30 +290,28 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     handle = G.graph.get('handle')
     if handle is None:
         handle = make_handle(G.graph['name'])
-    packed_G = dict(
-        R=R,
-        T=T,
-        C=C,
-        D=D,
-        handle=handle,
-        capacity=G.graph['capacity'],
-        length=length,
-        creator=G.graph['creator'],
-        runtime=G.graph['runtime'],
-        feeders_per_root=[len(G[root]) for root in range(-R, 0)],
-        misc=misc,
-        edges=terse.tolist(),
-    )
+    packed_G = {
+        'R': R,
+        'T': T,
+        'C': C,
+        'D': D,
+        'handle': handle,
+        'capacity': G.graph['capacity'],
+        'length': length,
+        'creator': G.graph['creator'],
+        'runtime': G.graph['runtime'],
+        'feeders_per_root': [len(G[root]) for root in range(-R, 0)],
+        'misc': misc,
+        'edges': terse.tolist(),
+    }
     # Optional fields
     if C + D > 0:
         packed_G['clone2prime'] = list(terse.clone2prime)
     concatenate_tuples = partial(sum, start=())
     pack_if_given = (  # key, function to prepare data
-        ('detextra', None),
-        ('num_diagonals', None),
-        ('tentative', concatenate_tuples),
-        ('rogue', concatenate_tuples),
-    )
+        ('detextra', None), ('num_diagonals', None),
+        ('tentative', concatenate_tuples), ('rogue', concatenate_tuples),
+    )  # fmt: skip
     packed_G.update(
         {
             k: (fun(G.graph[k]) if fun else G.graph[k])
@@ -430,8 +384,8 @@ def G_by_method(G: nx.Graph, method: Method) -> nx.Graph:
 
 
 def Gs_from_attrs(
-    farm: object,
-    methods: Method | Sequence[object],
+    farm: NodeSet,
+    methods: Method | Sequence[Method],
     capacities: int | Sequence[int],
 ) -> list[tuple[nx.Graph]]:
     """Fetch from the database a list (one per capacity) of tuples (one per

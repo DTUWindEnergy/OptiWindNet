@@ -22,8 +22,13 @@ from .api_utils import (
 )
 from .baselines.hgs import hgs_cvrp
 from .heuristics import constructor
-from .importer import L_from_pbf, L_from_site, L_from_windIO, L_from_yaml
-from .importer import load_repository as load_repository
+from .importer import (
+    L_from_pbf,
+    L_from_site,
+    L_from_windIO,
+    L_from_yaml,
+    load_repository,
+)
 from .interarraylib import (
     G_from_S,
     S_from_G,
@@ -55,14 +60,9 @@ _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 # surface: the notebooks reach for them as `from optiwindnet.api import ...`. Naming
 # them here puts them in this page's outline, pointing at where they are documented.
 __all__ = (
-    'EWRouter',
-    'HGSRouter',
-    'MILPRouter',
-    'ModelOptions',
-    'Router',
-    'WindFarmNetwork',
-    'load_repository',
-)
+    'EWRouter', 'HGSRouter', 'MILPRouter', 'ModelOptions', 'Router',
+    'WindFarmNetwork', 'load_repository',
+)  # fmt: skip
 
 _EMPTY_BORDER = np.empty((0, 2), dtype=np.float64)
 
@@ -213,10 +213,10 @@ class WindFarmNetwork:
                 R=substationsC.shape[0],
                 T=T,
                 B=border_sizes.sum().item(),
-                **(
-                    {'border': np.arange(T, T + borderC.shape[0])}
+                border=(
+                    np.arange(T, T + borderC.shape[0])
                     if (borderC is not None and borderC.shape[0] >= 3)
-                    else {}
+                    else None
                 ),
                 obstacles=[np.arange(a, b) for a, b in obstacle_slicelims],
                 name=name,
@@ -238,7 +238,7 @@ class WindFarmNetwork:
         if polygon is not None:
             # check if any of the new turbine coordinates lie outside the polygon
             if isinstance(polygon, shp.Polygon):
-                out_of_bounds = shp.MultiPoint(self._VertexC[: self._T]) - self.polygon
+                out_of_bounds = shp.MultiPoint(self._VertexC[: self._T]) - polygon
             else:
                 # polygon is a Multipolygon of the obstacles
                 out_of_bounds = polygon & shp.MultiPoint(self._VertexC[: self._T])
@@ -812,14 +812,9 @@ class HGSRouter(Router):
 
     _summary_attrs = ('runtime',)
     _repr_attrs = (
-        'time_limit',
-        'feeder_limit',
-        'feeder_exact',
-        'max_retries',
-        'balanced',
-        'ringed',
-        'seed',
-    )
+        'time_limit', 'feeder_limit', 'feeder_exact', 'max_retries',
+        'balanced', 'ringed', 'seed',
+    )  # fmt: skip
 
     def __init__(
         self,
@@ -1054,7 +1049,7 @@ class MILPRouter(Router):
         balanced = mo['balanced']
         # a built warm start must not outlast the solve it primes
         time_limit = min(self.time_limit, self.warmup_time)
-        ringed = mo['topology'] == 'ringed'
+        ringed = mo['topology'] is Topology.RINGED
         single_root = A.graph['R'] == 1
         per_subtree = 2 if ringed else 1
         min_subtrees = math.ceil(A.graph['T'] / (per_subtree * capacity))
@@ -1101,7 +1096,7 @@ class MILPRouter(Router):
 
         # unlimited / specified (or an un-pinnable 'exactly'): a branched model
         # takes the constructor's branched layout; radial/ringed take plain HGS.
-        if mo['topology'] == 'branched':
+        if mo['topology'] is Topology.BRANCHED:
             straight = mo['feeder_route'] == 'straight'
             return S_from_G(
                 constructor(

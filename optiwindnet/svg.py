@@ -2,7 +2,9 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 from collections import defaultdict
+from collections.abc import Mapping
 from itertools import chain
+from types import MappingProxyType
 from typing import Any
 
 import networkx as nx
@@ -62,9 +64,9 @@ class SvgRepr:
     ``_SOLUTION_KEYS`` in the second.
     """
 
-    def __init__(self, data: str, metadata: dict[str, Any] = {}):
+    def __init__(self, data: str, metadata: Mapping[str, Any] = MappingProxyType({})):
         self.data = data
-        self.metadata = metadata.copy()
+        self.metadata = dict(metadata)
         self.handle = self.metadata.pop('handle', '')
         if self.handle == self.metadata.get('name'):
             del self.metadata['name']
@@ -198,7 +200,7 @@ class Drawable:
         VertexS[:, 1] = h - VertexS[:, 1]
         VertexS = VertexS.round().astype(int)
         self.VertexS = VertexS
-        self.bottom_right_anchor = dict(x=round(W * scale + margin), y=h - margin)
+        self.bottom_right_anchor = {'x': round(W * scale + margin), 'y': h - margin}
         self.h_orig = h
         if self.legend:
             h = h + 80
@@ -213,7 +215,7 @@ class Drawable:
             # draw an opaque canvas the same size as the viewport
             self.toplevelE.append(svg.Rect(fill=c.bg_color, width=w, height=h))
         border, obstacles, landscape_angle = (
-            G.graph.get(k) for k in 'border obstacles landscape_angle'.split()
+            G.graph.get(k) for k in ['border', 'obstacles', 'landscape_angle']
         )
         # prepare obstacles
         draw_obstacles = []
@@ -307,7 +309,7 @@ class Drawable:
             else:
                 # single grouping level
                 edgesE = edges_super_group
-                extra_attrs = dict(stroke_width=_LINK_WIDTH)
+                extra_attrs = {'stroke_width': _LINK_WIDTH}
             for edge_kind, lines in edge_lines.items():
                 edgesE.append(
                     self._kind_group(
@@ -379,11 +381,11 @@ class Drawable:
                 points__[G[s][t].get('cable', None)].append(
                     ' '.join(str(c) for c in VertexS[hops].flat)
                 )
-        common_attr: dict[str, Any] = dict(
-            stroke=c.kind2color['detour'],
-            stroke_dasharray=[18, 15],
-            fill='none',
-        )
+        common_attr: dict[str, Any] = {
+            'stroke': c.kind2color['detour'],
+            'stroke_dasharray': [18, 15],
+            'fill': 'none',
+        }
         if None in points__:
             detours = [
                 svg.G(
@@ -667,7 +669,7 @@ class Drawable:
             label = ''
 
             if item_type == 'node':
-                _, name, label, color, shape = item
+                _, _name, label, color, shape = item
                 if shape == 'circle':
                     elements.append(
                         svg.Use(href='#wtg', x=x_pos + 20, y=y_pos, fill=color)
@@ -683,7 +685,7 @@ class Drawable:
                 elif shape == 'ring':
                     elements.append(svg.Use(href='#dt', x=x_pos + 20, y=y_pos))
             elif item_type == 'edge':
-                _, name, label, color, dash = item
+                _, _name, label, color, dash = item
                 attrs = {
                     'x1': x_pos,
                     'y1': y_pos,

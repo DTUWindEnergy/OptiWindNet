@@ -76,6 +76,19 @@ test  = [
     "psutil",  # memory profiling
     "memory_profiler",  # memory profiling
     "line_profiler",  # to check speed
+    "prek",  # runs the checks in .pre-commit-config.yaml, locally and in CI
+    # pyrefly and the third-party stub packages it needs, pinned exactly: a new stub
+    # release routinely changes which errors are reported, and the `# pyrefly: ignore`
+    # comments in the source are written against these versions. Type checking lives
+    # here rather than in an extra of its own because it needs the same environment
+    # the tests do -- it covers `tests/` and imports through `optiwindnet.MILP`. It
+    # also covers `docs/`, so running it needs the `docs` extra installed as well.
+    # ruff is deliberately absent: its version is pinned once, in the pre-commit
+    # `rev:`, and prek supplies it.
+    "pyrefly ==1.2.0",
+    "types-networkx ==3.6.1.20260728",
+    "types-peewee ==4.3.0.20260807",
+    "types-shapely ==2.1.0.20260728",
     "optiwindnet[solvers]",
 ]
 docs = [
@@ -87,7 +100,14 @@ docs = [
     "sphinx-versioned-docs",
     "sphinx-autoapi",
     "sphinx_copybutton", 
-    "sphinx_sitemap", 
+    "sphinx_sitemap",
+    # Imported directly by docs/run_notebooks.py. They also arrive transitively through
+    # myst-nb, but the type checker covers docs/, so the imports it must resolve are
+    # declared here rather than left to another package's dependency tree.
+    "nbformat",
+    "nbclient",
+    "jupyter_client",
+    "traitlets",
     # nbsphinx needs a `pandoc` executable; Linux/macOS get it from the system package
     # manager (see .gitlab-ci.yml and .readthedocs.yaml), Windows from this wheel.
     "pypandoc-binary; sys_platform == 'win32'",
@@ -122,9 +142,29 @@ quote-style = "single"
 [tool.ruff.lint]
 # This keeps all the defaults AND adds your new line-length rules
 extend-select = ["E501", "W505"]
+# N999 (snake_case module names) fires on `tests/test_MILP.py`, whose name mirrors the
+# `optiwindnet/MILP/` package it exercises.
+ignore = ["N999"]
 
 [tool.ruff.lint.per-file-ignores]
 # docs/conf.py embeds HTML and Jinja templates (nbsphinx_prolog) as raw strings,
 # where a line break would alter the emitted markup and `# noqa` would be inserted
 # into it verbatim. Line length is not meaningful there.
 "docs/conf.py" = ["E501"]
+
+[tool.pyrefly]
+infer-with-first-use = false
+# Check against the minimum supported Python rather than whatever interpreter happens
+# to be active, so CI does not drift when its image is upgraded. Verified clean on
+# 3.11 through 3.14.
+python-version = "3.11"
+# Notebooks are linted and formatted by ruff, which is notebook-aware, but not
+# type-checked. Their errors are dominated by peewee backrefs, IPython's injected
+# `display`, and optional dependencies (topfarm, py_wake, costmodels) that are not
+# installed here. `project-excludes` appends to pyrefly's own defaults.
+project-excludes = ["docs/notebooks/**"]
+# docs/conf.py imports pypandoc inside a try/except to locate the pandoc binary that
+# the `docs` extra installs on Windows only, so the module is genuinely absent on the
+# Linux/macOS machines that run the check. Treating it as Any keeps the result the
+# same on every platform instead of depending on what happens to be installed.
+replace-imports-with-any = ["pypandoc"]

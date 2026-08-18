@@ -1,4 +1,5 @@
 import copy
+import itertools
 import math
 import pickle
 
@@ -84,7 +85,7 @@ def _path_form_S(R, paths):
     S.add_nodes_from(range(-R, 0))
     for root, ordered in paths:
         S.add_edge(root, ordered[0])
-        S.add_edges_from(zip(ordered, ordered[1:]))
+        S.add_edges_from(itertools.pairwise(ordered))
     return S
 
 
@@ -394,7 +395,6 @@ def test_G_from_S():
     assert 'kind' not in G[0][2]
     assert (0, 2) in G.graph['shortened_contours']
 
-    #
     edges_to_test = [(0, 1), (0, 2), (0, 3), (-1, 2)]
 
     for s, t in edges_to_test:
@@ -423,7 +423,6 @@ def test_G_from_S():
         actual_kind = G[s][t].get('kind')
         assert actual_kind == expected_kind
 
-    #
     edges_to_test = [(1, 3), (-1, 1)]
 
     for s, t in edges_to_test:
@@ -881,17 +880,10 @@ def test_as_single_root():
 
     # 2) L with 3 roots
     T, R = 4, 3
-    VertexC = np.array(
-        [
-            [0, 0],
-            [1, 0],
-            [2, 0],
-            [3, 0],
-            [0, 1],
-            [1, 1],
-            [2, 1],
-        ]
-    )  # Roots -3, -2, -1
+    # the last R=3 rows are the roots -3, -2, -1
+    VertexC = np.array([
+        [0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [1, 1], [2, 1],
+    ])  # fmt: skip
     L_prime = nx.Graph(
         T=T, R=R, B=0, VertexC=VertexC, name='Site', handle='site_handle'
     )
@@ -1064,23 +1056,13 @@ def test_as_stratified_vertices():
 
     # --- Case B: border-vertices are NOT in the B-range of VertexC
     L0.graph['border'] = np.array([0, 5, 6, 7])
-    expected_VertexC = np.array(
-        [
-            [1.0, 0.0],
-            [2.0, 0.0],
-            [2.0, 1.0],
-            [2.0, 3.0],
-            [1.0, 0.0],
-            [2.0, -2.0],
-            [2.0, 4.0],
-            [-2.0, 4.0],
-            [1.2, -0.5],
-            [1.2, 1.0],
-            [1.8, 0.5],
-            [1.5, -0.5],
-            [0.0, 0.0],
-        ]
-    )
+    # strata: 4 terminals, 4 border, 4 obstacle, 1 root
+    expected_VertexC = np.array([
+        [1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [2.0, 3.0],
+        [1.0, 0.0], [2.0, -2.0], [2.0, 4.0], [-2.0, 4.0],
+        [1.2, -0.5], [1.2, 1.0], [1.8, 0.5], [1.5, -0.5],
+        [0.0, 0.0],
+    ])  # fmt: skip
     L2 = as_stratified_vertices(L0)
     assert np.array_equal(L2.graph['VertexC'], expected_VertexC)
 

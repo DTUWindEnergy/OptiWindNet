@@ -82,11 +82,11 @@ def gplot(
     c = Colors(dark)
 
     if node_tag is None:
-        kw_axes = dict(aspect='equal', xmargin=0.005, ymargin=0.005)
+        kw_axes = {'aspect': 'equal', 'xmargin': 0.005, 'ymargin': 0.005}
         root_size = node_size = NODESIZE
         detour_size = NODESIZE_DETOUR
     else:
-        kw_axes = dict(aspect='equal', xmargin=0.01, ymargin=0.01)
+        kw_axes = {'aspect': 'equal', 'xmargin': 0.01, 'ymargin': 0.01}
         root_size = NODESIZE_LABELED_ROOT
         detour_size = NODESIZE_LABELED_DETOUR
         node_size = NODESIZE_LABELED
@@ -95,7 +95,7 @@ def gplot(
     VertexC = G.graph['VertexC']
     C, D = (G.graph.get(k, 0) for k in 'CD')
     border, obstacles, landscape_angle = (
-        G.graph.get(k) for k in 'border obstacles landscape_angle'.split()
+        G.graph.get(k) for k in ['border', 'obstacles', 'landscape_angle']
     )
     if landscape and landscape_angle:
         # landscape_angle is not None and not 0
@@ -103,19 +103,19 @@ def gplot(
 
     if ax is None:
         dpi = max(min_dpi, plt.rcParams['figure.dpi'])
-        kw_fig: dict[str, Any] = dict(frameon=False, layout='constrained', dpi=dpi)
+        kw_fig: dict[str, Any] = {'frameon': False, 'layout': 'constrained', 'dpi': dpi}
         fig = plt.figure(**(kw_fig | kwargs))
         ax = fig.add_subplot(**kw_axes)
     else:
         ax.set(**kw_axes)
     ax.set_axis_off()
     # draw farm border
-    border_opt = dict(
-        facecolor=c.border_face,
-        linestyle='dashed',
-        edgecolor=c.kind2color['border'],
-        linewidth=0.7,
-    )
+    border_opt = {
+        'facecolor': c.border_face,
+        'linestyle': 'dashed',
+        'edgecolor': c.kind2color['border'],
+        'linewidth': 0.7,
+    }
     if border is not None:
         borderC = VertexC[border]
 
@@ -165,8 +165,9 @@ def gplot(
 
     # default value for subtree (i.e. color for unconnected nodes)
     # is the last color of the tab20 colormap (i.e. 19)
-    subtrees = G.nodes(data='subtree', default=19)
-    node_colors = [c.colors[subtrees[n] % len(c.colors)] for n in range(T)]
+    node_colors = [
+        c.colors[G.nodes[n].get('subtree', 19) % len(c.colors)] for n in range(T)
+    ]
 
     edges_width = 1.0
     edges_capstyle = 'round'
@@ -244,39 +245,41 @@ def gplot(
     # draw labels
     label_options: dict[str, Any]
     if 'has_loads' in G.graph and node_tag == 'load':
-        label_options = dict(
-            labels={n: G.nodes[n].get('load', '-') for n in range(-R, T)},
-            font_size=(
+        label_options = {
+            'labels': {n: G.nodes[n].get('load', '-') for n in range(-R, T)},
+            'font_size': (
                 {t: FONTSIZE_LOAD for t in range(T)}
                 | {r: FONTSIZE_LABEL for r in range(-R, 0)}
             ),
-        )
+        }
     elif isinstance(node_tag, str):
         # 'label' or some other node attr from node_tag
-        label_options = dict(
-            labels={n: G.nodes[n].get(node_tag, '') for n in range(-R, T)},
-            font_size=(
+        label_options = {
+            'labels': {n: G.nodes[n].get(node_tag, '') for n in range(-R, T)},
+            'font_size': (
                 {t: FONTSIZE_LABEL for t in range(T)}
                 | {r: FONTSIZE_ROOT_LABEL for r in range(-R, 0)}
             ),
-        )
+        }
     elif node_tag is True:
         # use the node number as label
-        label_options = dict(
-            labels={n: str(n) for n in range(-R, T)},
-            font_size=(
+        label_options = {
+            'labels': {n: str(n) for n in range(-R, T)},
+            'font_size': (
                 {t: FONTSIZE_LABEL for t in range(T)}
                 | {r: FONTSIZE_LOAD for r in range(-R, 0)}
             ),
-        )
+        }
     else:
-        label_options = dict(labels={})
+        label_options = {'labels': {}}
     arts = nx.draw_networkx_labels(
         G,
         pos,
         ax=ax,
-        font_color={
-            n: (c.root_edge if n < 0 else 'k') for n in label_options['labels'].keys()
+        # networkx accepts a per-node color mapping; the stub's mapping variant
+        # is typed `Mapping[int, Colormap]` instead of node-to-color
+        font_color={  # pyrefly: ignore[bad-argument-type]
+            n: (c.root_edge if n < 0 else 'k') for n in label_options['labels']
         },
         **label_options,
     )
@@ -374,7 +377,7 @@ def compare(positional=None, **title2G_dict):
             }
         else:
             title2G_dict[''] = positional
-    fig, axes = plt.subplots(1, len(title2G_dict), squeeze=False)
+    _fig, axes = plt.subplots(1, len(title2G_dict), squeeze=False)
     for ax, (title, G) in zip(axes.ravel(), title2G_dict.items()):
         gplot(G, ax=ax, node_tag=None)
         creator = G.graph.get('creator', 'no edges')

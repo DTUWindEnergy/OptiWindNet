@@ -33,15 +33,13 @@ def _make_routeset(branches: list[list[int]], R: int = 1) -> nx.Graph:
     S = nx.Graph(T=T, R=R)
     for r in range(-R, 0):
         S.add_node(r, load=0)
-    subtree = 0
     # all branches share the first root by default
-    for branch in branches:
+    for subtree, branch in enumerate(branches):
         predecessor = -1
         for load, node in zip(range(len(branch), 0, -1), branch):
             S.add_node(node, load=load, subtree=subtree)
             S.add_edge(predecessor, node, load=load)
             predecessor = node
-        subtree += 1
     S.nodes[-1]['load'] = T
     return S
 
@@ -63,18 +61,18 @@ def _make_A(T: int = 4, R: int = 1, edges=()) -> nx.Graph:
 
 
 def _fake_output(routes, *, cost=1.0, vehicles=2):
-    return dict(
-        routes=routes,
-        penalty=0,
-        minimum=str(int(cost * 1e5)),
-        cost=cost,
-        log='',
-        stderr='',
-        elapsed_time=0.01,
-        solution_time=0.0,
-        vehicles=vehicles,
-        seed=0,
-    )
+    return {
+        'routes': routes,
+        'penalty': 0,
+        'minimum': str(int(cost * 1e5)),
+        'cost': cost,
+        'log': '',
+        'stderr': '',
+        'elapsed_time': 0.01,
+        'solution_time': 0.0,
+        'vehicles': vehicles,
+        'seed': 0,
+    }
 
 
 def test_initial_tours_from_warmstart_walked_in_branch_order():

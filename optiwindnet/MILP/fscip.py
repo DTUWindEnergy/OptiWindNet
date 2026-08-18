@@ -8,7 +8,8 @@ import subprocess
 import tempfile
 from collections.abc import Mapping
 from itertools import chain
-from typing import Any
+from types import MappingProxyType
+from typing import Any, ClassVar
 
 import networkx as nx
 
@@ -36,7 +37,7 @@ class SolverFSCIP(Solver, PoolHandler):
     _solution_pool: list[tuple[float, dict]]
     _regexp_objective = re.compile(r'^objective value:\s+([0-9]+(?:\.[0-9]+)?)$')
     _regexp_var_value = re.compile(r'^(\S+)\s+([0-9]+(?:\.[0-9]+)?)\s+\(obj:\S+\)$')
-    _termination_from_status = {
+    _termination_from_status: ClassVar[dict[str, str]] = {
         # fscip has a very non-standard status description
         'problem is solved': 'optimal',
     }
@@ -77,7 +78,7 @@ class SolverFSCIP(Solver, PoolHandler):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         """Wrapper that calls the fscip executable."""
@@ -86,7 +87,7 @@ class SolverFSCIP(Solver, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
+        applied_options = {**self.options, **options}
 
         #  tmpdir = './log/'
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -113,34 +114,34 @@ class SolverFSCIP(Solver, PoolHandler):
             if 'ubiquity_generator' in applied_options:
                 ug_params = applied_options.pop('ubiquity_generator')
             else:
-                ug_params = dict(
-                    Quiet='FALSE',
+                ug_params = {
+                    'Quiet': 'FALSE',
                     #  OutputParaParams = 2,
-                    OutputParaParams=0,
-                    OutputTabularSolvingStatus='TRUE',
-                    TabularSolvingStatusInterval=1,
-                    LogSolvingStatus='TRUE',
+                    'OutputParaParams': 0,
+                    'OutputTabularSolvingStatus': 'TRUE',
+                    'TabularSolvingStatusInterval': 1,
+                    'LogSolvingStatus': 'TRUE',
                     # There is a bug with fscip in scipoptsuite 10.0.0:
                     #   When the ramp-up process ends, the program terminates.
                     #   The only way to make it search for a given duration
                     #   is to skip the ramp up entirely. Quite poor performance
                     #   when compared to SCIP's solveConcurrent().
-                    RampUpPhaseProcess=0,
+                    'RampUpPhaseProcess': 0,
                     #  RacingRampUpTerminationCriteria=1,
                     #  StopRacingTimeLimit=15,
-                    RacingStatBranching='FALSE',
+                    'RacingStatBranching': 'FALSE',
                     # not clear how TRUE and FALSE in LocalBranching compare
                     #  LocalBranching='TRUE',
-                    LogSolvingStatusFilePath='"./"',
-                    LogTasksTransferFilePath='"./"',
-                    SolutionFilePath='"./"',
-                    CheckpointFilePath='"./"',
-                    TempFilePath='"./"',
-                )
+                    'LogSolvingStatusFilePath': '"./"',
+                    'LogTasksTransferFilePath': '"./"',
+                    'SolutionFilePath': '"./"',
+                    'CheckpointFilePath': '"./"',
+                    'TempFilePath': '"./"',
+                }
             ug_params['TimeLimit'] = str(time_limit)
             with open(ug_params_path, 'w') as f:
                 f.write('\n'.join(f'{k} = {v}' for k, v in ug_params.items()))
-            options_lc = dict()
+            options_lc = {}
             options_lc['limits/gap'] = str(mip_gap)
             with open(lc_settings_path, 'w') as f:
                 f.write('\n'.join(f'{k} = {v}' for k, v in options_lc.items()))
@@ -152,27 +153,20 @@ class SolverFSCIP(Solver, PoolHandler):
                     '\n'.join(f'{k} = {v}\n' for k, v in applied_options.items())
                 )
             cmd = [
-                'fscip',
-                ug_params_file,
-                problem_file,
-                '-sl',
-                lc_settings_file,
-                #  '-sr',
-                #  root_settings_file,
-                '-s',
-                settings_file,
-                '-sth',
-                str(n_threads),  # number of parallel scip instances
-                '-fsol',
-                sol_file,
-            ]
+                'fscip', ug_params_file, problem_file,
+                '-sl', lc_settings_file,
+                #  '-sr', root_settings_file,
+                '-s', settings_file,
+                '-sth', str(n_threads),  # number of parallel scip instances
+                '-fsol', sol_file,
+            ]  # fmt: skip
             if model.getNSols() > 0:
                 isol_path = str(os.path.join(tmpdir, 'warmstart.sol')).replace(
                     '\\', '/'
                 )
                 model.writeBestSol(isol_path)
                 cmd.extend(['-isol', isol_path])
-            subprocess.run(cmd, cwd=tmpdir)
+            subprocess.run(cmd, cwd=tmpdir, check=False)  # output is parsed instead
             # The number of non-zero variables per solution block is not fixed:
             # radial/branched topologies have T link_ + T flow_ vars, but RINGED
             # topologies emit extra link_ vars (closed rings / dual feeders), so
@@ -298,7 +292,7 @@ class SolverFSCIP(Solver, PoolHandler):
             relgap=1.0 - bound / objective,
             termination=termination,
         )
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         self.solution_info, self.applied_options = solution_info, applied_options
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info

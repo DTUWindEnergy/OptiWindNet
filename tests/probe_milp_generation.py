@@ -68,16 +68,11 @@ def milp_reference_parser(
     parser.add_argument(
         '--feeder-limit',
         choices=(
-            'unlimited',
-            'minimum',
-            'min_plus1',
-            'min_plus2',
-            'min_plus3',
-            'exactly',
-            'specified',
+            'unlimited', 'minimum', 'min_plus1', 'min_plus2', 'min_plus3',
+            'exactly', 'specified',
         ),
         default='unlimited',
-    )
+    )  # fmt: skip
     parser.add_argument('--max-feeders', type=int, default=0)
     parser.add_argument('--balanced', action='store_true')
     parser.add_argument('--time-limit', type=float, default=30.0)

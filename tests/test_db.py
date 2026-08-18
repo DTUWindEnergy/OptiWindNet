@@ -31,7 +31,6 @@ from .helpers import assert_graph_equal, tiny_wfn
 
 
 def test_open_database(tmp_path):
-    """ """
     dbfile = tmp_path / 'db_test.sqlite'
 
     # ensure file is not present
@@ -39,9 +38,8 @@ def test_open_database(tmp_path):
         dbfile.unlink()
 
     # Expect OSError when trying to open a non-existent DB without create flag
-    with pytest.raises(OSError):
-        with database_connection(str(dbfile), create_db=False):
-            pass
+    with pytest.raises(OSError), database_connection(str(dbfile), create_db=False):
+        pass
 
     # create the DB
     try:
@@ -133,17 +131,10 @@ def test_G_from_routeset(tmp_path):
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {
-        'bound',
-        'method_options',
-        'relgap',
-        'solver_details',
-        'D',
-        'landscape_angle',
-        'method',
-        'norm_offset',
-        'norm_scale',
-        'num_diagonals',
-    }
+        'bound', 'method_options', 'relgap', 'solver_details',
+        'D', 'landscape_angle', 'method',
+        'norm_offset', 'norm_scale', 'num_diagonals',
+    }  # fmt: skip
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 
 
@@ -182,18 +173,10 @@ def test_G_from_routeset_ringed(tmp_path, locations):
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {
-        'bound',
-        'method_options',
-        'relgap',
-        'solver_details',
-        'C',
-        'D',
-        'landscape_angle',
-        'method',
-        'norm_offset',
-        'norm_scale',
-        'num_diagonals',
-    }
+        'bound', 'method_options', 'relgap', 'solver_details',
+        'C', 'D', 'landscape_angle', 'method',
+        'norm_offset', 'norm_scale', 'num_diagonals',
+    }  # fmt: skip
     assert_graph_equal(
         G_rs,
         G,
@@ -244,17 +227,10 @@ def test_G_from_routeset_detours(tmp_path):
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {
-        'bound',
-        'method_options',
-        'relgap',
-        'solver_details',
-        'D',
-        'landscape_angle',
-        'method',
-        'norm_offset',
-        'norm_scale',
-        'num_diagonals',
-    }
+        'bound', 'method_options', 'relgap', 'solver_details',
+        'D', 'landscape_angle', 'method',
+        'norm_offset', 'norm_scale', 'num_diagonals',
+    }  # fmt: skip
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 
 

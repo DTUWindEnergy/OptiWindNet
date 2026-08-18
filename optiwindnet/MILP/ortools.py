@@ -5,6 +5,7 @@ import logging
 from collections.abc import Iterator, Mapping
 from datetime import timedelta
 from itertools import chain
+from types import MappingProxyType
 from typing import Any
 
 import networkx as nx
@@ -25,6 +26,8 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    check_model_enums,
+    check_warmstart_topology,
     feeder_and_load_bounds,
     physical_core_count,
     warmstart_links,
@@ -119,7 +122,7 @@ class SolverORTools(Solver, PoolHandler):
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         """Wrapper for MathOpt solve() that saves all solutions.
@@ -144,8 +147,8 @@ class SolverORTools(Solver, PoolHandler):
                 )
             },
         )
-        applied_options = self.options | options
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        applied_options = {**self.options, **options}
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         solve_params = self._make_solve_parameters(
             time_limit, mip_gap, applied_options, verbose
         )
@@ -158,24 +161,26 @@ class SolverORTools(Solver, PoolHandler):
                 else []
             ),
         )
-        solve_kwargs = dict(
-            opt_model=model,
-            solver_type=_SOLVER_TYPES[self.backend],
-            params=solve_params,
-            model_params=model_params,
+        solve_kwargs = {
+            'opt_model': model,
+            'solver_type': _SOLVER_TYPES[self.backend],
+            'params': solve_params,
+            'model_params': model_params,
             # HiGHS triggers a deprecation warning when msg_cb is used
             # (setLogCallback → setCallback), so skip it for that backend.
-            msg_cb=self._msg_cb
+            'msg_cb': self._msg_cb
             if self.log_callback is not None and self.backend != 'highs'
             else None,
-        )
+        }
         if self.backend in _CALLBACK_BACKENDS:
             solve_kwargs['callback_reg'] = mathopt.CallbackRegistration(
                 events={mathopt.Event.MIP_SOLUTION},
                 mip_solution_filter=mathopt.VariableFilter(filtered_items=tracked_vars),
             )
             solve_kwargs['cb'] = storer.on_solution_callback
-        result = mathopt.solve(**solve_kwargs)
+        # `solve_kwargs` is heterogeneous, so each value is checked against every
+        # parameter it could land in rather than just its own
+        result = mathopt.solve(**solve_kwargs)  # pyrefly: ignore[bad-argument-type]
         self._solve_result = result
         if len(storer.solutions) == 0 and result.has_primal_feasible_solution():
             solution = {
@@ -345,6 +350,7 @@ def make_min_length_model(
       max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
         exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
     """
+    check_model_enums(topology, feeder_route, feeder_limit)
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -570,13 +576,13 @@ def make_min_length_model(
     # Store metadata #
     ##################
 
-    model_options = dict(
-        topology=topology,
-        feeder_route=feeder_route,
-        feeder_limit=feeder_limit,
-        max_feeders=max_feeders,
-        balanced=balanced,
-    )
+    model_options = {
+        'topology': topology,
+        'feeder_route': feeder_route,
+        'feeder_limit': feeder_limit,
+        'max_feeders': max_feeders,
+        'balanced': balanced,
+    }
     metadata = ModelMetadata(
         R,
         T,
@@ -644,12 +650,7 @@ def warmup_model(
     Raises:
       OWNWarmupFailed: if some link in S is not available in model.
     """
-    mt = metadata.model_options['topology']
-    st = S.graph['topology']
-    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
-        raise OWNWarmupFailed(
-            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
-        )
+    check_warmstart_topology(metadata, S)
     # CP-SAT should not have to complete the hint, so initialize every variable to 0
     # and override the ones S activates.
     hint_values: dict[Any, float] = dict.fromkeys(

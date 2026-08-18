@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # Configuration file for the Sphinx documentation builder.
 #
@@ -111,12 +110,9 @@ nitpick_ignore = [
 autoapi_dirs = ['../optiwindnet']
 #  autoapi_options = [ 'members', 'undoc-members', 'private-members', 'show-inheritance', 'show-module-summary', 'special-members', 'imported-members', ]
 autoapi_options = [
-    'members',
-    'undoc-members',
-    'show-inheritance',
-    'special-members',
-    'imported-members',
-]
+    'members', 'undoc-members', 'show-inheritance',
+    'special-members', 'imported-members',
+]  # fmt: skip
 autoapi_python_class_content = 'both'
 # Named explicitly: the handlers below derive page names from it.
 autoapi_root = 'autoapi'
@@ -328,14 +324,9 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (
-        master_doc,
-        'OptiWindNet.tex',
-        'OptiWindNet Documentation',
-        'DTU Wind Energy',
-        'manual',
-    ),
-]
+    (master_doc, 'OptiWindNet.tex', 'OptiWindNet Documentation',
+     'DTU Wind Energy', 'manual'),
+]  # fmt: skip
 
 
 # -- Options for manual page output ------------------------------------------
@@ -351,16 +342,9 @@ man_pages = [(master_doc, 'optiwindnet', 'OptiWindNet Documentation', [author], 
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (
-        master_doc,
-        'OptiWindNet',
-        'OptiWindNet Documentation',
-        author,
-        'OptiWindNet',
-        'One line description of project.',
-        'Miscellaneous',
-    ),
-]
+    (master_doc, 'OptiWindNet', 'OptiWindNet Documentation', author,
+     'OptiWindNet', 'One line description of project.', 'Miscellaneous'),
+]  # fmt: skip
 
 
 # -- Options for Epub output -------------------------------------------------
@@ -386,10 +370,9 @@ epub_exclude_files = ['search.html']
 
 def skip_empty_all_submodules(app, what, name, obj, skip, options):
     # Only consider modules
-    if what == 'module':
-        if obj.all is not None and len(obj.all) == 0:
-            # __all__ is empty -> do not document this module
-            return True
+    if what == 'module' and obj.all is not None and len(obj.all) == 0:
+        # __all__ is empty -> do not document this module
+        return True
     return None  # Use default behavior otherwise
 
 
@@ -526,13 +509,13 @@ def retarget_upstream_types(app, env, node, contnode):
     """
     target = node.get('reftarget', '')
     if node.get('refdomain') != 'py' or node.get('reftype') != 'class':
-        return None
+        return
     if target.partition('.')[0] not in _INTERSPHINX_ROOTS:
         # Leave project-local misses reported as py:class.
-        return None
+        return
     node['reftarget'] = _INVENTORY_RENAMES.get(target, target)
     node['reftype'] = 'obj'
-    return None  # intersphinx, at priority 500, resolves the rewritten node
+    return  # intersphinx, at priority 500, resolves the rewritten node
 
 
 def copy_milp_formulation_assets(app, exception):

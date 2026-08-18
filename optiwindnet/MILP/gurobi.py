@@ -3,7 +3,7 @@
 
 import logging
 from collections.abc import Mapping
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 import networkx as nx
@@ -38,12 +38,13 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     """
 
     name: str = 'pyomo.gurobi'
-    # default options to pass to Pyomo solver
-    options: dict = dict(
-        mipfocus=1,
-    )
+    options: dict[str, Any]
 
     def __init__(self):
+        # default options to pass to Pyomo solver
+        self.options = {
+            'mipfocus': 1,
+        }
         # dummy attribute `solver` to be used by SolverPyomo.set_problem()
         self.solver = SimpleNamespace(warm_start_capable=lambda: True)
 
@@ -72,13 +73,15 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         )
         self.solver = solver
         super().set_problem(P, A, capacity, model_options, warmstart)
-        self.solver.set_instance(self.model)
+        # `set_instance` is specific to pyomo's persistent solvers, which the
+        # `SolverFactory` stub types as the base `OptSolver`
+        self.solver.set_instance(self.model)  # pyrefly: ignore[missing-attribute]
 
     def solve(
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         model, solver = self.model, self.solver
@@ -87,13 +90,13 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         except AttributeError as exc:
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
-        applied_options = self.options | options
-        self.stopping = dict(mip_gap=mip_gap, time_limit=time_limit)
+        applied_options = {**self.options, **options}
+        self.stopping = {'mip_gap': mip_gap, 'time_limit': time_limit}
         info('>>> %s solver options <<<\n%s\n', self.name, solver.options)
         result = solver.solve(
             model,
             **self.solve_kwargs,
-            options=applied_options | dict(timelimit=time_limit, mipgap=mip_gap),
+            options=applied_options | {'timelimit': time_limit, 'mipgap': mip_gap},
             tee=verbose,
             load_solutions=False,
         )
@@ -136,9 +139,6 @@ class SolverGurobi(SolverPyomo, PoolHandler):
                 G = PathFinder(G_from_S(S, A), P, A).create_detours()
             else:
                 S, G = self._investigate_pool(P, A)
-        except Exception as exc:
-            raise exc
-        else:
             G.graph.update(self._make_graph_attributes())
             return S, G
         finally:

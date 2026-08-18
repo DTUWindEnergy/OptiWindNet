@@ -2,8 +2,8 @@ import copy
 import math
 import warnings
 from collections import Counter
-from collections.abc import Mapping
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -16,7 +16,6 @@ from optiwindnet.MILP import (
     SolutionInfo,
     solver_factory,
 )
-
 
 # Leave the root after one stalled separation round instead of SCIP's default 10.
 # At these short budgets the implied-integral flows keep the root separator busy,
@@ -131,9 +130,9 @@ def terminal_terminal_crossings(
 def assert_graph_equal(
     G1: nx.Graph,
     G2: nx.Graph,
-    ignored_graph_keys: Optional[Iterable[str]] = None,
+    ignored_graph_keys: Iterable[str] | None = None,
     *,
-    ignored_node_keys: Optional[Iterable[str]] = None,
+    ignored_node_keys: Iterable[str] | None = None,
     rtol: float = 1e-7,
     atol: float = 1e-10,
     max_show: int = 50,
@@ -185,7 +184,7 @@ def assert_graph_equal(
         if isinstance(a, dict) and isinstance(b, dict):
             if a.keys() != b.keys():
                 return False
-            return all(_eq(a[k], b[k]) for k in a.keys())
+            return all(_eq(a[k], b[k]) for k in a)
         # numpy arrays
         if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
             if a.dtype.kind == 'f' or b.dtype.kind == 'f':
@@ -213,12 +212,10 @@ def assert_graph_equal(
 
     # --- prepare ignored paths --------------------------------------------------
     default_ignored = {
-        'bound',
-        'relgap',
-        'solver_details',
+        'bound', 'relgap', 'solver_details',
         'method_options.fun_fingerprint.funfile',
         'method_options.fun_fingerprint.funhash',
-    }
+    }  # fmt: skip
     ignored_all = set(default_ignored)
     if ignored_graph_keys:
         ignored_all |= set(ignored_graph_keys)
@@ -255,10 +252,10 @@ def assert_graph_equal(
         if a1.keys() != a2.keys():
             diff = sorted(a1.keys() ^ a2.keys())
             raise AssertionError(f'Node {n} attribute keys differ: {diff}')
-        for k in a1:
-            if not _eq(a1[k], a2[k]):
+        for k, v1 in a1.items():
+            if not _eq(v1, a2[k]):
                 raise AssertionError(
-                    f"Node {n} attribute '{k}' differs: {a1[k]!r} != {a2[k]!r}"
+                    f"Node {n} attribute '{k}' differs: {v1!r} != {a2[k]!r}"
                 )
 
     # --- compare graph-level attributes ----------------------------------------
@@ -312,7 +309,7 @@ def tiny_wfn(
     substationsC=None,
     borderC=None,
     obstacleC_=None,
-    cables=[(4, 10.0)],
+    cables=None,
     optimize=True,
     router=None,
 ):
@@ -328,6 +325,9 @@ def tiny_wfn(
     - optimize : if True, call wfn.optimize() before returning (default False).
     """
     # defaults
+    if cables is None:
+        cables = [(4, 10.0)]
+
     if turbinesC is None:
         turbinesC = np.array([[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [2.0, 3.0]], float)
     else:

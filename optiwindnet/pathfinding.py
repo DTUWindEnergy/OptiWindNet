@@ -7,7 +7,7 @@ import math
 from bisect import bisect_left
 from collections import defaultdict, namedtuple
 from collections.abc import Generator
-from itertools import chain
+from itertools import chain, pairwise
 from typing import Any
 
 import networkx as nx
@@ -19,6 +19,7 @@ from .crossings import gateXing_iter
 from .geometric import rotation_checkers_factory
 from .interarraylib import bfs_subtree_loads, scaffolded
 from .mesh import planar_flipped_by_routeset
+from .types import Topology
 
 __all__ = ('PathFinder',)
 
@@ -175,7 +176,7 @@ def _expand_P_paths_edge(
     if path[0] != s:
         path = path[::-1]
     expanded = [path[0]]
-    for u, v in zip(path[:-1], path[1:]):
+    for u, v in pairwise(path):
         expanded.extend(_expand_P_paths_edge(u, v, shortcuts)[1:])
     return expanded
 
@@ -185,7 +186,7 @@ def _expand_P_paths_path(
 ) -> list[int]:
     """Expand every shortcut hop along ``path`` into its underlying P-edges."""
     expanded = [path[0]]
-    for s, t in zip(path[:-1], path[1:]):
+    for s, t in pairwise(path):
         expanded.extend(_expand_P_paths_edge(s, t, shortcuts)[1:])
     return expanded
 
@@ -251,9 +252,9 @@ class PathFinder:
     attribute ``'kind'`` with value ``'tentative'`` are checked for crossings.
 
     Feeders are rerouted within the topology ``Gʹ`` declares in its mandatory
-    ``'topology'`` graph attribute, which decides where a feeder may re-hook:
-    ``'branched'`` allows any terminal of the subtree, ``'radial'`` only its
-    head or tail, ``'ringed'`` only the current subroot.
+    ``'topology'`` graph attribute (a :class:`.Topology` member), which decides
+    where a feeder may re-hook: BRANCHED allows any terminal of the subtree,
+    RADIAL only its head or tail, RINGED only the current subroot.
 
     Args:
       G: the routeset without detours
@@ -326,9 +327,9 @@ class PathFinder:
             tentative = []
             hooks_by_root = []
             for r in range(-R, 0):
-                feeders = set(
+                feeders = {
                     n for n in G.neighbors(r) if G[r][n].get('kind') == 'tentative'
-                )
+                }
                 tentative.extend((r, n) for n in feeders)
                 hooks_by_root.append(
                     np.fromiter(feeders, count=len(feeders), dtype=int)
@@ -463,7 +464,7 @@ class PathFinder:
             )
             for ae, (subtree, mp) in contour_mps.items():
                 chain_seq = (ae[0], *mp, ae[1])
-                for pos, (a, b) in enumerate(zip(chain_seq[:-1], chain_seq[1:])):
+                for pos, (a, b) in enumerate(pairwise(chain_seq)):
                     egp.add((a, b) if a < b else (b, a))
                     if not planar.has_edge(a, b):
                         diag_locs[(a, b) if a < b else (b, a)].append((ae, pos))
@@ -499,7 +500,7 @@ class PathFinder:
         contour_diags = set()
         for ae, (subtree, mp) in contour_mps.items():
             chain_seq = (ae[0], *mp, ae[1])
-            for a, b in zip(chain_seq[:-1], chain_seq[1:]):
+            for a, b in pairwise(chain_seq):
                 if not planar.has_edge(a, b):
                     contour_diags.add((a, b) if a < b else (b, a))
 
@@ -513,19 +514,22 @@ class PathFinder:
             found = False
             for s in common:
                 for c in common:
-                    if s < c and planar.has_edge(s, c):
+                    if (
+                        s < c
+                        and planar.has_edge(s, c)
                         # Verify s-c is the base edge currently present in
                         # the triangulation
-                        if {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}:
-                            base_edge[d] = (s, c)
-                            quad_sides[d] = {
-                                (u, s) if u < s else (s, u),
-                                (s, v) if s < v else (v, s),
-                                (v, c) if v < c else (c, v),
-                                (c, u) if c < u else (u, c),
-                            }
-                            found = True
-                            break
+                        and {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}
+                    ):
+                        base_edge[d] = (s, c)
+                        quad_sides[d] = {
+                            (u, s) if u < s else (s, u),
+                            (s, v) if s < v else (v, s),
+                            (v, c) if v < c else (c, v),
+                            (c, u) if c < u else (u, c),
+                        }
+                        found = True
+                        break
                 if found:
                     break
 
@@ -546,13 +550,16 @@ class PathFinder:
             for d2 in contour_diags:
                 if d1 < d2:
                     b1, b2 = base_edge.get(d1), base_edge.get(d2)
-                    if b1 is not None and b2 is not None:
-                        if (
+                    if (
+                        b1 is not None
+                        and b2 is not None
+                        and (
                             b1 == b2
                             or b1 in quad_sides.get(d2, ())
                             or b2 in quad_sides.get(d1, ())
-                        ):
-                            conflicts.add((d1, d2))
+                        )
+                    ):
+                        conflicts.add((d1, d2))
 
         # 4. Resolve conflicts directly by scheduling de-shortcuts
         to_deshortcut = {}
@@ -576,7 +583,7 @@ class PathFinder:
             contour_diag_locs = defaultdict(list)
             for ae, (subtree, mp) in contour_mps.items():
                 chain_seq = (ae[0], *mp, ae[1])
-                for pos, (a, b) in enumerate(zip(chain_seq[:-1], chain_seq[1:])):
+                for pos, (a, b) in enumerate(pairwise(chain_seq)):
                     k = (a, b) if a < b else (b, a)
                     if k in to_deshortcut:
                         contour_diag_locs[k].append((ae, pos))
@@ -612,13 +619,13 @@ class PathFinder:
         # clearly, rather than cryptically deep in the chain builder.
         for fence in fences:
             seq = (fence.endpoints[0], *fence.primes_on_constraint, fence.endpoints[1])
-            for a, b in zip(seq[:-1], seq[1:]):
+            for a, b in pairwise(seq):
                 if not P.has_edge(a, b):
                     raise ValueError(
-                        'PathFinder: fence for subtree %d (A-edge %s) hop %d-%d '
-                        'is absent from the flipped navigation mesh — an '
-                        'unresolved contour-diagonal conflict.'
-                        % (fence.subtree, fence.endpoints, a, b)
+                        f'PathFinder: fence for subtree {fence.subtree} '
+                        f'(A-edge {fence.endpoints}) hop {a}-{b} is absent from '
+                        f'the flipped navigation mesh — an unresolved '
+                        f'contour-diagonal conflict.'
                     )
 
         # Precompute everything that depends only on (P, edges_G_primes,
@@ -657,15 +664,18 @@ class PathFinder:
         common = [w for w in planar.neighbors(u) if planar.has_edge(v, w)]
         for s in common:
             for c in common:
-                if s < c and planar.has_edge(s, c):
+                if (
+                    s < c
+                    and planar.has_edge(s, c)
                     # Verify s-c is the base edge currently present in the triangulation
-                    if {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}:
-                        return (s, c), {
-                            (u, s) if u < s else (s, u),
-                            (s, v) if s < v else (v, s),
-                            (v, c) if v < c else (c, v),
-                            (c, u) if c < u else (u, c),
-                        }
+                    and {planar[s][c]['ccw'], planar[c][s]['ccw']} == {u, v}
+                ):
+                    return (s, c), {
+                        (u, s) if u < s else (s, u),
+                        (s, v) if s < v else (v, s),
+                        (v, c) if v < c else (c, v),
+                        (c, u) if c < u else (u, c),
+                    }
         return None
 
     def _get_mesh_endpoint(
@@ -809,9 +819,12 @@ class PathFinder:
         prime_adj = G._adj.get(prime, {})  # type: ignore
         nbr = P[prime][opposite]['ccw']
         for _ in range(len(P._adj[prime])):  # type: ignore
-            if nbr < T and nbr in prime_adj:
-                if nbr >= 0 or (nbr, prime) not in tentative:
-                    return nbr
+            if (
+                nbr < T
+                and nbr in prime_adj
+                and (nbr >= 0 or (nbr, prime) not in tentative)
+            ):
+                return nbr
             nbr = P[prime][nbr]['ccw']
         # could not find a non-tentative G edge around prime
         return NULL
@@ -1212,7 +1225,7 @@ class PathFinder:
         # fence ends at `v`). All spanning fences at `v` must agree on it.
         if spanning_endings:
             f0, side0 = spanning_endings[0]
-            chain_step_nbr: int | None = (
+            chain_step_nbr: int = (
                 f0.primes_on_constraint[1]
                 if side0 == 'start'
                 else f0.primes_on_constraint[-2]
@@ -1630,7 +1643,7 @@ class PathFinder:
             x_1, x_k = spokes[0], spokes[-1]
             _launch(w, x_1, 1)
             _launch(x_k, w, 0)
-            for xi, xj in zip(spokes, spokes[1:]):
+            for xi, xj in pairwise(spokes):
                 if (xi, xj) in portal_set:
                     _launch(xi, xj, 1)
         else:
@@ -1668,7 +1681,8 @@ class PathFinder:
         if sub_cw == sub_ccw:
             return sub_cw if sub_cw is not None else NULL
         if sub_cw is None:
-            return sub_ccw
+            # the `sub_cw == sub_ccw` case returned above, so sub_ccw is not None
+            return sub_ccw  # pyrefly: ignore[bad-return]
         if sub_ccw is None:
             return sub_cw
         # overlapping fences: the two adjacent cones host different chains and
@@ -2033,7 +2047,7 @@ class PathFinder:
         """
         get_best_path = self.get_best_path
         for n in range(self.T):
-            path, dists = get_best_path(n)
+            path, _dists = get_best_path(n)
             nx.add_path(G, path, kind='virtual')
 
     def best_paths_overlay(self) -> nx.Graph:
@@ -2067,7 +2081,7 @@ class PathFinder:
         scaff = scaffolded(self.G, P=self.P)
         for endpoints, primes_on_constraint, _ in self.fences:
             chain = (endpoints[0], *primes_on_constraint, endpoints[1])
-            for a, b in zip(chain[:-1], chain[1:]):
+            for a, b in pairwise(chain):
                 st = (a, b) if a < b else (b, a)
                 if st in scaff.edges and 'kind' in scaff.edges[st]:
                     del scaff.edges[st]['kind']
@@ -2133,9 +2147,9 @@ class PathFinder:
             # where a feeder may re-hook depends on the declared topology
             hook_candidates = (
                 [n]
-                if self.topology == 'ringed'
+                if self.topology is Topology.RINGED
                 else [n for n in subtree if n < T]
-                if self.topology == 'branched'
+                if self.topology is Topology.BRANCHED
                 else [n, next(h for h in subtree if len(G._adj[h]) == 1)]  # type: ignore
             )
             debug('hook_candidates: %s', hook_candidates)
@@ -2178,17 +2192,15 @@ class PathFinder:
             clone2prime.extend(path[1:-1])
             G.add_nodes_from(
                 (
-                    (
-                        c,
-                        {
-                            'label': str(c),
-                            'kind': 'detour',
-                            'subtree': subtree_id,
-                            'load': subtree_load,
-                        },
-                    )
-                    for c in Clone
+                    c,
+                    {
+                        'label': str(c),
+                        'kind': 'detour',
+                        'subtree': subtree_id,
+                        'load': subtree_load,
+                    },
                 )
+                for c in Clone
             )
             if [n, r] != path:
                 # TODO: adapt this for contoured feeders

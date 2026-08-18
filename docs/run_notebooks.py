@@ -99,7 +99,9 @@ def read_notebook(path: Path) -> nbformat.NotebookNode:
     # such as cell sources and stream output are rejoined into strings.
     nb = nbformat.reads(json.dumps(normalized_nb), as_version=4)
     nbformat.validate(nb)
-    return nb
+    # `reads` is typed as returning any of the versioned node types, but
+    # `as_version=4` pins it to a v4 NotebookNode
+    return nb  # pyrefly: ignore[bad-return]
 
 
 def is_milp(path: Path) -> bool:
@@ -288,7 +290,7 @@ def run(args: argparse.Namespace) -> int:
             print(f'  -> {rel}  FAIL  {elapsed:6.1f}s  {exc.ename}: {exc.evalue}')
             failures.append((path, f'{exc.ename}: {exc.evalue}'))
             continue
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- report any notebook failure
             elapsed = time.monotonic() - t0
             print(f'  -> {rel}  FAIL  {elapsed:6.1f}s  {type(exc).__name__}: {exc}')
             failures.append((path, f'{type(exc).__name__}: {exc}'))

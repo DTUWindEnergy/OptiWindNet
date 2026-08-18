@@ -246,7 +246,7 @@ def update_candidates(
                 warmstart_max_retries=warmstart_max_retries,
                 verbose=verbose,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- record any per-case failure
             result = {
                 'case': {
                     'site': case.site,

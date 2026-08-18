@@ -128,12 +128,8 @@ def test_milp_golden_key_tracks_model_options():
 
 def test_constructor_matrix_covers_required_axes():
     assert {case.method for case in CONSTRUCTOR_CASES} == {
-        'esau_williams',
-        'biased_EW',
-        'rootlust',
-        'radial_EW',
-        'ringed',
-    }
+        'esau_williams', 'biased_EW', 'rootlust', 'radial_EW', 'ringed',
+    }  # fmt: skip
     expected = {
         'esau_williams': Topology.BRANCHED,
         'biased_EW': Topology.BRANCHED,

@@ -83,19 +83,10 @@ def test_edges_and_hull_from_cdt_all():
 
 
 def test_build_edge_line_tree_query_crosses():
-    VertexC = np.array(
-        [
-            [0.0, 0.0],
-            [2.0, 2.0],
-            [0.0, 2.0],
-            [2.0, 0.0],
-            [0.0, 1.0],
-            [2.0, 1.0],
-            [3.0, 3.0],
-            [4.0, 4.0],
-        ],
-        dtype=float,
-    )
+    VertexC = np.array([
+        [0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0],
+        [0.0, 1.0], [2.0, 1.0], [3.0, 3.0], [4.0, 4.0],
+    ], dtype=float)  # fmt: skip
     constraint_edges, _, tree = _build_edge_line_tree(VertexC, {(4, 5), (6, 7)})
     assert tree is not None
     probe = [shp.LineString(VertexC[[0, 1]]), shp.LineString(VertexC[[2, 3]])]

@@ -13,7 +13,8 @@ from inspect import cleandoc
 from itertools import chain
 from pathlib import Path
 from textwrap import indent
-from typing import TYPE_CHECKING, Any
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import networkx as nx
 from makefun import with_signature
@@ -158,10 +159,8 @@ def feeder_and_load_bounds(
             raise ValueError('max_feeders is below the minimum necessary')
         feeders_lb, feeders_ub = min_feeders, max_feeders
     elif feeder_limit in (
-        FeederLimit.MIN_PLUS1,
-        FeederLimit.MIN_PLUS2,
-        FeederLimit.MIN_PLUS3,
-    ):
+        FeederLimit.MIN_PLUS1, FeederLimit.MIN_PLUS2, FeederLimit.MIN_PLUS3,
+    ):  # fmt: skip
         plus = int(feeder_limit.value[-1])
         feeders_lb, feeders_ub = min_feeders, min_feeders + plus
     else:
@@ -194,25 +193,29 @@ class ModelOptions(dict):
     values. Use ModelOptions() without any parameters to use the defaults.
     """
 
-    hints = {
+    hints: ClassVar[dict[str, type]] = {
         _identifier_from_class_name(kind): kind
         for kind in (Topology, FeederRoute, FeederLimit)
     }
     # this has to be kept in sync with make_min_length_model()
-    simple = dict(
-        balanced=(
+    simple: ClassVar[dict[str, tuple]] = {
+        'balanced': (
             bool,
             False,
-            'Whether to enforce balanced subtrees (subtree loads differ at most '
-            'by one unit).',
+            (
+                'Whether to enforce balanced subtrees (subtree loads differ at most '
+                'by one unit).'
+            ),
         ),
-        max_feeders=(
+        'max_feeders': (
             int,
             0,
-            'Number of feeders: the maximum if <feeder_limit = "specified">, '
-            'the exact count if <feeder_limit = "exactly">',
+            (
+                'Number of feeders: the maximum if <feeder_limit = "specified">, '
+                'the exact count if <feeder_limit = "exactly">'
+            ),
         ),
-    )
+    }
 
     # `with_signature` rewrites `__init__` at import time so that `help()`,
     # `inspect.signature` and IDE introspection show the real options. Type
@@ -329,6 +332,55 @@ class SolutionInfo:
     termination: str
 
 
+def check_model_enums(
+    topology: Topology, feeder_route: FeederRoute, feeder_limit: FeederLimit
+) -> None:
+    """Reject a model option that is not a member of its enum.
+
+    The builders branch on identity, so an equal ``str`` selects the default
+    model and reaches ``ModelMetadata`` unnoticed. Pass the member;
+    :class:`ModelOptions` is where a ``str`` is coerced.
+
+    Raises:
+        TypeError: an option is not a member of its enum.
+    """
+    for value, kind in (
+        (topology, Topology),
+        (feeder_route, FeederRoute),
+        (feeder_limit, FeederLimit),
+    ):
+        if not isinstance(value, kind):
+            raise TypeError(
+                f'{_identifier_from_class_name(kind)} must be a {kind.__name__} '
+                f'member, got {type(value).__name__}: {value!r}'
+            )
+
+
+def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
+    """Reject a warm start whose topology the model cannot start from.
+
+    A model accepts its own topology, plus RADIAL into BRANCHED (a path is a
+    tree). The comparison is by identity, and ``S`` comes from the caller, so its
+    topology is checked for being a :class:`.Topology`: an equal ``str`` is a
+    type error, not a mismatch.
+
+    Raises:
+        OWNWarmupFailed: ``S``'s topology is one this model cannot start from, or
+          is not a ``Topology``.
+    """
+    mt = metadata.model_options['topology']
+    st = S.graph['topology']
+    if not isinstance(st, Topology):
+        raise OWNWarmupFailed(
+            f"warmup_model() failed: S.graph['topology'] must be a Topology "
+            f'member, got {type(st).__name__}: {st!r}'
+        )
+    if not (st is mt or (mt is Topology.BRANCHED and st is Topology.RADIAL)):
+        raise OWNWarmupFailed(
+            f'warmup_model() failed: {st} network cannot warm-start a {mt} model'
+        )
+
+
 def warmstart_links(
     metadata: ModelMetadata, S: nx.Graph
 ) -> Iterator[tuple[Any, Any | None, int]]:
@@ -350,7 +402,9 @@ def warmstart_links(
             raise OWNWarmupFailed(f'warmup_model() failed: model lacks S link {key}')
         yield (
             metadata.link_[key],
-            metadata.flow_[key] if key in metadata.flow_ else None,
+            # not `.get()`: `flow_` may be a Pyomo IndexedVar, which supports
+            # `in` and `[]` but is not a Mapping
+            metadata.flow_[key] if key in metadata.flow_ else None,  # noqa: SIM401
             flow,
         )
 
@@ -416,6 +470,8 @@ class Solver(abc.ABC):
 
     name: str
     metadata: ModelMetadata
+    # backend-native objects: every concrete solver sets both in `set_problem()`
+    model: Any
     solver: Any
     options: dict[str, Any]
     stopping: dict[str, Any]
@@ -426,12 +482,10 @@ class Solver(abc.ABC):
     @abc.abstractmethod
     def _link_val(self, var: Any) -> int | bool:
         "Get the value of a link variable from the current solution."
-        pass
 
     @abc.abstractmethod
     def _flow_val(self, var: Any) -> int:
         "Get the value of a flow variable from the current solution."
-        pass
 
     @abc.abstractmethod
     def set_problem(
@@ -451,14 +505,13 @@ class Solver(abc.ABC):
           model_options: tree properties - see ModelOptions.help()
           warmstart: initial feasible solution to pass to solver
         """
-        pass
 
     @abc.abstractmethod
     def solve(
         self,
         time_limit: float,
         mip_gap: float,
-        options: dict[str, Any] = {},
+        options: Mapping[str, Any] = MappingProxyType({}),
         verbose: bool = False,
     ) -> SolutionInfo:
         """Run the MILP solver search.
@@ -473,7 +526,6 @@ class Solver(abc.ABC):
           General information about the solution search (use ``get_solution()`` for
             the actual solution).
         """
-        pass
 
     @abc.abstractmethod
     def get_incumbent_topology(self) -> nx.Graph:
@@ -482,7 +534,6 @@ class Solver(abc.ABC):
         This method does not route or rank solution-pool entries by detoured
         length. Use :meth:`get_solution` for the routed, post-processed result.
         """
-        pass
 
     @abc.abstractmethod
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
@@ -494,7 +545,6 @@ class Solver(abc.ABC):
         Returns:
           Topology graph S and routeset G.
         """
-        pass
 
     def _make_graph_attributes(self) -> dict[str, Any]:
         metadata, solution_info = self.metadata, self.solution_info
@@ -589,12 +639,10 @@ class PoolHandler(abc.ABC):
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
         "Get objective value from solution pool at position ``index``"
-        pass
 
     @abc.abstractmethod
     def _topology_from_mip_pool(self) -> nx.Graph:
         "Build topology from the pool solution at the last requested position"
-        pass
 
     def _incumbent_topology_from_pool(self) -> nx.Graph:
         """Decode pool entry zero, which must hold the best model objective."""

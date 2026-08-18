@@ -70,13 +70,8 @@ def generate(database: Path) -> dict[bytes, np.ndarray]:
 
             database_location = L_from_nodeset(nodeset)
             current_pack = packnodes(current)
-            for field in (
-                'T',
-                'R',
-                'B',
-                'constraint_groups',
-                'constraint_vertices',
-            ):
+            fields = ('T', 'R', 'B', 'constraint_groups', 'constraint_vertices')
+            for field in fields:
                 if getattr(nodeset, field) != current_pack[field]:
                     raise ValueError(
                         f'{expected_name} alias disagrees on {field}: '

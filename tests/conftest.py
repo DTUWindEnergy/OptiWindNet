@@ -64,7 +64,8 @@ def run_isolated(request):
             case _:
                 try:
                     return func(*args)
-                except BaseException as exc:
+                # marshalled back to the caller, so nothing may escape
+                except BaseException as exc:  # noqa: BLE001
                     return exc
 
     return run

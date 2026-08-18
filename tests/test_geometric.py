@@ -66,23 +66,15 @@ def test_rotate():
 
     vertexC = G.graph['VertexC']
     rotated_vertexC = rotate(coords=vertexC, angle=5)
-    expected = np.array(
-        [
-            [0.9961947, 0.08715574],
-            [1.9923894, 0.17431149],
-            [1.90523365, 1.17050618],
-            [1.73092217, 3.16289558],
-            [-1.81807791, -2.16670088],
-            [2.16670088, -1.81807791],
-            [1.64376643, 4.15909028],
-            [-2.34101237, 3.81046731],
-            [1.23901151, -0.39351046],
-            [1.10827789, 1.10078159],
-            [1.74957259, 0.65497769],
-            [1.53786992, -0.36736373],
-            [0.0, 0.0],
-        ]
-    )
+    expected = np.array([
+        [0.9961947, 0.08715574], [1.9923894, 0.17431149],
+        [1.90523365, 1.17050618], [1.73092217, 3.16289558],
+        [-1.81807791, -2.16670088], [2.16670088, -1.81807791],
+        [1.64376643, 4.15909028], [-2.34101237, 3.81046731],
+        [1.23901151, -0.39351046], [1.10827789, 1.10078159],
+        [1.74957259, 0.65497769], [1.53786992, -0.36736373],
+        [0.0, 0.0],
+    ])  # fmt: skip
 
     np.testing.assert_allclose(rotated_vertexC, expected, atol=1e-6)
 
@@ -311,19 +303,19 @@ def test_complete_graph_no_prune():
 
 def test_rotating_calipers_square():
     hull = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-    calipers, angle_val, metric, bbox = rotating_calipers(hull, metric='height')
+    _calipers, _angle_val, metric, _bbox = rotating_calipers(hull, metric='height')
     assert np.isclose(metric, 1.0)
 
 
 def test_rotating_calipers_rectangle():
     hull = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]])
-    calipers, angle_val, metric, bbox = rotating_calipers(hull, metric='height')
+    _calipers, _angle_val, metric, _bbox = rotating_calipers(hull, metric='height')
     assert np.isclose(metric, 1.0)
 
 
 def test_rotating_calipers_area_metric():
     hull = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]])
-    calipers, angle_val, metric, bbox = rotating_calipers(hull, metric='area')
+    _calipers, _angle_val, metric, _bbox = rotating_calipers(hull, metric='area')
     assert np.isclose(metric, 2.0)
 
 
@@ -486,5 +478,5 @@ def test_is_bunch_split_by_corner_false():
     b = np.array([1.0, -1.0])
     # both points outside the rightward cone
     bunch = np.array([[-1.0, 0.5], [-1.0, -0.5]])
-    split, inside, outside = is_bunch_split_by_corner(bunch, a, o, b)
+    split, _inside, _outside = is_bunch_split_by_corner(bunch, a, o, b)
     assert not split

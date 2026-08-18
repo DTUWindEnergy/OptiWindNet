@@ -33,12 +33,12 @@ def length_matrix_single_depot_from_G(
         VertexC = A.graph['VertexC']
         VertexCmod = np.r_[VertexC[-R:], VertexC[:T]]
         Λv = pdist(VertexCmod) * scale
-        λ_max = Λv.max()
+        λ_max = float(Λv.max())
         Λ = squareform(Λv)
     else:
         # non-available edges map to infinite length
         Λ = np.full((T + R, T + R), np.inf)
-        λ_max = d2roots[:T, 0].max() * scale
+        λ_max = float(d2roots[:T, 0].max() * scale)
     for u, v, length in A.edges(data='length'):
         scaled_length = length * scale
         Λ[u + 1, v + 1] = Λ[v + 1, u + 1] = scaled_length

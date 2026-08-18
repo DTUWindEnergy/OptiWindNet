@@ -19,54 +19,26 @@ _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 
 __all__ = (
-    'assign_cables',
-    'describe_G',
-    'pathdist',
-    'count_diagonals',
-    'bfs_subtree_loads',
-    'calcload',
-    'split_rings_and_calc_loads',
-    'add_ring_to_S',
-    'rings_from_S',
-    'directed_links',
-    'L_from_site',
-    'G_from_S',
-    'S_from_G',
-    'L_from_G',
+    'G_from_S', 'L_from_G', 'L_from_site', 'S_from_G', 'S_from_terse_links',
     'TerseLinks',
-    'S_from_terse_links',
-    'terse_links_from_S',
-    'as_obstacle_free',
-    'as_single_root',
-    'as_normalized',
-    'as_rescaled',
-    'as_undetoured',
-    'as_hooked_to_nearest',
-    'as_hooked_to_head',
-    'as_stratified_vertices',
+    'add_link_blockmap', 'add_link_cosines', 'add_ring_to_S',
     'add_terminal_closest_root',
-    'add_link_blockmap',
-    'add_link_cosines',
-    'make_remap',
-    'scaffolded',
-    'validate_topology',
-    'validate_routeset',
-)
+    'as_hooked_to_head', 'as_hooked_to_nearest', 'as_normalized',
+    'as_obstacle_free', 'as_rescaled', 'as_single_root',
+    'as_stratified_vertices', 'as_undetoured',
+    'assign_cables', 'bfs_subtree_loads', 'calcload', 'count_diagonals',
+    'describe_G', 'directed_links', 'make_remap', 'pathdist', 'rings_from_S',
+    'scaffolded', 'split_rings_and_calc_loads', 'terse_links_from_S',
+    'validate_routeset', 'validate_topology',
+)  # fmt: skip
 
 
 _essential_graph_attrs = (
-    'R',
-    'T',
-    'B',
-    'VertexC',
-    'name',
-    'handle',
-    'border',  # required
-    'obstacles',
-    'landscape_angle',  # optional
-    'norm_scale',
-    'norm_offset',  # optional
-)
+    # required
+    'R', 'T', 'B', 'VertexC', 'name', 'handle', 'border',
+    # optional
+    'obstacles', 'landscape_angle', 'norm_scale', 'norm_offset',
+)  # fmt: skip
 
 
 def assign_cables(
@@ -605,8 +577,8 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     consistent calculated loads and cable capacity.
 
     Args:
-      S: topology graph to check. ``S.graph['topology']`` is mandatory: it is
-        one of ``'ringed'``, ``'radial'`` or ``'branched'``. Loads are
+      S: topology graph to check. ``S.graph['topology']`` is mandatory: it is a
+        :class:`.Topology` member (or its ``str`` value). Loads are
         mandatory too -- ``S`` without them is reported as a violation, while
         structural checks that do not need them still run.
       capacity: cable capacity; defaults to ``S.graph['capacity']``. Capacity
@@ -830,7 +802,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
       ``(source, sink, flow)`` per link, current flowing ``source`` -> ``sink``.
       ``flow`` is 0 for links carrying no current: a ring's closing feeder.
     """
-    if S.graph['topology'] != 'ringed':
+    if S.graph['topology'] is not Topology.RINGED:
         for u, v, edgeD in S.edges(data=True):
             source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
             yield source, sink, edgeD['load']
@@ -900,17 +872,11 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         A.graph[k] for k in ('VertexC', 'd2roots', 'diagonals')
     )
     G = nx.create_empty_copy(S)
-    for k in (
-        'B',
-        'border',
-        'obstacles',
-        'name',
-        'handle',
-        'landscape_angle',
-        'norm_scale',
-        'norm_offset',
-        'is_normalized',
-    ):
+    carry_over = (
+        'B', 'border', 'obstacles', 'name', 'handle',
+        'landscape_angle', 'norm_scale', 'norm_offset', 'is_normalized',
+    )  # fmt: skip
+    for k in carry_over:
         value = A.graph.get(k)
         if value is not None:
             G.graph[k] = value
@@ -929,7 +895,8 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
         {n: label for n, label in A.nodes(data='label') if label is not None},
         'label',
     )
-    nx.set_node_attributes(G, 'wtg', 'kind')
+    # a scalar `values` is applied to every node; the stubs only cover mappings
+    nx.set_node_attributes(G, 'wtg', 'kind')  # pyrefly: ignore[no-matching-overload]
     for r in range(-R, 0):
         G.nodes[r]['kind'] = 'oss'
     if 'is_normalized' in A.graph:
@@ -1196,8 +1163,8 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
 
     If using ``S`` to warm-start a MILP model, call after :func:`S_from_G`:
 
-    - :func:`as_hooked_to_nearest` for ``topology='branched'``;
-    - :func:`as_hooked_to_head` for ``topology='radial'``.
+    - :func:`as_hooked_to_nearest` for ``Topology.BRANCHED``;
+    - :func:`as_hooked_to_head` for ``Topology.RADIAL``.
 
     This makes a radial ``S`` feasible and avoids a trivially suboptimal
     branched ``S``. For RINGED routesets, cycle-closing links are retained, so
@@ -1600,7 +1567,7 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     # mappings to quickly obtain all nodes on a subtree
     num_subtree = sum(G.degree[r] for r in range(-R, 0))
     nodes_from_subtree_id = np.fromiter(
-        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+        ([] for _ in range(num_subtree)), count=num_subtree, dtype=object
     )
     subtree_from_node = np.empty((T,), dtype=object)
     for n, subtree_id in G.nodes(data='subtree'):
@@ -1668,11 +1635,11 @@ def as_hooked_to_head(Sʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
     S_T = nx.subgraph_view(Sʹ, filter_node=lambda n: n >= 0)
     num_subtree = sum(S.degree[r] for r in range(-R, 0))
     nodes_from_subtree_id = np.fromiter(
-        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+        ([] for _ in range(num_subtree)), count=num_subtree, dtype=object
     )
     subtree_from_node = np.empty((T,), dtype=object)
     headtail_from_subtree_id = np.fromiter(
-        (list() for _ in range(num_subtree)), count=num_subtree, dtype=object
+        ([] for _ in range(num_subtree)), count=num_subtree, dtype=object
     )
     headtail_from_node = np.empty((T,), dtype=object)
     for n, subtree_id in S.nodes(data='subtree'):
@@ -1952,10 +1919,12 @@ def scaffolded(G: nx.Graph, P: nx.PlanarEmbedding) -> nx.Graph:
     """
     scaff = P.to_undirected()
     scaff.graph.update(G.graph)
-    for attr in 'fnT C'.split():
+    for attr in ['fnT', 'C']:
         if attr in scaff.graph:
             del scaff.graph[attr]
-    R, T, B, C, D = (G.graph.get(k, 0) for k in 'R T B C D'.split())
+    R, T, B, C, D = (G.graph.get(k, 0) for k in ['R', 'T', 'B', 'C', 'D'])
+    # a scalar `values` is applied to every edge; the stubs only cover mappings
+    # pyrefly: ignore[no-matching-overload]
     nx.set_edge_attributes(scaff, 'scaffold', name='kind')
     constraints = P.graph.get('constraint_edges', [])
     for edge in constraints:
