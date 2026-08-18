@@ -578,7 +578,7 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
 
     Args:
       S: topology graph to check. ``S.graph['topology']`` is mandatory: it is a
-        :class:`.Topology` member (or its ``str`` value). Loads are
+        :class:`~optiwindnet.types.Topology` member (or its ``str`` value). Loads are
         mandatory too -- ``S`` without them is reported as a violation, while
         structural checks that do not need them still run.
       capacity: cable capacity; defaults to ``S.graph['capacity']``. Capacity
