@@ -1,6 +1,6 @@
 # Input Formats
 
-A problem instance for _OptiWindNet_ consists of a **location** — the geometry — and the properties of the **available cable types**. This page is the catalogue of what an instance must contain and of the formats it can be given in, independently of which API you use to load it. What the loaded instance becomes is described in [](/problem.md#the-graph-model).
+A problem instance for _OptiWindNet_ consists of a **location** — the geometry — and the properties of the **available cable types**. This page is the catalogue of what an instance must contain and of the formats it can be given in, independently of which API you use to load it. What the loaded instance becomes is described in [](/problem.md#graph-representations).
 
 ## What an instance requires
 
@@ -30,7 +30,7 @@ _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API).
 
 ## Input formats
 
-Four formats are accepted. All of them produce the same location graph `L` described in [](/problem.md#the-graph-model), so the choice is purely one of convenience.
+Four formats are accepted. All of them produce the same location graph `L` described in [](/problem.md#graph-representations), so the choice is purely one of convenience.
 
 ### Coordinate arrays
 

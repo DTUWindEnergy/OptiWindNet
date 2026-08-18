@@ -20,11 +20,13 @@ This problem is related to two classical operations research problems:
 
 Neither classical formulation accounts for route crossings. _OptiWindNet_ extends these formulations by incorporating crossing-free cable routing. The selected [](/problem.md#network-topologies) determines the underlying formulation: CMSTP for a _branched_ topology, CVRP for a _ringed_ topology, and the open-route variant of CVRP for a _radial_ topology.
 
+The complete mixed-integer formulation is given in [](/reference/milp_formulation.md#milp-formulation).
+
 A detailed analysis of the methodology is available in the open-access article referenced in {doc}`/paper`.
 
 _In use:_ {doc}`/notebooks/hi00_quickstart` (Network/Router API) · {doc}`/notebooks/lo00_quickstart` (Advanced API).
 
-## The graph model
+## Graph representations
 
 _OptiWindNet_ represents a problem instance and its solution as a sequence of _networkx_ graphs. Both APIs build the same graphs and provide corresponding plot views. The high-level API stores the graphs as attributes of a {py:class}`WindFarmNetwork <optiwindnet.api.WindFarmNetwork>` instance, whereas the low-level API passes them explicitly between functions. The location and routeset views present the input and final result; the other three expose intermediate graphs for inspection and diagnostics.
 
@@ -136,6 +138,6 @@ The following figure illustrates both constraints on a 50-turbine site with six 
 
 Contours appear in both panels because links selected from `A` follow boundaries as soon as the topology is converted into a physical graph. The feeders, shown as dashed lines, differ between the panels. In the first panel, they extend directly from the substation and intersect exclusion zones and other routes. In the second, they follow the navigation mesh; ringed markers identify the vertices of a detour added to eliminate a crossing.
 
-Because a detour changes the length of a solution, the total length of a routeset `G` is generally greater than that of the topology `S` from which it was derived. Plot conventions for contours and detours are described in [](/problem.md#the-graph-model).
+Because a detour changes the length of a solution, the total length of a routeset `G` is generally greater than that of the topology `S` from which it was derived. Plot conventions for contours and detours are described in [](/problem.md#graph-representations).
 
 _In use:_ {doc}`/notebooks/hi13_border_obstacles` (Network/Router API) · {doc}`/notebooks/lo40_example_taylor_2023` (Advanced API).

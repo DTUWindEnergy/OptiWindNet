@@ -4,7 +4,7 @@ These notebooks are the worked examples of the _OptiWindNet_ documentation. They
 
 Worth reading once, whichever of the two APIs you use:
 
-- [`../problem.md`](../problem.md) — the optimization problem, the graph model, the plot views and the network topologies
+- [`../problem.md`](../problem.md) — the optimization problem, the graph representations, the plot views and the network topologies
 - [`../routers.md`](../routers.md) — the optimization approaches, warm-starting and how to choose
 
 Worth consulting as needed:
