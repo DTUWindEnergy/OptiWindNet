@@ -104,7 +104,7 @@ _In use:_ {doc}`/notebooks/lo22_lkh` (Advanced API).
 
 ## Exact optimization
 
-The problem is formulated as a mixed-integer linear program and handed to a branch-and-cut solver. This is the only approach that quantifies solution quality: the solver maintains a bound on the best possible solution and reports the remaining **optimality gap**. Stopping at a 1% gap means the solution is provably within 1% of optimal, which typically needs much less time than proving optimality outright.
+The problem is formulated as a mixed-integer linear program and handed to a branch-and-cut solver. This is the only approach that quantifies solution quality: the solver maintains a bound on the best possible solution and reports the remaining **optimality gap** — the *MIP gap* of solver logs and of the `mip_gap` option. Stopping at a 1% gap means the solution is provably within 1% of optimal, which typically needs much less time than proving optimality outright.
 
 The exact routers honor every option in [](/routers.md#model-options), which the other approaches only partly support.
 
@@ -156,18 +156,18 @@ _In use:_ {doc}`/notebooks/hi40_example_taylor_2023` (Network/Router API) · {do
 The figure compares all three optimization approaches on one instance, relative to its proven optimum:
 
 ```{image} /_static/fig_routers_light.svg
-:alt: Solution length above the proven optimum versus computation time for the three optimization approaches
+:alt: Solution length above the proven optimum versus computation time for the three optimization approaches, with the MIP gap marked between the MILP bound and incumbent
 :class: only-light
 :width: 100%
 ```
 
 ```{image} /_static/fig_routers_dark.svg
-:alt: Solution length above the proven optimum versus computation time for the three optimization approaches
+:alt: Solution length above the proven optimum versus computation time for the three optimization approaches, with the MIP gap marked between the MILP bound and incumbent
 :class: only-dark
 :width: 100%
 ```
 
-The routers differ by orders of magnitude in runtime and show diminishing improvements in solution quality. Constructive heuristics finish in milliseconds with the largest optimality gap. The meta-heuristic closes most of the gap within about one second, with limited subsequent improvement. The warm-started MILP reaches the optimum before termination and then improves the bound until optimality is certified; its flat incumbent curve indicates that it is working on proving optimality, not that optimization has stalled.
+The routers differ by orders of magnitude in runtime and show diminishing improvements in solution quality. Constructive heuristics finish in milliseconds with the largest optimality gap. The meta-heuristic closes most of the gap within about one second, with limited subsequent improvement. The warm-started MILP reaches the optimum before termination and then improves the bound until optimality is certified; its flat incumbent curve indicates that it is working on proving optimality, not that optimization has stalled. The double arrow marks the MIP gap at one instant — the incumbent above the bound, with the unknown optimum somewhere between them — and the solve ends when that distance has shrunk to the requested tolerance.
 
 The differences between optimization approaches depend on the site, capacity, and model options. This figure represents a single instance and should be interpreted qualitatively.
 

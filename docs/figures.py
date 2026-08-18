@@ -27,6 +27,7 @@ nothing, so the builders raise instead of writing such a figure.
 # ruff: noqa: E402, RUF100 -- MPLCONFIGDIR precedes Matplotlib intentionally.
 
 import argparse
+import bisect
 import functools
 import io
 import os
@@ -276,6 +277,9 @@ def routers(theme: str) -> str:
     each get their own color and marker, so the legend names approaches rather
     than data files.
 
+    Annotate the distance between the incumbent and the bound at one instant,
+    which is what the solver reports as the optimality gap.
+
     Read the problem description from its definition.
     """
     data, timeseries = routers_data()
@@ -378,6 +382,51 @@ def routers(theme: str) -> str:
         color=bound_c,
         label='Exact: bound',
         zorder=2,
+    )
+
+    # Mark the optimality gap: the vertical distance between the incumbent and
+    # the bound at one instant. The solver reports it relative to the incumbent,
+    # while the axis measures both series against the optimum, so the arrow is
+    # proportional to the reported gap rather than equal to it.
+    #
+    # Place it between the two central meta-heuristic points, where the two MILP
+    # series are wide apart and no marker is in the way; the geometric mean is
+    # the midpoint of the logarithmic axis.
+    budgets = sorted(elapsed for elapsed, _ in meta.values())
+    gap_x = (budgets[len(budgets) // 2 - 1] * budgets[len(budgets) // 2]) ** 0.5
+
+    def step_at(times: list[float], values: list[float], when: float) -> float:
+        """Return the value a ``where='post'`` step series holds at `when`."""
+        return values[bisect.bisect_right(times, when) - 1]
+
+    gap_top = step_at([t for t, _ in updates], [y for _, y in updates], gap_x)
+    gap_bottom = step_at(bound_seconds, bound_excess, gap_x)
+    ax.annotate(
+        '',
+        xy=(gap_x, gap_top),
+        xytext=(gap_x, gap_bottom),
+        arrowprops={
+            'arrowstyle': '<->',
+            'color': ink,
+            'linewidth': 1.2,
+            'shrinkA': 0,
+            'shrinkB': 0,
+        },
+        zorder=5,
+    )
+    ax.annotate(
+        'MIP gap',
+        xy=(gap_x, (gap_top + gap_bottom) / 2),
+        # Set upright alongside the arrow, which keeps the label clear of the
+        # meta-heuristic points on either side.
+        xytext=(-11, 0),
+        textcoords='offset points',
+        ha='center',
+        va='center',
+        rotation=90,
+        fontsize=note_size,
+        color=ink,
+        zorder=5,
     )
 
     # Heuristic points sit close together, so only the topmost one is labelled
