@@ -4,7 +4,7 @@ OptiWindNet's primary development repository and CI are hosted on a private GitL
 
 ## Development setup
 
-OptiWindNet requires Python 3.11 or newer. In an activated development environment, install the package and the dependencies used by the checks:
+OptiWindNet requires Python 3.11 or newer. In an activated development environment, install the package and the dependencies used by the checks. The [installation guide](https://optiwindnet.readthedocs.io/latest/install.html) covers platform-specific environment setup.
 
 ```sh
 git clone https://github.com/DTUWindEnergy/OptiWindNet.git
@@ -29,6 +29,8 @@ Contributors who already have access to the [DTU Wind Energy GitLab project](htt
 
 - DTU employees, students, and other holders of a `dtu.dk` account should not register a new account; sign in through the DTU login using the existing DTU credentials.
 - External users must first register with a valid academic or recognized-company email address. After a site administrator approves the account, contact the project's main developer to request access to the private repository.
+
+Contributions accepted into OptiWindNet are distributed under the project's [MIT License](LICENSE.txt). Submit only work that you have the right to contribute under those terms.
 
 Questions and bug reports can be opened on the [GitHub issue tracker](https://github.com/DTUWindEnergy/OptiWindNet/issues).
 
@@ -56,7 +58,7 @@ Some project-specific details:
 - Ruff uses single-quoted strings and an 88-column line length. Its hooks cover `.py`, `.pyi`, and `.ipynb` files.
 - Pyrefly targets Python 3.11 and skips `docs/notebooks/`. If changing Pyrefly or the pinned `types-*` packages, run the all-files checks and update any suppressions that the new versions make obsolete.
 - Prefer a narrow, explained suppression when a checker is wrong instead of loosening the project-wide configuration.
-- Solver-dependent tests skip when a backend, executable, or licence is unavailable. The `solvers` extra covers the pip-installable backends; CBC and FiberSCIP also require external executables.
+- Solver-dependent tests skip when a backend, executable, or licence is unavailable. The `solvers` extra covers the pip-installable backends; CBC and FiberSCIP also require external executables. The [MILP solver guide](https://optiwindnet.readthedocs.io/latest/reference/solvers.html) gives installation and licensing details for each backend.
 - `tests/test_milp_references.py` is sensitive to heavy parallel load. If one of its short solver runs warns or fails, rerun that file serially before treating the result as a regression.
 
 ## Documentation and notebooks
@@ -68,7 +70,7 @@ make -C docs html
 make -C docs check
 ```
 
-On Linux and macOS, the Sphinx build needs a separately installed `pandoc` executable; on Windows, the `docs` extra supplies one. `make -C docs check` covers documentation rules that Sphinx cannot check and, when Prettier is available, verifies the Markdown format. See the [documentation maintainer notes](docs/README.md) for the source formats, cross-linking rules, figures, and notebook conventions.
+On Linux and macOS, the Sphinx build needs a separately installed `pandoc` executable; on Windows, the `docs` extra supplies one. `make -C docs check` covers documentation rules that Sphinx cannot check and, when Prettier is available, verifies the Markdown format. See `docs/README.md` for the source formats, cross-linking rules, figures, and notebook conventions maintained in the repository.
 
 Sphinx does not execute notebooks: their outputs are committed. Refresh changed notebooks with a suitable installed kernel:
 
@@ -86,6 +88,6 @@ Where practical, add focused tests for changed behavior or bug fixes. Update the
 
 A few areas deserve additional context in the pull request:
 
-- Graph transformations should preserve graph, node, and edge attributes unless changing them is intentional. Several later routing, storage, and plotting stages consume those attributes, so a regression test is especially helpful here.
-- If a change affects the public API, graph conventions, or stored-data compatibility, describe the compatibility impact and any migration path.
-- `optiwindnet/data/` and `tests/locations/` contain curated reference data. For changes there, explain the source of the new data and how it was produced.
+- Graph transformations should preserve graph, node, and edge attributes unless changing them is intentional. Several later routing, storage, and plotting stages consume those attributes, so a regression test is especially helpful here. The [graph model](https://optiwindnet.readthedocs.io/latest/problem.html#the-graph-model) describes the representations passed between stages.
+- If a change affects the [public APIs](https://optiwindnet.readthedocs.io/latest/apis.html), graph conventions, or [stored RouteSet data](https://optiwindnet.readthedocs.io/latest/dataset.html#reading-the-database), describe the compatibility impact and any migration path.
+- `optiwindnet/data/` and `tests/locations/` contain curated reference data. For changes there, explain the source of the new data and how it was produced; the [input-format guide](https://optiwindnet.readthedocs.io/latest/reference/input_formats.html) documents the supported location representations.
