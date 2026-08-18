@@ -108,7 +108,7 @@ A location alone, without a solution, comes from {py:func}`L_from_nodeset() <opt
 Four analyses over the release, each on paired instances:
 
 - **Meta-heuristic solution quality.** Against the shortest MILP-radial route set of the same instance, and with 120 s of single-core time, HGS-CVRP has a median length increase of 0.0 % (90th percentile 0.225 %) and LKH-3 of 0.555 % (90th percentile 2.187 %).
-- **Problem difficulty.** Read through the MILP gap and runtime, difficulty rises monotonically with turbine count, while its dependence on capacity peaks at intermediate values and depends on the count. Median runtime goes from seconds to the 6 h cap between 70 and 110 turbines. Branched instances are somewhat harder than radial ones.
+- **Problem difficulty.** Read through the MIP gap and runtime, difficulty rises monotonically with turbine count, while its dependence on capacity peaks at intermediate values and depends on the count. Median runtime goes from seconds to the 6 h cap between 70 and 110 turbines. Branched instances are somewhat harder than radial ones.
 - **Branched vs. radial topology.** Over 8 696 matched instances, branching shortens the network by a median 0.34 % (mean 0.64 %), and is shorter in 6 741 of them. The advantage grows with cable capacity and shrinks with turbine count, with enough spread to warrant deciding case by case.
 - **Detour impact.** The length added by feeder detours over the solver-optimized objective has a median of 0.171 % for radial and 0.154 % for branched, largest at capacities 3–6.
 
