@@ -16,8 +16,10 @@ import importlib
 import os
 import re
 import shutil
-from importlib.metadata import version as get_version
+from importlib.metadata import version as get_installed_version
 from pathlib import Path
+
+from setuptools_scm import get_version as get_scm_version
 
 # nbsphinx converts notebook markdown cells by shelling out to a `pandoc` executable
 # (via nbconvert), so pandoc must be on PATH. pypandoc-binary ships one inside the
@@ -33,7 +35,11 @@ if shutil.which('pandoc') is None:
         if glob.glob(os.path.join(_bundled, 'pandoc*')):
             os.environ['PATH'] += os.pathsep + _bundled
 
-release: str = get_version('optiwindnet')
+try:
+    release: str = get_scm_version(root='..', relative_to=__file__)
+except LookupError:
+    # Source distributions do not contain the Git metadata setuptools-scm needs.
+    release = get_installed_version('optiwindnet')
 # for example take major/minor
 version: str = '.'.join(release.split('.')[:2])
 
