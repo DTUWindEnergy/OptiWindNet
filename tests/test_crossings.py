@@ -1,9 +1,11 @@
 import networkx as nx
 import numpy as np
 import pytest
+import shapely as shp
 from bidict import bidict
 
 from optiwindnet.crossings import (
+    _routeset_polylines,
     edge_crossings,
     find_geometric_crossings,
     find_routeset_crossings,
@@ -429,3 +431,211 @@ def test_find_geometric_crossings_detects_detour_branch_split():
         1,
     )
     assert set(crossing['path_b'][2:]) == {2, 3}
+
+
+# --- RINGED topology ------------------------------------------------------
+# A ring returning to the substation it left is a closed polyline; a ring
+# bridging two substations is open. The substation is a vertex of every one of
+# its same-root rings, so these fixtures put it on a corner of the route.
+
+
+def _ringed_graph(VertexC, edges, R=1):
+    """Routeset with ``R`` roots, terminals ``0..T-1`` and no clones."""
+    T = len(VertexC) - R
+    G = nx.Graph(T=T, B=0, C=0, D=0, R=R, VertexC=np.array(VertexC, dtype=float))
+    G.add_nodes_from(range(T), kind='wtg')
+    G.add_nodes_from(range(-R, 0), kind='oss')
+    G.add_edges_from(edges)
+    return G
+
+
+def _square_ring():
+    """Ring over the unit-ish square with the root on its lower-left corner."""
+    return _ringed_graph(
+        VertexC=[[4.0, 0.0], [4.0, 4.0], [0.0, 4.0], [0.0, 0.0]],
+        edges=[(-1, 0), (0, 1), (1, 2), (2, -1)],
+    )
+
+
+def test_ring_is_decomposed_into_one_unit_covering_every_edge_once():
+    """Tracing crosses the zero-load link, producing one closed route without
+    emitting the far feeder again as a stub."""
+    G = _square_ring()
+
+    polylines = _routeset_polylines(G)
+
+    assert len(polylines) == 1
+    assert polylines[0].nodes[0] == polylines[0].nodes[-1]
+    assert polylines[0].nodes == (-1, 0, 1, 2, -1)
+    assert sum(len(p.nodes) - 1 for p in polylines) == G.number_of_edges()
+
+
+def test_ring_closure_at_the_root_is_not_a_self_intersection():
+    """A plain ring is clean: its two feeders meet at the root by construction."""
+    assert find_geometric_crossings(_square_ring()) == []
+
+
+def test_nested_ring_boundaries_do_not_cross():
+    G = _ringed_graph(
+        VertexC=[
+            [8.0, 0.0], [8.0, 8.0], [0.0, 8.0],
+            [4.0, 1.0], [5.0, 5.0], [1.0, 4.0],
+            [0.0, 0.0],
+        ],
+        edges=[
+            (-1, 0), (0, 1), (1, 2), (2, -1),
+            (-1, 3), (3, 4), (4, 5), (5, -1),
+        ],
+    )  # fmt: skip
+
+    assert find_geometric_crossings(G) == []
+
+
+def test_ring_boundaries_may_share_a_stretch():
+    G = _ringed_graph(
+        VertexC=[
+            [6.0, 0.0], [6.0, 6.0], [0.0, 6.0],
+            [3.0, 0.0], [3.0, -3.0], [0.0, -3.0],
+            [0.0, 0.0],
+        ],
+        edges=[
+            (-1, 0), (0, 1), (1, 2), (2, -1),
+            (-1, 3), (3, 4), (4, 5), (5, -1),
+        ],
+    )  # fmt: skip
+
+    assert find_geometric_crossings(G) == []
+
+
+def test_crossing_ring_boundaries_are_reported():
+    G = _ringed_graph(
+        VertexC=[
+            [6.0, 0.0], [6.0, 6.0], [0.0, 6.0],
+            [8.0, 4.0], [4.0, 8.0],
+            [0.0, 0.0],
+        ],
+        edges=[
+            (-1, 0), (0, 1), (1, 2), (2, -1),
+            (-1, 3), (3, 4), (4, -1),
+        ],
+    )  # fmt: skip
+
+    crossings = find_geometric_crossings(G)
+
+    assert [crossing['kind'] for crossing in crossings] == ['cross']
+    assert set(shp.from_wkt(crossings[0]['geometry']).geoms) == {
+        shp.Point(3.0, 6.0),
+        shp.Point(6.0, 3.0),
+    }
+
+
+def test_route_wholly_inside_a_ring_is_allowed():
+    """A radial feeder that does not meet the ring boundary does not cross it."""
+    G = _ringed_graph(
+        VertexC=[
+            [8.0, 0.0], [8.0, 8.0], [0.0, 8.0],
+            [2.0, 2.0], [4.0, 4.0],
+            [0.0, 0.0],
+        ],
+        edges=[
+            (-1, 0), (0, 1), (1, 2), (2, -1),
+            (-1, 3), (3, 4),
+        ],
+    )  # fmt: skip
+
+    assert find_geometric_crossings(G) == []
+
+
+def test_route_leaving_a_ring_is_reported():
+    """A feeder that passes through a ring boundary crosses it."""
+    G = _ringed_graph(
+        VertexC=[
+            [8.0, 0.0], [8.0, 8.0], [0.0, 8.0],
+            [4.0, 4.0], [12.0, 4.0],
+            [0.0, 0.0],
+        ],
+        edges=[
+            (-1, 0), (0, 1), (1, 2), (2, -1),
+            (-1, 3), (3, 4),
+        ],
+    )  # fmt: skip
+
+    crossings = find_geometric_crossings(G)
+
+    assert [crossing['kind'] for crossing in crossings] == ['cross']
+
+
+def test_ring_boundary_touch_is_optional():
+    """A route tangent to a ring follows the usual ``include_touches`` policy."""
+    G = _ringed_graph(
+        VertexC=[
+            [4.0, 0.0], [4.0, 4.0], [0.0, 4.0],
+            [1.0, 5.0], [2.0, 4.0], [3.0, 5.0],
+            [0.0, 0.0],
+        ],
+        edges=[
+            (-1, 0), (0, 1), (1, 2), (2, -1),
+            (3, 4), (4, 5),
+        ],
+    )  # fmt: skip
+
+    assert find_geometric_crossings(G) == []
+    crossings = find_geometric_crossings(G, include_touches=True)
+    assert [crossing['kind'] for crossing in crossings] == ['touch']
+    assert shp.from_wkt(crossings[0]['geometry']) == shp.Point(2.0, 4.0)
+
+
+def test_ring_bridging_two_roots_is_checked_as_a_polyline():
+    """A route crossing an open ring is caught by the ordinary polyline check."""
+    G = _ringed_graph(
+        VertexC=[
+            [0.0, 2.0], [4.0, 2.0], [2.0, 4.0],
+            [0.0, 0.0], [4.0, 0.0],
+        ],
+        edges=[(-2, 0), (0, 1), (1, -1), (-2, 2)],
+        R=2,
+    )  # fmt: skip
+
+    polylines = _routeset_polylines(G)
+    assert all(p.nodes[0] != p.nodes[-1] for p in polylines)
+
+    crossings = find_geometric_crossings(G)
+    assert [crossing['kind'] for crossing in crossings] == ['cross']
+
+
+def test_self_crossing_ring_is_reported():
+    """A ring whose boundary passes through itself is a genuine crossing."""
+    G = _ringed_graph(
+        VertexC=[[4.0, 4.0], [4.0, 0.0], [0.0, 4.0], [0.0, 0.0]],
+        edges=[(-1, 0), (0, 1), (1, 2), (2, -1)],
+    )  # fmt: skip
+
+    crossings = find_geometric_crossings(G)
+
+    assert [crossing['kind'] for crossing in crossings] == ['self_cross']
+    assert shp.from_wkt(crossings[0]['geometry']) == shp.Point(2.0, 2.0)
+
+
+def test_ring_sharing_a_detour_corridor_with_itself_is_tolerated():
+    """Both feeder legs of a ring detour through one border vertex, so the two
+    cables run in the same corridor. Coincident runs are tolerated between two
+    separate routes, and a ring is not held to a stricter standard."""
+    G = _graph_with_clones(
+        T=3,
+        B=1,
+        C=0,
+        D=2,
+        VertexC=[
+            [2.0, 4.0], [4.0, 6.0], [0.0, 6.0],
+            [2.0, 2.0],
+            [0.0, 0.0],
+        ],
+        edges=[
+            (-1, 5, {'kind': 'detour'}), (5, 0, {'kind': 'detour'}), (0, 1), (1, 2),
+            (2, 6, {'kind': 'detour'}), (6, -1, {'kind': 'detour'}),
+        ],
+    )  # fmt: skip
+    # both detour clones map back to border vertex 3
+    G.graph['fnT'] = np.array([0, 1, 2, 3, 3, 3, -1])
+
+    assert find_geometric_crossings(G) == []
