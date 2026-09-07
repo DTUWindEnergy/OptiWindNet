@@ -86,8 +86,8 @@ test  = [
     # ruff is deliberately absent: its version is pinned once, in the pre-commit
     # `rev:`, and prek supplies it.
     "pyrefly ==1.2.0",
-    "types-networkx ==3.6.1.20260728",
-    "types-peewee ==4.3.0.20260807",
+    "types-networkx ==3.6.1.20260903",
+    "types-peewee ==4.5.0.20260907",
     "types-shapely ==2.1.0.20260728",
     "optiwindnet[solvers]",
 ]
