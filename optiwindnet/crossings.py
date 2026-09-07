@@ -20,6 +20,8 @@ from .geometric import (
 
 @dataclass(frozen=True)
 class _RoutePolyline:
+    """A route section and its optional non-root endpoint."""
+
     nodes: tuple[int, ...]
     non_root_end: int | None = None
 
@@ -405,11 +407,19 @@ def _canonical_prime_path(
 
 
 def _routeset_polylines(G: nx.Graph) -> list[_RoutePolyline]:
-    """Walk G into one polyline per feeder plus one per inter-junction link.
+    """Trace G into one polyline per feeder plus one per inter-junction link.
 
     A feeder runs from a root through a degree-2 chain to the first leaf or
     branching node. A link runs between two non-degree-2 nodes that are not
     roots. Together these cover every edge exactly once.
+
+    A RINGED route is a chain of degree-2 terminals between two feeders, so the
+    trace crosses the ring's zero-load link and comes out at a root: the whole
+    ring is one unit. Its path returns to its starting root when both feeders
+    share one root and ends at a different root when it bridges two roots. Either
+    way the second feeder's edge is already visited, so the root loop must skip
+    it -- otherwise the ring's last segment would be emitted a second time as a
+    two-node stub and counted twice.
     """
     R = G.graph['R']
     roots = set(range(-R, 0))
@@ -437,8 +447,18 @@ def _routeset_polylines(G: nx.Graph) -> list[_RoutePolyline]:
 
     for root in sorted(roots):
         for nb in G[root]:
+            if edge_key(root, nb) in visited:
+                # the far feeder of a ring was already traced from its other end
+                continue
             path = walk(root, nb)
-            polylines.append(_RoutePolyline(path, non_root_end=path[-1]))
+            # a ring ends on a root, which is no terminal end to exempt splits at
+            end = path[-1]
+            polylines.append(
+                _RoutePolyline(
+                    path,
+                    non_root_end=None if end in roots else end,
+                )
+            )
 
     starts = [n for n in G if n not in roots and G.degree[n] != 2]
     for start in starts:
@@ -706,12 +726,20 @@ def _self_intersection_findings(
     line,
     *,
     length_tol: float,
+    endpoint_tol: float,
 ) -> list[dict[str, Any]]:
-    """Return segment intersections except adjacent segments' shared endpoint."""
+    """Return improper intersections between segments of one route.
+
+    A closed RINGED route has cyclic adjacency at its root. Its two arms may
+    also share a corridor or meet at a routing vertex, just as two separate
+    radial routes may; only a proper interior crossing is invalid there.
+    """
     if line.is_simple:
         return []
 
+    closed = polyline.nodes[0] == polyline.nodes[-1]
     segments = [shp.LineString(segment) for segment in pairwise(coords)]
+    scale = max((segment.length for segment in segments), default=1.0) or 1.0
     tree = shp.STRtree(segments)
     findings = []
     seen = set()
@@ -722,6 +750,13 @@ def _self_intersection_findings(
             intersection = segment_a.intersection(segments[j])
             if intersection.is_empty:
                 continue
+            if closed:
+                if intersection.geom_type != 'Point':
+                    continue
+                point = np.array(intersection.coords[0])
+                corners = np.vstack((coords[i : i + 2], coords[j : j + 2]))
+                if np.min(np.hypot(*(corners - point).T)) <= endpoint_tol * scale:
+                    continue
             if (
                 j == i + 1
                 and intersection.geom_type == 'Point'
@@ -765,6 +800,13 @@ def find_geometric_crossings(
     intersections between polylines, self-intersections, coincident runs,
     routes that separate a terminal's incident rays, and degenerate geometry.
 
+    A RINGED route returning to the root where it started is a closed polyline.
+    Its first and last segments are cyclically adjacent, and its two arms may
+    share routing vertices or corridors just as separate radial routes may. A
+    ring bridging two roots remains an open polyline. All intersections between
+    distinct routes are classified from their cable centerlines in the same way,
+    regardless of topology.
+
     Args:
       G: routeset graph with ``T``, ``R``, ``B`` and ``VertexC`` graph
         attributes. ``fnT`` is required when ``C > 0`` or ``D > 0``.
@@ -786,7 +828,9 @@ def find_geometric_crossings(
             a coincident segment);
           - ``'branch_split'``: a route through a real terminal's coordinate
             separates that terminal's incident topology rays;
-          - ``'self_cross'``: non-adjacent segments of one route cross;
+          - ``'self_cross'``: non-adjacent segments of one route cross (for a
+            closed ring, adjacency is cyclic and coincident runs are tolerated,
+            as they are between two separate routes);
           - ``'self_overlap'``: one route retraces part of itself;
           - ``'degenerate'``: a route lacks two finite distinct coordinates;
           - ``'touch'`` (only when ``include_touches=True``): point contact
@@ -864,7 +908,12 @@ def find_geometric_crossings(
             )
             continue
         findings += _self_intersection_findings(
-            polyline, prime_path, coords, line, length_tol=length_tol
+            polyline,
+            prime_path,
+            coords,
+            line,
+            length_tol=length_tol,
+            endpoint_tol=endpoint_tol,
         )
         lines.append(line)
         line_paths.append(path_i)
@@ -928,6 +977,10 @@ def find_geometric_crossings(
                     }
                 )
 
+            path_a, path_b = prime_paths[path_i], prime_paths[path_j]
+            kind: str | None = None
+            geometry = intersection
+
             excluded = _exclusion_coords(
                 paths[path_i], paths[path_j], fnT, VertexC, splits
             )
@@ -937,17 +990,11 @@ def find_geometric_crossings(
                 intersection, excluded, endpoint_tol=endpoint_tol
             ):
                 continue
-
-            path_a, path_b = prime_paths[path_i], prime_paths[path_j]
-            kind: str | None = None
-            geometry = intersection
-
             if intersection.length > length_tol and _shared_run_swaps_sides(
                 path_coords[path_i], path_coords[path_j]
             ):
                 kind = 'overlap_cross'
-
-            if kind is None:
+            else:
                 crossings = _filter_crossing_points(
                     intersection,
                     excluded,

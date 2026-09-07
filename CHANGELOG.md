@@ -7,6 +7,11 @@
   - Warm-start construction now also covers the `feeder_limit` values `'exactly'` (with `balanced`), `'min_plus1/2/3'`, and `'minimum'`+`balanced` across the `branched`, `radial`, and `ringed` topologies; these previously fell back to a cold solve.
 - **`make_min_length_model()` now rejects the `str` spelling of its enum options (`topology`, `feeder_route`, `feeder_limit`).** It raises `TypeError` rather than defaulting silently or failing deeper in the build; `ModelOptions` continues to accept the `str` spelling.
 
+## Bug Fixes
+
+- **`find_geometric_crossings()` rejected valid RINGED routesets.** It traced every route into a polyline, and a ring comes out *closed* — its first and last segments meet at the substation by construction — so the closure, and every corridor a ring's two legs shared, was reported as `self_cross`/`self_overlap`. The identical geometry between two separate routes was tolerated, so rings were held to a standard radial routes are not; `validate_routeset()` inherited the false positives. Same-root rings are now recognized as closed polylines: their root segments are cyclically adjacent, and routing vertices or corridors shared by their two arms are tolerated. Rings bridging two substations remain open polylines. Intersections between distinct routes use the same centerline checks regardless of topology, while genuine boundary and self-crossings are still reported as `'cross'` and `'self_cross'`.
+- **The route decomposition double-counted one link per ring.** Each ring's far feeder was emitted a second time as a two-node stub, breaking the documented "cover every edge exactly once" contract of the polyline tracing.
+
 # v0.3.0
 
 [Commit history since v0.2.3](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.2.3...v0.3.0)
