@@ -6,6 +6,7 @@ import pickle
 import networkx as nx
 import numpy as np
 import pytest
+from bitarray import frozenbitarray
 
 from optiwindnet.interarraylib import (
     G_from_S,
@@ -29,6 +30,7 @@ from optiwindnet.interarraylib import (
     calcload,
     count_diagonals,
     describe_G,
+    linkbits_from_S,
     make_remap,
     pathdist,
     rings_from_S,
@@ -42,6 +44,38 @@ from optiwindnet.MILP import Topology
 
 from .helpers import assert_graph_equal, tiny_wfn
 from .sitecache import get_bundle
+
+
+def test_linkbits_from_S_uses_canonical_edge_and_feeder_order():
+    A = nx.Graph(T=3, R=2)
+    A.add_edges_from(((2, 1), (2, 0), (1, 0)))
+    A.graph['_canonical_terminal_links'] = np.array(
+        ((0, 1), (0, 2), (1, 2)), dtype=np.uint32
+    )
+    S = nx.Graph(((2, 0), (-1, 1), (-2, 2)))
+
+    linkbits = linkbits_from_S(A, S)
+
+    assert linkbits == frozenbitarray('010000110')
+    assert A.graph['_canonical_terminal_links'].tolist() == [[0, 1], [0, 2], [1, 2]]
+
+
+def test_linkbits_from_S_requires_canonical_terminal_links():
+    A = nx.Graph(T=3, R=1)
+    S = nx.Graph(((0, 2), (-1, 1)))
+
+    with pytest.raises(KeyError, match='_canonical_terminal_links'):
+        linkbits_from_S(A, S)
+
+
+def test_linkbits_from_S_empty_terminal_universe_has_only_feeders():
+    A = nx.Graph(T=3, R=1, _canonical_terminal_links=np.empty((0, 2), np.uint32))
+    S = nx.Graph(((-1, 0), (-1, 1), (-1, 2)))
+
+    assert linkbits_from_S(A, S) == frozenbitarray('111')
+    S.add_edge(0, 1)
+    with pytest.raises(ValueError, match='terminal link absent from A'):
+        linkbits_from_S(A, S)
 
 
 @pytest.mark.parametrize('n', range(1, 13))
@@ -363,6 +397,7 @@ def test_G_from_S():
     wfn = tiny_wfn()
     A = wfn.A
     S = wfn.S
+    S.graph['_linkbits'] = frozenbitarray('1')
 
     # 1) basic test
     G = G_from_S(S, A)
@@ -372,6 +407,7 @@ def test_G_from_S():
     # No tentative/rogue
     assert 'tentative' not in G.graph or G.graph.get('tentative') == []
     assert 'rogue' not in G.graph
+    assert G.graph['_linkbits'] is S.graph['_linkbits']
 
     # num_diagonals present
     assert 'num_diagonals' in G.graph

@@ -281,7 +281,11 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     R, T = (G.graph[k] for k in 'RT')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     terse = TerseLinks.from_routeset(G)
-    misc = {key: G.graph[key] for key in G.graph.keys() - _misc_not}
+    misc = {
+        key: value
+        for key, value in G.graph.items()
+        if key not in _misc_not and not key.startswith('_')
+    }
     for k, v in misc.items():
         misc[k] = oddtypes_to_serializable(v)
     if not misc:

@@ -8,7 +8,7 @@ import pytest
 import optiwindnet.baselines.hgs as hgs_mod
 from optiwindnet.baselines._core import remove_offending_crossings
 from optiwindnet.baselines.hgs import _balanced_capacity
-from optiwindnet.interarraylib import as_normalized
+from optiwindnet.interarraylib import as_normalized, linkbits_from_S
 from optiwindnet.types import Topology
 
 from .cases import (
@@ -29,6 +29,7 @@ def test_hgs_real_topology_cases(case):
     A = get_bundle(case.site).A
     S = hgs_topology(case)
     assert_topology(S, expected_topology(case), case.capacity)
+    assert S.graph['_linkbits'] == linkbits_from_S(A, S)
     assert terminal_terminal_crossings(S, A.graph['VertexC']) == []
 
 
@@ -273,6 +274,25 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
     assert captured['capacity'] == 2
     assert captured['n'] == 5  # no slack nodes
     assert 'capacity_effective' not in S.graph['solver_details']
+
+
+def test_hgs_edgeless_A_encodes_complete_terminal_universe(monkeypatch):
+    _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
+    A = _make_A(T=4)
+
+    S = hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+
+    assert A.number_of_edges() == 0
+    assert A.graph['_canonical_terminal_links'].tolist() == [
+        [0, 1],
+        [0, 2],
+        [0, 3],
+        [1, 2],
+        [1, 3],
+        [2, 3],
+    ]
+    assert S.graph['_linkbits'].to01() == '1000011010'
+    assert S.graph['_linkbits'] == linkbits_from_S(A, S)
 
 
 def test_solution_time_falls_back_to_total_runtime():

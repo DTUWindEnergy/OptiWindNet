@@ -16,6 +16,7 @@ from optiwindnet.db.storage import (
     add_if_absent,
     get_machine_pk,
     infer_topology,
+    pack_G,
     packnodes,
 )
 from optiwindnet.fingerprint import fingerprint_coordinates
@@ -82,6 +83,16 @@ def test_database_connection_supports_db_usage(tmp_path):
 # ---------------------------
 
 
+def test_pack_G_filters_private_graph_attributes():
+    G = tiny_wfn().G
+    G.graph['_not_json_serializable'] = object()
+
+    packed = pack_G(G)
+
+    assert '_not_json_serializable' not in packed['misc']
+    assert '_linkbits' not in packed['misc']
+
+
 def test_packnodes_uses_canonical_vertexc_fingerprint():
     L = tiny_wfn().L
     L.graph['VertexC'] = np.array(L.graph['VertexC'], order='F')
@@ -122,18 +133,21 @@ def test_G_from_routeset(tmp_path):
 
         wfn = tiny_wfn(router=HGSRouter(time_limit=0.1))
         G = wfn.G
+        assert '_linkbits' in G.graph
 
         id = store_G(G)
         assert id == 1
 
         rs = RouteSet.get_by_id(id)
         assert rs.feeders_per_root == [len(G[root]) for root in range(-G.graph['R'], 0)]
+        assert all(not key.startswith('_') for key in rs.misc)
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {
         'bound', 'method_options', 'relgap', 'solver_details',
         'D', 'landscape_angle', 'method',
         'norm_offset', 'norm_scale', 'num_diagonals',
+        '_linkbits',
     }  # fmt: skip
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 
@@ -176,6 +190,7 @@ def test_G_from_routeset_ringed(tmp_path, locations):
         'bound', 'method_options', 'relgap', 'solver_details',
         'C', 'D', 'landscape_angle', 'method',
         'norm_offset', 'norm_scale', 'num_diagonals',
+        '_linkbits',
     }  # fmt: skip
     assert_graph_equal(
         G_rs,
@@ -230,6 +245,7 @@ def test_G_from_routeset_detours(tmp_path):
         'bound', 'method_options', 'relgap', 'solver_details',
         'D', 'landscape_angle', 'method',
         'norm_offset', 'norm_scale', 'num_diagonals',
+        '_linkbits',
     }  # fmt: skip
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 

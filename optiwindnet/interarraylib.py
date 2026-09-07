@@ -9,7 +9,7 @@ from itertools import chain, pairwise
 import networkx as nx
 import numba as nb
 import numpy as np
-from bitarray import bitarray
+from bitarray import bitarray, frozenbitarray
 
 from .geometric import CoordPair, angle_helpers, rotate
 from .terse import TerseLinks
@@ -27,7 +27,8 @@ __all__ = (
     'as_obstacle_free', 'as_rescaled', 'as_single_root',
     'as_stratified_vertices', 'as_undetoured',
     'assign_cables', 'bfs_subtree_loads', 'calcload', 'count_diagonals',
-    'describe_G', 'directed_links', 'make_remap', 'pathdist', 'rings_from_S',
+    'describe_G', 'directed_links', 'linkbits_from_S', 'make_remap',
+    'pathdist', 'rings_from_S',
     'scaffolded', 'split_rings_and_calc_loads', 'terse_links_from_S',
     'validate_routeset', 'validate_topology',
 )  # fmt: skip
@@ -39,6 +40,51 @@ _CANONICAL_TERMINAL_LINKS = '_canonical_terminal_links'
 def _invalidate_canonical_terminal_links(A: nx.Graph) -> None:
     """Drop the position cache before mutating ``A``'s candidate edge set."""
     A.graph.pop(_CANONICAL_TERMINAL_LINKS, None)
+
+
+def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
+    """Encode topology ``S`` over ``A``'s canonical undirected link universe.
+
+    Terminal-terminal positions follow the lexicographic edge order cached by
+    :func:`~optiwindnet.mesh.make_planar_embedding`. The ``R * T`` feeder
+    positions follow in terminal-major order, with roots from ``-R`` to ``-1``.
+    ``A`` must provide its ``'_canonical_terminal_links'`` graph attribute.
+    ``S`` must be an undetoured topology containing only terminals and roots.
+    """
+    R, T = (A.graph[key] for key in 'RT')
+    links = A.graph['_canonical_terminal_links']
+    feeder_start = len(links)
+
+    ends = np.fromiter(chain.from_iterable(S.edges), dtype=np.int64).reshape(-1, 2)
+    lo, hi = ends.min(axis=1), ends.max(axis=1)
+    is_feeder = lo < 0
+    offender = is_feeder & ((lo < -R) | (hi < 0) | (hi >= T))
+    if offender.any():
+        u, v = ends[offender][0].tolist()
+        raise ValueError(f'S contains a non-canonical feeder link: {(u, v)}')
+
+    # locate terminal links by their lexicographic key in the canonical order
+    wanted = lo[~is_feeder] * T + hi[~is_feeder]
+    if wanted.size:
+        keys = links[:, 0].astype(np.int64) * T + links[:, 1]
+        position = np.searchsorted(keys, wanted)
+        found = position < feeder_start
+        found[found] = keys[position[found]] == wanted[found]
+        if not found.all():
+            u, v = ends[~is_feeder][~found][0].tolist()
+            edge = (u, v) if u < v else (v, u)
+            raise ValueError(f'S contains a terminal link absent from A: {edge}')
+    else:
+        position = wanted
+    positions = np.concatenate(
+        (position, feeder_start + hi[is_feeder] * R + lo[is_feeder] + R)
+    )
+
+    nbits = feeder_start + R * T
+    flat = np.zeros(nbits, dtype=np.uint8)
+    flat[positions] = 1
+    packed = bitarray(buffer=np.packbits(flat).tobytes(), endian='big')
+    return frozenbitarray(packed[:nbits])
 
 
 _essential_graph_attrs = (

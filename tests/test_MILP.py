@@ -7,6 +7,7 @@ from typing import ClassVar
 import networkx as nx
 import numpy as np
 import pytest
+from bitarray import frozenbitarray
 
 import optiwindnet.MILP._core as core
 from optiwindnet import MILP
@@ -148,10 +149,21 @@ def _solve_toy_incumbent(solver_name, topology):
         side_effect=AssertionError('incumbent retrieval must not route'),
     ):
         S = solver.get_incumbent_topology()
+    E, _, stars, _ = core.canonical_linksets(
+        nx.subgraph_view(A, filter_node=lambda node: node >= 0),
+        R=A.graph['R'],
+        T=A.graph['T'],
+        topology=Topology(topology),
+    )
+    solution_edges = {frozenset(edge) for edge in S.edges}
+    expected_bits = frozenbitarray(
+        frozenset(link) in solution_edges for link in E + stars
+    )
     return {
         'terse': terse_links_from_S(S),
         'violations': validate_topology(S, _CAPACITY),
         'graph': dict(S.graph),
+        'linkbits_match': S.graph['_linkbits'] == expected_bits,
         'objective': solution_info.objective,
         'preserved_objective': solver.solution_info.objective,
     }
@@ -272,6 +284,47 @@ def test_canonical_linksets_ignore_graph_insertion_order():
         (3, -2), (3, -1),
     )  # fmt: skip
     assert starsʹ == tuple((r, t) for t, r in stars)
+
+
+@pytest.mark.parametrize(
+    ('topology', 'expected'),
+    (
+        (Topology.BRANCHED, '110100001'),
+        (Topology.RINGED, '110100101'),
+    ),
+)
+def test_linkbits_from_directed_combines_directions_in_canonical_order(
+    topology, expected
+):
+    A = nx.Graph(((2, 0), (1, 0), (2, 1)))
+    families = core.canonical_linksets(A, R=2, T=3, topology=topology)
+    E, Eʹ, stars, starsʹ = families
+    linkset = E + Eʹ + stars + starsʹ
+
+    active = {(0, 1), (2, 0), (0, -2), (-1, 1), (2, -1)}
+    values = (link in active for link in linkset)
+
+    # E: (0, 1), (0, 2), (1, 2); stars: terminal-major, roots -2 then -1
+    assert core.linkbits_from_directed(
+        values,
+        terminal_link_count=len(E),
+        feeder_link_count=len(stars),
+        ringed=topology is Topology.RINGED,
+    ) == frozenbitarray(expected)
+
+
+@pytest.mark.parametrize(
+    ('values', 'message'),
+    (((0,), 'equal lengths'), ((0, 2), 'not binary')),
+)
+def test_linkbits_from_directed_rejects_invalid_values(values, message):
+    with pytest.raises(ValueError, match=message):
+        core.linkbits_from_directed(
+            values,
+            terminal_link_count=1,
+            feeder_link_count=0,
+            ringed=False,
+        )
 
 
 @pytest.mark.parametrize(
@@ -419,10 +472,18 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     assert isinstance(golden, TerseLinks)
     assert tuple(result['terse']) == golden.links
     assert result['violations'] == []
+    assert result['linkbits_match']
     assert result['objective'] == result['preserved_objective']
     assert {
         'R', 'T', 'topology', 'capacity', 'max_load', 'has_loads', 'creator',
+        '_linkbits',
     } <= result['graph'].keys()  # fmt: skip
+    linkbits = result['graph']['_linkbits']
+    assert isinstance(linkbits, frozenbitarray)
+    assert linkbits.endian == 'big'
+    A = get_bundle('toy').A
+    terminal_link_count = sum(u >= 0 and v >= 0 for u, v in A.edges)
+    assert len(linkbits) == terminal_link_count + A.graph['R'] * A.graph['T']
 
 
 @pytest.mark.parametrize('topology', ['radial', 'ringed'])
@@ -436,6 +497,7 @@ def test_ortools_incumbent_decodes_valid_topology(ortools_worker, topology):
         raise result
 
     assert result['violations'] == []
+    assert result['linkbits_match']
     assert result['graph']['topology'] == topology
 
 
@@ -519,17 +581,23 @@ def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
     flows = {(0, head_root): n}
     flows.update({(terminal, terminal - 1): n - terminal for terminal in range(1, n)})
     closing_link = (close_root, n - 1)
-    links = dict.fromkeys((*flows, closing_link), True)
+    active_links = {*flows, closing_link}
+    A = nx.path_graph(n)
+    nx.set_edge_attributes(A, {edge: 1.0 for edge in A.edges}, 'length')
+    E, Eʹ, stars, starsʹ = core.canonical_linksets(
+        A, R=R, T=n, topology=Topology.RINGED
+    )
+    linkset = E + Eʹ + stars + starsʹ
+    links = {link: link in active_links for link in linkset}
     metadata = SimpleNamespace(
         R=R,
         T=n,
         capacity=math.ceil(n / 2),
+        linkset=linkset,
         model_options={'topology': Topology.RINGED},
         link_=links,
         flow_=flows,
     )
-    A = nx.path_graph(n)
-    nx.set_edge_attributes(A, {edge: 1.0 for edge in A.edges}, 'length')
 
     class FakeSolver:
         name = 'fake'
@@ -552,6 +620,10 @@ def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
     )
 
     assert_topology(S, Topology.RINGED, metadata.capacity)
+    active_edges = {frozenset(link) for link in active_links}
+    assert S.graph['_linkbits'] == frozenbitarray(
+        frozenset(link) in active_edges for link in E + stars
+    )
 
 
 def test_ringed_warmstart_is_accepted_by_scip():

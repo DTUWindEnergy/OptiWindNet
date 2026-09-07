@@ -21,6 +21,7 @@ from ..interarraylib import (
     add_link_blockmap,
     add_terminal_closest_root,
     calcload,
+    linkbits_from_S,
     split_rings_and_calc_loads,
 )
 from ..types import Topology
@@ -998,6 +999,7 @@ def constructor(
     S.graph.update(
         runtime=time.perf_counter() - start_time,
         capacity=capacity_report,
+        _linkbits=linkbits_from_S(Aʹ, S),
         creator='constructor',
         iterations=i,
         method_options={

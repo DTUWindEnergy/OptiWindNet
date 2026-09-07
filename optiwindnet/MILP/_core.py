@@ -6,7 +6,7 @@ import logging
 import math
 import os
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum, auto
 from inspect import cleandoc
@@ -17,6 +17,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import networkx as nx
+from bitarray import bitarray, frozenbitarray
 from makefun import with_signature
 
 from ..interarraylib import (
@@ -337,6 +338,49 @@ def canonical_linksets(
     return E, Eʹ, stars, starsʹ
 
 
+def linkbits_from_directed(
+    values: Iterable[int | bool],
+    *,
+    terminal_link_count: int,
+    feeder_link_count: int,
+    ringed: bool,
+) -> frozenbitarray:
+    """Build undirected linkbits from canonical directed link values.
+
+    ``values`` must follow the canonical block order ``E + Eʹ + stars`` (plus
+    ``starsʹ`` for RINGED). The result is ordered as ``E + stars`` and sets an
+    undirected link's bit when either direction is active.
+    """
+    if isinstance(values, bitarray) and values.endian == 'big':
+        binary_values = values
+    else:
+        binary_values = bitarray(endian='big')
+        for index, value in enumerate(values):
+            if value not in (0, 1):
+                raise ValueError(
+                    f'link value at index {index} is not binary: {value!r}'
+                )
+            binary_values.append(value)
+    expected_count = 2 * terminal_link_count + feeder_link_count * (1 + ringed)
+    if len(binary_values) != expected_count:
+        raise ValueError(
+            'canonical link blocks and values must have equal lengths: '
+            f'{expected_count} != {len(binary_values)}'
+        )
+
+    # bitarray(...) also unfreezes: slices of a frozenbitarray are frozen too
+    terminal_bits = bitarray(binary_values[:terminal_link_count])
+    terminal_bits |= binary_values[terminal_link_count : 2 * terminal_link_count]
+    feeder_start = 2 * terminal_link_count
+    feeder_bits = bitarray(
+        binary_values[feeder_start : feeder_start + feeder_link_count]
+    )
+    if ringed:
+        feeder_bits |= binary_values[feeder_start + feeder_link_count :]
+    terminal_bits.extend(feeder_bits)
+    return frozenbitarray(terminal_bits)
+
+
 @dataclass(slots=True)
 class ModelMetadata:
     R: int
@@ -566,10 +610,12 @@ class Solver(abc.ABC):
 
     @abc.abstractmethod
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
-        """Output solution topology A and routeset G.
+        """Output solution topology S and routeset G.
 
         Args:
-          A: optionally replace the A given via set_problem() (if normalized A)
+          A: optionally replace a normalized A given via set_problem() with its
+            unscaled counterpart for routing. It must have the same candidate
+            links; the MILP topology is defined by the original A.
 
         Returns:
           Topology graph S and routeset G.
@@ -609,11 +655,30 @@ class Solver(abc.ABC):
         S = nx.Graph(R=R, T=metadata.T)
         # ensure roots are added, even if some are not connected
         S.add_nodes_from(range(-R, 0))
+        # Mapping iteration is canonical by construction in all model builders.
+        # Read each binary variable once, then collapse the directed blocks with
+        # bit operations for a solver-independent topology representation.
+        link_values = bitarray(
+            (self._link_val(var) for var in metadata.link_.values()), endian='big'
+        )
+        feeder_link_count = R * metadata.T
+        ringed = topology is Topology.RINGED
+        terminal_link_count = (
+            len(metadata.linkset) - feeder_link_count * (1 + ringed)
+        ) // 2
+        linkbits = linkbits_from_directed(
+            link_values,
+            terminal_link_count=terminal_link_count,
+            feeder_link_count=feeder_link_count,
+            ringed=ringed,
+        )
         # Get active links and if flow is reversed (i.e. from small to big)
         rev_from_link = {
             (u, v): u < v
-            for (u, v), var in metadata.link_.items()
-            if self._link_val(var)
+            for ((u, v), _), active in zip(
+                metadata.link_.items(), link_values, strict=True
+            )
+            if active
         }
         flow_links = {
             link: reverse
@@ -653,6 +718,7 @@ class Solver(abc.ABC):
             capacity=metadata.capacity,
             max_load=max_load,
             has_loads=True,
+            _linkbits=linkbits,
             creator='MILP.' + self.name,
             solver_details={},
         )
