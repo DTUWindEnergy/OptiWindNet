@@ -5,6 +5,7 @@ import pickle
 from typing import ClassVar
 
 import networkx as nx
+import numpy as np
 import pytest
 
 import optiwindnet.MILP._core as core
@@ -72,6 +73,29 @@ def _build_toy_ringed_then_offer_a_str(module_name):
     except TypeError as exc:
         return ring_vars, stored_enum, str(exc)
     return ring_vars, stored_enum, 'accepted'
+
+
+def _two_root_toy_A():
+    """Return toy's available links with a synthetic second root-distance column."""
+    A = get_bundle('toy').A.copy()
+    d2roots = A.graph['d2roots']
+    A.graph.update(
+        R=2,
+        d2roots=np.column_stack((d2roots[:, 0], d2roots[:, 0] + 1.0)),
+    )
+    return A
+
+
+def _build_two_root_linkset(module_name, topology):
+    make_min_length_model = importlib.import_module(module_name).make_min_length_model
+    A = _two_root_toy_A()
+    _, metadata = make_min_length_model(A, _CAPACITY, topology=topology)
+    mapping_order = tuple(metadata.link_)
+    values_match_keys = all(
+        metadata.link_[link] is var
+        for link, var in zip(mapping_order, metadata.link_.values(), strict=True)
+    )
+    return tuple(metadata.linkset), mapping_order, values_match_keys, metadata.weight_
 
 
 def _warmup_with_uncoerced_topology():
@@ -228,6 +252,80 @@ def _patch_cpu_topology(monkeypatch, affinity, mapping=None):
 def P_A_toy():
     bundle = get_bundle('toy')
     return bundle.P, bundle.A
+
+
+def test_canonical_linksets_ignore_graph_insertion_order():
+    A = nx.Graph()
+    A.add_nodes_from((3, 1, 2, 0))
+    A.add_edges_from(((3, 1), (2, 0), (3, 2), (1, 0)))
+
+    E, Eʹ, stars, starsʹ = core.canonical_linksets(
+        A, R=2, T=4, topology=Topology.RINGED
+    )
+
+    assert E == ((0, 1), (0, 2), (1, 3), (2, 3))
+    assert Eʹ == ((1, 0), (2, 0), (3, 1), (3, 2))
+    assert stars == (
+        (0, -2), (0, -1),
+        (1, -2), (1, -1),
+        (2, -2), (2, -1),
+        (3, -2), (3, -1),
+    )  # fmt: skip
+    assert starsʹ == tuple((r, t) for t, r in stars)
+
+
+@pytest.mark.parametrize(
+    ('module_name', 'solver_name'),
+    [
+        ('optiwindnet.MILP.ortools', 'ortools.cp_sat'),
+        ('optiwindnet.MILP.scip', 'scip'),
+        ('optiwindnet.MILP.pyomo', 'highs'),
+    ],
+    ids=('ortools', 'scip', 'pyomo'),
+)
+@pytest.mark.parametrize('topology', (Topology.BRANCHED, Topology.RINGED))
+def test_milp_builders_share_canonical_linkset(
+    run_isolated, module_name, solver_name, topology
+):
+    result = run_isolated(
+        solver_name, _build_two_root_linkset, (module_name, topology), 60
+    )
+    if isinstance(result, BaseException):
+        if solver_unavailable(result):
+            pytest.skip(f'{solver_name} unavailable: {result}')
+        raise result
+    linkset, mapping_order, values_match_keys, _ = result
+
+    A = _two_root_toy_A()
+    T, R = (A.graph[key] for key in 'TR')
+    A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
+    families = core.canonical_linksets(A_terminals, R, T, topology)
+
+    assert linkset == sum(families, ())
+    assert mapping_order == linkset
+    assert values_match_keys
+
+
+@pytest.mark.parametrize('topology', (Topology.BRANCHED, Topology.RINGED))
+def test_mathopt_canonical_linkset_weights_stay_aligned(ortools_worker, topology):
+    result = ortools_worker.run(
+        _build_two_root_linkset,
+        ('optiwindnet.MILP.ortools', topology),
+        60,
+    )
+    if isinstance(result, BaseException):
+        raise result
+    linkset, _, _, weights = result
+
+    A = _two_root_toy_A()
+    expected = tuple(
+        A[u][v]['length']
+        if u >= 0 and v >= 0
+        else A.graph['d2roots'][(u, v) if u >= 0 else (v, u)]
+        for u, v in linkset
+    )
+
+    assert weights == expected
 
 
 def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():

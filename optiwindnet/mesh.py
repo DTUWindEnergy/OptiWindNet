@@ -841,6 +841,10 @@ def make_planar_embedding(
     A: nx.Graph[int] = nx.Graph()
     A.add_nodes_from(L.nodes(data=True))
     A.add_edges_from(P_A_edges)
+    # Keep a plain normalized-edge ledger through the remaining mutations.
+    # This avoids scanning NetworkX adjacency when the final canonical bit
+    # positions are installed in Part P.
+    A_terminal_edges = {(u, v) for u, v in P_A_edges if 0 <= u < T and 0 <= v < T}
     # a scalar `values` is applied to every edge; the stubs only cover mappings
     # pyrefly: ignore[no-matching-overload]
     nx.set_edge_attributes(A, 'delaunay', name='kind')
@@ -861,6 +865,9 @@ def make_planar_embedding(
             s, t = (s, t) if s < t else (t, s)
             diagonals_[(s, t)] = (u, v)
             A.add_edge(s, t, kind='extended')
+    A_terminal_edges.update(
+        st for st in diagonals_ if 0 <= st[0] < T and 0 <= st[1] < T
+    )
     diagonals = bidict(diagonals_)
 
     # ##########################
@@ -1339,6 +1346,7 @@ def make_planar_embedding(
             for p in path[1:-1]:
                 corner_to_A_edges[p].append(uv_uniq)
 
+    A_terminal_edges.difference_update(remove_from_A)
     for u, v in remove_from_A:
         A.remove_edge(u, v)
         if (u, v) in diagonals:
@@ -1391,6 +1399,7 @@ def make_planar_embedding(
                 # promoted edge.  Keeping st in A without a diagonal relation
                 # would make it look like an ordinary non-crossing edge.
                 A.remove_edge(*st)
+                A_terminal_edges.discard(st)
             else:
                 diagonals[st] = parent
             debug(
@@ -1427,6 +1436,8 @@ def make_planar_embedding(
                     *VertexS[[u, v, s]]
                 ) <= max_tri_AR:
                     A.add_edge(u, v, length=P_paths[u][v]['length'], kind='delaunay')
+                    if 0 <= u < T and 0 <= v < T:
+                        A_terminal_edges.add((u, v) if u < v else (v, u))
                     if suv_cw:
                         P_A.add_half_edge(u, v, cw=s)
                         P_A.add_half_edge(v, u, ccw=s)
@@ -1560,6 +1571,9 @@ def make_planar_embedding(
     # P) Set A's graph attributes.
     # ############################
     debug('PART P')
+    canonical_terminal_links = np.array(
+        sorted(A_terminal_edges), dtype=np.uint32
+    ).reshape(-1, 2)
     A.graph.update(
         T=T,
         R=R,
@@ -1580,6 +1594,7 @@ def make_planar_embedding(
         norm_scale=norm_scale,
         inter_terminal_clearance_min=inter_terminal_clearance_min,
         inter_terminal_clearance_safe=inter_terminal_clearance_safe,
+        _canonical_terminal_links=canonical_terminal_links,
     )
     if P_paths_shortcuts:
         A.graph['P_paths_shortcuts'] = P_paths_shortcuts

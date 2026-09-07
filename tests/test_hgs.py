@@ -325,7 +325,9 @@ def test_remove_offending_crossing_keeps_absent_diagonal_mapping():
     A = nx.Graph()
     A.add_edge(0, 1, length=1.0)
     A.add_edge(2, 3, length=1.0)
+    A.graph['_canonical_terminal_links'] = np.array(((0, 1), (2, 3)), np.uint32)
 
     remove_offending_crossings(A, {}, [((0, 1), (2, 3))])
 
     assert (0, 1) not in A.edges
+    assert '_canonical_terminal_links' not in A.graph

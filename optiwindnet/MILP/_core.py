@@ -20,6 +20,7 @@ import networkx as nx
 from makefun import with_signature
 
 from ..interarraylib import (
+    _CANONICAL_TERMINAL_LINKS,
     G_from_S,
     _ring_split_position,
     bfs_subtree_loads,
@@ -306,6 +307,34 @@ class ModelOptions(dict):
 
 
 _Link = tuple[int, int]
+
+
+def canonical_linksets(
+    A_terminals: nx.Graph,
+    R: int,
+    T: int,
+    topology: Topology,
+) -> tuple[tuple[_Link, ...], tuple[_Link, ...], tuple[_Link, ...], tuple[_Link, ...]]:
+    """Return the link families in the canonical MILP variable order.
+
+    Terminal-terminal links are normalized to their increasing orientation and
+    sorted lexicographically. Their reverse orientations follow in the same
+    order. Feeders are terminal-major, with roots ordered from ``-R`` to ``-1``;
+    RINGED root-to-terminal closing links follow their corresponding feeders.
+
+    Keeping this construction shared prevents graph insertion order and backend
+    implementation details from changing the meaning of a link-value sequence.
+    """
+    terminal_links = A_terminals.graph.get(_CANONICAL_TERMINAL_LINKS)
+    E = (
+        tuple(map(tuple, terminal_links.tolist()))
+        if terminal_links is not None
+        else tuple(sorted((u, v) if u < v else (v, u) for u, v in A_terminals.edges()))
+    )
+    Eʹ = tuple((v, u) for u, v in E)
+    stars = tuple((t, r) for t in range(T) for r in range(-R, 0))
+    starsʹ = tuple((r, t) for t, r in stars) if topology is Topology.RINGED else ()
+    return E, Eʹ, stars, starsʹ
 
 
 @dataclass(slots=True)

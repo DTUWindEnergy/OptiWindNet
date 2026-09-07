@@ -25,6 +25,7 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    canonical_linksets,
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
@@ -220,15 +221,7 @@ def make_min_length_model(
     _T = range(T)
     _R = range(-R, 0)
 
-    E = tuple(((u, v) if u < v else (v, u)) for u, v in A_terminals.edges())
-    # using directed node-node links -> create the reversed tuples
-    Eʹ = tuple((v, u) for u, v in E)
-    # set of feeders to all roots
-    stars = tuple((t, r) for t in _T for r in _R)
-    if topology is Topology.RINGED:
-        starsʹ = tuple((r, t) for t, r in stars)
-    else:
-        starsʹ = ()
+    E, Eʹ, stars, starsʹ = canonical_linksets(A_terminals, R, T, topology)
     linkset = E + Eʹ + stars + starsʹ
     # flow variables only for edges with actual flow (no ring-backs)
     flowset = E + Eʹ + stars

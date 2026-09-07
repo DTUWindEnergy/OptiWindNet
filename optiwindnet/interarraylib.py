@@ -33,6 +33,14 @@ __all__ = (
 )  # fmt: skip
 
 
+_CANONICAL_TERMINAL_LINKS = '_canonical_terminal_links'
+
+
+def _invalidate_canonical_terminal_links(A: nx.Graph) -> None:
+    """Drop the position cache before mutating ``A``'s candidate edge set."""
+    A.graph.pop(_CANONICAL_TERMINAL_LINKS, None)
+
+
 _essential_graph_attrs = (
     # required
     'R', 'T', 'B', 'VertexC', 'name', 'handle', 'border',
