@@ -28,6 +28,9 @@ from .interarraylib import L_from_site
 _lggr = logging.getLogger(__name__)
 info, warn = _lggr.info, _lggr.warning
 
+BoolGrid = np.ndarray[tuple[int, int], np.dtype[np.bool_]]
+"""Per-cell flags of the auxiliary grid, as a bool array of shape ``(i_len, j_len)``."""
+
 __all__ = ('get_shape_to_fill', 'poisson_disc_filler', 'turbinate')
 
 
@@ -218,10 +221,10 @@ def _poisson_disc_filler_core(
     j_len: int,
     cell_idc: IndexPairs,
     BorderS: CoordPairs,
-    cell_strictly_inside_border: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
+    cell_strictly_inside_border: BoolGrid,
     obstacleS__: list[CoordPairs],
-    cell_clear_of_obstacles: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
-    cell_fully_clear: np.ndarray[tuple[int, int], np.dtype[np.bool_]],
+    cell_clear_of_obstacles: BoolGrid,
+    cell_fully_clear: BoolGrid,
     repel_radius_sq: float,
     RepellerS: CoordPairs | None,
     rng: np.random.Generator,
@@ -580,13 +583,15 @@ def poisson_disc_filler(
         (i_len + 1, j_len + 1), copy=False
     )
 
+    # a reduction over a tuple axis always yields an array, but numpy's stubs
+    # also allow the scalar returned for `axis=None`, hence the casts
     cell_corners = _cell_corners_view(is_corner_within_border_)
-    cell_covers_polygon__ = cell_corners.any(axis=(0, 1))
-    cell_strictly_inside_polygon__ = cell_corners.all(axis=(0, 1))
+    cell_covers_polygon__ = cast('BoolGrid', cell_corners.any(axis=(0, 1)))
+    cell_strictly_inside_polygon__ = cast('BoolGrid', cell_corners.all(axis=(0, 1)))
 
-    cell_strictly_inside_border__ = _cell_corners_view(
-        is_corner_within_border_only_
-    ).all(axis=(0, 1))
+    cell_strictly_inside_border__ = cast(
+        'BoolGrid', _cell_corners_view(is_corner_within_border_only_).all(axis=(0, 1))
+    )
 
     cells, points = _walk_along_perimeter(BorderS, i_len + j_len + 1)
     for i, j in cells:
