@@ -3,7 +3,7 @@ import math
 import warnings
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 import numpy as np
@@ -16,6 +16,9 @@ from optiwindnet.MILP import (
     SolutionInfo,
     solver_factory,
 )
+
+if TYPE_CHECKING:
+    from .cases import MILPCase
 
 # Leave the root after one stalled separation round instead of SCIP's default 10.
 # At these short budgets the implied-integral flows keep the root separator busy,
@@ -77,6 +80,31 @@ def run_milp_solve_with_retry(
             stacklevel=2,
         )
         return _single_solve(fallback_limit)
+
+
+def warn_if_not_optimal(case: 'MILPCase', info: SolutionInfo) -> None:
+    """Warn (never fail) when a solve stopped at a limit instead of proving optimality.
+
+    On the tiny test cases the incumbent is the optimum long before optimality is
+    proven, so a machine too slow or too loaded to finish the proof within the
+    budget is not a defect -- but it explains a golden mismatch, so it is surfaced.
+    An incumbent is guaranteed: every adapter raises OWNSolutionNotFound without one.
+
+    The check is deliberately on the negative of 'optimal': all backends spell
+    proven optimality that way (modulo case), while each spells a hit limit
+    differently -- 'FEASIBLE' (OR-Tools), 'maxTimeLimit' (Pyomo: highs/gurobi/
+    cplex/cbc), 'timelimit' (SCIP) and fscip's free-form 'solving was interrupted
+    [...]' -- so an allowlist of limit spellings breaks on every backend added.
+    """
+    if info.termination.lower() == 'optimal':
+        return
+    warnings.warn(
+        f'Solver {case.solver_name!r} did not prove optimality within '
+        f'{case.time_limit} s (terminated with: {info.termination}); likely due '
+        'to a slow machine or high CPU load. The incumbent is still checked below.',
+        UserWarning,
+        stacklevel=2,
+    )
 
 
 def solver_unavailable(exc: BaseException) -> bool:
