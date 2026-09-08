@@ -32,6 +32,7 @@ def solve_milp_case(case: MILPCase):
         model_options=case.model_options,
         time_limit=case.time_limit,
         mip_gap=case.mip_gap,
+        retry_on_suboptimal=case.exact_golden,
     )
     return info, S
 

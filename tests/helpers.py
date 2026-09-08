@@ -46,6 +46,7 @@ def run_milp_solve_with_retry(
     time_limit: float,
     mip_gap: float,
     warmstart: nx.Graph | None = None,
+    retry_on_suboptimal: bool = False,
 ) -> tuple[SolutionInfo, nx.Graph, str]:
     """Execute solver.solve with retry on failure or non-optimal solve."""
     solve_options = TEST_ONLY_SOLVER_OPTIONS.get(solver_name, {})
@@ -70,7 +71,7 @@ def run_milp_solve_with_retry(
 
     try:
         info, S, warmed_by = _single_solve(time_limit)
-        if info.termination.lower() == 'optimal':
+        if not retry_on_suboptimal or info.termination.lower() == 'optimal':
             return info, S, warmed_by
         reason = f'did not prove optimality (terminated with: {info.termination})'
     except OWNSolutionNotFound:
