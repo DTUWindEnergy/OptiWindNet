@@ -18,7 +18,8 @@ from optiwindnet.mesh import (
 )
 
 from .helpers import tiny_wfn
-from .sitecache import get_bundle
+from .mesh_goldens import MESH_LINKSET_GOLDENS
+from .sitecache import get_bundle, location_repository
 
 
 def test_small_mesh_helpers_cover_empty_and_repeated_distance_paths():
@@ -167,3 +168,29 @@ def test_make_planar_embedding_marks_exact_los_crossing_without_border_path(
 
     assert blocked
     assert A.nodes[1]['los_d2root'][-1] > 0.0
+
+
+def test_mesh_goldens_cover_every_bundled_location():
+    """Adding or removing a bundled location must not silently skip a golden."""
+    handles = location_repository()._fields  # pyrefly: ignore[missing-attribute]
+
+    assert set(MESH_LINKSET_GOLDENS) == set(handles)
+
+
+@pytest.mark.parametrize(
+    'handle',
+    location_repository()._fields,  # pyrefly: ignore[missing-attribute]
+)
+def test_bundled_location_linkset_matches_golden(handle):
+    """The candidate link set of every bundled mesh is pinned.
+
+    A failure means make_planar_embedding() now selects a different link set.
+    Review the change before regenerating with
+    ``python -m tests.update_mesh_goldens``.
+    """
+    A = get_bundle(handle).A
+
+    assert (
+        len(A.graph['_canonical_terminal_links']),
+        A.graph['_linkset_id'].hex(),
+    ) == MESH_LINKSET_GOLDENS[handle]
