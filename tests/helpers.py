@@ -9,8 +9,8 @@ import networkx as nx
 import numpy as np
 
 from optiwindnet.api import WindFarmNetwork
-from optiwindnet.geometric import is_crossing
 from optiwindnet.converting import _rings_from_S
+from optiwindnet.geometric import is_crossing
 from optiwindnet.loads import _add_ring_to_S
 from optiwindnet.MILP import (
     ModelOptions,

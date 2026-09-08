@@ -17,10 +17,9 @@ import logging
 import networkx as nx
 import pytest
 
-from optiwindnet.converting import linkbits_from_S
+from optiwindnet.converting import _rings_from_S, linkbits_from_S
 from optiwindnet.heuristics import constructor
 from optiwindnet.identity import topology_id
-from optiwindnet.converting import _rings_from_S
 from optiwindnet.types import Topology
 
 from .cases import (

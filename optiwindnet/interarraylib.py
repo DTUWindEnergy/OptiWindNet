@@ -43,7 +43,7 @@ _DEPRECATED_EXPORTS = {
     'validate_topology': 'optiwindnet.validating',
 }
 
-__all__ = (
+__all__ = (  # noqa: PLE0604
     'add_link_blockmap', 'add_link_cosines', 'add_terminal_closest_root',
     'assign_cables', 'count_diagonals', 'describe_G', 'directed_links',
     'make_remap', 'pathdist', 'scaffolded', 'update_lengths',
@@ -235,8 +235,8 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     terminals, fed by a flowless closing feeder at one end and draining through
     a feeder carrying the whole ring at the other. Such rings are *radialized*
     into that chain here (walking across the zero-load link with
-    :func:`~optiwindnet.converting._rings_from_S`), so the zero-load link becomes an ordinary
-    flow-carrying link.
+    :func:`~optiwindnet.converting._rings_from_S`), so the zero-load link
+    becomes an ordinary flow-carrying link.
 
     A ring bridging two roots drains through the one feeding the head of the
     walk and closes on the other; which of the two drains is arbitrary, as it

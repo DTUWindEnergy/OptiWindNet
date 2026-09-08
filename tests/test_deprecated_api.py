@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-import optiwindnet.interarraylib as interarraylib
+from optiwindnet import interarraylib
 
 _DEPRECATED_INTERARRAYLIB_EXPORTS = {
     'G_from_S': 'optiwindnet.converting',
@@ -31,7 +31,9 @@ _DEPRECATED_INTERARRAYLIB_EXPORTS = {
 }
 
 
-@pytest.mark.parametrize(('name', 'module_name'), _DEPRECATED_INTERARRAYLIB_EXPORTS.items())
+@pytest.mark.parametrize(
+    ('name', 'module_name'), _DEPRECATED_INTERARRAYLIB_EXPORTS.items()
+)
 def test_interarraylib_deprecated_export_warns_and_aliases(name, module_name):
     interarraylib.__dict__.pop(name, None)
 

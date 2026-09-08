@@ -10,13 +10,13 @@ import pytest
 from bitarray import bitarray, frozenbitarray
 
 from optiwindnet.converting import (
-    _rings_from_S,
     G_from_S,
     L_from_G,
     L_from_site,
     S_from_G,
     S_from_linkbits,
     S_from_terse_links,
+    _rings_from_S,
     linkbits_from_S,
     terse_links_from_S,
 )
