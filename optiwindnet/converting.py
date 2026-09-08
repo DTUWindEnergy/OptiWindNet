@@ -27,7 +27,7 @@ __all__ = (
 
 
 def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
-    """Encode topology ``S`` over ``A``'s canonical undirected link universe.
+    """Encode topology ``S`` over ``A``'s canonical undirected available-links set.
 
     Terminal-terminal positions follow the lexicographic edge order cached by
     :func:`~optiwindnet.mesh.make_planar_embedding`. The ``R * T`` feeder
@@ -76,8 +76,10 @@ def S_from_linkbits(linkbits: bitarray, A: nx.Graph) -> nx.Graph:
 
     Uses the same terminal-link and feeder ordering as :func:`linkbits_from_S`.
     ``A`` must provide its ``'_canonical_terminal_links'`` graph attribute.
-    The bit count must match ``A``'s link universe; a mismatch raises
-    ``ValueError``.
+    The bit count must match ``A``'s available-links set; a mismatch raises
+    ``ValueError``. Equal bit counts are not proof of a common origin: compare
+    ``A``'s ``'_linkset_id'`` with the producer's to confirm that the bits
+    and the graph describe the same available-links set.
 
     The result contains all ``T`` terminals and ``R`` roots, including isolated
     nodes, without node attributes. Only connectivity is recovered:

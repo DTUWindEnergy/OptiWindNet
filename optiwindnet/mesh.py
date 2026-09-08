@@ -22,6 +22,7 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
+from .identity import linkset_id
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset')
 
@@ -1596,6 +1597,7 @@ def make_planar_embedding(
         inter_terminal_clearance_safe=inter_terminal_clearance_safe,
         _canonical_terminal_links=canonical_terminal_links,
     )
+    A.graph['_linkset_id'] = linkset_id(A)
     if P_paths_shortcuts:
         A.graph['P_paths_shortcuts'] = P_paths_shortcuts
     if len(border) > 0:

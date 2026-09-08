@@ -8,7 +8,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from ..identity import _invalidate_canonical_terminal_links
+from ..identity import _invalidate_canonical_linkset
 
 _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
@@ -74,7 +74,7 @@ def remove_offending_crossings(A, diagonals, crossings):
     longer edge ``st``, ``st`` is removed instead of ``uv`` (preferring to keep
     the shorter alternative). ``A`` and ``diagonals`` are mutated in place.
     """
-    _invalidate_canonical_terminal_links(A)
+    _invalidate_canonical_linkset(A)
     crossing_counterparts = defaultdict(list)
     for uv, st in crossings:
         crossing_counterparts[uv].append(st)

@@ -12,7 +12,7 @@ from bitarray import frozenbitarray
 import optiwindnet.MILP._core as core
 from optiwindnet import MILP
 from optiwindnet.converting import terse_links_from_S
-from optiwindnet.identity import topology_id
+from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.terse import TerseLinks
 from optiwindnet.types import Topology
@@ -510,7 +510,7 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     assert result['objective'] == result['preserved_objective']
     assert {
         'R', 'T', 'topology', 'capacity', 'max_load', 'has_loads', 'creator',
-        '_linkbits', '_topology_id',
+        '_linkbits', '_topology_id', '_linkset_id',
     } <= result['graph'].keys()  # fmt: skip
     linkbits = result['graph']['_linkbits']
     assert isinstance(linkbits, frozenbitarray)
@@ -631,6 +631,7 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
     A.graph.update(
         R=R, T=n, _canonical_terminal_links=np.array(E, dtype=np.uint32).reshape(-1, 2)
     )
+    A.graph['_linkset_id'] = linkset_id(A)
     linkset = E + Eʹ + stars + starsʹ
     links = {link: link in active_links for link in linkset}
     metadata = SimpleNamespace(
@@ -681,6 +682,7 @@ def test_forest_mip_decoder_preserves_non_unit_power(topology, powers):
         nx.set_node_attributes(A, dict(enumerate(powers)), 'power')
     E, reverse, stars, _ = core.canonical_linksets(A, R=2, T=3, topology=topology)
     A.graph.update(R=2, T=3, _canonical_terminal_links=np.array(E, dtype=np.uint32))
+    A.graph['_linkset_id'] = linkset_id(A)
     p0, p1, p2 = powers if powers is not None else (1, 1, 1)
     flows = {(0, 1): p0, (1, 2): p0 + p1, (2, -1): p0 + p1 + p2}
     linkset = E + reverse + stars

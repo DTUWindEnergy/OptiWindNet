@@ -89,6 +89,7 @@ def test_constructor_topology_cases(case):
     assert_topology(S, expected_topology(case), case.capacity)
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
     assert S.graph['_topology_id'] == topology_id(S.graph['_linkbits'])
+    assert S.graph['_linkset_id'] == A.graph['_linkset_id']
     assert terminal_terminal_crossings(S, A.graph['VertexC']) == []
     if case.exact_golden:
         assert_matches_golden(S, _SOLVER_GOLDENS[topology_golden_key(case)])

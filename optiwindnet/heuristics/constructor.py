@@ -998,6 +998,7 @@ def constructor(
         capacity=capacity_report,
         _linkbits=linkbits,
         _topology_id=topology_id(linkbits),
+        _linkset_id=Aʹ.graph['_linkset_id'],
         creator='constructor',
         iterations=i,
         method_options={

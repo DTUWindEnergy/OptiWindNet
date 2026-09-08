@@ -770,6 +770,7 @@ class Solver(abc.ABC):
             capacity=metadata.capacity,
             _linkbits=linkbits,
             _topology_id=topology_id(linkbits),
+            _linkset_id=A.graph['_linkset_id'],
             creator='MILP.' + self.name,
             solver_details={},
         )
