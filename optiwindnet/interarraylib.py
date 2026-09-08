@@ -20,7 +20,8 @@ _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 
 __all__ = (
-    'G_from_S', 'L_from_G', 'L_from_site', 'S_from_G', 'S_from_terse_links',
+    'G_from_S', 'L_from_G', 'L_from_site', 'S_from_G', 'S_from_linkbits',
+    'S_from_terse_links',
     'TerseLinks',
     'add_link_blockmap', 'add_link_cosines', 'add_ring_to_S',
     'add_terminal_closest_root',
@@ -86,6 +87,38 @@ def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
     flat[positions] = 1
     packed = bitarray(buffer=np.packbits(flat).tobytes(), endian='big')
     return frozenbitarray(packed[:nbits])
+
+
+def S_from_linkbits(linkbits: bitarray, A: nx.Graph) -> nx.Graph:
+    """Decode canonical ``linkbits`` into an undetoured topology ``S``.
+
+    Uses the same terminal-link and feeder ordering as :func:`linkbits_from_S`.
+    ``A`` must provide its ``'_canonical_terminal_links'`` graph attribute.
+    The bit count must match ``A``'s link universe; a mismatch raises
+    ``ValueError``.
+
+    The result contains all ``T`` terminals and ``R`` roots, including isolated
+    nodes, without node attributes. Only connectivity is recovered:
+    loads, capacity, topology type and other solution metadata are not encoded.
+    No feasibility validation or load calculation is performed.
+    """
+    R, T = (A.graph[key] for key in 'RT')
+    links = A.graph['_canonical_terminal_links']
+    feeder_start = len(links)
+    nbits = feeder_start + R * T
+    if len(linkbits) != nbits:
+        raise ValueError(f'Expected {nbits} link bits for A, got {len(linkbits)}')
+
+    S = nx.Graph(R=R, T=T)
+    S.add_nodes_from(range(-R, T))
+    for position in linkbits.search(bitarray('1')):
+        if position < feeder_start:
+            u, v = map(int, links[position])
+        else:
+            u, root_index = divmod(position - feeder_start, R)
+            v = root_index - R
+        S.add_edge(u, v)
+    return S
 
 
 def topology_digest(linkbits: frozenbitarray) -> bytes:
