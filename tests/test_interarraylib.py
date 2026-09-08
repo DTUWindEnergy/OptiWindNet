@@ -1155,6 +1155,35 @@ def test_as_hooked_to_nearest():
     assert G2.graph['tentative'] == expected
 
 
+def test_as_hooked_to_nearest_clears_clone_loads():
+    """A clone inside the rehooked subtree must not keep its previous load.
+
+    ``as_hooked_to_nearest()`` accepts a routeset, whose subtrees may contain
+    clones. Their loads are stale once the subtree is rehooked, and
+    ``bfs_subtree_loads()`` reads a surviving one back as the node's base load.
+    """
+    # -1 — 3 — 2 — 4(clone) — 1 — 0, hooked at 3 but 0 is the nearest to the root
+    T, R, clone = 4, 1, 4
+    G = nx.Graph(R=R, T=T, has_loads=True, max_load=4)
+    G.add_node(-1, kind='oss', load=4)
+    G.add_nodes_from(range(T), kind='wtg')
+    G.add_node(clone, kind='contour')
+    nx.add_path(G, (-1, 3, 2, clone, 1, 0))
+    for node, load in ((3, 4), (2, 3), (clone, 2), (1, 2), (0, 1)):
+        G.nodes[node].update(load=load, subtree=0)
+    for u, v in G.edges:
+        G[u][v]['load'] = min(G.nodes[u].get('load', 4), G.nodes[v].get('load', 4))
+    # terminal 0 is the closest to the root, so the feeder moves from 3 to 0
+    d2roots = np.array([[1.0], [2.0], [3.0], [4.0]])
+
+    H = as_hooked_to_nearest(G, d2roots)
+
+    assert H.graph['tentative'] == [(-1, 0)]
+    assert H.nodes[-1]['load'] == T
+    # loads now run 0 → root, and the clone carries the load of its two sides
+    assert [H.nodes[n]['load'] for n in (0, 1, clone, 2, 3)] == [4, 3, 2, 2, 1]
+
+
 # --- add_link_blockmap ---
 
 

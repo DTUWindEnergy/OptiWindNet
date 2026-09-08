@@ -1570,7 +1570,17 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
         ([] for _ in range(num_subtree)), count=num_subtree, dtype=object
     )
     subtree_from_node = np.empty((T,), dtype=object)
+    # Only terminals are hook candidates, but clones (detour and contour nodes,
+    # numbered from T up) carry a 'load' too, so clearing the subtree's loads
+    # must reach them: a clone that kept a stale load would be read back by
+    # bfs_subtree_loads() and counted twice.
+    loaded_from_subtree_id = np.fromiter(
+        ([] for _ in range(num_subtree)), count=num_subtree, dtype=object
+    )
     for n, subtree_id in G.nodes(data='subtree'):
+        if subtree_id is None:
+            continue
+        loaded_from_subtree_id[subtree_id].append(n)
         if 0 <= n < T:
             subtree = nodes_from_subtree_id[subtree_id]
             subtree.append(n)
@@ -1594,8 +1604,8 @@ def as_hooked_to_nearest(Gʹ: nx.Graph, d2roots: np.ndarray) -> nx.Graph:
                 kind='tentative',
                 load=subtree_load,
             )
-            for node in subtree:
-                del G.nodes[node]['load']
+            for node in loaded_from_subtree_id[G.nodes[hook]['subtree']]:
+                G.nodes[node].pop('load', None)
 
             ref_load = G.nodes[r]['load']
             G.nodes[r]['load'] = ref_load - subtree_load
