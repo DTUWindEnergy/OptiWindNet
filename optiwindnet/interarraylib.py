@@ -204,15 +204,62 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 # other way round. Feeders are never reversed, the sink being a root and a root's
 # id negative; links carrying ``load=0`` (a ring's zero-load link) have no current and
 # so no direction to encode.
+def _bfs_loads_walk(_adj, _node, T, visited, queue) -> None:
+    """Descend the subtrees seeded in ``queue``, appending every node reached.
+
+    Each ``queue`` entry is ``(node, parent, edgeD, parentD, subtree)``, with
+    ``edgeD`` the ⟨parent, node⟩ link data and ``parentD`` the parent's node
+    data. Queue (BFS) order places every node before its descendants, which is
+    what :func:`_bfs_loads_unwind` relies on. Every node gets its ``'subtree'``
+    and the base its descendants' loads are added to; the accumulation happens
+    on the way back up.
+
+    A node that keeps a stale ``'load'`` (callers that clear only part of the
+    graph, e.g. :func:`as_hooked_to_nearest`) starts from it, unless it is a
+    leaf of the traversal, which always restarts from its own contribution.
+    """
+    i = 0
+    while i < len(queue):
+        node, parent, _, _, subtree = queue[i]
+        i += 1
+        nodeD = _node[node]
+        nodeD['subtree'] = subtree
+        stop = len(queue)
+        for nbr, edgeD in _adj[node].items():
+            # a load=0 link is a ring zero-load link: never traverse across it
+            if nbr == parent or edgeD.get('load') == 0:
+                continue
+            if nbr in visited:
+                raise ValueError(f'node {nbr} reached twice: not a tree below {node}')
+            visited.add(nbr)
+            queue.append((nbr, node, edgeD, nodeD, subtree))
+        default = 1 if node < T else 0  # load is 1 for wtg nodes
+        nodeD['load'] = default if len(queue) == stop else nodeD.get('load', default)
+
+
+def _bfs_loads_unwind(_node, queue) -> None:
+    """Accumulate the loads of the traversal recorded in ``queue``.
+
+    Reversed BFS order visits every node after all of its descendants, so each
+    node's load is complete before it is added to its parent's.
+    """
+    for node, parent, edgeD, parentD, _ in reversed(queue):
+        load = _node[node]['load']
+        # the child sources the current, the parent sinks it (towards the root)
+        edgeD['load'] = load
+        edgeD['reverse'] = node < parent
+        parentD['load'] += load
+
+
 def bfs_subtree_loads(G, parent, children, subtree, visited=None):
-    """Recurse down the subtree, updating edge and node attributes.
+    """Descend the subtree, updating edge and node attributes.
 
     Meant to be called by :func:`calcload`, but can be used independently (e.g.
     from PathFinder). Nodes must not have a ``'load'`` attribute.
 
     Args:
       G: graph to traverse.
-      parent: node the recursion descends from.
+      parent: node the traversal descends from.
       children: nodes of ``G`` to descend into.
       subtree: subtree id to assign to every node visited.
       visited: nodes already claimed by this traversal; pass one set across
@@ -229,25 +276,23 @@ def bfs_subtree_loads(G, parent, children, subtree, visited=None):
     T = G.graph['T']
     if visited is None:
         visited = {parent}
-    nodeD = G.nodes[parent]
+    _adj, _node = G._adj, G._node
+    nodeD = _node[parent]
     default = 1 if parent < T else 0  # load is 1 for wtg nodes
     if not children:
         nodeD['load'] = default
         return default
-    load = nodeD.get('load', default)
+    nodeD['load'] = nodeD.get('load', default)
+    adjP = _adj[parent]
+    queue = []
     for child in children:
         if child in visited:
             raise ValueError(f'node {child} reached twice: not a tree below {parent}')
         visited.add(child)
-        G.nodes[child]['subtree'] = subtree
-        # a load=0 link is a ring zero-load link: never traverse across it
-        grandchildren = {n for n in G[child] if G[child][n].get('load') != 0} - {parent}
-        childload = bfs_subtree_loads(G, child, grandchildren, subtree, visited)
-        # the child sources the current, the parent sinks it (towards the root)
-        G[parent][child].update(load=childload, reverse=child < parent)
-        load += childload
-    nodeD['load'] = load
-    return load
+        queue.append((child, parent, adjP[child], nodeD, subtree))
+    _bfs_loads_walk(_adj, _node, T, visited, queue)
+    _bfs_loads_unwind(_node, queue)
+    return nodeD['load']
 
 
 def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
@@ -326,36 +371,50 @@ def calcload(G: nx.Graph) -> None:
     :func:`split_rings_and_calc_loads`, which the ringed builders call instead.
     """
     R, T = (G.graph[k] for k in 'RT')
-    for _, data in G.nodes(data=True):
-        if 'load' in data:
-            del data['load']
+    # the raw dicts: indexing G[u][v] and G.nodes[n] instead would rebuild a
+    # view object on every access, which dominates the cost of this traversal
+    # pyrefly: ignore[missing-attribute]
+    _adj, _node = G._adj, G._node
+    for data in _node.values():
+        data.pop('load', None)
 
-    subtree = 0
-    total_load = 0
-    max_load = 0
     # one set across every root: a node claimed by two roots is reported too
     visited = set(range(-R, 0))
+    queue = []
+    subroots = []
+    subtree = 0
     for root in range(-R, 0):
-        G.nodes[root]['load'] = 0
-        for subroot in G[root]:
+        rootD = _node[root]
+        rootD['load'] = 0
+        for subroot, edgeD in _adj[root].items():
             # A load=0 feeder (degenerate multi-root ring zero-load link) carries
             # no load.
-            if G[root][subroot].get('load') == 0:
+            if edgeD.get('load') == 0:
                 continue
-            _ = bfs_subtree_loads(G, root, [subroot], subtree, visited)
+            if subroot in visited:
+                raise ValueError(
+                    f'node {subroot} reached twice: not a tree below {root}'
+                )
+            visited.add(subroot)
+            queue.append((subroot, root, edgeD, rootD, subtree))
+            subroots.append(subroot)
             subtree += 1
-            max_load = max(max_load, G.nodes[subroot]['load'])
-        total_load += G.nodes[root]['load']
-    # Clones inside a routed ring's open cable are separated from both arms by
-    # load=0 segments. They intentionally carry no current and are therefore
-    # not reached by the root traversals above.
-    for node, nodeD in G.nodes(data=True):
-        if (
-            node >= T
-            and 'load' not in nodeD
-            and all(G[node][nbr].get('load') == 0 for nbr in G[node])
-        ):
-            nodeD['load'] = 0
+    _bfs_loads_walk(_adj, _node, T, visited, queue)
+    _bfs_loads_unwind(_node, queue)
+
+    max_load = max((_node[subroot]['load'] for subroot in subroots), default=0)
+    total_load = sum(_node[root]['load'] for root in range(-R, 0))
+    if len(_node) > T + R:
+        # Clones inside a routed ring's open cable are separated from both arms by
+        # load=0 segments. They intentionally carry no current and are therefore
+        # not reached by the root traversals above.
+        for node, nodeD in _node.items():
+            if (
+                node >= T
+                and 'load' not in nodeD
+                and all(edgeD.get('load') == 0 for edgeD in _adj[node].values())
+            ):
+                nodeD['load'] = 0
     if total_load != T:
         raise ValueError(f'root loads sum to {total_load}, expected T = {T}')
     G.graph['has_loads'] = True
