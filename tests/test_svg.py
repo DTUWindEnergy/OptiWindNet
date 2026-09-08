@@ -262,12 +262,13 @@ def test_svgrepr_repr_solution_line():
     """A routeset gets a second line with the solution-dependent properties."""
     wfn = tiny_wfn(cables=[(2, 10.0), (3, 15.0), (4, 18.0)])
     svg = svgplot(wfn.G)
-    static, _, solution = repr(svg).partition('\n')
+    static, _, rest = repr(svg).partition('\n')
+    solution, _, _ = rest.partition('\n')
     assert 'cables=2|3|4' in static
     assert 'feeders' not in static
     assert solution.startswith(' feeders = 1; C = 2; D = 0; Σλ = ')
     assert 'Σ¤ = ' in solution
-    assert solution.endswith(f'; {len(svg.data)} chars>')
+    assert solution.endswith(f'; {len(svg.data)} chars')
     # metadata values are unformatted
     assert svg.metadata['feeders'] == (1,)
     assert svg.metadata['cables'] == (2, 3, 4)
@@ -290,6 +291,39 @@ def test_svgrepr_repr_no_cost_without_currency():
     assert 'cables=4' in r
     assert 'Σλ = ' in r
     assert 'Σ¤' not in r
+
+
+def test_svgrepr_repr_digest_line():
+    """A routeset gets a third line with the topology digest in full hex."""
+    wfn = tiny_wfn()
+    svg = svgplot(wfn.G)
+    static, _, rest = repr(svg).partition('\n')
+    solution, _, digest = rest.partition('\n')
+    expected = wfn.G.graph['_topology_digest']
+
+    assert digest == f' topology_digest = {expected.hex()}>'
+    assert 'digest' not in static
+    assert 'digest' not in solution
+    # metadata values are unformatted
+    assert svg.metadata['topology_digest'] == expected
+
+
+def test_svgrepr_repr_without_digest_keeps_two_lines():
+    """A routeset without the private attribute (e.g. read back from the db)."""
+    wfn = tiny_wfn()
+    del wfn.G.graph['_topology_digest']
+
+    r = repr(svgplot(wfn.G))
+
+    assert r.count('\n') == 1
+    assert 'digest' not in r
+
+
+def test_svgrepr_repr_bad_digest_does_not_raise():
+    """A non-bytes digest falls back to the default rendering."""
+    r = repr(SvgRepr('x', {'handle': 'h', 'topology_digest': 'not bytes'}))
+
+    assert r.endswith('\n topology_digest = not bytes>')
 
 
 def test_svgrepr_repr_bad_metadata_does_not_raise():
