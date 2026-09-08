@@ -10,6 +10,14 @@ Regenerate `tests/nodeset_digest-location-map.pkl` after bundled location files 
 python -m tests.update_nodeset_digest_location_map
 ```
 
+## Mesh available-links sets
+
+Regenerate `tests/mesh_goldens.py` after any change to `make_planar_embedding()` or to the bundled location files:
+
+```bash
+python -m tests.update_mesh_goldens
+```
+
 ## Deterministic solver topologies
 
 Regenerate `tests/solver_topologies.pkl` from the exact constructor and required MILP cases:
