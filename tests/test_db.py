@@ -91,6 +91,7 @@ def test_pack_G_filters_private_graph_attributes():
 
     assert '_not_json_serializable' not in packed['misc']
     assert '_linkbits' not in packed['misc']
+    assert '_topology_digest' not in packed['misc']
 
 
 def test_packnodes_uses_canonical_vertexc_fingerprint():
@@ -134,6 +135,7 @@ def test_G_from_routeset(tmp_path):
         wfn = tiny_wfn(router=HGSRouter(time_limit=0.1))
         G = wfn.G
         assert '_linkbits' in G.graph
+        assert '_topology_digest' in G.graph
 
         id = store_G(G)
         assert id == 1
@@ -147,7 +149,7 @@ def test_G_from_routeset(tmp_path):
         'bound', 'method_options', 'relgap', 'solver_details',
         'D', 'landscape_angle', 'method',
         'norm_offset', 'norm_scale', 'num_diagonals',
-        '_linkbits',
+        '_linkbits', '_topology_digest',
     }  # fmt: skip
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 
@@ -190,7 +192,7 @@ def test_G_from_routeset_ringed(tmp_path, locations):
         'bound', 'method_options', 'relgap', 'solver_details',
         'C', 'D', 'landscape_angle', 'method',
         'norm_offset', 'norm_scale', 'num_diagonals',
-        '_linkbits',
+        '_linkbits', '_topology_digest',
     }  # fmt: skip
     assert_graph_equal(
         G_rs,
@@ -245,7 +247,7 @@ def test_G_from_routeset_detours(tmp_path):
         'bound', 'method_options', 'relgap', 'solver_details',
         'D', 'landscape_angle', 'method',
         'norm_offset', 'norm_scale', 'num_diagonals',
-        '_linkbits',
+        '_linkbits', '_topology_digest',
     }  # fmt: skip
     assert_graph_equal(G_rs, G, ignored_graph_keys=ignored_keys, verbose=False)
 

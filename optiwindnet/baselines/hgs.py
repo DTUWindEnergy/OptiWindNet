@@ -17,6 +17,7 @@ from ..interarraylib import (
     calcload,
     linkbits_from_S,
     split_rings_and_calc_loads,
+    topology_digest,
 )
 from ..repair import repair_routeset_path
 from ..types import Topology
@@ -496,11 +497,13 @@ def hgs_cvrp(
         S.graph['topology'] = Topology.RADIAL
         calcload(S)
 
+    linkbits = linkbits_from_S(A_orig, S)
     S.graph.update(
         T=T,
         R=R,
         capacity=capacity,
-        _linkbits=linkbits_from_S(A_orig, S),
+        _linkbits=linkbits,
+        _topology_digest=topology_digest(linkbits),
         creator='baselines.hgs',
         method_options=dict(
             solver_name='HGS-CVRP',

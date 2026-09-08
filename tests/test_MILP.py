@@ -11,7 +11,7 @@ from bitarray import frozenbitarray
 
 import optiwindnet.MILP._core as core
 from optiwindnet import MILP
-from optiwindnet.interarraylib import terse_links_from_S
+from optiwindnet.interarraylib import terse_links_from_S, topology_digest
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.terse import TerseLinks
 from optiwindnet.types import Topology
@@ -166,6 +166,8 @@ def _solve_toy_incumbent(solver_name, topology):
         'linkbits_match': S.graph['_linkbits'] == expected_bits,
         'objective': solution_info.objective,
         'preserved_objective': solver.solution_info.objective,
+        # solve() must return the digest already stamped on SolutionInfo
+        'info_digest': solution_info.digest,
     }
 
 
@@ -192,17 +194,13 @@ def _exercise_ortools_retrieval_branch(feeder_route):
     S = nx.Graph(source='best-objective')
     G = nx.Graph()
 
-    def incumbent():
-        calls.append('incumbent')
-        return S
-
     def investigate(P, A):
         assert P is solver.P
         assert A is solver.A
         calls.append('investigate')
         return S, G
 
-    solver._incumbent_topology_from_pool = incumbent
+    solver._incumbent_S = S
     solver._investigate_pool = investigate
     solver._make_graph_attributes = lambda: {'solver_details': {}}
     with (
@@ -392,6 +390,33 @@ def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():
     assert pool.investigations == 0
 
 
+def test_recording_solution_info_stamps_the_incumbent_digest():
+    """Every backend's solve() assigns solution_info; the digest rides along."""
+    # a Pyomo-backed solver needs no native library and trips no rival guard
+    from optiwindnet.MILP.pyomo import SolverPyomo
+
+    digest = topology_digest(frozenbitarray('1001'))
+
+    solver = SolverPyomo('cbc')
+    solver._decode_incumbent = lambda: nx.Graph(_topology_digest=digest)
+    info = core.SolutionInfo(1.0, 1.0, 1.0, 0.0, 'optimal')
+
+    solver.solution_info = info
+
+    assert info.digest == digest
+    assert solver.solution_info is info
+
+
+def test_solution_info_repr_shows_the_digest_as_hex():
+    info = core.SolutionInfo(1.0, 2.0, 3.0, 0.1, 'optimal')
+
+    assert repr(info).endswith("termination='optimal', digest='')")
+
+    info.digest = topology_digest(frozenbitarray('0110'))
+
+    assert repr(info).endswith(f"digest='{info.digest.hex()}')")
+
+
 def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
     from types import SimpleNamespace
 
@@ -406,6 +431,8 @@ def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
         applied_options={'threads': 1},
         stopping={'time_limit': 1, 'mip_gap': 0.01},
     )
+    digest = topology_digest(frozenbitarray('0110'))
+    fake.solution_info.digest = digest
 
     attributes = core.Solver._make_graph_attributes(
         fake  # pyrefly: ignore[bad-argument-type]
@@ -414,6 +441,10 @@ def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
     assert attributes['warmstart'] == 'constructor'
     assert attributes['solver_details']['max_feeders'] == 3
     assert 'max_feeders' not in attributes['method_options']
+    # the incumbent's digest is not a routeset attribute; S carries its own
+    assert 'digest' not in attributes
+    assert '_topology_digest' not in attributes
+    assert fake.solution_info.digest == digest
 
     fake.metadata.warmed_by = None
     assert 'warmstart' not in core.Solver._make_graph_attributes(
@@ -427,12 +458,14 @@ def test_pool_investigation_ranks_routed_candidates(monkeypatch, P_A_toy):
 
         def __init__(self):
             self.index = 0
+            self._incumbent_S = nx.Graph(candidate=0)
 
         def _objective_at(self, index):
             self.index = index
             return (1.0, 2.0, 10.0)[index]
 
         def _topology_from_mip_pool(self):
+            assert self.index > 0, 'entry zero must be reused, not decoded again'
             return nx.Graph(candidate=self.index)
 
     pool = Pool()
@@ -476,11 +509,13 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     assert result['objective'] == result['preserved_objective']
     assert {
         'R', 'T', 'topology', 'capacity', 'max_load', 'has_loads', 'creator',
-        '_linkbits',
+        '_linkbits', '_topology_digest',
     } <= result['graph'].keys()  # fmt: skip
     linkbits = result['graph']['_linkbits']
     assert isinstance(linkbits, frozenbitarray)
     assert linkbits.endian == 'big'
+    assert result['graph']['_topology_digest'] == topology_digest(linkbits)
+    assert result['info_digest'] == result['graph']['_topology_digest']
     A = get_bundle('toy').A
     terminal_link_count = sum(u >= 0 and v >= 0 for u, v in A.edges)
     assert len(linkbits) == terminal_link_count + A.graph['R'] * A.graph['T']
@@ -911,7 +946,7 @@ def test_straight_get_solution_starts_from_best_incumbent(ortools_worker):
         _exercise_ortools_retrieval_branch, ('straight',), 30
     )
 
-    assert calls == ['incumbent']
+    assert calls == []
     assert source == 'best-objective'
     assert pathfinder_calls == 1
 
@@ -929,7 +964,7 @@ def test_pyomo_solution_retrieval_glue(monkeypatch, module_name, class_name, P_A
     P, A = P_A_toy
     S, G_tentative, G = nx.Graph(), nx.Graph(), nx.Graph()
     solver.P, solver.A = P, A
-    solver._load_incumbent_topology = lambda: S
+    solver._incumbent_S = S
     solver._make_graph_attributes = lambda: {'retrieved': True}
     monkeypatch.setattr(module, 'G_from_S', lambda actual, available: G_tentative)
 
@@ -947,16 +982,16 @@ def test_pyomo_solution_retrieval_glue(monkeypatch, module_name, class_name, P_A
 
 
 @pytest.mark.parametrize(
-    ('module_name', 'class_name', 'prepare'),
+    ('module_name', 'class_name'),
     (
-        ('optiwindnet.MILP.scip', 'SolverSCIP', False),
-        ('optiwindnet.MILP.cplex', 'SolverCplex', True),
-        ('optiwindnet.MILP.fscip', 'SolverFSCIP', False),
+        ('optiwindnet.MILP.scip', 'SolverSCIP'),
+        ('optiwindnet.MILP.cplex', 'SolverCplex'),
+        ('optiwindnet.MILP.fscip', 'SolverFSCIP'),
     ),
 )
 @pytest.mark.parametrize('feeder_route', ('segmented', 'straight'))
 def test_pool_backend_solution_retrieval_branches(
-    monkeypatch, module_name, class_name, prepare, feeder_route, P_A_toy
+    monkeypatch, module_name, class_name, feeder_route, P_A_toy
 ):
     module = importlib.import_module(module_name)
     solver = object.__new__(getattr(module, class_name))
@@ -965,18 +1000,19 @@ def test_pool_backend_solution_retrieval_branches(
     calls = []
     solver.P, solver.A = P, A
     solver.model_options = ModelOptions(feeder_route=feeder_route)
-    solver._incumbent_topology_from_pool = lambda: calls.append('incumbent') or S
+    solver._incumbent_S = S
     solver._investigate_pool = lambda planar, available: (
         calls.append('investigate') or (S, G)
     )
     solver._make_graph_attributes = lambda: {'retrieved': True}
-    if prepare:
-        solver._prepare_solution_pool = lambda: calls.append('prepare')
+    # solve() prepared the pool; retrieval must not do it again
+    solver._prepare_solution_pool = lambda: calls.append('prepare')
     monkeypatch.setattr(module, 'G_from_S', lambda actual, available: G_tentative)
 
     class FakePathFinder:
         def __init__(self, tentative, planar, available):
             assert (tentative, planar, available) == (G_tentative, P, A)
+            calls.append('route')
 
         def create_detours(self):
             return G
@@ -984,9 +1020,8 @@ def test_pool_backend_solution_retrieval_branches(
     monkeypatch.setattr(module, 'PathFinder', FakePathFinder)
 
     assert solver.get_solution() == (S, G)
-    expected = ['prepare'] if prepare else []
-    expected.append('incumbent' if feeder_route == 'straight' else 'investigate')
-    assert calls == expected
+    # the straight branch routes the cached incumbent; the segmented one investigates
+    assert calls == ['route' if feeder_route == 'straight' else 'investigate']
     assert G.graph['retrieved'] is True
 
 
@@ -1614,7 +1649,7 @@ def test_solver_pyomo_error_branches(monkeypatch):
         solver.solve(time_limit=1.0, mip_gap=1e-3)
 
     with pytest.raises(AttributeError, match="has no attribute 'model'"):
-        solver._load_incumbent_topology()
+        solver._decode_incumbent()
 
     term = type('Term', (), {'name': 'infeasible'})()
 

@@ -9,6 +9,7 @@ from itertools import chain, pairwise
 import networkx as nx
 import numba as nb
 import numpy as np
+import xxhash
 from bitarray import bitarray, frozenbitarray
 
 from .geometric import CoordPair, angle_helpers, rotate
@@ -30,7 +31,7 @@ __all__ = (
     'describe_G', 'directed_links', 'linkbits_from_S', 'make_remap',
     'pathdist', 'rings_from_S',
     'scaffolded', 'split_rings_and_calc_loads', 'terse_links_from_S',
-    'validate_routeset', 'validate_topology',
+    'topology_digest', 'validate_routeset', 'validate_topology',
 )  # fmt: skip
 
 
@@ -85,6 +86,22 @@ def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
     flat[positions] = 1
     packed = bitarray(buffer=np.packbits(flat).tobytes(), endian='big')
     return frozenbitarray(packed[:nbits])
+
+
+def topology_digest(linkbits: frozenbitarray) -> bytes:
+    """Return the 128-bit xxh3 digest of a topology's canonical ``linkbits``.
+
+    The digest covers the length of the link universe together with the packed
+    bits, so vectors that differ only in the zero padding of the last byte
+    cannot collide. It identifies the set of active links alone: topologies with
+    equal digests may still differ in load assignment or in routing.
+
+    Being non-cryptographic and not tied to any persisted record, it is
+    unrelated to the digests in :mod:`optiwindnet.fingerprint`.
+    """
+    return xxhash.xxh3_128_digest(
+        len(linkbits).to_bytes(4, 'little') + linkbits.tobytes()
+    )
 
 
 _essential_graph_attrs = (

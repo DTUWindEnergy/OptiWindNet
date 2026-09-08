@@ -122,10 +122,14 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
+    def _decode_incumbent(self) -> nx.Graph:
+        # solve() decodes through here, so the license must stay in use
+        return self._incumbent_topology_from_pool()
+
     def get_incumbent_topology(self) -> nx.Graph:
-        """Return the best model-objective incumbent, then close the solver."""
+        """Return the incumbent decoded by solve(), then close the solver."""
         try:
-            return self._incumbent_topology_from_pool()
+            return super().get_incumbent_topology()
         finally:
             self.solver.close()
 
@@ -135,7 +139,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         P = self.P
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
-                S = self._incumbent_topology_from_pool()
+                S = self._incumbent_S
                 G = PathFinder(G_from_S(S, A), P, A).create_detours()
             else:
                 S, G = self._investigate_pool(P, A)

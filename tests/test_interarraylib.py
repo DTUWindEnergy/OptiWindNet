@@ -37,6 +37,7 @@ from optiwindnet.interarraylib import (
     scaffolded,
     split_rings_and_calc_loads,
     terse_links_from_S,
+    topology_digest,
     update_lengths,
     validate_topology,
 )
@@ -76,6 +77,17 @@ def test_linkbits_from_S_empty_terminal_universe_has_only_feeders():
     S.add_edge(0, 1)
     with pytest.raises(ValueError, match='terminal link absent from A'):
         linkbits_from_S(A, S)
+
+
+def test_topology_digest_separates_vectors_that_share_padded_bytes():
+    """Padding to the byte boundary must not make shorter linkbits collide."""
+    six = frozenbitarray('010010')
+    eight = frozenbitarray('01001000')
+
+    assert topology_digest(six) == topology_digest(frozenbitarray('010010'))
+    assert six.tobytes() == eight.tobytes()
+    assert topology_digest(six) != topology_digest(eight)
+    assert len(topology_digest(six)) == 16
 
 
 @pytest.mark.parametrize('n', range(1, 13))

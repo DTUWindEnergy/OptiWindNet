@@ -26,6 +26,7 @@ from ..interarraylib import (
     _ring_split_position,
     bfs_subtree_loads,
     directed_links,
+    topology_digest,
 )
 from ..pathfinding import PathFinder
 from ..types import Topology
@@ -398,11 +399,28 @@ class ModelMetadata:
 
 @dataclass(slots=True)
 class SolutionInfo:
+    """Search outcome, plus the digest identifying the returned solution.
+
+    ``digest`` is the :func:`~optiwindnet.interarraylib.topology_digest` of the
+    model-objective incumbent, filled in by ``solve()``. It is empty only in an
+    instance built outside a solver. A solution pool may hand over a different
+    entry, whose own digest is the ``_topology_digest`` of the topology
+    ``get_solution()`` returns.
+    """
+
     runtime: float
     bound: float
     objective: float
     relgap: float
     termination: str
+    digest: bytes = b''
+
+    def __repr__(self) -> str:
+        fields = ', '.join(
+            f'{name}={getattr(self, name)!r}'
+            for name in ('runtime', 'bound', 'objective', 'relgap', 'termination')
+        )
+        return f'{type(self).__name__}({fields}, digest={self.digest.hex()!r})'
 
 
 def check_model_enums(
@@ -549,8 +567,28 @@ class Solver(abc.ABC):
     options: dict[str, Any]
     stopping: dict[str, Any]
     model_options: ModelOptions
-    solution_info: SolutionInfo
     applied_options: dict[str, Any]
+    # incumbent topology, decoded once by the `solution_info` setter
+    _incumbent_S: nx.Graph
+
+    @property
+    def solution_info(self) -> SolutionInfo:
+        "Outcome of the last search, as recorded by ``solve()``."
+        return self._solution_info
+
+    @solution_info.setter
+    def solution_info(self, solution_info: SolutionInfo) -> None:
+        """Record the search outcome, stamped with the incumbent's digest.
+
+        Every backend assigns here at the end of ``solve()``, once the solver's
+        best solution is readable. The incumbent is decoded once, here, and kept
+        for every later retrieval, so the digest is available as soon as
+        ``solve()`` returns. It stays pinned to the model-objective incumbent,
+        which is not necessarily the topology :meth:`get_solution` hands over.
+        """
+        self._solution_info = solution_info
+        S = self._incumbent_S = self._decode_incumbent()
+        solution_info.digest = S.graph['_topology_digest']
 
     @abc.abstractmethod
     def _link_val(self, var: Any) -> int | bool:
@@ -601,12 +639,25 @@ class Solver(abc.ABC):
         """
 
     @abc.abstractmethod
+    def _decode_incumbent(self) -> nx.Graph:
+        """Decode the solver's best-objective solution into a topology ``S``.
+
+        Called once per search, by the ``solution_info`` setter. Every later
+        retrieval reuses the result, so this must not release solver resources.
+        """
+
     def get_incumbent_topology(self) -> nx.Graph:
         """Return the best model-objective incumbent as topology ``S``.
 
-        This method does not route or rank solution-pool entries by detoured
-        length. Use :meth:`get_solution` for the routed, post-processed result.
+        The topology was decoded by :meth:`solve`; this neither routes it nor
+        ranks solution-pool entries by detoured length. Use :meth:`get_solution`
+        for the routed, post-processed result.
         """
+        try:
+            return self._incumbent_S
+        except AttributeError as exc:
+            exc.args += ('.solve() must be called before solution retrieval',)
+            raise
 
     @abc.abstractmethod
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
@@ -631,9 +682,16 @@ class Solver(abc.ABC):
             **self.stopping,
             **metadata.model_options,
         )
+        # the incumbent's digest is not a routeset attribute: the delivered
+        # topology carries its own `_topology_digest`, inherited from S
+        outcome = {
+            key: value
+            for key, value in asdict(solution_info).items()
+            if key != 'digest'
+        }
         # remaining graph attributes (key=value) are stored in db.RouteSet[].misc
         attr = dict(
-            **asdict(solution_info),
+            **outcome,
             method_options=method_options,
             solver_details=solver_details,
         )
@@ -719,6 +777,7 @@ class Solver(abc.ABC):
             max_load=max_load,
             has_loads=True,
             _linkbits=linkbits,
+            _topology_digest=topology_digest(linkbits),
             creator='MILP.' + self.name,
             solver_details={},
         )
@@ -730,6 +789,8 @@ class PoolHandler(abc.ABC):
     num_solutions: int
     model_options: ModelOptions
     solution_info: SolutionInfo
+    # topology of the best-objective pool entry, decoded by ``solve()``
+    _incumbent_S: nx.Graph
 
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
@@ -770,7 +831,8 @@ class PoolHandler(abc.ABC):
                     f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length"
                 )
                 break
-            Sʹ = self._topology_from_mip_pool()
+            # entry zero is the incumbent solve() already decoded
+            Sʹ = self._incumbent_S if i == 0 else self._topology_from_mip_pool()
             Gʹ = PathFinder(G_from_S(Sʹ, A), planar=P, A=A).create_detours()
             Λʹ = Gʹ.size(weight='length')
             if Λʹ < Λ:
