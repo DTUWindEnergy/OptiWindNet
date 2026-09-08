@@ -47,7 +47,7 @@ def run_milp_solve_with_retry(
     mip_gap: float,
     warmstart: nx.Graph | None = None,
 ) -> tuple[SolutionInfo, nx.Graph, str]:
-    """Execute solver.solve with retry on OWNSolutionNotFound or non-finite bounds."""
+    """Execute solver.solve with retry on failure or non-optimal solve."""
     solve_options = TEST_ONLY_SOLVER_OPTIONS.get(solver_name, {})
 
     def _single_solve(limit: float) -> tuple[SolutionInfo, nx.Graph, str]:
@@ -69,17 +69,22 @@ def run_milp_solve_with_retry(
         return info, S, solver.metadata.warmed_by
 
     try:
-        return _single_solve(time_limit)
+        info, S, warmed_by = _single_solve(time_limit)
+        if info.termination.lower() == 'optimal':
+            return info, S, warmed_by
+        reason = f'did not prove optimality (terminated with: {info.termination})'
     except OWNSolutionNotFound:
-        fallback_limit = time_limit * 3.0
-        warnings.warn(
-            f'Solver {solver_name!r} raised OWNSolutionNotFound within '
-            f'{time_limit} s (likely due to high CPU load); '
-            f'retrying with {fallback_limit} s time limit.',
-            UserWarning,
-            stacklevel=2,
-        )
-        return _single_solve(fallback_limit)
+        reason = 'raised OWNSolutionNotFound'
+
+    fallback_limit = time_limit * 3.0
+    warnings.warn(
+        f'Solver {solver_name!r} {reason} within '
+        f'{time_limit} s (likely due to high CPU load); '
+        f'retrying with {fallback_limit} s time limit.',
+        UserWarning,
+        stacklevel=2,
+    )
+    return _single_solve(fallback_limit)
 
 
 def warn_if_not_optimal(case: 'MILPCase', info: SolutionInfo) -> None:
