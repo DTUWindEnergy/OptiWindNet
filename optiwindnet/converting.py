@@ -113,6 +113,50 @@ _essential_graph_attrs = (
 )  # fmt: skip
 
 
+def _rings_from_S(S: nx.Graph) -> list[tuple[tuple[int, int], list[int]]]:
+    """Recover ordered ring terminal sequences from a RINGED solution graph.
+
+    Each ring is returned as ``((r1, r2), [t1, ..., tn])`` with ``t1`` and ``tn``
+    the feeder-connected terminals, obtained by walking the terminal adjacency
+    from the head subroot to the tail one; ``r1`` feeds ``t1`` and ``r2`` feeds
+    ``tn``. The ring bridges two substations when ``r1 != r2``.
+
+    Feeders are identified by having exactly one negative (root) endpoint; a ring
+    with a single terminal (``n == 1``) has both feeders on that terminal.
+    """
+    R = S.graph['R']
+    subroots = {r: [t for t in S[r] if t >= 0] if r in S else [] for r in range(-R, 0)}
+    rings: list[tuple[tuple[int, int], list[int]]] = []
+    # `subroots` is consumed as the walk goes: each feeder is claimed once
+    for r in range(-R, 0):
+        while subroots[r]:
+            t1 = subroots[r].pop(0)
+            chain_ = [t1]
+            prev, curr = None, t1
+            while True:
+                nxts = [x for x in S[curr] if x >= 0 and x != prev]
+                if not nxts:
+                    break
+                prev, curr = curr, nxts[0]
+                chain_.append(curr)
+            tn = chain_[-1]
+            # claim the tail feeder: a ring of n > 1 always has one, a lone
+            # terminal only if it bridges two roots
+            if tn in subroots[r]:
+                r2 = r
+            else:
+                r2 = next(
+                    (rc for rc in S[tn] if rc < 0 and rc != r and tn in subroots[rc]),
+                    None,
+                )
+            if r2 is None:
+                r2 = r
+            else:
+                subroots[r2].remove(tn)
+            rings.append(((r, r2), chain_))
+    return rings
+
+
 def L_from_site(
     *,
     VertexC: np.ndarray,
@@ -498,7 +542,7 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
 
     # Links already joining two real nodes carry over verbatim, keeping ``G``'s
     # own orientation: 'reverse' is relative to the stored node order, and the
-    # RINGED builders (:func:`add_ring_to_S`) and the forest ones
+    # RINGED builders (:func:`_add_ring_to_S`) and the forest ones
     # (:func:`bfs_subtree_loads`) give it different meanings — copying sidesteps
     # having to pick one.
     for u, v, edgeD in G.edges(data=True):

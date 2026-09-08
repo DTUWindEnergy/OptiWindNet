@@ -9,8 +9,9 @@ import networkx as nx
 import numpy as np
 
 from optiwindnet.api import WindFarmNetwork
+from optiwindnet.converting import _rings_from_S
 from optiwindnet.geometric import is_crossing
-from optiwindnet.loads import add_ring_to_S, rings_from_S
+from optiwindnet.loads import _add_ring_to_S
 from optiwindnet.MILP import (
     ModelOptions,
     OWNSolutionNotFound,
@@ -412,14 +413,14 @@ def ringed_S(R, ringspec):
     S = nx.Graph(R=R, T=sum(len(o) for _, o in ringspec))
     S.add_nodes_from(range(-R, 0))
     for i, (root, ordered) in enumerate(ringspec):
-        add_ring_to_S(S, (root, root), ordered, subtree=i, A=None)
+        _add_ring_to_S(S, (root, root), ordered, subtree=i, A=None)
     for r in range(-R, 0):
         S.nodes[r]['load'] = sum(S.nodes[n]['load'] for n in S[r])
-    # add_ring_to_S sets every load but leaves the flag to its caller
+    # _add_ring_to_S sets every load but leaves the flag to its caller
     S.graph['has_loads'] = True
     S.graph['max_load'] = max(data['load'] for _, _, data in S.edges(data=True))
     return S
 
 
 def ring_sets(S):
-    return {(r, frozenset(o)) for r, o in rings_from_S(S)}
+    return {(r, frozenset(o)) for r, o in _rings_from_S(S)}

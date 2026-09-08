@@ -10,7 +10,7 @@ from optiwindnet import pathfinding
 from optiwindnet.converting import G_from_S, S_from_G
 from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import assign_cables
-from optiwindnet.loads import add_ring_to_S, calcload
+from optiwindnet.loads import _add_ring_to_S, calcload
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
@@ -403,7 +403,7 @@ def test_pathfinder_ringed_topology():
     )
     S.add_nodes_from(range(-R, 0))
     for subtree, start in enumerate(range(0, T, 6)):
-        add_ring_to_S(
+        _add_ring_to_S(
             S,
             (-1, -1),
             list(range(start, min(start + 6, T))),

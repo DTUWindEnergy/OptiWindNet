@@ -10,7 +10,7 @@ import networkx as nx
 from .types import Topology
 
 __all__ = (
-    'add_ring_to_S', 'bfs_subtree_loads', 'calcload', 'rings_from_S',
+'bfs_subtree_loads', 'calcload',
     'split_rings_and_calc_loads',
 )  # fmt: skip
 
@@ -124,7 +124,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     Only the ringed builders (HGS, LKH and the ``method='ringed'`` constructor)
     call this, on a solution ``S`` that is still a set of simple
     ``root → … → root`` paths missing their zero-load links. Each path is walked
-    and closed into a canonical ring (see :func:`add_ring_to_S`), using ``A`` to
+    and closed into a canonical ring (see :func:`_add_ring_to_S`), using ``A`` to
     pick the longer zero-load link on odd-length rings; a tail already touching
     a root bridges two roots ``(r1, r2)``. Every ring receives exactly one
     zero-load link (``load=0``, no current flows through it), and each node's
@@ -168,7 +168,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     S.remove_edges_from(list(S.edges))
     max_load = 0
     for subtree_id, (roots, ordered) in enumerate(paths):
-        add_ring_to_S(S, roots, ordered, subtree_id, A)
+        _add_ring_to_S(S, roots, ordered, subtree_id, A)
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
         # a load=0 feeder carries no current, so it adds nothing to its root
@@ -258,7 +258,7 @@ def _ring_split_position(ordered: list[int], A: nx.Graph | None = None) -> int:
     return m
 
 
-def add_ring_to_S(
+def _add_ring_to_S(
     S: nx.Graph,
     roots: tuple[int, int],
     ordered: list[int],
@@ -325,47 +325,3 @@ def add_ring_to_S(
             u_lighter = S.nodes[u]['load'] < S.nodes[v]['load']
             source, sink = (u, v) if u_lighter else (v, u)
             S.add_edge(u, v, load=load, reverse=source < sink)
-
-
-def rings_from_S(S: nx.Graph) -> list[tuple[tuple[int, int], list[int]]]:
-    """Recover ordered ring terminal sequences from a RINGED solution graph.
-
-    Each ring is returned as ``((r1, r2), [t1, ..., tn])`` with ``t1`` and ``tn``
-    the feeder-connected terminals, obtained by walking the terminal adjacency
-    from the head subroot to the tail one; ``r1`` feeds ``t1`` and ``r2`` feeds
-    ``tn``. The ring bridges two substations when ``r1 != r2``.
-
-    Feeders are identified by having exactly one negative (root) endpoint; a ring
-    with a single terminal (``n == 1``) has both feeders on that terminal.
-    """
-    R = S.graph['R']
-    subroots = {r: [t for t in S[r] if t >= 0] if r in S else [] for r in range(-R, 0)}
-    rings: list[tuple[tuple[int, int], list[int]]] = []
-    # `subroots` is consumed as the walk goes: each feeder is claimed once
-    for r in range(-R, 0):
-        while subroots[r]:
-            t1 = subroots[r].pop(0)
-            chain_ = [t1]
-            prev, curr = None, t1
-            while True:
-                nxts = [x for x in S[curr] if x >= 0 and x != prev]
-                if not nxts:
-                    break
-                prev, curr = curr, nxts[0]
-                chain_.append(curr)
-            tn = chain_[-1]
-            # claim the tail feeder: a ring of n > 1 always has one, a lone
-            # terminal only if it bridges two roots
-            if tn in subroots[r]:
-                r2 = r
-            else:
-                r2 = next(
-                    (rc for rc in S[tn] if rc < 0 and rc != r and tn in subroots[rc]),
-                    None,
-                )
-            if r2 is None:
-                r2 = r
-            else:
-                subroots[r2].remove(tn)
-            rings.append(((r, r2), chain_))
-    return rings

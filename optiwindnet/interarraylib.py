@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import importlib
 import logging
 import math
+import warnings
 from collections.abc import Iterator
 from itertools import chain, pairwise
 
@@ -11,18 +13,62 @@ import numba as nb
 import numpy as np
 from bitarray import bitarray
 
+from .converting import _rings_from_S
 from .geometric import angle_helpers, rotate
-from .loads import rings_from_S
 from .types import Topology
 
 _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 
-__all__ = (
+_DEPRECATED_EXPORTS = {
+    'G_from_S': 'optiwindnet.converting',
+    'L_from_G': 'optiwindnet.converting',
+    'L_from_site': 'optiwindnet.converting',
+    'S_from_G': 'optiwindnet.converting',
+    'S_from_terse_links': 'optiwindnet.converting',
+    'terse_links_from_S': 'optiwindnet.converting',
+    'bfs_subtree_loads': 'optiwindnet.loads',
+    'calcload': 'optiwindnet.loads',
+    'split_rings_and_calc_loads': 'optiwindnet.loads',
+    'TerseLinks': 'optiwindnet.terse',
+    'as_hooked_to_head': 'optiwindnet.transforming',
+    'as_hooked_to_nearest': 'optiwindnet.transforming',
+    'as_normalized': 'optiwindnet.transforming',
+    'as_obstacle_free': 'optiwindnet.transforming',
+    'as_rescaled': 'optiwindnet.transforming',
+    'as_single_root': 'optiwindnet.transforming',
+    'as_stratified_vertices': 'optiwindnet.transforming',
+    'as_undetoured': 'optiwindnet.transforming',
+    'validate_routeset': 'optiwindnet.validating',
+    'validate_topology': 'optiwindnet.validating',
+}
+
+__all__ = (  # noqa: PLE0604
     'add_link_blockmap', 'add_link_cosines', 'add_terminal_closest_root',
     'assign_cables', 'count_diagonals', 'describe_G', 'directed_links',
     'make_remap', 'pathdist', 'scaffolded', 'update_lengths',
+    *_DEPRECATED_EXPORTS,
 )  # fmt: skip
+
+
+def __getattr__(name: str):
+    module_name = _DEPRECATED_EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f'module {__name__!r} has no attribute {name!r}') from None
+
+    warnings.warn(
+        f'{__name__}.{name} is deprecated and will be removed in v0.4.0; '
+        f'import it from {module_name} instead',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    value = getattr(importlib.import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | _DEPRECATED_EXPORTS.keys())
 
 
 def assign_cables(
@@ -189,8 +235,8 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     terminals, fed by a flowless closing feeder at one end and draining through
     a feeder carrying the whole ring at the other. Such rings are *radialized*
     into that chain here (walking across the zero-load link with
-    :func:`rings_from_S`), so the zero-load link becomes an ordinary
-    flow-carrying link.
+    :func:`~optiwindnet.converting._rings_from_S`), so the zero-load link
+    becomes an ordinary flow-carrying link.
 
     A ring bridging two roots drains through the one feeding the head of the
     walk and closes on the other; which of the two drains is arbitrary, as it
@@ -208,7 +254,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
             source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
             yield source, sink, edgeD['load']
         return
-    for root, chain_ in rings_from_S(S):
+    for root, chain_ in _rings_from_S(S):
         head_root, tail_root = root
         n = len(chain_)
         # the ring drains through chain_[0], whose feeder carries all of it, and

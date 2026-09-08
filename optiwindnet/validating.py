@@ -8,8 +8,8 @@ from itertools import pairwise
 
 import networkx as nx
 
-from .converting import S_from_G
-from .loads import calcload, rings_from_S
+from .converting import S_from_G, _rings_from_S
+from .loads import calcload
 from .types import Topology
 
 __all__ = ('validate_routeset', 'validate_topology')
@@ -29,7 +29,7 @@ def _validate_ringed(
             f'ring edges must not carry a kind, got {sorted(map(str, kinds))}'
         )
 
-    rings = rings_from_S(S)
+    rings = _rings_from_S(S)
 
     # the rings partition the terminal set: every terminal in exactly one ring
     covered = sorted(t for _, ordered in rings for t in ordered)
@@ -81,7 +81,7 @@ def _validate_ringed(
         elif opens:
             # the zero-load link splits the ring where the node loads say it does:
             # arm 1 takes `arm` terminals, and an odd-terminal ring has a second
-            # balanced split one link earlier (see :func:`add_ring_to_S`). Both
+            # balanced split one link earlier (see :func:`_add_ring_to_S`). Both
             # walk directions are covered: the two indices map onto each other.
             balanced = {arm - 1} if n % 2 == 0 else {arm - 1, arm - 2}
             if opens[0] not in balanced:

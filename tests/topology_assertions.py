@@ -2,7 +2,7 @@
 
 import networkx as nx
 
-from optiwindnet.loads import rings_from_S
+from optiwindnet.converting import _rings_from_S
 from optiwindnet.types import Topology
 from optiwindnet.validating import validate_topology
 
@@ -29,7 +29,7 @@ def assert_topology(S: nx.Graph, expected: Topology, capacity: int) -> None:
     elif expected is Topology.BRANCHED:
         assert nx.is_forest(S)
     else:
-        rings = rings_from_S(S)
+        rings = _rings_from_S(S)
         assert rings
         roots_used = {root for roots, _ in rings for root in roots}
         assert roots_used <= set(range(-R, 0))

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from optiwindnet.identity import fingerprint_coordinates
-from optiwindnet.loads import add_ring_to_S, calcload
+from optiwindnet.loads import _add_ring_to_S, calcload
 from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
 from optiwindnet.validating import validate_routeset
@@ -17,7 +17,7 @@ from .helpers import canonical_edges, tiny_wfn
 def test_topology_encoding_preserves_bridging_ring(n):
     S = nx.Graph(R=2, T=n, topology=Topology.RINGED)
     S.add_nodes_from((-2, -1))
-    add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
+    _add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
     calcload(S)
 
     encoded = TerseLinks.from_topology(S)

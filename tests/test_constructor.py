@@ -17,10 +17,9 @@ import logging
 import networkx as nx
 import pytest
 
-from optiwindnet.converting import linkbits_from_S
+from optiwindnet.converting import _rings_from_S, linkbits_from_S
 from optiwindnet.heuristics import constructor
 from optiwindnet.identity import topology_id
-from optiwindnet.loads import rings_from_S
 from optiwindnet.types import Topology
 
 from .cases import (
@@ -100,14 +99,14 @@ def test_constructor_ringed_capacity_sweep(capacity):
     A = get_bundle('albatros').A
     S = constructor(A, capacity=capacity, method='ringed')
     assert_topology(S, Topology.RINGED, capacity)
-    assert all(len(terminals) <= 2 * capacity for _, terminals in rings_from_S(S))
+    assert all(len(terminals) <= 2 * capacity for _, terminals in _rings_from_S(S))
 
 
 def test_constructor_ringed_multi_root_uses_every_root():
     A = get_bundle('neart').A
     S = constructor(A, capacity=5, method='ringed')
     assert_topology(S, Topology.RINGED, 5)
-    roots_used = {root for roots, _ in rings_from_S(S) for root in roots}
+    roots_used = {root for roots, _ in _rings_from_S(S) for root in roots}
     assert roots_used == set(range(-A.graph['R'], 0))
 
 
@@ -122,14 +121,14 @@ def test_constructor_ringed_exact_double_capacity_boundary():
     A = get_bundle('example_location').A
     S = constructor(A, capacity=6, method='ringed')
     assert_topology(S, Topology.RINGED, 6)
-    assert max(len(ring[1]) for ring in rings_from_S(S)) <= 12
+    assert max(len(ring[1]) for ring in _rings_from_S(S)) <= 12
 
 
 def test_constructor_ringed_odd_site_exercises_single_terminal_ring():
     A = get_bundle('london').A
     S = constructor(A, capacity=1, method='ringed')
     assert_topology(S, Topology.RINGED, 1)
-    assert any(len(terminals) == 1 for _, terminals in rings_from_S(S))
+    assert any(len(terminals) == 1 for _, terminals in _rings_from_S(S))
 
 
 @pytest.mark.parametrize('method', METHODS)

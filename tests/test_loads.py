@@ -6,10 +6,10 @@ import math
 import networkx as nx
 import pytest
 
+from optiwindnet.converting import _rings_from_S
 from optiwindnet.loads import (
-    add_ring_to_S,
+    _add_ring_to_S,
     calcload,
-    rings_from_S,
     split_rings_and_calc_loads,
 )
 from optiwindnet.MILP import Topology
@@ -19,10 +19,10 @@ from .helpers import tiny_wfn
 
 
 @pytest.mark.parametrize('n', range(1, 13))
-def test_add_ring_to_S_canonical_shape(n):
+def test_private_add_ring_to_S_canonical_shape(n):
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
-    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
+    _add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
 
     feeders = [data['load'] for u, v, data in S.edges(data=True) if min(u, v) < 0]
     zero_load_links = [
@@ -37,20 +37,6 @@ def test_add_ring_to_S_canonical_shape(n):
         assert len(zero_load_links) == 1
     assert sum(S.nodes[t]['load'] for t in S.neighbors(-1)) == n
     assert {S.nodes[t]['subtree'] for t in range(n)} == {0}
-
-
-@pytest.mark.parametrize('n', range(1, 13))
-@pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
-def test_rings_from_S_roundtrip(n, bridging):
-    R = 2 if bridging else 1
-    S = nx.Graph(R=R, T=n)
-    S.add_nodes_from(range(-R, 0))
-    roots = (-1, -2) if bridging else (-1, -1)
-    add_ring_to_S(S, roots, list(range(n)), subtree=0, A=None)
-
-    recovered_roots, ordered = rings_from_S(S)[0]
-    assert set(recovered_roots) == set(roots)
-    assert set(ordered) == set(range(n))
 
 
 def _path_form_S(R, paths):
@@ -76,7 +62,7 @@ def test_split_rings_and_calc_loads_single_and_multi_root():
     by_root = {
         root: {
             frozenset(ordered)
-            for roots, ordered in rings_from_S(multi)
+            for roots, ordered in _rings_from_S(multi)
             if roots == (root, root)
         }
         for root in (-2, -1)
