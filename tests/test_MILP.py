@@ -5,11 +5,13 @@ import pickle
 from typing import ClassVar
 
 import networkx as nx
+import numpy as np
 import pytest
+from bitarray import frozenbitarray
 
 import optiwindnet.MILP._core as core
 from optiwindnet import MILP
-from optiwindnet.interarraylib import terse_links_from_S
+from optiwindnet.interarraylib import terse_links_from_S, topology_digest
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.terse import TerseLinks
 from optiwindnet.types import Topology
@@ -74,6 +76,29 @@ def _build_toy_ringed_then_offer_a_str(module_name):
     return ring_vars, stored_enum, 'accepted'
 
 
+def _two_root_toy_A():
+    """Return toy's available links with a synthetic second root-distance column."""
+    A = get_bundle('toy').A.copy()
+    d2roots = A.graph['d2roots']
+    A.graph.update(
+        R=2,
+        d2roots=np.column_stack((d2roots[:, 0], d2roots[:, 0] + 1.0)),
+    )
+    return A
+
+
+def _build_two_root_linkset(module_name, topology):
+    make_min_length_model = importlib.import_module(module_name).make_min_length_model
+    A = _two_root_toy_A()
+    _, metadata = make_min_length_model(A, _CAPACITY, topology=topology)
+    mapping_order = tuple(metadata.link_)
+    values_match_keys = all(
+        metadata.link_[link] is var
+        for link, var in zip(mapping_order, metadata.link_.values(), strict=True)
+    )
+    return tuple(metadata.linkset), mapping_order, values_match_keys, metadata.weight_
+
+
 def _warmup_with_uncoerced_topology():
     """Warm-start a BRANCHED model with a RADIAL S, then with its str spelling.
 
@@ -124,12 +149,25 @@ def _solve_toy_incumbent(solver_name, topology):
         side_effect=AssertionError('incumbent retrieval must not route'),
     ):
         S = solver.get_incumbent_topology()
+    E, _, stars, _ = core.canonical_linksets(
+        nx.subgraph_view(A, filter_node=lambda node: node >= 0),
+        R=A.graph['R'],
+        T=A.graph['T'],
+        topology=Topology(topology),
+    )
+    solution_edges = {frozenset(edge) for edge in S.edges}
+    expected_bits = frozenbitarray(
+        frozenset(link) in solution_edges for link in E + stars
+    )
     return {
         'terse': terse_links_from_S(S),
         'violations': validate_topology(S, _CAPACITY),
         'graph': dict(S.graph),
+        'linkbits_match': S.graph['_linkbits'] == expected_bits,
         'objective': solution_info.objective,
         'preserved_objective': solver.solution_info.objective,
+        # solve() must return the digest already stamped on SolutionInfo
+        'info_digest': solution_info.digest,
     }
 
 
@@ -156,17 +194,13 @@ def _exercise_ortools_retrieval_branch(feeder_route):
     S = nx.Graph(source='best-objective')
     G = nx.Graph()
 
-    def incumbent():
-        calls.append('incumbent')
-        return S
-
     def investigate(P, A):
         assert P is solver.P
         assert A is solver.A
         calls.append('investigate')
         return S, G
 
-    solver._incumbent_topology_from_pool = incumbent
+    solver._incumbent_S = S
     solver._investigate_pool = investigate
     solver._make_graph_attributes = lambda: {'solver_details': {}}
     with (
@@ -230,6 +264,121 @@ def P_A_toy():
     return bundle.P, bundle.A
 
 
+def test_canonical_linksets_ignore_graph_insertion_order():
+    A = nx.Graph()
+    A.add_nodes_from((3, 1, 2, 0))
+    A.add_edges_from(((3, 1), (2, 0), (3, 2), (1, 0)))
+
+    E, Eʹ, stars, starsʹ = core.canonical_linksets(
+        A, R=2, T=4, topology=Topology.RINGED
+    )
+
+    assert E == ((0, 1), (0, 2), (1, 3), (2, 3))
+    assert Eʹ == ((1, 0), (2, 0), (3, 1), (3, 2))
+    assert stars == (
+        (0, -2), (0, -1),
+        (1, -2), (1, -1),
+        (2, -2), (2, -1),
+        (3, -2), (3, -1),
+    )  # fmt: skip
+    assert starsʹ == tuple((r, t) for t, r in stars)
+
+
+@pytest.mark.parametrize(
+    ('topology', 'expected'),
+    (
+        (Topology.BRANCHED, '110100001'),
+        (Topology.RINGED, '110100101'),
+    ),
+)
+def test_linkbits_from_directed_combines_directions_in_canonical_order(
+    topology, expected
+):
+    A = nx.Graph(((2, 0), (1, 0), (2, 1)))
+    families = core.canonical_linksets(A, R=2, T=3, topology=topology)
+    E, Eʹ, stars, starsʹ = families
+    linkset = E + Eʹ + stars + starsʹ
+
+    active = {(0, 1), (2, 0), (0, -2), (-1, 1), (2, -1)}
+    values = (link in active for link in linkset)
+
+    # E: (0, 1), (0, 2), (1, 2); stars: terminal-major, roots -2 then -1
+    assert core.linkbits_from_directed(
+        values,
+        terminal_link_count=len(E),
+        feeder_link_count=len(stars),
+        ringed=topology is Topology.RINGED,
+    ) == frozenbitarray(expected)
+
+
+@pytest.mark.parametrize(
+    ('values', 'message'),
+    (((0,), 'equal lengths'), ((0, 2), 'not binary')),
+)
+def test_linkbits_from_directed_rejects_invalid_values(values, message):
+    with pytest.raises(ValueError, match=message):
+        core.linkbits_from_directed(
+            values,
+            terminal_link_count=1,
+            feeder_link_count=0,
+            ringed=False,
+        )
+
+
+@pytest.mark.parametrize(
+    ('module_name', 'solver_name'),
+    [
+        ('optiwindnet.MILP.ortools', 'ortools.cp_sat'),
+        ('optiwindnet.MILP.scip', 'scip'),
+        ('optiwindnet.MILP.pyomo', 'highs'),
+    ],
+    ids=('ortools', 'scip', 'pyomo'),
+)
+@pytest.mark.parametrize('topology', (Topology.BRANCHED, Topology.RINGED))
+def test_milp_builders_share_canonical_linkset(
+    run_isolated, module_name, solver_name, topology
+):
+    result = run_isolated(
+        solver_name, _build_two_root_linkset, (module_name, topology), 60
+    )
+    if isinstance(result, BaseException):
+        if solver_unavailable(result):
+            pytest.skip(f'{solver_name} unavailable: {result}')
+        raise result
+    linkset, mapping_order, values_match_keys, _ = result
+
+    A = _two_root_toy_A()
+    T, R = (A.graph[key] for key in 'TR')
+    A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
+    families = core.canonical_linksets(A_terminals, R, T, topology)
+
+    assert linkset == sum(families, ())
+    assert mapping_order == linkset
+    assert values_match_keys
+
+
+@pytest.mark.parametrize('topology', (Topology.BRANCHED, Topology.RINGED))
+def test_mathopt_canonical_linkset_weights_stay_aligned(ortools_worker, topology):
+    result = ortools_worker.run(
+        _build_two_root_linkset,
+        ('optiwindnet.MILP.ortools', topology),
+        60,
+    )
+    if isinstance(result, BaseException):
+        raise result
+    linkset, _, _, weights = result
+
+    A = _two_root_toy_A()
+    expected = tuple(
+        A[u][v]['length']
+        if u >= 0 and v >= 0
+        else A.graph['d2roots'][(u, v) if u >= 0 else (v, u)]
+        for u, v in linkset
+    )
+
+    assert weights == expected
+
+
 def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():
     pool = _FakePool([(7.0, 'later'), (1.0, 'best'), (4.0, 'middle')])
 
@@ -239,6 +388,33 @@ def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():
     assert pool.objectives_requested == [0]
     assert pool.decoded == ['best']
     assert pool.investigations == 0
+
+
+def test_recording_solution_info_stamps_the_incumbent_digest():
+    """Every backend's solve() assigns solution_info; the digest rides along."""
+    # a Pyomo-backed solver needs no native library and trips no rival guard
+    from optiwindnet.MILP.pyomo import SolverPyomo
+
+    digest = topology_digest(frozenbitarray('1001'))
+
+    solver = SolverPyomo('cbc')
+    solver._decode_incumbent = lambda: nx.Graph(_topology_digest=digest)
+    info = core.SolutionInfo(1.0, 1.0, 1.0, 0.0, 'optimal')
+
+    solver.solution_info = info
+
+    assert info.digest == digest
+    assert solver.solution_info is info
+
+
+def test_solution_info_repr_shows_the_digest_as_hex():
+    info = core.SolutionInfo(1.0, 2.0, 3.0, 0.1, 'optimal')
+
+    assert repr(info).endswith("termination='optimal', digest='')")
+
+    info.digest = topology_digest(frozenbitarray('0110'))
+
+    assert repr(info).endswith(f"digest='{info.digest.hex()}')")
 
 
 def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
@@ -255,6 +431,8 @@ def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
         applied_options={'threads': 1},
         stopping={'time_limit': 1, 'mip_gap': 0.01},
     )
+    digest = topology_digest(frozenbitarray('0110'))
+    fake.solution_info.digest = digest
 
     attributes = core.Solver._make_graph_attributes(
         fake  # pyrefly: ignore[bad-argument-type]
@@ -263,6 +441,10 @@ def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
     assert attributes['warmstart'] == 'constructor'
     assert attributes['solver_details']['max_feeders'] == 3
     assert 'max_feeders' not in attributes['method_options']
+    # the incumbent's digest is not a routeset attribute; S carries its own
+    assert 'digest' not in attributes
+    assert '_topology_digest' not in attributes
+    assert fake.solution_info.digest == digest
 
     fake.metadata.warmed_by = None
     assert 'warmstart' not in core.Solver._make_graph_attributes(
@@ -276,12 +458,14 @@ def test_pool_investigation_ranks_routed_candidates(monkeypatch, P_A_toy):
 
         def __init__(self):
             self.index = 0
+            self._incumbent_S = nx.Graph(candidate=0)
 
         def _objective_at(self, index):
             self.index = index
             return (1.0, 2.0, 10.0)[index]
 
         def _topology_from_mip_pool(self):
+            assert self.index > 0, 'entry zero must be reused, not decoded again'
             return nx.Graph(candidate=self.index)
 
     pool = Pool()
@@ -321,10 +505,20 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     assert isinstance(golden, TerseLinks)
     assert tuple(result['terse']) == golden.links
     assert result['violations'] == []
+    assert result['linkbits_match']
     assert result['objective'] == result['preserved_objective']
     assert {
         'R', 'T', 'topology', 'capacity', 'max_load', 'has_loads', 'creator',
+        '_linkbits', '_topology_digest',
     } <= result['graph'].keys()  # fmt: skip
+    linkbits = result['graph']['_linkbits']
+    assert isinstance(linkbits, frozenbitarray)
+    assert linkbits.endian == 'big'
+    assert result['graph']['_topology_digest'] == topology_digest(linkbits)
+    assert result['info_digest'] == result['graph']['_topology_digest']
+    A = get_bundle('toy').A
+    terminal_link_count = sum(u >= 0 and v >= 0 for u, v in A.edges)
+    assert len(linkbits) == terminal_link_count + A.graph['R'] * A.graph['T']
 
 
 @pytest.mark.parametrize('topology', ['radial', 'ringed'])
@@ -338,6 +532,7 @@ def test_ortools_incumbent_decodes_valid_topology(ortools_worker, topology):
         raise result
 
     assert result['violations'] == []
+    assert result['linkbits_match']
     assert result['graph']['topology'] == topology
 
 
@@ -412,7 +607,8 @@ def test_ringed_warmstart_links_conserve_flow(n, bridging):
 
 @pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
 @pytest.mark.parametrize('n', range(1, 11))
-def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
+@pytest.mark.parametrize('descending_lengths', (False, True))
+def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
     from types import SimpleNamespace
 
     head_root = -1
@@ -421,17 +617,30 @@ def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
     flows = {(0, head_root): n}
     flows.update({(terminal, terminal - 1): n - terminal for terminal in range(1, n)})
     closing_link = (close_root, n - 1)
-    links = dict.fromkeys((*flows, closing_link), True)
+    active_links = {*flows, closing_link}
+    A = nx.path_graph(n)
+    nx.set_edge_attributes(
+        A,
+        {edge: n - edge[0] if descending_lengths else edge[0] + 1 for edge in A.edges},
+        'length',
+    )
+    E, Eʹ, stars, starsʹ = core.canonical_linksets(
+        A, R=R, T=n, topology=Topology.RINGED
+    )
+    A.graph.update(
+        R=R, T=n, _canonical_terminal_links=np.array(E, dtype=np.uint32).reshape(-1, 2)
+    )
+    linkset = E + Eʹ + stars + starsʹ
+    links = {link: link in active_links for link in linkset}
     metadata = SimpleNamespace(
         R=R,
         T=n,
         capacity=math.ceil(n / 2),
+        linkset=linkset,
         model_options={'topology': Topology.RINGED},
         link_=links,
         flow_=flows,
     )
-    A = nx.path_graph(n)
-    nx.set_edge_attributes(A, {edge: 1.0 for edge in A.edges}, 'length')
 
     class FakeSolver:
         name = 'fake'
@@ -444,7 +653,7 @@ def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
 
         @staticmethod
         def _flow_val(value):
-            return value
+            raise AssertionError('unit-power decoding must not read flow variables')
 
     fake = FakeSolver()
     fake.A = A
@@ -454,6 +663,68 @@ def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
     )
 
     assert_topology(S, Topology.RINGED, metadata.capacity)
+    active_edges = {frozenset(link) for link in active_links}
+    assert S.graph['_linkbits'] == frozenbitarray(
+        frozenset(link) in active_edges for link in E + stars
+    )
+    assert all('kind' not in attrs for _, attrs in S.nodes(data=True))
+
+
+@pytest.mark.parametrize('topology', (Topology.BRANCHED, Topology.RADIAL))
+@pytest.mark.parametrize('powers', (None, (1, 1, 1), (2, 3, 1)))
+def test_forest_mip_decoder_preserves_non_unit_power(topology, powers):
+    from types import SimpleNamespace
+
+    A = nx.path_graph(3)
+    if powers is not None:
+        nx.set_node_attributes(A, dict(enumerate(powers)), 'power')
+    E, reverse, stars, _ = core.canonical_linksets(A, R=2, T=3, topology=topology)
+    A.graph.update(R=2, T=3, _canonical_terminal_links=np.array(E, dtype=np.uint32))
+    p0, p1, p2 = powers if powers is not None else (1, 1, 1)
+    flows = {(0, 1): p0, (1, 2): p0 + p1, (2, -1): p0 + p1 + p2}
+    linkset = E + reverse + stars
+
+    class FakeSolver:
+        name = 'fake'
+        _topology_from_mip_flows = core.Solver._topology_from_mip_flows
+        flow_reads = 0
+
+        def __init__(self):
+            self.A = A
+            self.metadata = SimpleNamespace(
+                R=2,
+                T=3,
+                capacity=6,
+                model_options={'topology': topology},
+                linkset=linkset,
+                link_={link: link in flows for link in linkset},
+                flow_=flows,
+            )
+
+        @staticmethod
+        def _link_val(value):
+            return value
+
+        def _flow_val(self, value):
+            self.flow_reads += 1
+            return value
+
+    fake = FakeSolver()
+    S = core.Solver._topology_from_mip_sol(
+        fake  # pyrefly: ignore[bad-argument-type]
+    )
+    assert {frozenset(edge) for edge in S.edges} == {frozenset(edge) for edge in flows}
+    assert S.nodes[-2]['load'] == 0
+    assert S.nodes[-1]['load'] == p0 + p1 + p2
+    assert S.graph['max_load'] == p0 + p1 + p2
+    for (u, v), load in flows.items():
+        assert S[u][v] == {'load': load, 'reverse': u < v}
+        assert S.nodes[u] == {'load': load, 'subtree': 0}
+    assert fake.flow_reads == (3 if powers == (2, 3, 1) else 0)
+    assert S.graph['_topology_digest'] == topology_digest(S.graph['_linkbits'])
+    assert S.graph['topology'] is topology
+    assert S.graph['capacity'] == 6
+    assert S.graph['has_loads']
 
 
 def test_ringed_warmstart_is_accepted_by_scip():
@@ -741,7 +1012,7 @@ def test_straight_get_solution_starts_from_best_incumbent(ortools_worker):
         _exercise_ortools_retrieval_branch, ('straight',), 30
     )
 
-    assert calls == ['incumbent']
+    assert calls == []
     assert source == 'best-objective'
     assert pathfinder_calls == 1
 
@@ -759,7 +1030,7 @@ def test_pyomo_solution_retrieval_glue(monkeypatch, module_name, class_name, P_A
     P, A = P_A_toy
     S, G_tentative, G = nx.Graph(), nx.Graph(), nx.Graph()
     solver.P, solver.A = P, A
-    solver._load_incumbent_topology = lambda: S
+    solver._incumbent_S = S
     solver._make_graph_attributes = lambda: {'retrieved': True}
     monkeypatch.setattr(module, 'G_from_S', lambda actual, available: G_tentative)
 
@@ -777,16 +1048,16 @@ def test_pyomo_solution_retrieval_glue(monkeypatch, module_name, class_name, P_A
 
 
 @pytest.mark.parametrize(
-    ('module_name', 'class_name', 'prepare'),
+    ('module_name', 'class_name'),
     (
-        ('optiwindnet.MILP.scip', 'SolverSCIP', False),
-        ('optiwindnet.MILP.cplex', 'SolverCplex', True),
-        ('optiwindnet.MILP.fscip', 'SolverFSCIP', False),
+        ('optiwindnet.MILP.scip', 'SolverSCIP'),
+        ('optiwindnet.MILP.cplex', 'SolverCplex'),
+        ('optiwindnet.MILP.fscip', 'SolverFSCIP'),
     ),
 )
 @pytest.mark.parametrize('feeder_route', ('segmented', 'straight'))
 def test_pool_backend_solution_retrieval_branches(
-    monkeypatch, module_name, class_name, prepare, feeder_route, P_A_toy
+    monkeypatch, module_name, class_name, feeder_route, P_A_toy
 ):
     module = importlib.import_module(module_name)
     solver = object.__new__(getattr(module, class_name))
@@ -795,18 +1066,19 @@ def test_pool_backend_solution_retrieval_branches(
     calls = []
     solver.P, solver.A = P, A
     solver.model_options = ModelOptions(feeder_route=feeder_route)
-    solver._incumbent_topology_from_pool = lambda: calls.append('incumbent') or S
+    solver._incumbent_S = S
     solver._investigate_pool = lambda planar, available: (
         calls.append('investigate') or (S, G)
     )
     solver._make_graph_attributes = lambda: {'retrieved': True}
-    if prepare:
-        solver._prepare_solution_pool = lambda: calls.append('prepare')
+    # solve() prepared the pool; retrieval must not do it again
+    solver._prepare_solution_pool = lambda: calls.append('prepare')
     monkeypatch.setattr(module, 'G_from_S', lambda actual, available: G_tentative)
 
     class FakePathFinder:
         def __init__(self, tentative, planar, available):
             assert (tentative, planar, available) == (G_tentative, P, A)
+            calls.append('route')
 
         def create_detours(self):
             return G
@@ -814,9 +1086,8 @@ def test_pool_backend_solution_retrieval_branches(
     monkeypatch.setattr(module, 'PathFinder', FakePathFinder)
 
     assert solver.get_solution() == (S, G)
-    expected = ['prepare'] if prepare else []
-    expected.append('incumbent' if feeder_route == 'straight' else 'investigate')
-    assert calls == expected
+    # the straight branch routes the cached incumbent; the segmented one investigates
+    assert calls == ['route' if feeder_route == 'straight' else 'investigate']
     assert G.graph['retrieved'] is True
 
 
@@ -1444,7 +1715,7 @@ def test_solver_pyomo_error_branches(monkeypatch):
         solver.solve(time_limit=1.0, mip_gap=1e-3)
 
     with pytest.raises(AttributeError, match="has no attribute 'model'"):
-        solver._load_incumbent_topology()
+        solver._decode_incumbent()
 
     term = type('Term', (), {'name': 'infeasible'})()
 

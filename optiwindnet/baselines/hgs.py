@@ -13,7 +13,12 @@ import numpy as np
 
 from ..clustering import clusterize
 from ..fingerprint import fingerprint_function
-from ..interarraylib import calcload, split_rings_and_calc_loads
+from ..interarraylib import (
+    calcload,
+    linkbits_from_S,
+    split_rings_and_calc_loads,
+    topology_digest,
+)
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
@@ -452,6 +457,12 @@ def hgs_cvrp(
             )
         return S
 
+    # Only HGS interprets an edgeless A as a complete terminal graph.
+    if A.number_of_edges() == 0:
+        A.graph['_canonical_terminal_links'] = np.stack(
+            np.triu_indices(T, k=1), axis=1
+        ).astype(np.uint32)
+
     # iterative repair loop
     A_orig = A  # the loop may rebind A to a pruned copy
     diagonals = A.graph['diagonals']
@@ -486,10 +497,13 @@ def hgs_cvrp(
         S.graph['topology'] = Topology.RADIAL
         calcload(S)
 
+    linkbits = linkbits_from_S(A_orig, S)
     S.graph.update(
         T=T,
         R=R,
         capacity=capacity,
+        _linkbits=linkbits,
+        _topology_digest=topology_digest(linkbits),
         creator='baselines.hgs',
         method_options=dict(
             solver_name='HGS-CVRP',

@@ -25,6 +25,7 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    canonical_linksets,
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
@@ -152,8 +153,7 @@ class SolverSCIP(Solver, PoolHandler):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def get_incumbent_topology(self) -> nx.Graph:
-        """Return the best model-objective incumbent without geometric routing."""
+    def _decode_incumbent(self) -> nx.Graph:
         return self._incumbent_topology_from_pool()
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
@@ -161,7 +161,7 @@ class SolverSCIP(Solver, PoolHandler):
             A = self.A
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self._incumbent_topology_from_pool()
+            S = self._incumbent_S
             G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
             S, G = self._investigate_pool(P, A)
@@ -220,15 +220,7 @@ def make_min_length_model(
     _T = range(T)
     _R = range(-R, 0)
 
-    E = tuple(((u, v) if u < v else (v, u)) for u, v in A_terminals.edges())
-    # using directed node-node links -> create the reversed tuples
-    Eʹ = tuple((v, u) for u, v in E)
-    # set of feeders to all roots
-    stars = tuple((t, r) for t in _T for r in _R)
-    if topology is Topology.RINGED:
-        starsʹ = tuple((r, t) for t, r in stars)
-    else:
-        starsʹ = ()
+    E, Eʹ, stars, starsʹ = canonical_linksets(A_terminals, R, T, topology)
     linkset = E + Eʹ + stars + starsʹ
     # flow variables only for edges with actual flow (no ring-backs)
     flowset = E + Eʹ + stars

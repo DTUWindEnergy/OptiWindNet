@@ -29,6 +29,7 @@ from ._core import (
     SolutionInfo,
     Solver,
     Topology,
+    canonical_linksets,
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
@@ -167,7 +168,7 @@ class SolverPyomo(Solver):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def _load_incumbent_topology(self) -> nx.Graph:
+    def _decode_incumbent(self) -> nx.Graph:
         model = self.model
         try:
             result = self.result
@@ -176,20 +177,18 @@ class SolverPyomo(Solver):
             raise
         # hack to prevent warning about the solver not reaching the desired mip_gap
         result.solver.status = pyo.SolverStatus.ok
+        # load_from() consumes the result's symbol map, so it may run only once
+        # per search: solve() decodes the incumbent, every retrieval reuses it.
         model.solutions.load_from(result)
         S = self._topology_from_mip_sol()
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         return S
 
-    def get_incumbent_topology(self) -> nx.Graph:
-        """Return the best model-objective incumbent without geometric routing."""
-        return self._load_incumbent_topology()
-
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         P = self.P
         if A is None:
             A = self.A
-        S = self._load_incumbent_topology()
+        S = self._incumbent_S
         G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -280,7 +279,7 @@ class SolverPyomoAppsi(Solver):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def _load_incumbent_topology(self) -> nx.Graph:
+    def _decode_incumbent(self) -> nx.Graph:
         try:
             result = self.result
         except AttributeError as exc:
@@ -292,15 +291,11 @@ class SolverPyomoAppsi(Solver):
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         return S
 
-    def get_incumbent_topology(self) -> nx.Graph:
-        """Return the best model-objective incumbent without geometric routing."""
-        return self._load_incumbent_topology()
-
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         P = self.P
         if A is None:
             A = self.A
-        S = self._load_incumbent_topology()
+        S = self._incumbent_S
         G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -351,16 +346,7 @@ def make_min_length_model(
     _T = range(T)
     _R = range(-R, 0)
 
-    E = tuple(((u, v) if u < v else (v, u)) for u, v in A_terminals.edges())
-    # using directed node-node links -> create the reversed tuples
-    Eʹ = tuple((v, u) for u, v in E)
-    # set of feeders to all roots
-    stars = tuple((t, r) for t in _T for r in _R)
-    if topology is Topology.RINGED:
-        # append the links leaving the roots
-        starsʹ = tuple((r, t) for t, r in stars)
-    else:
-        starsʹ = ()
+    E, Eʹ, stars, starsʹ = canonical_linksets(A_terminals, R, T, topology)
 
     # Create model
     m = pyo.ConcreteModel()

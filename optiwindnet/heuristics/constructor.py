@@ -21,7 +21,9 @@ from ..interarraylib import (
     add_link_blockmap,
     add_terminal_closest_root,
     calcload,
+    linkbits_from_S,
     split_rings_and_calc_loads,
+    topology_digest,
 )
 from ..types import Topology
 from .priorityqueue import PriorityQueue
@@ -995,9 +997,12 @@ def constructor(
     else:
         calcload(S)
     # algorithm finished, store some info in the graph object
+    linkbits = linkbits_from_S(Aʹ, S)
     S.graph.update(
         runtime=time.perf_counter() - start_time,
         capacity=capacity_report,
+        _linkbits=linkbits,
+        _topology_digest=topology_digest(linkbits),
         creator='constructor',
         iterations=i,
         method_options={

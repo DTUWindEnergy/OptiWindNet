@@ -6,12 +6,14 @@ import pickle
 import networkx as nx
 import numpy as np
 import pytest
+from bitarray import bitarray, frozenbitarray
 
 from optiwindnet.interarraylib import (
     G_from_S,
     L_from_G,
     L_from_site,
     S_from_G,
+    S_from_linkbits,
     S_from_terse_links,
     add_link_blockmap,
     add_link_cosines,
@@ -29,12 +31,14 @@ from optiwindnet.interarraylib import (
     calcload,
     count_diagonals,
     describe_G,
+    linkbits_from_S,
     make_remap,
     pathdist,
     rings_from_S,
     scaffolded,
     split_rings_and_calc_loads,
     terse_links_from_S,
+    topology_digest,
     update_lengths,
     validate_topology,
 )
@@ -42,6 +46,110 @@ from optiwindnet.MILP import Topology
 
 from .helpers import assert_graph_equal, tiny_wfn
 from .sitecache import get_bundle
+
+
+def test_linkbits_from_S_uses_canonical_edge_and_feeder_order():
+    A = nx.Graph(T=3, R=2)
+    A.add_edges_from(((2, 1), (2, 0), (1, 0)))
+    A.graph['_canonical_terminal_links'] = np.array(
+        ((0, 1), (0, 2), (1, 2)), dtype=np.uint32
+    )
+    S = nx.Graph(((2, 0), (-1, 1), (-2, 2)))
+
+    linkbits = linkbits_from_S(A, S)
+
+    assert linkbits == frozenbitarray('010000110')
+    assert A.graph['_canonical_terminal_links'].tolist() == [[0, 1], [0, 2], [1, 2]]
+
+
+def test_linkbits_from_S_requires_canonical_terminal_links():
+    A = nx.Graph(T=3, R=1)
+    S = nx.Graph(((0, 2), (-1, 1)))
+
+    with pytest.raises(KeyError, match='_canonical_terminal_links'):
+        linkbits_from_S(A, S)
+
+
+def test_linkbits_from_S_empty_terminal_universe_has_only_feeders():
+    A = nx.Graph(T=3, R=1, _canonical_terminal_links=np.empty((0, 2), np.uint32))
+    S = nx.Graph(((-1, 0), (-1, 1), (-1, 2)))
+
+    assert linkbits_from_S(A, S) == frozenbitarray('111')
+    S.add_edge(0, 1)
+    with pytest.raises(ValueError, match='terminal link absent from A'):
+        linkbits_from_S(A, S)
+
+
+@pytest.mark.parametrize('bits_type', (bitarray, frozenbitarray))
+@pytest.mark.parametrize('endian', ('big', 'little'))
+def test_S_from_linkbits_uses_canonical_edge_and_feeder_order(bits_type, endian):
+    A = nx.Graph(T=3, R=2)
+    A.add_edges_from(((2, 1), (2, 0), (1, 0), (-1, 0), (0, 3)))
+    A.graph['_canonical_terminal_links'] = np.array(
+        ((0, 1), (0, 2), (1, 2)), dtype=np.uint32
+    )
+    bits = bits_type('010000110', endian=endian)
+
+    S = S_from_linkbits(bits, A)
+
+    assert {frozenset(edge) for edge in S.edges} == {
+        frozenset(edge) for edge in ((0, 2), (-1, 1), (-2, 2))
+    }
+    assert set(S) == set(range(-2, 3))
+    assert S.graph == {'T': 3, 'R': 2}
+    assert all(not attrs for _, attrs in S.nodes(data=True))
+    assert linkbits_from_S(A, S) == bits
+
+
+@pytest.mark.parametrize('terminal_edges', ((), ((0, 2),), ((0, 1), (0, 2), (1, 2))))
+def test_S_from_linkbits_roundtrip_every_link(terminal_edges):
+    A = nx.Graph(T=3, R=2)
+    A.add_edges_from(terminal_edges)
+    A.graph['_canonical_terminal_links'] = np.array(
+        terminal_edges, dtype=np.uint32
+    ).reshape(-1, 2)
+    nbits = len(terminal_edges) + 6
+    for position in range(nbits):
+        bits = bitarray(nbits)
+        bits.setall(0)
+        bits[position] = 1
+        S = S_from_linkbits(bits, A)
+        assert S.number_of_edges() == 1
+        assert linkbits_from_S(A, S) == bits
+
+
+@pytest.mark.parametrize('R, T', ((2, 3), (1, 1), (1, 0), (0, 0), (0, 3)))
+def test_S_from_linkbits_preserves_isolated_nodes(R, T):
+    A = nx.Graph(R=R, T=T)
+    A.graph['_canonical_terminal_links'] = np.array(
+        list(itertools.combinations(range(T), 2)), dtype=np.uint32
+    ).reshape(-1, 2)
+    bits = frozenbitarray('0' * (T * (T - 1) // 2 + R * T))
+    S = S_from_linkbits(bits, A)
+    assert set(S) == set(range(-R, T))
+    assert S.number_of_edges() == 0
+    assert linkbits_from_S(A, S) == bits
+
+
+@pytest.mark.parametrize('nbits', (0, 5, 7))
+def test_S_from_linkbits_rejects_wrong_bit_count(nbits):
+    A = nx.Graph(T=3, R=1)
+    A.graph['_canonical_terminal_links'] = np.array(
+        ((0, 1), (0, 2), (1, 2)), dtype=np.uint32
+    )
+    with pytest.raises(ValueError, match=f'Expected 6 link bits for A, got {nbits}'):
+        S_from_linkbits(frozenbitarray('0' * nbits), A)
+
+
+def test_topology_digest_separates_vectors_that_share_padded_bytes():
+    """Padding to the byte boundary must not make shorter linkbits collide."""
+    six = frozenbitarray('010010')
+    eight = frozenbitarray('01001000')
+
+    assert topology_digest(six) == topology_digest(frozenbitarray('010010'))
+    assert six.tobytes() == eight.tobytes()
+    assert topology_digest(six) != topology_digest(eight)
+    assert len(topology_digest(six)) == 16
 
 
 @pytest.mark.parametrize('n', range(1, 13))
@@ -363,6 +471,7 @@ def test_G_from_S():
     wfn = tiny_wfn()
     A = wfn.A
     S = wfn.S
+    S.graph['_linkbits'] = frozenbitarray('1')
 
     # 1) basic test
     G = G_from_S(S, A)
@@ -372,6 +481,7 @@ def test_G_from_S():
     # No tentative/rogue
     assert 'tentative' not in G.graph or G.graph.get('tentative') == []
     assert 'rogue' not in G.graph
+    assert G.graph['_linkbits'] is S.graph['_linkbits']
 
     # num_diagonals present
     assert 'num_diagonals' in G.graph

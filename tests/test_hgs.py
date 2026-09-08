@@ -8,7 +8,11 @@ import pytest
 import optiwindnet.baselines.hgs as hgs_mod
 from optiwindnet.baselines._core import remove_offending_crossings
 from optiwindnet.baselines.hgs import _balanced_capacity
-from optiwindnet.interarraylib import as_normalized
+from optiwindnet.interarraylib import (
+    as_normalized,
+    linkbits_from_S,
+    topology_digest,
+)
 from optiwindnet.types import Topology
 
 from .cases import (
@@ -29,6 +33,8 @@ def test_hgs_real_topology_cases(case):
     A = get_bundle(case.site).A
     S = hgs_topology(case)
     assert_topology(S, expected_topology(case), case.capacity)
+    assert S.graph['_linkbits'] == linkbits_from_S(A, S)
+    assert S.graph['_topology_digest'] == topology_digest(S.graph['_linkbits'])
     assert terminal_terminal_crossings(S, A.graph['VertexC']) == []
 
 
@@ -275,6 +281,25 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
     assert 'capacity_effective' not in S.graph['solver_details']
 
 
+def test_hgs_edgeless_A_encodes_complete_terminal_universe(monkeypatch):
+    _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
+    A = _make_A(T=4)
+
+    S = hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+
+    assert A.number_of_edges() == 0
+    assert A.graph['_canonical_terminal_links'].tolist() == [
+        [0, 1],
+        [0, 2],
+        [0, 3],
+        [1, 2],
+        [1, 3],
+        [2, 3],
+    ]
+    assert S.graph['_linkbits'].to01() == '1000011010'
+    assert S.graph['_linkbits'] == linkbits_from_S(A, S)
+
+
 def test_solution_time_falls_back_to_total_runtime():
     assert hgs_mod._solution_time('Summary total 1.25', objective=999.0) == 1.25
 
@@ -325,7 +350,9 @@ def test_remove_offending_crossing_keeps_absent_diagonal_mapping():
     A = nx.Graph()
     A.add_edge(0, 1, length=1.0)
     A.add_edge(2, 3, length=1.0)
+    A.graph['_canonical_terminal_links'] = np.array(((0, 1), (2, 3)), np.uint32)
 
     remove_offending_crossings(A, {}, [((0, 1), (2, 3))])
 
     assert (0, 1) not in A.edges
+    assert '_canonical_terminal_links' not in A.graph

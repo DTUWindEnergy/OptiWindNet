@@ -9,7 +9,8 @@ from itertools import chain, pairwise
 import networkx as nx
 import numba as nb
 import numpy as np
-from bitarray import bitarray
+import xxhash
+from bitarray import bitarray, frozenbitarray
 
 from .geometric import CoordPair, angle_helpers, rotate
 from .terse import TerseLinks
@@ -19,7 +20,8 @@ _lggr = logging.getLogger(__name__)
 debug, warn, error = _lggr.debug, _lggr.warning, _lggr.error
 
 __all__ = (
-    'G_from_S', 'L_from_G', 'L_from_site', 'S_from_G', 'S_from_terse_links',
+    'G_from_S', 'L_from_G', 'L_from_site', 'S_from_G', 'S_from_linkbits',
+    'S_from_terse_links',
     'TerseLinks',
     'add_link_blockmap', 'add_link_cosines', 'add_ring_to_S',
     'add_terminal_closest_root',
@@ -27,10 +29,112 @@ __all__ = (
     'as_obstacle_free', 'as_rescaled', 'as_single_root',
     'as_stratified_vertices', 'as_undetoured',
     'assign_cables', 'bfs_subtree_loads', 'calcload', 'count_diagonals',
-    'describe_G', 'directed_links', 'make_remap', 'pathdist', 'rings_from_S',
+    'describe_G', 'directed_links', 'linkbits_from_S', 'make_remap',
+    'pathdist', 'rings_from_S',
     'scaffolded', 'split_rings_and_calc_loads', 'terse_links_from_S',
-    'validate_routeset', 'validate_topology',
+    'topology_digest', 'validate_routeset', 'validate_topology',
 )  # fmt: skip
+
+
+_CANONICAL_TERMINAL_LINKS = '_canonical_terminal_links'
+
+
+def _invalidate_canonical_terminal_links(A: nx.Graph) -> None:
+    """Drop the position cache before mutating ``A``'s candidate edge set."""
+    A.graph.pop(_CANONICAL_TERMINAL_LINKS, None)
+
+
+def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
+    """Encode topology ``S`` over ``A``'s canonical undirected link universe.
+
+    Terminal-terminal positions follow the lexicographic edge order cached by
+    :func:`~optiwindnet.mesh.make_planar_embedding`. The ``R * T`` feeder
+    positions follow in terminal-major order, with roots from ``-R`` to ``-1``.
+    ``A`` must provide its ``'_canonical_terminal_links'`` graph attribute.
+    ``S`` must be an undetoured topology containing only terminals and roots.
+    """
+    R, T = (A.graph[key] for key in 'RT')
+    links = A.graph['_canonical_terminal_links']
+    feeder_start = len(links)
+
+    ends = np.fromiter(chain.from_iterable(S.edges), dtype=np.int64).reshape(-1, 2)
+    lo, hi = ends.min(axis=1), ends.max(axis=1)
+    is_feeder = lo < 0
+    offender = is_feeder & ((lo < -R) | (hi < 0) | (hi >= T))
+    if offender.any():
+        u, v = ends[offender][0].tolist()
+        raise ValueError(f'S contains a non-canonical feeder link: {(u, v)}')
+
+    # locate terminal links by their lexicographic key in the canonical order
+    wanted = lo[~is_feeder] * T + hi[~is_feeder]
+    if wanted.size:
+        keys = links[:, 0].astype(np.int64) * T + links[:, 1]
+        position = np.searchsorted(keys, wanted)
+        found = position < feeder_start
+        found[found] = keys[position[found]] == wanted[found]
+        if not found.all():
+            u, v = ends[~is_feeder][~found][0].tolist()
+            edge = (u, v) if u < v else (v, u)
+            raise ValueError(f'S contains a terminal link absent from A: {edge}')
+    else:
+        position = wanted
+    positions = np.concatenate(
+        (position, feeder_start + hi[is_feeder] * R + lo[is_feeder] + R)
+    )
+
+    nbits = feeder_start + R * T
+    flat = np.zeros(nbits, dtype=np.uint8)
+    flat[positions] = 1
+    packed = bitarray(buffer=np.packbits(flat).tobytes(), endian='big')
+    return frozenbitarray(packed[:nbits])
+
+
+def S_from_linkbits(linkbits: bitarray, A: nx.Graph) -> nx.Graph:
+    """Decode canonical ``linkbits`` into an undetoured topology ``S``.
+
+    Uses the same terminal-link and feeder ordering as :func:`linkbits_from_S`.
+    ``A`` must provide its ``'_canonical_terminal_links'`` graph attribute.
+    The bit count must match ``A``'s link universe; a mismatch raises
+    ``ValueError``.
+
+    The result contains all ``T`` terminals and ``R`` roots, including isolated
+    nodes, without node attributes. Only connectivity is recovered:
+    loads, capacity, topology type and other solution metadata are not encoded.
+    No feasibility validation or load calculation is performed.
+    """
+    R, T = (A.graph[key] for key in 'RT')
+    links = A.graph['_canonical_terminal_links']
+    feeder_start = len(links)
+    nbits = feeder_start + R * T
+    if len(linkbits) != nbits:
+        raise ValueError(f'Expected {nbits} link bits for A, got {len(linkbits)}')
+
+    S = nx.Graph(R=R, T=T)
+    S.add_nodes_from(range(-R, T))
+    for position in linkbits.search(bitarray('1')):
+        if position < feeder_start:
+            u, v = map(int, links[position])
+        else:
+            u, root_index = divmod(position - feeder_start, R)
+            v = root_index - R
+        S.add_edge(u, v)
+    return S
+
+
+def topology_digest(linkbits: frozenbitarray) -> bytes:
+    """Return the 128-bit xxh3 digest of a topology's canonical ``linkbits``.
+
+    The digest covers the length of the link universe together with the packed
+    bits, so vectors that differ only in the zero padding of the last byte
+    cannot collide. It identifies the set of active links alone: topologies with
+    equal digests may still differ in load assignment or in routing.
+
+    Being non-cryptographic and not tied to any persisted record, it is
+    unrelated to the digests in :mod:`optiwindnet.fingerprint`.
+    """
+    return xxhash.xxh3_128_digest(
+        len(linkbits).to_bytes(4, 'little') + linkbits.tobytes()
+    )
 
 
 _essential_graph_attrs = (

@@ -3,6 +3,7 @@ from typing import cast
 import condeltri as cdt  # pyrefly: ignore[missing-import]
 import networkx as nx
 import numpy as np
+import pytest
 import shapely as shp
 
 from optiwindnet.geometric import CoordPairs, is_crossing
@@ -16,6 +17,7 @@ from optiwindnet.mesh import (
 )
 
 from .helpers import tiny_wfn
+from .sitecache import get_bundle
 
 
 def test_small_mesh_helpers_cover_empty_and_repeated_distance_paths():
@@ -62,6 +64,36 @@ def test_make_planar_embedding_basic():
     # check basic keys in A
     for key in ('T', 'R', 'B', 'VertexC', 'hull'):
         assert key in A.graph
+
+    terminal_links = A.graph['_canonical_terminal_links']
+    expected_links = sorted(
+        (u, v) if u < v else (v, u)
+        for u, v in A.edges
+        if 0 <= u < A.graph['T'] and 0 <= v < A.graph['T']
+    )
+    assert terminal_links.dtype == np.uint32
+    assert terminal_links.tolist() == [list(link) for link in expected_links]
+
+
+@pytest.mark.parametrize(
+    'handle',
+    (
+        # cazzaro_2022 drops 16 A edges in the shortest-path pruning loop;
+        # G-140 is the smallest bundled location whose mesh also reaches Part
+        # MN's late candidate-edge additions (2 of them).
+        'cazzaro_2022',
+        'cazzaro_2022G140',
+    ),
+)
+def test_canonical_terminal_links_track_late_mesh_edge_changes(handle):
+    A = get_bundle(handle).A
+    T = A.graph['T']
+    expected_links = sorted(
+        (u, v) if u < v else (v, u) for u, v in A.edges if 0 <= u < T and 0 <= v < T
+    )
+
+    terminal_links = A.graph['_canonical_terminal_links']
+    assert terminal_links.tolist() == [list(link) for link in expected_links]
 
 
 def test_edges_and_hull_from_cdt_all():
