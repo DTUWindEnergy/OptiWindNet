@@ -293,37 +293,37 @@ def test_svgrepr_repr_no_cost_without_currency():
     assert 'Σ¤' not in r
 
 
-def test_svgrepr_repr_digest_line():
-    """A routeset gets a third line with the topology digest in full hex."""
+def test_svgrepr_repr_id_line():
+    """A routeset gets a third line with the topology id in full hex."""
     wfn = tiny_wfn()
     svg = svgplot(wfn.G)
     static, _, rest = repr(svg).partition('\n')
-    solution, _, digest = rest.partition('\n')
-    expected = wfn.G.graph['_topology_digest']
+    solution, _, topology_id = rest.partition('\n')
+    expected = wfn.G.graph['_topology_id']
 
-    assert digest == f' topology_digest = {expected.hex()}>'
-    assert 'digest' not in static
-    assert 'digest' not in solution
+    assert topology_id == f' topology_id = {expected.hex()}>'
+    assert 'topology_id' not in static
+    assert 'topology_id' not in solution
     # metadata values are unformatted
-    assert svg.metadata['topology_digest'] == expected
+    assert svg.metadata['topology_id'] == expected
 
 
-def test_svgrepr_repr_without_digest_keeps_two_lines():
+def test_svgrepr_repr_without_id_keeps_two_lines():
     """A routeset without the private attribute (e.g. read back from the db)."""
     wfn = tiny_wfn()
-    del wfn.G.graph['_topology_digest']
+    del wfn.G.graph['_topology_id']
 
     r = repr(svgplot(wfn.G))
 
     assert r.count('\n') == 1
-    assert 'digest' not in r
+    assert 'topology_id' not in r
 
 
-def test_svgrepr_repr_bad_digest_does_not_raise():
-    """A non-bytes digest falls back to the default rendering."""
-    r = repr(SvgRepr('x', {'handle': 'h', 'topology_digest': 'not bytes'}))
+def test_svgrepr_repr_bad_id_does_not_raise():
+    """A non-bytes id falls back to the default rendering."""
+    r = repr(SvgRepr('x', {'handle': 'h', 'topology_id': 'not bytes'}))
 
-    assert r.endswith('\n topology_digest = not bytes>')
+    assert r.endswith('\n topology_id = not bytes>')
 
 
 def test_svgrepr_repr_bad_metadata_does_not_raise():

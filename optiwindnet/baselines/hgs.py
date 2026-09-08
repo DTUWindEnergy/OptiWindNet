@@ -12,13 +12,9 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import clusterize
-from ..fingerprint import fingerprint_function
-from ..interarraylib import (
-    calcload,
-    linkbits_from_S,
-    split_rings_and_calc_loads,
-    topology_digest,
-)
+from ..converting import linkbits_from_S
+from ..identity import fingerprint_function, linkset_id, topology_id
+from ..loads import calcload, split_rings_and_calc_loads
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
@@ -462,6 +458,7 @@ def hgs_cvrp(
         A.graph['_canonical_terminal_links'] = np.stack(
             np.triu_indices(T, k=1), axis=1
         ).astype(np.uint32)
+        A.graph['_linkset_id'] = linkset_id(A)
 
     # iterative repair loop
     A_orig = A  # the loop may rebind A to a pruned copy
@@ -503,7 +500,8 @@ def hgs_cvrp(
         R=R,
         capacity=capacity,
         _linkbits=linkbits,
-        _topology_digest=topology_digest(linkbits),
+        _topology_id=topology_id(linkbits),
+        _linkset_id=A_orig.graph['_linkset_id'],
         creator='baselines.hgs',
         method_options=dict(
             solver_name='HGS-CVRP',

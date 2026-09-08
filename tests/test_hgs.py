@@ -8,11 +8,9 @@ import pytest
 import optiwindnet.baselines.hgs as hgs_mod
 from optiwindnet.baselines._core import remove_offending_crossings
 from optiwindnet.baselines.hgs import _balanced_capacity
-from optiwindnet.interarraylib import (
-    as_normalized,
-    linkbits_from_S,
-    topology_digest,
-)
+from optiwindnet.converting import linkbits_from_S
+from optiwindnet.identity import linkset_id, topology_id
+from optiwindnet.transforming import as_normalized
 from optiwindnet.types import Topology
 
 from .cases import (
@@ -34,7 +32,8 @@ def test_hgs_real_topology_cases(case):
     S = hgs_topology(case)
     assert_topology(S, expected_topology(case), case.capacity)
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
-    assert S.graph['_topology_digest'] == topology_digest(S.graph['_linkbits'])
+    assert S.graph['_topology_id'] == topology_id(S.graph['_linkbits'])
+    assert S.graph['_linkset_id'] == A.graph['_linkset_id']
     assert terminal_terminal_crossings(S, A.graph['VertexC']) == []
 
 
@@ -281,7 +280,7 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
     assert 'capacity_effective' not in S.graph['solver_details']
 
 
-def test_hgs_edgeless_A_encodes_complete_terminal_universe(monkeypatch):
+def test_hgs_edgeless_A_encodes_complete_terminal_linkset(monkeypatch):
     _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
     A = _make_A(T=4)
 
@@ -298,6 +297,9 @@ def test_hgs_edgeless_A_encodes_complete_terminal_universe(monkeypatch):
     ]
     assert S.graph['_linkbits'].to01() == '1000011010'
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
+    # the complete linkset replaces the meshed one: its digest must follow
+    assert A.graph['_linkset_id'] == linkset_id(A)
+    assert S.graph['_linkset_id'] == A.graph['_linkset_id']
 
 
 def test_solution_time_falls_back_to_total_runtime():
@@ -350,9 +352,12 @@ def test_remove_offending_crossing_keeps_absent_diagonal_mapping():
     A = nx.Graph()
     A.add_edge(0, 1, length=1.0)
     A.add_edge(2, 3, length=1.0)
+    A.graph.update(R=1, T=4)
     A.graph['_canonical_terminal_links'] = np.array(((0, 1), (2, 3)), np.uint32)
+    A.graph['_linkset_id'] = linkset_id(A)
 
     remove_offending_crossings(A, {}, [((0, 1), (2, 3))])
 
     assert (0, 1) not in A.edges
     assert '_canonical_terminal_links' not in A.graph
+    assert '_linkset_id' not in A.graph

@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from optiwindnet.fingerprint import fingerprint_coordinates
+from optiwindnet.identity import fingerprint_coordinates
 
 HERE = Path(__file__).resolve().parent
 

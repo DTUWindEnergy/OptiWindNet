@@ -8,16 +8,16 @@ from pathlib import Path
 
 import networkx as nx
 
-from optiwindnet.fingerprint import fingerprint_coordinates
+from optiwindnet.identity import fingerprint_coordinates
 from optiwindnet.importer import (
     L_from_pbf,
     L_from_yaml,
     LocationsRepository,
     load_repository,
 )
-from optiwindnet.interarraylib import as_single_root
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.synthetic import toyfarm
+from optiwindnet.transforming import as_single_root
 
 from . import paths
 from .nodeset_digest_aliases import (

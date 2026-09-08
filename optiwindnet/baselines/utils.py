@@ -36,7 +36,7 @@ def length_matrix_single_depot_from_G(
         λ_max = float(Λv.max())
         Λ = squareform(Λv)
     else:
-        # non-available edges map to infinite length
+        # non-available links map to infinite length
         Λ = np.full((T + R, T + R), np.inf)
         λ_max = float(d2roots[:T, 0].max() * scale)
     for u, v, length in A.edges(data='length'):

@@ -7,14 +7,10 @@ import numpy as np
 import pytest
 
 from optiwindnet import pathfinding
+from optiwindnet.converting import G_from_S, S_from_G
 from optiwindnet.geometric import is_crossing
-from optiwindnet.interarraylib import (
-    G_from_S,
-    S_from_G,
-    add_ring_to_S,
-    assign_cables,
-    calcload,
-)
+from optiwindnet.interarraylib import assign_cables
+from optiwindnet.loads import add_ring_to_S, calcload
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology

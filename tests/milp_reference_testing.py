@@ -10,7 +10,7 @@ from typing import Any
 
 import networkx as nx
 
-from optiwindnet.fingerprint import fingerprint_coordinates
+from optiwindnet.identity import fingerprint_coordinates
 from optiwindnet.MILP import SolutionInfo
 from optiwindnet.terse import LinkScope, TerseLinks
 

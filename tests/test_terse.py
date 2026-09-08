@@ -4,10 +4,11 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from optiwindnet.fingerprint import fingerprint_coordinates
-from optiwindnet.interarraylib import add_ring_to_S, calcload, validate_routeset
+from optiwindnet.identity import fingerprint_coordinates
+from optiwindnet.loads import add_ring_to_S, calcload
 from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
+from optiwindnet.validating import validate_routeset
 
 from .helpers import canonical_edges, tiny_wfn
 

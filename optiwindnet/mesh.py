@@ -22,6 +22,7 @@ from .geometric import (
     rotation_checkers_factory,
     triangle_AR,
 )
+from .identity import linkset_id
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset')
 
@@ -396,7 +397,7 @@ def make_planar_embedding(
 ) -> tuple[nx.PlanarEmbedding, nx.Graph]:
     """Triangulate a location and produce graphs P and A for it.
 
-    P is the planar embedding mesh and A is the available-edges graph.
+    P is the planar embedding mesh and A is the available-links graph.
     TODO: change the name of this function.
 
     Args:
@@ -408,7 +409,7 @@ def make_planar_embedding(
         A as the algorithm removes flat triangles (higher values keep more).
 
     Returns:
-      P - the planar embedding graph - and A - the available-edges graph.
+      P - the planar embedding graph - and A - the available-links graph.
     """
 
     # ######
@@ -420,7 +421,7 @@ def make_planar_embedding(
     #    create stunt concavity vertices to the inside of the concavity.
     # D) Create a miriad of indices and mappings.
     # E) Get Delaunay triangulation of the wtg+oss nodes only.
-    # F) Build the available-edges graph A and its planar embedding.
+    # F) Build the available-links graph A and its planar embedding.
     # G) Build the hull-concave.
     # H) Insert the obstacles' constraint edges.
     # I) Insert the hull's and concavities' constraint edges.
@@ -793,7 +794,7 @@ def make_planar_embedding(
     P_A_edges.difference_update((u, v) for v in supertriangle for u in P_A[v])
 
     # ##############################################################
-    # F) Build the available-edges graph A and its planar embedding.
+    # F) Build the available-links graph A and its planar embedding.
     # ##############################################################
     debug('PART F')
     convex_hull_A = []
@@ -1596,6 +1597,7 @@ def make_planar_embedding(
         inter_terminal_clearance_safe=inter_terminal_clearance_safe,
         _canonical_terminal_links=canonical_terminal_links,
     )
+    A.graph['_linkset_id'] = linkset_id(A)
     if P_paths_shortcuts:
         A.graph['P_paths_shortcuts'] = P_paths_shortcuts
     if len(border) > 0:

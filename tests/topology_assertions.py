@@ -2,8 +2,9 @@
 
 import networkx as nx
 
-from optiwindnet.interarraylib import rings_from_S, validate_topology
+from optiwindnet.loads import rings_from_S
 from optiwindnet.types import Topology
+from optiwindnet.validating import validate_topology
 
 
 def assert_topology(S: nx.Graph, expected: Topology, capacity: int) -> None:

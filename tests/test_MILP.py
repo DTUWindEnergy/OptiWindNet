@@ -11,7 +11,8 @@ from bitarray import frozenbitarray
 
 import optiwindnet.MILP._core as core
 from optiwindnet import MILP
-from optiwindnet.interarraylib import terse_links_from_S, topology_digest
+from optiwindnet.converting import terse_links_from_S
+from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.terse import TerseLinks
 from optiwindnet.types import Topology
@@ -104,8 +105,8 @@ def _warmup_with_uncoerced_topology():
 
     Returns the distinguishing fragment of the second attempt's message.
     """
+    from optiwindnet.converting import S_from_G
     from optiwindnet.heuristics import constructor
-    from optiwindnet.interarraylib import S_from_G
     from optiwindnet.MILP._core import OWNWarmupFailed
     from optiwindnet.MILP.ortools import make_min_length_model, warmup_model
 
@@ -131,7 +132,7 @@ def _solve_toy_incumbent(solver_name, topology):
     from unittest import mock
 
     import optiwindnet.MILP.ortools as ortools_milp
-    from optiwindnet.interarraylib import validate_topology
+    from optiwindnet.validating import validate_topology
 
     bundle = get_bundle('toy')
     P, A = bundle.P, bundle.A
@@ -166,8 +167,8 @@ def _solve_toy_incumbent(solver_name, topology):
         'linkbits_match': S.graph['_linkbits'] == expected_bits,
         'objective': solution_info.objective,
         'preserved_objective': solver.solution_info.objective,
-        # solve() must return the digest already stamped on SolutionInfo
-        'info_digest': solution_info.digest,
+        # solve() must return the id already stamped on SolutionInfo
+        'info_id': solution_info.topology_id,
     }
 
 
@@ -390,31 +391,31 @@ def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():
     assert pool.investigations == 0
 
 
-def test_recording_solution_info_stamps_the_incumbent_digest():
-    """Every backend's solve() assigns solution_info; the digest rides along."""
+def test_recording_solution_info_stamps_the_incumbent_id():
+    """Every backend's solve() assigns solution_info; the id rides along."""
     # a Pyomo-backed solver needs no native library and trips no rival guard
     from optiwindnet.MILP.pyomo import SolverPyomo
 
-    digest = topology_digest(frozenbitarray('1001'))
+    topology = topology_id(frozenbitarray('1001'))
 
     solver = SolverPyomo('cbc')
-    solver._decode_incumbent = lambda: nx.Graph(_topology_digest=digest)
+    solver._decode_incumbent = lambda: nx.Graph(_topology_id=topology)
     info = core.SolutionInfo(1.0, 1.0, 1.0, 0.0, 'optimal')
 
     solver.solution_info = info
 
-    assert info.digest == digest
+    assert info.topology_id == topology
     assert solver.solution_info is info
 
 
-def test_solution_info_repr_shows_the_digest_as_hex():
+def test_solution_info_repr_shows_the_id_as_hex():
     info = core.SolutionInfo(1.0, 2.0, 3.0, 0.1, 'optimal')
 
-    assert repr(info).endswith("termination='optimal', digest='')")
+    assert repr(info).endswith("termination='optimal', topology_id='')")
 
-    info.digest = topology_digest(frozenbitarray('0110'))
+    info.topology_id = topology_id(frozenbitarray('0110'))
 
-    assert repr(info).endswith(f"digest='{info.digest.hex()}')")
+    assert repr(info).endswith(f"topology_id='{info.topology_id.hex()}')")
 
 
 def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
@@ -431,8 +432,8 @@ def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
         applied_options={'threads': 1},
         stopping={'time_limit': 1, 'mip_gap': 0.01},
     )
-    digest = topology_digest(frozenbitarray('0110'))
-    fake.solution_info.digest = digest
+    topology = topology_id(frozenbitarray('0110'))
+    fake.solution_info.topology_id = topology
 
     attributes = core.Solver._make_graph_attributes(
         fake  # pyrefly: ignore[bad-argument-type]
@@ -441,10 +442,10 @@ def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
     assert attributes['warmstart'] == 'constructor'
     assert attributes['solver_details']['max_feeders'] == 3
     assert 'max_feeders' not in attributes['method_options']
-    # the incumbent's digest is not a routeset attribute; S carries its own
-    assert 'digest' not in attributes
-    assert '_topology_digest' not in attributes
-    assert fake.solution_info.digest == digest
+    # the incumbent's id is not a routeset attribute; S carries its own
+    assert 'topology_id' not in attributes
+    assert '_topology_id' not in attributes
+    assert fake.solution_info.topology_id == topology
 
     fake.metadata.warmed_by = None
     assert 'warmstart' not in core.Solver._make_graph_attributes(
@@ -509,13 +510,13 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     assert result['objective'] == result['preserved_objective']
     assert {
         'R', 'T', 'topology', 'capacity', 'max_load', 'has_loads', 'creator',
-        '_linkbits', '_topology_digest',
+        '_linkbits', '_topology_id', '_linkset_id',
     } <= result['graph'].keys()  # fmt: skip
     linkbits = result['graph']['_linkbits']
     assert isinstance(linkbits, frozenbitarray)
     assert linkbits.endian == 'big'
-    assert result['graph']['_topology_digest'] == topology_digest(linkbits)
-    assert result['info_digest'] == result['graph']['_topology_digest']
+    assert result['graph']['_topology_id'] == topology_id(linkbits)
+    assert result['info_id'] == result['graph']['_topology_id']
     A = get_bundle('toy').A
     terminal_link_count = sum(u >= 0 and v >= 0 for u, v in A.edges)
     assert len(linkbits) == terminal_link_count + A.graph['R'] * A.graph['T']
@@ -548,7 +549,7 @@ def test_ortools_incumbent_before_solve_has_useful_error(ortools_worker):
 def test_ringed_warmstart_links_conserve_flow(n, bridging):
     from types import SimpleNamespace
 
-    from optiwindnet.interarraylib import add_ring_to_S
+    from optiwindnet.loads import add_ring_to_S
     from optiwindnet.MILP._core import warmstart_links
 
     terminals = list(range(n))
@@ -630,6 +631,7 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
     A.graph.update(
         R=R, T=n, _canonical_terminal_links=np.array(E, dtype=np.uint32).reshape(-1, 2)
     )
+    A.graph['_linkset_id'] = linkset_id(A)
     linkset = E + Eʹ + stars + starsʹ
     links = {link: link in active_links for link in linkset}
     metadata = SimpleNamespace(
@@ -680,6 +682,7 @@ def test_forest_mip_decoder_preserves_non_unit_power(topology, powers):
         nx.set_node_attributes(A, dict(enumerate(powers)), 'power')
     E, reverse, stars, _ = core.canonical_linksets(A, R=2, T=3, topology=topology)
     A.graph.update(R=2, T=3, _canonical_terminal_links=np.array(E, dtype=np.uint32))
+    A.graph['_linkset_id'] = linkset_id(A)
     p0, p1, p2 = powers if powers is not None else (1, 1, 1)
     flows = {(0, 1): p0, (1, 2): p0 + p1, (2, -1): p0 + p1 + p2}
     linkset = E + reverse + stars
@@ -721,7 +724,7 @@ def test_forest_mip_decoder_preserves_non_unit_power(topology, powers):
         assert S[u][v] == {'load': load, 'reverse': u < v}
         assert S.nodes[u] == {'load': load, 'subtree': 0}
     assert fake.flow_reads == (3 if powers == (2, 3, 1) else 0)
-    assert S.graph['_topology_digest'] == topology_digest(S.graph['_linkbits'])
+    assert S.graph['_topology_id'] == topology_id(S.graph['_linkbits'])
     assert S.graph['topology'] is topology
     assert S.graph['capacity'] == 6
     assert S.graph['has_loads']
@@ -751,10 +754,11 @@ def _warmup_toy_with(feeder_limit, warm_source):
     import math
 
     from optiwindnet.baselines.hgs import hgs_cvrp
+    from optiwindnet.converting import S_from_G
     from optiwindnet.heuristics import constructor
-    from optiwindnet.interarraylib import S_from_G, as_normalized
     from optiwindnet.MILP import OWNWarmupFailed
     from optiwindnet.MILP.ortools import make_min_length_model, warmup_model
+    from optiwindnet.transforming import as_normalized
 
     A = get_bundle('toy').A
     if warm_source == 'constructor':
@@ -941,8 +945,8 @@ def test_milprouter_rejects_nonpositive_warmup_time():
 
 def test_scip_warmstart_rejects_pinned_feeder_mismatch():
     """SCIP's checkSol() must catch what addSol() alone would accept."""
+    from optiwindnet.converting import S_from_G
     from optiwindnet.heuristics import constructor
-    from optiwindnet.interarraylib import S_from_G
 
     # imported here, not at module scope: `ortools_worker` re-imports this module in
     # its own process, which must never load pyscipopt (see the note at the top)

@@ -13,7 +13,7 @@ from typing import Any, ClassVar
 
 import networkx as nx
 
-from ..interarraylib import G_from_S
+from ..converting import G_from_S
 from ..pathfinding import PathFinder
 from ._core import (
     FeederRoute,

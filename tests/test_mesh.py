@@ -7,6 +7,7 @@ import pytest
 import shapely as shp
 
 from optiwindnet.geometric import CoordPairs, is_crossing
+from optiwindnet.identity import linkset_id
 from optiwindnet.mesh import (
     _build_edge_line_tree,
     _edges_and_hull_from_cdt,
@@ -73,6 +74,7 @@ def test_make_planar_embedding_basic():
     )
     assert terminal_links.dtype == np.uint32
     assert terminal_links.tolist() == [list(link) for link in expected_links]
+    assert A.graph['_linkset_id'] == linkset_id(A)
 
 
 @pytest.mark.parametrize(

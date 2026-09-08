@@ -10,9 +10,9 @@ from typing import Any
 import networkx as nx
 from pyscipopt import SCIP_STAGE, Model
 
+from ..converting import G_from_S
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
-from ..fingerprint import fingerprint_function
-from ..interarraylib import G_from_S
+from ..identity import fingerprint_function
 from ..pathfinding import PathFinder
 from ._core import (
     FeederLimit,
@@ -191,7 +191,7 @@ def make_min_length_model(
     Build SCIP model for the collector system length minimization.
 
     Args:
-      A: graph with the available edges to choose from
+      A: graph with the available links to choose from
       capacity: maximum link flow capacity
       topology: one of ``Topology.{BRANCHED, RADIAL, RINGED}``
       feeder_route:

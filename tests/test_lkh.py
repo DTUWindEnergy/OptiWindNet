@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 import optiwindnet.baselines.lkh as lkh_mod
-from optiwindnet.interarraylib import as_normalized
+from optiwindnet.transforming import as_normalized
 
 from .cases import LKH_CASES, case_node_id, expected_topology
 from .sitecache import get_bundle

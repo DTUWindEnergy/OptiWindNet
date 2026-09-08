@@ -14,8 +14,8 @@ from typing import Any
 import networkx as nx
 import numpy as np
 
-from ..fingerprint import fingerprint_coordinates
-from ..interarraylib import calcload
+from ..identity import fingerprint_coordinates
+from ..loads import calcload
 from ..terse import LinkScope, TerseLinks
 from ..types import Topology
 from ..utils import make_handle

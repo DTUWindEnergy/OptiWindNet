@@ -15,6 +15,7 @@ import numpy as np
 from numba.typed import List
 from scipy.spatial import ConvexHull
 
+from .converting import L_from_site
 from .geometric import (
     CoordPair,
     CoordPairs,
@@ -23,7 +24,6 @@ from .geometric import (
     rotate,
     rotating_calipers,
 )
-from .interarraylib import L_from_site
 
 _lggr = logging.getLogger(__name__)
 info, warn = _lggr.info, _lggr.warning

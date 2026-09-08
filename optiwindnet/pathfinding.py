@@ -17,7 +17,8 @@ from scipy.stats import rankdata
 
 from .crossings import gateXing_iter
 from .geometric import rotation_checkers_factory
-from .interarraylib import bfs_subtree_loads, scaffolded
+from .interarraylib import scaffolded
+from .loads import bfs_subtree_loads
 from .mesh import planar_flipped_by_routeset
 from .types import Topology
 

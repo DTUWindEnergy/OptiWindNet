@@ -21,6 +21,7 @@ from .api_utils import (
     plot_org_buff,
 )
 from .baselines.hgs import hgs_cvrp
+from .converting import G_from_S, S_from_G, terse_links_from_S
 from .heuristics import constructor
 from .importer import (
     L_from_pbf,
@@ -29,20 +30,14 @@ from .importer import (
     L_from_yaml,
     load_repository,
 )
-from .interarraylib import (
-    G_from_S,
-    S_from_G,
-    as_normalized,
-    as_stratified_vertices,
-    assign_cables,
-    terse_links_from_S,
-)
+from .interarraylib import assign_cables
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
 from .pathfinding import PathFinder
 from .plotting import gplot, pplot
 from .svg import svgplot, svgpplot
 from .terse import LinkScope, TerseLinks
+from .transforming import as_normalized, as_stratified_vertices
 from .types import Topology
 
 ##################################
