@@ -157,7 +157,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     """Create G from S and A.
 
     Graph ``S`` contains the topology of a routeset network (nodes only, no
-    contours or detours). ``S`` must have been created from the available edges
+    contours or detours). ``S`` must have been created from the available links
     in ``A``, whose contour information is used to obtain a routeset ``G``
     (possibly with contours, but not with detours – use PathFinder afterward).
     """

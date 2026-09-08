@@ -54,7 +54,7 @@ def test_linkbits_from_S_requires_canonical_terminal_links():
         linkbits_from_S(A, S)
 
 
-def test_linkbits_from_S_empty_terminal_universe_has_only_feeders():
+def test_linkbits_from_S_empty_terminal_linkset_has_only_feeders():
     A = nx.Graph(T=3, R=1, _canonical_terminal_links=np.empty((0, 2), np.uint32))
     S = nx.Graph(((-1, 0), (-1, 1), (-1, 2)))
 

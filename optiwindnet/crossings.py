@@ -1085,7 +1085,7 @@ def list_edge_crossings(
 
     Args:
       S: solution topology
-      A: available edges used in creating ``S``
+      A: available links used in creating ``S``
 
     Returns:
       list of 2-tuple (crossing) of 2-tuple (edge, ordered)

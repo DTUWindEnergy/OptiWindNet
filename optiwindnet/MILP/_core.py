@@ -606,11 +606,11 @@ class Solver(abc.ABC):
         model_options: Mapping[str, Any],
         warmstart: nx.Graph | None = None,
     ):
-        """Define the problem geometry, available edges and tree properties
+        """Define the problem geometry, available links and tree properties
 
         Args:
           P: planar embedding of the location
-          A: available edges for the location
+          A: available links for the location
           capacity: maximum number of terminals in a subtree
           model_options: tree properties - see ModelOptions.help()
           warmstart: initial feasible solution to pass to solver

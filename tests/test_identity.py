@@ -82,7 +82,7 @@ def test_linkset_id_reads_only_the_canonical_linkset():
         pytest.param(1, 3, [(0, 1), (1, 2)], id='links'),
     ),
 )
-def test_linkset_id_separates_distinct_universes(R, T, links):
+def test_linkset_id_separates_distinct_linksets(R, T, links):
     """R and T size the feeder block, so neither may be left out of the hash."""
     base = _A(1, 3, [(0, 1), (0, 2), (1, 2)])
 

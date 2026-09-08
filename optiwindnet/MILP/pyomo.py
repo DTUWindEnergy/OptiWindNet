@@ -316,7 +316,7 @@ def make_min_length_model(
     Build ILP Pyomo model for the collector system length minimization.
 
     Args:
-      A: graph with the available edges to choose from
+      A: graph with the available links to choose from
       capacity: maximum link flow capacity
       topology: one of ``Topology.{BRANCHED, RADIAL}``
       feeder_route:

@@ -146,7 +146,7 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
 
     Args:
       S: solution topology
-      A: available edges used in creating ``S``
+      A: available links used in creating ``S``
 
     Returns:
       number of non-gate edges of ``S`` that are of kind ``'extended'`` or

@@ -313,7 +313,7 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx
 
     Args:
         Sʹ: solution topology that contains non-branching rooted tree(s)
-        A: available edges used in creating ``Sʹ``
+        A: available links used in creating ``Sʹ``
         ringed: rank fix choices as if both path extremes get a feeder, for
             topologies destined for ring form (``Sʹ`` itself must still be in
             single-feeder path form)

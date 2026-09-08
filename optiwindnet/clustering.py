@@ -87,7 +87,7 @@ def clusterize(A: nx.Graph, capacity: int) -> list[set[int]]:
     Callers must handle a root with no terminals.
 
     Args:
-      A: available-edges graph, needs graph attributes ``R``, ``T`` and ``d2roots``
+      A: available-links graph, needs graph attributes ``R``, ``T`` and ``d2roots``
       capacity: maximum number of terminals a feeder may serve
 
     Returns:

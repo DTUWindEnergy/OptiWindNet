@@ -280,7 +280,7 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
     assert 'capacity_effective' not in S.graph['solver_details']
 
 
-def test_hgs_edgeless_A_encodes_complete_terminal_universe(monkeypatch):
+def test_hgs_edgeless_A_encodes_complete_terminal_linkset(monkeypatch):
     _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
     A = _make_A(T=4)
 
@@ -297,7 +297,7 @@ def test_hgs_edgeless_A_encodes_complete_terminal_universe(monkeypatch):
     ]
     assert S.graph['_linkbits'].to01() == '1000011010'
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
-    # the complete universe replaces the meshed one: its digest must follow
+    # the complete linkset replaces the meshed one: its digest must follow
     assert A.graph['_linkset_id'] == linkset_id(A)
     assert S.graph['_linkset_id'] == A.graph['_linkset_id']
 
