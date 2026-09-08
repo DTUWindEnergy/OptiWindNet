@@ -81,7 +81,7 @@ def _validate_ringed(
         elif opens:
             # the zero-load link splits the ring where the node loads say it does:
             # arm 1 takes `arm` terminals, and an odd-terminal ring has a second
-            # balanced split one link earlier (see :func:`add_ring_to_S`). Both
+            # balanced split one link earlier (see :func:`_add_ring_to_S`). Both
             # walk directions are covered: the two indices map onto each other.
             balanced = {arm - 1} if n % 2 == 0 else {arm - 1, arm - 2}
             if opens[0] not in balanced:

@@ -10,7 +10,7 @@ import networkx as nx
 from .types import Topology
 
 __all__ = (
-    'add_ring_to_S', 'bfs_subtree_loads', 'calcload',
+'bfs_subtree_loads', 'calcload',
     'split_rings_and_calc_loads',
 )  # fmt: skip
 
@@ -124,7 +124,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     Only the ringed builders (HGS, LKH and the ``method='ringed'`` constructor)
     call this, on a solution ``S`` that is still a set of simple
     ``root → … → root`` paths missing their zero-load links. Each path is walked
-    and closed into a canonical ring (see :func:`add_ring_to_S`), using ``A`` to
+    and closed into a canonical ring (see :func:`_add_ring_to_S`), using ``A`` to
     pick the longer zero-load link on odd-length rings; a tail already touching
     a root bridges two roots ``(r1, r2)``. Every ring receives exactly one
     zero-load link (``load=0``, no current flows through it), and each node's
@@ -168,7 +168,7 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     S.remove_edges_from(list(S.edges))
     max_load = 0
     for subtree_id, (roots, ordered) in enumerate(paths):
-        add_ring_to_S(S, roots, ordered, subtree_id, A)
+        _add_ring_to_S(S, roots, ordered, subtree_id, A)
         max_load = max(max_load, math.ceil(len(ordered) / 2))
     for root in range(-R, 0):
         # a load=0 feeder carries no current, so it adds nothing to its root
@@ -258,7 +258,7 @@ def _ring_split_position(ordered: list[int], A: nx.Graph | None = None) -> int:
     return m
 
 
-def add_ring_to_S(
+def _add_ring_to_S(
     S: nx.Graph,
     roots: tuple[int, int],
     ordered: list[int],

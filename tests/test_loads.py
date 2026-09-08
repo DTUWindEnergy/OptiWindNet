@@ -8,7 +8,7 @@ import pytest
 
 from optiwindnet.converting import _rings_from_S
 from optiwindnet.loads import (
-    add_ring_to_S,
+    _add_ring_to_S,
     calcload,
     split_rings_and_calc_loads,
 )
@@ -19,10 +19,10 @@ from .helpers import tiny_wfn
 
 
 @pytest.mark.parametrize('n', range(1, 13))
-def test_add_ring_to_S_canonical_shape(n):
+def test_private_add_ring_to_S_canonical_shape(n):
     S = nx.Graph(R=1, T=n)
     S.add_node(-1)
-    add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
+    _add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
 
     feeders = [data['load'] for u, v, data in S.edges(data=True) if min(u, v) < 0]
     zero_load_links = [

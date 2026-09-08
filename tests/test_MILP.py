@@ -549,7 +549,7 @@ def test_ortools_incumbent_before_solve_has_useful_error(ortools_worker):
 def test_ringed_warmstart_links_conserve_flow(n, bridging):
     from types import SimpleNamespace
 
-    from optiwindnet.loads import add_ring_to_S
+    from optiwindnet.loads import _add_ring_to_S
     from optiwindnet.MILP._core import warmstart_links
 
     terminals = list(range(n))
@@ -569,7 +569,7 @@ def test_ringed_warmstart_links_conserve_flow(n, bridging):
     )
     S = nx.Graph(R=R, T=n)
     S.add_nodes_from(roots)
-    add_ring_to_S(
+    _add_ring_to_S(
         S,
         (-1, -2) if bridging else (-1, -1),
         terminals,

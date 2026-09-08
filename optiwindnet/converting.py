@@ -542,7 +542,7 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
 
     # Links already joining two real nodes carry over verbatim, keeping ``G``'s
     # own orientation: 'reverse' is relative to the stored node order, and the
-    # RINGED builders (:func:`add_ring_to_S`) and the forest ones
+    # RINGED builders (:func:`_add_ring_to_S`) and the forest ones
     # (:func:`bfs_subtree_loads`) give it different meanings — copying sidesteps
     # having to pick one.
     for u, v, edgeD in G.edges(data=True):

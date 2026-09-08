@@ -14,7 +14,6 @@ _DEPRECATED_INTERARRAYLIB_EXPORTS = {
     'S_from_G': 'optiwindnet.converting',
     'S_from_terse_links': 'optiwindnet.converting',
     'terse_links_from_S': 'optiwindnet.converting',
-    'add_ring_to_S': 'optiwindnet.loads',
     'bfs_subtree_loads': 'optiwindnet.loads',
     'calcload': 'optiwindnet.loads',
     'split_rings_and_calc_loads': 'optiwindnet.loads',
@@ -52,10 +51,11 @@ def test_interarraylib_deprecated_exports_remain_in_all():
     assert _DEPRECATED_INTERARRAYLIB_EXPORTS.keys() <= set(interarraylib.__all__)
 
 
-def test_interarraylib_does_not_reexport_private_rings_decoder():
-    assert 'rings_from_S' not in interarraylib.__all__
+@pytest.mark.parametrize('name', ('add_ring_to_S', 'rings_from_S'))
+def test_interarraylib_does_not_reexport_private_ring_helpers(name):
+    assert name not in interarraylib.__all__
     with pytest.raises(AttributeError):
-        getattr(interarraylib, 'rings_from_S')
+        getattr(interarraylib, name)
 
 
 def test_fingerprint_module_warns_and_aliases_identity_functions():

@@ -27,7 +27,6 @@ _DEPRECATED_EXPORTS = {
     'S_from_G': 'optiwindnet.converting',
     'S_from_terse_links': 'optiwindnet.converting',
     'terse_links_from_S': 'optiwindnet.converting',
-    'add_ring_to_S': 'optiwindnet.loads',
     'bfs_subtree_loads': 'optiwindnet.loads',
     'calcload': 'optiwindnet.loads',
     'split_rings_and_calc_loads': 'optiwindnet.loads',

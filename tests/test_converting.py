@@ -21,7 +21,7 @@ from optiwindnet.converting import (
     terse_links_from_S,
 )
 from optiwindnet.loads import (
-    add_ring_to_S,
+    _add_ring_to_S,
     calcload,
 )
 from optiwindnet.MILP import Topology
@@ -40,7 +40,7 @@ def test_private_rings_from_S_roundtrip(n, bridging):
     S = nx.Graph(R=R, T=n)
     S.add_nodes_from(range(-R, 0))
     roots = (-1, -2) if bridging else (-1, -1)
-    add_ring_to_S(S, roots, list(range(n)), subtree=0, A=None)
+    _add_ring_to_S(S, roots, list(range(n)), subtree=0, A=None)
 
     recovered_roots, ordered = _rings_from_S(S)[0]
     assert set(recovered_roots) == set(roots)
@@ -523,14 +523,14 @@ def test_terse_links_ringed_preserves_zero_load_link(longer, expected_zero_load_
 
     The two balanced split edges of an odd ring map onto the two walk
     directions, so the encoder orients the walk to reproduce the exact zero-load
-    link that ``add_ring_to_S`` chose from ``A`` -- without storing it.
+    link that ``_add_ring_to_S`` chose from ``A`` -- without storing it.
     """
     A = nx.Graph()
     A.add_edge(0, 1, length=10.0 if longer == 0 else 1.0)
     A.add_edge(1, 2, length=10.0 if longer == 1 else 1.0)
     S = nx.Graph(R=1, T=3)
     S.add_node(-1)
-    add_ring_to_S(S, (-1, -1), [0, 1, 2], subtree=0, A=A)
+    _add_ring_to_S(S, (-1, -1), [0, 1, 2], subtree=0, A=A)
     S.nodes[-1]['load'] = sum(S.nodes[n]['load'] for n in S[-1])
 
     terse = terse_links_from_S(S)
