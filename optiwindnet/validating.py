@@ -8,8 +8,8 @@ from itertools import pairwise
 
 import networkx as nx
 
-from .converting import S_from_G
-from .loads import calcload, rings_from_S
+from .converting import S_from_G, _rings_from_S
+from .loads import calcload
 from .types import Topology
 
 __all__ = ('validate_routeset', 'validate_topology')
@@ -29,7 +29,7 @@ def _validate_ringed(
             f'ring edges must not carry a kind, got {sorted(map(str, kinds))}'
         )
 
-    rings = rings_from_S(S)
+    rings = _rings_from_S(S)
 
     # the rings partition the terminal set: every terminal in exactly one ring
     covered = sorted(t for _, ordered in rings for t in ordered)

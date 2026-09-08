@@ -10,6 +10,7 @@ import pytest
 from bitarray import bitarray, frozenbitarray
 
 from optiwindnet.converting import (
+    _rings_from_S,
     G_from_S,
     L_from_G,
     L_from_site,
@@ -30,6 +31,20 @@ from optiwindnet.transforming import (
 
 from .helpers import ring_sets, ringed_S, tiny_wfn
 from .sitecache import get_bundle
+
+
+@pytest.mark.parametrize('n', range(1, 13))
+@pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
+def test_private_rings_from_S_roundtrip(n, bridging):
+    R = 2 if bridging else 1
+    S = nx.Graph(R=R, T=n)
+    S.add_nodes_from(range(-R, 0))
+    roots = (-1, -2) if bridging else (-1, -1)
+    add_ring_to_S(S, roots, list(range(n)), subtree=0, A=None)
+
+    recovered_roots, ordered = _rings_from_S(S)[0]
+    assert set(recovered_roots) == set(roots)
+    assert set(ordered) == set(range(n))
 
 
 def test_linkbits_from_S_uses_canonical_edge_and_feeder_order():

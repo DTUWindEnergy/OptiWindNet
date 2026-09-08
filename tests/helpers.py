@@ -10,7 +10,8 @@ import numpy as np
 
 from optiwindnet.api import WindFarmNetwork
 from optiwindnet.geometric import is_crossing
-from optiwindnet.loads import add_ring_to_S, rings_from_S
+from optiwindnet.converting import _rings_from_S
+from optiwindnet.loads import add_ring_to_S
 from optiwindnet.MILP import (
     ModelOptions,
     OWNSolutionNotFound,
@@ -422,4 +423,4 @@ def ringed_S(R, ringspec):
 
 
 def ring_sets(S):
-    return {(r, frozenset(o)) for r, o in rings_from_S(S)}
+    return {(r, frozenset(o)) for r, o in _rings_from_S(S)}

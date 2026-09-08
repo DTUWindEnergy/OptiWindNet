@@ -11,8 +11,8 @@ import numba as nb
 import numpy as np
 from bitarray import bitarray
 
+from .converting import _rings_from_S
 from .geometric import angle_helpers, rotate
-from .loads import rings_from_S
 from .types import Topology
 
 _lggr = logging.getLogger(__name__)
@@ -189,7 +189,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     terminals, fed by a flowless closing feeder at one end and draining through
     a feeder carrying the whole ring at the other. Such rings are *radialized*
     into that chain here (walking across the zero-load link with
-    :func:`rings_from_S`), so the zero-load link becomes an ordinary
+    :func:`~optiwindnet.converting._rings_from_S`), so the zero-load link becomes an ordinary
     flow-carrying link.
 
     A ring bridging two roots drains through the one feeding the head of the
@@ -208,7 +208,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
             source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
             yield source, sink, edgeD['load']
         return
-    for root, chain_ in rings_from_S(S):
+    for root, chain_ in _rings_from_S(S):
         head_root, tail_root = root
         n = len(chain_)
         # the ring drains through chain_[0], whose feeder carries all of it, and
