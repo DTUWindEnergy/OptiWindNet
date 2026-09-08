@@ -20,10 +20,10 @@ from typing import TypedDict
 import networkx as nx
 
 from optiwindnet.heuristics import constructor
-from optiwindnet.interarraylib import as_normalized
 from optiwindnet.MILP import ModelOptions, OWNWarmupFailed, solver_factory
 from optiwindnet.MILP._core import feeder_and_load_bounds
 from optiwindnet.terse import TerseLinks
+from optiwindnet.transforming import as_normalized
 from optiwindnet.types import Topology
 
 from .cases import MILPCase

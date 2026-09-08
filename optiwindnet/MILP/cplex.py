@@ -8,7 +8,7 @@ from typing import Any
 import networkx as nx
 import pyomo.environ as pyo
 
-from ..interarraylib import G_from_S
+from ..converting import G_from_S
 from ..pathfinding import PathFinder
 from ._core import FeederRoute, OWNSolutionNotFound, PoolHandler
 from .pyomo import SolverPyomo

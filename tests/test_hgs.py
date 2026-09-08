@@ -8,11 +8,9 @@ import pytest
 import optiwindnet.baselines.hgs as hgs_mod
 from optiwindnet.baselines._core import remove_offending_crossings
 from optiwindnet.baselines.hgs import _balanced_capacity
-from optiwindnet.interarraylib import (
-    as_normalized,
-    linkbits_from_S,
-    topology_digest,
-)
+from optiwindnet.converting import linkbits_from_S
+from optiwindnet.identity import topology_id
+from optiwindnet.transforming import as_normalized
 from optiwindnet.types import Topology
 
 from .cases import (
@@ -34,7 +32,7 @@ def test_hgs_real_topology_cases(case):
     S = hgs_topology(case)
     assert_topology(S, expected_topology(case), case.capacity)
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
-    assert S.graph['_topology_digest'] == topology_digest(S.graph['_linkbits'])
+    assert S.graph['_topology_id'] == topology_id(S.graph['_linkbits'])
     assert terminal_terminal_crossings(S, A.graph['VertexC']) == []
 
 

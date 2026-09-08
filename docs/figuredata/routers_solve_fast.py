@@ -15,9 +15,10 @@ Usage::
 """
 
 from optiwindnet.baselines.hgs import hgs_cvrp
+from optiwindnet.converting import G_from_S
 from optiwindnet.heuristics import constructor
-from optiwindnet.interarraylib import G_from_S, as_normalized
 from optiwindnet.terse import TerseLinks
+from optiwindnet.transforming import as_normalized
 
 from . import routers_problem as problem
 

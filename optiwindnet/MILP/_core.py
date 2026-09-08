@@ -20,16 +20,10 @@ import networkx as nx
 from bitarray import bitarray, frozenbitarray
 from makefun import with_signature
 
-from ..interarraylib import (
-    _CANONICAL_TERMINAL_LINKS,
-    G_from_S,
-    S_from_linkbits,
-    _ring_split_position,
-    bfs_subtree_loads,
-    calcload,
-    directed_links,
-    topology_digest,
-)
+from ..converting import G_from_S, S_from_linkbits
+from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
+from ..interarraylib import directed_links
+from ..loads import _ring_split_position, bfs_subtree_loads, calcload
 from ..pathfinding import PathFinder
 from ..types import Topology
 
@@ -401,12 +395,12 @@ class ModelMetadata:
 
 @dataclass(slots=True)
 class SolutionInfo:
-    """Search outcome, plus the digest identifying the returned solution.
+    """Search outcome, plus the id of the returned solution's topology.
 
-    ``digest`` is the :func:`~optiwindnet.interarraylib.topology_digest` of the
+    ``topology_id`` is the :func:`~optiwindnet.identity.topology_id` of the
     model-objective incumbent, filled in by ``solve()``. It is empty only in an
     instance built outside a solver. A solution pool may hand over a different
-    entry, whose own digest is the ``_topology_digest`` of the topology
+    entry, whose own id is the ``_topology_id`` of the topology
     ``get_solution()`` returns.
     """
 
@@ -415,14 +409,16 @@ class SolutionInfo:
     objective: float
     relgap: float
     termination: str
-    digest: bytes = b''
+    topology_id: bytes = b''
 
     def __repr__(self) -> str:
         fields = ', '.join(
             f'{name}={getattr(self, name)!r}'
             for name in ('runtime', 'bound', 'objective', 'relgap', 'termination')
         )
-        return f'{type(self).__name__}({fields}, digest={self.digest.hex()!r})'
+        return (
+            f'{type(self).__name__}({fields}, topology_id={self.topology_id.hex()!r})'
+        )
 
 
 def check_model_enums(
@@ -581,17 +577,17 @@ class Solver(abc.ABC):
 
     @solution_info.setter
     def solution_info(self, solution_info: SolutionInfo) -> None:
-        """Record the search outcome, stamped with the incumbent's digest.
+        """Record the search outcome, stamped with the incumbent's id.
 
         Every backend assigns here at the end of ``solve()``, once the solver's
         best solution is readable. The incumbent is decoded once, here, and kept
-        for every later retrieval, so the digest is available as soon as
+        for every later retrieval, so the id is available as soon as
         ``solve()`` returns. It stays pinned to the model-objective incumbent,
         which is not necessarily the topology :meth:`get_solution` hands over.
         """
         self._solution_info = solution_info
         S = self._incumbent_S = self._decode_incumbent()
-        solution_info.digest = S.graph['_topology_digest']
+        solution_info.topology_id = S.graph['_topology_id']
 
     @abc.abstractmethod
     def _link_val(self, var: Any) -> int | bool:
@@ -685,12 +681,12 @@ class Solver(abc.ABC):
             **self.stopping,
             **metadata.model_options,
         )
-        # the incumbent's digest is not a routeset attribute: the delivered
-        # topology carries its own `_topology_digest`, inherited from S
+        # the incumbent's id is not a routeset attribute: the delivered
+        # topology carries its own `_topology_id`, inherited from S
         outcome = {
             key: value
             for key, value in asdict(solution_info).items()
-            if key != 'digest'
+            if key != 'topology_id'
         }
         # remaining graph attributes (key=value) are stored in db.RouteSet[].misc
         attr = dict(
@@ -773,7 +769,7 @@ class Solver(abc.ABC):
             topology=topology,
             capacity=metadata.capacity,
             _linkbits=linkbits,
-            _topology_digest=topology_digest(linkbits),
+            _topology_id=topology_id(linkbits),
             creator='MILP.' + self.name,
             solver_details={},
         )

@@ -22,7 +22,7 @@ _STATIC_KEYS = ('name', 'T', 'R', 'capacity', 'topology', 'cables')
 # SvgRepr's repr, second line: properties that change with the solution
 _SOLUTION_KEYS = ('feeders', 'C', 'D', 'length', 'cost')
 # SvgRepr's repr, third line: the topology's identity
-_DIGEST_KEY = 'topology_digest'
+_ID_KEY = 'topology_id'
 # keys used only by other keys' formatters
 _ANCILLARY_KEYS = ('currency',)
 # keys not rendered as '«key»«sep»«value»'
@@ -34,13 +34,9 @@ _KEY_FORMATTER = {
         'Σ¤ = {:_.0f} '.format(meta['cost']) + meta.get('currency', '')
     ).rstrip(),
     # bytes() so that a non-bytes value raises TypeError into _render's fallback
-    'topology_digest': lambda meta: (
-        'topology_digest = ' + bytes(meta['topology_digest']).hex()
-    ),
+    'topology_id': lambda meta: 'topology_id = ' + bytes(meta['topology_id']).hex(),
 }
-_KNOWN_KEYS = frozenset(
-    _STATIC_KEYS + _SOLUTION_KEYS + _ANCILLARY_KEYS + (_DIGEST_KEY,)
-)
+_KNOWN_KEYS = frozenset(_STATIC_KEYS + _SOLUTION_KEYS + _ANCILLARY_KEYS + (_ID_KEY,))
 
 _NODE_RADII = 12, 20
 _RING_RADII = 23, 28
@@ -69,7 +65,7 @@ class SvgRepr:
 
     ``metadata`` holds unformatted values, so that instances may be compared
     programmatically. Its repr renders ``_STATIC_KEYS`` in the first line,
-    ``_SOLUTION_KEYS`` in the second and the topology digest in the third.
+    ``_SOLUTION_KEYS`` in the second and the topology id in the third.
     """
 
     def __init__(self, data: str, metadata: Mapping[str, Any] = MappingProxyType({})):
@@ -98,8 +94,8 @@ class SvgRepr:
             lines = ['; '.join(static + solution)]
         else:
             lines = ['; '.join(static), '; '.join(solution)]
-        if _DIGEST_KEY in metadata:
-            lines.append(_render(_DIGEST_KEY, metadata, ' = '))
+        if _ID_KEY in metadata:
+            lines.append(_render(_ID_KEY, metadata, ' = '))
         return f'<SvgRepr[{self.handle}]: ' + '\n '.join(lines) + '>'
 
     def save(self, filepath: str) -> None:
@@ -166,9 +162,9 @@ class Drawable:
                 self.metadata['currency'] = G.graph['currency']
             # absent from routesets read back from the database: pack_G() withholds
             # the underscore-prefixed graph attributes
-            digest = G.graph.get('_topology_digest')
-            if digest is not None:
-                self.metadata[_DIGEST_KEY] = digest
+            topology_id = G.graph.get('_topology_id')
+            if topology_id is not None:
+                self.metadata[_ID_KEY] = topology_id
         self.c = c = Colors(dark)
         fnT = G.graph.get('fnT')
         if fnT is None:

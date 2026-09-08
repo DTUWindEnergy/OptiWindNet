@@ -46,7 +46,7 @@ def L_from_synthetic(
     name: str = '',
     handle: str = 'synthetic',
 ) -> nx.Graph:
-    """Sythetic location aggregator analogous to :func:`.interarraylib.L_from_site`.
+    """Sythetic location aggregator analogous to :func:`.converting.L_from_site`.
 
     Example::
 

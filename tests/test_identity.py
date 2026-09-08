@@ -1,8 +1,13 @@
 from hashlib import sha256
 
 import numpy as np
+from bitarray import frozenbitarray
 
-from optiwindnet.fingerprint import fingerprint_coordinates, fingerprint_function
+from optiwindnet.identity import (
+    fingerprint_coordinates,
+    fingerprint_function,
+    topology_id,
+)
 
 
 def test_fingerprint_coordinates_canonicalizes_memory_order():
@@ -28,3 +33,14 @@ def test_fingerprint_function_reports_bytecode_and_identity():
         'funfile': sample_function.__code__.co_filename,
         'funname': sample_function.__code__.co_name,
     }
+
+
+def test_topology_id_separates_vectors_that_share_padded_bytes():
+    """Padding to the byte boundary must not make shorter linkbits collide."""
+    six = frozenbitarray('010010')
+    eight = frozenbitarray('01001000')
+
+    assert topology_id(six) == topology_id(frozenbitarray('010010'))
+    assert six.tobytes() == eight.tobytes()
+    assert topology_id(six) != topology_id(eight)
+    assert len(topology_id(six)) == 16

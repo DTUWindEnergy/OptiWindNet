@@ -19,8 +19,8 @@ import utm
 import yaml
 from scipy.spatial import ConvexHull
 
+from .converting import L_from_site
 from .geometric import rotating_calipers
-from .interarraylib import L_from_site
 from .utils import make_handle
 
 _lggr = logging.getLogger(__name__)

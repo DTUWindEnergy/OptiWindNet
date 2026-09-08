@@ -8,7 +8,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from ..interarraylib import _invalidate_canonical_terminal_links
+from ..identity import _invalidate_canonical_terminal_links
 
 _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning

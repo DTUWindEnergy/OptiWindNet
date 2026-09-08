@@ -11,7 +11,7 @@ from optiwindnet.crossings import (
     find_routeset_crossings,
     get_interferences_list,
 )
-from optiwindnet.interarraylib import validate_routeset
+from optiwindnet.validating import validate_routeset
 
 from .helpers import tiny_wfn
 

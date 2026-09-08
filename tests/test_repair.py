@@ -5,7 +5,7 @@ import pytest
 
 from optiwindnet import repair
 from optiwindnet.api import WindFarmNetwork
-from optiwindnet.interarraylib import calcload
+from optiwindnet.loads import calcload
 from optiwindnet.repair import gate_and_leaf_path, list_path
 
 from .helpers import assert_graph_equal

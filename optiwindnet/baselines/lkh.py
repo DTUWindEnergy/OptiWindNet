@@ -19,12 +19,9 @@ import numpy as np
 from scipy.spatial.distance import pdist, squareform
 
 from ..clustering import clusterize
-from ..fingerprint import fingerprint_function
-from ..interarraylib import (
-    add_link_blockmap,
-    calcload,
-    split_rings_and_calc_loads,
-)
+from ..identity import fingerprint_function
+from ..interarraylib import add_link_blockmap
+from ..loads import calcload, split_rings_and_calc_loads
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
@@ -116,7 +113,7 @@ def _build_weight_matrix(
             so the budget per entry is ``int32_max // (2 * PRECISION)`` —
             which the caller passes here as ``w_clip``. Exceeding it usually
             means the input graph is not normalized (call
-            :func:`~optiwindnet.interarraylib.as_normalized` before solving), or
+            :func:`~optiwindnet.transforming.as_normalized` before solving), or
             that ``scale`` is too large for the coordinate magnitudes.
     """
     T_c = len(terminals)
@@ -629,7 +626,7 @@ def _lkh(
     """Low-level single-root Lin-Kernighan-Helsgaun (LKH-3) solver.
 
     Open Capacitated Vehicle Routing Problem on a single depot. ``A`` must be
-    normalized (use :func:`~optiwindnet.interarraylib.as_normalized` before
+    normalized (use :func:`~optiwindnet.transforming.as_normalized` before
     calling) and have R == 1. For multi-root instances, use :func:`lkh3` instead.
 
     See :func:`lkh3` for a higher-level wrapper that handles multi-root,
@@ -901,7 +898,7 @@ def lkh3(
     route returns to the depot, forming a ring whose capacity is doubled
     internally (``2 * capacity``) so each of the two arms holds at most
     ``capacity`` terminals. Normalization of the input graph is recommended
-    before calling this function (use :func:`~optiwindnet.interarraylib.as_normalized`).
+    before calling this function (use :func:`~optiwindnet.transforming.as_normalized`).
 
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered (one cluster per root) and each cluster is

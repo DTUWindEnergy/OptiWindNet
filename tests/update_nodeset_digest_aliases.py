@@ -15,10 +15,10 @@ import numpy as np
 
 from optiwindnet.db import NodeSet, database_connection
 from optiwindnet.db.storage import L_from_nodeset, packnodes
-from optiwindnet.fingerprint import fingerprint_coordinates
+from optiwindnet.identity import fingerprint_coordinates
 from optiwindnet.importer import load_repository
-from optiwindnet.interarraylib import as_single_root
 from optiwindnet.mesh import make_planar_embedding
+from optiwindnet.transforming import as_single_root
 
 from .nodeset_digest_aliases import (
     NODESET_DIGEST_ALIAS_COORDINATES_FILE,

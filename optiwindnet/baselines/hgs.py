@@ -12,13 +12,9 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import clusterize
-from ..fingerprint import fingerprint_function
-from ..interarraylib import (
-    calcload,
-    linkbits_from_S,
-    split_rings_and_calc_loads,
-    topology_digest,
-)
+from ..converting import linkbits_from_S
+from ..identity import fingerprint_function, topology_id
+from ..loads import calcload, split_rings_and_calc_loads
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
@@ -503,7 +499,7 @@ def hgs_cvrp(
         R=R,
         capacity=capacity,
         _linkbits=linkbits,
-        _topology_digest=topology_digest(linkbits),
+        _topology_id=topology_id(linkbits),
         creator='baselines.hgs',
         method_options=dict(
             solver_name='HGS-CVRP',

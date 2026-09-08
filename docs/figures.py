@@ -47,12 +47,13 @@ from docs.figuredata import routers_problem
 from docs.svg_utils import prettify_svg
 from optiwindnet.api import MILPRouter, ModelOptions, WindFarmNetwork
 from optiwindnet.baselines.hgs import hgs_cvrp
+from optiwindnet.converting import G_from_S
 from optiwindnet.importer import load_repository
-from optiwindnet.interarraylib import G_from_S, as_normalized
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.svg import Drawable
 from optiwindnet.synthetic import toyfarm
+from optiwindnet.transforming import as_normalized
 
 STATIC = HERE / '_static'
 

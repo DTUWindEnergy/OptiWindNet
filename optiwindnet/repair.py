@@ -7,7 +7,7 @@ import logging
 import networkx as nx
 
 from .crossings import list_edge_crossings
-from .interarraylib import calcload
+from .loads import calcload
 
 __all__ = ('repair_routeset_path',)
 
@@ -207,7 +207,7 @@ def _find_fix_choices_path(
 def _quantify_choices_ringed(S, A, swapS, src_path, dst_path, choices):
     """Ring-aware counterpart of :func:`_quantify_choices`.
 
-    In a topology destined for rings (closed by :func:`.interarraylib.calcload`
+    In a topology destined for rings (closed by :func:`.loads.calcload`
     when handed ``A``), *both* extremes of every path get a feeder, so the length
     change prices ``d2roots`` at all four extremes and there is no freedom to flip
     a gate to a leaf end. The returned ``gates_del``/``gates_add`` still maintain

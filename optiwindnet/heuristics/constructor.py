@@ -12,19 +12,14 @@ from bitarray import bitarray
 from bitarray.util import ones, zeros
 from scipy.stats import rankdata
 
+from ..converting import linkbits_from_S
 from ..crossings import edge_conflicts
-from ..fingerprint import fingerprint_function
 from ..geometric import (
     angle_oracles_factory,
 )
-from ..interarraylib import (
-    add_link_blockmap,
-    add_terminal_closest_root,
-    calcload,
-    linkbits_from_S,
-    split_rings_and_calc_loads,
-    topology_digest,
-)
+from ..identity import fingerprint_function, topology_id
+from ..interarraylib import add_link_blockmap, add_terminal_closest_root
+from ..loads import calcload, split_rings_and_calc_loads
 from ..types import Topology
 from .priorityqueue import PriorityQueue
 
@@ -1002,7 +997,7 @@ def constructor(
         runtime=time.perf_counter() - start_time,
         capacity=capacity_report,
         _linkbits=linkbits,
-        _topology_digest=topology_digest(linkbits),
+        _topology_id=topology_id(linkbits),
         creator='constructor',
         iterations=i,
         method_options={

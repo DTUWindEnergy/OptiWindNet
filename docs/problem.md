@@ -56,7 +56,7 @@ The following figure shows four graph representations of Kriegers Flak A, with 2
 
 This sequence describes the data pipeline rather than a required user workflow. The {doc}`/high_level_api` accepts `L` and returns `G`, while constructing and storing `P`, `A` and `S` internally. Direct access to these intermediate graphs is useful for inspecting the search space, reusing a topology across runs or controlling individual processing steps through the {doc}`/low_level_api`.
 
-{py:func}`G_from_S(S, A) <optiwindnet.interarraylib.G_from_S>` renders the selected-links graph `S` as a tentative physical graph. Links that must avoid the border or obstacles already follow their contours at this stage. Path-finding then resolves crossings by adding detours, producing the routeset `G`. The selected-links and routeset views therefore differ in routing completeness: the former includes contours but no detours, whereas the latter shows the finalized physical cable routes. See {doc}`/reference/validation` for procedures that verify solution validity.
+{py:func}`G_from_S(S, A) <optiwindnet.converting.G_from_S>` renders the selected-links graph `S` as a tentative physical graph. Links that must avoid the border or obstacles already follow their contours at this stage. Path-finding then resolves crossings by adding detours, producing the routeset `G`. The selected-links and routeset views therefore differ in routing completeness: the former includes contours but no detours, whereas the latter shows the finalized physical cable routes. See {doc}`/reference/validation` for procedures that verify solution validity.
 
 ```{admonition} Two meanings of "topology"
 :class: note

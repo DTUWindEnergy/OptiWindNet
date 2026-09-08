@@ -3,7 +3,7 @@
 from functools import cache
 
 from optiwindnet.baselines.hgs import hgs_cvrp
-from optiwindnet.interarraylib import as_normalized
+from optiwindnet.transforming import as_normalized
 
 from .cases import BaselineCase
 from .sitecache import get_bundle

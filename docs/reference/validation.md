@@ -12,7 +12,7 @@ Please report any invalid solution topology or invalid routesets that are not re
 
 <!-- prettier-ignore-start -->
 
-{py:func}`validate_topology(S) <optiwindnet.interarraylib.validate_topology>`
+{py:func}`validate_topology(S) <optiwindnet.validating.validate_topology>`
 : Checks that a solution topology `S` adheres to the network topology (architecture) and to the cable capacity it declares. Ensures that all terminals are connected to a root and that the required edge attributes are set.
 
 <!-- prettier-ignore-end -->
@@ -31,7 +31,7 @@ _In use:_ {doc}`/notebooks/lo30_topologies` (Advanced API).
 
 <!-- prettier-ignore-start -->
 
-{py:func}`validate_routeset(G) <optiwindnet.interarraylib.validate_routeset>`
-: Checks the complete routed solution. It verifies stored loads against the routes, reduces the routes to their solution topology and calls {py:func}`validate_topology() <optiwindnet.interarraylib.validate_topology>`, then checks the complete route polylines with {py:func}`find_geometric_crossings() <optiwindnet.crossings.find_geometric_crossings>`. Calling `validate_topology()` separately is redundant.
+{py:func}`validate_routeset(G) <optiwindnet.validating.validate_routeset>`
+: Checks the complete routed solution. It verifies stored loads against the routes, reduces the routes to their solution topology and calls {py:func}`validate_topology() <optiwindnet.validating.validate_topology>`, then checks the complete route polylines with {py:func}`find_geometric_crossings() <optiwindnet.crossings.find_geometric_crossings>`. Calling `validate_topology()` separately is redundant.
 
 <!-- prettier-ignore-end -->

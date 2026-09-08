@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from optiwindnet.fingerprint import fingerprint_coordinates
+from optiwindnet.identity import fingerprint_coordinates
 
 __all__ = (
     'NODESET_DIGEST_ALIASES',

@@ -13,7 +13,8 @@ from typing import Any
 import networkx as nx
 import numpy as np
 
-from .fingerprint import fingerprint_coordinates
+from .identity import fingerprint_coordinates
+from .loads import calcload
 from .types import Topology
 
 __all__ = ('LinkScope', 'TerseLinks')
@@ -323,8 +324,6 @@ class TerseLinks(Sequence[int]):
         """Encode routed solution ``G``, including its clone mapping."""
         if not G.graph.get('has_loads'):
             G = G.copy()
-            from .interarraylib import calcload
-
             calcload(G)
         topology = G.graph['topology']
         R, T, B = (G.graph[key] for key in 'RTB')
@@ -419,8 +418,6 @@ class TerseLinks(Sequence[int]):
             attrs = {'load': 0, 'reverse': False} if edge.is_open else {}
             S.add_edge(edge.u, edge.v, **attrs)
 
-        from .interarraylib import calcload
-
         calcload(S)
         if 'capacity' not in graph_attrs:
             S.graph['capacity'] = S.graph['max_load']
@@ -479,8 +476,6 @@ class TerseLinks(Sequence[int]):
             edge_data['kind'] = 'contour'
         for _, _, edge_data in G.edges(detour_nodes, data=True):
             edge_data['kind'] = 'detour'
-
-        from .interarraylib import calcload
 
         calcload(G)
         return G

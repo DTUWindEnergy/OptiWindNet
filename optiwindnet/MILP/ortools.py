@@ -11,9 +11,9 @@ from typing import Any
 import networkx as nx
 from ortools.math_opt.python import mathopt
 
+from ..converting import G_from_S
 from ..crossings import edgeset_edgeXing_iter, gateXing_iter
-from ..fingerprint import fingerprint_function
-from ..interarraylib import G_from_S
+from ..identity import fingerprint_function
 from ..pathfinding import PathFinder
 from ._core import (
     FeederLimit,
