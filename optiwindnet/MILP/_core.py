@@ -23,8 +23,10 @@ from makefun import with_signature
 from ..interarraylib import (
     _CANONICAL_TERMINAL_LINKS,
     G_from_S,
+    S_from_linkbits,
     _ring_split_position,
     bfs_subtree_loads,
+    calcload,
     directed_links,
     topology_digest,
 )
@@ -561,6 +563,7 @@ class Solver(abc.ABC):
 
     name: str
     metadata: ModelMetadata
+    A: nx.Graph
     # backend-native objects: every concrete solver sets both in `set_problem()`
     model: Any
     solver: Any
@@ -702,17 +705,10 @@ class Solver(abc.ABC):
         return attr
 
     def _topology_from_mip_sol(self):
-        """Create a topology graph from the solution to the MILP model.
-
-        Returns:
-          Graph topology ``S`` from the solution.
-        """
+        """Decode selected links, retaining solver flows for non-unit node power."""
         metadata = self.metadata
         topology = metadata.model_options['topology']
         R = metadata.R
-        S = nx.Graph(R=R, T=metadata.T)
-        # ensure roots are added, even if some are not connected
-        S.add_nodes_from(range(-R, 0))
         # Mapping iteration is canonical by construction in all model builders.
         # Read each binary variable once, then collapse the directed blocks with
         # bit operations for a solver-independent topology representation.
@@ -730,6 +726,66 @@ class Solver(abc.ABC):
             feeder_link_count=feeder_link_count,
             ringed=ringed,
         )
+        A = self.A
+        if any(A.nodes[t].get('power', 1) != 1 for t in range(metadata.T)):
+            S = self._topology_from_mip_flows(link_values)
+        elif ringed:
+            # The full bits identify the topology, but the finalizer needs open
+            # paths and their closing feeders separately. In a one-terminal ring
+            # the opening and closing feeder may be the same undirected edge.
+            feeder_start = 2 * terminal_link_count
+            opening_bits = link_values[feeder_start : feeder_start + feeder_link_count]
+            pathbits = bitarray(linkbits[:terminal_link_count])
+            pathbits.extend(opening_bits)
+            S = S_from_linkbits(pathbits, A)
+            closing_links = []
+            for position in link_values[feeder_start + feeder_link_count :].search(
+                bitarray('1')
+            ):
+                tail, root_index = divmod(position, R)
+                closing_links.append((root_index - R, tail))
+
+            # Only the tail's subtree ID is read by the finalizer, which assigns
+            # every other node attribute and all loads after splitting the rings.
+            subtree = 0
+            visited = set(range(-R, 0))
+            for root in range(-R, 0):
+                for head in S[root]:
+                    previous, tail = root, head
+                    while True:
+                        if tail in visited:
+                            raise ValueError(f'node {tail} reached twice in ring paths')
+                        visited.add(tail)
+                        successors = [n for n in S[tail] if n != previous]
+                        if not successors:
+                            break
+                        (next_node,) = successors
+                        previous, tail = tail, next_node
+                    S.nodes[tail]['subtree'] = subtree
+                    subtree += 1
+            if len(visited) != metadata.T + R:
+                raise ValueError('ring paths do not reach every terminal')
+            _finalize_ringed_mip_S(S, closing_links, A)
+        else:
+            S = S_from_linkbits(linkbits, A)
+            calcload(S)
+        S.graph.update(
+            topology=topology,
+            capacity=metadata.capacity,
+            _linkbits=linkbits,
+            _topology_digest=topology_digest(linkbits),
+            creator='MILP.' + self.name,
+            solver_details={},
+        )
+        return S
+
+    def _topology_from_mip_flows(self, link_values: bitarray) -> nx.Graph:
+        """Preserve solver-assigned loads when terminal powers are non-unitary."""
+        metadata = self.metadata
+        topology = metadata.model_options['topology']
+        R = metadata.R
+        S = nx.Graph(R=R, T=metadata.T)
+        S.add_nodes_from(range(-R, 0))
         # Get active links and if flow is reversed (i.e. from small to big)
         rev_from_link = {
             (u, v): u < v
@@ -771,16 +827,7 @@ class Solver(abc.ABC):
             max_load = _finalize_ringed_mip_S(
                 S, closing_links, getattr(self, 'A', None)
             )
-        S.graph.update(
-            topology=topology,
-            capacity=metadata.capacity,
-            max_load=max_load,
-            has_loads=True,
-            _linkbits=linkbits,
-            _topology_digest=topology_digest(linkbits),
-            creator='MILP.' + self.name,
-            solver_details={},
-        )
+        S.graph.update(max_load=max_load, has_loads=True)
         return S
 
 

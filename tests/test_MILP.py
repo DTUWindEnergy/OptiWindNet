@@ -607,7 +607,8 @@ def test_ringed_warmstart_links_conserve_flow(n, bridging):
 
 @pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
 @pytest.mark.parametrize('n', range(1, 11))
-def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
+@pytest.mark.parametrize('descending_lengths', (False, True))
+def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
     from types import SimpleNamespace
 
     head_root = -1
@@ -618,9 +619,16 @@ def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
     closing_link = (close_root, n - 1)
     active_links = {*flows, closing_link}
     A = nx.path_graph(n)
-    nx.set_edge_attributes(A, {edge: 1.0 for edge in A.edges}, 'length')
+    nx.set_edge_attributes(
+        A,
+        {edge: n - edge[0] if descending_lengths else edge[0] + 1 for edge in A.edges},
+        'length',
+    )
     E, Eʹ, stars, starsʹ = core.canonical_linksets(
         A, R=R, T=n, topology=Topology.RINGED
+    )
+    A.graph.update(
+        R=R, T=n, _canonical_terminal_links=np.array(E, dtype=np.uint32).reshape(-1, 2)
     )
     linkset = E + Eʹ + stars + starsʹ
     links = {link: link in active_links for link in linkset}
@@ -645,7 +653,7 @@ def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
 
         @staticmethod
         def _flow_val(value):
-            return value
+            raise AssertionError('unit-power decoding must not read flow variables')
 
     fake = FakeSolver()
     fake.A = A
@@ -659,6 +667,64 @@ def test_ringed_mip_decoder_reuses_flow_tree(n, bridging):
     assert S.graph['_linkbits'] == frozenbitarray(
         frozenset(link) in active_edges for link in E + stars
     )
+    assert all('kind' not in attrs for _, attrs in S.nodes(data=True))
+
+
+@pytest.mark.parametrize('topology', (Topology.BRANCHED, Topology.RADIAL))
+@pytest.mark.parametrize('powers', (None, (1, 1, 1), (2, 3, 1)))
+def test_forest_mip_decoder_preserves_non_unit_power(topology, powers):
+    from types import SimpleNamespace
+
+    A = nx.path_graph(3)
+    if powers is not None:
+        nx.set_node_attributes(A, dict(enumerate(powers)), 'power')
+    E, reverse, stars, _ = core.canonical_linksets(A, R=2, T=3, topology=topology)
+    A.graph.update(R=2, T=3, _canonical_terminal_links=np.array(E, dtype=np.uint32))
+    p0, p1, p2 = powers if powers is not None else (1, 1, 1)
+    flows = {(0, 1): p0, (1, 2): p0 + p1, (2, -1): p0 + p1 + p2}
+    linkset = E + reverse + stars
+
+    class FakeSolver:
+        name = 'fake'
+        _topology_from_mip_flows = core.Solver._topology_from_mip_flows
+        flow_reads = 0
+
+        def __init__(self):
+            self.A = A
+            self.metadata = SimpleNamespace(
+                R=2,
+                T=3,
+                capacity=6,
+                model_options={'topology': topology},
+                linkset=linkset,
+                link_={link: link in flows for link in linkset},
+                flow_=flows,
+            )
+
+        @staticmethod
+        def _link_val(value):
+            return value
+
+        def _flow_val(self, value):
+            self.flow_reads += 1
+            return value
+
+    fake = FakeSolver()
+    S = core.Solver._topology_from_mip_sol(
+        fake  # pyrefly: ignore[bad-argument-type]
+    )
+    assert {frozenset(edge) for edge in S.edges} == {frozenset(edge) for edge in flows}
+    assert S.nodes[-2]['load'] == 0
+    assert S.nodes[-1]['load'] == p0 + p1 + p2
+    assert S.graph['max_load'] == p0 + p1 + p2
+    for (u, v), load in flows.items():
+        assert S[u][v] == {'load': load, 'reverse': u < v}
+        assert S.nodes[u] == {'load': load, 'subtree': 0}
+    assert fake.flow_reads == (3 if powers == (2, 3, 1) else 0)
+    assert S.graph['_topology_digest'] == topology_digest(S.graph['_linkbits'])
+    assert S.graph['topology'] is topology
+    assert S.graph['capacity'] == 6
+    assert S.graph['has_loads']
 
 
 def test_ringed_warmstart_is_accepted_by_scip():
