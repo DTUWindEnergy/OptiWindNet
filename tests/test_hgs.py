@@ -129,9 +129,15 @@ def test_balanced_capacity_empty_cluster():
 def _capture_do_hgs(monkeypatch, routes):
     captured = {}
 
-    def fake_do_hgs(W, coordinates, vehicles, capacity, hgs_options, log_callback=None):
+    def fake_do_hgs(
+        W, coordinates, vehicles, capacity, hgs_options, log_callback=None, demands=None
+    ):
         captured.update(
-            vehicles=vehicles, capacity=capacity, n=coordinates.shape[1], W=W
+            vehicles=vehicles,
+            capacity=capacity,
+            n=coordinates.shape[1],
+            W=W,
+            demands=demands,
         )
         return (routes, 0.01, 0.0, 1.0, '', {})
 
@@ -277,6 +283,8 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
 
     assert captured['capacity'] == 2
     assert captured['n'] == 5  # no slack nodes
+    # The worker supplies unit demands when no array is passed.
+    assert captured['demands'] is None
     assert 'capacity_effective' not in S.graph['solver_details']
 
 
@@ -361,3 +369,39 @@ def test_remove_offending_crossing_keeps_absent_diagonal_mapping():
     assert (0, 1) not in A.edges
     assert '_canonical_terminal_links' not in A.graph
     assert '_linkset_id' not in A.graph
+
+
+def test_hgs_honours_non_unit_terminal_power_on_a_single_root_radial_solve():
+    """HGS-CVRP respects declared terminal power when filling each route."""
+    from optiwindnet.validating import validate_topology
+
+    A = as_normalized(get_bundle('toy').A.copy())
+    powers = {t: 1 + (t % 3) for t in range(A.graph['T'])}
+    nx.set_node_attributes(A, powers, 'power')
+
+    S = hgs_mod.hgs_cvrp(A, capacity=8, time_limit=DEFAULT_BASELINE_TIME_LIMIT, seed=1)
+
+    subtree_loads = [S.nodes[t]['load'] for t in S.neighbors(-1)]
+    assert max(subtree_loads) <= 8  # capacity is a power budget, not a count
+    assert sum(subtree_loads) == sum(powers.values())
+    # the solution carries the power its loads were derived from
+    assert {t: S.nodes[t].get('power') for t in (0, 1, 2)} == {0: None, 1: 2, 2: 3}
+    assert validate_topology(S, 8) == []
+
+
+@pytest.mark.parametrize(
+    ('site', 'options'),
+    (
+        ('toy', {'ringed': True}),
+        ('toy', {'balanced': True}),
+        ('neart', {}),  # multi-root: clusterize() partitions by terminal count
+    ),
+)
+def test_hgs_rejects_non_unit_terminal_power_it_cannot_honour(site, options):
+    A = as_normalized(get_bundle(site).A.copy())
+    nx.set_node_attributes(A, {0: 2}, 'power')
+
+    with pytest.raises(NotImplementedError, match='single-root radial solve'):
+        hgs_mod.hgs_cvrp(
+            A, capacity=8, time_limit=DEFAULT_BASELINE_TIME_LIMIT, **options
+        )

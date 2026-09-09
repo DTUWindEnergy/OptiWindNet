@@ -14,7 +14,7 @@ import numpy as np
 from ..clustering import clusterize
 from ..converting import linkbits_from_S
 from ..identity import fingerprint_function, linkset_id, topology_id
-from ..loads import calcload, split_rings_and_calc_loads
+from ..loads import calcload, split_rings_and_calc_loads, terminal_powers
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
@@ -150,11 +150,13 @@ def _solution_time(log, objective) -> float:
         return 0.0
 
 
-def _do_hgs(W, coordinates, vehicles, capacity, hgs_options, log_callback=None):
+def _do_hgs(W, coordinates, vehicles, capacity, hgs_options, log_callback=None,
+            demands=None):  # fmt: skip
     """Multithreading worker function that calls the external library"""
     n = coordinates.shape[1]
-    demands = np.ones(n, dtype=np.float64)
-    demands[0] = 0.0  # depot demand = 0
+    if demands is None:
+        demands = np.ones(n, dtype=np.float64)
+        demands[0] = 0.0  # depot demand = 0
 
     num_vehicles = vehicles if vehicles is not None else -1
     result = hybgensea.solve_cvrp_dist_mtx(
@@ -198,8 +200,24 @@ def _solve_single_root(
     rootC = VertexC[-1:].T
     coordinates = np.hstack((rootC, VertexC[:T].T, *((rootC,) * num_slack)))
 
+    demands = None
+    powers = terminal_powers(A)
+    if powers:
+        # The depot precedes the terminals in the demand array.
+        # hgs_cvrp() rejects balanced solves with non-unit power.
+        demands = np.ones(T + 1 + num_slack, dtype=np.float64)
+        demands[0] = 0.0
+        for t, power in powers.items():
+            demands[t + 1] = power
+
     outputs = _do_hgs(
-        distance_matrix, coordinates, vehicles, capacity, hgs_options, log_callback
+        distance_matrix,
+        coordinates,
+        vehicles,
+        capacity,
+        hgs_options,
+        log_callback,
+        demands,
     )
 
     inputs_ = (vehicles,), (T,), (n_from_i,), (num_slack,), (capacity,)
@@ -388,7 +406,18 @@ def hgs_cvrp(
         raise NotImplementedError(
             'vehicles_exact is not supported together with ringed=True.'
         )
-    vehicles_min = math.ceil(T / solve_capacity)
+    powers = terminal_powers(A)
+    if powers and (ringed or balanced or R > 1):
+        raise NotImplementedError(
+            "hgs_cvrp() honours a terminal 'power' other than 1 only for an "
+            'unbalanced single-root radial solve: rings split by terminal count, '
+            'the balanced slack nodes are counted, and clusterize() partitions '
+            'by count.'
+        )
+    # Add departures from unit power to the default total of T.
+    vehicles_min = math.ceil(
+        (T + sum(power - 1 for power in powers.values())) / solve_capacity
+    )
     if vehicles_exact:
         if vehicles is None:
             raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
@@ -492,6 +521,8 @@ def hgs_cvrp(
         split_rings_and_calc_loads(S, A_orig)
     else:
         S.graph['topology'] = Topology.RADIAL
+        # Preserve terminal power for load calculation and validation.
+        nx.set_node_attributes(S, powers, 'power')
         calcload(S)
 
     linkbits = linkbits_from_S(A_orig, S)
