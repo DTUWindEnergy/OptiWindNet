@@ -11,8 +11,34 @@ from .types import Topology
 
 __all__ = (
 'bfs_subtree_loads', 'calcload',
-    'split_rings_and_calc_loads',
+    'split_rings_and_calc_loads', 'terminal_powers',
 )  # fmt: skip
+
+
+def terminal_powers(G: nx.Graph) -> dict[int, int]:
+    """Return terminal powers that differ from one unit, keyed by node.
+
+    An absent ``'power'`` attribute means one unit. The result is empty when
+    all terminals have unit power. Solvers use this mapping to set customer
+    demands and preserve power on the solution, or to reject unsupported modes.
+
+    Raises:
+        ValueError: a terminal's power is less than one or is not a whole number.
+          Capacity and terminal demands must use whole units.
+    """
+    nodes = G.nodes
+    powers = {
+        t: power
+        for t in range(G.graph['T'])
+        if (power := nodes[t].get('power', 1)) != 1
+    }
+    for t, power in powers.items():
+        if power < 1 or power % 1:
+            raise ValueError(
+                f"terminal {t} declares power {power!r}: a terminal's 'power' "
+                'must be a whole number of units, one or more'
+            )
+    return powers
 
 
 # A link's ``'reverse'`` flag orients it independently of the node order it
@@ -27,7 +53,7 @@ __all__ = (
 # other way round. Feeders are never reversed, the sink being a root and a root's
 # id negative; links carrying ``load=0`` (a ring's zero-load link) have no current and
 # so no direction to encode.
-def _bfs_loads_walk(_adj, _node, T, visited, queue) -> None:
+def _bfs_loads_walk(_adj, _node, T, visited, queue) -> int:
     """Descend the subtrees seeded in ``queue``, appending every node reached.
 
     Each ``queue`` entry is ``(node, parent, edgeD, parentD, subtree)``, with
@@ -37,11 +63,17 @@ def _bfs_loads_walk(_adj, _node, T, visited, queue) -> None:
     and the base its descendants' loads are added to; the accumulation happens
     on the way back up.
 
-    A node that keeps a stale ``'load'`` (callers that clear only part of the
-    graph, e.g. :func:`as_hooked_to_nearest`) starts from it, unless it is a
-    leaf of the traversal, which always restarts from its own contribution.
+    A terminal contributes its ``'power'``, defaulting to one unit; a clone
+    contributes zero. Internal nodes retain any existing ``'load'`` value,
+    as needed by callers that clear only part of the graph, such as
+    :func:`as_hooked_to_nearest`. Leaves restart from their own contribution.
+
+    Returns:
+      Number of terminals reached. Callers use this count to check traversal
+      coverage independently of the terminals' power.
     """
     i = 0
+    terminals = 0
     while i < len(queue):
         node, parent, _, _, subtree = queue[i]
         i += 1
@@ -56,8 +88,13 @@ def _bfs_loads_walk(_adj, _node, T, visited, queue) -> None:
                 raise ValueError(f'node {nbr} reached twice: not a tree below {node}')
             visited.add(nbr)
             queue.append((nbr, node, edgeD, nodeD, subtree))
-        default = 1 if node < T else 0  # load is 1 for wtg nodes
+        if node < T:
+            default = nodeD.get('power', 1)
+            terminals += 1
+        else:
+            default = 0
         nodeD['load'] = default if len(queue) == stop else nodeD.get('load', default)
+    return terminals
 
 
 def _bfs_loads_unwind(_node, queue) -> None:
@@ -90,7 +127,8 @@ def bfs_subtree_loads(G, parent, children, subtree, visited=None):
         used when omitted.
 
     Returns:
-      Total number of descendant nodes
+      Load of ``parent`` after accumulating its descendants' loads, including
+      its own power if it is a terminal.
 
     Raises:
       ValueError: a node is reached twice, so the traversal is not descending a
@@ -101,7 +139,9 @@ def bfs_subtree_loads(G, parent, children, subtree, visited=None):
         visited = {parent}
     _adj, _node = G._adj, G._node
     nodeD = _node[parent]
-    default = 1 if parent < T else 0  # load is 1 for wtg nodes
+    # Terminals contribute their declared power, defaulting to one unit.
+    # Roots and clones contribute zero.
+    default = nodeD.get('power', 1) if 0 <= parent < T else 0
     if not children:
         nodeD['load'] = default
         return default
@@ -190,6 +230,9 @@ def calcload(G: nx.Graph) -> None:
     ``'load'`` attributes, the edges' ``'load'`` attributes are updated, and the
     graph's ``'max_load'``, ``'has_loads'`` and root loads are set.
 
+    Each terminal contributes its ``'power'`` attribute, defaulting to one unit.
+    The traversal must reach all ``T`` terminals, regardless of their power.
+
     Ring construction — closing path-form arms into rings — lives in
     :func:`split_rings_and_calc_loads`, which the ringed builders call instead.
     """
@@ -222,11 +265,10 @@ def calcload(G: nx.Graph) -> None:
             queue.append((subroot, root, edgeD, rootD, subtree))
             subroots.append(subroot)
             subtree += 1
-    _bfs_loads_walk(_adj, _node, T, visited, queue)
+    terminals = _bfs_loads_walk(_adj, _node, T, visited, queue)
     _bfs_loads_unwind(_node, queue)
 
     max_load = max((_node[subroot]['load'] for subroot in subroots), default=0)
-    total_load = sum(_node[root]['load'] for root in range(-R, 0))
     if len(_node) > T + R:
         # Clones inside a routed ring's open cable are separated from both arms by
         # load=0 segments. They intentionally carry no current and are therefore
@@ -238,8 +280,8 @@ def calcload(G: nx.Graph) -> None:
                 and all(edgeD.get('load') == 0 for edgeD in _adj[node].values())
             ):
                 nodeD['load'] = 0
-    if total_load != T:
-        raise ValueError(f'root loads sum to {total_load}, expected T = {T}')
+    if terminals != T:
+        raise ValueError(f'root traversals reached {terminals} terminals, not T = {T}')
     G.graph['has_loads'] = True
     G.graph['max_load'] = max_load
 

@@ -915,7 +915,7 @@ def lkh3(
     ``time_limit``.
 
     Args:
-        A: graph with allowed edges (if it has 0 edges, use ``complete=True``).
+        A: available-links graph. No edges implies ``complete=True``.
         capacity: maximum vehicle capacity.
         time_limit: [s] solver run time limit (per cluster).
         vehicles: number of vehicles (if None or at the minimum, use the

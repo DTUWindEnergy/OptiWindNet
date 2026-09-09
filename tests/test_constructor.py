@@ -248,3 +248,11 @@ def test_debug_logging_reports_heap_state(caplog):
     with caplog.at_level(logging.DEBUG, logger='optiwindnet.heuristics.constructor'):
         constructor(A, capacity=3, method='rootlust')
     assert 'heap' in caplog.text
+
+
+def test_constructor_rejects_non_unit_terminal_power():
+    A = get_bundle('toy').A.copy()
+    nx.set_node_attributes(A, {0: 2}, 'power')
+
+    with pytest.raises(NotImplementedError, match='up to `capacity` terminals'):
+        constructor(A, capacity=5, method='biased_EW')

@@ -9,8 +9,10 @@ import pytest
 from optiwindnet.converting import _rings_from_S
 from optiwindnet.loads import (
     _add_ring_to_S,
+    bfs_subtree_loads,
     calcload,
     split_rings_and_calc_loads,
+    terminal_powers,
 )
 from optiwindnet.MILP import Topology
 from optiwindnet.validating import validate_topology
@@ -89,3 +91,65 @@ def test_calcload():
 
     assert G.graph['has_loads']
     assert G.graph['max_load'] == 4
+
+
+def _chain_S(T, powers=None):
+    """One root feeding a single chain of ``T`` terminals."""
+    S = nx.Graph(R=1, T=T)
+    S.add_node(-1)
+    S.add_edge(-1, 0)
+    S.add_edges_from(itertools.pairwise(range(T)))
+    if powers is not None:
+        nx.set_node_attributes(S, dict(enumerate(powers)), 'power')
+    return S
+
+
+def test_calcload_sources_declared_terminal_power():
+    powers = (2, 3, 1, 4)
+    S = _chain_S(4, powers)
+
+    calcload(S)
+
+    # each link carries the power of everything beyond it, feeder included
+    assert [S[u][v]['load'] for u, v in ((2, 3), (1, 2), (0, 1), (-1, 0))] == [
+        4, 5, 8, 10,
+    ]  # fmt: skip
+    assert S.nodes[-1]['load'] == sum(powers)
+    assert S.graph['max_load'] == sum(powers)
+
+
+def test_calcload_without_power_attributes_counts_terminals():
+    plain, unitary = _chain_S(4), _chain_S(4, (1, 1, 1, 1))
+
+    calcload(plain)
+    calcload(unitary)
+
+    assert plain.nodes[-1]['load'] == unitary.nodes[-1]['load'] == 4
+    assert {(u, v): d['load'] for u, v, d in plain.edges(data=True)} == {
+        (u, v): d['load'] for u, v, d in unitary.edges(data=True)
+    }
+
+
+def test_calcload_reports_a_terminal_no_root_reaches():
+    """Traversal coverage is checked by terminal count, independently of power."""
+    S = _chain_S(4, (2, 3, 1, 4))
+    S.remove_edge(2, 3)  # terminal 3 is now cut off from every root
+
+    with pytest.raises(ValueError, match='reached 3 terminals, not T = 4'):
+        calcload(S)
+
+
+def test_bfs_subtree_loads_sources_declared_terminal_power():
+    S = _chain_S(3, (2, 3, 1))
+
+    assert bfs_subtree_loads(S, -1, [0], subtree=0) == 6
+    assert S.nodes[0]['load'] == 6
+    assert S.nodes[1]['load'] == 4
+
+
+def test_terminal_powers_reports_only_the_departures_from_one_unit():
+    S = _chain_S(4, (1, 2, 1, 3))
+    S.add_node(-1, power=99)  # a root sources nothing; it is never reported
+
+    assert terminal_powers(S) == {1: 2, 3: 3}
+    assert terminal_powers(_chain_S(4)) == {}
