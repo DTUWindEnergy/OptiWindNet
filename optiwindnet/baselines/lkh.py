@@ -21,7 +21,7 @@ from scipy.spatial.distance import pdist, squareform
 from ..clustering import clusterize
 from ..identity import fingerprint_function
 from ..interarraylib import add_link_blockmap
-from ..loads import calcload, split_rings_and_calc_loads
+from ..loads import calcload, split_rings_and_calc_loads, terminal_powers
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
@@ -217,6 +217,7 @@ def _do_lkh(
     capacity: int,
     vehicles: int,
     min_route_size: int,
+    demands: list[int] | None = None,
     time_limit: float,
     scale: float,
     runs: int,
@@ -270,10 +271,15 @@ def _do_lkh(
         # calibrated for open (radial) routes; a closed ring pays a second feeder
         # leg, so the cap is not imposed for ringed solves.
         specs['DISTANCE'] = distance_cap  # maximum route length
+    if demands is None:
+        demands = [1] * T
     data = {
         'EDGE_WEIGHT_SECTION': edge_weights,
         'DEMAND_SECTION': '\n'.join(
-            chain((f'{i + 1} 1' for i in range(T)), (f'{N} 0',))
+            chain(
+                (f'{i} {demand}' for i, demand in enumerate(demands, start=1)),
+                (f'{N} 0',),
+            )
         ),
     }
     params = dict(
@@ -296,7 +302,8 @@ def _do_lkh(
         #   EDGE_WEIGHT_FORMAT='FULL_MATRIX' is required for open routes
         #   Notably, balanced=True is NOT enforced with the current parameters
         MTSP_MIN_SIZE=min_route_size,
-        MTSP_MAX_SIZE=capacity,
+        # a node cap, so it is CAPACITY over the lightest demand a route can hold
+        MTSP_MAX_SIZE=capacity // min(demands, default=1),
         MTSP_OBJECTIVE='MINSUM',  # [ MINMAX | MINMAX_SIZE | MINSUM ]
         MTSP_SOLUTION_FILE=output_fname,
         # LKH-3 only writes MTSP_SOLUTION_FILE for 2+ salesmen. With a single
@@ -450,6 +457,7 @@ def _solve_cluster(
     capacity: int,
     vehicles: int,
     balanced: bool,
+    demands: list[int] | None = None,
     time_limit: float,
     scale: float,
     runs: int,
@@ -469,9 +477,10 @@ def _solve_cluster(
     not mutate the underlying graph.
     """
     T_c = L.shape[0] - 1
-    if ringed:
+    if ringed or demands is not None:
         # MTSP_MIN_SIZE for TYPE=CVRP would require a FULL_MATRIX (asymmetric)
         # formulation; the symmetric ring solve does not impose a minimum size.
+        # It counts nodes, too, which bounds nothing once the demands differ.
         min_route_size = 0
     elif balanced:
         min_route_size = T_c // vehicles
@@ -484,6 +493,7 @@ def _solve_cluster(
         capacity=capacity,
         vehicles=vehicles,
         min_route_size=min_route_size,
+        demands=demands,
         time_limit=time_limit,
         scale=scale,
         runs=runs,
@@ -735,6 +745,7 @@ def _run_lkh_per_cluster(
     vehicles_: list[int],
     warmstart_tours: list[list[int] | None],
     balanced: bool,
+    demands: list[int] | None = None,
     scale: float,
     runs: int,
     per_run_limit: float,
@@ -759,6 +770,7 @@ def _run_lkh_per_cluster(
             'capacity': capacity,
             'vehicles': vehicles_c,
             'balanced': balanced,
+            'demands': demands,
             'time_limit': time_limit,
             'scale': scale,
             'runs': runs,
@@ -823,7 +835,7 @@ def _vehicles_within_capacity(T_c: int) -> int:
 
 
 def _setup_clusters(
-    A: nx.Graph, *, capacity: int, vehicles: int | None
+    A: nx.Graph, *, capacity: int, vehicles: int | None, power_total: int | None = None
 ) -> tuple[list[list[int]], list[int]]:
     """Compute per-root terminals and vehicle counts.
 
@@ -856,7 +868,9 @@ def _setup_clusters(
         cluster_ = clusterize(A, capacity)
         terminals_ = [sorted(c) for c in cluster_]
         len_cluster_ = [len(c) for c in terminals_]
-    vehicles_min_ = [math.ceil(n / capacity) for n in len_cluster_]
+    # Non-unit power is supported only for a single root and its one cluster.
+    demand_ = len_cluster_ if power_total is None else [power_total]
+    vehicles_min_ = [math.ceil(demand / capacity) for demand in demand_]
     if R == 1 and vehicles is not None and vehicles > vehicles_min_[0]:
         vehicles_ = [vehicles]
     else:
@@ -940,10 +954,26 @@ def lkh3(
         Solution topology S.
     """
     R, T = A.graph['R'], A.graph['T']
+    powers = terminal_powers(A)
+    if powers and (ringed or balanced or R > 1):
+        raise NotImplementedError(
+            "lkh3() honours a terminal 'power' other than 1 only for an "
+            'unbalanced single-root radial solve: rings split by terminal count, '
+            "LKH-3's route-size bounds count nodes, and clusterize() partitions "
+            'by count.'
+        )
+    # Add departures from unit power to the default total of T.
+    power_total = T + sum(power - 1 for power in powers.values())
+    demands = [powers.get(t, 1) for t in range(T)] if powers else None
+
+    def _route_load(route: list[int]) -> int:
+        """Return total terminal demand, using the terminal count for unit power."""
+        return len(route) if demands is None else sum(demands[i] for i in route)
+
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
     if vehicles is not None:
-        vehicles_min = math.ceil(T / solve_capacity)
+        vehicles_min = math.ceil(power_total / solve_capacity)
         if vehicles != vehicles_min and R > 1:
             warn(
                 'For multi-root instances, the parameter vehicles (feeders) can '
@@ -981,7 +1011,10 @@ def lkh3(
     _prune_links(A_iter, math.ceil(2.4 * solve_capacity))
 
     terminals_, vehicles_ = _setup_clusters(
-        A_iter, capacity=solve_capacity, vehicles=vehicles
+        A_iter,
+        capacity=solve_capacity,
+        vehicles=vehicles,
+        power_total=power_total if powers else None,
     )
     if warmstart is not None:
         warmstart_tours = _initial_tours_from_warmstart(
@@ -1007,6 +1040,7 @@ def lkh3(
             vehicles_=vehicles_,
             warmstart_tours=warmstart_tours,
             balanced=balanced,
+            demands=demands,
             scale=scale,
             runs=runs,
             per_run_limit=per_run_limit,
@@ -1041,12 +1075,18 @@ def lkh3(
             over_capacity_clusters = [
                 ic
                 for ic, output in enumerate(outputs_)
-                if max((len(r) for r in output['routes']), default=0) > solve_capacity
+                if max((_route_load(r) for r in output['routes']), default=0)
+                > solve_capacity
             ]
             if over_capacity_clusters:
+                worst = max(
+                    _route_load(route)
+                    for ic in over_capacity_clusters
+                    for route in outputs_[ic]['routes']
+                )
                 warn(
                     'Capacity violated in LKH solution: '
-                    f'max_load ({S.graph["max_load"]}) > capacity ({solve_capacity}). '
+                    f'max_load ({worst}) > capacity ({solve_capacity}). '
                     'Retrying with increased vehicles.'
                 )
             if (not crossings and not over_capacity_clusters) or i == max_retries:
@@ -1084,6 +1124,8 @@ def lkh3(
         split_rings_and_calc_loads(S, A)
     else:
         S.graph['topology'] = Topology.RADIAL
+        # Preserve terminal power for load calculation and validation.
+        nx.set_node_attributes(S, powers, 'power')
         calcload(S)
     return S
 

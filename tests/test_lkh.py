@@ -1,4 +1,7 @@
+import math
 import shutil
+import subprocess
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
@@ -366,3 +369,80 @@ def test_lkh_lower_level_function(monkeypatch):
     assert any('too low' in str(w) for w in warnings_seen)
     assert S.graph.get('has_loads') is True
     assert S.nodes[-1]['load'] == 4
+
+
+def _capture_lkh_problem(monkeypatch):
+    """Capture the generated LKH-3 problem and parameter files without running LKH.
+
+    The fake process returns no solution, causing lkh3() to raise AssertionError
+    when checking the result. Callers expect that error and inspect the files
+    written before the subprocess call.
+    """
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        params = Path(argv[1]).read_text()
+        captured['params'] = dict(
+            line.split(' = ', 1) for line in params.splitlines() if ' = ' in line
+        )
+        captured['problem'] = Path(captured['params']['PROBLEM_FILE']).read_text()
+        return subprocess.CompletedProcess(argv, 1, stdout=b'', stderr=b'')
+
+    monkeypatch.setattr(lkh_mod.subprocess, 'run', fake_run)
+    return captured
+
+
+def _demand_section(problem: str) -> dict[int, int]:
+    body = problem.split('DEMAND_SECTION\n', 1)[1].split('\nEOF', 1)[0]
+    return {int(node): int(demand) for node, demand in
+            (line.split() for line in body.splitlines())}  # fmt: skip
+
+
+def test_lkh3_sends_one_unit_of_demand_per_unitary_terminal(monkeypatch):
+    captured = _capture_lkh_problem(monkeypatch)
+    A = get_bundle('toy').A
+    T = A.graph['T']
+
+    with pytest.raises(AssertionError, match='root node load'):
+        lkh_mod.lkh3(as_normalized(A), capacity=5, time_limit=0.1, repair=False)
+
+    demands = _demand_section(captured['problem'])
+    assert demands == {**{t + 1: 1 for t in range(T)}, T + 1: 0}
+    assert captured['params']['MTSP_MAX_SIZE'] == '5'
+
+
+def test_lkh3_declares_terminal_power_as_demand(monkeypatch):
+    captured = _capture_lkh_problem(monkeypatch)
+    A = as_normalized(get_bundle('toy').A.copy())
+    T = A.graph['T']
+    powers = {t: 1 + (t % 3) for t in range(T)}
+    nx.set_node_attributes(A, powers, 'power')
+
+    with pytest.raises(AssertionError, match='root node load'):
+        lkh_mod.lkh3(A, capacity=8, time_limit=0.1, repair=False)
+
+    demands = _demand_section(captured['problem'])
+    assert demands == {**{t + 1: powers[t] for t in range(T)}, T + 1: 0}
+    assert captured['problem'].splitlines()[0].startswith('NAME')
+    # The smallest demand is one unit, allowing at most 8 nodes per route.
+    assert captured['params']['MTSP_MAX_SIZE'] == '8'
+    # Unequal demands disable the minimum node count.
+    assert captured['params']['MTSP_MIN_SIZE'] == '0'
+    # the feeder minimum follows the total power (24), not the terminal count
+    assert int(captured['params']['VEHICLES']) >= math.ceil(sum(powers.values()) / 8)
+
+
+def test_lkh3_rejects_non_unit_terminal_power_it_cannot_honour():
+    """Unsupported modes are rejected before invoking the LKH executable."""
+    A = as_normalized(get_bundle('toy').A.copy())
+    nx.set_node_attributes(A, {0: 2}, 'power')
+
+    with pytest.raises(NotImplementedError, match='single-root radial solve'):
+        lkh_mod.lkh3(A, capacity=5, time_limit=1.0, ringed=True)
+    with pytest.raises(NotImplementedError, match='single-root radial solve'):
+        lkh_mod.lkh3(A, capacity=5, time_limit=1.0, balanced=True)
+
+    Amr = as_normalized(get_bundle('neart').A.copy())
+    nx.set_node_attributes(Amr, {0: 2}, 'power')
+    with pytest.raises(NotImplementedError, match='single-root radial solve'):
+        lkh_mod.lkh3(Amr, capacity=5, time_limit=1.0)
