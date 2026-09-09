@@ -23,8 +23,8 @@ import xxhash
 from bitarray import frozenbitarray
 
 __all__ = (
-    'fingerprint_coordinates', 'fingerprint_function', 'linkset_id',
-    'topology_id',
+    'complete_linkset_id', 'fingerprint_coordinates', 'fingerprint_function',
+    'linkset_id', 'topology_id',
 )  # fmt: skip
 
 
@@ -89,6 +89,38 @@ def linkset_id(A: nx.Graph) -> bytes:
         + len(links).to_bytes(4, 'little')
         + np.ascontiguousarray(links, dtype='<u4').tobytes()
     )
+
+
+def complete_linkset_id(R: int, T: int) -> bytes:
+    """Return the :func:`linkset_id` of the complete terminal graph over ``T``.
+
+    The digest is the one ``linkset_id()`` would return for a graph whose
+    canonical link array is ``np.triu_indices(T, k=1)``, but the array is hashed
+    a block of rows at a time and never held whole: it counts ``T*(T - 1)/2``
+    links, which is 95 MiB at ``T = 5000`` -- and five times that at the peak of
+    building it, against 8 MiB for this.
+    """
+    count = T * (T - 1) // 2
+    hasher = xxhash.xxh3_128()
+    hasher.update(
+        R.to_bytes(4, 'little') + T.to_bytes(4, 'little') + count.to_bytes(4, 'little')
+    )
+    # rows per block, so that a block's int64 intermediates stay a few MiB
+    step = max(1, (1 << 18) // max(1, T))
+    for start in range(0, max(T - 1, 0), step):
+        stop = min(start + step, T - 1)
+        us = np.arange(start, stop, dtype=np.uint32)
+        counts = (T - 1 - us).astype(np.int64)
+        lo = np.repeat(us, counts)
+        # within each row, hi runs from u + 1 up to T - 1
+        offsets = np.repeat(np.cumsum(counts) - counts, counts)
+        hi = (np.arange(counts.sum(), dtype=np.int64) - offsets + lo + 1).astype(
+            np.uint32
+        )
+        hasher.update(
+            np.ascontiguousarray(np.stack((lo, hi), axis=1), dtype='<u4').tobytes()
+        )
+    return hasher.digest()
 
 
 def topology_id(linkbits: frozenbitarray) -> bytes:

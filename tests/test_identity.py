@@ -6,6 +6,7 @@ import pytest
 from bitarray import frozenbitarray
 
 from optiwindnet.identity import (
+    complete_linkset_id,
     fingerprint_coordinates,
     fingerprint_function,
     linkset_id,
@@ -36,6 +37,24 @@ def test_fingerprint_function_reports_bytecode_and_identity():
         'funfile': sample_function.__code__.co_filename,
         'funname': sample_function.__code__.co_name,
     }
+
+
+@pytest.mark.parametrize('R', (1, 3))
+@pytest.mark.parametrize('T', (0, 1, 2, 5, 40, 1100))
+def test_complete_linkset_id_equals_the_materialized_digest(R, T):
+    """T=1100 spans several hashed blocks, the rest fit in one."""
+    A = nx.Graph(R=R, T=T)
+    A.graph['_canonical_terminal_links'] = np.stack(
+        np.triu_indices(T, k=1), axis=1
+    ).astype(np.uint32)
+
+    assert complete_linkset_id(R, T) == linkset_id(A)
+
+
+def test_complete_linkset_id_separates_shapes():
+    assert complete_linkset_id(1, 40) != complete_linkset_id(2, 40)
+    assert complete_linkset_id(1, 40) != complete_linkset_id(1, 41)
+    assert len(complete_linkset_id(1, 40)) == 16
 
 
 def test_topology_id_separates_vectors_that_share_padded_bytes():

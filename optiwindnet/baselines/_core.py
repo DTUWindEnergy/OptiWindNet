@@ -13,7 +13,12 @@ from numpy.typing import DTypeLike
 from scipy.spatial.distance import pdist, squareform
 
 from ..converting import linkbits_from_S
-from ..identity import _LINKSET_ID, _invalidate_canonical_linkset, topology_id
+from ..identity import (
+    _LINKSET_ID,
+    _invalidate_canonical_linkset,
+    complete_linkset_id,
+    topology_id,
+)
 
 _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
@@ -121,30 +126,37 @@ def scaled_length_block(
     return block, fill_max, edge_max
 
 
-def linkset_identity(S: nx.Graph, A: nx.Graph) -> dict[str, object]:
-    """Return the identity of solution ``S`` relative to ``A``'s available links.
+def linkset_identity(S: nx.Graph, A: nx.Graph, *, complete: bool) -> dict[str, object]:
+    """Link-bit identity of solution ``S`` over the link set it was solved on.
 
-    The wrappers assign large costs to missing links instead of forbidding
-    them, so either solver may select a link outside ``A``. Complete solves
-    can also use links outside ``A``. Such links have no position in ``A``'s
-    bit vector; log a warning and return an empty mapping in that case.
+    That set is ``A``'s links, or the complete terminal graph over ``A``'s
+    terminals when the solve was given ``complete`` -- the two are told apart by
+    the ``'_linkset_id'`` returned. The complete set is never built: its bit
+    positions are arithmetic and its id is hashed a block at a time.
 
-    A complete solve that uses only links in ``A`` retains its identity,
-    allowing topology comparisons over the same available-links set.
+    Neither solver can be told which links exist: both price a link that ``A``
+    lacks at a big-M and let the objective discourage it (see the specs written
+    in :func:`~optiwindnet.baselines.lkh._do_lkh`). A solve with no feasible
+    solution inside ``A`` therefore spends the big-M, and the resulting link has
+    no bit position. The identity is dropped in that case -- with a warning, and
+    rather than recording bits over a link set that does not contain ``S``. A
+    ``complete`` solve has a position for every terminal pair, so it never is.
 
     Returns:
-        A mapping with ``'_linkbits'``, ``'_topology_id'`` and ``'_linkset_id'``,
-        or an empty mapping if the solution cannot be encoded over ``A``.
+        The ``'_linkbits'``, ``'_topology_id'`` and ``'_linkset_id'`` graph
+        attributes, or nothing at all if ``S`` left ``A``'s link set.
     """
     try:
-        linkbits = linkbits_from_S(A, S)
-    except (KeyError, ValueError) as exc:
+        linkbits = linkbits_from_S(A, S, complete=complete)
+    except ValueError as exc:
         _warn('Solution left the available-links set, so it is not identified: %s', exc)
         return {}
     return {
         '_linkbits': linkbits,
         '_topology_id': topology_id(linkbits),
-        '_linkset_id': A.graph[_LINKSET_ID],
+        '_linkset_id': complete_linkset_id(A.graph['R'], A.graph['T'])
+        if complete
+        else A.graph[_LINKSET_ID],
     }
 
 

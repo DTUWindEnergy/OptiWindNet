@@ -9,7 +9,7 @@ import pytest
 
 import optiwindnet.baselines.lkh as lkh_mod
 from optiwindnet.converting import linkbits_from_S
-from optiwindnet.identity import linkset_id, topology_id
+from optiwindnet.identity import complete_linkset_id, linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
 
 from .cases import LKH_CASES, case_node_id, expected_topology
@@ -360,52 +360,34 @@ def test_lkh3_drops_identity_when_the_solution_leaves_A(monkeypatch, caplog):
     assert 'left the available-links set' in caplog.text
 
 
-def test_lkh3_complete_that_stays_within_A_is_identified_over_A(monkeypatch):
-    """A complete solve using only links in A retains an identity over A."""
+def test_lkh3_complete_encodes_over_the_complete_linkset(monkeypatch):
     A = _make_A(T=4, edges=[(0, 1, 1.0), (2, 3, 1.0)])
 
     monkeypatch.setattr(
-        lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 1], [2, 3]])
+        lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 2], [1, 3]])
     )
 
     S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, complete=True, repair=False)
 
     assert S.graph['method_options']['complete']
-    assert S.graph['_linkbits'] == linkbits_from_S(A, S)
-    assert S.graph['_linkset_id'] == A.graph['_linkset_id'] == linkset_id(A)
+    # (0, 2) and (1, 3) are absent from A, yet the complete link set positions them
+    assert S.graph['_linkbits'] == linkbits_from_S(A, S, complete=True)
+    complete_id = complete_linkset_id(A.graph['R'], A.graph['T'])
+    assert S.graph['_linkset_id'] == complete_id != A.graph['_linkset_id']
+    assert A.graph['_linkset_id'] == linkset_id(A)  # A itself is left alone
 
 
-def test_lkh3_complete_that_leaves_A_is_not_identified(monkeypatch, caplog):
-    A = _make_A(T=4, edges=[(0, 1, 1.0), (2, 3, 1.0)])
-
-    # (0, 2) and (1, 3) are the links the complete graph adds
-    monkeypatch.setattr(
-        lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 2], [1, 3]])
-    )
-
-    with caplog.at_level('WARNING'):
-        S = lkh_mod.lkh3(
-            A, capacity=2, time_limit=0.1, seed=1, complete=True, repair=False
-        )
-
-    assert '_linkbits' not in S.graph
-    assert 'left the available-links set' in caplog.text
-    assert A.graph['_linkset_id'] == linkset_id(A)  # input identity is unchanged
-
-
-def test_lkh3_edgeless_A_implies_complete(monkeypatch, caplog):
+def test_lkh3_edgeless_A_implies_complete(monkeypatch):
     A = _make_A(T=4)
 
     monkeypatch.setattr(
         lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 1], [2, 3]])
     )
 
-    with caplog.at_level('WARNING'):
-        S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, repair=False)
 
     assert S.graph['method_options']['complete']
-    assert '_linkbits' not in S.graph
-    assert 'left the available-links set' in caplog.text
+    assert S.graph['_linkset_id'] == complete_linkset_id(A.graph['R'], A.graph['T'])
 
 
 def test_lkh3_complete_is_refused_together_with_repair():

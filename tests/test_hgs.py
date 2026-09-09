@@ -9,7 +9,7 @@ import optiwindnet.baselines.hgs as hgs_mod
 from optiwindnet.baselines._core import remove_offending_crossings
 from optiwindnet.baselines.hgs import _balanced_capacity
 from optiwindnet.converting import linkbits_from_S
-from optiwindnet.identity import linkset_id, topology_id
+from optiwindnet.identity import complete_linkset_id, linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
 from optiwindnet.types import Topology
 
@@ -294,20 +294,22 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
     assert 'capacity_effective' not in S.graph['solver_details']
 
 
-def test_hgs_edgeless_A_solves_complete_and_is_not_identified(monkeypatch, caplog):
+def test_hgs_edgeless_A_encodes_complete_terminal_linkset(monkeypatch):
     _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
     A = _make_A(T=4)
 
-    with caplog.at_level('WARNING'):
-        S = hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+    S = hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, repair=False)
 
     assert A.number_of_edges() == 0
     assert S.graph['method_options']['complete']
-    # the solution's links are not in A, so they have no bit position
-    assert '_linkbits' not in S.graph
-    assert '_topology_id' not in S.graph
-    assert '_linkset_id' not in S.graph
-    assert 'left the available-links set' in caplog.text
+    # bit positions over (0,1) (0,2) (0,3) (1,2) (1,3) (2,3), then the 4 feeders
+    assert S.graph['_linkbits'].to01() == '1000011010'
+    assert S.graph['_linkbits'] == linkbits_from_S(A, S, complete=True)
+    # the bits are over the complete link set, and the id says so
+    assert S.graph['_linkset_id'] == complete_linkset_id(A.graph['R'], A.graph['T'])
+    # the caller's A keeps the (empty) link set it came with
+    assert A.graph['_canonical_terminal_links'].shape == (0, 2)
+    assert A.graph['_linkset_id'] != S.graph['_linkset_id']
 
 
 def test_hgs_complete_is_refused_together_with_repair():

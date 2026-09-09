@@ -61,6 +61,40 @@ def test_linkbits_from_S_uses_canonical_edge_and_feeder_order():
     assert A.graph['_canonical_terminal_links'].tolist() == [[0, 1], [0, 2], [1, 2]]
 
 
+def test_linkbits_from_S_complete_positions_every_terminal_pair():
+    """``complete=True`` reads only R and T: the position is arithmetic."""
+    A = nx.Graph(T=3, R=2)  # no links of its own, canonical or otherwise
+    S = nx.Graph(((2, 0), (-1, 1), (-2, 2)))
+
+    linkbits = linkbits_from_S(A, S, complete=True)
+
+    # (0,1) (0,2) (1,2), then the R*T feeders in terminal-major order
+    assert linkbits == frozenbitarray('010000110')
+    assert '_canonical_terminal_links' not in A.graph
+
+
+@pytest.mark.parametrize('T', (2, 3, 7, 40))
+def test_linkbits_from_S_complete_matches_the_materialized_linkset(T):
+    """The arithmetic positions are the ones triu_indices order would give."""
+    A_complete = nx.Graph(T=T, R=1)
+    A_complete.graph['_canonical_terminal_links'] = np.stack(
+        np.triu_indices(T, k=1), axis=1
+    ).astype(np.uint32)
+    A = nx.Graph(T=T, R=1)
+    S = nx.Graph([(t, t + 1) for t in range(T - 1)] + [(-1, 0)])
+
+    assert linkbits_from_S(A, S, complete=True) == linkbits_from_S(A_complete, S)
+
+
+def test_linkbits_from_S_complete_accepts_a_link_A_lacks():
+    A = nx.Graph(T=3, R=1, _canonical_terminal_links=np.empty((0, 2), np.uint32))
+    S = nx.Graph(((0, 1), (-1, 0), (-1, 2)))
+
+    with pytest.raises(ValueError, match='terminal link absent from A'):
+        linkbits_from_S(A, S)
+    assert linkbits_from_S(A, S, complete=True) == frozenbitarray('100101')
+
+
 def test_linkbits_from_S_requires_canonical_terminal_links():
     A = nx.Graph(T=3, R=1)
     S = nx.Graph(((0, 2), (-1, 1)))

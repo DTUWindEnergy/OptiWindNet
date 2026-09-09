@@ -26,7 +26,9 @@ __all__ = (
 )  # fmt: skip
 
 
-def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
+def linkbits_from_S(
+    A: nx.Graph, S: nx.Graph, *, complete: bool = False
+) -> frozenbitarray:
     """Encode topology ``S`` over ``A``'s canonical undirected available-links set.
 
     Terminal-terminal positions follow the lexicographic edge order cached by
@@ -34,10 +36,17 @@ def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
     positions follow in terminal-major order, with roots from ``-R`` to ``-1``.
     ``A`` must provide its ``'_canonical_terminal_links'`` graph attribute.
     ``S`` must be an undetoured topology containing only terminals and roots.
+
+    With ``complete=True`` the links are instead the complete terminal graph,
+    ordered the same way (as ``np.triu_indices(T, k=1)`` would give them). Only
+    ``R`` and ``T`` are then read from ``A``: a pair's position is the arithmetic
+    one, so nothing is cached, searched or held in memory, and no terminal link
+    can be missing. Its id is :func:`~optiwindnet.identity.complete_linkset_id`.
     """
     R, T = (A.graph[key] for key in 'RT')
-    links = A.graph[_CANONICAL_TERMINAL_LINKS]
-    feeder_start = len(links)
+    feeder_start = (
+        T * (T - 1) // 2 if complete else len(A.graph[_CANONICAL_TERMINAL_LINKS])
+    )
 
     ends = np.fromiter(chain.from_iterable(S.edges), dtype=np.int64).reshape(-1, 2)
     lo, hi = ends.min(axis=1), ends.max(axis=1)
@@ -47,19 +56,30 @@ def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
         u, v = ends[offender][0].tolist()
         raise ValueError(f'S contains a non-canonical feeder link: {(u, v)}')
 
-    # locate terminal links by their lexicographic key in the canonical order
-    wanted = lo[~is_feeder] * T + hi[~is_feeder]
-    if wanted.size:
-        keys = links[:, 0].astype(np.int64) * T + links[:, 1]
-        position = np.searchsorted(keys, wanted)
-        found = position < feeder_start
-        found[found] = keys[position[found]] == wanted[found]
-        if not found.all():
-            u, v = ends[~is_feeder][~found][0].tolist()
-            edge = (u, v) if u < v else (v, u)
-            raise ValueError(f'S contains a terminal link absent from A: {edge}')
+    if complete:
+        # position of (lo, hi) in the row-major upper triangle, lo < hi
+        u, v = lo[~is_feeder], hi[~is_feeder]
+        if (v >= T).any():
+            i = int(np.flatnonzero(v >= T)[0])
+            raise ValueError(
+                f'S contains a non-terminal link: {(int(u[i]), int(v[i]))}'
+            )
+        position = u * T - u * (u + 1) // 2 + v - u - 1
     else:
-        position = wanted
+        # locate terminal links by their lexicographic key in the canonical order
+        links = A.graph[_CANONICAL_TERMINAL_LINKS]
+        wanted = lo[~is_feeder] * T + hi[~is_feeder]
+        if wanted.size:
+            keys = links[:, 0].astype(np.int64) * T + links[:, 1]
+            position = np.searchsorted(keys, wanted)
+            found = position < feeder_start
+            found[found] = keys[position[found]] == wanted[found]
+            if not found.all():
+                u, v = ends[~is_feeder][~found][0].tolist()
+                edge = (u, v) if u < v else (v, u)
+                raise ValueError(f'S contains a terminal link absent from A: {edge}')
+        else:
+            position = wanted
     positions = np.concatenate(
         (position, feeder_start + hi[is_feeder] * R + lo[is_feeder] + R)
     )

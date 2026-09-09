@@ -1151,8 +1151,10 @@ def lkh3(
         nx.set_node_attributes(S, powers, 'power')
         calcload(S)
 
-    # Encode against the original link set, before repair removed any links.
-    S.graph.update(linkset_identity(S, A))
+    # A_iter may have lost links to the repair loop, so the bits are positioned
+    # over the link set the caller passed -- or over the complete terminal graph,
+    # which is what a `complete` solve was free to choose from
+    S.graph.update(linkset_identity(S, A, complete=complete))
     return S
 
 
