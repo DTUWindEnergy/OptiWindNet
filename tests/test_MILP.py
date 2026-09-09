@@ -407,11 +407,11 @@ def test_recording_the_incumbent_caches_its_bits_and_stamps_their_id():
 def test_solution_info_repr_shows_the_id_as_hex():
     info = core.SolutionInfo(1.0, 2.0, 3.0, 0.1, 'optimal')
 
-    assert repr(info).endswith("termination='optimal', topology_id='')")
+    assert repr(info).endswith("    topology_id = ''\n)")
 
     info.topology_id = topology_id(frozenbitarray('0110'))
 
-    assert repr(info).endswith(f"topology_id='{info.topology_id.hex()}')")
+    assert repr(info).endswith(f"    topology_id = '{info.topology_id.hex()}'\n)")
 
 
 def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
