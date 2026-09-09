@@ -11,7 +11,6 @@ from bitarray import frozenbitarray
 
 import optiwindnet.MILP._core as core
 from optiwindnet import MILP
-from optiwindnet.converting import terse_links_from_S
 from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.MILP import ModelOptions, solver_factory
 from optiwindnet.types import Topology
@@ -122,10 +121,7 @@ def _warmup_with_uncoerced_topology():
     return 'accepted'
 
 
-def _solve_toy_incumbent(solver_name, topology):
-    from unittest import mock
-
-    import optiwindnet.MILP.ortools as ortools_milp
+def _solve_toy_solution(solver_name, topology):
     from optiwindnet.validating import validate_topology
 
     bundle = get_bundle('toy')
@@ -138,12 +134,7 @@ def _solve_toy_incumbent(solver_name, topology):
         model_options=ModelOptions(topology=topology),
     )
     solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
-    with mock.patch.object(
-        ortools_milp.PathFinder,
-        'create_detours',
-        side_effect=AssertionError('incumbent retrieval must not route'),
-    ):
-        S = solver.get_incumbent_topology()
+    S, _ = solver.get_solution()
     E, _, stars, _ = core.canonical_linksets(
         nx.subgraph_view(A, filter_node=lambda node: node >= 0),
         R=A.graph['R'],
@@ -155,23 +146,28 @@ def _solve_toy_incumbent(solver_name, topology):
         frozenset(link) in solution_edges for link in E + stars
     )
     return {
-        'terse': terse_links_from_S(S),
         'violations': validate_topology(S, _CAPACITY),
         'graph': dict(S.graph),
         'linkbits_match': S.graph['_linkbits'] == expected_bits,
         'objective': solution_info.objective,
         'preserved_objective': solver.solution_info.objective,
-        # solve() must return the id already stamped on SolutionInfo
+        # the id solve() stamps on SolutionInfo, and the bits it is derived from
         'info_id': solution_info.topology_id,
+        'info_bits': solver.incumbent_linkbits,
     }
 
 
-def _get_incumbent_before_solve(solver_name):
+def _get_solution_before_solve(solver_name):
     bundle = get_bundle('toy')
     P, A = bundle.P, bundle.A
     solver = solver_factory(solver_name)
-    solver.set_problem(P, A, capacity=_CAPACITY, model_options=ModelOptions())
-    return solver.get_incumbent_topology()
+    solver.set_problem(
+        P,
+        A,
+        capacity=_CAPACITY,
+        model_options=ModelOptions(feeder_route='straight'),
+    )
+    return solver.get_solution()
 
 
 def _exercise_ortools_retrieval_branch(feeder_route):
@@ -195,7 +191,8 @@ def _exercise_ortools_retrieval_branch(feeder_route):
         calls.append('investigate')
         return S, G
 
-    solver._incumbent_S = S
+    solver._incumbent_linkbits = frozenbitarray('0')
+    solver._S_from_linkbits = lambda linkbits: S
     solver._investigate_pool = investigate
     solver._make_graph_attributes = lambda: {'solver_details': {}}
     with (
@@ -213,7 +210,7 @@ class _FakePool(core.PoolHandler):
         self.solution_info = core.SolutionInfo(0.0, 0.0, 1.0, 0.0, 'optimal')
         self.selected = 0
         self.objectives_requested: list[int] = []
-        self.decoded: list[str] = []
+        self.read: list[str] = []
         self.investigations = 0
 
     def _objective_at(self, index: int) -> float:
@@ -221,10 +218,10 @@ class _FakePool(core.PoolHandler):
         self.selected = index
         return self.candidates[index][0]
 
-    def _topology_from_mip_pool(self) -> nx.Graph:
+    def _linkbits_from_mip_sol(self) -> frozenbitarray:
         label = self.candidates[self.selected][1]
-        self.decoded.append(label)
-        return nx.Graph(candidate=label)
+        self.read.append(label)
+        return frozenbitarray(format(len(label), '08b'))
 
     def _investigate_pool(
         self, P: nx.PlanarEmbedding, A: nx.Graph
@@ -374,32 +371,37 @@ def test_mathopt_canonical_linkset_weights_stay_aligned(ortools_worker, topology
     assert weights == expected
 
 
-def test_pool_incumbent_helper_selects_and_decodes_only_best_objective():
+def test_pool_incumbent_helper_selects_and_reads_only_best_objective():
     pool = _FakePool([(7.0, 'later'), (1.0, 'best'), (4.0, 'middle')])
 
-    S = pool._incumbent_topology_from_pool()
+    linkbits = pool._read_incumbent_linkbits_from_pool()
 
-    assert S.graph['candidate'] == 'best'
+    assert linkbits == frozenbitarray(format(len('best'), '08b'))
     assert pool.objectives_requested == [0]
-    assert pool.decoded == ['best']
+    assert pool.read == ['best']
     assert pool.investigations == 0
 
 
-def test_recording_solution_info_stamps_the_incumbent_id():
-    """Every backend's solve() assigns solution_info; the id rides along."""
+def test_recording_the_incumbent_caches_its_bits_and_stamps_their_id():
+    """Every backend's solve() ends here: bits kept, id stamped, no topology built."""
     # a Pyomo-backed solver needs no native library and trips no rival guard
     from optiwindnet.MILP.pyomo import SolverPyomo
 
-    topology = topology_id(frozenbitarray('1001'))
+    linkbits = frozenbitarray('1001')
 
     solver = SolverPyomo('cbc')
-    solver._decode_incumbent = lambda: nx.Graph(_topology_id=topology)
+    with pytest.raises(AttributeError, match='must be called before'):
+        _ = solver.incumbent_linkbits
+
+    solver._read_incumbent_linkbits = lambda: linkbits
+    solver._S_from_linkbits = lambda linkbits: pytest.fail('solve() must not decode')
     info = core.SolutionInfo(1.0, 1.0, 1.0, 0.0, 'optimal')
 
-    solver.solution_info = info
-
-    assert info.topology_id == topology
+    assert solver._record_incumbent(info, {'threads': 1}) is info
+    assert solver.incumbent_linkbits is linkbits
+    assert info.topology_id == topology_id(linkbits)
     assert solver.solution_info is info
+    assert solver.applied_options == {'threads': 1}
 
 
 def test_solution_info_repr_shows_the_id_as_hex():
@@ -437,8 +439,7 @@ def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
     assert attributes['solver_details']['max_feeders'] == 3
     assert 'max_feeders' not in attributes['method_options']
     # the incumbent's id is not a routeset attribute; S carries its own
-    assert 'topology_id' not in attributes
-    assert '_topology_id' not in attributes
+    assert {'topology_id', '_topology_id'}.isdisjoint(attributes)
     assert fake.solution_info.topology_id == topology
 
     fake.metadata.warmed_by = None
@@ -453,15 +454,19 @@ def test_pool_investigation_ranks_routed_candidates(monkeypatch, P_A_toy):
 
         def __init__(self):
             self.index = 0
-            self._incumbent_S = nx.Graph(candidate=0)
 
         def _objective_at(self, index):
             self.index = index
             return (1.0, 2.0, 10.0)[index]
 
-        def _topology_from_mip_pool(self):
-            assert self.index > 0, 'entry zero must be reused, not decoded again'
-            return nx.Graph(candidate=self.index)
+        def _linkbits_from_mip_sol(self):
+            return frozenbitarray(format(self.index, '04b'))
+
+        # the Solver mixed in supplies this one; here a stand-in decodes the bits
+        def _S_from_linkbits(  # pyrefly: ignore[bad-override-mutable-attribute]
+            self, linkbits: frozenbitarray
+        ) -> nx.Graph:
+            return nx.Graph(candidate=int(linkbits.to01(), 2))
 
     pool = Pool()
     lengths = (5.0, 6.0, 1.0)
@@ -486,9 +491,9 @@ def test_pool_investigation_ranks_routed_candidates(monkeypatch, P_A_toy):
     assert G.graph['pool_count'] == 3
 
 
-def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
+def test_ortools_topology_matches_the_toy_golden(ortools_worker):
     result = ortools_worker.run(
-        _solve_toy_incumbent,
+        _solve_toy_solution,
         ('ortools.cp_sat', 'branched'),
         30 + _RUNTIME,
     )
@@ -508,16 +513,16 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
     assert isinstance(linkbits, frozenbitarray)
     assert linkbits.endian == 'big'
     assert result['graph']['_topology_id'] == topology_id(linkbits)
-    assert result['info_id'] == result['graph']['_topology_id']
+    assert result['info_id'] == topology_id(result['info_bits'])
     A = get_bundle('toy').A
     terminal_link_count = sum(u >= 0 and v >= 0 for u, v in A.edges)
     assert len(linkbits) == terminal_link_count + A.graph['R'] * A.graph['T']
 
 
 @pytest.mark.parametrize('topology', ['radial', 'ringed'])
-def test_ortools_incumbent_decodes_valid_topology(ortools_worker, topology):
+def test_ortools_solution_decodes_valid_topology(ortools_worker, topology):
     result = ortools_worker.run(
-        _solve_toy_incumbent,
+        _solve_toy_solution,
         ('ortools.cp_sat', topology),
         30 + _RUNTIME,
     )
@@ -529,8 +534,8 @@ def test_ortools_incumbent_decodes_valid_topology(ortools_worker, topology):
     assert result['graph']['topology'] == topology
 
 
-def test_ortools_incumbent_before_solve_has_useful_error(ortools_worker):
-    result = ortools_worker.run(_get_incumbent_before_solve, ('ortools.cp_sat',), 30)
+def test_ortools_retrieval_before_solve_has_useful_error(ortools_worker):
+    result = ortools_worker.run(_get_solution_before_solve, ('ortools.cp_sat',), 30)
 
     assert isinstance(result, AttributeError)
     assert '.solve() must be called before solution retrieval' in str(result)
@@ -652,8 +657,13 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
     fake = FakeSolver()
     fake.A = A
     fake.metadata = metadata
-    S = core.Solver._topology_from_mip_sol(
+    # what solve() records, then what get_solution() rebuilds from it
+    linkbits = core.Solver._linkbits_from_mip_sol(
         fake  # pyrefly: ignore[bad-argument-type]
+    )
+    S = core.Solver._S_from_linkbits(
+        fake,  # pyrefly: ignore[bad-argument-type]
+        linkbits,
     )
 
     assert_topology(S, Topology.RINGED, metadata.capacity)
@@ -705,8 +715,12 @@ def test_forest_mip_decoder_preserves_non_unit_power(topology, powers):
             return value
 
     fake = FakeSolver()
-    S = core.Solver._topology_from_mip_sol(
+    linkbits = core.Solver._linkbits_from_mip_sol(
         fake  # pyrefly: ignore[bad-argument-type]
+    )
+    S = core.Solver._S_from_linkbits(
+        fake,  # pyrefly: ignore[bad-argument-type]
+        linkbits,
     )
     assert {frozenset(edge) for edge in S.edges} == {frozenset(edge) for edge in flows}
     assert S.nodes[-2]['load'] == 0
@@ -730,7 +744,7 @@ def test_ringed_warmstart_is_accepted_by_scip():
         warm_solver = solver_factory('scip')
         warm_solver.set_problem(P, A, capacity=3, model_options=options)
         warm_solver.solve(time_limit=10, mip_gap=0.05)
-        S = warm_solver.get_incumbent_topology()
+        S, _ = warm_solver.get_solution()
     except BaseException as exc:
         if solver_unavailable(exc):
             pytest.skip(f'scip unavailable: {exc}')
@@ -1026,7 +1040,8 @@ def test_pyomo_solution_retrieval_glue(monkeypatch, module_name, class_name, P_A
     P, A = P_A_toy
     S, G_tentative, G = nx.Graph(), nx.Graph(), nx.Graph()
     solver.P, solver.A = P, A
-    solver._incumbent_S = S
+    solver._incumbent_linkbits = frozenbitarray('0')
+    solver._S_from_linkbits = lambda linkbits: S
     solver._make_graph_attributes = lambda: {'retrieved': True}
     monkeypatch.setattr(module, 'G_from_S', lambda actual, available: G_tentative)
 
@@ -1062,7 +1077,8 @@ def test_pool_backend_solution_retrieval_branches(
     calls = []
     solver.P, solver.A = P, A
     solver.model_options = ModelOptions(feeder_route=feeder_route)
-    solver._incumbent_S = S
+    solver._incumbent_linkbits = frozenbitarray('0')
+    solver._S_from_linkbits = lambda linkbits: S
     solver._investigate_pool = lambda planar, available: (
         calls.append('investigate') or (S, G)
     )
@@ -1158,7 +1174,7 @@ def _solve_toy_balanced(solver_name, max_feeders):
         ),
     )
     solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
-    S = solver.get_incumbent_topology()
+    S, _ = solver.get_solution()
     R = S.graph['R']
     return sorted(S.nodes[t]['load'] for r in range(-R, 0) for t in S.neighbors(r))
 
@@ -1658,18 +1674,18 @@ def test_pool_handler_methods():
         def _objective_at(self, index: int) -> float:
             return 999.0
 
-        def _topology_from_mip_pool(self) -> nx.Graph:
-            return nx.Graph()
+        def _linkbits_from_mip_sol(self) -> frozenbitarray:
+            return frozenbitarray('0')
 
     handler = DummyPoolHandler()
     with pytest.raises(AttributeError, match='must be called before'):
-        handler._incumbent_topology_from_pool()
+        handler._read_incumbent_linkbits_from_pool()
 
     handler.solution_info = core.SolutionInfo(
         runtime=0.1, bound=10.0, objective=10.0, relgap=0.0, termination='optimal'
     )
     with pytest.raises(ValueError, match='Best solution-pool objective'):
-        handler._incumbent_topology_from_pool()
+        handler._read_incumbent_linkbits_from_pool()
 
 
 def test_solver_gurobi_error_branches():
@@ -1711,7 +1727,7 @@ def test_solver_pyomo_error_branches(monkeypatch):
         solver.solve(time_limit=1.0, mip_gap=1e-3)
 
     with pytest.raises(AttributeError, match="has no attribute 'model'"):
-        solver._decode_incumbent()
+        solver._read_incumbent_linkbits()
 
     term = type('Term', (), {'name': 'infeasible'})()
 

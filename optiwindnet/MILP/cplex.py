@@ -7,6 +7,7 @@ from typing import Any
 
 import networkx as nx
 import pyomo.environ as pyo
+from bitarray import frozenbitarray
 
 from ..converting import G_from_S
 from ..pathfinding import PathFinder
@@ -69,21 +70,19 @@ class SolverCplex(SolverPyomo, PoolHandler):
         self.sorted_index_ = sorted(
             range(num_solutions), key=cplex.solution.pool.get_objective_value
         )
-        # set the selected (last visited) soln to the best one
         self.vars = tuple(self.solver._pyomo_var_to_ndx_map)
-        self._objective_at(0)
 
-    def _decode_incumbent(self) -> nx.Graph:
-        # the ranked pool this sets up outlives the decode: get_solution() walks it
+    def _read_incumbent_linkbits(self) -> frozenbitarray:
+        # the ranked pool this sets up outlives the read: get_solution() walks it
         self._prepare_solution_pool()
-        return self._incumbent_topology_from_pool()
+        return self._read_incumbent_linkbits_from_pool()
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self._incumbent_S
+            S = self._incumbent_topology()
             G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
             S, G = self._investigate_pool(P, A)
@@ -92,15 +91,8 @@ class SolverCplex(SolverPyomo, PoolHandler):
 
     def _objective_at(self, index: int) -> float:
         soln = self.sorted_index_[index]
-        objective = self.cplex.solution.pool.get_objective_value(soln)
-        self.soln = soln
-        return objective
-
-    def _topology_from_mip_pool(self) -> nx.Graph:
+        pool = self.cplex.solution.pool
         self._value_map = {
-            var.name: val
-            for var, val in zip(
-                self.vars, self.solver._solver_model.solution.pool.get_values(self.soln)
-            )
+            var.name: val for var, val in zip(self.vars, pool.get_values(soln))
         }
-        return self._topology_from_mip_sol()
+        return pool.get_objective_value(soln)

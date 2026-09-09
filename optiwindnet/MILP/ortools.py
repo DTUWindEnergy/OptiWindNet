@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any
 
 import networkx as nx
+from bitarray import frozenbitarray
 from ortools.math_opt.python import mathopt
 
 from ..converting import G_from_S
@@ -201,7 +202,6 @@ class SolverORTools(Solver, PoolHandler):
         # PoolHandler relies on index zero being the lowest model objective.
         storer.solutions.sort(key=lambda entry: entry[0])
         self._solution_pool = storer.solutions
-        _, self._value_map = storer.solutions[0]
         self.num_solutions = num_solutions
         bound = result.best_objective_bound()
         objective = result.objective_value()
@@ -212,19 +212,17 @@ class SolverORTools(Solver, PoolHandler):
             relgap=1.0 - bound / objective,
             termination=termination,
         )
-        self.solution_info, self.applied_options = solution_info, applied_options
-        info('>>> Solution <<<\n%s\n', solution_info)
-        return solution_info
+        return self._record_incumbent(solution_info, applied_options)
 
-    def _decode_incumbent(self) -> nx.Graph:
-        return self._incumbent_topology_from_pool()
+    def _read_incumbent_linkbits(self) -> frozenbitarray:
+        return self._read_incumbent_linkbits_from_pool()
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
         P, model_options = self.P, self.model_options
         if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self._incumbent_S
+            S = self._incumbent_topology()
             G = PathFinder(G_from_S(S, A), P, A).create_detours()
         else:
             S, G = self._investigate_pool(P, A)
@@ -235,9 +233,6 @@ class SolverORTools(Solver, PoolHandler):
     def _objective_at(self, index: int) -> float:
         objective_value, self._value_map = self._solution_pool[index]
         return objective_value
-
-    def _topology_from_mip_pool(self) -> nx.Graph:
-        return self._topology_from_mip_sol()
 
     def _solver_termination_detail(self) -> str:
         if self._solve_result is None:
