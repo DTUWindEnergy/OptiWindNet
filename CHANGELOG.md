@@ -6,6 +6,11 @@
   - **Behavior change:** with `warmup=True` (the default), a *fresh* MILP solve now builds a warm start via HGS/constructor before solving, where it previously solved cold. Reusing the solution carried across successive `WindFarmNetwork.optimize()` calls is unchanged. Pass `warmup=False` to force a fully cold solve (any stored or supplied solution is then ignored).
   - Warm-start construction now also covers the `feeder_limit` values `'exactly'` (with `balanced`), `'min_plus1/2/3'`, and `'minimum'`+`balanced` across the `branched`, `radial`, and `ringed` topologies; these previously fell back to a cold solve.
 - **`make_min_length_model()` now rejects the `str` spelling of its enum options (`topology`, `feeder_route`, `feeder_limit`).** It raises `TypeError` rather than defaulting silently or failing deeper in the build; `ModelOptions` continues to accept the `str` spelling.
+- **A MILP search now settles on link bits, not on a topology.** `Solver.solve()` reads the incumbent's binary link variables into a canonical bit vector, exposed as the new read-only `Solver.incumbent_linkbits`, and derives the `topology_id` it stamps on `SolutionInfo` from it; no topology graph is built. `get_solution()` decodes that vector — and every solution-pool entry it ranks — through `S_from_linkbits()`. Identifying a solution therefore costs a bit vector rather than a decode, and a ringed MILP solution is now closed into rings by the same `split_rings_and_calc_loads()` every other ringed producer uses (its subtree ids are numbered in that function's order).
+
+## Removed APIs
+
+- **`Solver.get_incumbent_topology()` was removed** (added in v0.3.0). `get_solution()` is the one way to obtain a routed topology. To obtain the incumbent topology without routing, decode the bits the search recorded: `S_from_linkbits(solver.incumbent_linkbits, A)`, followed by `calcload(S)` or `split_rings_and_calc_loads(S, A)` for the loads — this is what `docs/notebooks/lo32_clustering.ipynb` now does for its per-cluster sub-problems.
 
 ## Bug Fixes
 

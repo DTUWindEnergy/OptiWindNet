@@ -23,9 +23,9 @@ from .cases import (
     topology_golden_key,
 )
 from .helpers import canonical_edges, tiny_wfn
-from .producers import hgs_topology
+from .producers import constructor_topology, hgs_topology
 from .sitecache import get_bundle, get_bundle_from_nodeset_digest
-from .solver_topologies import load_solver_topologies
+from .topology_assertions import assert_golden_topology_id
 
 PATHFINDER_GOLDEN_FILE = Path(__file__).with_name('pathfinder_golden.pkl')
 
@@ -52,7 +52,6 @@ def _load_pathfinder_golden() -> tuple[TerseLinks, ...]:
 
 
 PATHFINDER_CASES = _load_pathfinder_golden()
-SOLVER_TOPOLOGIES = load_solver_topologies()
 
 
 def _edges_cross(G):
@@ -426,12 +425,11 @@ def test_pathfinder_ringed_topology():
     ids=case_node_id,
 )
 def test_pathfinder_routes_curated_constructor_topologies(case):
-    """Route stored producer output here, keeping solver tests topology-only."""
+    """Route curated constructor output, keeping the constructor tests routing-free."""
     bundle = get_bundle(case.site)
     P, A = bundle.P, bundle.A
-    encoded = SOLVER_TOPOLOGIES[topology_golden_key(case)]
-    assert isinstance(encoded, TerseLinks)
-    S = encoded.to_topology(capacity=case.capacity, creator='golden')
+    S = constructor_topology(case)
+    assert_golden_topology_id(S.graph['_topology_id'], topology_golden_key(case))
 
     G = PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
     assign_cables(G, [(case.capacity, 1.0)])

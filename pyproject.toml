@@ -152,6 +152,10 @@ ignore = ["N999"]
 # where a line break would alter the emitted markup and `# noqa` would be inserted
 # into it verbatim. Line length is not meaningful there.
 "docs/conf.py" = ["E501"]
+# tests/solver_topologies.py is generated, one line per golden. Its keys spell out
+# every producer option, so they overrun on their own; splitting them would only
+# make the diff of a changed golden harder to read.
+"tests/solver_topologies.py" = ["E501"]
 
 [tool.pyrefly]
 infer-with-first-use = false

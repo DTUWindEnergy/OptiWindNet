@@ -8,6 +8,7 @@ from typing import Any
 
 import networkx as nx
 import pyomo.environ as pyo
+from bitarray import frozenbitarray
 
 from ..converting import G_from_S
 from ..pathfinding import PathFinder
@@ -64,7 +65,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     ):
         """
         This keeps the Gurobi license in use until a call to
-        :meth:`get_solution` or :meth:`get_incumbent_topology`.
+        :meth:`get_solution`.
         """
         solver = pyo.SolverFactory(
             'gurobi_persistent',
@@ -117,21 +118,12 @@ class SolverGurobi(SolverPyomo, PoolHandler):
             relgap=1.0 - bound / objective,
             termination=termination,
         )
-        self.solution_info, self.applied_options = solution_info, applied_options
         self.num_solutions = num_solutions
-        info('>>> Solution <<<\n%s\n', solution_info)
-        return solution_info
+        return self._record_incumbent(solution_info, applied_options)
 
-    def _decode_incumbent(self) -> nx.Graph:
-        # solve() decodes through here, so the license must stay in use
-        return self._incumbent_topology_from_pool()
-
-    def get_incumbent_topology(self) -> nx.Graph:
-        """Return the incumbent decoded by solve(), then close the solver."""
-        try:
-            return super().get_incumbent_topology()
-        finally:
-            self.solver.close()
+    def _read_incumbent_linkbits(self) -> frozenbitarray:
+        # solve() reads the incumbent through here, so the license must stay in use
+        return self._read_incumbent_linkbits_from_pool()
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
@@ -139,7 +131,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         P = self.P
         try:
             if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
-                S = self._incumbent_S
+                S = self._incumbent_topology()
                 G = PathFinder(G_from_S(S, A), P, A).create_detours()
             else:
                 S, G = self._investigate_pool(P, A)
@@ -151,11 +143,8 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     def _objective_at(self, index: int) -> float:
         solver_model = self.solver._solver_model
         solver_model.setParam('SolutionNumber', index)
-        return solver_model.getAttr('PoolObjVal')
-
-    def _topology_from_mip_pool(self) -> nx.Graph:
         self._value_map = {
             omovar.name: round(gurvar.Xn)
             for omovar, gurvar in self.solver._pyomo_var_to_solver_var_map.items()
         }
-        return self._topology_from_mip_sol()
+        return solver_model.getAttr('PoolObjVal')

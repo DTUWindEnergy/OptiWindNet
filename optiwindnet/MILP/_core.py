@@ -6,7 +6,7 @@ import logging
 import math
 import os
 import sys
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum, auto
 from inspect import cleandoc
@@ -23,7 +23,12 @@ from makefun import with_signature
 from ..converting import G_from_S, S_from_linkbits
 from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
 from ..interarraylib import directed_links
-from ..loads import _ring_split_position, bfs_subtree_loads, calcload
+from ..loads import (
+    _ring_split_position,
+    bfs_subtree_loads,
+    calcload,
+    split_rings_and_calc_loads,
+)
 from ..pathfinding import PathFinder
 from ..types import Topology
 
@@ -395,12 +400,14 @@ class ModelMetadata:
 
 @dataclass(slots=True)
 class SolutionInfo:
-    """Search outcome, plus the id of the returned solution's topology.
+    """Search outcome, plus the id of the topology the search settled on.
 
     ``topology_id`` is the :func:`~optiwindnet.identity.topology_id` of the
-    model-objective incumbent, filled in by ``solve()``. It is empty only in an
-    instance built outside a solver. A solution pool may hand over a different
-    entry, whose own id is the ``_topology_id`` of the topology
+    model-objective incumbent, which ``solve()`` derives from the link bits it
+    reads off the solver -- no topology is built to obtain it, and the bits
+    themselves stay on the solver, as :attr:`Solver.incumbent_linkbits`. It is
+    empty only in an instance made outside a solver. A solution pool may hand
+    over a different entry, whose own id is the ``_topology_id`` of the topology
     ``get_solution()`` returns.
     """
 
@@ -503,7 +510,16 @@ def _finalize_ringed_mip_S(
     closing_links: list[tuple[int, int]],
     A: nx.Graph | None,
 ) -> int:
-    """Close decoded MILP paths into canonical rings and recalculate their loads."""
+    """Close decoded MILP paths into canonical rings and recalculate their loads.
+
+    Reached only from :meth:`Solver._topology_from_mip_flows`. Both the split
+    position (:func:`~optiwindnet.loads._ring_split_position`) and the load walk
+    (:func:`~optiwindnet.loads.bfs_subtree_loads`) count one unit per terminal, so
+    the loads recomputed here drop any non-unitary ``'power'`` that routed the
+    caller through the flow variables in the first place. Unit-power solutions go
+    to :func:`~optiwindnet.loads.split_rings_and_calc_loads` instead, which closes
+    the rings the link bits already carry.
+    """
     rings: list[tuple[int, int, int, int, int, int]] = []
     for close_root, tail in closing_links:
         subtree = S.nodes[tail]['subtree']
@@ -566,28 +582,25 @@ class Solver(abc.ABC):
     options: dict[str, Any]
     stopping: dict[str, Any]
     model_options: ModelOptions
+    solution_info: SolutionInfo
     applied_options: dict[str, Any]
-    # incumbent topology, decoded once by the `solution_info` setter
-    _incumbent_S: nx.Graph
+    _incumbent_linkbits: frozenbitarray
 
     @property
-    def solution_info(self) -> SolutionInfo:
-        "Outcome of the last search, as recorded by ``solve()``."
-        return self._solution_info
+    def incumbent_linkbits(self) -> frozenbitarray:
+        """Canonical link bits of the model-objective incumbent, read by ``solve()``.
 
-    @solution_info.setter
-    def solution_info(self, solution_info: SolutionInfo) -> None:
-        """Record the search outcome, stamped with the incumbent's id.
-
-        Every backend assigns here at the end of ``solve()``, once the solver's
-        best solution is readable. The incumbent is decoded once, here, and kept
-        for every later retrieval, so the id is available as soon as
-        ``solve()`` returns. It stays pinned to the model-objective incumbent,
-        which is not necessarily the topology :meth:`get_solution` hands over.
+        The solution itself, in the encoding
+        :func:`~optiwindnet.converting.S_from_linkbits` decodes: the route to a
+        topology that skips the detour routing :meth:`get_solution` performs.
+        These are the incumbent's bits, not those of whichever solution-pool entry
+        ``get_solution()`` settles on once the entries are ranked by routed length.
         """
-        self._solution_info = solution_info
-        S = self._incumbent_S = self._decode_incumbent()
-        solution_info.topology_id = S.graph['_topology_id']
+        try:
+            return self._incumbent_linkbits
+        except AttributeError as exc:
+            exc.args += ('.solve() must be called before solution retrieval',)
+            raise
 
     @abc.abstractmethod
     def _link_val(self, var: Any) -> int | bool:
@@ -638,25 +651,35 @@ class Solver(abc.ABC):
         """
 
     @abc.abstractmethod
-    def _decode_incumbent(self) -> nx.Graph:
-        """Decode the solver's best-objective solution into a topology ``S``.
+    def _read_incumbent_linkbits(self) -> frozenbitarray:
+        """Read the model-objective incumbent's canonical link bits off the solver.
 
-        Called once per search, by the ``solution_info`` setter. Every later
-        retrieval reuses the result, so this must not release solver resources.
+        Called once per search, by :meth:`_record_incumbent`, which keeps the
+        result as :attr:`incumbent_linkbits`. Only the binary link variables are
+        read: no topology is built, and no solver resource is released, because
+        :meth:`get_solution` has yet to walk the solution pool.
         """
 
-    def get_incumbent_topology(self) -> nx.Graph:
-        """Return the best model-objective incumbent as topology ``S``.
+    def _record_incumbent(
+        self, solution_info: SolutionInfo, applied_options: dict[str, Any]
+    ) -> SolutionInfo:
+        """Close a search: record the incumbent's link bits and stamp their id.
 
-        The topology was decoded by :meth:`solve`; this neither routes it nor
-        ranks solution-pool entries by detoured length. Use :meth:`get_solution`
-        for the routed, post-processed result.
+        Every backend ends ``solve()`` here, once its best solution is readable,
+        so that the bits and the id are available as soon as ``solve()`` returns.
+        No topology is built: :meth:`get_solution` rebuilds one from these very
+        bits. Both stay pinned to the model-objective incumbent, which is not
+        necessarily the topology ``get_solution()`` hands over.
         """
-        try:
-            return self._incumbent_S
-        except AttributeError as exc:
-            exc.args += ('.solve() must be called before solution retrieval',)
-            raise
+        self.solution_info, self.applied_options = solution_info, applied_options
+        self._incumbent_linkbits = linkbits = self._read_incumbent_linkbits()
+        solution_info.topology_id = topology_id(linkbits)
+        info('>>> Solution <<<\n%s\n', solution_info)
+        return solution_info
+
+    def _incumbent_topology(self) -> nx.Graph:
+        """Rebuild the incumbent topology from the link bits ``solve()`` recorded."""
+        return self._S_from_linkbits(self.incumbent_linkbits)
 
     @abc.abstractmethod
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
@@ -700,71 +723,49 @@ class Solver(abc.ABC):
             attr['warmstart'] = metadata.warmed_by
         return attr
 
-    def _topology_from_mip_sol(self):
-        """Decode selected links, retaining solver flows for non-unit node power."""
+    def _linkbits_from_mip_sol(self) -> frozenbitarray:
+        """Read the current solution's selected links as canonical link bits.
+
+        Mapping iteration is canonical by construction in all model builders, so
+        reading each binary variable once and collapsing the directed blocks with
+        bit operations yields a solver-independent solution representation.
+        """
         metadata = self.metadata
-        topology = metadata.model_options['topology']
-        R = metadata.R
-        # Mapping iteration is canonical by construction in all model builders.
-        # Read each binary variable once, then collapse the directed blocks with
-        # bit operations for a solver-independent topology representation.
-        link_values = bitarray(
-            (self._link_val(var) for var in metadata.link_.values()), endian='big'
-        )
-        feeder_link_count = R * metadata.T
-        ringed = topology is Topology.RINGED
+        feeder_link_count = metadata.R * metadata.T
+        ringed = metadata.model_options['topology'] is Topology.RINGED
         terminal_link_count = (
             len(metadata.linkset) - feeder_link_count * (1 + ringed)
         ) // 2
-        linkbits = linkbits_from_directed(
+        link_values = bitarray(
+            (self._link_val(var) for var in metadata.link_.values()), endian='big'
+        )
+        return linkbits_from_directed(
             link_values,
             terminal_link_count=terminal_link_count,
             feeder_link_count=feeder_link_count,
             ringed=ringed,
         )
+
+    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
+        """Decode canonical link bits into a topology, over the model's own ``A``.
+
+        With unit terminal power the loads follow from the link selection alone,
+        so this is a pure function of the bits. Non-unitary power needs the
+        solver's flows instead, which :meth:`_topology_from_mip_flows` reads.
+        """
+        metadata = self.metadata
+        topology = metadata.model_options['topology']
         A = self.A
         if any(A.nodes[t].get('power', 1) != 1 for t in range(metadata.T)):
-            S = self._topology_from_mip_flows(link_values)
-        elif ringed:
-            # The full bits identify the topology, but the finalizer needs open
-            # paths and their closing feeders separately. In a one-terminal ring
-            # the opening and closing feeder may be the same undirected edge.
-            feeder_start = 2 * terminal_link_count
-            opening_bits = link_values[feeder_start : feeder_start + feeder_link_count]
-            pathbits = bitarray(linkbits[:terminal_link_count])
-            pathbits.extend(opening_bits)
-            S = S_from_linkbits(pathbits, A)
-            closing_links = []
-            for position in link_values[feeder_start + feeder_link_count :].search(
-                bitarray('1')
-            ):
-                tail, root_index = divmod(position, R)
-                closing_links.append((root_index - R, tail))
-
-            # Only the tail's subtree ID is read by the finalizer, which assigns
-            # every other node attribute and all loads after splitting the rings.
-            subtree = 0
-            visited = set(range(-R, 0))
-            for root in range(-R, 0):
-                for head in S[root]:
-                    previous, tail = root, head
-                    while True:
-                        if tail in visited:
-                            raise ValueError(f'node {tail} reached twice in ring paths')
-                        visited.add(tail)
-                        successors = [n for n in S[tail] if n != previous]
-                        if not successors:
-                            break
-                        (next_node,) = successors
-                        previous, tail = tail, next_node
-                    S.nodes[tail]['subtree'] = subtree
-                    subtree += 1
-            if len(visited) != metadata.T + R:
-                raise ValueError('ring paths do not reach every terminal')
-            _finalize_ringed_mip_S(S, closing_links, A)
+            S = self._topology_from_mip_flows()
         else:
             S = S_from_linkbits(linkbits, A)
-            calcload(S)
+            if topology is Topology.RINGED:
+                # the bits close every ring: this only splits the arms and
+                # derives their loads, in the form every ringed producer uses
+                split_rings_and_calc_loads(S, A)
+            else:
+                calcload(S)
         S.graph.update(
             topology=topology,
             capacity=metadata.capacity,
@@ -776,8 +777,14 @@ class Solver(abc.ABC):
         )
         return S
 
-    def _topology_from_mip_flows(self, link_values: bitarray) -> nx.Graph:
-        """Preserve solver-assigned loads when terminal powers are non-unitary."""
+    def _topology_from_mip_flows(self) -> nx.Graph:
+        """Take the loads from the solver's flows, not from the link selection.
+
+        Reached when a terminal of ``A`` declares a ``'power'`` other than 1, which
+        leaves the loads underdetermined by the links alone. RADIAL and BRANCHED
+        keep the flows as read. RINGED goes on to :func:`_finalize_ringed_mip_S`,
+        which recomputes every load at one unit per terminal.
+        """
         metadata = self.metadata
         topology = metadata.model_options['topology']
         R = metadata.R
@@ -786,10 +793,8 @@ class Solver(abc.ABC):
         # Get active links and if flow is reversed (i.e. from small to big)
         rev_from_link = {
             (u, v): u < v
-            for ((u, v), _), active in zip(
-                metadata.link_.items(), link_values, strict=True
-            )
-            if active
+            for (u, v), var in metadata.link_.items()
+            if self._link_val(var)
         }
         flow_links = {
             link: reverse
@@ -821,31 +826,39 @@ class Solver(abc.ABC):
             closing_links = [
                 link for link in rev_from_link if link not in metadata.flow_
             ]
-            max_load = _finalize_ringed_mip_S(
-                S, closing_links, getattr(self, 'A', None)
-            )
+            max_load = _finalize_ringed_mip_S(S, closing_links, self.A)
         S.graph.update(max_load=max_load, has_loads=True)
         return S
 
 
 class PoolHandler(abc.ABC):
+    """Mixed into a :class:`Solver` whose backend keeps a pool of solutions.
+
+    Ranking the pool reads the link bits of the selected entry and decodes them.
+    Both members come from the ``Solver``, and are declared below for the reader
+    and for the type checker.
+    """
+
     name: str
     num_solutions: int
     model_options: ModelOptions
     solution_info: SolutionInfo
-    # topology of the best-objective pool entry, decoded by ``solve()``
-    _incumbent_S: nx.Graph
+
+    if TYPE_CHECKING:
+        # supplied by the `Solver` every `PoolHandler` is mixed into
+        _linkbits_from_mip_sol: Callable[[], frozenbitarray]
+        _S_from_linkbits: Callable[[frozenbitarray], nx.Graph]
 
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
-        "Get objective value from solution pool at position ``index``"
+        """Select the pool solution at ``index`` and return its model objective.
 
-    @abc.abstractmethod
-    def _topology_from_mip_pool(self) -> nx.Graph:
-        "Build topology from the pool solution at the last requested position"
+        Selecting it must also make its variable values the ones
+        ``_link_val()`` and ``_flow_val()`` read.
+        """
 
-    def _incumbent_topology_from_pool(self) -> nx.Graph:
-        """Decode pool entry zero, which must hold the best model objective."""
+    def _read_incumbent_linkbits_from_pool(self) -> frozenbitarray:
+        """Read pool entry zero, which must hold the best model objective."""
         try:
             expected_objective = self.solution_info.objective
         except AttributeError as exc:
@@ -857,7 +870,7 @@ class PoolHandler(abc.ABC):
                 'Best solution-pool objective does not agree with solution_info: '
                 f'{objective} != {expected_objective}'
             )
-        return self._topology_from_mip_pool()
+        return self._linkbits_from_mip_sol()
 
     def _investigate_pool(
         self, P: nx.PlanarEmbedding, A: nx.Graph
@@ -875,8 +888,7 @@ class PoolHandler(abc.ABC):
                     f"#{i} halted pool search: objective ({λ:.3f}) > incumbent's length"
                 )
                 break
-            # entry zero is the incumbent solve() already decoded
-            Sʹ = self._incumbent_S if i == 0 else self._topology_from_mip_pool()
+            Sʹ = self._S_from_linkbits(self._linkbits_from_mip_sol())
             Gʹ = PathFinder(G_from_S(Sʹ, A), planar=P, A=A).create_detours()
             Λʹ = Gʹ.size(weight='length')
             if Λʹ < Λ:

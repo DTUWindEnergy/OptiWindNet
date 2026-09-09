@@ -10,7 +10,8 @@ from typing import Any
 
 import networkx as nx
 
-from optiwindnet.identity import fingerprint_coordinates
+from optiwindnet.converting import linkbits_from_S
+from optiwindnet.identity import fingerprint_coordinates, topology_id
 from optiwindnet.MILP import SolutionInfo
 from optiwindnet.terse import LinkScope, TerseLinks
 
@@ -123,6 +124,16 @@ def _make_reference_executions() -> tuple[MILPReferenceExecution, ...]:
 
 
 MILP_REFERENCE_EXECUTIONS = _make_reference_executions()
+
+
+def reference_topology_id(reference: MILPReference, case: MILPCase) -> bytes:
+    """The id of a reference optimum, over the available links of its own site."""
+    nodeset_digest = reference.topology.nodeset_digest
+    if nodeset_digest is None:
+        raise ValueError('MILP reference topology has no nodeset digest')
+    A = get_bundle_from_nodeset_digest(nodeset_digest).A
+    S = reference.topology.to_topology(capacity=case.capacity)
+    return topology_id(linkbits_from_S(A, S))
 
 
 def reference_execution_id(execution: MILPReferenceExecution) -> str:

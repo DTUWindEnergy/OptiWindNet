@@ -10,6 +10,7 @@ from typing import Any
 
 import networkx as nx
 import pyomo.environ as pyo
+from bitarray import frozenbitarray
 from pyomo.util.infeasible import (
     find_infeasible_constraints,
     log_infeasible_constraints,
@@ -164,11 +165,9 @@ class SolverPyomo(Solver):
             relgap=relgap,
             termination=termination,
         )
-        self.solution_info, self.applied_options = solution_info, applied_options
-        info('>>> Solution <<<\n%s\n', solution_info)
-        return solution_info
+        return self._record_incumbent(solution_info, applied_options)
 
-    def _decode_incumbent(self) -> nx.Graph:
+    def _read_incumbent_linkbits(self) -> frozenbitarray:
         model = self.model
         try:
             result = self.result
@@ -177,10 +176,13 @@ class SolverPyomo(Solver):
             raise
         # hack to prevent warning about the solver not reaching the desired mip_gap
         result.solver.status = pyo.SolverStatus.ok
-        # load_from() consumes the result's symbol map, so it may run only once
-        # per search: solve() decodes the incumbent, every retrieval reuses it.
+        # load_from() consumes the result's symbol map, so it may run only once per
+        # search: solve() loads the incumbent and it stays readable on the model.
         model.solutions.load_from(result)
-        S = self._topology_from_mip_sol()
+        return self._linkbits_from_mip_sol()
+
+    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
+        S = super()._S_from_linkbits(linkbits)
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         return S
 
@@ -188,7 +190,7 @@ class SolverPyomo(Solver):
         P = self.P
         if A is None:
             A = self.A
-        S = self._incumbent_S
+        S = self._incumbent_topology()
         G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G
@@ -275,19 +277,19 @@ class SolverPyomoAppsi(Solver):
             relgap=1.0 - bound / objective,
             termination=termination,
         )
-        self.solution_info, self.applied_options = solution_info, applied_options
-        info('>>> Solution <<<\n%s\n', solution_info)
-        return solution_info
+        return self._record_incumbent(solution_info, applied_options)
 
-    def _decode_incumbent(self) -> nx.Graph:
+    def _read_incumbent_linkbits(self) -> frozenbitarray:
         try:
             result = self.result
         except AttributeError as exc:
             exc.args += ('.solve() must be called before solution retrieval',)
             raise
         result.solution_loader.load_vars()
-        #  model.solutions.load_from(result)
-        S = self._topology_from_mip_sol()
+        return self._linkbits_from_mip_sol()
+
+    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
+        S = super()._S_from_linkbits(linkbits)
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         return S
 
@@ -295,7 +297,7 @@ class SolverPyomoAppsi(Solver):
         P = self.P
         if A is None:
             A = self.A
-        S = self._incumbent_S
+        S = self._incumbent_topology()
         G = PathFinder(G_from_S(S, A), P, A).create_detours()
         G.graph.update(self._make_graph_attributes())
         return S, G

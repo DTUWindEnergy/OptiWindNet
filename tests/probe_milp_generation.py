@@ -12,7 +12,6 @@ write a golden artifact.
 
 import argparse
 import json
-from dataclasses import asdict
 from math import ceil
 from time import perf_counter
 from typing import TypedDict
@@ -346,17 +345,30 @@ def solve_milp_reference(
     solve = perf_counter() - phase
 
     phase = perf_counter()
-    S = solver.get_incumbent_topology()
+    S, _ = solver.get_solution()
     assert_topology(S, topology, case.capacity)
-    decode_and_validate = perf_counter() - phase
+    if S.graph['_topology_id'] != info.topology_id:
+        # A reference record pairs an objective with the topology that attains
+        # it, and the regression test compares it against the id solve() stamps.
+        # get_solution() may hand over a tied pool entry that routes shorter,
+        # which would put the two halves of the record out of step.
+        raise ValueError(
+            'the routed solution is a tied pool entry, not the model incumbent: '
+            f'{S.graph["_topology_id"].hex()} != {info.topology_id.hex()}'
+        )
+    retrieve_and_validate = perf_counter() - phase
 
-    solution = asdict(info)
-    solution.update(
-        objective=float(info.objective),
-        bound=float(info.bound),
-        relgap=float(info.relgap),
-        topology_edges=S.number_of_edges(),
-    )
+    # spelled out rather than asdict(): topology_id is a digest, which JSON
+    # carries only once it is hexadecimal
+    solution = {
+        'runtime': info.runtime,
+        'termination': info.termination,
+        'objective': float(info.objective),
+        'bound': float(info.bound),
+        'relgap': float(info.relgap),
+        'topology_id': info.topology_id.hex(),
+        'topology_edges': S.number_of_edges(),
+    }
     return {
         'case': {
             'site': case.site,
@@ -388,7 +400,7 @@ def solve_milp_reference(
             'solver_init': solver_init,
             'model_build': model_build,
             'solve': solve,
-            'decode_and_validate': decode_and_validate,
+            'retrieve_and_validate': retrieve_and_validate,
             'total': perf_counter() - started,
         },
     }
