@@ -1,10 +1,15 @@
+import math
 import shutil
+import subprocess
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
 import pytest
 
 import optiwindnet.baselines.lkh as lkh_mod
+from optiwindnet.converting import linkbits_from_S
+from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
 
 from .cases import LKH_CASES, case_node_id, expected_topology
@@ -57,6 +62,12 @@ def _make_A(T: int = 4, R: int = 1, edges=()) -> nx.Graph:
     A.add_nodes_from(range(-R, 0))
     for u, v, length in edges:
         A.add_edge(u, v, length=length)
+    # Add the linkset metadata normally supplied by make_planar_embedding().
+    A.graph['_canonical_terminal_links'] = np.array(
+        sorted((u, v) if u < v else (v, u) for u, v, _ in edges),
+        dtype=np.uint32,
+    ).reshape(-1, 2)
+    A.graph['_linkset_id'] = linkset_id(A)
     return A
 
 
@@ -148,7 +159,7 @@ def test_lkh3_single_root_calls_do_lkh_with_expected_args(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=42)
+    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=42, repair=False)
 
     assert captured['L_shape'] == (5, 5)  # T_c + 1
     assert captured['vehicles'] == 2  # ceil(4/2) = 2
@@ -172,7 +183,7 @@ def test_lkh3_balanced_sets_min_route_size(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, balanced=True)
+    lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, balanced=True, repair=False)
 
     assert captured['min_route_size'] == 1  # 5 % 2 = 1
     assert captured['vehicles'] == 3
@@ -189,7 +200,7 @@ def test_lkh3_seed_none_picks_random_seed(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=None)
+    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=None, repair=False)
 
     assert isinstance(captured['seed'], int)
     assert captured['seed'] >= 0
@@ -285,7 +296,7 @@ def test_lkh3_multi_root_runs_one_call_per_cluster(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=7)
+    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=7, repair=False)
     assert len(captured_calls) == 2
     # multi-root: solver_details aggregates per root
     assert S.graph['solver_details']['vehicles'] == (1, 1)
@@ -311,8 +322,96 @@ def test_lkh3_multi_root_warns_when_vehicles_above_min(monkeypatch):
     warnings_seen = []
     monkeypatch.setattr(lkh_mod, 'warn', warnings_seen.append)
 
-    lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, vehicles=4)
+    lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, vehicles=4, repair=False)
     assert any('multi-root' in str(w) for w in warnings_seen)
+
+
+def test_lkh3_records_identity_over_the_available_links(monkeypatch):
+    A = _make_A(T=4, edges=[(0, 1, 1.0), (1, 2, 1.0), (2, 3, 1.0), (0, 3, 1.0)])
+
+    monkeypatch.setattr(
+        lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 1], [2, 3]])
+    )
+    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
+
+    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1)
+
+    assert S.graph['_linkbits'] == linkbits_from_S(A, S)
+    assert S.graph['_topology_id'] == topology_id(S.graph['_linkbits'])
+    assert S.graph['_linkset_id'] == A.graph['_linkset_id']
+
+
+def test_lkh3_drops_identity_when_the_solution_leaves_A(monkeypatch, caplog):
+    """The big-M only discourages a link absent from A: it cannot forbid it."""
+    A = _make_A(T=4, edges=[(0, 1, 1.0)])
+
+    # route [2, 3] activates (2, 3), which A does not have
+    monkeypatch.setattr(
+        lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 1], [2, 3]])
+    )
+    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
+
+    with caplog.at_level('WARNING'):
+        S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1)
+
+    assert '_linkbits' not in S.graph
+    assert '_topology_id' not in S.graph
+    assert '_linkset_id' not in S.graph
+    assert 'left the available-links set' in caplog.text
+
+
+def test_lkh3_complete_that_stays_within_A_is_identified_over_A(monkeypatch):
+    """A complete solve using only links in A retains an identity over A."""
+    A = _make_A(T=4, edges=[(0, 1, 1.0), (2, 3, 1.0)])
+
+    monkeypatch.setattr(
+        lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 1], [2, 3]])
+    )
+
+    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, complete=True, repair=False)
+
+    assert S.graph['method_options']['complete']
+    assert S.graph['_linkbits'] == linkbits_from_S(A, S)
+    assert S.graph['_linkset_id'] == A.graph['_linkset_id'] == linkset_id(A)
+
+
+def test_lkh3_complete_that_leaves_A_is_not_identified(monkeypatch, caplog):
+    A = _make_A(T=4, edges=[(0, 1, 1.0), (2, 3, 1.0)])
+
+    # (0, 2) and (1, 3) are the links the complete graph adds
+    monkeypatch.setattr(
+        lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 2], [1, 3]])
+    )
+
+    with caplog.at_level('WARNING'):
+        S = lkh_mod.lkh3(
+            A, capacity=2, time_limit=0.1, seed=1, complete=True, repair=False
+        )
+
+    assert '_linkbits' not in S.graph
+    assert 'left the available-links set' in caplog.text
+    assert A.graph['_linkset_id'] == linkset_id(A)  # input identity is unchanged
+
+
+def test_lkh3_edgeless_A_implies_complete(monkeypatch, caplog):
+    A = _make_A(T=4)
+
+    monkeypatch.setattr(
+        lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 1], [2, 3]])
+    )
+
+    with caplog.at_level('WARNING'):
+        S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+
+    assert S.graph['method_options']['complete']
+    assert '_linkbits' not in S.graph
+    assert 'left the available-links set' in caplog.text
+
+
+def test_lkh3_complete_is_refused_together_with_repair():
+    A = _make_A(T=4, edges=[(0, 1, 1.0), (2, 3, 1.0)])
+    with pytest.raises(NotImplementedError, match='complete graph over all nodes'):
+        lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, complete=True)
 
 
 def test_build_weight_matrix_single_root_shape_and_depot_column():
@@ -366,3 +465,80 @@ def test_lkh_lower_level_function(monkeypatch):
     assert any('too low' in str(w) for w in warnings_seen)
     assert S.graph.get('has_loads') is True
     assert S.nodes[-1]['load'] == 4
+
+
+def _capture_lkh_problem(monkeypatch):
+    """Capture the generated LKH-3 problem and parameter files without running LKH.
+
+    The fake process returns no solution, causing lkh3() to raise AssertionError
+    when checking the result. Callers expect that error and inspect the files
+    written before the subprocess call.
+    """
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        params = Path(argv[1]).read_text()
+        captured['params'] = dict(
+            line.split(' = ', 1) for line in params.splitlines() if ' = ' in line
+        )
+        captured['problem'] = Path(captured['params']['PROBLEM_FILE']).read_text()
+        return subprocess.CompletedProcess(argv, 1, stdout=b'', stderr=b'')
+
+    monkeypatch.setattr(lkh_mod.subprocess, 'run', fake_run)
+    return captured
+
+
+def _demand_section(problem: str) -> dict[int, int]:
+    body = problem.split('DEMAND_SECTION\n', 1)[1].split('\nEOF', 1)[0]
+    return {int(node): int(demand) for node, demand in
+            (line.split() for line in body.splitlines())}  # fmt: skip
+
+
+def test_lkh3_sends_one_unit_of_demand_per_unitary_terminal(monkeypatch):
+    captured = _capture_lkh_problem(monkeypatch)
+    A = get_bundle('toy').A
+    T = A.graph['T']
+
+    with pytest.raises(AssertionError, match='root node load'):
+        lkh_mod.lkh3(as_normalized(A), capacity=5, time_limit=0.1, repair=False)
+
+    demands = _demand_section(captured['problem'])
+    assert demands == {**{t + 1: 1 for t in range(T)}, T + 1: 0}
+    assert captured['params']['MTSP_MAX_SIZE'] == '5'
+
+
+def test_lkh3_declares_terminal_power_as_demand(monkeypatch):
+    captured = _capture_lkh_problem(monkeypatch)
+    A = as_normalized(get_bundle('toy').A.copy())
+    T = A.graph['T']
+    powers = {t: 1 + (t % 3) for t in range(T)}
+    nx.set_node_attributes(A, powers, 'power')
+
+    with pytest.raises(AssertionError, match='root node load'):
+        lkh_mod.lkh3(A, capacity=8, time_limit=0.1, repair=False)
+
+    demands = _demand_section(captured['problem'])
+    assert demands == {**{t + 1: powers[t] for t in range(T)}, T + 1: 0}
+    assert captured['problem'].splitlines()[0].startswith('NAME')
+    # The smallest demand is one unit, allowing at most 8 nodes per route.
+    assert captured['params']['MTSP_MAX_SIZE'] == '8'
+    # Unequal demands disable the minimum node count.
+    assert captured['params']['MTSP_MIN_SIZE'] == '0'
+    # the feeder minimum follows the total power (24), not the terminal count
+    assert int(captured['params']['VEHICLES']) >= math.ceil(sum(powers.values()) / 8)
+
+
+def test_lkh3_rejects_non_unit_terminal_power_it_cannot_honour():
+    """Unsupported modes are rejected before invoking the LKH executable."""
+    A = as_normalized(get_bundle('toy').A.copy())
+    nx.set_node_attributes(A, {0: 2}, 'power')
+
+    with pytest.raises(NotImplementedError, match='single-root radial solve'):
+        lkh_mod.lkh3(A, capacity=5, time_limit=1.0, ringed=True)
+    with pytest.raises(NotImplementedError, match='single-root radial solve'):
+        lkh_mod.lkh3(A, capacity=5, time_limit=1.0, balanced=True)
+
+    Amr = as_normalized(get_bundle('neart').A.copy())
+    nx.set_node_attributes(Amr, {0: 2}, 'power')
+    with pytest.raises(NotImplementedError, match='single-root radial solve'):
+        lkh_mod.lkh3(Amr, capacity=5, time_limit=1.0)

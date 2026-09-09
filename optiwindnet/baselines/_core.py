@@ -5,10 +5,15 @@
 
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 
+import networkx as nx
 import numpy as np
+from numpy.typing import DTypeLike
+from scipy.spatial.distance import pdist, squareform
 
-from ..identity import _invalidate_canonical_linkset
+from ..converting import linkbits_from_S
+from ..identity import _LINKSET_ID, _invalidate_canonical_linkset, topology_id
 
 _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
@@ -64,6 +69,83 @@ def add_branches_to_S(S, branches, root, subtree_id_start):
         S.add_edges_from(zip(prev, branch_list, edgeD))
         subtree_id += 1
     return max_load, subtree_id
+
+
+def scaled_length_block(
+    A: nx.Graph,
+    terminals: Sequence[int],
+    *,
+    scale: float,
+    complete: bool,
+    absent: float,
+    dtype: DTypeLike,
+) -> tuple[np.ndarray, float, float]:
+    """Build a scaled length matrix in the order given by ``terminals``.
+
+    The HGS-CVRP and LKH-3 wrappers share this block. Each wrapper handles its
+    own depot placement, slack nodes, and missing-link penalties.
+
+    With ``complete=False``, pairs absent from ``A`` retain ``absent``.
+    With ``complete=True``, initialize all pairs with their Euclidean distances,
+    then overwrite entries for links in ``A`` with their stored lengths, which
+    may include routes around obstacles. Round scaled lengths for integer
+    ``dtype`` values.
+
+    Returns:
+        ``(block, fill_max, edge_max)`` containing the matrix and maximum scaled
+        lengths from the Euclidean distances and stored links, respectively.
+        The maxima are unrounded and default to 0.0 when no lengths contribute.
+        Callers use them to set penalties and check for overflow.
+    """
+    integral = np.issubdtype(np.dtype(dtype), np.integer)
+    fill_max = 0.0
+    if complete:
+        condensed = pdist(A.graph['VertexC'][terminals]) * scale
+        fill_max = float(condensed.max(initial=0.0))
+        if integral:
+            np.round(condensed, out=condensed)
+        # Convert the condensed array before expanding it to save memory.
+        block = squareform(condensed.astype(dtype, copy=False))
+    else:
+        block = np.full((len(terminals), len(terminals)), absent, dtype=dtype)
+    i_from_n = {n: i for i, n in enumerate(terminals)}
+    edge_max = 0.0
+    for u, v, length in A.edges(data='length'):
+        iu = i_from_n.get(u)
+        iv = i_from_n.get(v)
+        if iu is None or iv is None:
+            continue
+        scaled = length * scale
+        edge_max = max(edge_max, scaled)
+        block[iu, iv] = block[iv, iu] = round(scaled) if integral else scaled
+    return block, fill_max, edge_max
+
+
+def linkset_identity(S: nx.Graph, A: nx.Graph) -> dict[str, object]:
+    """Return the identity of solution ``S`` relative to ``A``'s available links.
+
+    The wrappers assign large costs to missing links instead of forbidding
+    them, so either solver may select a link outside ``A``. Complete solves
+    can also use links outside ``A``. Such links have no position in ``A``'s
+    bit vector; log a warning and return an empty mapping in that case.
+
+    A complete solve that uses only links in ``A`` retains its identity,
+    allowing topology comparisons over the same available-links set.
+
+    Returns:
+        A mapping with ``'_linkbits'``, ``'_topology_id'`` and ``'_linkset_id'``,
+        or an empty mapping if the solution cannot be encoded over ``A``.
+    """
+    try:
+        linkbits = linkbits_from_S(A, S)
+    except (KeyError, ValueError) as exc:
+        _warn('Solution left the available-links set, so it is not identified: %s', exc)
+        return {}
+    return {
+        '_linkbits': linkbits,
+        '_topology_id': topology_id(linkbits),
+        '_linkset_id': A.graph[_LINKSET_ID],
+    }
 
 
 def remove_offending_crossings(A, diagonals, crossings):

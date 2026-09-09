@@ -248,6 +248,28 @@ def test_S_from_G():
     assert 'method_options' not in S2.graph
 
 
+def test_S_from_G_carries_terminal_power():
+    """Preserving terminal power allows the topology to reproduce routed loads."""
+    wfn = tiny_wfn()
+    G = wfn.G
+    powers = {0: 2, 2: 3}
+    nx.set_node_attributes(G, powers, 'power')
+    calcload(G)
+
+    S = S_from_G(G)
+
+    assert {t: S.nodes[t].get('power') for t in range(G.graph['T'])} == {
+        0: 2, 1: None, 2: 3, 3: None,
+    }  # fmt: skip
+    # Recalculating loads preserves the values copied from G.
+    reference = S.copy()
+    calcload(reference)
+    assert {n: d['load'] for n, d in reference.nodes(data=True)} == {
+        n: d['load'] for n, d in S.nodes(data=True)
+    }
+    assert S.nodes[-1]['load'] == sum(powers.values()) + 2
+
+
 def test_S_from_G_rejects_a_route_node_that_is_not_part_of_a_chain():
     G = nx.Graph(R=1, T=2, capacity=2, topology=Topology.BRANCHED)
     G.add_edges_from([(0, 2), (2, 1), (2, -1)])

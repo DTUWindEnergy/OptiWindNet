@@ -19,7 +19,7 @@ from ..geometric import (
 )
 from ..identity import fingerprint_function, topology_id
 from ..interarraylib import add_link_blockmap, add_terminal_closest_root
-from ..loads import calcload, split_rings_and_calc_loads
+from ..loads import calcload, split_rings_and_calc_loads, terminal_powers
 from ..types import Topology
 from .priorityqueue import PriorityQueue
 
@@ -123,6 +123,11 @@ def constructor(
     Returns:
       Solution topology S.
     """
+    if terminal_powers(Aʹ):
+        raise NotImplementedError(
+            'constructor() fills a subtree up to `capacity` terminals, so it '
+            "cannot honour a terminal 'power' other than 1."
+        )
 
     start_time = time.perf_counter()
     if straight_feeder_route and weigh_detours:

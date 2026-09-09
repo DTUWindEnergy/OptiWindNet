@@ -28,6 +28,7 @@ from ..loads import (
     bfs_subtree_loads,
     calcload,
     split_rings_and_calc_loads,
+    terminal_powers,
 )
 from ..pathfinding import PathFinder
 from ..types import Topology
@@ -113,6 +114,7 @@ def feeder_and_load_bounds(
     max_feeders: int,
     balanced: bool,
     feeders_per_subtree: int = 1,
+    power_total: int | None = None,
 ) -> tuple[int, int | None, int | None, int | None]:
     """Derive the feeder-count and feeder-load bounds a model must enforce.
 
@@ -125,20 +127,29 @@ def feeder_and_load_bounds(
     constrains, and the returned bounds are multiplied back by
     ``feeders_per_subtree`` for reporting.
 
-    The subtree count is bounded below by ``min_feeders = ceil(T/capacity)``
-    regardless of ``feeder_limit`` (a valid inequality). ``feeders_ub`` is
-    ``None`` when the count is unbounded above; when it equals ``feeders_lb``,
-    the count is pinned and callers should emit an equality constraint.
+    ``power_total`` is the sum of terminal power and defaults to ``T`` (one
+    unit per terminal). It determines the capacity-based bounds. The number
+    of subtrees is still at most ``T``, since each must contain a terminal.
+
+    The subtree count is bounded below by ``min_feeders = ceil(power_total /
+    capacity)`` regardless of ``feeder_limit`` (a valid inequality).
+    ``feeders_ub`` is ``None`` when the count is unbounded above; when it equals
+    ``feeders_lb``, the count is pinned and callers should emit an equality
+    constraint.
 
     Balanced subtrees (loads differing at most by one unit) are only expressible
     with a pinned feeder count ``F``, in which case the loads must lie in
-    ``{T // F, ceil(T / F)}``. A load bound of ``None`` means "do not emit":
-    either ``balanced`` is off, or it is not enforceable (a warning is issued),
-    or the bound is already implied by the flow variable's own bounds.
+    ``{power_total // F, ceil(power_total / F)}``. A load bound of ``None`` means
+    "do not emit": either ``balanced`` is off, or it is not enforceable (a
+    warning is issued), or the bound is already implied by the flow variable's
+    own bounds. Unequal terminal powers may make these balanced load bounds
+    infeasible.
 
     Returns:
         ``(feeders_lb, feeders_ub, load_lb, load_ub)`` in subtree-count units.
     """
+    if power_total is None:
+        power_total = T
     if feeders_per_subtree != 1 and max_feeders:
         if max_feeders % feeders_per_subtree:
             raise ValueError(
@@ -147,7 +158,7 @@ def feeder_and_load_bounds(
                 f'{feeders_per_subtree} substation connections)'
             )
         max_feeders //= feeders_per_subtree
-    min_feeders = math.ceil(T / capacity)
+    min_feeders = math.ceil(power_total / capacity)
     if feeder_limit is FeederLimit.UNLIMITED:
         feeders_lb, feeders_ub = min_feeders, None
     elif feeder_limit is FeederLimit.MINIMUM:
@@ -180,7 +191,7 @@ def feeder_and_load_bounds(
         )
         return feeders_lb, feeders_ub, None, None
     F = feeders_lb
-    load_lb, load_ub = T // F, math.ceil(T / F)
+    load_lb, load_ub = power_total // F, math.ceil(power_total / F)
     # bounds at the extremes are already implied by the flow variable's bounds
     return (
         feeders_lb,
@@ -755,19 +766,22 @@ class Solver(abc.ABC):
         )
 
     def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
-        """Decode canonical link bits into a topology, over the model's own ``A``.
+        """Decode canonical link bits into a topology over the model's ``A``.
 
-        With unit terminal power the loads follow from the link selection alone,
-        so this is a pure function of the bits. Non-unitary power needs the
-        solver's flows instead, which :meth:`_topology_from_mip_flows` reads.
+        For RADIAL and BRANCHED topologies, the selected links and terminal powers
+        determine the loads. RINGED topologies with non-unit power use
+        :meth:`_topology_from_mip_flows`, since ring splitting uses terminal counts.
         """
         metadata = self.metadata
         topology = metadata.model_options['topology']
         A = self.A
-        if any(A.nodes[t].get('power', 1) != 1 for t in range(metadata.T)):
+        power_ = terminal_powers(A)
+        if power_ and topology is Topology.RINGED:
             S = self._topology_from_mip_flows()
         else:
             S = S_from_linkbits(linkbits, A)
+            # Preserve terminal power so validation can reproduce the loads.
+            nx.set_node_attributes(S, power_, 'power')
             if topology is Topology.RINGED:
                 # the bits close every ring: this only splits the arms and
                 # derives their loads, in the form every ringed producer uses
@@ -786,12 +800,15 @@ class Solver(abc.ABC):
         return S
 
     def _topology_from_mip_flows(self) -> nx.Graph:
-        """Take the loads from the solver's flows, not from the link selection.
+        """Build the topology from the solver's flow variables.
 
-        Reached when a terminal of ``A`` declares a ``'power'`` other than 1, which
-        leaves the loads underdetermined by the links alone. RADIAL and BRANCHED
-        keep the flows as read. RINGED goes on to :func:`_finalize_ringed_mip_S`,
-        which recomputes every load at one unit per terminal.
+        Used for RINGED models with non-unit terminal power. The flows define the
+        path forest and subtree IDs. :func:`_finalize_ringed_mip_S` closes the rings
+        and recalculates loads at one unit per terminal, discarding declared power.
+
+        Supporting non-unit power requires changes to the ring model as well as
+        the decoder: doubling cable capacity does not guarantee that a ring can
+        be split into two arms whose loads each fit within the cable capacity.
         """
         metadata = self.metadata
         topology = metadata.model_options['topology']
