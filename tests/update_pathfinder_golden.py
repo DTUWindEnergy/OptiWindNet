@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Manually regenerate the PathFinder golden routesets.
 
 Run from the repository root with::

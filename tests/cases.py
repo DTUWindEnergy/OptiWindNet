@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Typed low-level producer cases with attribute-derived names and golden keys."""
 
 from dataclasses import dataclass, field

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Solve provisional MILP reference cases and retain proven optima temporarily.
 
 This is deliberately not the final test artifact generator. Until deployment

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Check documentation requirements that the Sphinx build cannot see.
 
 The Sphinx build already catches broken cross-references, and does so for every

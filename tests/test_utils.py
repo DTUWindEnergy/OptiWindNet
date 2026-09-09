@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 from optiwindnet.utils import NodeTagger, make_handle
 
 # --- make_handle ---

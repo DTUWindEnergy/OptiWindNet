@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Regenerate the expected available-links sets of the bundled locations.
 
 Run from the repository root with::

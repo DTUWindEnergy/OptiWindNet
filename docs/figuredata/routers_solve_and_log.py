@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Record the MILP incumbent and bound time series from an early warm start.
 
 HiGHS runs to ``problem.TARGET_GAP`` from the stored 0.1-second HGS topology.

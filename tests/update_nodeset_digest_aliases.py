@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Regenerate verified historical coordinate payloads for node-set aliases.
 
 Run from the repository root with::

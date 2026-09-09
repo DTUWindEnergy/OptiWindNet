@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 # tests/isolation.py
 """
 Isolated subprocess workers for solver code that cannot share a process with

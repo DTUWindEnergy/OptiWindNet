@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Expected canonical available-links sets of the bundled locations.
 
 Each entry maps a location handle to the number of canonical terminal-terminal

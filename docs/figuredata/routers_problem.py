@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Define the problem used by the Routers figure.
 
 This module defines the problem shared by all Routers scripts and data files. To

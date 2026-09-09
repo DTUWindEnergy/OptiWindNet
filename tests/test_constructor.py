@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Tests for the unified constructive heuristic `optiwindnet.heuristics.constructor`.
 
 `constructor` replaced several near-duplicate heuristic modules. It exposes four

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Tests for :func:`optiwindnet.clustering.clusterize`.
 
 The guarantee that must never break is that clustering costs no extra feeder::

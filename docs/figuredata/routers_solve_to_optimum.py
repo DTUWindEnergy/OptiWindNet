@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Solve the configured problem to proven optimality.
 
 Gurobi solves to zero gap with ``mipfocus=2``, using the shortest stored

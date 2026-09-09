@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Refresh notebook outputs in docs/notebooks via nbclient.
 
 Executes each notebook with the kernel given via ``--kernel`` from cwd

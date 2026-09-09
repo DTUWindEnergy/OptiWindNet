@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Expected topologies of the deterministic constructor and MILP cases.
 
 Each entry maps a topology golden key (see

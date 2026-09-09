@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Run Prettier over the *markdown cells* of the notebooks.
 
 Prettier formats Markdown files, and a notebook is not one: it is JSON that

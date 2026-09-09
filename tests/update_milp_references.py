@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Deploy reviewed provisional MILP references without rerunning any solver.
 
 Run from the repository root with::

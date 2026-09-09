@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Solve the configured problem with the fast routers used by the figure.
 
 The constructive and meta-heuristic samples cover the millisecond-to-second

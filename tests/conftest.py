@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 # tests/conftest.py
 """
 Central pytest fixtures for optiwindnet tests.

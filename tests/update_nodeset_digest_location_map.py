@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Regenerate the bundled-node-set digest to location-name mapping.
 
 Run from the repository root with::

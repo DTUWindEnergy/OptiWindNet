@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Derived graph variants: normalized, single-root, undetoured, rehooked."""
 
 import networkx as nx

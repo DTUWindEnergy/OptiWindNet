@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Measure the cost of generating one MILP objective reference.
 
 Run from the repository root, for example::

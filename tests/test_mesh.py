@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 from typing import cast
 
 import condeltri as cdt  # pyrefly: ignore[missing-import]

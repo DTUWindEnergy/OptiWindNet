@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Generate the SVG figures embedded in the prose pages of the documentation.
 
 The notebooks under ``docs/notebooks`` carry their own figures as committed cell

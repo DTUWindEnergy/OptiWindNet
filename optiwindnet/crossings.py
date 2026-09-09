@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 import math
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass

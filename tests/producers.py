@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Process-local caches for expensive, read-only producer topology fixtures."""
 
 from functools import cache

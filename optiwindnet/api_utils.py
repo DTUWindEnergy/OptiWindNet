@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Meta-tests for the typed low-level producer matrix."""
 
 from dataclasses import replace

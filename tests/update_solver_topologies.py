@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
 """Regenerate the expected topologies of the deterministic producer cases.
 
 Run from the repository root with::
