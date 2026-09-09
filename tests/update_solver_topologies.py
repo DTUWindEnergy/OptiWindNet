@@ -31,7 +31,10 @@ from .topology_assertions import assert_topology
 
 SOLVER_TOPOLOGIES_FILE = Path(__file__).with_name('solver_topologies.py')
 
-_TEMPLATE = '''"""Expected topologies of the deterministic constructor and MILP cases.
+_TEMPLATE = '''# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
+"""Expected topologies of the deterministic constructor and MILP cases.
 
 Each entry maps a topology golden key (see
 :func:`tests.cases.topology_golden_key`) to the hexadecimal
