@@ -20,7 +20,7 @@ python -m tests.update_mesh_goldens
 
 ## Deterministic solver topologies
 
-Regenerate `tests/solver_topologies.pkl` from the exact constructor and required MILP cases:
+Regenerate `tests/solver_topologies.py` from the exact constructor and required MILP cases:
 
 ```bash
 python -m tests.update_solver_topologies

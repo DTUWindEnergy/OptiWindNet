@@ -9,9 +9,9 @@ from .milp_reference_testing import (
     MILP_REFERENCE_EXECUTIONS,
     load_milp_references,
     reference_execution_id,
+    reference_topology_id,
     solve_milp_reference_execution,
 )
-from .solver_topologies import assert_matches_golden
 from .topology_assertions import assert_topology
 from .update_milp_reference_candidates import reference_problem_key
 
@@ -45,7 +45,9 @@ def test_milp_reference_execution(execution, milp_references, run_isolated):
     assert_topology(S, case.model_options['topology'], case.capacity)
 
     if execution.warmstart or info.termination.lower() == 'optimal':
-        assert_matches_golden(S, reference.topology)
+        # the incumbent, not the routed pool pick: the reference is the optimum
+        # of the model objective, which is what solve() stamps on SolutionInfo
+        assert info.topology_id == reference_topology_id(reference, case)
     if info.termination.lower() == 'optimal':
         return
 

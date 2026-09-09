@@ -29,9 +29,9 @@ from .cases import (
     topology_golden_key,
 )
 from .helpers import terminal_terminal_crossings
+from .producers import constructor_topology
 from .sitecache import get_bundle
-from .solver_topologies import assert_matches_golden, load_solver_topologies
-from .topology_assertions import assert_topology
+from .topology_assertions import assert_golden_topology_id, assert_topology
 
 METHODS = ('esau_williams', 'biased_EW', 'rootlust', 'radial_EW')
 BRANCHED_METHODS = ('esau_williams', 'biased_EW', 'rootlust')
@@ -45,7 +45,6 @@ _LOCATIONS = {
     'cazzaro_2022_1ss': 'cazzaro_2022',
     'morayeast_3ss': 'morayeast',
 }
-_SOLVER_GOLDENS = load_solver_topologies()
 
 
 @pytest.fixture(params=list(_LOCATIONS.values()), ids=list(_LOCATIONS), scope='session')
@@ -77,21 +76,14 @@ def _each_terminal_reaches_exactly_one_root(S):
 def test_constructor_topology_cases(case):
     """The broad constructor matrix validates undetoured topology output."""
     A = get_bundle(case.site).A
-    S = constructor(
-        A,
-        capacity=case.capacity,
-        method=case.method,
-        bias_margin=case.bias_margin,
-        weigh_detours=case.feeder_route.value == 'segmented',
-        straight_feeder_route=case.feeder_route.value == 'straight',
-    )
+    S = constructor_topology(case)
     assert_topology(S, expected_topology(case), case.capacity)
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
     assert S.graph['_topology_id'] == topology_id(S.graph['_linkbits'])
     assert S.graph['_linkset_id'] == A.graph['_linkset_id']
     assert terminal_terminal_crossings(S, A.graph['VertexC']) == []
     if case.exact_golden:
-        assert_matches_golden(S, _SOLVER_GOLDENS[topology_golden_key(case)])
+        assert_golden_topology_id(S.graph['_topology_id'], topology_golden_key(case))
 
 
 @pytest.mark.parametrize('capacity', (3, 5, 8))

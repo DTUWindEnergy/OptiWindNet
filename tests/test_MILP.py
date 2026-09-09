@@ -14,7 +14,6 @@ from optiwindnet import MILP
 from optiwindnet.converting import terse_links_from_S
 from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.MILP import ModelOptions, solver_factory
-from optiwindnet.terse import TerseLinks
 from optiwindnet.types import Topology
 
 from .cases import (
@@ -27,22 +26,17 @@ from .cases import (
 )
 from .helpers import (
     TEST_ONLY_SOLVER_OPTIONS,
+    solve_milp_case,
     solver_unavailable,
     warn_if_not_optimal,
 )
 from .sitecache import get_bundle
-from .solver_topologies import (
-    assert_matches_golden,
-    load_solver_topologies,
-    solve_milp_case,
-)
-from .topology_assertions import assert_topology
+from .topology_assertions import assert_golden_topology_id, assert_topology
 
 # topology in terse links for toy_farm at capacity=5
 _CAPACITY = 5
 _RUNTIME = 10
 _GAP = 0.001
-_SOLVER_GOLDENS = load_solver_topologies()
 
 
 # ortools.math_opt bundles its own copies of HiGHS/SCIP that collide with the
@@ -502,9 +496,7 @@ def test_ortools_incumbent_matches_toy_topology_without_routing(ortools_worker):
         raise result
 
     case = next(case for case in MILP_FORMULATION_CASES if case.exact_golden)
-    golden = _SOLVER_GOLDENS[topology_golden_key(case)]
-    assert isinstance(golden, TerseLinks)
-    assert tuple(result['terse']) == golden.links
+    assert_golden_topology_id(result['info_id'], topology_golden_key(case))
     assert result['violations'] == []
     assert result['linkbits_match']
     assert result['objective'] == result['preserved_objective']
@@ -1108,7 +1100,7 @@ def test_milp_adapter_topology_golden(case, run_isolated):
     solution_info, S = result
     warn_if_not_optimal(case, solution_info)
     assert_topology(S, case.model_options['topology'], case.capacity)
-    assert_matches_golden(S, _SOLVER_GOLDENS[topology_golden_key(case)])
+    assert_golden_topology_id(solution_info.topology_id, topology_golden_key(case))
 
 
 @pytest.mark.parametrize('case', MILP_FORMULATION_CASES, ids=case_node_id)
@@ -1122,7 +1114,7 @@ def test_milp_required_formulation_topologies(case, run_isolated):
     warn_if_not_optimal(case, info)
     assert_topology(S, case.model_options['topology'], case.capacity)
     if case.exact_golden:
-        assert_matches_golden(S, _SOLVER_GOLDENS[topology_golden_key(case)])
+        assert_golden_topology_id(info.topology_id, topology_golden_key(case))
 
 
 @pytest.mark.parametrize('case', MILP_FAMILY_CASES, ids=case_node_id)

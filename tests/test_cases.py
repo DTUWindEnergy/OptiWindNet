@@ -16,6 +16,7 @@ from .cases import (
     MILP_FORMULATION_CASES,
     case_node_id,
     expected_topology,
+    golden_keys,
     topology_golden_key,
 )
 from .sitecache import (
@@ -24,6 +25,7 @@ from .sitecache import (
     get_location,
     location_repository,
 )
+from .solver_topologies import SOLVER_TOPOLOGY_GOLDENS
 
 
 def test_selected_site_monikers_are_canonical_handles():
@@ -170,3 +172,20 @@ def test_milp_matrix_separates_formulations_from_adapters():
     } == set(FeederRoute)
     assert len({case.solver_name for case in MILP_ADAPTER_CASES}) >= 3
     assert {case.solver_name for case in MILP_FAMILY_CASES} == {'highs', 'scip'}
+
+
+def test_golden_module_covers_exactly_the_exact_golden_cases():
+    """A stale or missing golden is a bug in the matrix, not in a producer."""
+    missing = sorted(golden_keys() - SOLVER_TOPOLOGY_GOLDENS.keys())
+    stale = sorted(SOLVER_TOPOLOGY_GOLDENS.keys() - golden_keys())
+
+    assert (missing, stale) == ([], []), (
+        'tests/solver_topologies.py is out of step with the case matrix; '
+        'regenerate with: python -m tests.update_solver_topologies'
+    )
+    for key, accepted in SOLVER_TOPOLOGY_GOLDENS.items():
+        assert accepted, f'{key}: at least one topology id must be accepted'
+        assert len(set(accepted)) == len(accepted), f'{key}: duplicate topology ids'
+        assert all(len(bytes.fromhex(item)) == 16 for item in accepted), (
+            f'{key}: every topology id must be 128 bits of hexadecimal'
+        )

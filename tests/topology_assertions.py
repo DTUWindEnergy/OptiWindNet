@@ -6,6 +6,16 @@ from optiwindnet.converting import _rings_from_S
 from optiwindnet.types import Topology
 from optiwindnet.validating import validate_topology
 
+from .solver_topologies import SOLVER_TOPOLOGY_GOLDENS
+
+
+def assert_golden_topology_id(topology_id: bytes, key: str) -> None:
+    """Check a topology id against every id accepted for the golden ``key``."""
+    accepted = SOLVER_TOPOLOGY_GOLDENS[key]
+    assert topology_id.hex() in accepted, (
+        f'{key}: topology {topology_id.hex()} is none of the golden {accepted}'
+    )
+
 
 def assert_topology(S: nx.Graph, expected: Topology, capacity: int) -> None:
     """Validate the common topology contract without invoking PathFinder."""

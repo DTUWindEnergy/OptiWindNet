@@ -19,6 +19,8 @@ from optiwindnet.MILP import (
     solver_factory,
 )
 
+from .sitecache import get_bundle
+
 if TYPE_CHECKING:
     from .cases import MILPCase
 
@@ -68,7 +70,7 @@ def run_milp_solve_with_retry(
                 f'Solver {solver_name!r} returned non-finite dual bound '
                 f'({info.bound}) within {limit} s'
             )
-        S = solver.get_incumbent_topology()
+        S, _ = solver.get_solution()
         return info, S, solver.metadata.warmed_by
 
     try:
@@ -88,6 +90,22 @@ def run_milp_solve_with_retry(
         stacklevel=2,
     )
     return _single_solve(fallback_limit)
+
+
+def solve_milp_case(case: 'MILPCase') -> tuple[SolutionInfo, nx.Graph]:
+    """Solve a typed MILP case and return its outcome and routed topology."""
+    bundle = get_bundle(case.site)
+    info, S, _ = run_milp_solve_with_retry(
+        bundle.P,
+        bundle.A,
+        solver_name=case.solver_name,
+        capacity=case.capacity,
+        model_options=case.model_options,
+        time_limit=case.time_limit,
+        mip_gap=case.mip_gap,
+        retry_on_suboptimal=case.exact_golden,
+    )
+    return info, S
 
 
 def warn_if_not_optimal(case: 'MILPCase', info: SolutionInfo) -> None:
