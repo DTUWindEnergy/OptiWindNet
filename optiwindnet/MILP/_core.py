@@ -419,13 +419,21 @@ class SolutionInfo:
     topology_id: bytes = b''
 
     def __repr__(self) -> str:
-        fields = ', '.join(
-            f'{name}={getattr(self, name)!r}'
-            for name in ('runtime', 'bound', 'objective', 'relgap', 'termination')
+        """Fixed-shape summary: one field per line, keys column-aligned.
+
+        The floats are rounded for reading, so this is not a reconstructible
+        repr: use :func:`dataclasses.asdict` when exact values are needed.
+        """
+        fields = (
+            ('termination', repr(self.termination)),
+            ('objective', f'{self.objective:.8g}'),
+            ('bound', f'{self.bound:.8g}'),
+            ('relgap', f'{self.relgap:.2%}'),
+            ('runtime', f'{self.runtime:.4g}s'),
+            ('topology_id', repr(self.topology_id.hex())),
         )
-        return (
-            f'{type(self).__name__}({fields}, topology_id={self.topology_id.hex()!r})'
-        )
+        body = ''.join(f'    {key:<11} = {val}\n' for key, val in fields)
+        return f'SolutionInfo(\n{body})'
 
 
 def check_model_enums(
