@@ -16,7 +16,6 @@ from typing import Any
 
 import networkx as nx
 import numpy as np
-from scipy.spatial.distance import pdist, squareform
 
 from ..clustering import clusterize
 from ..identity import fingerprint_function
@@ -27,7 +26,9 @@ from ..types import Topology
 from ._core import (
     add_branches_to_S,
     clamp_vehicles_to_min,
+    linkset_identity,
     remove_offending_crossings,
+    scaled_length_block,
 )
 
 _lggr = logging.getLogger(__name__)
@@ -132,23 +133,16 @@ def _build_weight_matrix(
     d2root_scaled = np.round(A.graph['d2roots'][terminals, root_col] * scale)
     _check(float(d2root_scaled.max(initial=0.0)), 'depot distance')
 
-    if complete:
-        VertexC = A.graph['VertexC']
-        coords = np.vstack([VertexC[terminals], VertexC[root].reshape(1, -1)])
-        pd_scaled = np.round(pdist(coords) * scale)
-        _check(float(pd_scaled.max(initial=0.0)), 'pairwise distance')
-        L = squareform(pd_scaled.astype(np.int32))
-    else:
-        L = np.full((T_c + 1, T_c + 1), w_clip, dtype=np.int32)
+    block, fill_max, edge_max = scaled_length_block(
+        A, terminals, scale=scale, complete=complete, absent=w_clip, dtype=np.int32
+    )
+    _check(fill_max, 'pairwise distance')
+    _check(edge_max, 'edge length')
 
-    i_from_n = {n: i for i, n in enumerate(terminals)}
-    for u, v, length in A.edges(data='length'):
-        iu = i_from_n.get(u)
-        iv = i_from_n.get(v)
-        if iu is not None and iv is not None:
-            scaled = round(length * scale)
-            _check(scaled, 'edge length')
-            L[iu, iv] = L[iv, iu] = scaled
+    # only the upper triangle is passed to LKH, so the depot row and the diagonal
+    # are left at the sentinel
+    L = np.full((T_c + 1, T_c + 1), w_clip, dtype=np.int32)
+    L[:-1, :-1] = block
     L[:-1, -1] = d2root_scaled.astype(np.int32)
     return L
 
@@ -264,6 +258,16 @@ def _do_lkh(
         'CAPACITY': capacity,
         'EDGE_WEIGHT_TYPE': 'EXPLICIT',
         'EDGE_WEIGHT_FORMAT': 'UPPER_ROW',
+        # The available-links set reaches LKH only through the weights: a link
+        # absent from A is priced at the big-M of _build_cluster_weight_matrices,
+        # never declared missing. Declaring it was tried and only made the solver
+        # fail. LKH does offer EDGE_DATA_SECTION (with EDGE_DATA_FORMAT={ADJ_LIST,
+        # EDGE_LIST}), but it is very hard to use with the VRP problem types used
+        # here: LKH seems to expect the edges with respect to the transformed
+        # problem, and no reference documents that transformation (the C code
+        # lacks comments). EDGE_FILE, the alternative way to define a candidate
+        # set, applies to the transformed problem as well and follows the Concorde
+        # format, whose indices start at 0.
     }
     if not ringed and not math.isinf(distance_cap):
         # LKH treats DISTANCE as a hard constraint: too low and it reports the
@@ -442,6 +446,9 @@ def _build_cluster_weight_matrices(
     (terminals, root) pair in root order (-R..-1).
     """
     R = A.graph['R']
+    # the same expression LKH uses to define its big-M value: it is what a link
+    # missing from A costs, since the problem file never declares which links
+    # exist (see the specs in _do_lkh)
     w_clip = np.iinfo(np.int32).max // (2 * precision)
     return [
         _build_weight_matrix(
@@ -926,7 +933,8 @@ def lkh3(
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause
     the actual runtime to be up to ``(max_retries + 1)`` times the given
-    ``time_limit``.
+    ``time_limit``. Repair requires ``A``'s planar mesh. Set ``repair=False``
+    when using ``complete=True``.
 
     Args:
         A: available-links graph. No edges implies ``complete=True``.
@@ -944,8 +952,13 @@ def lkh3(
         runs: number of LKH runs (LKH manual).
         per_run_limit: [s] LKH per-run time limit.
         precision: LKH precision parameter.
-        complete: make the full graph over A available (missing edges assumed
-            direct).
+        complete: allow every terminal pair, using Euclidean distances for
+            links absent from ``A``. Enabled automatically when ``A`` has no
+            edges. Requires ``repair=False`` because mesh-based crossing
+            detection and repair cannot handle the added links. Use this
+            option to assess how missing-link penalties affect solution
+            quality. Pass the meshed ``A`` to preserve stored lengths
+            for links that route around obstacles.
         warmstart: optional previous solution graph used to initialize the
             tour. For multi-root instances each cluster receives the portion of
             the warmstart attached to its root.
@@ -954,6 +967,15 @@ def lkh3(
         Solution topology S.
     """
     R, T = A.graph['R'], A.graph['T']
+    # An edgeless A requests the complete graph over all nodes.
+    complete = complete or A.number_of_edges() == 0
+    if complete and repair:
+        raise NotImplementedError(
+            'lkh3() cannot repair a solve over the complete graph over all nodes: '
+            "crossing detection and repair read A's planar embedding and "
+            'diagonals, which say nothing about a link absent from A. Pass '
+            'repair=False (the solution may then cross itself).'
+        )
     powers = terminal_powers(A)
     if powers and (ringed or balanced or R > 1):
         raise NotImplementedError(
@@ -1000,7 +1022,8 @@ def lkh3(
     solver_details_extra = {'seed': seed}
 
     A_iter = A.copy()
-    diagonals = A.graph['diagonals'].copy()
+    # Without repair, A need not contain mesh diagonals.
+    diagonals = A.graph['diagonals'].copy() if repair else A.graph.get('diagonals', {})
     A_iter.graph['diagonals'] = diagonals
     # for clustering() and _prune_links() to index d2roots (-R offset is indifferent):
     if R > 1:
@@ -1127,6 +1150,9 @@ def lkh3(
         # Preserve terminal power for load calculation and validation.
         nx.set_node_attributes(S, powers, 'power')
         calcload(S)
+
+    # Encode against the original link set, before repair removed any links.
+    S.graph.update(linkset_identity(S, A))
     return S
 
 

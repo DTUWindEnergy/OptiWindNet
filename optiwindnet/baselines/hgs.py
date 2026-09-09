@@ -12,15 +12,16 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import clusterize
-from ..converting import linkbits_from_S
-from ..identity import fingerprint_function, linkset_id, topology_id
+from ..identity import fingerprint_function
 from ..loads import calcload, split_rings_and_calc_loads, terminal_powers
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
     add_branches_to_S,
     clamp_vehicles_to_min,
+    linkset_identity,
     remove_offending_crossings,
+    scaled_length_block,
 )
 
 _lggr = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ def _length_matrix(
     num_slack: int,
     n_from_i: np.ndarray,
     *,
+    complete: bool = False,
     closed: bool = False,
     clip_factor: float = 5.0,
 ) -> np.ndarray:
@@ -77,16 +79,22 @@ def _length_matrix(
     With ``closed=True`` the return leg costs the feeder distance, so every route
     pays for both of its feeder legs: HGS then finds cycles (rings). Depot
     clones (slack nodes) stay at the depot, so their return leg is always free.
+
+    With ``complete=True``, use Euclidean distances for terminal pairs
+    absent from ``A``.
+
+    HGS-CVRP requires finite entries. Clip the matrix to ``clip_factor`` times
+    the largest terminal-to-terminal length, including the Euclidean fill.
+    This gives missing links and unreachable slack-node entries a finite
+    penalty.
     """
     terminal_slice = slice(1, -num_slack if num_slack else None)
-    i_from_n = {n: i for i, n in enumerate(n_from_i[terminal_slice].tolist(), 1)}
+    terminals = n_from_i[terminal_slice].tolist()
     W = np.full((len(n_from_i), len(n_from_i)), np.inf)
-    w_max = 0.0
-    for u, v, length in A.edges(data='length'):
-        if u >= 0 and v >= 0:
-            idx = i_from_n[u], i_from_n[v]
-            W[idx] = W[idx[::-1]] = length
-            w_max = max(w_max, length)
+    W[terminal_slice, terminal_slice], fill_max, edge_max = scaled_length_block(
+        A, terminals, scale=1.0, complete=complete, absent=np.inf, dtype=np.float64
+    )
+    w_max = max(fill_max, edge_max)
 
     d2roots = A.graph['d2roots'][n_from_i[terminal_slice], r]
     W[0, terminal_slice] = d2roots
@@ -111,6 +119,7 @@ def _length_matrices(
     A: nx.Graph,
     cluster_: list[set[int]],
     num_slack_: Sequence[int],
+    complete: bool = False,
     closed: bool = False,
 ) -> tuple[list, list]:
     R = A.graph['R']
@@ -119,7 +128,9 @@ def _length_matrices(
     for r, (cluster, num_slack) in enumerate(zip(cluster_, num_slack_), start=-R):
         n_from_i = np.array([r] + sorted(cluster) + [r] * num_slack, dtype=int)
         A_clu = nx.subgraph_view(A, filter_node=lambda n, cluster=cluster: n in cluster)
-        W = _length_matrix(A_clu, r, num_slack, n_from_i, closed=closed)
+        W = _length_matrix(
+            A_clu, r, num_slack, n_from_i, complete=complete, closed=closed
+        )
         W_.append(W)
         indices_.append(n_from_i)
     return W_, indices_
@@ -189,6 +200,7 @@ def _solve_single_root(
     balanced,
     log_callback,
     closed=False,
+    complete=False,
 ):
     T, VertexC = A.graph['T'], A.graph['VertexC']
     if balanced:
@@ -196,7 +208,9 @@ def _solve_single_root(
     else:
         num_slack = 0
     n_from_i = np.array([-1] + list(range(T)) + [-1] * num_slack, dtype=int)
-    distance_matrix = _length_matrix(A, -1, num_slack, n_from_i, closed=closed)
+    distance_matrix = _length_matrix(
+        A, -1, num_slack, n_from_i, complete=complete, closed=closed
+    )
     rootC = VertexC[-1:].T
     coordinates = np.hstack((rootC, VertexC[:T].T, *((rootC,) * num_slack)))
 
@@ -235,7 +249,14 @@ def _no_terminals_output(hgs_options):
 
 
 def _solve_multi_root(
-    A, capacity, hgs_options, vehicles, balanced, log_callback, closed=False
+    A,
+    capacity,
+    hgs_options,
+    vehicles,
+    balanced,
+    log_callback,
+    closed=False,
+    complete=False,
 ):
     R, VertexC = A.graph['R'], A.graph['VertexC']
     cluster_ = clusterize(A, capacity)
@@ -261,7 +282,9 @@ def _solve_multi_root(
             vehicles_ = [
                 math.ceil(len_cluster / capacity) for len_cluster in len_cluster_
             ]
-    W_, indices_ = _length_matrices(A, cluster_, num_slack_, closed=closed)
+    W_, indices_ = _length_matrices(
+        A, cluster_, num_slack_, complete=complete, closed=closed
+    )
     populated_ = [c for c, len_cluster in enumerate(len_cluster_) if len_cluster]
     cluster_data = [
         (W_[c], VertexC[indices_[c]].T, vehicles_[c], capacity_[c], hgs_options)
@@ -342,6 +365,7 @@ def hgs_cvrp(
     repair: bool = True,
     max_retries: int = 10,
     balanced: bool = False,
+    complete: bool = False,
     ringed: bool = False,
     log_callback: Callable | None = None,
 ) -> nx.Graph:
@@ -376,9 +400,11 @@ def hgs_cvrp(
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause the
     actual runtime to be up to ``(max_retries + 1)`` times the given ``time_limit``.
+    Repair requires ``A``'s planar mesh. Set ``repair=False`` when using
+    ``complete=True``.
 
     Args:
-        A: graph with allowed edges (if it has 0 edges, use complete graph)
+        A: available-links graph. No edges implies ``complete=True``
         capacity: maximum vehicle capacity
         time_limit: [s] solver run time limit
         vehicles: maximum number of vehicles (if None, let HGS-CVRP decide;
@@ -392,6 +418,13 @@ def hgs_cvrp(
         repair: iteratively fix crossings (default True)
         max_retries: maximum repair iterations
         balanced: balance loads across feeders (per root, if multiple roots)
+        complete: allow every terminal pair, using Euclidean distances for
+            links absent from ``A``. Enabled automatically when ``A`` has no
+            edges. Requires ``repair=False`` because mesh-based crossing
+            detection and repair cannot handle the added links. Use this
+            option to assess how missing-link penalties affect solution
+            quality. Pass the meshed ``A`` to preserve stored lengths
+            for links that route around obstacles.
         log_callback: callback to receive each log line produced by HGS-CVRP
             (only for single-root instances)
 
@@ -400,6 +433,15 @@ def hgs_cvrp(
     """
     R = A.graph['R']
     T = A.graph['T']
+    # An edgeless A requests the complete graph over all nodes.
+    complete = complete or A.number_of_edges() == 0
+    if complete and repair:
+        raise NotImplementedError(
+            'hgs_cvrp() cannot repair a solve over the complete graph over all nodes: '
+            "crossing detection and repair read A's planar embedding and "
+            'diagonals, which say nothing about a link absent from A. Pass '
+            'repair=False (the solution may then cross itself).'
+        )
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
     if ringed and vehicles_exact:
@@ -468,7 +510,14 @@ def hgs_cvrp(
     def _solve():
         solve = _solve_single_root if R == 1 else _solve_multi_root
         results_ = solve(
-            A, solve_capacity, hgs_options, vehicles, balanced, log_callback, ringed
+            A,
+            solve_capacity,
+            hgs_options,
+            vehicles,
+            balanced,
+            log_callback,
+            ringed,
+            complete,
         )
         S = _process_results(A, keep_log, balanced, *results_)
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
@@ -482,16 +531,10 @@ def hgs_cvrp(
             )
         return S
 
-    # Only HGS interprets an edgeless A as a complete terminal graph.
-    if A.number_of_edges() == 0:
-        A.graph['_canonical_terminal_links'] = np.stack(
-            np.triu_indices(T, k=1), axis=1
-        ).astype(np.uint32)
-        A.graph['_linkset_id'] = linkset_id(A)
-
     # iterative repair loop
     A_orig = A  # the loop may rebind A to a pruned copy
-    diagonals = A.graph['diagonals']
+    # Without repair, A need not contain mesh diagonals.
+    diagonals = A.graph['diagonals'] if repair else A.graph.get('diagonals', {})
     if R > 1:
         # needed in clustering
         A.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
@@ -525,18 +568,16 @@ def hgs_cvrp(
         nx.set_node_attributes(S, powers, 'power')
         calcload(S)
 
-    linkbits = linkbits_from_S(A_orig, S)
+    # Encode against the original link set, before repair removed any links.
     S.graph.update(
         T=T,
         R=R,
         capacity=capacity,
-        _linkbits=linkbits,
-        _topology_id=topology_id(linkbits),
-        _linkset_id=A_orig.graph['_linkset_id'],
+        **linkset_identity(S, A_orig),
         creator='baselines.hgs',
         method_options=dict(
             solver_name='HGS-CVRP',
-            complete=False,
+            complete=complete,
             feeders_above_min=feeders_above_min,
             feeders_exact=vehicles_exact,
             fun_fingerprint=_hgs_cvrp_fun_fingerprint,

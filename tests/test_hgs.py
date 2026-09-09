@@ -75,6 +75,12 @@ def _make_A(T: int = 4, R: int = 1, edges=()) -> nx.Graph:
     A.add_nodes_from(range(-R, 0))
     for u, v, length in edges:
         A.add_edge(u, v, length=length)
+    # Add the linkset metadata normally supplied by make_planar_embedding().
+    A.graph['_canonical_terminal_links'] = np.array(
+        sorted((u, v) if u < v else (v, u) for u, v, _ in edges),
+        dtype=np.uint32,
+    ).reshape(-1, 2)
+    A.graph['_linkset_id'] = linkset_id(A)
     return A
 
 
@@ -288,26 +294,26 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
     assert 'capacity_effective' not in S.graph['solver_details']
 
 
-def test_hgs_edgeless_A_encodes_complete_terminal_linkset(monkeypatch):
+def test_hgs_edgeless_A_solves_complete_and_is_not_identified(monkeypatch, caplog):
     _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
     A = _make_A(T=4)
 
-    S = hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+    with caplog.at_level('WARNING'):
+        S = hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, repair=False)
 
     assert A.number_of_edges() == 0
-    assert A.graph['_canonical_terminal_links'].tolist() == [
-        [0, 1],
-        [0, 2],
-        [0, 3],
-        [1, 2],
-        [1, 3],
-        [2, 3],
-    ]
-    assert S.graph['_linkbits'].to01() == '1000011010'
-    assert S.graph['_linkbits'] == linkbits_from_S(A, S)
-    # the complete linkset replaces the meshed one: its digest must follow
-    assert A.graph['_linkset_id'] == linkset_id(A)
-    assert S.graph['_linkset_id'] == A.graph['_linkset_id']
+    assert S.graph['method_options']['complete']
+    # the solution's links are not in A, so they have no bit position
+    assert '_linkbits' not in S.graph
+    assert '_topology_id' not in S.graph
+    assert '_linkset_id' not in S.graph
+    assert 'left the available-links set' in caplog.text
+
+
+def test_hgs_complete_is_refused_together_with_repair():
+    A = _make_A(T=4)
+    with pytest.raises(NotImplementedError, match='complete graph over all nodes'):
+        hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1)
 
 
 def test_solution_time_falls_back_to_total_runtime():
