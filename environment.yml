@@ -7,7 +7,7 @@ dependencies:
   - absl-py>=2.0.0  # from ortools
   - bidict>=0.23.1
   - bitarray>=3.4.2
-  - condeltri>=0.0.3
+  - condeltri>=0.0.6
   - darkdetect>=0.8.0
   - esy.osm.pbf>=0.1.1
   - hybgensea>=0.1.1

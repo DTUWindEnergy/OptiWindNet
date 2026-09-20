@@ -228,6 +228,28 @@ def _edges_and_hull_from_cdt(
     return ebunch, convex_hull
 
 
+def _supertriangleS(mesh: cdt.Triangulation) -> CoordPairs:
+    """Get the coordinates of the supertriangle that CDT adds to the mesh.
+
+    CDT always keeps the supertriangle's corners at the first three vertex indices.
+
+    Args:
+      mesh: triangulation to read the supertriangle from
+
+    Returns:
+      (3, 2) array of coordinates
+    """
+    # `copy=False` avoids materializing the mesh's entire vertex list; the structured
+    # view is contiguous, so it can be reinterpreted as coordinate pairs, and the copy
+    # detaches the result from the triangulation's memory.
+    # numpy cannot infer the `Literal[2]` second axis from the reshape, so the
+    # `CoordPairs` invariant has to be asserted here.
+    return cast(
+        'CoordPairs',
+        mesh.vertices_array(copy=False)[:3].view(np.float64).reshape(-1, 2).copy(),
+    )
+
+
 def _planar_from_cdt_triangles(
     mesh: cdt.Triangulation, vertmap: Indices, get_triangles: bool = False
 ) -> tuple[
@@ -241,24 +263,24 @@ def _planar_from_cdt_triangles(
     :func:`_halfedges_from_triangulation`, which does the intensive work.
 
     Args:
-      triangles: ``PythonCDT.Triangulation().triangles`` list
+      mesh: triangulation to convert
       vertmap: node number translation table, from CDT numbers to NetworkX
+      get_triangles: whether to also return the sorted list of triangles
 
     Returns:
       planar embedding
     """
-    num_tri = mesh.triangles_count()
+    # `copy=False` yields a read-only view of the triangulation's memory, which the
+    # fancy-indexing and casting below immediately turn into owned arrays.
+    tri_arr = mesh.triangles_array(copy=False)
+    neighborU = tri_arr['neighbors']
     # numpy cannot infer the `Literal[3]` second axis from the shape tuple, so the
     # `IndexTrios` invariant has to be asserted at each array's creation.
-    triangleI = cast('IndexTrios', np.empty((num_tri, 3), dtype=np.int_))
-    neighborI = cast('IndexTrios', np.empty((num_tri, 3), dtype=np.int_))
-
-    for i, tri in enumerate(mesh.triangles):
-        vertices = vertmap[tri.vertices]
-        triangleI[i] = vertices
-        neighborI[i] = tuple(
-            (NULL if n == cdt.NO_NEIGHBOR else n) for n in tri.neighbors
-        )
+    triangleI = cast('IndexTrios', vertmap[tri_arr['vertices']])
+    neighborI = cast(
+        'IndexTrios',
+        np.where(neighborU == cdt.NO_NEIGHBOR, NULL, neighborU.astype(np.int_)),
+    )
     if get_triangles:
         # sort each triangle's vertices and the list of triangles
         triangles = [tuple(sorted(tri.tolist())) for tri in triangleI]
@@ -957,7 +979,7 @@ def make_planar_embedding(
             (
                 VertexS[:-R],
                 *stuntS,
-                np.array([(v.x, v.y) for v in mesh.vertices[:3]]),
+                _supertriangleS(mesh),
                 VertexS[-R:],
             )
         )
@@ -1009,7 +1031,7 @@ def make_planar_embedding(
             (
                 VertexS[:-R],
                 *stuntS,
-                np.array([(v.x, v.y) for v in mesh.vertices[:3]]),
+                _supertriangleS(mesh),
                 VertexS[-R:],
             )
         )
@@ -1084,7 +1106,7 @@ def make_planar_embedding(
     # add any newly created plus the supertriangle's vertices to VertexC
     # note: B has already been increased by all stuntC lengths within the loop
     debug('PART J')
-    supertriangleC = mean + scale * np.array([(v.x, v.y) for v in mesh.vertices[:3]])
+    supertriangleC = mean + scale * _supertriangleS(mesh)
     VertexC = np.vstack(
         (
             VertexCʹ[:-R],
