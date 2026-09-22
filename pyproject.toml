@@ -74,6 +74,7 @@ test  = [
     "pytest",  # for testing
     "pytest-cov",  # for calculating coverage
     "pytest-xdist",  # for testing in parallel
+    "tabulate",  # summary tables of tests/sweep.py
     "psutil",  # memory profiling
     "memory_profiler",  # memory profiling
     "line_profiler",  # to check speed
