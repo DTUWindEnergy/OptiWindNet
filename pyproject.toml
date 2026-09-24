@@ -86,9 +86,11 @@ test  = [
     # also covers `docs/`, so running it needs the `docs` extra installed as well.
     # ruff is deliberately absent: its version is pinned once, in the pre-commit
     # `rev:`, and prek supplies it.
-    "pyrefly ==1.2.0",
+    "pyrefly ==1.3.1",
+    "scipy-stubs ==1.18.1.0",
     "types-networkx ==3.6.1.20260903",
     "types-peewee ==4.5.0.20260907",
+    "types-pyyaml ==6.0.12.20260906",
     "types-shapely ==2.1.0.20260728",
     "optiwindnet[solvers]",
 ]
