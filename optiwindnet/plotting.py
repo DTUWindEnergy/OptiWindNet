@@ -150,6 +150,17 @@ def gplot(
         # draw only obstacles
         for obstacle in obstacles:
             ax.fill(*VertexC[obstacle].T, **border_opt)
+    # pre-buffering border and obstacles (outline only)
+    for i, boundaryC in enumerate(G.graph.get('_original_boundaries', ())):
+        if landscape and landscape_angle:
+            boundaryC = rotate(boundaryC, landscape_angle)
+        ax.fill(
+            *boundaryC.T,
+            facecolor='none',
+            edgecolor=c.kind2color['original_boundaries'],
+            linewidth=0.7,
+            label=None if i else 'pre-buffer',
+        )
 
     # setup
     roots = range(-R, 0)

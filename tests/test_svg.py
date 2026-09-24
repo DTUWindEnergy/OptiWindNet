@@ -493,3 +493,17 @@ def test_svgplot_without_roots():
     )
     svg = svgplot(G)
     assert 'id="border"' in svg.data
+
+
+def test_svgplot_original_boundaries():
+    """Boundaries prior to buffering are drawn only if the graph records them."""
+    wfn = tiny_wfn()
+    assert 'id="original_boundaries"' not in svgplot(wfn.L).data
+    wfn.add_buffer(5.0)
+    svg = svgplot(wfn.L)
+    assert 'id="original_boundaries"' in svg.data
+    # one closed subpath per original ring (border + obstacles)
+    (d,) = re.findall(r'id="original_boundaries" d="([^"]*)"', svg.data)
+    assert d.count('M') == len(wfn.L.graph['_original_boundaries'])
+    assert 'pre-buffer' not in _texts(svg.data)
+    assert 'pre-buffer' in _texts(svgplot(wfn.L, legend=True).data)
