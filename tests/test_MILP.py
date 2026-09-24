@@ -655,7 +655,7 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
 
         @staticmethod
         def _flow_val(value):
-            raise AssertionError('unit-power decoding must not read flow variables')
+            raise AssertionError('unitary-inflow decoding must not read flow variables')
 
     fake = FakeSolver()
     fake.A = A
@@ -678,21 +678,25 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
 
 
 @pytest.mark.parametrize('topology', (Topology.BRANCHED, Topology.RADIAL))
-@pytest.mark.parametrize('powers', (None, (1, 1, 1), (2, 3, 1)))
-def test_forest_mip_decoder_derives_loads_from_terminal_power(topology, powers):
-    """A forest's loads follow from its links and its terminals' power."""
+@pytest.mark.parametrize('inflow', (None, (1, 1, 1), (2, 3, 1)))
+def test_forest_mip_decoder_derives_loads_from_terminal_inflow(topology, inflow):
+    """A forest's loads follow from its links and its terminals' inflow."""
     from types import SimpleNamespace
 
     from optiwindnet.validating import validate_topology
 
     A = nx.path_graph(3)
-    if powers is not None:
-        nx.set_node_attributes(A, dict(enumerate(powers)), 'power')
+    if inflow is not None:
+        nx.set_node_attributes(A, dict(enumerate(inflow)), 'inflow')
     E, reverse, stars, _ = core.canonical_linksets(A, R=2, T=3, topology=topology)
     A.graph.update(R=2, T=3, _canonical_terminal_links=np.array(E, dtype=np.uint32))
     A.graph['_linkset_id'] = linkset_id(A)
-    p0, p1, p2 = powers if powers is not None else (1, 1, 1)
-    flows = {(0, 1): p0, (1, 2): p0 + p1, (2, -1): p0 + p1 + p2}
+    inflow0, inflow1, inflow2 = inflow if inflow is not None else (1, 1, 1)
+    flows = {
+        (0, 1): inflow0,
+        (1, 2): inflow0 + inflow1,
+        (2, -1): inflow0 + inflow1 + inflow2,
+    }
     linkset = E + reverse + stars
 
     class FakeSolver:
@@ -731,18 +735,17 @@ def test_forest_mip_decoder_derives_loads_from_terminal_power(topology, powers):
     # Decoded links and loads match the expected flow solution.
     assert {frozenset(edge) for edge in S.edges} == {frozenset(edge) for edge in flows}
     assert S.nodes[-2]['load'] == 0
-    assert S.nodes[-1]['load'] == p0 + p1 + p2
-    assert S.graph['max_load'] == p0 + p1 + p2
+    assert S.nodes[-1]['load'] == inflow0 + inflow1 + inflow2
+    assert S.graph['max_load'] == inflow0 + inflow1 + inflow2
     for (u, v), load in flows.items():
         assert S[u][v] == {'load': load, 'reverse': u < v}
-        # Store power only when it differs from the default of one unit.
         expected = {'load': load, 'subtree': 0}
-        if powers is not None and powers[u] != 1:
-            expected['power'] = powers[u]
+        if inflow is not None and inflow[u] != 1:
+            expected['inflow'] = inflow[u]
         assert S.nodes[u] == expected
-    # Link bits and terminal powers suffice; no flow variables are read.
+    # Link bits and terminal inflow suffice; no flow variables are read.
     assert fake.flow_reads == 0
-    # Validation reproduces the loads from the preserved terminal powers.
+    # Validation reproduces the loads from the preserved terminal inflow.
     assert validate_topology(S, 6) == []
     assert S.graph['_topology_id'] == topology_id(S.graph['_linkbits'])
     assert S.graph['topology'] is topology
@@ -750,15 +753,15 @@ def test_forest_mip_decoder_derives_loads_from_terminal_power(topology, powers):
     assert S.graph['has_loads']
 
 
-@pytest.mark.parametrize('powers', ((1, 1, 1), (2, 3, 1)))
-def test_ringed_mip_decoder_reads_flows_only_for_non_unit_power(powers):
-    """Non-unit power selects the flow-based ring decoder."""
+@pytest.mark.parametrize('inflow', ((1, 1, 1), (2, 3, 1)))
+def test_ringed_mip_decoder_reads_flows_only_for_nonunitary_inflow(inflow):
+    """Nonunitary inflow selects the flow-based ring decoder."""
     from types import SimpleNamespace
 
     n, R, root = 3, 1, -1
     A = nx.path_graph(n)
     nx.set_edge_attributes(A, {e: e[0] + 1 for e in A.edges}, 'length')
-    nx.set_node_attributes(A, dict(enumerate(powers)), 'power')
+    nx.set_node_attributes(A, dict(enumerate(inflow)), 'inflow')
     E, Eʹ, stars, starsʹ = core.canonical_linksets(
         A, R=R, T=n, topology=Topology.RINGED
     )
@@ -766,8 +769,8 @@ def test_ringed_mip_decoder_reads_flows_only_for_non_unit_power(powers):
         R=R, T=n, _canonical_terminal_links=np.array(E, dtype=np.uint32).reshape(-1, 2)
     )
     A.graph['_linkset_id'] = linkset_id(A)
-    # One feeder carries the total power; the closing link carries no flow.
-    flows = {(0, root): sum(powers), (1, 0): powers[1] + powers[2], (2, 1): powers[2]}
+    # One feeder carries the total inflow; the closing link carries no flow.
+    flows = {(0, root): sum(inflow), (1, 0): inflow[1] + inflow[2], (2, 1): inflow[2]}
     active = {*flows, (root, n - 1)}
     linkset = E + Eʹ + stars + starsʹ
 
@@ -781,7 +784,7 @@ def test_ringed_mip_decoder_reads_flows_only_for_non_unit_power(powers):
             self.metadata = SimpleNamespace(
                 R=R,
                 T=n,
-                capacity=sum(powers),
+                capacity=sum(inflow),
                 model_options={'topology': Topology.RINGED},
                 linkset=linkset,
                 link_={link: link in active for link in linkset},
@@ -805,12 +808,12 @@ def test_ringed_mip_decoder_reads_flows_only_for_non_unit_power(powers):
         linkbits,
     )
 
-    unitary = set(powers) == {1}
+    unitary = set(inflow) == {1}
     assert (fake.flow_reads == 0) is unitary
     assert_topology(S, Topology.RINGED, fake.metadata.capacity)
-    # Both decoding paths split by terminal count and return unit-power loads.
+    # Both decoding paths split by terminal count and return unitary loads.
     assert S.nodes[root]['load'] == n
-    assert 'power' not in S.nodes[0]
+    assert 'inflow' not in S.nodes[0]
 
 
 def test_ringed_warmstart_is_accepted_by_scip():
@@ -1746,7 +1749,7 @@ def test_calculate_bounds_invalid_max_feeders_ringed():
         )
 
 
-def test_feeder_bounds_scale_with_total_power_not_terminal_count():
+def test_feeder_bounds_scale_with_total_inflow_not_terminal_count():
     from optiwindnet.MILP._core import FeederLimit, feeder_and_load_bounds
 
     # 6 terminals of one unit each: 2 cables of capacity 3
@@ -1757,27 +1760,27 @@ def test_feeder_bounds_scale_with_total_power_not_terminal_count():
     # the same 6 terminals sourcing 12 units need twice the cables
     assert feeder_and_load_bounds(
         T=6, capacity=3, feeder_limit=FeederLimit.UNLIMITED,
-        max_feeders=0, balanced=False, power_total=12,
+        max_feeders=0, balanced=False, inflow_total=12,
     )[0] == 4  # fmt: skip
-    # omitting power_total is the same as one unit per terminal
+    # omitting inflow_total is the same as one unit per terminal
     unitary = feeder_and_load_bounds(
         T=6, capacity=3, feeder_limit=FeederLimit.MINIMUM,
         max_feeders=0, balanced=True,
     )  # fmt: skip
     assert unitary == feeder_and_load_bounds(
         T=6, capacity=3, feeder_limit=FeederLimit.MINIMUM,
-        max_feeders=0, balanced=True, power_total=6,
+        max_feeders=0, balanced=True, inflow_total=6,
     )  # fmt: skip
-    # balanced load bounds are in power units too: 12 over 4 feeders
+    # balanced load bounds are in inflow units too: 12 over 4 feeders
     assert feeder_and_load_bounds(
         T=6, capacity=3, feeder_limit=FeederLimit.MINIMUM,
-        max_feeders=0, balanced=True, power_total=12,
+        max_feeders=0, balanced=True, inflow_total=12,
     )[2:] == (3, None)  # fmt: skip
-    # Each feeder needs a terminal, regardless of total power.
+    # Each feeder needs a terminal, regardless of total inflow.
     with pytest.raises(ValueError, match='above the number of terminals'):
         feeder_and_load_bounds(
             T=6, capacity=3, feeder_limit=FeederLimit.EXACTLY,
-            max_feeders=7, balanced=False, power_total=12,
+            max_feeders=7, balanced=False, inflow_total=12,
         )  # fmt: skip
 
 

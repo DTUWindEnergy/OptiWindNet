@@ -10,35 +10,26 @@ import networkx as nx
 from .types import Topology
 
 __all__ = (
-'bfs_subtree_loads', 'calcload',
-    'split_rings_and_calc_loads', 'terminal_powers',
+    'bfs_subtree_loads',
+    'calcload',
+    'split_rings_and_calc_loads',
+    'terminal_inflow',
+    'total_inflow',
 )  # fmt: skip
 
 
-def terminal_powers(G: nx.Graph) -> dict[int, int]:
-    """Return terminal powers that differ from one unit, keyed by node.
+def total_inflow(G: nx.Graph) -> int:
+    """Return total terminal power injection in inflow integer units."""
+    return sum(G.nodes[t].get('inflow', 1) for t in range(G.graph['T']))
 
-    An absent ``'power'`` attribute means one unit. The result is empty when
-    all terminals have unit power. Solvers use this mapping to set customer
-    demands and preserve power on the solution, or to reject unsupported modes.
 
-    Raises:
-        ValueError: a terminal's power is less than one or is not a whole number.
-          Capacity and terminal demands must use whole units.
-    """
-    nodes = G.nodes
-    powers = {
-        t: power
+def terminal_inflow(G: nx.Graph) -> dict[int, int]:
+    """Return terminal injections differing from one inflow, keyed by node."""
+    return {
+        t: inflow
         for t in range(G.graph['T'])
-        if (power := nodes[t].get('power', 1)) != 1
+        if (inflow := G.nodes[t].get('inflow', 1)) != 1
     }
-    for t, power in powers.items():
-        if power < 1 or power % 1:
-            raise ValueError(
-                f"terminal {t} declares power {power!r}: a terminal's 'power' "
-                'must be a whole number of units, one or more'
-            )
-    return powers
 
 
 # A link's ``'reverse'`` flag orients it independently of the node order it
@@ -63,14 +54,14 @@ def _bfs_loads_walk(_adj, _node, T, visited, queue) -> int:
     and the base its descendants' loads are added to; the accumulation happens
     on the way back up.
 
-    A terminal contributes its ``'power'``, defaulting to one unit; a clone
+    A terminal contributes its inflow, defaulting to one; a clone
     contributes zero. Internal nodes retain any existing ``'load'`` value,
     as needed by callers that clear only part of the graph, such as
     :func:`as_hooked_to_nearest`. Leaves restart from their own contribution.
 
     Returns:
       Number of terminals reached. Callers use this count to check traversal
-      coverage independently of the terminals' power.
+      coverage independently of the terminals' inflow.
     """
     i = 0
     terminals = 0
@@ -89,7 +80,7 @@ def _bfs_loads_walk(_adj, _node, T, visited, queue) -> int:
             visited.add(nbr)
             queue.append((nbr, node, edgeD, nodeD, subtree))
         if node < T:
-            default = nodeD.get('power', 1)
+            default = nodeD.get('inflow', 1)
             terminals += 1
         else:
             default = 0
@@ -128,7 +119,7 @@ def bfs_subtree_loads(G, parent, children, subtree, visited=None):
 
     Returns:
       Load of ``parent`` after accumulating its descendants' loads, including
-      its own power if it is a terminal.
+      its own inflow if it is a terminal.
 
     Raises:
       ValueError: a node is reached twice, so the traversal is not descending a
@@ -139,9 +130,9 @@ def bfs_subtree_loads(G, parent, children, subtree, visited=None):
         visited = {parent}
     _adj, _node = G._adj, G._node
     nodeD = _node[parent]
-    # Terminals contribute their declared power, defaulting to one unit.
+    # Terminals contribute their declared inflow, defaulting to one.
     # Roots and clones contribute zero.
-    default = nodeD.get('power', 1) if 0 <= parent < T else 0
+    default = nodeD.get('inflow', 1) if 0 <= parent < T else 0
     if not children:
         nodeD['load'] = default
         return default
@@ -230,8 +221,8 @@ def calcload(G: nx.Graph) -> None:
     ``'load'`` attributes, the edges' ``'load'`` attributes are updated, and the
     graph's ``'max_load'``, ``'has_loads'`` and root loads are set.
 
-    Each terminal contributes its ``'power'`` attribute, defaulting to one unit.
-    The traversal must reach all ``T`` terminals, regardless of their power.
+    Each terminal contributes its ``'inflow'`` attribute, defaulting to one.
+    The traversal must reach all ``T`` terminals, regardless of their inflow.
 
     Ring construction — closing path-form arms into rings — lives in
     :func:`split_rings_and_calc_loads`, which the ringed builders call instead.

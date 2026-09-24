@@ -13,7 +13,12 @@ import numpy as np
 
 from ..clustering import clusterize
 from ..identity import fingerprint_function
-from ..loads import calcload, split_rings_and_calc_loads, terminal_powers
+from ..loads import (
+    calcload,
+    split_rings_and_calc_loads,
+    terminal_inflow,
+    total_inflow,
+)
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
@@ -215,14 +220,14 @@ def _solve_single_root(
     coordinates = np.hstack((rootC, VertexC[:T].T, *((rootC,) * num_slack)))
 
     demands = None
-    powers = terminal_powers(A)
-    if powers:
+    inflow_by_node = terminal_inflow(A)
+    if inflow_by_node:
         # The depot precedes the terminals in the demand array.
-        # hgs_cvrp() rejects balanced solves with non-unit power.
+        # hgs_cvrp() rejects balanced solves with nonunitary inflow.
         demands = np.ones(T + 1 + num_slack, dtype=np.float64)
         demands[0] = 0.0
-        for t, power in powers.items():
-            demands[t + 1] = power
+        for t, inflow in inflow_by_node.items():
+            demands[t + 1] = inflow
 
     outputs = _do_hgs(
         distance_matrix,
@@ -448,18 +453,15 @@ def hgs_cvrp(
         raise NotImplementedError(
             'vehicles_exact is not supported together with ringed=True.'
         )
-    powers = terminal_powers(A)
-    if powers and (ringed or balanced or R > 1):
+    inflow_by_node = terminal_inflow(A)
+    if inflow_by_node and (ringed or balanced or R > 1):
         raise NotImplementedError(
-            "hgs_cvrp() honours a terminal 'power' other than 1 only for an "
+            "hgs_cvrp() honours a terminal 'inflow' other than 1 only for an "
             'unbalanced single-root radial solve: rings split by terminal count, '
             'the balanced slack nodes are counted, and clusterize() partitions '
             'by count.'
         )
-    # Add departures from unit power to the default total of T.
-    vehicles_min: int = math.ceil(
-        (T + sum(power - 1 for power in powers.values())) / solve_capacity
-    )
+    vehicles_min: int = math.ceil(total_inflow(A) / solve_capacity)
     if vehicles_exact:
         if vehicles is None:
             raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
@@ -559,13 +561,12 @@ def hgs_cvrp(
         S.graph['retries'] = i
         if crossings:
             _warn('Solution contains crossings (max_retries reached)')
+    nx.set_node_attributes(S, inflow_by_node, 'inflow')
     if ringed:
         S.graph['topology'] = Topology.RINGED
         split_rings_and_calc_loads(S, A_orig)
     else:
         S.graph['topology'] = Topology.RADIAL
-        # Preserve terminal power for load calculation and validation.
-        nx.set_node_attributes(S, powers, 'power')
         calcload(S)
 
     # Encode against the original link set, before repair removed any links.

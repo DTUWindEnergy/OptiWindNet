@@ -193,7 +193,7 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
+    inflow_total = sum(w for _, w in A_terminals.nodes(data='inflow', default=1))
 
     # For RINGED, double the internal capacity; store original for metadata.
     ring_capacity = capacity
@@ -296,12 +296,12 @@ def make_min_length_model(
         )
         m.addCons(flow_[t, n] >= link_[t, n], name=f'flow_lb_{t}~{_n}')
 
-    # flow conservation with possibly non-unitary node power
+    # flow conservation with possibly nonunitary terminal inflow
     for t in _T:
         m.addCons(
             sum((flow_[t, n] - flow_[n, t]) for n in A_terminals.neighbors(t))
             + sum(flow_[t, r] for r in _R)
-            == A.nodes[t].get('power', 1),
+            == A.nodes[t].get('inflow', 1),
             name=f'flow_conserv_{t}',
         )
 
@@ -310,7 +310,7 @@ def make_min_length_model(
     # the model counts rings (one flow-feeder var each): convert between them.
     feeders_per_subtree = 2 if topology is Topology.RINGED else 1
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, k, feeder_limit, max_feeders, balanced, feeders_per_subtree, W
+        T, k, feeder_limit, max_feeders, balanced, feeders_per_subtree, inflow_total
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata
@@ -354,14 +354,17 @@ def make_min_length_model(
             )
 
     # assert all nodes are connected to some root
-    m.addCons(sum(flow_[t, r] for r in _R for t in _T) == W, name='total_power_sank')
+    m.addCons(
+        sum(flow_[t, r] for r in _R for t in _T) == inflow_total,
+        name='total_inflow_sank',
+    )
 
     # valid inequalities
     for t in _T:
         # incoming flow limit
         m.addCons(
             sum(flow_[n, t] for n in A_terminals.neighbors(t))
-            <= k - A.nodes[t].get('power', 1),
+            <= k - A.nodes[t].get('inflow', 1),
             name=f'inflow_limit_{t}',
         )
         # only one out-edge per terminal

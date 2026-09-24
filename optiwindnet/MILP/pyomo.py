@@ -321,7 +321,7 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
+    inflow_total = sum(w for _, w in A_terminals.nodes(data='inflow', default=1))
 
     # For RINGED, double the internal capacity so each ring can hold up to
     # 2×capacity turbines (capacity per arm); store original for metadata.
@@ -460,14 +460,14 @@ def make_min_length_model(
         name='flow_lb',
     )
 
-    # flow conservation with possibly non-unitary node power
+    # flow conservation with possibly nonunitary terminal inflow
     m.cons_flow_conserv = pyo.Constraint(
         m.T,
         rule=(
             lambda m, u: (
                 sum((m.flow_[u, v] - m.flow_[v, u]) for v in A_terminals.neighbors(u))
                 + sum(m.flow_[u, r] for r in _R)
-                == A.nodes[u].get('power', 1)
+                == A.nodes[u].get('inflow', 1)
             )
         ),
         name='flow_conserv',
@@ -478,7 +478,13 @@ def make_min_length_model(
     # the model counts rings (one flow-feeder var each): convert between them.
     feeders_per_subtree = 2 if topology is Topology.RINGED else 1
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, capacity, feeder_limit, max_feeders, balanced, feeders_per_subtree, W
+        T,
+        capacity,
+        feeder_limit,
+        max_feeders,
+        balanced,
+        feeders_per_subtree,
+        inflow_total,
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata
@@ -545,9 +551,9 @@ def make_min_length_model(
         )
 
     # assert all nodes are connected to some root
-    m.cons_total_power_sank = pyo.Constraint(
-        rule=(lambda m: sum(m.flow_[t, r] for r in _R for t in _T) == W),
-        name='total_power_sank',
+    m.cons_total_inflow_sank = pyo.Constraint(
+        rule=(lambda m: sum(m.flow_[t, r] for r in _R for t in _T) == inflow_total),
+        name='total_inflow_sank',
     )
 
     # valid inequalities
@@ -556,7 +562,7 @@ def make_min_length_model(
         rule=(
             lambda m, u: (
                 sum(m.flow_[v, u] for v in A_terminals.neighbors(u))
-                <= m.k - A.nodes[u].get('power', 1)
+                <= m.k - A.nodes[u].get('inflow', 1)
             )
         ),
         name='inflow_limit',

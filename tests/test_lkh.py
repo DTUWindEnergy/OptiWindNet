@@ -510,31 +510,31 @@ def test_lkh3_sends_one_unit_of_demand_per_unitary_terminal(monkeypatch):
     assert captured['params']['MTSP_MAX_SIZE'] == '5'
 
 
-def test_lkh3_declares_terminal_power_as_demand(monkeypatch):
+def test_lkh3_declares_terminal_inflow_as_demand(monkeypatch):
     captured = _capture_lkh_problem(monkeypatch)
     A = as_normalized(get_bundle('toy').A.copy())
     T = A.graph['T']
-    powers = {t: 1 + (t % 3) for t in range(T)}
-    nx.set_node_attributes(A, powers, 'power')
+    inflow = {t: 1 + (t % 3) for t in range(T)}
+    nx.set_node_attributes(A, inflow, 'inflow')
 
     with pytest.raises(AssertionError, match='root node load'):
         lkh_mod.lkh3(A, capacity=8, time_limit=0.1, repair=False)
 
     demands = _demand_section(captured['problem'])
-    assert demands == {**{t + 1: powers[t] for t in range(T)}, T + 1: 0}
+    assert demands == {**{t + 1: inflow[t] for t in range(T)}, T + 1: 0}
     assert captured['problem'].splitlines()[0].startswith('NAME')
     # The smallest demand is one unit, allowing at most 8 nodes per route.
     assert captured['params']['MTSP_MAX_SIZE'] == '8'
     # Unequal demands disable the minimum node count.
     assert captured['params']['MTSP_MIN_SIZE'] == '0'
-    # the feeder minimum follows the total power (24), not the terminal count
-    assert int(captured['params']['VEHICLES']) >= math.ceil(sum(powers.values()) / 8)
+    # the feeder minimum follows the total inflow (24), not the terminal count
+    assert int(captured['params']['VEHICLES']) >= math.ceil(sum(inflow.values()) / 8)
 
 
-def test_lkh3_rejects_non_unit_terminal_power_it_cannot_honour():
+def test_lkh3_rejects_non_unit_terminal_inflow_it_cannot_honour():
     """Unsupported modes are rejected before invoking the LKH executable."""
     A = as_normalized(get_bundle('toy').A.copy())
-    nx.set_node_attributes(A, {0: 2}, 'power')
+    nx.set_node_attributes(A, {0: 2}, 'inflow')
 
     with pytest.raises(NotImplementedError, match='single-root radial solve'):
         lkh_mod.lkh3(A, capacity=5, time_limit=1.0, ringed=True)
@@ -542,6 +542,6 @@ def test_lkh3_rejects_non_unit_terminal_power_it_cannot_honour():
         lkh_mod.lkh3(A, capacity=5, time_limit=1.0, balanced=True)
 
     Amr = as_normalized(get_bundle('neart').A.copy())
-    nx.set_node_attributes(Amr, {0: 2}, 'power')
+    nx.set_node_attributes(Amr, {0: 2}, 'inflow')
     with pytest.raises(NotImplementedError, match='single-root radial solve'):
         lkh_mod.lkh3(Amr, capacity=5, time_limit=1.0)

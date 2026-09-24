@@ -499,7 +499,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
 def S_from_G(G: nx.Graph) -> nx.Graph:
     """Get ``G``'s topology (contours, detours, lengths and coords are dropped).
 
-    Terminal ``'power'`` attributes are preserved so that recalculating loads
+    Terminal ``'inflow'`` attributes are preserved so that recalculating loads
     on ``S`` uses the same terminal contributions as on ``G``.
 
     If using ``S`` to warm-start a MILP model, call after :func:`S_from_G`:
@@ -537,14 +537,18 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
         S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']} if has_loads else {}))
     for t in sorted(n for n in G if 0 <= n < T):
         nodeD = G.nodes[t]
-        # Preserve declared power for subsequent load calculations.
-        power = {'power': nodeD['power']} if 'power' in nodeD else {}
+        # Preserve inflow for subsequent load calculations.
+        inflow_attrs = {'inflow': nodeD['inflow']} if 'inflow' in nodeD else {}
         if has_loads:
             S.add_node(
-                t, kind='wtg', load=nodeD['load'], subtree=nodeD['subtree'], **power
+                t,
+                kind='wtg',
+                load=nodeD['load'],
+                subtree=nodeD['subtree'],
+                **inflow_attrs,
             )
         else:
-            S.add_node(t, kind='wtg', **power)
+            S.add_node(t, kind='wtg', **inflow_attrs)
 
     # Links already joining two real nodes carry over verbatim, keeping ``G``'s
     # own orientation: 'reverse' is relative to the stored node order, and the
