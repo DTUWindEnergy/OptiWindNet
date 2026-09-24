@@ -629,24 +629,31 @@ class Solver(abc.ABC):
     def _flow_val(self, var: Any) -> int:
         "Get the value of a flow variable from the current solution."
 
-    @abc.abstractmethod
     def set_problem(
         self,
         P: nx.PlanarEmbedding,
         A: nx.Graph,
-        capacity: int,
+        *,
         model_options: Mapping[str, Any],
+        capacity: int,
         warmstart: nx.Graph | None = None,
-    ):
-        """Define the problem geometry, available links and tree properties
+    ) -> None:
+        """Define the problem geometry, available links and tree properties.
 
         Args:
           P: planar embedding of the location
           A: available links for the location
-          capacity: maximum number of terminals in a subtree
           model_options: tree properties - see ModelOptions.help()
+          capacity: maximum number of terminals in a subtree
           warmstart: initial feasible solution to pass to solver
         """
+        self.P, self.A, self.capacity = P, A, capacity
+        self.model_options = ModelOptions(**model_options)
+        self._set_model(warmstart)
+
+    @abc.abstractmethod
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        "Build the model of ``A``, ``capacity`` and ``model_options``."
 
     @abc.abstractmethod
     def solve(

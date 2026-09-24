@@ -24,7 +24,6 @@ from ._core import (
     FeederLimit,
     FeederRoute,
     ModelMetadata,
-    ModelOptions,
     OWNSolutionNotFound,
     OWNWarmupFailed,
     SolutionInfo,
@@ -93,18 +92,11 @@ class SolverPyomo(Solver):
     def _flow_val(self, var: Any) -> int:
         return round(var.value)
 
-    def set_problem(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        capacity: int,
-        model_options: Mapping[str, Any],
-        warmstart: nx.Graph | None = None,
-    ):
-        self.P, self.A, self.capacity = P, A, capacity
-        model_options = ModelOptions(**model_options)
-        model, metadata = make_min_length_model(A, capacity, **model_options)
-        self.model, self.model_options, self.metadata = model, model_options, metadata
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        model, metadata = make_min_length_model(
+            self.A, self.capacity, **self.model_options
+        )
+        self.model, self.metadata = model, metadata
         if warmstart is not None and self.solver.warm_start_capable():
             warmup_model(model, metadata, warmstart)
             self.solve_kwargs = {'warmstart': True}
@@ -213,18 +205,11 @@ class SolverPyomoAppsi(Solver):
     def _flow_val(self, var: Any) -> int:
         return round(var.value)
 
-    def set_problem(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        capacity: int,
-        model_options: Mapping[str, Any],
-        warmstart: nx.Graph | None = None,
-    ):
-        self.P, self.A, self.capacity = P, A, capacity
-        model_options = ModelOptions(**model_options)
-        model, metadata = make_min_length_model(A, capacity, **model_options)
-        self.model, self.model_options, self.metadata = model, model_options, metadata
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        model, metadata = make_min_length_model(
+            self.A, self.capacity, **self.model_options
+        )
+        self.model, self.metadata = model, metadata
         if warmstart is not None and self.solver.warm_start_capable():
             warmup_model(model, metadata, warmstart)
             self.solver.config.warmstart = True

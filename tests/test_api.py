@@ -777,7 +777,7 @@ def test_milp_router_warmup_fallback_and_retry_exhaustion(monkeypatch):
             self.model_options = ModelOptions()
             self.metadata = type('Meta', (), {'warmed_by': ''})()
 
-        def set_problem(self, P, A, capacity, model_options, warmstart=None):
+        def set_problem(self, P, A, *, model_options, warmstart=None, **capacity):
             if warmstart is not None and not getattr(self, '_passed_warmup', False):
                 self._passed_warmup = True
                 raise OWNWarmupFailed('Warmup failed')

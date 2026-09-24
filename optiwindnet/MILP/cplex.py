@@ -2,7 +2,6 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-from collections.abc import Mapping
 from typing import Any
 
 import networkx as nx
@@ -47,15 +46,8 @@ class SolverCplex(SolverPyomo, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return round(self._value_map[var.name])
 
-    def set_problem(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        capacity: int,
-        model_options: Mapping[str, Any],
-        warmstart: nx.Graph | None = None,
-    ):
-        super().set_problem(P, A, capacity, model_options, warmstart)
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        super()._set_model(warmstart)
         self.solver.set_instance(self.model)
 
     def _prepare_solution_pool(self) -> None:

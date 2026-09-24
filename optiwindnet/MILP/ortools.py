@@ -20,7 +20,6 @@ from ._core import (
     FeederLimit,
     FeederRoute,
     ModelMetadata,
-    ModelOptions,
     OWNSolutionNotFound,
     OWNWarmupFailed,
     PoolHandler,
@@ -105,17 +104,10 @@ class SolverORTools(Solver, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return self._value_map[var.id]
 
-    def set_problem(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        capacity: int,
-        model_options: Mapping[str, Any],
-        warmstart: nx.Graph | None = None,
-    ):
-        self.P, self.A, self.capacity = P, A, capacity
-        model_options = self.model_options = ModelOptions(**model_options)
-        model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        model, metadata = make_min_length_model(
+            self.A, self.capacity, **self.model_options
+        )
         self.model, self.metadata = model, metadata
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
