@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum, auto
+from fractions import Fraction
 from inspect import cleandoc
 from itertools import chain
 from pathlib import Path
@@ -24,7 +25,9 @@ from ..converting import G_from_S, S_from_linkbits
 from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
 from ..interarraylib import directed_links
 from ..loads import (
+    DEFAULT_POWER_RTOL,
     calcload,
+    quantized,
     split_rings_and_calc_loads,
     terminal_inflow,
     total_inflow,
@@ -582,6 +585,8 @@ class Solver(abc.ABC):
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
     _incumbent_linkbits: frozenbitarray
+    # graph attributes recording the power basis of the solve (see `set_problem()`)
+    _power_attrs: Mapping[str, Any] = MappingProxyType({})
 
     @property
     def incumbent_linkbits(self) -> frozenbitarray:
@@ -613,7 +618,9 @@ class Solver(abc.ABC):
         A: nx.Graph,
         *,
         model_options: Mapping[str, Any],
-        capacity: int,
+        capacity: int | None = None,
+        capacity_nominal: float | Fraction | None = None,
+        power_rtol: float = DEFAULT_POWER_RTOL,
         warmstart: nx.Graph | None = None,
     ) -> None:
         """Define the problem geometry, available links and tree properties.
@@ -622,11 +629,28 @@ class Solver(abc.ABC):
           P: planar embedding of the location
           A: available links for the location
           model_options: tree properties - see ModelOptions.help()
-          capacity: maximum number of terminals in a subtree
+          capacity: maximum inflow of a subtree
+          capacity_nominal: maximum power of a subtree, instead of ``capacity``
+            (see :func:`~optiwindnet.loads.quantized`)
+          power_rtol: quantization tolerance of unequal turbine power
           warmstart: initial feasible solution to pass to solver
         """
-        self.P, self.A, self.capacity = P, A, capacity
+        A, self.capacity, self._power_attrs = quantized(
+            A,
+            capacity=capacity,
+            capacity_nominal=capacity_nominal,
+            power_rtol=power_rtol,
+        )
+        self.P, self.A = P, A
         self.model_options = ModelOptions(**model_options)
+        inflow = terminal_inflow(A)
+        if warmstart is not None and terminal_inflow(warmstart) != inflow:
+            # a warm start quantized otherwise carries loads in other inflow
+            warmstart = warmstart.copy()
+            for t in range(A.graph['T']):
+                warmstart.nodes[t].pop('inflow', None)
+            nx.set_node_attributes(warmstart, inflow, 'inflow')
+            calcload(warmstart)
         self._set_model(warmstart)
 
     @abc.abstractmethod
@@ -776,6 +800,7 @@ class Solver(abc.ABC):
             _linkset_id=A.graph['_linkset_id'],
             creator='MILP.' + self.name,
             solver_details={},
+            **self._power_attrs,
         )
         return S
 

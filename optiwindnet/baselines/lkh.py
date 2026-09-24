@@ -11,6 +11,7 @@ import tempfile
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from fractions import Fraction
 from itertools import chain, pairwise
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,9 @@ from ..clustering import clusterize
 from ..identity import fingerprint_function
 from ..interarraylib import add_link_blockmap
 from ..loads import (
+    DEFAULT_POWER_RTOL,
     calcload,
+    quantized,
     split_rings_and_calc_loads,
     terminal_inflow,
     total_inflow,
@@ -897,7 +900,9 @@ def _setup_clusters(
 def lkh3(
     A: nx.Graph,
     *,
-    capacity: int,
+    capacity: int | None = None,
+    capacity_nominal: float | Fraction | None = None,
+    power_rtol: float = DEFAULT_POWER_RTOL,
     time_limit: float,
     vehicles: int | None = None,
     seed: int | None = None,
@@ -944,7 +949,10 @@ def lkh3(
 
     Args:
         A: available-links graph. No edges implies ``complete=True``.
-        capacity: maximum vehicle capacity.
+        capacity: maximum vehicle capacity, in inflow.
+        capacity_nominal: maximum vehicle capacity, in nominal power, instead of
+            ``capacity`` (see :func:`~optiwindnet.loads.quantized`).
+        power_rtol: quantization tolerance of unequal turbine power.
         time_limit: [s] solver run time limit (per cluster).
         vehicles: number of vehicles (if None or at the minimum, use the
             per-cluster default described above; ignored for multi-root
@@ -982,6 +990,9 @@ def lkh3(
             'diagonals, which say nothing about a link absent from A. Pass '
             'repair=False (the solution may then cross itself).'
         )
+    A, capacity, power_attrs = quantized(
+        A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
+    )
     inflow_by_node = terminal_inflow(A)
     if inflow_by_node and (ringed or balanced or R > 1):
         raise NotImplementedError(
@@ -1156,7 +1167,7 @@ def lkh3(
         calcload(S)
 
     # Encode against the original link set, before repair removed any links.
-    S.graph.update(linkset_identity(S, A))
+    S.graph.update(linkset_identity(S, A), **power_attrs)
     return S
 
 

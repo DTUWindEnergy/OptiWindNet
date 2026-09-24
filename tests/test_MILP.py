@@ -667,6 +667,7 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
         name = 'fake'
         A: nx.Graph
         metadata: object
+        _power_attrs: ClassVar[dict] = {}
 
         @staticmethod
         def _link_val(value):
@@ -721,6 +722,7 @@ def test_forest_mip_decoder_derives_loads_from_terminal_inflow(topology, inflow)
     class FakeSolver:
         name = 'fake'
         flow_reads = 0
+        _power_attrs: ClassVar[dict] = {}
 
         def __init__(self):
             self.A = A
@@ -795,6 +797,7 @@ def test_ringed_mip_decoder_never_reads_flow_variables():
     class FakeSolver:
         name = 'fake'
         flow_reads = 0
+        _power_attrs: ClassVar[dict] = {}
 
         def __init__(self):
             self.A = A

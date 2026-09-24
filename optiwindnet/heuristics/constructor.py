@@ -4,6 +4,7 @@
 import logging
 import time
 from collections import defaultdict
+from fractions import Fraction
 from itertools import chain, tee
 
 import networkx as nx
@@ -19,7 +20,13 @@ from ..geometric import (
 )
 from ..identity import fingerprint_function, topology_id
 from ..interarraylib import add_link_blockmap, add_terminal_closest_root
-from ..loads import calcload, split_rings_and_calc_loads, terminal_inflow
+from ..loads import (
+    DEFAULT_POWER_RTOL,
+    calcload,
+    quantized,
+    split_rings_and_calc_loads,
+    terminal_inflow,
+)
 from ..types import Topology
 from .priorityqueue import PriorityQueue
 
@@ -54,9 +61,11 @@ _rootlust_coefs = (
 
 def constructor(
     Aʹ: nx.Graph,
-    capacity: int,
+    capacity: int | None = None,
     method: str = 'rootlust',
     *,
+    capacity_nominal: float | Fraction | None = None,
+    power_rtol: float = DEFAULT_POWER_RTOL,
     rootlust_: tuple[float, float] | None = None,
     maxiter: int = 10000,
     bias_margin: float | None = None,
@@ -107,8 +116,11 @@ def constructor(
 
     Args:
       Aʹ: available links graph
-      capacity: max number of terminals in a subtree
+      capacity: max inflow of a subtree
       method: choice of method (see Available Methods)
+      capacity_nominal: max power of a subtree, instead of ``capacity`` (see
+        :func:`~optiwindnet.loads.quantized`)
+      power_rtol: quantization tolerance of unequal turbine power
       bias_margin: (biased_EW | radial_EW | ringed) fractional margin within
         which candidates are equivalent, resolving the quasi-tie root-ward. For
         ``'ringed'`` the margin is a fraction of the best union ``saving`` (not
@@ -123,6 +135,9 @@ def constructor(
     Returns:
       Solution topology S.
     """
+    Aʹ, capacity, power_attrs = quantized(
+        Aʹ, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
+    )
     if terminal_inflow(Aʹ):
         raise NotImplementedError(
             'constructor() fills a subtree up to `capacity` terminals, so it '
@@ -1010,6 +1025,7 @@ def constructor(
             'method': method,
             'fun_fingerprint': _constructor_fun_fingerprint,
         },
+        **power_attrs,
     )
     if radial_like:
         S.graph['num_insertions'] = num_insertions

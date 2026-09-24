@@ -6,6 +6,7 @@ import math
 import random
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from fractions import Fraction
 
 import hybgensea
 import networkx as nx
@@ -14,7 +15,9 @@ import numpy as np
 from ..clustering import clusterize
 from ..identity import fingerprint_function
 from ..loads import (
+    DEFAULT_POWER_RTOL,
     calcload,
+    quantized,
     split_rings_and_calc_loads,
     terminal_inflow,
     total_inflow,
@@ -361,7 +364,9 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
 def hgs_cvrp(
     A: nx.Graph,
     *,
-    capacity: int,
+    capacity: int | None = None,
+    capacity_nominal: float | Fraction | None = None,
+    power_rtol: float = DEFAULT_POWER_RTOL,
     time_limit: float,
     vehicles: int | None = None,
     vehicles_exact: bool = False,
@@ -410,7 +415,10 @@ def hgs_cvrp(
 
     Args:
         A: available-links graph. No edges implies ``complete=True``
-        capacity: maximum vehicle capacity
+        capacity: maximum vehicle capacity, in inflow
+        capacity_nominal: maximum vehicle capacity, in nominal power, instead of
+            ``capacity`` (see :func:`~optiwindnet.loads.quantized`)
+        power_rtol: quantization tolerance of unequal turbine power
         time_limit: [s] solver run time limit
         vehicles: maximum number of vehicles (if None, let HGS-CVRP decide;
             clamped to the minimum for multi-root problems); the exact number of
@@ -447,6 +455,9 @@ def hgs_cvrp(
             'diagonals, which say nothing about a link absent from A. Pass '
             'repair=False (the solution may then cross itself).'
         )
+    A, capacity, power_attrs = quantized(
+        A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
+    )
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
     if ringed and vehicles_exact:
@@ -588,6 +599,7 @@ def hgs_cvrp(
             seed=seed,
             **S.graph['solver_details'],
         ),
+        **power_attrs,
     )
     return S
 
