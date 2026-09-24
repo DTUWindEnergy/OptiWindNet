@@ -234,8 +234,8 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
         (
             (solved.P, solved.A),
             {
-                'capacity': solved.cables_capacity,
                 'model_options': options,
+                'capacity': solved.cables_capacity,
                 'warmstart': solved.S,
             },
         )

@@ -9,6 +9,8 @@ import numpy as np
 from shapely.geometry import Polygon
 from shapely.validation import explain_validity
 
+from .loads import calcload
+
 logger = logging.getLogger(__name__)
 warning, info = logger.warning, logger.info
 
@@ -65,19 +67,19 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
 
 
 def parse_cables_input(
-    cables: int | list[int] | list[tuple[int, float | int]] | np.ndarray,
-) -> list[tuple[int, float | int]]:
+    cables: float | Sequence[float] | Sequence[tuple[float, float]] | np.ndarray,
+) -> list[tuple[float, float | int]]:
     # If input is numpy array, convert to list for uniform processing
     if isinstance(cables, np.ndarray):
         cables = cables.tolist()
 
-    if isinstance(cables, int):
+    if isinstance(cables, (int, float)) and not isinstance(cables, bool):
         # single number means the maximum capacity, set cost to 0
         return [(cables, 0.0)]
     elif isinstance(cables, Sequence):
         cables_out = []
         for entry in cables:
-            if isinstance(entry, int):
+            if isinstance(entry, (int, float)) and not isinstance(entry, bool):
                 # any entry that is a single number is the capacity, set cost to 0
                 cables_out.append((entry, 0.0))
             elif isinstance(entry, Sequence) and len(entry) == 2:
@@ -114,16 +116,28 @@ def extract_network_as_array(G):
         keys.append('cost')
         types.append(float)
 
+    value_keys = keys[2:]
+    # nominal loads scale from the integer ones, unless quantization is inexact
+    if G.graph.get('power_quantization_inexact', False):
+        calcload(G, nominal=True)
+        value_keys[value_keys.index('load')] = 'load_nominal'
+        power_per_inflow = 1.0
+    else:
+        power_per_inflow = float(G.graph.get('power_per_inflow', 1))
+
     def iter_edges():
         for s, t, edgeD in G.edges(data=True):
             s, t = (s, t) if ((s < t) == edgeD['reverse']) else (t, s)
-            yield s, t, *(edgeD[key] for key in keys[2:])
+            values = [edgeD[key] for key in value_keys]
+            yield s, t, *values
 
     network = np.fromiter(
         iter_edges(),
         dtype=list(zip(keys, types)),
         count=G.number_of_edges(),
     )
+    if power_per_inflow != 1.0:
+        network['load'] *= power_per_inflow
 
     return network
 

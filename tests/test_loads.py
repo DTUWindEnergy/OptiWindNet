@@ -10,6 +10,7 @@ from fractions import Fraction
 import networkx as nx
 import pytest
 
+from optiwindnet.api_utils import extract_network_as_array
 from optiwindnet.converting import _rings_from_S
 from optiwindnet.loads import (
     _add_ring_to_S,
@@ -159,6 +160,40 @@ def test_terminal_inflow_reports_only_the_departures_from_unitary_inflow():
 
     assert terminal_inflow(S) == {1: 2, 3: 3}
     assert terminal_inflow(_chain_S(4)) == {}
+
+
+def test_nominal_export_preserves_integer_loads_with_clones_and_open_ring():
+    G = nx.Graph(R=2, T=4, power_per_inflow=Fraction(1, 2))
+    G.add_edges_from([(-2, 4), (4, 0), (0, 1), (0, 2), (-1, 3)])
+    G.add_edge(2, 3, load=0, reverse=True)
+    nx.set_node_attributes(G, {0: 2, 1: 2, 2: 4, 3: 3}, 'inflow')
+    nx.set_node_attributes(G, {0: 1.01, 1: 1.0, 2: 2.01, 3: 1.49}, 'power')
+    for _, _, attrs in G.edges(data=True):
+        attrs.update(length=10.0, cable=0)
+    validate_terminal_power(G)
+    calcload(G)
+    original = G.copy()
+
+    network = extract_network_as_array(G)
+
+    loads = {(row['src'], row['tgt']): row['load'] for row in network}
+    assert loads == pytest.approx(
+        {
+            (4, -2): 4.02,
+            (0, 4): 4.02,
+            (1, 0): 1.0,
+            (2, 0): 2.01,
+            (3, -1): 1.49,
+            (2, 3): 0.0,
+        }
+    )
+    assert G.nodes[-2]['load_nominal'] == pytest.approx(4.02)
+    assert G.nodes[4]['load_nominal'] == pytest.approx(4.02)
+    for _, attrs in G.nodes(data=True):
+        attrs.pop('load_nominal')
+    for _, _, attrs in G.edges(data=True):
+        attrs.pop('load_nominal')
+    assert nx.utils.graphs_equal(G, original)
 
 
 def test_exact_nominal_loads_scale_integer_loads_without_touching_the_graph(

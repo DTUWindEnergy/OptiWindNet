@@ -930,7 +930,9 @@ def _make_warmstart_toy(topology, feeder_limit, balanced, max_feeders):
     router = MILPRouter(
         solver_name='ortools', time_limit=1, mip_gap=0.01, model_options=options
     )
-    S = router._make_warmstart(A, _CAPACITY)
+    S = router._make_warmstart(A, {'capacity': _CAPACITY}, A, _CAPACITY)
+    # unitary inflow: a warm start is always built
+    assert S is not None
     model, metadata = make_min_length_model(A, _CAPACITY, **options)
     warmup_model(model, metadata, S)
     return metadata.warmed_by
@@ -1023,7 +1025,7 @@ def _warmup_time_budget_toy(warmup_time):
             warmup_time=warmup_time,
             model_options=ModelOptions(feeder_limit='minimum'),
         )
-        router._make_warmstart(A, _CAPACITY)
+        router._make_warmstart(A, {'capacity': _CAPACITY}, A, _CAPACITY)
     finally:
         api.hgs_cvrp = original
     return captured.get('time_limit')

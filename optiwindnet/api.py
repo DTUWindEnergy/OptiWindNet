@@ -5,6 +5,7 @@ import logging
 import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from fractions import Fraction
 from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -31,9 +32,22 @@ from .importer import (
     load_repository,
 )
 from .interarraylib import assign_cables
+from .loads import (
+    DEFAULT_POWER_RTOL,
+    _clear_turbine_powers,
+    _is_positive_integer,
+    _validated_capacity_nominal,
+    _validated_rtol,
+    quantized,
+    set_turbine_powers,
+    terminal_inflow,
+    total_inflow,
+    validate_terminal_power,
+)
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
 from .pathfinding import PathFinder
+from .presenting import _nominal_loads
 from .svg import SvgRepr, svgplot, svgpplot
 from .terse import LinkScope, TerseLinks
 from .transforming import as_normalized, as_stratified_vertices
@@ -69,6 +83,18 @@ class Router(ABC):
 
     _summary_attrs: tuple[str, ...]
     _repr_attrs: tuple[str, ...] = ()
+    power_rtol: float = DEFAULT_POWER_RTOL
+
+    def __init__(self, power_rtol: float = DEFAULT_POWER_RTOL, **kwargs) -> None:
+        """Set the options common to all routers.
+
+        Args:
+          power_rtol: quantization tolerance of unequal turbine power (see
+            :func:`~optiwindnet.loads.quantize_for_capacity`).
+        """
+        super().__init__(**kwargs)
+        _validated_rtol(power_rtol)
+        self.power_rtol = power_rtol
 
     def __repr__(self) -> str:
         # Defensive by design: getattr-guard every field and skip None values so
@@ -85,8 +111,8 @@ class Router(ABC):
         self,
         P: nx.PlanarEmbedding,
         A: nx.Graph,
-        cables: list[tuple[int, float | int]],
-        cables_capacity: int,
+        cables: list[tuple[int, float | int]] | list[tuple[Fraction, float | int]],
+        cables_capacity: int | Fraction,
         verbose: bool,
         **kwargs,
     ) -> tuple[nx.Graph, nx.Graph]:
@@ -96,13 +122,41 @@ class Router(ABC):
           P : Navigation mesh for the location.
           A : Graph of available links.
           cables: set of cable specifications as [(capacity, linear_cost), ...].
-          cables_capacity: highest cable capacity in cables.
+          cables_capacity: highest cable capacity in cables (see
+            :meth:`_capacity_kwargs` for its unit).
           verbose : Whether to print progress/logging info.
           **kwargs : Additional router-specific parameters.
 
         Returns:
           Tuple of (solution topology (selected links), optimized routeset).
         """
+
+    def _capacity_kwargs(
+        self, A: nx.Graph, cables_capacity: int | Fraction
+    ) -> dict[str, Any]:
+        """Return the producer arguments that state ``cables_capacity``.
+
+        The capacity is nominal if ``A`` has ``'power_unit'`` or ``'powers_set'``,
+        and inflow otherwise.
+        """
+        if 'power_unit' in A.graph or 'powers_set' in A.graph:
+            return {'capacity_nominal': cables_capacity, 'power_rtol': self.power_rtol}
+        return {'capacity': cables_capacity}
+
+
+def _validated_inflow(turbine_powers: Sequence | np.ndarray, T: int) -> list[int]:
+    """Per-turbine integer inflow, as ``turbine_powers`` gives it without a unit."""
+    if len(turbine_powers) != T:
+        raise ValueError(
+            f'turbine_powers has {len(turbine_powers)} entries but T={T} turbines.'
+        )
+    for value in turbine_powers:
+        if not _is_positive_integer(value):
+            raise ValueError(
+                f'turbine_powers must be positive integers (inflow) if power_unit '
+                f'is None: got {value!r}.'
+            )
+    return [int(value) for value in turbine_powers]
 
 
 class WindFarmNetwork:
@@ -124,7 +178,7 @@ class WindFarmNetwork:
 
     def __init__(
         self,
-        cables: int | list[int] | list[tuple[int, float | int]] | np.ndarray,
+        cables: float | Sequence[float] | Sequence[tuple[float, float]] | np.ndarray,
         turbinesC: np.ndarray | None = None,
         substationsC: np.ndarray | None = None,
         borderC: np.ndarray = _EMPTY_BORDER,
@@ -134,6 +188,8 @@ class WindFarmNetwork:
         L: nx.Graph | None = None,
         router: Router | None = None,
         verbose: bool = False,
+        turbine_powers: Sequence[float | Fraction] | np.ndarray | None = None,
+        power_unit: str | None = None,
     ):
         """Initialize a wind farm electrical network.
 
@@ -150,8 +206,21 @@ class WindFarmNetwork:
           router: Routing algorithm instance. Defaults to :class:`EWRouter`.
           buffer_dist: Buffer distance to dilate borders / erode obstacles.
             Defaults to 0.
+          turbine_powers: Enables mixed power ratings (not required if the location
+            uses uniform generators). Passed as a sequence of power values in the
+            same order as the turbine coordinates: positive integers (inflow) if
+            ``power_unit`` is None, nominal power in ``power_unit`` otherwise.
+          power_unit: Physical unit (e.g. ``'MW'``) of ``turbine_powers`` and of the
+            cable capacities. If None (default), both are integer inflow, which
+            count turbines wherever each injects unitary inflow. If a string, each
+            solve quantizes unequal powers for the largest capacity at the router's
+            ``power_rtol`` (see :func:`~optiwindnet.loads.quantized`); the powers
+            come from ``L`` if ``turbine_powers`` is omitted. A location ``L`` that
+            declares a ``'power_unit'`` requires the same string, or None, in which
+            case its power declarations are dropped.
 
-        **Cable Specs** (``capacity`` is in number of turbines):
+        **Cable Specs** (``capacity`` in inflow if ``power_unit`` is None, in
+        ``power_unit`` otherwise):
             * List of 2-tuple cable specifications:
               ``[(capacity, linear_cost), ...]``.
 
@@ -182,7 +251,6 @@ class WindFarmNetwork:
         self.handle = handle
         'Short instance identifier.'
         self.router = router if router is not None else EWRouter()
-        self.cables = cables
 
         self.verbose = verbose
         'Enable verbose logging.'
@@ -226,7 +294,99 @@ class WindFarmNetwork:
         self._VertexC = L.graph['VertexC']
         self._R, self._T = L.graph['R'], T
 
+        L_power_unit = L.graph.get('power_unit')
+        if power_unit is None:
+            declared = {'power_unit', 'powers_set', 'power_per_inflow'} & L.graph.keys()
+            if 'powers_set' in declared:
+                _warning(
+                    'L declares unequal turbine power in %s, which is ignored '
+                    'because power_unit is None: every turbine injects unitary '
+                    'inflow. Pass power_unit=%r to route by the declared power.',
+                    L_power_unit,
+                    L_power_unit,
+                )
+            elif declared:
+                _logger.info(
+                    'L declares uniform turbine power in %s, which is dropped '
+                    'because power_unit is None: capacities count turbines.',
+                    L_power_unit,
+                )
+            if declared or turbine_powers is not None:
+                _clear_turbine_powers(L)
+            if turbine_powers is not None:
+                inflow = _validated_inflow(turbine_powers, T)
+                nx.set_node_attributes(
+                    L, {t: k for t, k in enumerate(inflow) if k != 1}, 'inflow'
+                )
+            validate_terminal_power(L)
+        else:
+            if L_power_unit not in (None, power_unit):
+                raise ValueError(
+                    f'power_unit={power_unit!r} differs from the power_unit '
+                    f'{L_power_unit!r} that L declares.'
+                )
+            if turbine_powers is None:
+                if L_power_unit is None:
+                    raise ValueError(
+                        f'power_unit={power_unit!r} requires turbine_powers, or a '
+                        'location L that declares its power_unit.'
+                    )
+                validate_terminal_power(L)
+            else:
+                set_turbine_powers(L, turbine_powers, power_unit)
+        self._assign_cables(cables)
+
     # -------- helpers --------
+    def _assign_cables(self, cables) -> None:
+        """Parse the cable specifications and reassign the cables of the solution.
+
+        Capacities are nominal power if ``L`` has a ``'power_unit'``, and inflow
+        otherwise. A solution whose largest load exceeds the largest capacity is
+        invalidated; one that fits keeps its links and gets its cables reassigned.
+        """
+        L, T = self._L, self._T
+        raw = parse_cables_input(cables)
+        nominal = 'power_unit' in L.graph
+        if nominal:
+            parsed = [
+                (_validated_capacity_nominal(capacity), cost) for capacity, cost in raw
+            ]
+            largest_turbine = L.graph.get(
+                'powers_set', (L.graph.get('power_per_inflow', 1),)
+            )[-1]
+        else:
+            for capacity, _ in raw:
+                if not _is_positive_integer(capacity):
+                    raise ValueError(
+                        f'Cable capacity {capacity!r} is not a positive integer: '
+                        'capacities are inflow if power_unit is None.'
+                    )
+            parsed = [(int(capacity), cost) for capacity, cost in raw]
+            largest_turbine = max(
+                (L.nodes[t].get('inflow', 1) for t in range(T)), default=1
+            )
+        cables_capacity = max(parsed)[0]
+        if largest_turbine > cables_capacity:
+            raise ValueError(
+                f'Maximum turbine power {float(largest_turbine):g} exceeds maximum '
+                f'cable capacity {float(cables_capacity):g}.'
+            )
+
+        if not self._is_stale_SG:
+            G = self._G
+            max_load = (
+                max(load for n, load in _nominal_loads(G).items() if n >= 0)
+                if nominal
+                else G.graph['max_load']
+            )
+            if max_load > cables_capacity:
+                self._is_stale_SG = True
+            else:
+                assign_cables(G, parsed)
+        self._cables = parsed
+        self.cables_capacity = cables_capacity
+        'highest cable capacity in cables.'
+
     def _refresh_planar(self):
         polygon = self.polygon
         if polygon is not None:
@@ -310,18 +470,40 @@ class WindFarmNetwork:
         return self._G
 
     @property
-    def cables(self) -> list[tuple[int, float | int]]:
-        "Set of cable specifications as ``[(capacity, linear_cost), ...]``."
+    def cables(
+        self,
+    ) -> list[tuple[int, float | int]] | list[tuple[Fraction, float | int]]:
+        """Cable specifications as ``[(capacity, linear_cost), ...]``.
+
+        Capacities are exact fractions in :attr:`power_unit` where it is set, and
+        integer inflow otherwise.
+        """
         return self._cables
 
     @cables.setter
     def cables(self, cables):
-        parsed = parse_cables_input(cables)
-        self._cables = parsed
-        self.cables_capacity = max(parsed)[0]
-        'highest cable capacity in cables.'
-        if not self._is_stale_SG:
-            assign_cables(self._G, parsed)
+        self._assign_cables(cables)
+
+    @property
+    def turbine_powers(self) -> list[Fraction] | list[int] | None:
+        """Per-turbine power, or None if every turbine injects unitary inflow.
+
+        With a :attr:`power_unit`, the nominal power each turbine declares, as
+        exact fractions. Without, the integer inflow of each turbine.
+        """
+        L, T = self._L, self._T
+        if self.power_unit is not None:
+            if 'powers_set' in L.graph:
+                return [L.nodes[t]['power'] for t in range(T)]
+            return [Fraction(L.graph.get('power_per_inflow', 1))] * T
+        if not terminal_inflow(L):
+            return None
+        return [L.nodes[t].get('inflow', 1) for t in range(T)]
+
+    @property
+    def power_unit(self) -> str | None:
+        "Physical unit of the turbine power and cable capacities, or None for inflow."
+        return self._L.graph.get('power_unit')
 
     @property
     def router(self) -> Router:
@@ -476,7 +658,7 @@ class WindFarmNetwork:
     def plot_selected_links(self, **kwargs):
         """Plot link selection (tentative feeder routes)."""
         G_tentative = G_from_S(self.S, self.A)
-        assign_cables(G_tentative, self.cables)
+        assign_cables(G_tentative, self._cables)
         if 'ax' in kwargs:
             from .plotting import gplot
 
@@ -543,24 +725,25 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
+        capacity_kwargs = self.router._capacity_kwargs(self._L, self.cables_capacity)
         if encoding.scope is LinkScope.ROUTESET:
             self._G = encoding.to_routeset(
-                self.L,
-                capacity=self.cables_capacity,
-                creator='from_terse_links',
+                self._L, **capacity_kwargs, creator='from_terse_links'
             )
             self._S = S_from_G(self._G)
         else:
-            S = encoding.to_topology(creator='from_terse_links')
+            S = encoding.to_topology(
+                self._L, **capacity_kwargs, creator='from_terse_links'
+            )
             G_tentative = G_from_S(S, self.A)
             self._S = S
             self._G = PathFinder(G_tentative, planar=self.P, A=self.A).create_detours()
 
-        assign_cables(self._G, self.cables)
+        assign_cables(self._G, self._cables)
         self._is_stale_SG = False
 
     def get_network(self):
-        """Export the optimized network as a structured array."""
+        """Export the optimized network with loads in nominal power units."""
         return extract_network_as_array(self.G)
 
     def map_detour_vertex(self):
@@ -674,7 +857,7 @@ class WindFarmNetwork:
         self._S, self._G = router.route(
             P=self.P,
             A=self.A,
-            cables=self.cables,
+            cables=self._cables,
             cables_capacity=self.cables_capacity,
             verbose=verbose,
             **warmstart,
@@ -752,6 +935,7 @@ class EWRouter(Router):
             edge ``extent``).
             Defaults to the constructor's built-in default (0.02) when ``None``.
           verbose: Enable verbose logging.
+          **kwargs: Options common to all routers (see :class:`Router`).
         """
 
         super().__init__(**kwargs)
@@ -779,7 +963,9 @@ class EWRouter(Router):
                 ' Choose among: ("segmented", "straight").'
             )
 
-        S = constructor(A, capacity=cables_capacity, **constructor_args)
+        S = constructor(
+            A, **self._capacity_kwargs(A, cables_capacity), **constructor_args
+        )
         G_tentative = G_from_S(S, A)
 
         G = PathFinder(G_tentative, planar=P, A=A).create_detours()
@@ -835,6 +1021,7 @@ class HGSRouter(Router):
               ``2 * cables_capacity`` turbines (two arms of ``cables_capacity`` each).
           seed: Set the seed of the pseudo-random number generator (reproducibility).
           verbose: Enable verbose logging.
+          **kwargs: Options common to all routers (see :class:`Router`).
 
         Note:
           The total runtime may reach up to ``(max_retries + 1) * time_limit`` in the
@@ -855,7 +1042,7 @@ class HGSRouter(Router):
         # optimizing
         S = hgs_cvrp(
             as_normalized(A),
-            capacity=cables_capacity,
+            **self._capacity_kwargs(A, cables_capacity),
             time_limit=self.time_limit,
             max_retries=self.max_retries,
             vehicles=self.feeder_limit,
@@ -918,6 +1105,7 @@ class MILPRouter(Router):
               be built). Capped by ``time_limit``. Building uses HGS-CVRP with crossing
               repair, so the worst-case build time can reach a few times this value.
           verbose: Enable verbose logging.
+          **kwargs: Options common to all routers (see :class:`Router`).
         """
         super().__init__(**kwargs)
         if warmup_time <= 0:
@@ -958,33 +1146,41 @@ class MILPRouter(Router):
         # the model cannot take (topology, missing links, violated constraints) and the
         # loop below then warm-starts the model some other way.
         solver = self.solver
+        capacity_kwargs = self._capacity_kwargs(A, cables_capacity)
+        A_solve, capacity, _ = quantized(A, **capacity_kwargs)
+        has_nonunit_inflow = bool(terminal_inflow(A_solve))
 
         if not self.warmup:
             # master switch off: solve cold, ignoring any carried/provided solution
             S_warm = None
         elif S_warm is None:
             # warm-starting on, nothing to reuse: build a warm start
-            S_warm = self._make_warmstart(A, cables_capacity)
+            S_warm = self._make_warmstart(A, capacity_kwargs, A_solve, capacity)
 
         for _ in range(2):
             try:
                 solver.set_problem(
                     P,
                     A,
-                    capacity=cables_capacity,
                     model_options=self.model_options,
                     warmstart=S_warm,
+                    **capacity_kwargs,
                 )
                 break
             except OWNWarmupFailed:
-                S_warm = self._make_warmstart(A, cables_capacity)
+                if has_nonunit_inflow:
+                    if S_warm is None:
+                        raise
+                    S_warm = None
+                    continue
+                S_warm = self._make_warmstart(A, capacity_kwargs, A_solve, capacity)
 
         else:
             # No available solution can warm-start this model, so solve it cold
             # rather than give up: a warm start is an optimization, not a requirement.
             _warning('Unable to warm-start model: solving without a warm start.')
             solver.set_problem(
-                P, A, capacity=cables_capacity, model_options=self.model_options
+                P, A, model_options=self.model_options, **capacity_kwargs
             )
 
         for _ in range(num_retries + 1):
@@ -1010,7 +1206,7 @@ class MILPRouter(Router):
 
         return S, G
 
-    def _make_warmstart(self, A, capacity):
+    def _make_warmstart(self, A, capacity_kwargs, A_solve, capacity):
         """Build a warm start matched to the model's topology and feeder limit.
 
         Called (only when ``warmup`` is enabled) to obtain a warm start the model
@@ -1034,6 +1230,21 @@ class MILPRouter(Router):
         HGS solution. A RINGED model has no exact-vehicles mode, so ``exactly``
         above the minimum stays there -- and, like every un-reproducible case,
         ends up solving cold.
+
+        Nonunitary terminal inflow restrict this to a plain HGS solution, the only
+        warm start either producer honours, and only for an unbalanced,
+        single-root, radial solve. The other modes return ``None``, i.e. the
+        model is solved cold.
+
+        Args:
+          A: available-links graph, as given to :meth:`route`.
+          capacity_kwargs: capacity keyword arguments for the producers, which
+            quantize ``A`` themselves.
+          A_solve: ``A`` as quantized by :func:`~optiwindnet.loads.quantized`.
+          capacity: cable capacity in inflow.
+
+        Returns:
+          A topology to warm-start from, or ``None`` if none can be built.
         """
         mo = self.model_options
         feeder_limit = mo['feeder_limit']
@@ -1043,12 +1254,12 @@ class MILPRouter(Router):
         ringed = mo['topology'] is Topology.RINGED
         single_root = A.graph['R'] == 1
         per_subtree = 2 if ringed else 1
-        min_subtrees = math.ceil(A.graph['T'] / (per_subtree * capacity))
+        min_subtrees = math.ceil(total_inflow(A_solve) / (per_subtree * capacity))
 
         def _hgs(vehicles, *, exact=False, balance=False):
             return hgs_cvrp(
                 as_normalized(A),
-                capacity=capacity,
+                **capacity_kwargs,
                 time_limit=time_limit,
                 vehicles=vehicles,
                 vehicles_exact=exact,
@@ -1056,6 +1267,17 @@ class MILPRouter(Router):
                 repair=True,
                 ringed=ringed,
             )
+
+        if terminal_inflow(A_solve):
+            # constructor() fills subtrees by terminal count and hgs_cvrp() honours
+            # inflow only unbalanced, single-root and radial: outside that, no warm
+            # start can be built and the model is solved cold.
+            if ringed or balanced or not single_root:
+                return None
+            # the feeder count HGS derives from the terminals' inflow may miss a
+            # pinned `feeder_limit`; warmup_model() then rejects it and route()
+            # falls back to a cold solve
+            return _hgs(None)
 
         if feeder_limit == 'minimum':
             pinned = min_subtrees
@@ -1092,7 +1314,7 @@ class MILPRouter(Router):
             return S_from_G(
                 constructor(
                     A,
-                    capacity=capacity,
+                    **capacity_kwargs,
                     method=self.default_heuristic,
                     weigh_detours=not straight,
                     straight_feeder_route=straight,
