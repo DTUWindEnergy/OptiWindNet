@@ -392,10 +392,11 @@ def test_invalid_gradient_type_raises():
 
 
 def test_from_own_yaml_loads_own_yaml_file():
-    wfn = WindFarmNetwork.from_own_yaml(str(_LOCATION_FILE), cables=4)
+    for filepath in (_LOCATION_FILE, str(_LOCATION_FILE)):
+        wfn = WindFarmNetwork.from_own_yaml(filepath, cables=4)
 
-    assert wfn.L.graph['T'] == 12
-    assert wfn.L.graph['R'] == 1
+        assert wfn.L.graph['T'] == 12
+        assert wfn.L.graph['R'] == 1
 
 
 def test_deprecated_from_yaml_warns():
