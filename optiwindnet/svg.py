@@ -169,7 +169,7 @@ class Drawable:
         fnT = G.graph.get('fnT')
         if fnT is None:
             fnT = np.arange(R + T + B + 3)
-            fnT[-R:] = range(-R, 0)
+            fnT[len(fnT) - R :] = range(-R, 0)
         self.fnT = fnT
 
         ##############################
@@ -187,11 +187,9 @@ class Drawable:
 
         # viewport scaling
         idx_B = self.T + self.B
-        R = self.R
-        Woff = min(VertexC[:idx_B, 0].min(), VertexC[-R:, 0].min())
-        W = max(VertexC[:idx_B, 0].max(), VertexC[-R:, 0].max()) - Woff
-        Hoff = min(VertexC[:idx_B, 1].min(), VertexC[-R:, 1].min())
-        H = max(VertexC[:idx_B, 1].max(), VertexC[-R:, 1].max()) - Hoff
+        extentC = np.vstack((VertexC[:idx_B], VertexC[VertexC.shape[0] - self.R :]))
+        Woff, Hoff = extentC.min(axis=0)
+        W, H = extentC.max(axis=0) - (Woff, Hoff)
         wr = (w - 2 * margin) / W
         hr = (h - 2 * margin) / H
         if W / H < w / h:
@@ -820,6 +818,6 @@ def svgpplot(P: nx.PlanarEmbedding, A: nx.Graph, **kwargs) -> SvgRepr:
     R, T, B = (A.graph[k] for k in 'RTB')
     H.add_edges_from(P.edges, kind='planar')
     fnT = np.arange(R + T + B + 3)
-    fnT[-R:] = range(-R, 0)
+    fnT[len(fnT) - R :] = range(-R, 0)
     H.graph['fnT'] = fnT
     return svgplot(H, **kwargs)
