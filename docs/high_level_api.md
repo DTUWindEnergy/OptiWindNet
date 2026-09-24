@@ -20,6 +20,7 @@ notebooks/hi12_locations
 notebooks/hi13_border_obstacles
 notebooks/hi14_plotting
 notebooks/hi15_debugging
+notebooks/hi16_mixed_power
 ```
 
 ```{toctree}

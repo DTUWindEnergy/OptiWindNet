@@ -105,6 +105,7 @@ docs = [
     "sphinx-autoapi",
     "sphinx_copybutton", 
     "sphinx_sitemap",
+    "tabulate",
     # Imported directly by docs/run_notebooks.py. They also arrive transitively through
     # myst-nb, but the type checker covers docs/, so the imports it must resolve are
     # declared here rather than left to another package's dependency tree.

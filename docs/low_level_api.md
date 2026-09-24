@@ -20,6 +20,7 @@ notebooks/lo00_quickstart
 notebooks/lo11_data_input
 notebooks/lo12_locations
 notebooks/lo14_plotting
+notebooks/lo16_mixed_power
 ```
 
 ```{toctree}
