@@ -12,7 +12,13 @@ import numpy as np
 import svg
 
 from .geometric import rotate
-from .presenting import _format_length, describe_G
+from .presenting import (
+    _format_length,
+    _format_nominal_power,
+    _nominal_loads,
+    _terminal_groups,
+    describe_G,
+)
 from .themes import Colors
 
 __all__ = ('SvgRepr', 'svgplot', 'svgpplot')
@@ -450,14 +456,38 @@ class Drawable:
 
         # reusable elements
         self.root_side = root_side = round(1.77 * node_radius)
+        self.terminal_groups = terminal_groups = _terminal_groups(G)
+        href_from_terminal = {}
+        scale_from_sides = {}
+        for sides, scale, _, terminals in terminal_groups:
+            href = '#wtg' if sides == 0 else f'#wtg{sides}'
+            href_from_terminal |= dict.fromkeys(terminals, href)
+            scale_from_sides[sides] = scale
+        for sides, scale in sorted(scale_from_sides.items()):
+            if sides == 0:
+                self.reusableE.append(
+                    svg.Circle(
+                        id='wtg',
+                        stroke=c.term_edge,
+                        stroke_width=_NODE_EDGE_WIDTH,
+                        r=node_radius,
+                    )
+                )
+            else:
+                # same area as the circle, vertex pointing up
+                angles = 2 * np.pi * np.arange(sides) / sides
+                vertices = scale * node_radius * np.c_[np.sin(angles), -np.cos(angles)]
+                self.reusableE.append(
+                    svg.Polygon(
+                        id=f'wtg{sides}',
+                        stroke=c.term_edge,
+                        stroke_width=_NODE_EDGE_WIDTH,
+                        # adding 0.0 turns -0.0 into 0.0
+                        points=(vertices.round(1) + 0.0).ravel().tolist(),
+                    )
+                )
         self.reusableE.extend(
             (
-                svg.Circle(
-                    id='wtg',
-                    stroke=c.term_edge,
-                    stroke_width=_NODE_EDGE_WIDTH,
-                    r=node_radius,
-                ),
                 svg.Rect(
                     id='oss',
                     fill=c.root_face,
@@ -480,7 +510,11 @@ class Drawable:
                 svg.G(
                     fill=c.colors[sub % len(c.colors)],
                     elements=[
-                        svg.Use(href='#wtg', x=VertexS[n, 0], y=VertexS[n, 1])
+                        svg.Use(
+                            href=href_from_terminal[n],
+                            x=VertexS[n, 0],
+                            y=VertexS[n, 1],
+                        )
                         for n in nodes
                     ],
                 )
@@ -505,12 +539,24 @@ class Drawable:
         # node labels
         if node_tag is not None:
             has_loads = G.graph.get('has_loads', False)
+            power_per_inflow = G.graph.get('power_per_inflow', 1)
+            nominal = (
+                _nominal_loads(G) if has_loads and node_tag == 'load_nominal' else {}
+            )
 
             def get_label(n):
                 if node_tag is True:
                     return str(n)
-                if node_tag == 'load' and has_loads:
-                    return str(G.nodes[n].get('load', '-'))
+                if node_tag in ('load', 'load_nominal') and has_loads:
+                    if node_tag == 'load_nominal':
+                        load = nominal.get(n)
+                        return '-' if load is None else f'{float(load):g}'
+                    load = G.nodes[n].get('load')
+                    return '-' if load is None else str(load)
+                if node_tag == 'power':
+                    if n < 0:
+                        return ''
+                    return _format_nominal_power(G.nodes[n], power_per_inflow)
                 if isinstance(node_tag, str):
                     val = G.nodes[n].get(node_tag, '')
                     return str(val) if val != '' else ''
@@ -524,7 +570,7 @@ class Drawable:
             # turbine/root font sizes mirror gplot's per-tag scheme, whose
             # FONTSIZE_ROOT_LABEL : FONTSIZE_LABEL : FONTSIZE_LOAD = 4 : 5 : 7
             small, normal, large = (round(node_radius * f) for f in (0.8, 1.0, 1.4))
-            if node_tag == 'load' and has_loads:
+            if node_tag in ('load', 'load_nominal') and has_loads:
                 wtg_font, oss_font = large, normal
             elif node_tag is True:
                 wtg_font, oss_font = normal, large
@@ -637,8 +683,10 @@ class Drawable:
         c, G = self.c, self.G
         legend_items = []
 
-        # 1. WTG
-        legend_items.append(('node', 'wtg', 'WTG', c.colors[0], 'circle'))
+        # 1. WTG (one item per power level)
+        for sides, _, label, _ in self.terminal_groups:
+            href = '#wtg' if sides == 0 else f'#wtg{sides}'
+            legend_items.append(('node', href, label, c.colors[0], 'terminal'))
 
         # 2. OSS
         legend_items.append(('node', 'oss', 'OSS', c.root_face, 'rect'))
@@ -704,10 +752,10 @@ class Drawable:
             label = ''
 
             if item_type == 'node':
-                _, _name, label, color, shape = item
-                if shape == 'circle':
+                _, name, label, color, shape = item
+                if shape == 'terminal':
                     elements.append(
-                        svg.Use(href='#wtg', x=x_pos + 20, y=y_pos, fill=color)
+                        svg.Use(href=name, x=x_pos + 20, y=y_pos, fill=color)
                     )
                 elif shape == 'rect':
                     elements.append(
@@ -795,8 +843,14 @@ def svgplot(
     Args:
       G: graph to plot
       landscape: rotate(?) the plot by G's graph attribute ``'landscape_angle'``.
-      node_tag: text label inside each node. Use ``True`` for node numbers, ``'load'``
-        for power flow values (requires ``has_loads``), or any node attribute name.
+      node_tag: text label inside each node. Use ``True`` for node numbers,
+        ``'load'`` for cumulative integer inflow (requires ``has_loads``), or any
+        node attribute name. ``'power'`` displays declared turbine ratings,
+        falling back to inflow times ``'power_per_inflow'``.
+        ``'load_nominal'`` displays cumulative nominal power, requiring current
+        routing loads. Exact quantization scales ``'load'`` for display only;
+        inexact quantization accumulates turbine ratings through the network,
+        refreshing the graph's ``'load_nominal'`` attributes.
       tag_border: if ``True``, label all border and obstacle vertices with their
         index numbers (useful for geometry debugging).
       infobox: add(?) text box with summary of G's main properties: capacity,

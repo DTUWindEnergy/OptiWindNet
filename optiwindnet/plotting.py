@@ -9,12 +9,18 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.markers import MarkerStyle
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 
 from .geometric import rotate
-from .presenting import describe_G
+from .presenting import (
+    _format_nominal_power,
+    _nominal_loads,
+    _terminal_groups,
+    describe_G,
+)
 from .themes import Colors
 
 NODESIZE = 35
@@ -61,8 +67,15 @@ def gplot(
 
     Args:
       ax: Axes instance to plot into. If ``None``, opens a new figure.
-      node_tag: text tag inside each node (e.g. ``'load'``, ``'label'`` or any of
-        the nodes' attributes). If ``True``, tags the nodes with their numbers.
+      node_tag: text tag inside each node. ``'load'`` displays cumulative integer
+        inflow. ``'power'`` displays declared turbine ratings,
+        falling back to inflow times ``'power_per_inflow'``. Other strings select
+        a node attribute. If ``True``, tags the
+        nodes with their numbers.
+        ``'load_nominal'`` displays cumulative nominal power, requiring current
+        routing loads. Exact quantization scales ``'load'`` for display only;
+        inexact quantization accumulates turbine ratings through the network,
+        refreshing the graph's ``'load_nominal'`` attributes.
       tag_border: if ``True``, all border and obstacle vertices get a number tag.
       landscape: ``True`` → rotate the plot by G's attribute ``'landscape_angle'``.
       infobox: Draw text box with summary of G's main properties: capacity,
@@ -92,6 +105,7 @@ def gplot(
         node_size = NODESIZE_LABELED
 
     R, T, B = (G.graph[k] for k in 'RTB')
+    power_per_inflow = G.graph.get('power_per_inflow', 1)
     VertexC = G.graph['VertexC']
     C, D = (G.graph.get(k, 0) for k in 'CD')
     border, obstacles, landscape_angle = (
@@ -226,18 +240,24 @@ def gplot(
         label='OSS',
     )
     arts.set_clip_on(False)
-    arts = nx.draw_networkx_nodes(
-        G,
-        pos,
-        nodelist=range(T),
-        edgecolors=c.term_edge,
-        ax=ax,
-        label='WTG',
-        node_color=node_colors,
-        node_size=node_size,
-        linewidths=0.3,
-    )
-    arts.set_clip_on(False)
+    for sides, scale, label, terminals in _terminal_groups(G):
+        arts = nx.draw_networkx_nodes(
+            G,
+            pos,
+            nodelist=terminals if len(terminals) < T else range(T),
+            edgecolors=c.term_edge,
+            ax=ax,
+            label=label,
+            node_color=[node_colors[t] for t in terminals],
+            # node_size is an area: square the circumradius scale
+            node_size=node_size * scale**2 if sides else node_size,
+            linewidths=0.3,
+        )
+        if sides:
+            # networkx cannot take a polygon tuple as node_shape: swap the path
+            marker = MarkerStyle((sides, 0, 0))
+            arts.set_paths([marker.get_path().transformed(marker.get_transform())])
+        arts.set_clip_on(False)
     if D:
         # draw rings around nodes that have Detour clones
         arts = nx.draw_networkx_nodes(
@@ -255,12 +275,36 @@ def gplot(
 
     # draw labels
     label_options: dict[str, Any]
-    if 'has_loads' in G.graph and node_tag == 'load':
+    if G.graph.get('has_loads', False) and node_tag in ('load', 'load_nominal'):
+        if node_tag == 'load_nominal':
+            nominal = _nominal_loads(G)
+            labels = {
+                n: '-' if (load := nominal.get(n)) is None else f'{float(load):g}'
+                for n in range(-R, T)
+            }
+        else:
+            labels = {
+                n: '-' if (load := G.nodes[n].get('load')) is None else str(load)
+                for n in range(-R, T)
+            }
         label_options = {
-            'labels': {n: G.nodes[n].get('load', '-') for n in range(-R, T)},
+            'labels': labels,
             'font_size': (
                 {t: FONTSIZE_LOAD for t in range(T)}
                 | {r: FONTSIZE_LABEL for r in range(-R, 0)}
+            ),
+        }
+    elif node_tag == 'power':
+        label_options = {
+            'labels': {
+                n: (
+                    '' if n < 0 else _format_nominal_power(G.nodes[n], power_per_inflow)
+                )
+                for n in range(-R, T)
+            },
+            'font_size': (
+                {t: FONTSIZE_LABEL for t in range(T)}
+                | {r: FONTSIZE_ROOT_LABEL for r in range(-R, 0)}
             ),
         }
     elif isinstance(node_tag, str):

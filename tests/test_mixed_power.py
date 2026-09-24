@@ -1,11 +1,15 @@
 import logging
 import math
+import re
 from fractions import Fraction
 from itertools import combinations, product
 
+import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pytest
+from matplotlib.collections import PathCollection
+from matplotlib.markers import MarkerStyle
 
 from optiwindnet import loads
 from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
@@ -26,6 +30,9 @@ from optiwindnet.loads import (
 )
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.MILP import solver_factory
+from optiwindnet.plotting import NODESIZE, gplot
+from optiwindnet.presenting import _terminal_groups, describe_G
+from optiwindnet.svg import _NODE_RADII, svgplot
 
 from .helpers import solver_unavailable
 
@@ -53,6 +60,18 @@ def _mixed_wfn(**kwargs):
         **_SITE,
         **kwargs,
     )
+
+
+def _labels(G, node_tag, backend):
+    if backend == 'svg':
+        text = svgplot(G, node_tag=node_tag).data
+        return sorted(re.findall(r'<text[^>]*>([^<]+)</text>', text))
+    fig, ax = plt.subplots(layout='constrained')
+    try:
+        gplot(G, ax=ax, node_tag=node_tag, infobox=False)
+        return sorted(t.get_text() for t in ax.texts if t.get_text())
+    finally:
+        plt.close(fig)
 
 
 def _assert_packing_preserved(powers, capacity, rtol, result):
@@ -714,3 +733,159 @@ def test_pack_G_refuses_unequal_power():
     wfn.update_from_terse_links(np.array([-1, -1]))
     with pytest.raises(NotImplementedError, match='unequal power'):
         pack_G(wfn.G)
+
+
+# --- rendering ---
+
+
+def test_describe_G_reports_inflow():
+    wfn = _mixed_wfn()
+    wfn.update_from_terse_links(np.array([-1, -1]))
+    desc = describe_G(wfn.G)
+    assert desc[:2] == [f'κ = {wfn.G.graph["capacity"]}, T = 2', 'ι ∈ {4, 5}']
+
+
+def test_topology_terse_links_record_the_quantized_capacity():
+    wfn = _mixed_wfn()
+    wfn.update_from_terse_links(np.array([-1, -1]))
+    assert wfn.G.graph['capacity'] == 10
+
+
+@pytest.mark.parametrize('backend', ('svg', 'matplotlib'))
+@pytest.mark.parametrize(('rtol', 'inexact'), ((0, False), (0.01, True)))
+def test_load_and_power_labels(backend, rtol, inexact):
+    wfn = WindFarmNetwork(
+        cables=20,
+        power_unit='MW',
+        turbine_powers=[5.0, 6.35],
+        router=EWRouter(power_rtol=rtol),
+        **_SITE,
+    )
+    wfn.update_from_terse_links(np.array([-1, 0]))
+    G = wfn.G
+    assert G.graph['power_quantization_inexact'] is inexact
+
+    assert _labels(G, 'load_nominal', backend) == ['11.35', '11.35', '6.35']
+    # only inexact quantization traverses the network and writes to the graph
+    assert ('load_nominal' in G.nodes[0]) is inexact
+    assert _labels(G, 'load', backend) == sorted(
+        str(G.nodes[n]['load']) for n in (-1, 0, 1)
+    )
+    assert _labels(G, 'power', backend) == ['5', '6.35']
+    assert _labels(wfn.L, 'power', backend) == ['5', '6.35']
+
+
+def test_power_labels_fall_back_to_inflow_times_power_per_inflow():
+    wfn = WindFarmNetwork(cables=2, turbine_powers=[1, 2], **_SITE)
+    wfn.update_from_terse_links(np.array([-1, -1]))
+    G = wfn.G
+    G.graph['power_per_inflow'] = Fraction(1, 2)
+    assert _labels(G, 'power', 'svg') == ['0.5', '1']
+    assert _labels(G, 'power', 'matplotlib') == ['0.5', '1']
+
+
+@pytest.mark.parametrize('node_tag', (None, 'load', 'power'))
+def test_explicit_unitary_inflow_preserves_svg(node_tag):
+    implicit = WindFarmNetwork(cables=2, **_SITE)
+    explicit = WindFarmNetwork(cables=2, turbine_powers=[1, 1], **_SITE)
+    for wfn in (implicit, explicit):
+        wfn.update_from_terse_links(np.array([-1, -1]))
+    expected = svgplot(implicit.G, node_tag=node_tag)
+    actual = svgplot(explicit.G, node_tag=node_tag)
+    assert actual.data == expected.data
+    assert actual.metadata == expected.metadata
+
+
+# --- terminal symbols per power level ---
+
+# seven power levels, so that the shape list cycles; terminal 6 has the lowest power
+_LEVELS_POWERS = [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0]
+_LEVELS_SIDES = (0, 8, 7, 6, 5, 0, 8)
+_LEVELS_LABELS = [f'{p:g} MW' for p in sorted(_LEVELS_POWERS)]
+
+
+def _levels_G():
+    wfn = WindFarmNetwork(
+        cables=[(100, 1.0)],
+        turbinesC=np.array([[i * 1000.0, 0.0] for i in range(7)]),
+        substationsC=np.array([[3000.0, -1000.0]]),
+        power_unit='MW',
+        turbine_powers=_LEVELS_POWERS,
+    )
+    wfn.update_from_terse_links(np.full(7, -1))
+    return wfn.G
+
+
+def test_terminal_groups_follow_powers_set_order():
+    G = _levels_G()
+    groups = _terminal_groups(G)
+    assert [(sides, label, terminals) for sides, _, label, terminals in groups] == [
+        (sides, label, [6 - i])
+        for i, (sides, label) in enumerate(zip(_LEVELS_SIDES, _LEVELS_LABELS))
+    ]
+    for sides, scale, _, _ in groups:
+        assert scale == (
+            1.0
+            if sides == 0
+            else pytest.approx(
+                math.sqrt(2 * math.pi / (sides * math.sin(2 * math.pi / sides))),
+                abs=5e-5,
+            )
+        )
+    del G.graph['power_unit']
+    assert _terminal_groups(G)[0] == (0, 1.0, 'WTG 3', [6])
+    G = WindFarmNetwork(cables=2, **_SITE).L
+    assert _terminal_groups(G) == [(0, 1.0, 'WTG', [0, 1])]
+
+
+def _polygon_area(vertices):
+    x, y = np.asarray(vertices).T
+    return abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))) / 2
+
+
+def test_svgplot_terminal_shapes_per_power_level():
+    data = svgplot(_levels_G(), legend=True).data
+    hrefs = ['#wtg' if s == 0 else f'#wtg{s}' for s in _LEVELS_SIDES]
+    defs = data.split('<defs>', 1)[1].split('</defs>', 1)[0]
+    assert re.findall(r'<circle[^>]* id="wtg"', defs)
+    for sides in (8, 7, 6, 5):
+        (points,) = re.findall(rf'<polygon[^>]* id="wtg{sides}" points="([^"]+)"', defs)
+        assert len(points.split()) == 2 * sides
+        assert '-0.0' not in points
+        vertices = np.array(points.split(), dtype=float).reshape(-1, 2)
+        radius = _NODE_RADII[0]
+        # vertices are rounded to 0.1
+        assert _polygon_area(vertices) == pytest.approx(math.pi * radius**2, rel=0.01)
+    terminals = data.split('id="WTGgrp"', 1)[1].split('id="OSSgrp"', 1)[0]
+    assert sorted(re.findall(r'href="([^"]+)"', terminals)) == sorted(hrefs)
+    legend = data.split('id="legend"', 1)[1].split('<defs', 1)[0]
+    assert re.findall(r'href="(#wtg\d*)"', legend) == hrefs
+    assert re.findall(r'<text[^>]*>([^<]+)</text>', legend)[:7] == _LEVELS_LABELS
+
+
+def test_gplot_terminal_shapes_per_power_level():
+    fig, ax = plt.subplots(layout='constrained')
+    try:
+        gplot(_levels_G(), ax=ax, legend=True)
+        terminals = [
+            c
+            for c in ax.collections
+            if isinstance(c, PathCollection) and c.get_label() in _LEVELS_LABELS
+        ]
+        assert [c.get_label() for c in terminals] == _LEVELS_LABELS
+        circle = MarkerStyle('o')
+        circle_path = circle.get_path().transformed(circle.get_transform())
+        circle_area = math.pi * 0.5**2 * NODESIZE
+        for collection, sides in zip(terminals, _LEVELS_SIDES):
+            (path,) = collection.get_paths()
+            (size,) = collection.get_sizes()
+            if sides:
+                # closed regular polygon: one vertex per side plus the closing one
+                assert len(path.vertices) == sides + 1
+                area = _polygon_area(path.vertices[:-1]) * size
+                assert area == pytest.approx(circle_area, rel=1e-4)
+            else:
+                np.testing.assert_array_equal(path.vertices, circle_path.vertices)
+                assert size == NODESIZE
+    finally:
+        plt.close(fig)
