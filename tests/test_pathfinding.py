@@ -102,13 +102,20 @@ def _pathfinder_case_id(case: TerseLinks) -> str:
 
 @pytest.fixture(scope='module')
 def location_meshes():
-    """Load only the explicitly mapped sites used by the golden artifact."""
+    """Load only the explicitly mapped sites used by the golden artifact.
+
+    The goldens carry no capacity, so the sites are loaded without turbine power
+    and the routesets decode with one inflow unit per turbine.
+    """
     wanted = {
         case.nodeset_digest
         for case in PATHFINDER_CASES
         if case.nodeset_digest is not None
     }
-    return {digest: get_bundle_from_nodeset_digest(digest) for digest in wanted}
+    return {
+        digest: get_bundle_from_nodeset_digest(digest, read_powers=False)
+        for digest in wanted
+    }
 
 
 @pytest.mark.parametrize('case', PATHFINDER_CASES, ids=_pathfinder_case_id)

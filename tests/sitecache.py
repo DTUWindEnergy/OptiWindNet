@@ -18,6 +18,7 @@ from optiwindnet.importer import (
     LocationsRepository,
     load_repository,
 )
+from optiwindnet.loads import _clear_turbine_powers
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.synthetic import toyfarm
 from optiwindnet.transforming import as_single_root
@@ -182,19 +183,63 @@ def _bundle_cached(
     return SiteBundle(derived_handle, coordinate_digest, L, P, A)
 
 
+def _without_turbine_powers(bundle: SiteBundle) -> SiteBundle:
+    """Return a bundle whose ``L`` and ``A`` are copies without turbine power."""
+    L, A = bundle.L.copy(), bundle.A.copy()
+    _clear_turbine_powers(L)
+    _clear_turbine_powers(A)
+    return SiteBundle(bundle.handle, bundle.coordinate_digest, L, bundle.P, A)
+
+
 def get_bundle(
-    handle: str, *, single_root: bool = False, copy: bool = False
+    handle: str,
+    *,
+    single_root: bool = False,
+    copy: bool = False,
+    read_powers: bool = True,
 ) -> SiteBundle:
-    """Return the shared ``L/P/A`` bundle, or a mutation-safe deep copy."""
+    """Return the shared ``L/P/A`` bundle, or a mutation-safe deep copy.
+
+    Args:
+      handle: location handle.
+      single_root: whether to merge the location's roots into one.
+      copy: whether to return a deep copy instead of the shared bundle.
+      read_powers: whether ``L`` and ``A`` keep the turbine power the location
+        declares. If False, they are copies without it that share ``P`` with the
+        cached bundle, suiting callers whose capacities count turbines.
+
+    Returns:
+      ``L/P/A`` bundle of the location.
+    """
     L = get_location(handle, single_root=single_root)
     digest = fingerprint_coordinates(L.graph['VertexC'])[0]
     bundle = _bundle_cached(digest, L.graph['handle'], handle)
+    if not read_powers:
+        bundle = _without_turbine_powers(bundle)
     return deepcopy(bundle) if copy else bundle
 
 
 @cache
-def get_bundle_from_nodeset_digest(digest: bytes) -> SiteBundle:
-    """Return the location variant identified by a coordinate digest."""
+def get_bundle_from_nodeset_digest(
+    digest: bytes, *, read_powers: bool = True
+) -> SiteBundle:
+    """Return the location variant identified by a coordinate digest.
+
+    Args:
+      digest: coordinate fingerprint of the location variant.
+      read_powers: whether ``L`` and ``A`` keep the turbine power the location
+        declares. If False, they are copies without it that share ``P`` with the
+        cached bundle, suiting tests whose capacities count turbines.
+
+    Returns:
+      Shared ``L/P/A`` bundle of the location variant.
+    """
+    bundle = _powered_bundle_from_nodeset_digest(digest)
+    return bundle if read_powers else _without_turbine_powers(bundle)
+
+
+@cache
+def _powered_bundle_from_nodeset_digest(digest: bytes) -> SiteBundle:
     mapping = nodeset_digest_location_map()
     try:
         name = mapping[digest]

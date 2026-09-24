@@ -328,7 +328,8 @@ def _raise_timeout(signum, frame) -> None:
 
 
 def _execute(job: _Job) -> dict[str, Any]:
-    bundle = get_bundle(job.site, copy=True)
+    # case capacities count turbines, whatever power the site declares
+    bundle = get_bundle(job.site, copy=True, read_powers=False)
     task = Task(
         job.site,
         job.capacity,
@@ -616,7 +617,7 @@ def load_solution(db_path: Path | str, row_id: int) -> tuple[nx.Graph, SiteBundl
     conn.close()
     if row is None or row['linkbits'] is None:
         raise ValueError(f'results row {row_id} has no recorded solution')
-    bundle = get_bundle(row['site'], copy=True)
+    bundle = get_bundle(row['site'], copy=True, read_powers=False)
     A = bundle.A
     if linkset_id(A) != row['linkset_id']:
         raise ValueError(f'available links of {row["site"]!r} changed since the run')

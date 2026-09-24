@@ -6,7 +6,7 @@
 # https://commons.wikimedia.org/w/index.php?title=Data:{}&action=raw
 # where {} is:
 # Wind turbines Borssele I.map
-# Wind turbines Borssele III.map
+# Wind turbines Borssele II.map
 # Wind turbines Borssele III.map
 # Wind turbines Borssele IV.map
 # Wind turbines Borssele V.map
@@ -15,14 +15,26 @@ HANDLE: borssele
 
 OPERATOR:
   - Ørsted # 1 and 2
-  - Blauwwind II Consortium # 3, 4, 5
+  - Blauwwind II Consortium # 3 and 4
+  - Two Towers # 5
 
-# Borssele 1 and 2: Siemens Gamesa
-# Borssele 3, 4 and 5: Vestas
+# TURBINES lists the sub-areas in order, so the quantities below follow it.
 TURBINE:
-  make: [Siemens Gamesa, Vestas]
-  model: [SG 8.0-167 DD, V164-9.5]
-  power_MW: [8, 9.5]
+  # Borssele I and II: T1-01..T1-47, T2-01..T2-47
+  - make: Siemens Gamesa
+    model: SG 8.0-167 DD
+    power_MW: 8
+    qty: 94
+  # Borssele III and IV: T3-01..T3-37, T4-01..T4-40
+  - make: Vestas
+    model: V164-9.5
+    power_MW: 9.5
+    qty: 77
+  # Borssele V, the innovation site: T5-01, T5-02
+  - make: Vestas
+    model: V164-9.5
+    power_MW: 9.5
+    qty: 2
 
 LANDSCAPE_ANGLE: 44.1
 
