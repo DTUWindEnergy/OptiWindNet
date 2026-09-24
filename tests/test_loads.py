@@ -5,6 +5,7 @@
 
 import itertools
 import math
+from fractions import Fraction
 
 import networkx as nx
 import pytest
@@ -16,8 +17,10 @@ from optiwindnet.loads import (
     calcload,
     split_rings_and_calc_loads,
     terminal_inflow,
+    validate_terminal_power,
 )
 from optiwindnet.MILP import Topology
+from optiwindnet.presenting import _nominal_loads
 from optiwindnet.validating import validate_topology
 
 from .helpers import tiny_wfn
@@ -156,3 +159,75 @@ def test_terminal_inflow_reports_only_the_departures_from_unitary_inflow():
 
     assert terminal_inflow(S) == {1: 2, 3: 3}
     assert terminal_inflow(_chain_S(4)) == {}
+
+
+def test_exact_nominal_loads_scale_integer_loads_without_touching_the_graph(
+    monkeypatch,
+):
+    G = _chain_S(2, (2, 3))
+    G.graph['power_per_inflow'] = Fraction(1, 2)
+    validate_terminal_power(G)
+    calcload(G)
+    original = G.copy()
+
+    def unexpected_traversal(*args, **kwargs):
+        pytest.fail('Exact nominal loads must use existing integer loads.')
+
+    monkeypatch.setattr('optiwindnet.loads._bfs_loads_walk', unexpected_traversal)
+    nominal = _nominal_loads(G)
+    assert nominal == {-1: Fraction(5, 2), 0: Fraction(5, 2), 1: Fraction(3, 2)}
+    assert nx.utils.graphs_equal(G, original)
+
+
+def test_inexact_nominal_loads_use_partial_declarations_and_refresh():
+    G = _chain_S(2, (1, 1))
+    G.nodes[0]['power'] = Fraction(101, 100)
+    validate_terminal_power(G)
+    assert G.graph['power_quantization_inexact'] is True
+    calcload(G)
+    assert _nominal_loads(G) == {-1: Fraction(201, 100), 0: Fraction(201, 100), 1: 1}
+    assert G[-1][0]['load_nominal'] == Fraction(201, 100)
+    assert G[0][1]['load_nominal'] == 1
+
+    G.remove_edge(0, 1)
+    G.add_edge(-1, 1)
+    calcload(G)
+    calcload(G, nominal=True)
+    assert G[-1][0]['load_nominal'] == Fraction(101, 100)
+    assert G[-1][1]['load_nominal'] == 1
+    assert G.nodes[-1]['load_nominal'] == Fraction(201, 100)
+    assert G.graph['max_load'] == 1
+
+
+def test_inexact_flag_detects_errors_that_cancel():
+    G = _chain_S(2, (1, 1))
+    G.nodes[0]['power'] = Fraction(101, 100)
+    G.nodes[1]['power'] = Fraction(99, 100)
+    validate_terminal_power(G)
+    assert G.graph['power_quantization_inexact'] is True
+    calcload(G)
+    calcload(G, nominal=True)
+    assert G.nodes[-1]['load_nominal'] == 2
+    assert G[0][1]['load_nominal'] == Fraction(99, 100)
+
+    G.nodes[0]['power'] = G.nodes[1]['power'] = Fraction(1)
+    validate_terminal_power(G)
+    assert G.graph['power_quantization_inexact'] is False
+
+
+def test_nominal_calcload_refreshes_and_falls_back_to_inflow():
+    G = _chain_S(2, (2, 3))
+    G.graph['power_per_inflow'] = Fraction(1, 2)
+    calcload(G)
+    nx.set_node_attributes(G, {0: Fraction(101, 100), 1: Fraction(149, 100)}, 'power')
+    calcload(G, nominal=True)
+    G.nodes[1]['power'] = Fraction(3, 2)
+
+    calcload(G, nominal=True)
+
+    assert G[-1][0]['load_nominal'] == Fraction(251, 100)
+    assert G[-1][0]['load'] == G.graph['max_load'] == 5
+    # an undeclared terminal is worth its inflow times power_per_inflow
+    del G.nodes[1]['power']
+    calcload(G, nominal=True)
+    assert G[-1][0]['load_nominal'] == Fraction(101, 100) + 3 * Fraction(1, 2)

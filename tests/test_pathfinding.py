@@ -478,6 +478,7 @@ def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
             has_loads=True,
             topology=Topology.RADIAL,
         )
+        S.add_nodes_from(range(T))
         S.add_node(-1, load=2)
         S.add_node(gate, load=2, subtree=0)
         S.add_node(leaf, load=1, subtree=0)

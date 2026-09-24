@@ -387,6 +387,7 @@ def test_G_from_S_expands_a_contoured_ring_zero_load_link():
         creator='synthetic',
     )
     S.add_nodes_from(range(-R, 0), load=0)
+    S.add_nodes_from(range(T))
     S.add_node(u, load=1, subtree=0)
     S.add_node(v, load=1, subtree=0)
     S.add_edge(root, u, load=1, reverse=False)

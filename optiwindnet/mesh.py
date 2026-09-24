@@ -23,6 +23,7 @@ from .geometric import (
     triangle_AR,
 )
 from .identity import linkset_id
+from .loads import validate_terminal_power
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset')
 
@@ -455,6 +456,7 @@ def make_planar_embedding(
     # O) Calculate the area of the concave hull.
     # P) Set A's graph attributes.
 
+    validate_terminal_power(L)
     R, T, B, VertexCʹ = (L.graph[k] for k in ['R', 'T', 'B', 'VertexC'])
     border = L.graph.get('border', ())
     obstacles = L.graph.get('obstacles', ())
@@ -1631,6 +1633,9 @@ def make_planar_embedding(
     landscape_angle = L.graph.get('landscape_angle')
     if landscape_angle is not None:
         A.graph['landscape_angle'] = landscape_angle
+    for power_key in ('power_per_inflow', 'power_unit', 'powers_set'):
+        if power_key in L.graph:
+            A.graph[power_key] = L.graph[power_key]
     # products:
     # P: PlanarEmbedding
     # A: Graph (carries the updated VertexC)

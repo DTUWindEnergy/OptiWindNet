@@ -4,8 +4,10 @@
 import importlib
 import logging
 import warnings
-from collections.abc import Iterator
-from itertools import chain, pairwise
+from bisect import bisect_left
+from collections.abc import Iterator, Sequence
+from fractions import Fraction
+from itertools import chain
 
 import networkx as nx
 import numba as nb
@@ -14,6 +16,7 @@ from bitarray import bitarray
 
 from .converting import _rings_from_S
 from .geometric import angle_helpers, rotate
+from .loads import _rationalize, calcload
 from .types import Topology
 
 _lggr = logging.getLogger(__name__)
@@ -72,45 +75,62 @@ def __dir__() -> list[str]:
 
 
 def assign_cables(
-    G: nx.Graph, cables: list[tuple[int, float | int]], currency: str = '€'
+    G: nx.Graph,
+    cables: Sequence[tuple[int | float | Fraction, float | int]],
+    currency: str = '€',
 ):
     """Assign a cable type to each edge of ``G`` and update attribute ``'cost'``.
 
     Each edge is assigned the cheapest cable type that can carry its load. The
     edge attribute ``'cable'`` is the index in ``cables`` of the type chosen.
+    Capacities are nominal power if ``G`` has ``'capacity_nominal'``, compared
+    with nominal loads, and inflow otherwise, compared with integer loads.
 
     Changes ``G`` in place.
 
     Args:
       G: networkx graph with edges having a ``'load'`` attribute (use ``calcload(G)``)
       cables: [(«capacity», «cost»), ...] in increasing capacity order (each
-        cable entry must be a tuple)
+        cable entry must be a tuple).
       currency: symbol representing the unit of the cost
+
+    Raises:
+      ValueError: the largest capacity is smaller than the largest load.
     """
-    capacity = max(cables)[0]
-    if G.graph['max_load'] > capacity:
-        raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
-    run_len_ = (b[0] - a[0] for a, b in pairwise(chain(((0,),), cables)))
-    kind = [k for k, run_len in enumerate(run_len_) for _ in range(run_len)]
-    cost = [cables[k][1] for k in kind]
-    has_cost = sum(cost) > 0
+    graph = G.graph
+    has_cost = any(cost for _, cost in cables)
+    nominal = 'capacity_nominal' in graph
+    capacities = [
+        _rationalize(capacity) if nominal and isinstance(capacity, float) else capacity
+        for capacity, _ in cables
+    ]
+    inexact = nominal and graph.get('power_quantization_inexact', False)
+    if inexact:
+        calcload(G, nominal=True)
+    scale = Fraction(graph.get('power_per_inflow', 1)) if nominal else 1
     for _, _, data in G.edges(data=True):
-        if data['load'] == 0:
-            # ring zero-load link ('split'): a real cable with no current — assign the
-            # thinnest cable type, but no current-carrying capacity is consumed.
-            data['cable'] = 0
-            if has_cost:
-                data['cost'] = data['length'] * cost[0]
-            continue
-        k = data['load'] - 1
-        data['cable'] = kind[k]
+        load = data['load']
+        # ring zero-load link ('split'): a real cable with no current — assign the
+        # thinnest cable type, but no current-carrying capacity is consumed.
+        k = (
+            0
+            if load == 0
+            else bisect_left(
+                capacities, data['load_nominal'] if inexact else load * scale
+            )
+        )
+        if k == len(cables):
+            raise ValueError(
+                'Maximum cable capacity is smaller than maximum load in G.'
+            )
+        data['cable'] = k
         if has_cost:
-            data['cost'] = data['length'] * cost[k]
-    G.graph['cables'] = cables
+            data['cost'] = data['length'] * cables[k][1]
+    graph['cables'] = cables
     if has_cost:
-        G.graph['currency'] = currency
-    if 'capacity' not in G.graph:
-        G.graph['capacity'] = capacity
+        graph['currency'] = currency
+    if 'capacity' not in graph and not nominal:
+        graph['capacity'] = capacities[-1]
 
 
 def update_lengths(G):

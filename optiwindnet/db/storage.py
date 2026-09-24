@@ -5,6 +5,7 @@ import base64
 import io
 import json
 from collections.abc import Mapping, Sequence
+from fractions import Fraction
 from functools import partial
 from hashlib import sha256
 from itertools import chain, pairwise
@@ -15,7 +16,7 @@ import networkx as nx
 import numpy as np
 
 from ..identity import fingerprint_coordinates
-from ..loads import calcload
+from ..loads import calcload, terminal_inflow, validate_terminal_power
 from ..terse import LinkScope, TerseLinks
 from ..types import Topology
 from ..utils import make_handle
@@ -99,6 +100,9 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
     # `misc` round-trips through JSON, so a stored topology arrives as a plain
     # str: withhold it here and restore it as the enum below
     stored_topology = misc.pop('topology', None)
+    for key in ('power_per_inflow', 'capacity_nominal'):
+        if key in misc:
+            misc[key] = Fraction(misc[key])
     G.graph.update(
         C=routeset.C,
         D=routeset.D,
@@ -273,11 +277,29 @@ def oddtypes_to_serializable(obj):
         return int(obj)
     elif isinstance(obj, (np.floating,)):
         return float(obj)
+    elif isinstance(obj, Fraction):
+        # an exact power_per_inflow would lose its last digits as a JSON number
+        return str(obj)
     else:
         return obj
 
 
 def pack_G(G: nx.Graph) -> dict[str, Any]:
+    """Return graph data as fields of a :class:`RouteSet` record.
+
+    Raises:
+        NotImplementedError: unequal terminal power or nonunitary terminal
+            inflow cannot be stored: a record keeps no terminal power, so the
+            routeset would be read back with loads of one unit per terminal,
+            below what its cables carry.
+    """
+    validate_terminal_power(G)
+    if terminal_inflow(G) or 'powers_set' in G.graph:
+        raise NotImplementedError(
+            'a routeset whose terminals declare unequal power or an inflow other '
+            'than 1 cannot be stored: the record keeps no terminal power, so its '
+            'loads would read back as one unit per terminal'
+        )
     R, T = (G.graph[k] for k in 'RT')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     terse = TerseLinks.from_routeset(G)

@@ -128,7 +128,7 @@ def as_single_root(Lʹ: nx.Graph) -> nx.Graph:
 def as_normalized(
     Aʹ: nx.Graph, *, offset: CoordPair | None = None, scale: float | None = None
 ) -> nx.Graph:
-    """Make a shallow copy of an instance and shift and scale its geometry.
+    """Make a copy of an instance and shift and scale its geometry.
 
     Coordinates are subtracted by graph attribute ``'norm_offset'``.
     All lengths and coordinates are multiplied by graph attribute ``'norm_scale'``.
