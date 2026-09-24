@@ -24,11 +24,11 @@ from ..converting import G_from_S, S_from_linkbits
 from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
 from ..interarraylib import directed_links
 from ..loads import (
-    _ring_split_position,
-    bfs_subtree_loads,
     calcload,
     split_rings_and_calc_loads,
     terminal_inflow,
+    total_inflow,
+    validate_terminal_power,
 )
 from ..pathfinding import PathFinder
 from ..types import Topology
@@ -95,6 +95,10 @@ class FeederLimit(StrEnum):
     bound) and ``'exactly'`` (an exact count) require the additional kwarg
     ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
     count is pinned to a single value, i.e. ``'minimum'`` or ``'exactly'``.
+
+    Nonunitary terminal inflow rule out ``'minimum'`` and the ``'min_plus*'`` modes,
+    whose bounds come from a minimum feeder count that indivisible terminal
+    inflow may not reach.
     """
 
     UNLIMITED = auto()
@@ -105,6 +109,12 @@ class FeederLimit(StrEnum):
     MIN_PLUS2 = auto()
     MIN_PLUS3 = auto()
     DEFAULT = UNLIMITED
+
+
+_FEEDER_LIMITS_FROM_MINIMUM = (
+    FeederLimit.MINIMUM, FeederLimit.MIN_PLUS1,
+    FeederLimit.MIN_PLUS2, FeederLimit.MIN_PLUS3,
+)  # fmt: skip
 
 
 def feeder_and_load_bounds(
@@ -137,6 +147,11 @@ def feeder_and_load_bounds(
     ``feeders_lb``, the count is pinned and callers should emit an equality
     constraint.
 
+    Nonunitary terminal inflow make ``min_feeders`` unattainable in general -- it
+    ignores that a terminal's inflow is indivisible, which is a bin-packing
+    question -- so the ``feeder_limit`` modes that derive their bounds from it
+    are rejected rather than pinning the model to an infeasible count.
+
     Balanced subtrees (loads differing at most by one unit) are only expressible
     with a pinned feeder count ``F``, in which case the loads must lie in
     ``{inflow_total // F, ceil(inflow_total / F)}``. A load bound of ``None`` means
@@ -150,6 +165,12 @@ def feeder_and_load_bounds(
     """
     if inflow_total is None:
         inflow_total = T
+    elif inflow_total != T and feeder_limit in _FEEDER_LIMITS_FROM_MINIMUM:
+        raise ValueError(
+            f'feeder_limit "{feeder_limit.value}" derives the feeder count from '
+            'the minimum, which nonunitary terminal inflow may not attain; use '
+            '"unlimited", "exactly" or "specified" instead'
+        )
     if feeders_per_subtree != 1 and max_feeders:
         if max_feeders % feeders_per_subtree:
             raise ValueError(
@@ -173,9 +194,7 @@ def feeder_and_load_bounds(
         if max_feeders < min_feeders:
             raise ValueError('max_feeders is below the minimum necessary')
         feeders_lb, feeders_ub = min_feeders, max_feeders
-    elif feeder_limit in (
-        FeederLimit.MIN_PLUS1, FeederLimit.MIN_PLUS2, FeederLimit.MIN_PLUS3,
-    ):  # fmt: skip
+    elif feeder_limit in _FEEDER_LIMITS_FROM_MINIMUM[1:]:
         plus = int(feeder_limit.value[-1])
         feeders_lb, feeders_ub = min_feeders, min_feeders + plus
     else:
@@ -447,6 +466,30 @@ class SolutionInfo:
         return f'SolutionInfo(\n{body})'
 
 
+def check_inflow_support(A: nx.Graph, topology: Topology) -> int:
+    """Validate terminal power and return total inflow for the model.
+
+    A RINGED model splits each ring into two arms of at most ``capacity`` each,
+    which it expresses by doubling the capacity of a single path. That holds only
+    while every terminal weighs the same: with nonunitary inflow, a path within twice
+    the capacity need not divide into two arms that each fit within it, so the
+    model would admit rings that no pair of cables can carry.
+
+    Raises:
+        NotImplementedError: ``topology`` is RINGED and the terminals declare an
+          inflow other than one unit.
+    """
+    validate_terminal_power(A)
+    total = total_inflow(A)
+    if topology is Topology.RINGED and total != A.graph['T']:
+        raise NotImplementedError(
+            "a RINGED model cannot honour a terminal 'inflow' other than 1: a ring "
+            'within twice the capacity is not guaranteed to split into two arms '
+            'that each fit within it'
+        )
+    return total
+
+
 def check_model_enums(
     topology: Topology, feeder_route: FeederRoute, feeder_limit: FeederLimit
 ) -> None:
@@ -522,71 +565,6 @@ def warmstart_links(
             metadata.flow_[key] if key in metadata.flow_ else None,  # noqa: SIM401
             flow,
         )
-
-
-def _finalize_ringed_mip_S(
-    S: nx.Graph,
-    closing_links: list[tuple[int, int]],
-    A: nx.Graph | None,
-) -> int:
-    """Close decoded MILP paths into canonical rings and recalculate their loads.
-
-    Reached only from :meth:`Solver._topology_from_mip_flows`. Both the split
-    position (:func:`~optiwindnet.loads._ring_split_position`) and the load walk
-    (:func:`~optiwindnet.loads.bfs_subtree_loads`) count one unit per terminal, so
-    the loads recomputed here drop any nonunitary ``'inflow'`` that routed the
-    caller through the flow variables in the first place. Unitary solutions go
-    to :func:`~optiwindnet.loads.split_rings_and_calc_loads` instead, which closes
-    the rings the link bits already carry.
-    """
-    rings: list[tuple[int, int, int, int, int, int]] = []
-    for close_root, tail in closing_links:
-        subtree = S.nodes[tail]['subtree']
-        ordered = [tail]
-        prev, curr = None, tail
-        while True:
-            nxts = [n for n in S[curr] if n != prev]
-            if len(nxts) != 1:
-                raise ValueError(
-                    f'RINGED MILP path at terminal {curr} has {len(nxts)} continuations'
-                )
-            nxt = nxts[0]
-            if nxt < 0:
-                head_root = nxt
-                break
-            ordered.append(nxt)
-            prev, curr = curr, nxt
-        ordered.reverse()
-        head, n = ordered[0], len(ordered)
-        if n == 1:
-            if close_root != head_root:
-                S.add_edge(close_root, tail, load=0, reverse=False)
-        else:
-            m = _ring_split_position(ordered, A)
-            u, v = ordered[m - 1], ordered[m]
-            S[u][v].update(load=0, reverse=False)
-            # bfs_subtree_loads overwrites this placeholder with the arm load.
-            S.add_edge(close_root, tail, load=1, reverse=False)
-        rings.append((subtree, head_root, head, close_root, tail, n))
-
-    for nodeD in S.nodes.values():
-        nodeD.pop('load', None)
-    roots = set(range(-S.graph['R'], 0))
-    visited = roots.copy()
-    for root in roots:
-        S.nodes[root]['load'] = 0
-    for subtree, head_root, head, close_root, tail, n in rings:
-        bfs_subtree_loads(S, head_root, [head], subtree, visited)
-        if n > 1:
-            bfs_subtree_loads(S, close_root, [tail], subtree, visited)
-
-    max_load = max(
-        (edgeD['load'] for u, v, edgeD in S.edges(data=True) if u < 0 or v < 0),
-        default=0,
-    )
-    S.graph['max_load'] = max_load
-    S.graph['has_loads'] = True
-    return max_load
 
 
 class Solver(abc.ABC):
@@ -773,28 +751,23 @@ class Solver(abc.ABC):
         )
 
     def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
-        """Decode canonical link bits into a topology over the model's ``A``.
+        """Decode link bits and calculate loads from terminal inflow.
 
-        For RADIAL and BRANCHED topologies, the selected links and terminal inflow
-        determine the loads. RINGED topologies with nonunitary inflow use
-        :meth:`_topology_from_mip_flows`, since ring splitting uses terminal counts.
+        A RINGED model only ever carries unitary inflow (:func:`check_inflow_support`
+        refuses the rest), which is what its terminal-counting arm split needs.
         """
         metadata = self.metadata
         topology = metadata.model_options['topology']
         A = self.A
-        inflow_ = terminal_inflow(A)
-        if inflow_ and topology is Topology.RINGED:
-            S = self._topology_from_mip_flows()
+        S = S_from_linkbits(linkbits, A)
+        # Preserve terminal inflow so validation can reproduce the loads.
+        nx.set_node_attributes(S, terminal_inflow(A), 'inflow')
+        if topology is Topology.RINGED:
+            # the bits close every ring: this only splits the arms and
+            # derives their loads, in the form every ringed producer uses
+            split_rings_and_calc_loads(S, A)
         else:
-            S = S_from_linkbits(linkbits, A)
-            # Preserve terminal inflow so validation can reproduce the loads.
-            nx.set_node_attributes(S, inflow_, 'inflow')
-            if topology is Topology.RINGED:
-                # the bits close every ring: this only splits the arms and
-                # derives their loads, in the form every ringed producer uses
-                split_rings_and_calc_loads(S, A)
-            else:
-                calcload(S)
+            calcload(S)
         S.graph.update(
             topology=topology,
             capacity=metadata.capacity,
@@ -804,62 +777,6 @@ class Solver(abc.ABC):
             creator='MILP.' + self.name,
             solver_details={},
         )
-        return S
-
-    def _topology_from_mip_flows(self) -> nx.Graph:
-        """Build the topology from the solver's flow variables.
-
-        Used for RINGED models with nonunitary terminal inflow. The flows define the
-        path forest and subtree IDs. :func:`_finalize_ringed_mip_S` closes the rings
-        and recalculates loads at one unit per terminal, discarding declared inflow.
-
-        Supporting nonunitary inflow requires changes to the ring model as well as
-        the decoder: doubling cable capacity does not guarantee that a ring can
-        be split into two arms whose loads each fit within the cable capacity.
-        """
-        metadata = self.metadata
-        topology = metadata.model_options['topology']
-        R = metadata.R
-        S = nx.Graph(R=R, T=metadata.T)
-        S.add_nodes_from(range(-R, 0))
-        # Get active links and if flow is reversed (i.e. from small to big)
-        rev_from_link = {
-            (u, v): u < v
-            for (u, v), var in metadata.link_.items()
-            if self._link_val(var)
-        }
-        flow_links = {
-            link: reverse
-            for link, reverse in rev_from_link.items()
-            if link in metadata.flow_
-        }
-        S.add_weighted_edges_from(
-            ((u, v, self._flow_val(metadata.flow_[u, v])) for u, v in flow_links),
-            weight='load',
-        )
-        nx.set_edge_attributes(S, flow_links, name='reverse')
-        # Propagate the decoded flow-tree attributes for every topology. A RINGED
-        # model is a path forest until its flowless starsʹ links are restored.
-        subtree = -1
-        max_load = 0
-        for r in range(-R, 0):
-            for u, v in nx.edge_dfs(S, r):
-                S.nodes[v]['load'] = S[u][v]['load']
-                if u == r:
-                    subtree += 1
-                S.nodes[v]['subtree'] = subtree
-            rootload = 0
-            for nbr in S.neighbors(r):
-                subtree_load = S.nodes[nbr]['load']
-                max_load = max(max_load, subtree_load)
-                rootload += subtree_load
-            S.nodes[r]['load'] = rootload
-        if topology is Topology.RINGED:
-            closing_links = [
-                link for link in rev_from_link if link not in metadata.flow_
-            ]
-            max_load = _finalize_ringed_mip_S(S, closing_links, self.A)
-        S.graph.update(max_load=max_load, has_loads=True)
         return S
 
 

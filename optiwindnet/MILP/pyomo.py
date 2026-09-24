@@ -30,6 +30,7 @@ from ._core import (
     Solver,
     Topology,
     canonical_linksets,
+    check_inflow_support,
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
@@ -321,7 +322,7 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    inflow_total = sum(w for _, w in A_terminals.nodes(data='inflow', default=1))
+    inflow_total = check_inflow_support(A, topology)
 
     # For RINGED, double the internal capacity so each ring can hold up to
     # 2×capacity turbines (capacity per arm); store original for metadata.
@@ -364,7 +365,8 @@ def make_min_length_model(
     m.link_ = pyo.Var(m.linkset, domain=pyo.Binary, initialize=0)
 
     def flow_bounds(m, u, v):
-        return (0, (m.k if v < 0 else m.k - 1))
+        # a link into v carries at most what leaves v less v's own inflow
+        return (0, (m.k if v < 0 else m.k - A.nodes[v].get('inflow', 1)))
 
     # continuous: cons_single_out_link + cons_flow_conserv pin flows to integers.
     m.flow_ = pyo.Var(
@@ -449,14 +451,20 @@ def make_min_length_model(
         m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
         rule=(
             lambda m, u, v: (
-                m.flow_[(u, v)] <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
+                m.flow_[(u, v)]
+                <= m.link_[(u, v)]
+                * (m.k if v < 0 else m.k - A.nodes[v].get('inflow', 1))
             )
         ),
         name='flow_ub',
     )
     m.cons_flow_lb = pyo.Constraint(
         m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
-        rule=(lambda m, u, v: m.link_[(u, v)] <= m.flow_[(u, v)]),
+        rule=(
+            lambda m, u, v: (
+                m.link_[(u, v)] * A.nodes[u].get('inflow', 1) <= m.flow_[(u, v)]
+            )
+        ),
         name='flow_lb',
     )
 

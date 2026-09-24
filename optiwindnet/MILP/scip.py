@@ -26,6 +26,7 @@ from ._core import (
     Solver,
     Topology,
     canonical_linksets,
+    check_inflow_support,
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
@@ -193,7 +194,7 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    inflow_total = sum(w for _, w in A_terminals.nodes(data='inflow', default=1))
+    inflow_total = check_inflow_support(A, topology)
 
     # For RINGED, double the internal capacity; store original for metadata.
     ring_capacity = capacity
@@ -236,8 +237,10 @@ def make_min_length_model(
     if topology is Topology.RINGED:
         link_ |= {(r, t): m.addVar(f'link_r{-r}~{t}', 'B') for r, t in starsʹ}
     # 'M' (implied integral): single_out_link + flow_conserv pin flows to integers.
+    # a link into v carries at most what leaves v less v's own inflow
     flow_ = {
-        (u, v): m.addVar(f'flow_{u}~{v}', 'M', lb=0, ub=k - 1) for u, v in chain(E, Eʹ)
+        (u, v): m.addVar(f'flow_{u}~{v}', 'M', lb=0, ub=k - A.nodes[v].get('inflow', 1))
+        for u, v in chain(E, Eʹ)
     }
     flow_ |= {(t, r): m.addVar(f'flow_{t}~r{-r}', 'M', lb=0, ub=k) for t, r in stars}
 
@@ -290,11 +293,15 @@ def make_min_length_model(
     # bind flow to link activation (only for edges with flow variables)
     for t, n in flowset:
         _n = str(n) if n >= 0 else f'r{-n}'
+        head_room = k if n < 0 else k - A.nodes[n].get('inflow', 1)
         m.addCons(
-            flow_[t, n] <= link_[t, n] * (k if n < 0 else (k - 1)),
+            flow_[t, n] <= link_[t, n] * head_room,
             name=f'flow_ub_{t}~{_n}',
         )
-        m.addCons(flow_[t, n] >= link_[t, n], name=f'flow_lb_{t}~{_n}')
+        m.addCons(
+            flow_[t, n] >= link_[t, n] * A.nodes[t].get('inflow', 1),
+            name=f'flow_lb_{t}~{_n}',
+        )
 
     # flow conservation with possibly nonunitary terminal inflow
     for t in _T:

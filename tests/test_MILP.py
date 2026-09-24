@@ -73,6 +73,25 @@ def _build_toy_ringed_then_offer_a_str(module_name):
     return ring_vars, stored_enum, 'accepted'
 
 
+def _build_ringed_and_branched_weighted(module_name):
+    """Build the toy with one heavier terminal, RINGED then BRANCHED.
+
+    Returns the RINGED refusal message; reaching the BRANCHED build at all shows
+    that only the ring model objects to the declared inflow.
+    """
+    make_min_length_model = importlib.import_module(module_name).make_min_length_model
+    A = get_bundle('toy').A.copy()
+    nx.set_node_attributes(A, {0: 2}, 'inflow')
+    try:
+        make_min_length_model(A, _CAPACITY, topology=Topology.RINGED)
+    except NotImplementedError as exc:
+        refusal = str(exc)
+    else:
+        refusal = 'accepted'
+    make_min_length_model(A, _CAPACITY, topology=Topology.BRANCHED)
+    return refusal
+
+
 def _two_root_toy_A():
     """Return toy's available links with a synthetic second root-distance column."""
     A = get_bundle('toy').A.copy()
@@ -701,7 +720,6 @@ def test_forest_mip_decoder_derives_loads_from_terminal_inflow(topology, inflow)
 
     class FakeSolver:
         name = 'fake'
-        _topology_from_mip_flows = core.Solver._topology_from_mip_flows
         flow_reads = 0
 
         def __init__(self):
@@ -753,9 +771,9 @@ def test_forest_mip_decoder_derives_loads_from_terminal_inflow(topology, inflow)
     assert S.graph['has_loads']
 
 
-@pytest.mark.parametrize('inflow', ((1, 1, 1), (2, 3, 1)))
-def test_ringed_mip_decoder_reads_flows_only_for_nonunitary_inflow(inflow):
-    """Nonunitary inflow selects the flow-based ring decoder."""
+def test_ringed_mip_decoder_never_reads_flow_variables():
+    """A ring is closed by its link bits and split by terminal count."""
+    inflow = (1, 1, 1)
     from types import SimpleNamespace
 
     n, R, root = 3, 1, -1
@@ -776,7 +794,6 @@ def test_ringed_mip_decoder_reads_flows_only_for_nonunitary_inflow(inflow):
 
     class FakeSolver:
         name = 'fake'
-        _topology_from_mip_flows = core.Solver._topology_from_mip_flows
         flow_reads = 0
 
         def __init__(self):
@@ -808,10 +825,8 @@ def test_ringed_mip_decoder_reads_flows_only_for_nonunitary_inflow(inflow):
         linkbits,
     )
 
-    unitary = set(inflow) == {1}
-    assert (fake.flow_reads == 0) is unitary
+    assert fake.flow_reads == 0
     assert_topology(S, Topology.RINGED, fake.metadata.capacity)
-    # Both decoding paths split by terminal count and return unitary loads.
     assert S.nodes[root]['load'] == n
     assert 'inflow' not in S.nodes[0]
 
@@ -1773,14 +1788,69 @@ def test_feeder_bounds_scale_with_total_inflow_not_terminal_count():
     )  # fmt: skip
     # balanced load bounds are in inflow units too: 12 over 4 feeders
     assert feeder_and_load_bounds(
-        T=6, capacity=3, feeder_limit=FeederLimit.MINIMUM,
-        max_feeders=0, balanced=True, inflow_total=12,
+        T=6, capacity=3, feeder_limit=FeederLimit.EXACTLY,
+        max_feeders=4, balanced=True, inflow_total=12,
     )[2:] == (3, None)  # fmt: skip
     # Each feeder needs a terminal, regardless of total inflow.
     with pytest.raises(ValueError, match='above the number of terminals'):
         feeder_and_load_bounds(
             T=6, capacity=3, feeder_limit=FeederLimit.EXACTLY,
             max_feeders=7, balanced=False, inflow_total=12,
+        )  # fmt: skip
+
+
+@pytest.mark.parametrize('topology', ('radial', 'branched', 'ringed'))
+def test_only_a_ringed_model_refuses_unequal_terminal_inflow(topology):
+    """A ring within twice the capacity need not split into two arms that fit."""
+    from optiwindnet.MILP._core import check_inflow_support
+
+    A = nx.Graph(T=6)
+    A.add_nodes_from(range(6))
+    A.nodes[0]['inflow'] = 4
+    if topology == 'ringed':
+        with pytest.raises(NotImplementedError, match='RINGED model cannot honour'):
+            check_inflow_support(A, Topology(topology))
+    else:
+        assert check_inflow_support(A, Topology(topology)) == 9
+    A.nodes[0]['inflow'] = 1
+    assert check_inflow_support(A, Topology(topology)) == 6
+
+
+@pytest.mark.parametrize(
+    ('module_name', 'solver_name'),
+    [
+        ('optiwindnet.MILP.ortools', 'ortools.cp_sat'),
+        ('optiwindnet.MILP.scip', 'scip'),
+        ('optiwindnet.MILP.pyomo', 'highs'),
+    ],
+    ids=('ortools', 'scip', 'pyomo'),
+)
+def test_milp_builders_refuse_a_ringed_model_of_nonunit_inflow(
+    run_isolated, module_name, solver_name
+):
+    result = run_isolated(
+        solver_name, _build_ringed_and_branched_weighted, (module_name,), 60
+    )
+    if isinstance(result, BaseException):
+        if solver_unavailable(result):
+            pytest.skip(f'{solver_name} unavailable: {result}')
+        raise result
+    assert 'RINGED model cannot honour' in result
+
+
+@pytest.mark.parametrize(
+    'feeder_limit', ('minimum', 'min_plus1', 'min_plus2', 'min_plus3')
+)
+def test_feeder_bounds_reject_minimum_derived_limits_for_nonunit_inflow(feeder_limit):
+    """ceil(W/κ) ignores that a terminal's inflow cannot be split among feeders."""
+    from optiwindnet.MILP._core import FeederLimit, feeder_and_load_bounds
+
+    # three terminals of 2 units each and a capacity of 3: ceil(6/3) = 2 feeders,
+    # yet no two of those terminals fit a single cable, so 3 feeders are needed
+    with pytest.raises(ValueError, match='derives the feeder count from the minimum'):
+        feeder_and_load_bounds(
+            T=3, capacity=3, feeder_limit=FeederLimit(feeder_limit),
+            max_feeders=0, balanced=False, inflow_total=6,
         )  # fmt: skip
 
 
