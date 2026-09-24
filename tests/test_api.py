@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import subprocess
+import sys
 from pathlib import Path
 from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from matplotlib.axes import Axes
 
 from optiwindnet import api, plotting
 from optiwindnet.api import (
@@ -17,6 +20,7 @@ from optiwindnet.api import (
     WindFarmNetwork,
 )
 from optiwindnet.MILP import ModelOptions
+from optiwindnet.svg import SvgRepr
 
 from .helpers import tiny_wfn
 
@@ -639,11 +643,21 @@ def test_plot_original_vs_buffered_without_prior_buffer_logs_message(caplog):
     assert 'No buffering is performed' in caplog.text
 
 
-def test_add_buffer_then_plot_original_vs_buffered_returns_axes():
+def test_add_buffer_then_plot_original_vs_buffered():
     wfn = tiny_wfn()
     wfn.add_buffer(5.0)
-    ax = wfn.plot_original_vs_buffered()
-    assert ax is not None
+    assert isinstance(wfn.plot_original_vs_buffered(), SvgRepr)
+    ax = wfn.plot_original_vs_buffered(ax=None)
+    assert isinstance(ax, Axes)
+    plt.close('all')
+
+
+def test_import_api_does_not_load_matplotlib():
+    code = (
+        'import sys, optiwindnet.api; '
+        "sys.exit(any(m.startswith('matplotlib') for m in sys.modules))"
+    )
+    assert subprocess.run([sys.executable, '-c', code], check=False).returncode == 0
 
 
 def test_merge_obstacles_into_border_idempotent_smoke():

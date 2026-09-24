@@ -5,9 +5,7 @@ import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Polygon as MplPolygon
 from shapely.geometry import Polygon
 from shapely.validation import explain_validity
 
@@ -64,80 +62,6 @@ def shrink_polygon_safely(polygon, shrink_dist, indx):
             indx,
         )
         return None
-
-
-def plot_org_buff(borderC, border_bufferedC, obstaclesC, obstacles_bufferedC, **kwargs):
-    kw_fig: dict[str, Any] = {'layout': 'constrained'}
-    fig = plt.figure(**(kw_fig | kwargs))
-    ax = fig.add_subplot()
-    ax.set_title('Original and Buffered Shapes')
-
-    # Plot original
-    ax.add_patch(
-        MplPolygon(
-            borderC,
-            closed=True,
-            edgecolor='none',
-            facecolor='lightblue',
-            label='Original Border',
-        )
-    )
-    for i, obs in enumerate(obstaclesC):
-        ax.add_patch(
-            MplPolygon(
-                obs,
-                closed=True,
-                edgecolor='none',
-                facecolor='white',
-                label='Original Obstacle' if i == 0 else None,
-            )
-        )
-
-    # Plot buffered
-    ax.add_patch(
-        MplPolygon(
-            border_bufferedC,
-            closed=True,
-            edgecolor='red',
-            linestyle='--',
-            facecolor='none',
-            label='Buffered Border',
-        )
-    )
-    for i, obs in enumerate(obstacles_bufferedC):
-        ax.add_patch(
-            MplPolygon(
-                obs,
-                closed=True,
-                edgecolor='black',
-                linestyle='--',
-                facecolor='none',
-                label='Buffered Obstacle' if i == 0 else None,
-            )
-        )
-
-    # Collect all coordinates for axis scaling
-    all_x = np.concatenate(
-        [borderC[:, 0], border_bufferedC[:, 0]]
-        + [obs[:, 0] for obs in obstaclesC]
-        + [obs[:, 0] for obs in obstacles_bufferedC]
-    )
-    all_y = np.concatenate(
-        [borderC[:, 1], border_bufferedC[:, 1]]
-        + [obs[:, 1] for obs in obstaclesC]
-        + [obs[:, 1] for obs in obstacles_bufferedC]
-    )
-
-    # Add padding
-    x_pad = 0.05 * (all_x.max() - all_x.min())
-    y_pad = 0.05 * (all_y.max() - all_y.min())
-    ax.set_xlim(all_x.min() - x_pad, all_x.max() + x_pad)
-    ax.set_ylim(all_y.min() - y_pad, all_y.max() + y_pad)
-
-    ax.set_aspect('equal')
-    ax.legend()
-    ax.set_axis_off()
-    return ax
 
 
 def parse_cables_input(
@@ -345,15 +269,17 @@ def buffer_border_obs(L, buffer_dist):
     borderC = V[border_idx] if border_idx is not None else None
     obstaclesC = [V[idx] for idx in obstacles_idx]
 
-    pre_buffer = {
-        'borderC': None if borderC is None else borderC.copy(),
-        'obstaclesC': [obs.copy() for obs in obstaclesC],
-    }
-
     if buffer_dist == 0:
-        return L, pre_buffer
+        return L
 
     elif buffer_dist > 0:
+        # keep the boundaries prior to the first buffering, for plotting
+        L.graph.setdefault(
+            '_original_boundaries',
+            ([] if borderC is None else [borderC.copy()])
+            + [obs.copy() for obs in obstaclesC if obs.size],
+        )
+
         # Border
         if borderC is not None:
             border_polygon = Polygon(borderC)
@@ -406,7 +332,7 @@ def buffer_border_obs(L, buffer_dist):
             len(idx) for idx in obstacle_ranges_new
         )
 
-        return L, pre_buffer
+        return L
 
     else:  # buffer_dist < 0
         raise ValueError('Buffer value must be equal or greater than 0!')

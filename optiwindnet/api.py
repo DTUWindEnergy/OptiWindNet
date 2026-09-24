@@ -7,13 +7,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import shapely as shp
-from matplotlib.axes import Axes
 
 from .api_utils import (
     buffer_border_obs,
@@ -21,7 +19,6 @@ from .api_utils import (
     extract_network_as_array,
     merge_obs_into_border,
     parse_cables_input,
-    plot_org_buff,
 )
 from .baselines.hgs import hgs_cvrp
 from .converting import G_from_S, S_from_G, terse_links_from_S
@@ -37,18 +34,17 @@ from .interarraylib import assign_cables
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
 from .pathfinding import PathFinder
-from .plotting import gplot, pplot
-from .svg import svgplot, svgpplot
+from .svg import SvgRepr, svgplot, svgpplot
 from .terse import LinkScope, TerseLinks
 from .transforming import as_normalized, as_stratified_vertices
 from .types import Topology
 
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+
 ##################################
 # OptiWindNet Network/Router API #
 ##################################
-
-# Keep text editable (not converted to paths) in SVG output
-plt.rcParams['svg.fonttype'] = 'none'
 
 # Set up a logger and create shortcuts for error, warning, and info logging methods
 _logger = logging.getLogger(__name__)
@@ -349,34 +345,23 @@ class WindFarmNetwork:
         """Get the total cable length of the optimized network."""
         return self.G.size(weight='length')
 
-    def plot_original_vs_buffered(self, **kwargs) -> Axes | None:
-        """Plot original and buffered borders and obstacles on a single plot.
+    def plot_original_vs_buffered(self, **kwargs) -> 'Axes | SvgRepr | None':
+        """Plot the location with the borders and obstacles prior to buffering.
+
+        The buffered boundaries are drawn as the location's border, the original
+        ones as outlines on top of it. This is :meth:`plot_location` for a
+        location that went through :meth:`add_buffer`.
 
         Args:
-          **kwargs: passed to matplotlib's pyplot.figure()
+          **kwargs: passed to :meth:`plot_location`.
 
         Returns:
-          matplotlib Axes instance.
+          SvgRepr or matplotlib Axes instance; ``None`` if no buffering was done.
         """
-        L = self._L
-        VertexC = self._VertexC
-        landscape_angle = L.graph.get('landscape_angle', False)
-        if landscape_angle:
-            pass  # TODO: to be added
-
-        borderC = VertexC[L.graph.get('border', [])]
-        obstacleC_ = [VertexC[obs] for obs in L.graph.get('obstacles', [])]
-
-        try:
-            return plot_org_buff(
-                self._pre_buffer_border_obs['borderC'],
-                borderC,
-                self._pre_buffer_border_obs['obstaclesC'],
-                obstacleC_,
-                **kwargs,
-            )
-        except AttributeError:
+        if '_original_boundaries' not in self._L.graph:
             _logger.info('No buffering is performed')
+            return None
+        return self.plot_location(**kwargs)
 
     @classmethod
     def from_own_yaml(cls, filepath: str, **kwargs):
@@ -459,24 +444,32 @@ class WindFarmNetwork:
           ``pyplot`` directly in the user code.
         """
         if 'ax' in kwargs:
+            from .plotting import gplot
+
             return gplot(self.G, *args, **kwargs)
         return svgplot(self.G, *args, **kwargs)
 
     def plot_location(self, **kwargs):
         """Plot the original location geometry."""
         if 'ax' in kwargs:
+            from .plotting import gplot
+
             return gplot(self.L, **kwargs)
         return svgplot(self.L, **kwargs)
 
     def plot_available_links(self, **kwargs):
         """Plot available links from planar embedding."""
         if 'ax' in kwargs:
+            from .plotting import gplot
+
             return gplot(self.A, **kwargs)
         return svgplot(self.A, **kwargs)
 
     def plot_navigation_mesh(self, **kwargs):
         """Plot navigation mesh (planar graph and adjacency)."""
         if 'ax' in kwargs:
+            from .plotting import pplot
+
             return pplot(self.P, self.A, **kwargs)
         return svgpplot(self.P, self.A, **kwargs)
 
@@ -485,6 +478,8 @@ class WindFarmNetwork:
         G_tentative = G_from_S(self.S, self.A)
         assign_cables(G_tentative, self.cables)
         if 'ax' in kwargs:
+            from .plotting import gplot
+
             return gplot(G_tentative, **kwargs)
         return svgplot(G_tentative, **kwargs)
 
@@ -600,9 +595,7 @@ class WindFarmNetwork:
         Args:
           buffer_dist: Buffer distance to dilate borders / erode obstacles.
         """
-        L, self._pre_buffer_border_obs = buffer_border_obs(
-            self._L, buffer_dist=buffer_dist
-        )
+        L = buffer_border_obs(self._L, buffer_dist=buffer_dist)
         self._L = L
         self._VertexC = L.graph['VertexC']
         self._is_stale_polygon = True

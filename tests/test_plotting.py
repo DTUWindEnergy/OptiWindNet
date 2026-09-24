@@ -21,6 +21,20 @@ def test_gplot_returns_axes(wfn):
     plt.close('all')
 
 
+def test_gplot_original_boundaries():
+    """Each ring of the pre-buffering boundaries is drawn as an extra patch."""
+    wfn = tiny_wfn()
+    num_patches = len(gplot(wfn.L).patches)
+    wfn.add_buffer(5.0)
+    ax = gplot(wfn.L)
+    assert len(ax.patches) == num_patches + len(wfn.L.graph['_original_boundaries'])
+    ax = gplot(wfn.L, legend=True)
+    legend = ax.get_legend()
+    assert legend is not None
+    assert [t.get_text() for t in legend.get_texts()].count('pre-buffer') == 1
+    plt.close('all')
+
+
 def test_gplot_with_provided_axes(wfn):
     """When an existing Axes is passed, gplot reuses it and returns the same object."""
     _fig, ax = plt.subplots()

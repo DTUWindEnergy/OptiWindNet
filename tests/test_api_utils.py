@@ -111,21 +111,19 @@ def test_buffer_border_obs_empty_obstacle_entry():
     wfn = tiny_wfn()
     L = wfn.L.copy()
     L.graph['obstacles'] = [np.array([], dtype=int)]
-    L_buffered, pre_buf = api_utils.buffer_border_obs(L, buffer_dist=1.0)
-    assert L_buffered is not None
-    assert isinstance(pre_buf, dict)
+    L_buffered = api_utils.buffer_border_obs(L, buffer_dist=1.0)
+    # only the border is recorded, the empty obstacle is skipped
+    assert len(L_buffered.graph['_original_boundaries']) == 1
 
 
-def test_plot_org_buff():
-    import matplotlib.pyplot as plt
-
-    borderC = np.array([(0, 0), (10, 0), (10, 10), (0, 10)])
-    border_bufferedC = np.array([(1, 1), (9, 1), (9, 9), (1, 9)])
-    ax = api_utils.plot_org_buff(
-        borderC=borderC,
-        border_bufferedC=border_bufferedC,
-        obstaclesC=[],
-        obstacles_bufferedC=[],
-    )
-    assert ax is not None
-    plt.close('all')
+def test_buffer_border_obs_records_first_original_boundaries():
+    wfn = tiny_wfn()
+    L = wfn.L.copy()
+    VertexC = L.graph['VertexC']
+    borderC = VertexC[L.graph['border']]
+    assert '_original_boundaries' not in api_utils.buffer_border_obs(L, 0).graph
+    api_utils.buffer_border_obs(L, buffer_dist=1.0)
+    api_utils.buffer_border_obs(L, buffer_dist=1.0)
+    boundaryC_ = L.graph['_original_boundaries']
+    assert len(boundaryC_) == 1 + len(wfn.L.graph['obstacles'])
+    np.testing.assert_array_equal(boundaryC_[0], borderC)

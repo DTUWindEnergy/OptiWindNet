@@ -47,6 +47,11 @@ _NODE_EDGE_WIDTH = 2
 _DETOUR_RING_WIDTH = 4
 
 
+def _closed_path(S: np.ndarray) -> str:
+    """Make SVG path data for the closed polygon with vertices ``S``."""
+    return 'M' + ' '.join(str(c) for c in S.flat) + 'z'
+
+
 def _render(key: str, metadata: dict[str, Any], sep: str = '=') -> str:
     """Render metadata entry ``key`` for SvgRepr's repr (never raises)."""
     formatter = _KEY_FORMATTER.get(key)
@@ -169,7 +174,7 @@ class Drawable:
         fnT = G.graph.get('fnT')
         if fnT is None:
             fnT = np.arange(R + T + B + 3)
-            fnT[-R:] = range(-R, 0)
+            fnT[len(fnT) - R :] = range(-R, 0)
         self.fnT = fnT
 
         ##############################
@@ -180,18 +185,20 @@ class Drawable:
         margin = self.margin
         # TODO: ¿use SVG's attr overflow="visible" instead of margin?
         VertexC = G.graph['VertexC']
+        boundaryC_ = G.graph.get('_original_boundaries', ())
         landscape_angle = G.graph.get('landscape_angle', False)
         if self.landscape and landscape_angle:
             # landscape_angle is not None and not 0
             VertexC = rotate(VertexC, landscape_angle)
+            boundaryC_ = [rotate(C, landscape_angle) for C in boundaryC_]
 
         # viewport scaling
         idx_B = self.T + self.B
-        R = self.R
-        Woff = min(VertexC[:idx_B, 0].min(), VertexC[-R:, 0].min())
-        W = max(VertexC[:idx_B, 0].max(), VertexC[-R:, 0].max()) - Woff
-        Hoff = min(VertexC[:idx_B, 1].min(), VertexC[-R:, 1].min())
-        H = max(VertexC[:idx_B, 1].max(), VertexC[-R:, 1].max()) - Hoff
+        extentC = np.vstack(
+            (VertexC[:idx_B], VertexC[VertexC.shape[0] - self.R :], *boundaryC_)
+        )
+        Woff, Hoff = extentC.min(axis=0)
+        W, H = extentC.max(axis=0) - (Woff, Hoff)
         wr = (w - 2 * margin) / W
         hr = (h - 2 * margin) / H
         if W / H < w / h:
@@ -202,11 +209,15 @@ class Drawable:
             scale = wr
             h = round(H * scale + 2 * margin)
         offset = np.array((Woff, Hoff))
-        VertexS = (VertexC - offset) * scale + margin
-        # y axis flipping
-        VertexS[:, 1] = h - VertexS[:, 1]
-        VertexS = VertexS.round().astype(int)
-        self.VertexS = VertexS
+
+        def to_svg(C: np.ndarray) -> np.ndarray:
+            S = (C - offset) * scale + margin
+            # y axis flipping
+            S[:, 1] = h - S[:, 1]
+            return S.round().astype(int)
+
+        self.VertexS = VertexS = to_svg(VertexC)
+        boundaryS_ = [to_svg(C) for C in boundaryC_]
         self.bottom_right_anchor = {'x': round(W * scale + margin), 'y': h - margin}
         self.h_orig = h
         if self.legend:
@@ -228,9 +239,7 @@ class Drawable:
         draw_obstacles = []
         if obstacles is not None:
             for obstacle in obstacles:
-                draw_obstacles.append(
-                    'M' + ' '.join(str(c) for c in VertexS[obstacle].flat) + 'z'
-                )
+                draw_obstacles.append(_closed_path(VertexS[obstacle]))
         if border is not None:
             # border with obstacles as holes
             self.borderE.append(
@@ -246,14 +255,7 @@ class Drawable:
                     # svg.py types `d` as list[PathData], but it renders a
                     # pre-joined path string just as well
                     d=' '.join(  # pyrefly: ignore[bad-argument-type]
-                        chain(
-                            (
-                                'M'
-                                + ' '.join(str(c) for c in VertexS[border].flat)
-                                + 'z',
-                            ),
-                            draw_obstacles,
-                        )
+                        chain((_closed_path(VertexS[border]),), draw_obstacles)
                     ),
                 )
             )
@@ -267,6 +269,21 @@ class Drawable:
                     stroke_width=_BORDER_WIDTH,
                     fill=c.border_face,
                     d=draw_obstacles,
+                )
+            )
+        if boundaryS_:
+            # pre-buffering border and obstacles (outline only)
+            self.borderE.append(
+                svg.Path(
+                    id='original_boundaries',
+                    stroke=c.kind2color['original_boundaries'],
+                    stroke_width=_BORDER_WIDTH,
+                    fill='none',
+                    # svg.py types `d` as list[PathData], but it renders a
+                    # pre-joined path string just as well
+                    d=' '.join(  # pyrefly: ignore[bad-argument-type]
+                        _closed_path(S) for S in boundaryS_
+                    ),
                 )
             )
 
@@ -660,6 +677,17 @@ class Drawable:
                 )
             )
 
+        if '_original_boundaries' in G.graph:
+            legend_items.append(
+                (
+                    'edge',
+                    'original_boundaries',
+                    'pre-buffer',
+                    c.kind2color['original_boundaries'],
+                    None,
+                )
+            )
+
         # Layout metrics
         item_width = 180
         N = len(legend_items)
@@ -820,6 +848,6 @@ def svgpplot(P: nx.PlanarEmbedding, A: nx.Graph, **kwargs) -> SvgRepr:
     R, T, B = (A.graph[k] for k in 'RTB')
     H.add_edges_from(P.edges, kind='planar')
     fnT = np.arange(R + T + B + 3)
-    fnT[-R:] = range(-R, 0)
+    fnT[len(fnT) - R :] = range(-R, 0)
     H.graph['fnT'] = fnT
     return svgplot(H, **kwargs)

@@ -4,6 +4,7 @@
 import re
 
 import networkx as nx
+import numpy as np
 
 from optiwindnet.svg import SvgRepr, svgplot, svgpplot
 from optiwindnet.types import Topology
@@ -475,3 +476,34 @@ def test_svgpplot_has_loads_removed():
     A.graph['has_loads'] = True  # artificially inject
     svg = svgpplot(wfn.P, A)
     assert isinstance(svg, SvgRepr)
+
+
+def test_svgplot_without_roots():
+    """A graph with R=0 (only border and obstacles) is drawable."""
+    VertexC = np.array(
+        [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (4, 4), (6, 4), (5, 6)]
+    )
+    G = nx.Graph(
+        VertexC=VertexC,
+        T=0,
+        R=0,
+        B=7,
+        border=np.arange(4),
+        obstacles=[np.arange(4, 7)],
+    )
+    svg = svgplot(G)
+    assert 'id="border"' in svg.data
+
+
+def test_svgplot_original_boundaries():
+    """Boundaries prior to buffering are drawn only if the graph records them."""
+    wfn = tiny_wfn()
+    assert 'id="original_boundaries"' not in svgplot(wfn.L).data
+    wfn.add_buffer(5.0)
+    svg = svgplot(wfn.L)
+    assert 'id="original_boundaries"' in svg.data
+    # one closed subpath per original ring (border + obstacles)
+    (d,) = re.findall(r'id="original_boundaries" d="([^"]*)"', svg.data)
+    assert d.count('M') == len(wfn.L.graph['_original_boundaries'])
+    assert 'pre-buffer' not in _texts(svg.data)
+    assert 'pre-buffer' in _texts(svgplot(wfn.L, legend=True).data)
