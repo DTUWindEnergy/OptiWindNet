@@ -7,6 +7,7 @@ import math
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum, auto
+from fractions import Fraction
 from itertools import pairwise
 from typing import Any
 
@@ -14,7 +15,13 @@ import networkx as nx
 import numpy as np
 
 from .identity import fingerprint_coordinates
-from .loads import calcload
+from .loads import (
+    DEFAULT_POWER_RTOL,
+    calcload,
+    quantized,
+    terminal_inflow,
+    validate_terminal_power,
+)
 from .types import Topology
 
 __all__ = ('LinkScope', 'TerseLinks')
@@ -407,37 +414,110 @@ class TerseLinks(Sequence[int]):
                     is_open=frozenset((u, v)) in open_edges,
                 )
 
-    def to_topology(self, **graph_attrs) -> nx.Graph:
-        """Reconstruct topology ``S``."""
+    def _check_site_dimensions(self, site: nx.Graph, keys: str) -> None:
+        for key in keys:
+            actual, expected = site.graph[key], getattr(self, key)
+            if actual != expected:
+                raise ValueError(
+                    f'location {key}={actual} does not match encoding {key}={expected}'
+                )
+
+    def to_topology(
+        self,
+        A: nx.Graph | None = None,
+        *,
+        capacity: int | None = None,
+        capacity_nominal: float | Fraction | None = None,
+        power_rtol: float = DEFAULT_POWER_RTOL,
+        **graph_attrs,
+    ) -> nx.Graph:
+        """Reconstruct topology ``S``, quantizing the power of site ``A``.
+
+        An encoding carries no inflow. With ``A``, the terminal inflows and the
+        quantization attributes come from :func:`~optiwindnet.loads.quantized`,
+        as a producer's would. Without ``A``, every terminal has one inflow unit.
+
+        Args:
+          A: location or available-links graph that declares the turbine power.
+          capacity: cable capacity in inflow.
+          capacity_nominal: cable capacity in nominal power; requires ``A``.
+          power_rtol: quantization tolerance, used with ``capacity_nominal``.
+          **graph_attrs: additional graph attributes for ``S``.
+
+        Returns:
+          Topology of the encoded links, whose ``'capacity'`` is its
+          ``'max_load'`` if no capacity is given.
+
+        Raises:
+          ValueError: the encoding is routeset-scoped, ``A`` does not match its
+            dimensions, or the capacity does not suit the power ``A`` declares.
+        """
         if self.scope is not LinkScope.TOPOLOGY:
             raise ValueError('a routeset encoding must be reconstructed with a site')
+        if A is None:
+            if capacity_nominal is not None:
+                raise ValueError('capacity_nominal requires a site graph A.')
+            inflow, power_attrs = {}, {}
+        else:
+            self._check_site_dimensions(A, 'RT')
+            A, capacity, power_attrs = _quantized_site(
+                A, capacity, capacity_nominal, power_rtol
+            )
+            inflow = terminal_inflow(A)
         S = nx.Graph(T=self.T, R=self.R, topology=self.topology, **graph_attrs)
+        S.graph.update(power_attrs)
         S.add_nodes_from(range(-self.R, 0), kind='oss')
         S.add_nodes_from(range(self.T), kind='wtg')
+        nx.set_node_attributes(S, inflow, 'inflow')
+        validate_terminal_power(S)
         for edge in self._edge_specs():
             attrs = {'load': 0, 'reverse': False} if edge.is_open else {}
             S.add_edge(edge.u, edge.v, **attrs)
 
         calcload(S)
-        if 'capacity' not in graph_attrs:
-            S.graph['capacity'] = S.graph['max_load']
+        S.graph['capacity'] = S.graph['max_load'] if capacity is None else capacity
         return S
 
-    def to_routeset(self, L: nx.Graph, **graph_attrs) -> nx.Graph:
-        """Reconstruct routeset ``G`` against location graph ``L``."""
+    def to_routeset(
+        self,
+        L: nx.Graph,
+        *,
+        capacity: int | None = None,
+        capacity_nominal: float | Fraction | None = None,
+        power_rtol: float = DEFAULT_POWER_RTOL,
+        **graph_attrs,
+    ) -> nx.Graph:
+        """Reconstruct routeset ``G`` against location graph ``L``.
+
+        The power of ``L`` is quantized as in :meth:`to_topology`.
+
+        Args:
+          L: location graph of the encoded routeset.
+          capacity: cable capacity in inflow.
+          capacity_nominal: cable capacity in nominal power.
+          power_rtol: quantization tolerance, used with ``capacity_nominal``.
+          **graph_attrs: additional graph attributes for ``G``.
+
+        Returns:
+          Routeset of the encoded links, whose ``'capacity'`` is its
+          ``'max_load'`` if no capacity is given.
+
+        Raises:
+          ValueError: the encoding is topology-scoped, ``L`` does not match its
+            dimensions or geometry, or the capacity does not suit the power ``L``
+            declares.
+        """
         if self.scope is not LinkScope.ROUTESET:
             raise ValueError('a topology encoding must be routed before creating G')
-        for key, expected in (('R', self.R), ('T', self.T), ('B', self.B)):
-            actual = L.graph[key]
-            if actual != expected:
-                raise ValueError(
-                    f'location {key}={actual} does not match encoding {key}={expected}'
-                )
+        self._check_site_dimensions(L, 'RTB')
         if (
             self.nodeset_digest is not None
             and fingerprint_coordinates(L.graph['VertexC'])[0] != self.nodeset_digest
         ):
             raise ValueError('location geometry does not match the routed encoding')
+        L, capacity, power_attrs = _quantized_site(
+            L, capacity, capacity_nominal, power_rtol
+        )
         G = nx.create_empty_copy(L, with_data=True)
         G.graph.update(
             topology=self.topology,
@@ -445,6 +525,7 @@ class TerseLinks(Sequence[int]):
             D=self.D,
             **graph_attrs,
         )
+        G.graph.update(power_attrs)
         clone_start = self.T + self.B
         contour_nodes = range(clone_start, clone_start + self.C)
         detour_nodes = range(clone_start + self.C, clone_start + self.C + self.D)
@@ -477,5 +558,33 @@ class TerseLinks(Sequence[int]):
         for _, _, edge_data in G.edges(detour_nodes, data=True):
             edge_data['kind'] = 'detour'
 
+        validate_terminal_power(G)
         calcload(G)
+        G.graph['capacity'] = G.graph['max_load'] if capacity is None else capacity
         return G
+
+
+def _quantized_site(
+    site: nx.Graph,
+    capacity: int | None,
+    capacity_nominal: float | Fraction | None,
+    power_rtol: float,
+) -> tuple[nx.Graph, int | None, dict[str, Any]]:
+    """Quantize ``site`` as :func:`~optiwindnet.loads.quantized`, capacity optional.
+
+    Without either capacity, ``site`` is used unquantized and the returned
+    capacity is ``None``, which is valid only if ``site`` declares no unequal power.
+    """
+    if capacity is None and capacity_nominal is None:
+        if 'powers_set' in site.graph:
+            raise ValueError(
+                'site declares unequal turbine power: pass capacity_nominal.'
+            )
+        validate_terminal_power(site)
+        return site, None, {}
+    return quantized(
+        site,
+        capacity=capacity,
+        capacity_nominal=capacity_nominal,
+        power_rtol=power_rtol,
+    )

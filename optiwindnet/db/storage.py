@@ -141,7 +141,7 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
         clone2prime=tuple(routeset.clone2prime or ()),
         nodeset_digest=bytes(nodeset.digest),
     )
-    G = encoding.to_routeset(G)
+    G = encoding.to_routeset(G, capacity=routeset.capacity)
     calc_length = G.size(weight='length')
     if abs(calc_length / routeset.length - 1) > 1e-5:
         G.graph['length_mismatch_on_db_read'] = calc_length - routeset.length

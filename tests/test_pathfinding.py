@@ -128,7 +128,6 @@ def test_create_detours_matches_milp_routeset(case, location_meshes):
     # Decode the stored, detoured routeset on the freshly loaded location, then
     # discard its geometry to recover only the solver topology S.
     expected = case.to_routeset(L)
-    expected.graph['capacity'] = expected.graph['max_load']
     S = S_from_G(expected)
 
     G = G_from_S(S, A)
