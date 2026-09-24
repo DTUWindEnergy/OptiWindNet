@@ -364,12 +364,12 @@ class WindFarmNetwork:
         return self.plot_location(**kwargs)
 
     @classmethod
-    def from_own_yaml(cls, filepath: str, **kwargs):
+    def from_own_yaml(cls, filepath: Path | str, **kwargs):
         """Create a WindFarmNetwork instance from an OptiWindNet (OWN) YAML file."""
         return cls(L=L_from_yaml(filepath), **kwargs)
 
     @classmethod
-    def from_yaml(cls, filepath: str, **kwargs):
+    def from_yaml(cls, filepath: Path | str, **kwargs):
         """Deprecated: use :meth:`from_own_yaml` instead."""
         import warnings
 
