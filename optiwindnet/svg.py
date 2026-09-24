@@ -12,7 +12,7 @@ import numpy as np
 import svg
 
 from .geometric import rotate
-from .interarraylib import _format_length, describe_G
+from .presenting import _format_length, describe_G
 from .themes import Colors
 
 __all__ = ('SvgRepr', 'svgplot', 'svgpplot')

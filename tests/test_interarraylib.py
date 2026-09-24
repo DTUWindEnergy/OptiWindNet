@@ -13,7 +13,6 @@ from optiwindnet.interarraylib import (
     add_terminal_closest_root,
     assign_cables,
     count_diagonals,
-    describe_G,
     make_remap,
     pathdist,
     scaffolded,
@@ -122,16 +121,6 @@ def test_assign_cables_prices_ring_zero_load_link():
 
     assert G[0][1]['cable'] == 0
     assert G[0][1]['cost'] == 12.0
-
-
-def test_describe_G():
-    wfn = tiny_wfn()
-    G = wfn.G
-
-    desc = describe_G(G)
-    expected = ['κ = 4, T = 4', '(+0) [-1]: 1', 'Σλ = 5.5456\u00a0m', '55\u00a0€']
-
-    assert desc == expected, f'Output mismatch:\nGot: {desc}\nExpected: {expected}'
 
 
 def test_scaffolded():

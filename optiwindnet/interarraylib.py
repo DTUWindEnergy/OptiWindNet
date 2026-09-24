@@ -3,7 +3,6 @@
 
 import importlib
 import logging
-import math
 import warnings
 from collections.abc import Iterator
 from itertools import chain, pairwise
@@ -30,6 +29,7 @@ _DEPRECATED_EXPORTS = {
     'bfs_subtree_loads': 'optiwindnet.loads',
     'calcload': 'optiwindnet.loads',
     'split_rings_and_calc_loads': 'optiwindnet.loads',
+    'describe_G': 'optiwindnet.presenting',
     'TerseLinks': 'optiwindnet.terse',
     'as_hooked_to_head': 'optiwindnet.transforming',
     'as_hooked_to_nearest': 'optiwindnet.transforming',
@@ -45,7 +45,7 @@ _DEPRECATED_EXPORTS = {
 
 __all__ = (  # noqa: PLE0604
     'add_link_blockmap', 'add_link_cosines', 'add_terminal_closest_root',
-    'assign_cables', 'count_diagonals', 'describe_G', 'directed_links',
+    'assign_cables', 'count_diagonals', 'directed_links',
     'make_remap', 'pathdist', 'scaffolded', 'update_lengths',
     *_DEPRECATED_EXPORTS,
 )  # fmt: skip
@@ -111,55 +111,6 @@ def assign_cables(
         G.graph['currency'] = currency
     if 'capacity' not in G.graph:
         G.graph['capacity'] = capacity
-
-
-def _format_length(length: float, significant_digits: int = 5) -> str:
-    """Format ``length`` with '_' as thousands separator.
-
-    ``significant_digits`` is a minimum, enforced through fraction digits only.
-    """
-    intdigits = int(np.floor(np.log10(length))) + 1
-    fracdigits = max(0, significant_digits - intdigits)
-    return f'{{:_.{fracdigits}f}}'.format(round(length, fracdigits))
-
-
-def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
-    """Create a 3-4 line summary of G's properties.
-
-    ``significant_digits`` applies only to total length and is enforced only when the
-    integer part has fewer significant digits than ``significant_digits``.
-
-    Args:
-      G: routeset instance
-      significant_digits: minimum number of significant digits used for total length
-
-    Returns:
-      Text lines with capacity and T, excess feeders and feeders per root, total
-      length and total cost.
-    """
-    R = G.graph['R']
-    T = G.graph['T']
-    capacity = G.graph['capacity']
-    roots = range(1, R + 1)
-    RootL = {-r: G.nodes[-r].get('label', f'[{-r}]') for r in roots}
-    desc = []
-    desc.append(f'κ = {capacity}, T = {T}')
-    feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
-    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(T / capacity)
-    desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
-    length = G.size(weight='length')
-    if length > 0:
-        desc.append(
-            'Σλ = '
-            + _format_length(length, significant_digits).replace('_', '\u202f')
-            + '\u00a0m'
-        )
-    if 'currency' in G.graph:
-        desc.append(
-            f'{G.size(weight="cost"):_.0f}\u00a0'.replace('_', '\u202f')
-            + G.graph['currency']
-        )
-    return desc
 
 
 def update_lengths(G):

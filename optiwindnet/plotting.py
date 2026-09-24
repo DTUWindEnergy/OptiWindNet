@@ -14,7 +14,7 @@ from matplotlib.path import Path
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 
 from .geometric import rotate
-from .interarraylib import describe_G
+from .presenting import describe_G
 from .themes import Colors
 
 NODESIZE = 35

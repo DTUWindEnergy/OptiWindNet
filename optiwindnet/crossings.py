@@ -313,8 +313,7 @@ def find_routeset_crossings(G: nx.Graph) -> list[tuple[int, int, int, int]]:
     Returns:
       list of ``(u, v, s, t)``, empty if ``G`` has neither. ``u != v`` means
       edge ⟨u, v⟩ crosses edge ⟨s, t⟩; ``u == v`` means the detour at ``u``
-      splits the branch between ``s`` and ``t``. See :func:`describe_crossings`
-      to render them.
+      splits the branch between ``s`` and ``t``.
     """
     T, B = (G.graph[k] for k in 'TB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
@@ -361,23 +360,6 @@ def find_routeset_crossings(G: nx.Graph) -> list[tuple[int, int, int, int]]:
         if is_split:
             Xings.append((d_, d_, bunch[insideI[0]], bunch[outsideI[0]]))
     return Xings
-
-
-def describe_crossings(Xings: list[tuple[int, int, int, int]]) -> list[str]:
-    """Render the findings of :func:`find_routeset_crossings` as text.
-
-    Args:
-      Xings: ``(u, v, s, t)`` findings.
-
-    Returns:
-      one line per finding, in the order given.
-    """
-    return [
-        f'{u}–{v} crosses {s}–{t}'
-        if u != v
-        else f'detour @ {u} splits the branch between {s} and {t}'
-        for u, v, s, t in Xings
-    ]
 
 
 def _routeset_fnT(G: nx.Graph) -> np.ndarray:
