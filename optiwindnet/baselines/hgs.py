@@ -457,7 +457,7 @@ def hgs_cvrp(
             'by count.'
         )
     # Add departures from unit power to the default total of T.
-    vehicles_min = math.ceil(
+    vehicles_min: int = math.ceil(
         (T + sum(power - 1 for power in powers.values())) / solve_capacity
     )
     if vehicles_exact:

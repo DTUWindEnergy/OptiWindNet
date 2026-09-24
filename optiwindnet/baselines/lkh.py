@@ -9,6 +9,7 @@ import re
 import subprocess
 import tempfile
 import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from itertools import chain, pairwise
 from pathlib import Path
@@ -211,7 +212,7 @@ def _do_lkh(
     capacity: int,
     vehicles: int,
     min_route_size: int,
-    demands: list[int] | None = None,
+    demands: Sequence[int] = (),
     time_limit: float,
     scale: float,
     runs: int,
@@ -275,7 +276,7 @@ def _do_lkh(
         # calibrated for open (radial) routes; a closed ring pays a second feeder
         # leg, so the cap is not imposed for ringed solves.
         specs['DISTANCE'] = distance_cap  # maximum route length
-    if demands is None:
+    if not demands:
         demands = [1] * T
     data = {
         'EDGE_WEIGHT_SECTION': edge_weights,
@@ -464,7 +465,7 @@ def _solve_cluster(
     capacity: int,
     vehicles: int,
     balanced: bool,
-    demands: list[int] | None = None,
+    demands: Sequence[int] = (),
     time_limit: float,
     scale: float,
     runs: int,
@@ -484,7 +485,7 @@ def _solve_cluster(
     not mutate the underlying graph.
     """
     T_c = L.shape[0] - 1
-    if ringed or demands is not None:
+    if ringed or demands:
         # MTSP_MIN_SIZE for TYPE=CVRP would require a FULL_MATRIX (asymmetric)
         # formulation; the symmetric ring solve does not impose a minimum size.
         # It counts nodes, too, which bounds nothing once the demands differ.
@@ -669,7 +670,7 @@ def _lkh(
     R, T = A.graph['R'], A.graph['T']
     assert R == 1, 'LKH allows only 1 depot'
 
-    vehicles_min = math.ceil(T / capacity)
+    vehicles_min: int = math.ceil(T / capacity)
     if (vehicles is None) or (vehicles <= vehicles_min):
         if vehicles is not None and vehicles < vehicles_min:
             warn(
@@ -752,7 +753,7 @@ def _run_lkh_per_cluster(
     vehicles_: list[int],
     warmstart_tours: list[list[int] | None],
     balanced: bool,
-    demands: list[int] | None = None,
+    demands: Sequence[int] = (),
     scale: float,
     runs: int,
     per_run_limit: float,
@@ -986,11 +987,11 @@ def lkh3(
         )
     # Add departures from unit power to the default total of T.
     power_total = T + sum(power - 1 for power in powers.values())
-    demands = [powers.get(t, 1) for t in range(T)] if powers else None
+    demands = [powers.get(t, 1) for t in range(T)] if powers else ()
 
     def _route_load(route: list[int]) -> int:
         """Return total terminal demand, using the terminal count for unit power."""
-        return len(route) if demands is None else sum(demands[i] for i in route)
+        return sum(demands[i] for i in route) if demands else len(route)
 
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
