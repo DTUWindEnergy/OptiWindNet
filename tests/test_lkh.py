@@ -16,6 +16,7 @@ from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
 
 from .cases import LKH_CASES, case_node_id, expected_topology
+from .producers import lkh_topology
 from .sitecache import get_bundle
 from .topology_assertions import assert_topology
 
@@ -25,14 +26,7 @@ def test_lkh_real_topology_cases(case):
     """Run a small optional matrix when the external LKH binary is installed."""
     if shutil.which('LKH') is None:
         pytest.skip('LKH executable not on PATH')
-    A = get_bundle(case.site).A
-    S = lkh_mod.lkh3(
-        as_normalized(A),
-        capacity=case.capacity,
-        time_limit=case.time_limit,
-        ringed=case.ringed,
-        seed=case.seed,
-    )
+    S = lkh_topology(case)
     assert_topology(S, expected_topology(case), case.capacity)
 
 
