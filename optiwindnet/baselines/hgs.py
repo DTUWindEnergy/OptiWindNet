@@ -389,14 +389,15 @@ def hgs_cvrp(
     is doubled internally (``2 * capacity``) so each of the ring's two arms holds
     at most ``capacity`` terminals.
 
-    Each vehicle is one route, so ``vehicles`` counts routes, whose relation to
-    feeders (links to a root) depends on the topology:
+    Each vehicle is one route, so ``vehicles`` bounds the route count (see
+    ``vehicles_exact`` below). The relation of routes to feeders (links to a
+    root) depends on the topology:
 
     - radial: one route is one subtree with a single feeder, so ``vehicles``
-      is the feeder count and its minimum is ``ceil(T / capacity)``;
+      caps the feeder count, whose minimum is ``ceil(T / capacity)``;
     - ringed: one route is one ring with two feeders (one per arm), so
-      ``vehicles`` is the ring count, the feeder count is ``2 * vehicles``, and
-      the minimum is ``ceil(T / (2 * capacity))`` rings.
+      ``vehicles`` caps the ring count, the feeder count is twice the ring
+      count, and the minimum is ``ceil(T / (2 * capacity))`` rings.
 
     Normalization of input graph is recommended before calling this function.
 

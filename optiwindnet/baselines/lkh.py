@@ -932,14 +932,16 @@ def lkh3(
     ``capacity`` terminals. Normalization of the input graph is recommended
     before calling this function (use :func:`~optiwindnet.transforming.as_normalized`).
 
-    Each vehicle is one route, so ``vehicles`` counts routes, whose relation to
-    feeders (links to a root) depends on the topology:
+    Each vehicle is one route, so ``vehicles`` bounds the route count from
+    above: LKH-3 may leave vehicles unused, returning fewer routes than
+    ``vehicles``. The relation of routes to feeders (links to a root) depends
+    on the topology:
 
     - radial: one route is one subtree with a single feeder, so ``vehicles``
-      is the feeder count and its minimum is ``ceil(T / capacity)``;
+      caps the feeder count, whose minimum is ``ceil(T / capacity)``;
     - ringed: one route is one ring with two feeders (one per arm), so
-      ``vehicles`` is the ring count, the feeder count is ``2 * vehicles``, and
-      the minimum is ``ceil(T / (2 * capacity))`` rings.
+      ``vehicles`` caps the ring count, the feeder count is twice the ring
+      count, and the minimum is ``ceil(T / (2 * capacity))`` rings.
 
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered (one cluster per root) and each cluster is
@@ -963,8 +965,8 @@ def lkh3(
             ``capacity`` (see :func:`~optiwindnet.loads.quantized`).
         power_rtol: quantization tolerance of unequal turbine power.
         time_limit: [s] solver run time limit (per cluster).
-        vehicles: number of routes: feeders if radial, rings (half the
-            feeders) if ``ringed`` (if None or at the minimum, use the
+        vehicles: maximum number of routes: feeders if radial, rings (half
+            the feeders) if ``ringed`` (if None or at the minimum, use the
             per-cluster default described above; ignored for multi-root
             problems).
         seed: random seed for reproducibility (if None, picks a random one).
