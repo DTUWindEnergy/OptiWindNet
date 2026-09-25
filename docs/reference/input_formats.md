@@ -24,7 +24,7 @@ Cable capacity is expressed in **number of turbines**, not in amperes: it is the
 - a list of capacities — one entry per cable type;
 - a list of `(capacity, linear_cost)` pairs — capacities must be increasing, and cost is per unit of length.
 
-Only the last form allows _OptiWindNet_ to report a network cost; with the other two, the objective is total cable length. Each link is assigned the cheapest type that can carry its load, so a link's cable type follows from the {term}`load` it carries.
+Only the last form supplies prices for reporting a network cost. All built-in routers optimize cable length using the largest capacity, including when prices are supplied. Cable types are assigned afterwards: each link receives the first type in increasing capacity order that can carry its load. Use costs that are nondecreasing with capacity if this is to select the cheapest feasible type. A shorter network need not have a lower cost when its loads require more expensive cables.
 
 _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API).
 
@@ -138,7 +138,7 @@ _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API) · {doc}`/noteb
 
 ### OpenStreetMap PBF
 
-`.osm.pbf` stands for _OpenStreetMap Protocolbuffer Binary Format_. It is the format to use when the location is digitized from a map.
+`.osm.pbf` stands for _OpenStreetMap Protocol Buffer Binary Format_. It is the format to use when the location is digitized from a map.
 
 The [JOSM](https://josm.openstreetmap.de/) open-source map editor is recommended for producing these files. The JOSM plugin **pbf** is required to save in the `.osm.pbf` format; the plugin **opendata** is useful for importing many common GIS file formats.
 
@@ -159,7 +159,7 @@ _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API) · {doc}`/noteb
 
 ## Location repositories
 
-{py:func}`load_repository() <optiwindnet.importer.load_repository>` reads every `.osm.pbf` and `.yaml` file in a directory into a _namedtuple_ of _networkx_ graphs, one per location. Called without arguments, it loads the locations distributed with _OptiWindNet_; called with a path, it loads a repository of your own. `read_powers=False` loads the locations without their declared turbine power.
+{py:func}`load_repository() <optiwindnet.importer.load_repository>` reads every `.osm.pbf` and `.yaml` file in a directory into a _namedtuple_ of NetworkX graphs, one per location. Called without arguments, it loads the locations distributed with _OptiWindNet_; called with a path, it loads a repository of your own. `read_powers=False` loads the locations without their declared turbine power.
 
 The bundled locations are real offshore wind farms and are used throughout this documentation as ready-made examples.
 

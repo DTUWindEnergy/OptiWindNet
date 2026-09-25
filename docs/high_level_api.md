@@ -2,7 +2,7 @@
 
 The high-level API exposes _OptiWindNet_ through two classes: {py:class}`WindFarmNetwork <optiwindnet.api.WindFarmNetwork>`, which holds the problem instance and its solution, and {py:class}`Router <optiwindnet.api.Router>`, which represents the algorithm used to solve it.
 
-These notebooks show how to drive that API. What the tool computes and how it solves are covered by the API-agnostic {doc}`/problem` and {doc}`/routers`; the formats it accepts are catalogued in {doc}`/reference/input_formats`.
+These notebooks show how to drive that API. What the tool computes and how it solves are covered by the API-agnostic {doc}`/problem` and {doc}`/routers`; the formats it accepts are cataloged in {doc}`/reference/input_formats`.
 
 [](/reference/tasks.md#paired-examples) maps each notebook here to its counterpart in the {doc}`/low_level_api`, and the {doc}`/reference/tasks` indexes them by goal. Complete signatures are in the generated {doc}`API Reference </autoapi/index>`.
 

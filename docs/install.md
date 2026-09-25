@@ -6,7 +6,7 @@ The easiest way to experiment with OptiWindNet is in JupyterLab. Click the ![lau
 
 ## Requirements
 
-_OptiWindNet_ has been tested on Windows 10/11 and on Linux systems, but should run on MacOSX as well.
+_OptiWindNet_ has been tested on Windows 10/11 and Linux, and should run on macOS as well.
 
 Python version 3.11+ is required. The last version to support Python 3.10 was v0.0.6.
 
@@ -31,11 +31,12 @@ Create a new venv:
 
     python -m venv optiwindnet_env
 
-Activate _optiwindnet_env_ (choose the one that matches your command prompt):
+Activate _optiwindnet_env_ with the command for your operating system and shell:
 
-- cmd: `optiwindnet_env\Scripts\activate.bat`
-- bash: `source optiwindnet_env/Scripts/activate`
-- powershell: `optiwindnet_env\Scripts\Activate.ps1`
+- Linux or macOS Bash: `source optiwindnet_env/bin/activate`
+- Windows Git Bash: `source optiwindnet_env/Scripts/activate`
+- Windows Command Prompt: `optiwindnet_env\Scripts\activate.bat`
+- Windows PowerShell: `optiwindnet_env\Scripts\Activate.ps1`
 
 And finally:
 
@@ -62,10 +63,15 @@ The **launch|binder** button is an easy way to get started, but a local installa
 
 ## Updating
 
-Activate the Python environment for _OptiWindNet_ and enter:
+Activate the Python environment for _OptiWindNet_, then use the command matching how it was installed:
 
-    pip install --upgrade optiwindnet
-    conda update optiwindnet
+- `pip`:
+
+      python -m pip install --upgrade optiwindnet
+
+- `conda`:
+
+      conda update optiwindnet
 
 ## Running the notebooks
 

@@ -76,7 +76,7 @@ Variants sharing a donor are geometrically related, so a random split across geo
 
 ### Objective, length and gap
 
-The optimizer minimizes a weighted connectivity problem defined over the available-links graph, which abstracts away the geometric detail. The best weight it found is `misc['objective']`, and, for MILP runs, the best dual bound is `misc['bound']` — together they give the proven relative gap `misc['relgap']`.
+The optimizer minimizes the sum of selected link lengths in the available-links graph, which abstracts away some geometric detail. The best modeled length it found is `misc['objective']`, and, for MILP runs, the best dual bound is `misc['bound']` — together they give the proven relative gap `misc['relgap']` for that length objective. Length and cost are often strongly correlated, so a small length gap is a useful indication of cost quality, but it does not bound the gap to the minimum possible cost; see [](/problem.md#objective-and-reported-cost).
 
 The route set itself is the embedded network: the cable routes in the plane that implement that connectivity, after feeder detours are added. Its total length is the `length` field, which may exceed the objective; `detextra` is the relative increase between the two, so `length = (1 + detextra) * objective`. The pre-detour graph is recoverable from the route set and is therefore not stored.
 

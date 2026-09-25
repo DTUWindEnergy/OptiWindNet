@@ -19,7 +19,7 @@ Each heuristic run stores only `(elapsed time, objective length)`. Two site-boun
 
 The MILP bound and incumbent are stored as two independent series, `<name>_time` and `<name>`, because HiGHS reports them on different occasions: the bound is polled densely by the interrupt and logging callbacks, while the incumbent has one entry per improvement the solver announced.
 
-Lengths are stored in metres. `../figures.py` computes all percentages relative to the proven optimum. Both artifacts fingerprint the site geometry and complete experiment configuration, and their loaders reject data for a different problem. The NumPy archive contains plain arrays and loads with `allow_pickle=False`.
+Lengths are stored in meters. `../figures.py` computes all percentages relative to the proven optimum. Both artifacts fingerprint the site geometry and complete experiment configuration, and their loaders reject data for a different problem. The NumPy archive contains plain arrays and loads with `allow_pickle=False`.
 
 ## Regenerating
 
@@ -31,7 +31,7 @@ python -m docs.figuredata.routers_solve_to_optimum
 python -m docs.figuredata.routers_solve_and_log
 ```
 
-`routers_solve_to_optimum.py` requires a Gurobi licence, and `routers_solve_and_log.py` requires `highspy`.
+`routers_solve_to_optimum.py` requires a Gurobi license, and `routers_solve_and_log.py` requires `highspy`.
 
 The documentation build uses the committed artifacts and does not run the routers.
 

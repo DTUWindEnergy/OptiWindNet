@@ -9,7 +9,7 @@ docs/
 ├── conf.py               Sphinx configuration
 ├── Makefile              `make html`, `make check`
 ├── check_docs.py         checks the Sphinx build cannot do (see below)
-├── run_notebooks.py      re-executes notebooks and normalises their JSON
+├── run_notebooks.py      re-executes notebooks and normalizes their JSON
 ├── figures.py            builds the SVG figures the prose pages embed
 ├── index.md              landing page; holds every toctree
 │
@@ -142,7 +142,7 @@ prettier --write "**/*.md"                     # the pages
 python docs/format_notebook_prose.py --write   # the notebooks' markdown cells
 ```
 
-`never` unwraps paragraphs, which is the point: a contribution hard-wrapped at 80 columns normalises to the shape every other page has, and editing a paragraph no longer reflows its neighbours. The cost is that a paragraph is one long line — break it where the topic changes, not at a column.
+`never` unwraps paragraphs, which is the point: a contribution hard-wrapped at 80 columns normalizes to the shape every other page has, and editing a paragraph no longer reflows its neighbors. The cost is that a paragraph is one long line — break it where the topic changes, not at a column.
 
 Prettier has no `.ipynb` parser, so the notebooks are invisible to it. That is what `docs/format_notebook_prose.py` is for: it lifts the markdown cells out, formats them as Markdown, and puts them back, leaving code cells and outputs alone.
 
@@ -161,7 +161,7 @@ Two things need protecting from `never`, both with Prettier's own fences:
 .venv/bin/python docs/run_notebooks.py --kernel <name> --changed
 ```
 
-It executes, then normalises the JSON so diffs stay small (drops transient metadata, renumbers execution counts, prettifies SVG, marks long-output cells `scrolled`). MILP notebooks are skipped unless `--milp` or explicit paths are given, because they are slow.
+It executes, then normalizes the JSON so diffs stay small (drops transient metadata, renumbers execution counts, prettifies SVG, marks long-output cells `scrolled`). MILP notebooks are skipped unless `--milp` or explicit paths are given, because they are slow.
 
 ### Editing notebook JSON by hand
 

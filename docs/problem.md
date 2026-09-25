@@ -20,6 +20,12 @@ This problem is related to two classical operations research problems:
 
 Neither classical formulation accounts for route crossings. _OptiWindNet_ extends these formulations by incorporating crossing-free cable routing. The selected [](/problem.md#network-topologies) determines the underlying formulation: CMSTP for a _branched_ topology, CVRP for a _ringed_ topology, and the open-route variant of CVRP for a _radial_ topology.
 
+### Objective and reported cost
+
+A low-cost network is often the practical goal. The built-in routers seek a short feasible network: their optimization objective is cable length, which often correlates strongly with total cable cost. When cable types have different prices per unit of length, the shortest feasible network need not be the cheapest.
+
+The routers select a solution topology `S` using the lengths of available links and feeders. Path-finding then adds any necessary detours to produce the physical routeset `G`, so its total cable length can exceed the objective value used by a solver. If priced cable types are supplied, _OptiWindNet_ assigns a type to each routed link according to its load and reports the sum of routed length times that type's price per unit of length. This is the **cost of the resulting network**, not a claim that its cost is minimal. See [](/reference/input_formats.md#cable-types) for cable inputs and [](/routers.md#exact-optimization) for the meaning of a MILP optimality gap.
+
 The complete mixed-integer formulation is given in [](/reference/milp_formulation.md#milp-formulation).
 
 A detailed analysis of the methodology is available in the open-access article referenced in {doc}`/paper`.
@@ -28,7 +34,7 @@ _In use:_ {doc}`/notebooks/hi00_quickstart` (Network/Router API) · {doc}`/noteb
 
 ## Graph representations
 
-_OptiWindNet_ represents a problem instance and its solution as a sequence of _networkx_ graphs. Both APIs build the same graphs and provide corresponding plot views. The high-level API stores the graphs as attributes of a {py:class}`WindFarmNetwork <optiwindnet.api.WindFarmNetwork>` instance, whereas the low-level API passes them explicitly between functions. The location and routeset views present the input and final result; the other three expose intermediate graphs for inspection and diagnostics.
+_OptiWindNet_ represents a problem instance and its solution as a sequence of NetworkX graphs. Both APIs build the same graphs and provide corresponding plot views. The high-level API stores the graphs as attributes of a {py:class}`WindFarmNetwork <optiwindnet.api.WindFarmNetwork>` instance, whereas the low-level API passes them explicitly between functions. The location and routeset views present the input and final result; the other three expose intermediate graphs for inspection and diagnostics.
 
 | Graph | Name | Contents | Plot representation |
 | --- | --- | --- | --- |
@@ -69,7 +75,7 @@ _In use:_ {doc}`/notebooks/hi10_windfarmnetwork` and {doc}`/notebooks/hi14_plott
 
 ## Network topologies
 
-_OptiWindNet_ supports three electrical topologies. Each constrains the structure of the solution and can be selected through the `topology` option described in [](/routers.md#model-options).
+_OptiWindNet_ supports three electrical topologies. Each constrains the structure of the solution and can be selected through the `topology` option described in [](/routers.md#problem-options).
 
 ```{glossary}
 branched
