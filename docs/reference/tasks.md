@@ -10,7 +10,7 @@ A task-oriented index into the rest of the documentation. Each entry names the c
 | Load my own turbine coordinates | [](/reference/input_formats.md#coordinate-arrays) | {doc}`/notebooks/hi11_data_input` | {doc}`/notebooks/lo11_data_input` |
 | Load a windIO, YAML or `.osm.pbf` file | [Input formats](/reference/input_formats.md#input-formats) | {doc}`/notebooks/hi11_data_input` | {doc}`/notebooks/lo11_data_input` |
 | Try it on a real wind farm without any data of my own | [](/reference/input_formats.md#location-repositories) | {doc}`/notebooks/hi12_locations` | {doc}`/notebooks/lo12_locations` |
-| Get a cost instead of a cable length | [](/reference/input_formats.md#cable-types) | {doc}`/notebooks/hi11_data_input` | — |
+| Report the resulting network's cost | [](/reference/input_formats.md#cable-types) | {doc}`/notebooks/hi10_windfarmnetwork` | — |
 
 ## Shape the solution
 
@@ -18,9 +18,9 @@ A task-oriented index into the rest of the documentation. Each entry names the c
 | --- | --- | --- | --- |
 | Avoid branching at turbines (radial network) | [](/problem.md#network-topologies) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo30_topologies` |
 | Build rings for fault redundancy | [](/problem.md#ring-semantics) | {doc}`/notebooks/hi30_topologies` | {doc}`/notebooks/lo30_topologies` |
-| Limit or pin the number of feeders | [](/routers.md#model-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
-| Balance the load across subtrees | [](/routers.md#model-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
-| Keep feeder routes straight | [](/routers.md#model-options) | {doc}`/notebooks/hi20_heuristic` | {doc}`/notebooks/lo20_heuristic` |
+| Limit or pin the number of feeders | [](/routers.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
+| Balance the load across subtrees | [](/routers.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
+| Keep feeder routes straight | [](/routers.md#problem-options) | {doc}`/notebooks/hi20_heuristic` | {doc}`/notebooks/lo20_heuristic` |
 | Keep cables out of an exclusion zone | [](/problem.md#crossings-contours-and-detours) | {doc}`/notebooks/hi13_border_obstacles` | — |
 | Add a safety margin to the boundaries | [](/reference/input_formats.md#preparing-the-geometry) | {doc}`/notebooks/hi13_border_obstacles` | — |
 | Handle several substations | [](/routers.md#meta-heuristics) · [](/problem.md#ring-semantics) | — | {doc}`/notebooks/lo32_clustering` |
@@ -33,7 +33,7 @@ A task-oriented index into the rest of the documentation. Each entry names the c
 | Get the fastest possible answer | [](/routers.md#constructive-heuristics) | {doc}`/notebooks/hi20_heuristic` | {doc}`/notebooks/lo20_heuristic` |
 | Get a better network for a fixed time budget | [](/routers.md#meta-heuristics) | {doc}`/notebooks/hi21_hgs` | {doc}`/notebooks/lo21_hgs` |
 | Prove how good the solution is | [](/routers.md#exact-optimization) | {doc}`/notebooks/hi23_milp` | {doc}`/notebooks/lo23_milp_ortools` |
-| Speed up a MILP solve with a warm start | [](/routers.md#warm-starting) | {doc}`/notebooks/hi23_milp` | {doc}`/notebooks/lo40_example_taylor_2023` |
+| Speed up a MILP solve with a warm start | [](/routers.md#warm-starting) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo40_example_taylor_2023` |
 | Pick and install a MILP solver | [](/routers.md#exact-optimization) · {doc}`/install` | {doc}`/notebooks/hi23_milp` | {doc}`/notebooks/lo23_milp_ortools` |
 | Decide when to stop a solve | [](/routers.md#how-long-a-solve-takes) | {doc}`/notebooks/hi23_milp` | {doc}`/notebooks/lo23_milp_ortools` |
 
@@ -78,10 +78,10 @@ Some material exists in one section only: the {py:class}`WindFarmNetwork <optiwi
 : Every terminal and root is checked against the allowed area before optimizing. Either the coordinates are wrong, or the border is — see [](/reference/input_formats.md#preparing-the-geometry). Plotting the location before optimizing is the fastest way to tell which.
 
 The MILP solver ignored my warm start
-: Not every solution is a valid start for every model. A constructive heuristic does not limit the feeder count and is not radial, so it cannot start a model that requires either. The full matrix is in [](/routers.md#warm-starting); run with `verbose=True` to see the solver report what it accepted.
+: A warm start must satisfy the target model's topology, capacity, feeder and crossing constraints. With `warmup=True`, `MILPRouter` attempts to replace an incompatible stored solution; with `warmup=False`, it ignores all warm starts. See [](/routers.md#warm-starting) and inspect `solver.metadata.warmed_by` for the accepted producer.
 
 The result is not what the options asked for
-: Only the exact routers enforce every model option. A router given an option it cannot honor returns a solution that ignores it, without failing — see [](/routers.md#model-options).
+: Check the router's supported options and their combination rules. Some unsupported combinations raise errors; others are ignored with a warning, including MILP balancing without a pinned feeder count. See [](/routers.md#problem-options).
 
 I need to see what the algorithm is doing
 : Logging is configured per module, and non-Python solvers have their own verbosity — see {doc}`/notebooks/hi15_debugging`.
