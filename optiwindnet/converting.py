@@ -16,7 +16,7 @@ import numpy as np
 from bitarray import bitarray, frozenbitarray
 
 from .identity import _CANONICAL_TERMINAL_LINKS
-from .loads import calcload
+from .loads import calcload, terminal_power_attrs, validate_terminal_power
 from .terse import TerseLinks
 from .types import Topology
 
@@ -110,6 +110,7 @@ _essential_graph_attrs = (
     'R', 'T', 'B', 'VertexC', 'name', 'handle', 'border',
     # optional
     'obstacles', 'landscape_angle', 'norm_scale', 'norm_offset',
+    'power_unit', 'powers_set',
 )  # fmt: skip
 
 
@@ -213,11 +214,21 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     carry_over = (
         'B', 'border', 'obstacles', 'name', 'handle',
         'landscape_angle', 'norm_scale', 'norm_offset', 'is_normalized',
+        'power_per_inflow', 'power_unit', 'powers_set',
     )  # fmt: skip
     for k in carry_over:
         value = A.graph.get(k)
         if value is not None:
             G.graph[k] = value
+
+    # the power is declared by the site; its quantization comes with the solve
+    for k in ('power_per_inflow', 'capacity_nominal', 'power_rtol'):
+        if k in S.graph:
+            G.graph[k] = S.graph[k]
+    if 'powers_set' in A.graph:
+        for t in range(T):
+            G.nodes[t]['power'] = A.nodes[t]['power']
+    validate_terminal_power(G)
 
     stunts_primes = A.graph.get('stunts_primes')
     if stunts_primes:
@@ -499,8 +510,11 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
 def S_from_G(G: nx.Graph) -> nx.Graph:
     """Get ``G``'s topology (contours, detours, lengths and coords are dropped).
 
-    Terminal ``'power'`` attributes are preserved so that recalculating loads
-    on ``S`` uses the same terminal contributions as on ``G``.
+    Terminal ``'inflow'`` attributes are preserved so that recalculating loads
+    on ``S`` uses the same terminal contributions as on ``G``, as are the graph
+    attributes that record the quantization of the solve (``'power_per_inflow'``,
+    ``'capacity_nominal'`` and ``'power_rtol'``). Declared nominal power belongs
+    to the site and routed graphs, not the topology.
 
     If using ``S`` to warm-start a MILP model, call after :func:`S_from_G`:
 
@@ -523,11 +537,7 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
     R, T = (G.graph[k] for k in 'RT')
     capacity = G.graph['capacity']
     has_loads = G.graph.get('has_loads', False)
-    S = nx.Graph(
-        T=T,
-        R=R,
-        capacity=capacity,
-    )
+    S = nx.Graph(T=T, R=R, capacity=capacity)
 
     def is_real(n: int) -> bool:
         "Only roots and terminals survive in S (border vertices and clones do not)."
@@ -537,14 +547,18 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
         S.add_node(r, kind='oss', **({'load': G.nodes[r]['load']} if has_loads else {}))
     for t in sorted(n for n in G if 0 <= n < T):
         nodeD = G.nodes[t]
-        # Preserve declared power for subsequent load calculations.
-        power = {'power': nodeD['power']} if 'power' in nodeD else {}
+        # Preserve inflow for subsequent load calculations.
+        inflow_attrs = {'inflow': nodeD['inflow']} if 'inflow' in nodeD else {}
         if has_loads:
             S.add_node(
-                t, kind='wtg', load=nodeD['load'], subtree=nodeD['subtree'], **power
+                t,
+                kind='wtg',
+                load=nodeD['load'],
+                subtree=nodeD['subtree'],
+                **inflow_attrs,
             )
         else:
-            S.add_node(t, kind='wtg', **power)
+            S.add_node(t, kind='wtg', **inflow_attrs)
 
     # Links already joining two real nodes carry over verbatim, keeping ``G``'s
     # own orientation: 'reverse' is relative to the stored node order, and the
@@ -603,6 +617,9 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
     if method_options is not None:
         S.graph['method_options'] = method_options
     S.graph['topology'] = G.graph['topology']
+    for k in ('power_per_inflow', 'capacity_nominal', 'power_rtol'):
+        if k in G.graph:
+            S.graph[k] = G.graph[k]
     if has_loads:
         S.graph['has_loads'] = True
         S.graph['max_load'] = G.graph['max_load']
@@ -616,6 +633,9 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
 
     The returned location graph ``L`` retains only roots, nodes and basic graph
     attributes. All edges and remaining attributes are not carried from ``G``.
+    Of the turbine power, only the declaration is kept (see
+    :func:`~optiwindnet.loads.terminal_power_attrs`), not the quantization of
+    the solve.
 
     Args:
       G: routeset graph to extract site data from.
@@ -625,6 +645,9 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
     """
     R, T = (G.graph[k] for k in 'RT')
     L = nx.Graph(**{k: G.graph[k] for k in _essential_graph_attrs if k in G.graph})
+    if 'power_per_inflow' in G.graph and 'powers_set' not in G.graph:
+        # uniform power: the power of the single inflow is the declared power
+        L.graph['power_per_inflow'] = G.graph['power_per_inflow']
 
     # TODO: remove this entire legacy compatibility block after a couple of releases.
     # BEGIN: Legacy compatibility block for graphs whose VertexC/B still reflect stunts
@@ -647,6 +670,7 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
         ((n, {'label': label}) for n, label in G.nodes(data='label') if 0 <= n < T),
         kind='wtg',
     )
+    nx.set_node_attributes(L, terminal_power_attrs(G))
     for r in range(-R, 0):
         L.add_node(r, label=G.nodes[r].get('label'), kind='oss')
     return L

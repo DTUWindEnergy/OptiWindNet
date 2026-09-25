@@ -82,7 +82,7 @@ from optiwindnet.converting import (
     linkbits_from_S,
 )
 from optiwindnet.identity import linkset_id
-from optiwindnet.loads import calcload, split_rings_and_calc_loads, terminal_powers
+from optiwindnet.loads import calcload, split_rings_and_calc_loads, terminal_inflow
 from optiwindnet.MILP._core import physical_core_count
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.types import Topology
@@ -328,7 +328,8 @@ def _raise_timeout(signum, frame) -> None:
 
 
 def _execute(job: _Job) -> dict[str, Any]:
-    bundle = get_bundle(job.site, copy=True)
+    # case capacities count turbines, whatever power the site declares
+    bundle = get_bundle(job.site, copy=True, read_powers=False)
     task = Task(
         job.site,
         job.capacity,
@@ -616,13 +617,13 @@ def load_solution(db_path: Path | str, row_id: int) -> tuple[nx.Graph, SiteBundl
     conn.close()
     if row is None or row['linkbits'] is None:
         raise ValueError(f'results row {row_id} has no recorded solution')
-    bundle = get_bundle(row['site'], copy=True)
+    bundle = get_bundle(row['site'], copy=True, read_powers=False)
     A = bundle.A
     if linkset_id(A) != row['linkset_id']:
         raise ValueError(f'available links of {row["site"]!r} changed since the run')
     S = S_from_linkbits(deserialize(row['linkbits']), A)
     topology = Topology(json.loads(row['extras']).get('topology', 'branched'))
-    nx.set_node_attributes(S, terminal_powers(A), 'power')
+    nx.set_node_attributes(S, terminal_inflow(A), 'inflow')
     if topology is Topology.RINGED:
         split_rings_and_calc_loads(S, A)
     else:

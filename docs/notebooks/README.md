@@ -41,7 +41,7 @@ The band digit means the same thing in both API sections, and paired notebooks s
 Drives _OptiWindNet_ through the `WindFarmNetwork` and `Router` classes: provide input data, call a few intuitive methods, read the results.
 
 - `hi00_quickstart`: minimum steps to optimize a network
-- `hi10_windfarmnetwork`, `hi11_data_input`, `hi12_locations`, `hi13_border_obstacles`, `hi14_plotting`, `hi15_debugging`
+- `hi10_windfarmnetwork`, `hi11_data_input`, `hi12_locations`, `hi13_border_obstacles`, `hi14_plotting`, `hi15_debugging`, `hi16_mixed_power`
 - `hi20_heuristic`, `hi21_hgs`, `hi23_milp`: the three optimization approaches
 - `hi30_topologies`, `hi31_options`: shaping the solution
 - `hi40_example_taylor_2023`, `hi41_example_iea_wind_task_55`: worked examples
@@ -54,7 +54,7 @@ Drives _OptiWindNet_ through the `WindFarmNetwork` and `Router` classes: provide
 Imports the internal modules directly, calling each intermediate step (mesh generation, warm start, optimization, routing) explicitly.
 
 - `lo00_quickstart`: the `L` → `P`,`A` → `S` → `G` pipeline
-- `lo11_data_input`, `lo12_locations`, `lo14_plotting`
+- `lo11_data_input`, `lo12_locations`, `lo14_plotting`, `lo16_mixed_power`
 - `lo20_heuristic`, `lo21_hgs`, `lo22_lkh`: the constructive-heuristic and meta-heuristic routers
 - `lo23_milp_ortools`–`lo28_milp_cbc`: one notebook per MILP backend
 - `lo30_topologies`: topologies and validation
@@ -76,6 +76,7 @@ Imports the internal modules directly, calling each intermediate step (mesh gene
 | Loading input data | `hi11_data_input` | `lo11_data_input` |
 | Bundled locations | `hi12_locations` | `lo12_locations` |
 | Plotting | `hi14_plotting` | `lo14_plotting` |
+| Turbines of unequal power | `hi16_mixed_power` | `lo16_mixed_power` |
 | Constructive heuristic | `hi20_heuristic` | `lo20_heuristic` |
 | Meta-heuristic | `hi21_hgs` | `lo21_hgs` |
 | Exact optimization | `hi23_milp` | `lo23_milp_ortools` |

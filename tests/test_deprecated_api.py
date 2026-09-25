@@ -20,6 +20,7 @@ _DEPRECATED_INTERARRAYLIB_EXPORTS = {
     'bfs_subtree_loads': 'optiwindnet.loads',
     'calcload': 'optiwindnet.loads',
     'split_rings_and_calc_loads': 'optiwindnet.loads',
+    'describe_G': 'optiwindnet.presenting',
     'TerseLinks': 'optiwindnet.terse',
     'as_hooked_to_head': 'optiwindnet.transforming',
     'as_hooked_to_nearest': 'optiwindnet.transforming',

@@ -24,13 +24,13 @@ from ._core import (
     FeederLimit,
     FeederRoute,
     ModelMetadata,
-    ModelOptions,
     OWNSolutionNotFound,
     OWNWarmupFailed,
     SolutionInfo,
     Solver,
     Topology,
     canonical_linksets,
+    check_inflow_support,
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
@@ -93,18 +93,11 @@ class SolverPyomo(Solver):
     def _flow_val(self, var: Any) -> int:
         return round(var.value)
 
-    def set_problem(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        capacity: int,
-        model_options: Mapping[str, Any],
-        warmstart: nx.Graph | None = None,
-    ):
-        self.P, self.A, self.capacity = P, A, capacity
-        model_options = ModelOptions(**model_options)
-        model, metadata = make_min_length_model(A, capacity, **model_options)
-        self.model, self.model_options, self.metadata = model, model_options, metadata
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        model, metadata = make_min_length_model(
+            self.A, self.capacity, **self.model_options
+        )
+        self.model, self.metadata = model, metadata
         if warmstart is not None and self.solver.warm_start_capable():
             warmup_model(model, metadata, warmstart)
             self.solve_kwargs = {'warmstart': True}
@@ -213,18 +206,11 @@ class SolverPyomoAppsi(Solver):
     def _flow_val(self, var: Any) -> int:
         return round(var.value)
 
-    def set_problem(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        capacity: int,
-        model_options: Mapping[str, Any],
-        warmstart: nx.Graph | None = None,
-    ):
-        self.P, self.A, self.capacity = P, A, capacity
-        model_options = ModelOptions(**model_options)
-        model, metadata = make_min_length_model(A, capacity, **model_options)
-        self.model, self.model_options, self.metadata = model, model_options, metadata
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        model, metadata = make_min_length_model(
+            self.A, self.capacity, **self.model_options
+        )
+        self.model, self.metadata = model, metadata
         if warmstart is not None and self.solver.warm_start_capable():
             warmup_model(model, metadata, warmstart)
             self.solver.config.warmstart = True
@@ -336,7 +322,7 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
+    inflow_total = check_inflow_support(A, topology)
 
     # For RINGED, double the internal capacity so each ring can hold up to
     # 2×capacity turbines (capacity per arm); store original for metadata.
@@ -379,7 +365,8 @@ def make_min_length_model(
     m.link_ = pyo.Var(m.linkset, domain=pyo.Binary, initialize=0)
 
     def flow_bounds(m, u, v):
-        return (0, (m.k if v < 0 else m.k - 1))
+        # a link into v carries at most what leaves v less v's own inflow
+        return (0, (m.k if v < 0 else m.k - A.nodes[v].get('inflow', 1)))
 
     # continuous: cons_single_out_link + cons_flow_conserv pin flows to integers.
     m.flow_ = pyo.Var(
@@ -464,25 +451,31 @@ def make_min_length_model(
         m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
         rule=(
             lambda m, u, v: (
-                m.flow_[(u, v)] <= m.link_[(u, v)] * (m.k if v < 0 else (m.k - 1))
+                m.flow_[(u, v)]
+                <= m.link_[(u, v)]
+                * (m.k if v < 0 else m.k - A.nodes[v].get('inflow', 1))
             )
         ),
         name='flow_ub',
     )
     m.cons_flow_lb = pyo.Constraint(
         m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
-        rule=(lambda m, u, v: m.link_[(u, v)] <= m.flow_[(u, v)]),
+        rule=(
+            lambda m, u, v: (
+                m.link_[(u, v)] * A.nodes[u].get('inflow', 1) <= m.flow_[(u, v)]
+            )
+        ),
         name='flow_lb',
     )
 
-    # flow conservation with possibly non-unitary node power
+    # flow conservation with possibly nonunitary terminal inflow
     m.cons_flow_conserv = pyo.Constraint(
         m.T,
         rule=(
             lambda m, u: (
                 sum((m.flow_[u, v] - m.flow_[v, u]) for v in A_terminals.neighbors(u))
                 + sum(m.flow_[u, r] for r in _R)
-                == A.nodes[u].get('power', 1)
+                == A.nodes[u].get('inflow', 1)
             )
         ),
         name='flow_conserv',
@@ -493,7 +486,13 @@ def make_min_length_model(
     # the model counts rings (one flow-feeder var each): convert between them.
     feeders_per_subtree = 2 if topology is Topology.RINGED else 1
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, capacity, feeder_limit, max_feeders, balanced, feeders_per_subtree, W
+        T,
+        capacity,
+        feeder_limit,
+        max_feeders,
+        balanced,
+        feeders_per_subtree,
+        inflow_total,
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata
@@ -560,9 +559,9 @@ def make_min_length_model(
         )
 
     # assert all nodes are connected to some root
-    m.cons_total_power_sank = pyo.Constraint(
-        rule=(lambda m: sum(m.flow_[t, r] for r in _R for t in _T) == W),
-        name='total_power_sank',
+    m.cons_total_inflow_sank = pyo.Constraint(
+        rule=(lambda m: sum(m.flow_[t, r] for r in _R for t in _T) == inflow_total),
+        name='total_inflow_sank',
     )
 
     # valid inequalities
@@ -571,7 +570,7 @@ def make_min_length_model(
         rule=(
             lambda m, u: (
                 sum(m.flow_[v, u] for v in A_terminals.neighbors(u))
-                <= m.k - A.nodes[u].get('power', 1)
+                <= m.k - A.nodes[u].get('inflow', 1)
             )
         ),
         name='inflow_limit',

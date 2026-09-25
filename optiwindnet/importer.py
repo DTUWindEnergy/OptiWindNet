@@ -5,7 +5,9 @@ import logging
 import math
 import re
 from collections import Counter, namedtuple
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from decimal import Decimal
+from fractions import Fraction
 from importlib.resources import files
 from itertools import chain
 from pathlib import Path
@@ -21,6 +23,7 @@ from scipy.spatial import ConvexHull
 
 from .converting import L_from_site
 from .geometric import rotating_calipers
+from .loads import _validated_powers, set_turbine_powers
 from .utils import make_handle
 
 _lggr = logging.getLogger(__name__)
@@ -33,6 +36,10 @@ __all__ = (
 
 
 _coord_sep = r',\s*|;\s*|\s{1,}|,|;'
+
+# OSM's generator:output:electricity holds a number followed by an optional unit
+# (e.g. '8 MW'), or a non-numeric value such as 'yes', which conveys no power.
+_power_output = re.compile(r'\s*(?P<number>\d+(?:\.\d*)?|\.\d+)\s*(?P<unit>\S.*?)?\s*$')
 _coord_lbraces = '(['
 _coord_rbraces = ')]'
 
@@ -128,7 +135,157 @@ coordinate_parser = {
 }
 
 
-def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
+def _entry_power_MW(entry: dict, name: str) -> float:
+    """Return a TURBINE entry's ``power_MW`` as a positive finite number.
+
+    Raises:
+        ValueError: the entry's ``power_MW`` is not one.
+    """
+    power_MW = entry['power_MW']
+    if (
+        isinstance(power_MW, bool)
+        or not isinstance(power_MW, (int, float))
+        or not math.isfinite(power_MW)
+        or power_MW <= 0
+    ):
+        raise ValueError(
+            f'Location: "{name}" -> a TURBINE power_MW must be a positive finite'
+            f' number: got {power_MW!r}.'
+        )
+    return float(power_MW)
+
+
+def _turbine_power_by_prefix(
+    entries: list[dict], T: int, name: str, labels: Sequence[str | None]
+) -> list[float]:
+    """Assign turbine powers by the prefix of their ``TURBINES`` label.
+
+    Raises:
+        ValueError: labels are missing, a prefix is not a non-empty string or
+            matches no turbine, ``qty`` disagrees with the matches, a
+            ``power_MW`` is not a positive finite number, or a turbine is claimed
+            zero or twice.
+    """
+    if len(labels) < T or any(labels[t] is None for t in range(T)):
+        raise ValueError(
+            f'Location: "{name}" -> a TURBINE prefix claims turbines by their'
+            ' TURBINES label, which this location does not give to all of them.'
+        )
+    turbine_power = [0.0] * T
+    claimed_by: list[str] = [''] * T
+    for entry in entries:
+        prefix = entry['prefix']
+        if not isinstance(prefix, str) or not prefix:
+            raise ValueError(
+                f'Location: "{name}" -> a TURBINE prefix must be a non-empty'
+                f' string: got {prefix!r}.'
+            )
+        matched = [t for t in range(T) if str(labels[t]).startswith(prefix)]
+        if not matched:
+            raise ValueError(
+                f'Location: "{name}" -> the TURBINE prefix {prefix!r} matches no'
+                ' turbine label.'
+            )
+        qty = entry.get('qty')
+        if qty is not None and qty != len(matched):
+            raise ValueError(
+                f'Location: "{name}" -> the TURBINE prefix {prefix!r} matches'
+                f' {len(matched)} turbines, but its qty states {qty!r}.'
+            )
+        power_MW = _entry_power_MW(entry, name)
+        for t in matched:
+            if claimed_by[t]:
+                raise ValueError(
+                    f'Location: "{name}" -> turbine {labels[t]!r} is claimed by'
+                    f' both the TURBINE prefix {claimed_by[t]!r} and {prefix!r}.'
+                )
+            turbine_power[t] = power_MW
+            claimed_by[t] = prefix
+    unclaimed = [labels[t] for t in range(T) if not claimed_by[t]]
+    if unclaimed:
+        raise ValueError(
+            f'Location: "{name}" -> no TURBINE prefix claims {len(unclaimed)} of'
+            f' the {T} turbines, starting with {unclaimed[0]!r}.'
+        )
+    return turbine_power
+
+
+def _turbine_power_from_spec(
+    turbine: object, T: int, name: str, labels: Sequence[str | None] = ()
+) -> list[Fraction] | None:
+    """Read the turbines' declared power from the YAML ``TURBINE`` section.
+
+    A mapping supplies one ``power_MW`` for all turbines. List entries assign
+    power by consecutive ``qty`` blocks or label ``prefix``. Partial power
+    declarations are ignored with a warning.
+
+    Args:
+        turbine: the file's ``TURBINE`` section, or None if it has none.
+        T: number of turbines in the location.
+        name: location name, used in the diagnostic messages.
+        labels: the terminals' ``TURBINES`` labels, empty where absent.
+
+    Returns:
+        Declared power of each turbine in MW, in terminal order, or None if power
+        is unspecified or incomplete.
+
+    Raises:
+        ValueError: quantities or prefixes do not cover each turbine exactly
+            once, or power is not positive and finite.
+    """
+    if isinstance(turbine, dict):
+        if turbine.get('power_MW') is None:
+            return None
+        turbine_power = [_entry_power_MW(turbine, name)] * T
+    elif isinstance(turbine, (list, tuple)):
+        entries = [entry if isinstance(entry, dict) else {} for entry in turbine]
+        declared = [entry for entry in entries if entry.get('power_MW') is not None]
+        if not declared:
+            # a list of makes, models and quantities declares no power
+            return None
+        if len(declared) < len(entries):
+            _warn(
+                'Location "%s" -> ignoring the power of %d turbine models, as the'
+                ' other %d do not declare theirs.',
+                name,
+                len(declared),
+                len(entries) - len(declared),
+            )
+            return None
+        by_prefix = [entry for entry in entries if entry.get('prefix') is not None]
+        if by_prefix:
+            if len(by_prefix) < len(entries):
+                raise ValueError(
+                    f'Location: "{name}" -> either every TURBINE entry claims its'
+                    ' turbines by prefix or none does, and'
+                    f' {len(entries) - len(by_prefix)} of {len(entries)} carry no'
+                    ' prefix.'
+                )
+            turbine_power = _turbine_power_by_prefix(entries, T, name, labels)
+        else:
+            turbine_power = []
+            for entry in entries:
+                qty = entry.get('qty')
+                if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
+                    raise ValueError(
+                        f'Location: "{name}" -> every TURBINE entry declaring a'
+                        f' power_MW must state the qty of turbines of that model'
+                        f' as a positive integer: got {qty!r}.'
+                    )
+                turbine_power.extend([_entry_power_MW(entry, name)] * qty)
+            if len(turbine_power) != T:
+                raise ValueError(
+                    f'Location: "{name}" -> the TURBINE quantities add up to'
+                    f' {len(turbine_power)} turbines, but the location has {T}.'
+                )
+    else:
+        return None
+    return _validated_powers(turbine_power, T)
+
+
+def L_from_yaml(
+    filepath: Path | str, handle: str | None = None, read_powers: bool = True
+) -> nx.Graph:
     """Import wind farm data from .yaml file.
 
     Two options available for ``COORDINATE_FORMAT``: ``'planar'`` and ``'latlon'``.
@@ -150,12 +307,39 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
 
       LABEL [234.2, 5212.5]
 
+    The optional ``TURBINE`` section declares the turbines' nominal power in
+    MW (see :func:`~optiwindnet.loads.set_turbine_powers`), with graph
+    attribute ``'power_unit'`` set to ``'MW'``. A mapping states one
+    ``power_MW`` for the whole site; a
+    list states one entry per turbine model, each claiming its turbines by
+    ``qty``, as a block of consecutive terminals, or by a label ``prefix``::
+
+      TURBINE:
+        - make: MHI Vestas
+          model: V164-8.0
+          power_MW: 8.25
+          qty: 40
+          prefix: 3-
+        - make: Siemens Gamesa
+          model: SWT-7.0-154
+          power_MW: 7
+          qty: 47
+          prefix: 4-
+
     Args:
       filepath: path to ``.yaml`` file to read.
       handle: Short moniker for the site.
+      read_powers: whether to declare the ``TURBINE`` section's power on the
+        location; if False, the section is ignored.
 
     Returns:
       Unconnected location graph L.
+
+    Raises:
+      ValueError: a ``TURBINE`` list entry has neither a positive integer
+        ``qty`` nor a ``prefix``, the quantities do not add up to the number of
+        turbines, the prefixes do not claim every turbine exactly once, or a
+        ``power_MW`` is not a positive finite number.
     """
     if isinstance(filepath, str):
         filepath = Path(filepath)
@@ -272,18 +456,96 @@ def L_from_yaml(filepath: Path | str, handle: str | None = None) -> nx.Graph:
         nx.set_node_attributes(
             G, {-R + r: RootLabel[r] for r in range(R)}, name='label'
         )
+    if read_powers:
+        turbine_powers = _turbine_power_from_spec(
+            parsed_dict.get('TURBINE'), T, name, TerminalLabel
+        )
+        if turbine_powers is not None:
+            set_turbine_powers(G, turbine_powers, 'MW')
     return G
 
 
-def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
+def _turbine_power_from_tags(
+    tag_values: list[str | None], name: str
+) -> tuple[list[Fraction], str] | None:
+    """Read the generators' declared power from OSM electricity-output tags.
+
+    All generators must declare positive output in a common unit, since a partial
+    declaration leaves the remaining turbines without a demand to compare
+    against. Missing or nonnumeric tags cause the power declaration to be
+    ignored.
+
+    Args:
+        tag_values: ``generator:output:electricity`` value of each turbine, in
+            terminal order, with ``None`` wherever the tag is absent.
+        name: location name, used in the diagnostic messages.
+
+    Returns:
+        Declared power of each generator, in terminal order, and the unit string
+        (empty if absent), or None if power is unspecified or incomplete.
+
+    Raises:
+        ValueError: output units differ between generators.
+    """
+    parsed = []
+    unusable = Counter()
+    for value in tag_values:
+        match = None if value is None else _power_output.match(value)
+        if match is not None and Decimal(match['number']) <= 0:
+            match = None
+        if match is None and value is not None:
+            unusable[value] += 1
+        parsed.append(match)
+    if unusable:
+        _info(
+            'Location "%s" -> unusable generator output: %s',
+            name,
+            ', '.join(f'{value} ({count}x)' for value, count in unusable.most_common()),
+        )
+    declared = [match for match in parsed if match is not None]
+    if not declared:
+        return None
+    if len(declared) < len(parsed):
+        _warn(
+            'Location "%s" -> ignoring the electricity output of %d generators,'
+            ' as the other %d do not declare theirs.',
+            name,
+            len(declared),
+            len(parsed) - len(declared),
+        )
+        return None
+    units = {match['unit'] or '' for match in declared}
+    if len(units) > 1:
+        raise ValueError(
+            f'Location: "{name}" -> generators declare their electricity output'
+            f' in inconsistent units: {", ".join(sorted(units))}.'
+        )
+    return [Fraction(match['number']) for match in declared], units.pop()
+
+
+def L_from_pbf(
+    filepath: Path | str, handle: str | None = None, read_powers: bool = True
+) -> nx.Graph:
     """Import wind farm data from .osm.pbf file.
+
+    Generators tagged with ``generator:output:electricity`` declare their
+    nominal power (see :func:`~optiwindnet.loads.set_turbine_powers`) and
+    set the graph attribute ``'power_unit'``, provided every generator declares
+    a positive output in a common unit.
 
     Args:
         filepath: path to ``.osm.pbf`` file to read.
         handle: Short moniker for the site.
+        read_powers: whether to declare the generators' tagged output on the
+            location; if False, the tags are ignored.
 
     Returns:
         Unconnected location graph L.
+
+    Raises:
+        ValueError: no substation or generator was found, more than one border
+            was defined, or the generators declare their electricity output in
+            inconsistent units.
     """
     if isinstance(filepath, str):
         filepath = Path(filepath)
@@ -298,6 +560,7 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
     substation_labels = []
     turbines = []
     turbine_labels = []
+    turbine_outputs = []
     border_raw = None
     obstacles_raw = []
     ways = {}
@@ -316,6 +579,9 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
                     case 'generator':
                         turbines.append(e.lonlat[::-1])
                         turbine_labels.append(label)
+                        turbine_outputs.append(
+                            e.tags.get('generator:output:electricity')
+                        )
                     case _:
                         _info('Unhandled power category for Node: %s', power_kind)
 
@@ -472,6 +738,12 @@ def L_from_pbf(filepath: Path | str, handle: str | None = None) -> nx.Graph:
             for i, label in enumerate(labels, start=start):
                 if label is not None:
                     L.nodes[i]['label'] = label
+    declaration = (
+        _turbine_power_from_tags(turbine_outputs, name) if read_powers else None
+    )
+    if declaration is not None:
+        turbine_powers, power_unit = declaration
+        set_turbine_powers(L, turbine_powers, power_unit or None)
     if border_list:
         border = np.array(border_list, dtype=np.int_)
         L.graph['border'] = border
@@ -589,7 +861,9 @@ else:
     LocationsRepository = tuple
 
 
-def load_repository(path: Path | str | None = None) -> 'LocationsRepository':
+def load_repository(
+    path: Path | str | None = None, read_powers: bool = True
+) -> 'LocationsRepository':
     """Load locations from files of known formats into a namedtuple.
 
     Each file (.yaml or .osm.pbf) is translated into a location graph and
@@ -600,6 +874,8 @@ def load_repository(path: Path | str | None = None) -> 'LocationsRepository':
     Args:
       path: Path to look for location files (non-recursive). If omited, the
         locations included in optiwindnet are loaded.
+      read_powers: whether to declare the turbine power the files state (see
+        :func:`L_from_yaml` and :func:`L_from_pbf`).
     Returns:
       Named tuple which has the location handles as attribute identifiers.
     """
@@ -611,8 +887,12 @@ def load_repository(path: Path | str | None = None) -> 'LocationsRepository':
         root = Path(str(files(anchor) / 'data'))
     else:
         root = Path(path)
-    locations = [L_from_yaml(file) for file in root.glob('*.yaml')]
-    locations.extend(L_from_pbf(file) for file in root.glob('*.osm.pbf'))
+    locations = [
+        L_from_yaml(file, read_powers=read_powers) for file in root.glob('*.yaml')
+    ]
+    locations.extend(
+        L_from_pbf(file, read_powers=read_powers) for file in root.glob('*.osm.pbf')
+    )
     handles = tuple(L.graph['handle'] for L in locations)
     # field names are only known at run time -- see LocationsRepository
     return namedtuple('Locations', handles)(*locations)  # pyrefly: ignore

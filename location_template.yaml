@@ -4,11 +4,22 @@
 # (optional)
 OPERATOR:
 
+# The single turbine model the whole site is built of.
 # (optional)
 TURBINE:
   make: 
   model: 
   power_MW: 
+# For a site of turbines of unequal power, give TURBINE as a list instead: one
+# entry per turbine model, claiming its turbines by qty -- a block of
+# consecutive TURBINES, the entries in the order given -- or, where TURBINES is
+# not grouped by model, by the prefix of their label.
+# TURBINE:
+#   - make: 
+#     model: 
+#     power_MW: 
+#     qty: 
+#     prefix:   # optional; all or nothing across the entries
 
 # LANDSCAPE_ANGLE is used for plotting. `plotting.gplot()` and `svg.svgplot()`
 # rotate the site by this angle (degrees). Use `...plot(..., landscape=False)`

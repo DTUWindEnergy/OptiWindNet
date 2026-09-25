@@ -251,17 +251,17 @@ def test_S_from_G():
     assert 'method_options' not in S2.graph
 
 
-def test_S_from_G_carries_terminal_power():
-    """Preserving terminal power allows the topology to reproduce routed loads."""
+def test_S_from_G_carries_terminal_inflow():
+    """Preserving terminal inflow allows the topology to reproduce routed loads."""
     wfn = tiny_wfn()
     G = wfn.G
-    powers = {0: 2, 2: 3}
-    nx.set_node_attributes(G, powers, 'power')
+    inflow = {0: 2, 2: 3}
+    nx.set_node_attributes(G, inflow, 'inflow')
     calcload(G)
 
     S = S_from_G(G)
 
-    assert {t: S.nodes[t].get('power') for t in range(G.graph['T'])} == {
+    assert {t: S.nodes[t].get('inflow') for t in range(G.graph['T'])} == {
         0: 2, 1: None, 2: 3, 3: None,
     }  # fmt: skip
     # Recalculating loads preserves the values copied from G.
@@ -270,7 +270,7 @@ def test_S_from_G_carries_terminal_power():
     assert {n: d['load'] for n, d in reference.nodes(data=True)} == {
         n: d['load'] for n, d in S.nodes(data=True)
     }
-    assert S.nodes[-1]['load'] == sum(powers.values()) + 2
+    assert S.nodes[-1]['load'] == sum(inflow.values()) + 2
 
 
 def test_S_from_G_rejects_a_route_node_that_is_not_part_of_a_chain():
@@ -387,6 +387,7 @@ def test_G_from_S_expands_a_contoured_ring_zero_load_link():
         creator='synthetic',
     )
     S.add_nodes_from(range(-R, 0), load=0)
+    S.add_nodes_from(range(T))
     S.add_node(u, load=1, subtree=0)
     S.add_node(v, load=1, subtree=0)
     S.add_edge(root, u, load=1, reverse=False)

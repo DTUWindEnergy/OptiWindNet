@@ -19,7 +19,6 @@ from ._core import (
     FeederLimit,
     FeederRoute,
     ModelMetadata,
-    ModelOptions,
     OWNSolutionNotFound,
     OWNWarmupFailed,
     PoolHandler,
@@ -27,6 +26,7 @@ from ._core import (
     Solver,
     Topology,
     canonical_linksets,
+    check_inflow_support,
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
@@ -62,17 +62,10 @@ class SolverSCIP(Solver, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return round(self._value_map[var])
 
-    def set_problem(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        capacity: int,
-        model_options: Mapping[str, Any],
-        warmstart: nx.Graph | None = None,
-    ):
-        self.P, self.A, self.capacity = P, A, capacity
-        model_options = self.model_options = ModelOptions(**model_options)
-        model, metadata = make_min_length_model(self.A, self.capacity, **model_options)
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        model, metadata = make_min_length_model(
+            self.A, self.capacity, **self.model_options
+        )
         self.model, self.metadata = model, metadata
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
@@ -201,7 +194,7 @@ def make_min_length_model(
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    W = sum(w for _, w in A_terminals.nodes(data='power', default=1))
+    inflow_total = check_inflow_support(A, topology)
 
     # For RINGED, double the internal capacity; store original for metadata.
     ring_capacity = capacity
@@ -244,8 +237,10 @@ def make_min_length_model(
     if topology is Topology.RINGED:
         link_ |= {(r, t): m.addVar(f'link_r{-r}~{t}', 'B') for r, t in starsʹ}
     # 'M' (implied integral): single_out_link + flow_conserv pin flows to integers.
+    # a link into v carries at most what leaves v less v's own inflow
     flow_ = {
-        (u, v): m.addVar(f'flow_{u}~{v}', 'M', lb=0, ub=k - 1) for u, v in chain(E, Eʹ)
+        (u, v): m.addVar(f'flow_{u}~{v}', 'M', lb=0, ub=k - A.nodes[v].get('inflow', 1))
+        for u, v in chain(E, Eʹ)
     }
     flow_ |= {(t, r): m.addVar(f'flow_{t}~r{-r}', 'M', lb=0, ub=k) for t, r in stars}
 
@@ -298,18 +293,22 @@ def make_min_length_model(
     # bind flow to link activation (only for edges with flow variables)
     for t, n in flowset:
         _n = str(n) if n >= 0 else f'r{-n}'
+        head_room = k if n < 0 else k - A.nodes[n].get('inflow', 1)
         m.addCons(
-            flow_[t, n] <= link_[t, n] * (k if n < 0 else (k - 1)),
+            flow_[t, n] <= link_[t, n] * head_room,
             name=f'flow_ub_{t}~{_n}',
         )
-        m.addCons(flow_[t, n] >= link_[t, n], name=f'flow_lb_{t}~{_n}')
+        m.addCons(
+            flow_[t, n] >= link_[t, n] * A.nodes[t].get('inflow', 1),
+            name=f'flow_lb_{t}~{_n}',
+        )
 
-    # flow conservation with possibly non-unitary node power
+    # flow conservation with possibly nonunitary terminal inflow
     for t in _T:
         m.addCons(
             sum((flow_[t, n] - flow_[n, t]) for n in A_terminals.neighbors(t))
             + sum(flow_[t, r] for r in _R)
-            == A.nodes[t].get('power', 1),
+            == A.nodes[t].get('inflow', 1),
             name=f'flow_conserv_{t}',
         )
 
@@ -318,7 +317,7 @@ def make_min_length_model(
     # the model counts rings (one flow-feeder var each): convert between them.
     feeders_per_subtree = 2 if topology is Topology.RINGED else 1
     feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, k, feeder_limit, max_feeders, balanced, feeders_per_subtree, W
+        T, k, feeder_limit, max_feeders, balanced, feeders_per_subtree, inflow_total
     )
     if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
         # derived from the minimum: surface it in the solution's metadata
@@ -362,14 +361,17 @@ def make_min_length_model(
             )
 
     # assert all nodes are connected to some root
-    m.addCons(sum(flow_[t, r] for r in _R for t in _T) == W, name='total_power_sank')
+    m.addCons(
+        sum(flow_[t, r] for r in _R for t in _T) == inflow_total,
+        name='total_inflow_sank',
+    )
 
     # valid inequalities
     for t in _T:
         # incoming flow limit
         m.addCons(
             sum(flow_[n, t] for n in A_terminals.neighbors(t))
-            <= k - A.nodes[t].get('power', 1),
+            <= k - A.nodes[t].get('inflow', 1),
             name=f'inflow_limit_{t}',
         )
         # only one out-edge per terminal

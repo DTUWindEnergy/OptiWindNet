@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
+from fractions import Fraction
 
 import networkx as nx
 import numpy as np
@@ -13,7 +14,6 @@ from optiwindnet.interarraylib import (
     add_terminal_closest_root,
     assign_cables,
     count_diagonals,
-    describe_G,
     make_remap,
     pathdist,
     scaffolded,
@@ -124,14 +124,25 @@ def test_assign_cables_prices_ring_zero_load_link():
     assert G[0][1]['cost'] == 12.0
 
 
-def test_describe_G():
-    wfn = tiny_wfn()
-    G = wfn.G
+@pytest.mark.parametrize('inexact', (False, True))
+@pytest.mark.parametrize('capacities', ((6.6,), (6.6, 10)))
+def test_assign_cables_nominal_float_boundary(inexact, capacities):
+    G = nx.Graph(
+        T=1,
+        R=1,
+        capacity_nominal=Fraction(33, 5),
+        power_per_inflow=Fraction(33, 5),
+        power_quantization_inexact=inexact,
+    )
+    G.add_node(0, power=Fraction(33, 5), inflow=1)
+    G.add_edge(-1, 0, load=1, length=2.0)
+    cables = [(capacity, 100 * (i + 1)) for i, capacity in enumerate(capacities)]
 
-    desc = describe_G(G)
-    expected = ['κ = 4, T = 4', '(+0) [-1]: 1', 'Σλ = 5.5456\u00a0m', '55\u00a0€']
+    assign_cables(G, cables)
 
-    assert desc == expected, f'Output mismatch:\nGot: {desc}\nExpected: {expected}'
+    assert G[-1][0]['cable'] == 0
+    assert G[-1][0]['cost'] == 200
+    assert G.graph['cables'] is cables
 
 
 def test_scaffolded():

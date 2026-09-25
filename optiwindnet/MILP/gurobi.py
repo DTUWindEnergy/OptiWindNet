@@ -46,7 +46,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         self.options = {
             'mipfocus': 1,
         }
-        # dummy attribute `solver` to be used by SolverPyomo.set_problem()
+        # dummy attribute `solver` to be used by SolverPyomo._set_model()
         self.solver = SimpleNamespace(warm_start_capable=lambda: True)
 
     def _link_val(self, var: Any) -> int:
@@ -55,25 +55,14 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return self._value_map[var.name]
 
-    def set_problem(
-        self,
-        P: nx.PlanarEmbedding,
-        A: nx.Graph,
-        capacity: int,
-        model_options: Mapping[str, Any],
-        warmstart: nx.Graph | None = None,
-    ):
-        """
-        This keeps the Gurobi license in use until a call to
-        :meth:`get_solution`.
-        """
-        solver = pyo.SolverFactory(
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        "Build the model, keeping the Gurobi license in use until get_solution()."
+        self.solver = pyo.SolverFactory(
             'gurobi_persistent',
             manage_env=True,
             options=self.options,
         )
-        self.solver = solver
-        super().set_problem(P, A, capacity, model_options, warmstart)
+        super()._set_model(warmstart)
         # `set_instance` is specific to pyomo's persistent solvers, which the
         # `SolverFactory` stub types as the base `OptSolver`
         self.solver.set_instance(self.model)  # pyrefly: ignore[missing-attribute]

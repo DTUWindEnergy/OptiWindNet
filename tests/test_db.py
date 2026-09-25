@@ -87,6 +87,15 @@ def test_database_connection_supports_db_usage(tmp_path):
 # ---------------------------
 
 
+def test_pack_G_refuses_a_routeset_of_unequal_terminal_inflow():
+    """A record keeps no inflow, so storing one would understate the cable loads."""
+    G = tiny_wfn().G
+    nx.set_node_attributes(G, {0: 2}, 'inflow')
+
+    with pytest.raises(NotImplementedError, match='inflow other than 1'):
+        pack_G(G)
+
+
 def test_pack_G_filters_private_graph_attributes():
     G = tiny_wfn().G
     G.graph['_not_json_serializable'] = object()
@@ -258,7 +267,7 @@ def test_G_from_routeset_detours(tmp_path):
 
 def _bare_G(**graph_attrs):
     """A 3-terminal, 1-root routeset graph carrying only record metadata."""
-    return nx.Graph(
+    G = nx.Graph(
         R=1,
         T=3,
         B=0,
@@ -266,6 +275,9 @@ def _bare_G(**graph_attrs):
         VertexC=np.array([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (0.0, 1.0)]),
         **graph_attrs,
     )
+    G.add_nodes_from(range(3), kind='wtg')
+    G.add_node(-1, kind='oss')
+    return G
 
 
 _FOREST = [-1, 0, 1]  # positional: a chain -1--0--1--2

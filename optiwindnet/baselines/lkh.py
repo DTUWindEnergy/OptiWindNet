@@ -11,6 +11,7 @@ import tempfile
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from fractions import Fraction
 from itertools import chain, pairwise
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,14 @@ import numpy as np
 from ..clustering import clusterize
 from ..identity import fingerprint_function
 from ..interarraylib import add_link_blockmap
-from ..loads import calcload, split_rings_and_calc_loads, terminal_powers
+from ..loads import (
+    DEFAULT_POWER_RTOL,
+    calcload,
+    quantized,
+    split_rings_and_calc_loads,
+    terminal_inflow,
+    total_inflow,
+)
 from ..repair import repair_routeset_path
 from ..types import Topology
 from ._core import (
@@ -843,7 +851,7 @@ def _vehicles_within_capacity(T_c: int) -> int:
 
 
 def _setup_clusters(
-    A: nx.Graph, *, capacity: int, vehicles: int | None, power_total: int | None = None
+    A: nx.Graph, *, capacity: int, vehicles: int | None, inflow_total: int | None = None
 ) -> tuple[list[list[int]], list[int]]:
     """Compute per-root terminals and vehicle counts.
 
@@ -876,8 +884,8 @@ def _setup_clusters(
         cluster_ = clusterize(A, capacity)
         terminals_ = [sorted(c) for c in cluster_]
         len_cluster_ = [len(c) for c in terminals_]
-    # Non-unit power is supported only for a single root and its one cluster.
-    demand_ = len_cluster_ if power_total is None else [power_total]
+    # Nonunitary inflow is supported only for a single root and its one cluster.
+    demand_ = len_cluster_ if inflow_total is None else [inflow_total]
     vehicles_min_ = [math.ceil(demand / capacity) for demand in demand_]
     if R == 1 and vehicles is not None and vehicles > vehicles_min_[0]:
         vehicles_ = [vehicles]
@@ -892,7 +900,9 @@ def _setup_clusters(
 def lkh3(
     A: nx.Graph,
     *,
-    capacity: int,
+    capacity: int | None = None,
+    capacity_nominal: float | Fraction | None = None,
+    power_rtol: float = DEFAULT_POWER_RTOL,
     time_limit: float,
     vehicles: int | None = None,
     seed: int | None = None,
@@ -939,7 +949,10 @@ def lkh3(
 
     Args:
         A: available-links graph. No edges implies ``complete=True``.
-        capacity: maximum vehicle capacity.
+        capacity: maximum vehicle capacity, in inflow.
+        capacity_nominal: maximum vehicle capacity, in nominal power, instead of
+            ``capacity`` (see :func:`~optiwindnet.loads.quantized`).
+        power_rtol: quantization tolerance of unequal turbine power.
         time_limit: [s] solver run time limit (per cluster).
         vehicles: number of vehicles (if None or at the minimum, use the
             per-cluster default described above; ignored for multi-root
@@ -977,26 +990,28 @@ def lkh3(
             'diagonals, which say nothing about a link absent from A. Pass '
             'repair=False (the solution may then cross itself).'
         )
-    powers = terminal_powers(A)
-    if powers and (ringed or balanced or R > 1):
+    A, capacity, power_attrs = quantized(
+        A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
+    )
+    inflow_by_node = terminal_inflow(A)
+    if inflow_by_node and (ringed or balanced or R > 1):
         raise NotImplementedError(
-            "lkh3() honours a terminal 'power' other than 1 only for an "
+            "lkh3() honours a terminal 'inflow' other than 1 only for an "
             'unbalanced single-root radial solve: rings split by terminal count, '
             "LKH-3's route-size bounds count nodes, and clusterize() partitions "
             'by count.'
         )
-    # Add departures from unit power to the default total of T.
-    power_total = T + sum(power - 1 for power in powers.values())
-    demands = [powers.get(t, 1) for t in range(T)] if powers else ()
+    inflow_total = total_inflow(A)
+    demands = [inflow_by_node.get(t, 1) for t in range(T)] if inflow_by_node else ()
 
     def _route_load(route: list[int]) -> int:
-        """Return total terminal demand, using the terminal count for unit power."""
+        """Return total terminal demand, using the terminal count for unitary inflow."""
         return sum(demands[i] for i in route) if demands else len(route)
 
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
     if vehicles is not None:
-        vehicles_min = math.ceil(power_total / solve_capacity)
+        vehicles_min = math.ceil(inflow_total / solve_capacity)
         if vehicles != vehicles_min and R > 1:
             warn(
                 'For multi-root instances, the parameter vehicles (feeders) can '
@@ -1038,7 +1053,7 @@ def lkh3(
         A_iter,
         capacity=solve_capacity,
         vehicles=vehicles,
-        power_total=power_total if powers else None,
+        inflow_total=inflow_total if inflow_by_node else None,
     )
     if warmstart is not None:
         warmstart_tours = _initial_tours_from_warmstart(
@@ -1143,17 +1158,16 @@ def lkh3(
         S.graph['retries'] = i
         if crossings or over_capacity_clusters:
             warn('Solution remains invalid (max_retries reached)')
+    nx.set_node_attributes(S, inflow_by_node, 'inflow')
     if ringed:
         S.graph['topology'] = Topology.RINGED
         split_rings_and_calc_loads(S, A)
     else:
         S.graph['topology'] = Topology.RADIAL
-        # Preserve terminal power for load calculation and validation.
-        nx.set_node_attributes(S, powers, 'power')
         calcload(S)
 
     # Encode against the original link set, before repair removed any links.
-    S.graph.update(linkset_identity(S, A))
+    S.graph.update(linkset_identity(S, A), **power_attrs)
     return S
 
 

@@ -3,10 +3,11 @@
 
 import importlib
 import logging
-import math
 import warnings
-from collections.abc import Iterator
-from itertools import chain, pairwise
+from bisect import bisect_left
+from collections.abc import Iterator, Sequence
+from fractions import Fraction
+from itertools import chain
 
 import networkx as nx
 import numba as nb
@@ -15,6 +16,7 @@ from bitarray import bitarray
 
 from .converting import _rings_from_S
 from .geometric import angle_helpers, rotate
+from .loads import _rationalize, calcload
 from .types import Topology
 
 _lggr = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ _DEPRECATED_EXPORTS = {
     'bfs_subtree_loads': 'optiwindnet.loads',
     'calcload': 'optiwindnet.loads',
     'split_rings_and_calc_loads': 'optiwindnet.loads',
+    'describe_G': 'optiwindnet.presenting',
     'TerseLinks': 'optiwindnet.terse',
     'as_hooked_to_head': 'optiwindnet.transforming',
     'as_hooked_to_nearest': 'optiwindnet.transforming',
@@ -45,7 +48,7 @@ _DEPRECATED_EXPORTS = {
 
 __all__ = (  # noqa: PLE0604
     'add_link_blockmap', 'add_link_cosines', 'add_terminal_closest_root',
-    'assign_cables', 'count_diagonals', 'describe_G', 'directed_links',
+    'assign_cables', 'count_diagonals', 'directed_links',
     'make_remap', 'pathdist', 'scaffolded', 'update_lengths',
     *_DEPRECATED_EXPORTS,
 )  # fmt: skip
@@ -72,94 +75,62 @@ def __dir__() -> list[str]:
 
 
 def assign_cables(
-    G: nx.Graph, cables: list[tuple[int, float | int]], currency: str = '€'
+    G: nx.Graph,
+    cables: Sequence[tuple[int | float | Fraction, float | int]],
+    currency: str = '€',
 ):
     """Assign a cable type to each edge of ``G`` and update attribute ``'cost'``.
 
     Each edge is assigned the cheapest cable type that can carry its load. The
     edge attribute ``'cable'`` is the index in ``cables`` of the type chosen.
+    Capacities are nominal power if ``G`` has ``'capacity_nominal'``, compared
+    with nominal loads, and inflow otherwise, compared with integer loads.
 
     Changes ``G`` in place.
 
     Args:
       G: networkx graph with edges having a ``'load'`` attribute (use ``calcload(G)``)
       cables: [(«capacity», «cost»), ...] in increasing capacity order (each
-        cable entry must be a tuple)
+        cable entry must be a tuple).
       currency: symbol representing the unit of the cost
+
+    Raises:
+      ValueError: the largest capacity is smaller than the largest load.
     """
-    capacity = max(cables)[0]
-    if G.graph['max_load'] > capacity:
-        raise ValueError('Maximum cable capacity is smaller than maximum load in G.')
-    run_len_ = (b[0] - a[0] for a, b in pairwise(chain(((0,),), cables)))
-    kind = [k for k, run_len in enumerate(run_len_) for _ in range(run_len)]
-    cost = [cables[k][1] for k in kind]
-    has_cost = sum(cost) > 0
+    graph = G.graph
+    has_cost = any(cost for _, cost in cables)
+    nominal = 'capacity_nominal' in graph
+    capacities = [
+        _rationalize(capacity) if nominal and isinstance(capacity, float) else capacity
+        for capacity, _ in cables
+    ]
+    inexact = nominal and graph.get('power_quantization_inexact', False)
+    if inexact:
+        calcload(G, nominal=True)
+    scale = Fraction(graph.get('power_per_inflow', 1)) if nominal else 1
     for _, _, data in G.edges(data=True):
-        if data['load'] == 0:
-            # ring zero-load link ('split'): a real cable with no current — assign the
-            # thinnest cable type, but no current-carrying capacity is consumed.
-            data['cable'] = 0
-            if has_cost:
-                data['cost'] = data['length'] * cost[0]
-            continue
-        k = data['load'] - 1
-        data['cable'] = kind[k]
+        load = data['load']
+        # ring zero-load link ('split'): a real cable with no current — assign the
+        # thinnest cable type, but no current-carrying capacity is consumed.
+        k = (
+            0
+            if load == 0
+            else bisect_left(
+                capacities, data['load_nominal'] if inexact else load * scale
+            )
+        )
+        if k == len(cables):
+            raise ValueError(
+                'Maximum cable capacity is smaller than maximum load in G.'
+            )
+        data['cable'] = k
         if has_cost:
-            data['cost'] = data['length'] * cost[k]
-    G.graph['cables'] = cables
+            data['cost'] = data['length'] * cables[k][1]
+    graph['cables'] = cables
     if has_cost:
-        G.graph['currency'] = currency
-    if 'capacity' not in G.graph:
-        G.graph['capacity'] = capacity
-
-
-def _format_length(length: float, significant_digits: int = 5) -> str:
-    """Format ``length`` with '_' as thousands separator.
-
-    ``significant_digits`` is a minimum, enforced through fraction digits only.
-    """
-    intdigits = int(np.floor(np.log10(length))) + 1
-    fracdigits = max(0, significant_digits - intdigits)
-    return f'{{:_.{fracdigits}f}}'.format(round(length, fracdigits))
-
-
-def describe_G(G: nx.Graph, significant_digits: int = 5) -> list[str]:
-    """Create a 3-4 line summary of G's properties.
-
-    ``significant_digits`` applies only to total length and is enforced only when the
-    integer part has fewer significant digits than ``significant_digits``.
-
-    Args:
-      G: routeset instance
-      significant_digits: minimum number of significant digits used for total length
-
-    Returns:
-      Text lines with capacity and T, excess feeders and feeders per root, total
-      length and total cost.
-    """
-    R = G.graph['R']
-    T = G.graph['T']
-    capacity = G.graph['capacity']
-    roots = range(1, R + 1)
-    RootL = {-r: G.nodes[-r].get('label', f'[{-r}]') for r in roots}
-    desc = []
-    desc.append(f'κ = {capacity}, T = {T}')
-    feeder_info = [f'{rootL}: {G.degree[r]}' for r, rootL in RootL.items()]
-    excess_feeders = sum(G.degree[-r] for r in roots) - math.ceil(T / capacity)
-    desc.append(f'({excess_feeders:+d}) {", ".join(feeder_info)}')
-    length = G.size(weight='length')
-    if length > 0:
-        desc.append(
-            'Σλ = '
-            + _format_length(length, significant_digits).replace('_', '\u202f')
-            + '\u00a0m'
-        )
-    if 'currency' in G.graph:
-        desc.append(
-            f'{G.size(weight="cost"):_.0f}\u00a0'.replace('_', '\u202f')
-            + G.graph['currency']
-        )
-    return desc
+        graph['currency'] = currency
+    if 'capacity' not in graph and not nominal:
+        graph['capacity'] = capacities[-1]
 
 
 def update_lengths(G):

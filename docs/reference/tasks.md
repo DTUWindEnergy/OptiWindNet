@@ -60,6 +60,7 @@ Most notebooks have a counterpart in the other section that performs the same ta
 | Loading input data | {doc}`/notebooks/hi11_data_input` | {doc}`/notebooks/lo11_data_input` |
 | Bundled locations | {doc}`/notebooks/hi12_locations` | {doc}`/notebooks/lo12_locations` |
 | Plotting | {doc}`/notebooks/hi14_plotting` | {doc}`/notebooks/lo14_plotting` |
+| Turbines of unequal power | {doc}`/notebooks/hi16_mixed_power` | {doc}`/notebooks/lo16_mixed_power` |
 | Constructive heuristic | {doc}`/notebooks/hi20_heuristic` | {doc}`/notebooks/lo20_heuristic` |
 | Meta-heuristic | {doc}`/notebooks/hi21_hgs` | {doc}`/notebooks/lo21_hgs` |
 | Exact optimization | {doc}`/notebooks/hi23_milp` | {doc}`/notebooks/lo23_milp_ortools` |

@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum, auto
+from fractions import Fraction
 from inspect import cleandoc
 from itertools import chain
 from pathlib import Path
@@ -24,11 +25,13 @@ from ..converting import G_from_S, S_from_linkbits
 from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
 from ..interarraylib import directed_links
 from ..loads import (
-    _ring_split_position,
-    bfs_subtree_loads,
+    DEFAULT_POWER_RTOL,
     calcload,
+    quantized,
     split_rings_and_calc_loads,
-    terminal_powers,
+    terminal_inflow,
+    total_inflow,
+    validate_terminal_power,
 )
 from ..pathfinding import PathFinder
 from ..types import Topology
@@ -95,6 +98,10 @@ class FeederLimit(StrEnum):
     bound) and ``'exactly'`` (an exact count) require the additional kwarg
     ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
     count is pinned to a single value, i.e. ``'minimum'`` or ``'exactly'``.
+
+    Nonunitary terminal inflow rule out ``'minimum'`` and the ``'min_plus*'`` modes,
+    whose bounds come from a minimum feeder count that indivisible terminal
+    inflow may not reach.
     """
 
     UNLIMITED = auto()
@@ -107,6 +114,12 @@ class FeederLimit(StrEnum):
     DEFAULT = UNLIMITED
 
 
+_FEEDER_LIMITS_FROM_MINIMUM = (
+    FeederLimit.MINIMUM, FeederLimit.MIN_PLUS1,
+    FeederLimit.MIN_PLUS2, FeederLimit.MIN_PLUS3,
+)  # fmt: skip
+
+
 def feeder_and_load_bounds(
     T: int,
     capacity: int,
@@ -114,7 +127,7 @@ def feeder_and_load_bounds(
     max_feeders: int,
     balanced: bool,
     feeders_per_subtree: int = 1,
-    power_total: int | None = None,
+    inflow_total: int | None = None,
 ) -> tuple[int, int | None, int | None, int | None]:
     """Derive the feeder-count and feeder-load bounds a model must enforce.
 
@@ -127,29 +140,40 @@ def feeder_and_load_bounds(
     constrains, and the returned bounds are multiplied back by
     ``feeders_per_subtree`` for reporting.
 
-    ``power_total`` is the sum of terminal power and defaults to ``T`` (one
+    ``inflow_total`` is the sum of terminal inflow and defaults to ``T`` (one
     unit per terminal). It determines the capacity-based bounds. The number
     of subtrees is still at most ``T``, since each must contain a terminal.
 
-    The subtree count is bounded below by ``min_feeders = ceil(power_total /
+    The subtree count is bounded below by ``min_feeders = ceil(inflow_total /
     capacity)`` regardless of ``feeder_limit`` (a valid inequality).
     ``feeders_ub`` is ``None`` when the count is unbounded above; when it equals
     ``feeders_lb``, the count is pinned and callers should emit an equality
     constraint.
 
+    Nonunitary terminal inflow make ``min_feeders`` unattainable in general -- it
+    ignores that a terminal's inflow is indivisible, which is a bin-packing
+    question -- so the ``feeder_limit`` modes that derive their bounds from it
+    are rejected rather than pinning the model to an infeasible count.
+
     Balanced subtrees (loads differing at most by one unit) are only expressible
     with a pinned feeder count ``F``, in which case the loads must lie in
-    ``{power_total // F, ceil(power_total / F)}``. A load bound of ``None`` means
+    ``{inflow_total // F, ceil(inflow_total / F)}``. A load bound of ``None`` means
     "do not emit": either ``balanced`` is off, or it is not enforceable (a
     warning is issued), or the bound is already implied by the flow variable's
-    own bounds. Unequal terminal powers may make these balanced load bounds
+    own bounds. Nonunitary terminal inflow may make these balanced load bounds
     infeasible.
 
     Returns:
         ``(feeders_lb, feeders_ub, load_lb, load_ub)`` in subtree-count units.
     """
-    if power_total is None:
-        power_total = T
+    if inflow_total is None:
+        inflow_total = T
+    elif inflow_total != T and feeder_limit in _FEEDER_LIMITS_FROM_MINIMUM:
+        raise ValueError(
+            f'feeder_limit "{feeder_limit.value}" derives the feeder count from '
+            'the minimum, which nonunitary terminal inflow may not attain; use '
+            '"unlimited", "exactly" or "specified" instead'
+        )
     if feeders_per_subtree != 1 and max_feeders:
         if max_feeders % feeders_per_subtree:
             raise ValueError(
@@ -158,7 +182,7 @@ def feeder_and_load_bounds(
                 f'{feeders_per_subtree} substation connections)'
             )
         max_feeders //= feeders_per_subtree
-    min_feeders = math.ceil(power_total / capacity)
+    min_feeders = math.ceil(inflow_total / capacity)
     if feeder_limit is FeederLimit.UNLIMITED:
         feeders_lb, feeders_ub = min_feeders, None
     elif feeder_limit is FeederLimit.MINIMUM:
@@ -173,9 +197,7 @@ def feeder_and_load_bounds(
         if max_feeders < min_feeders:
             raise ValueError('max_feeders is below the minimum necessary')
         feeders_lb, feeders_ub = min_feeders, max_feeders
-    elif feeder_limit in (
-        FeederLimit.MIN_PLUS1, FeederLimit.MIN_PLUS2, FeederLimit.MIN_PLUS3,
-    ):  # fmt: skip
+    elif feeder_limit in _FEEDER_LIMITS_FROM_MINIMUM[1:]:
         plus = int(feeder_limit.value[-1])
         feeders_lb, feeders_ub = min_feeders, min_feeders + plus
     else:
@@ -191,7 +213,7 @@ def feeder_and_load_bounds(
         )
         return feeders_lb, feeders_ub, None, None
     F = feeders_lb
-    load_lb, load_ub = power_total // F, math.ceil(power_total / F)
+    load_lb, load_ub = inflow_total // F, math.ceil(inflow_total / F)
     # bounds at the extremes are already implied by the flow variable's bounds
     return (
         feeders_lb,
@@ -447,6 +469,30 @@ class SolutionInfo:
         return f'SolutionInfo(\n{body})'
 
 
+def check_inflow_support(A: nx.Graph, topology: Topology) -> int:
+    """Validate terminal power and return total inflow for the model.
+
+    A RINGED model splits each ring into two arms of at most ``capacity`` each,
+    which it expresses by doubling the capacity of a single path. That holds only
+    while every terminal weighs the same: with nonunitary inflow, a path within twice
+    the capacity need not divide into two arms that each fit within it, so the
+    model would admit rings that no pair of cables can carry.
+
+    Raises:
+        NotImplementedError: ``topology`` is RINGED and the terminals declare an
+          inflow other than one unit.
+    """
+    validate_terminal_power(A)
+    total = total_inflow(A)
+    if topology is Topology.RINGED and total != A.graph['T']:
+        raise NotImplementedError(
+            "a RINGED model cannot honour a terminal 'inflow' other than 1: a ring "
+            'within twice the capacity is not guaranteed to split into two arms '
+            'that each fit within it'
+        )
+    return total
+
+
 def check_model_enums(
     topology: Topology, feeder_route: FeederRoute, feeder_limit: FeederLimit
 ) -> None:
@@ -524,71 +570,6 @@ def warmstart_links(
         )
 
 
-def _finalize_ringed_mip_S(
-    S: nx.Graph,
-    closing_links: list[tuple[int, int]],
-    A: nx.Graph | None,
-) -> int:
-    """Close decoded MILP paths into canonical rings and recalculate their loads.
-
-    Reached only from :meth:`Solver._topology_from_mip_flows`. Both the split
-    position (:func:`~optiwindnet.loads._ring_split_position`) and the load walk
-    (:func:`~optiwindnet.loads.bfs_subtree_loads`) count one unit per terminal, so
-    the loads recomputed here drop any non-unitary ``'power'`` that routed the
-    caller through the flow variables in the first place. Unit-power solutions go
-    to :func:`~optiwindnet.loads.split_rings_and_calc_loads` instead, which closes
-    the rings the link bits already carry.
-    """
-    rings: list[tuple[int, int, int, int, int, int]] = []
-    for close_root, tail in closing_links:
-        subtree = S.nodes[tail]['subtree']
-        ordered = [tail]
-        prev, curr = None, tail
-        while True:
-            nxts = [n for n in S[curr] if n != prev]
-            if len(nxts) != 1:
-                raise ValueError(
-                    f'RINGED MILP path at terminal {curr} has {len(nxts)} continuations'
-                )
-            nxt = nxts[0]
-            if nxt < 0:
-                head_root = nxt
-                break
-            ordered.append(nxt)
-            prev, curr = curr, nxt
-        ordered.reverse()
-        head, n = ordered[0], len(ordered)
-        if n == 1:
-            if close_root != head_root:
-                S.add_edge(close_root, tail, load=0, reverse=False)
-        else:
-            m = _ring_split_position(ordered, A)
-            u, v = ordered[m - 1], ordered[m]
-            S[u][v].update(load=0, reverse=False)
-            # bfs_subtree_loads overwrites this placeholder with the arm load.
-            S.add_edge(close_root, tail, load=1, reverse=False)
-        rings.append((subtree, head_root, head, close_root, tail, n))
-
-    for nodeD in S.nodes.values():
-        nodeD.pop('load', None)
-    roots = set(range(-S.graph['R'], 0))
-    visited = roots.copy()
-    for root in roots:
-        S.nodes[root]['load'] = 0
-    for subtree, head_root, head, close_root, tail, n in rings:
-        bfs_subtree_loads(S, head_root, [head], subtree, visited)
-        if n > 1:
-            bfs_subtree_loads(S, close_root, [tail], subtree, visited)
-
-    max_load = max(
-        (edgeD['load'] for u, v, edgeD in S.edges(data=True) if u < 0 or v < 0),
-        default=0,
-    )
-    S.graph['max_load'] = max_load
-    S.graph['has_loads'] = True
-    return max_load
-
-
 class Solver(abc.ABC):
     "Common interface to multiple MILP solvers"
 
@@ -604,6 +585,8 @@ class Solver(abc.ABC):
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
     _incumbent_linkbits: frozenbitarray
+    # graph attributes recording the power basis of the solve (see `set_problem()`)
+    _power_attrs: Mapping[str, Any] = MappingProxyType({})
 
     @property
     def incumbent_linkbits(self) -> frozenbitarray:
@@ -629,24 +612,50 @@ class Solver(abc.ABC):
     def _flow_val(self, var: Any) -> int:
         "Get the value of a flow variable from the current solution."
 
-    @abc.abstractmethod
     def set_problem(
         self,
         P: nx.PlanarEmbedding,
         A: nx.Graph,
-        capacity: int,
+        *,
         model_options: Mapping[str, Any],
+        capacity: int | None = None,
+        capacity_nominal: float | Fraction | None = None,
+        power_rtol: float = DEFAULT_POWER_RTOL,
         warmstart: nx.Graph | None = None,
-    ):
-        """Define the problem geometry, available links and tree properties
+    ) -> None:
+        """Define the problem geometry, available links and tree properties.
 
         Args:
           P: planar embedding of the location
           A: available links for the location
-          capacity: maximum number of terminals in a subtree
           model_options: tree properties - see ModelOptions.help()
+          capacity: maximum inflow of a subtree
+          capacity_nominal: maximum power of a subtree, instead of ``capacity``
+            (see :func:`~optiwindnet.loads.quantized`)
+          power_rtol: quantization tolerance of unequal turbine power
           warmstart: initial feasible solution to pass to solver
         """
+        A, self.capacity, self._power_attrs = quantized(
+            A,
+            capacity=capacity,
+            capacity_nominal=capacity_nominal,
+            power_rtol=power_rtol,
+        )
+        self.P, self.A = P, A
+        self.model_options = ModelOptions(**model_options)
+        inflow = terminal_inflow(A)
+        if warmstart is not None and terminal_inflow(warmstart) != inflow:
+            # a warm start quantized otherwise carries loads in other inflow
+            warmstart = warmstart.copy()
+            for t in range(A.graph['T']):
+                warmstart.nodes[t].pop('inflow', None)
+            nx.set_node_attributes(warmstart, inflow, 'inflow')
+            calcload(warmstart)
+        self._set_model(warmstart)
+
+    @abc.abstractmethod
+    def _set_model(self, warmstart: nx.Graph | None) -> None:
+        "Build the model of ``A``, ``capacity`` and ``model_options``."
 
     @abc.abstractmethod
     def solve(
@@ -766,28 +775,23 @@ class Solver(abc.ABC):
         )
 
     def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
-        """Decode canonical link bits into a topology over the model's ``A``.
+        """Decode link bits and calculate loads from terminal inflow.
 
-        For RADIAL and BRANCHED topologies, the selected links and terminal powers
-        determine the loads. RINGED topologies with non-unit power use
-        :meth:`_topology_from_mip_flows`, since ring splitting uses terminal counts.
+        A RINGED model only ever carries unitary inflow (:func:`check_inflow_support`
+        refuses the rest), which is what its terminal-counting arm split needs.
         """
         metadata = self.metadata
         topology = metadata.model_options['topology']
         A = self.A
-        power_ = terminal_powers(A)
-        if power_ and topology is Topology.RINGED:
-            S = self._topology_from_mip_flows()
+        S = S_from_linkbits(linkbits, A)
+        # Preserve terminal inflow so validation can reproduce the loads.
+        nx.set_node_attributes(S, terminal_inflow(A), 'inflow')
+        if topology is Topology.RINGED:
+            # the bits close every ring: this only splits the arms and
+            # derives their loads, in the form every ringed producer uses
+            split_rings_and_calc_loads(S, A)
         else:
-            S = S_from_linkbits(linkbits, A)
-            # Preserve terminal power so validation can reproduce the loads.
-            nx.set_node_attributes(S, power_, 'power')
-            if topology is Topology.RINGED:
-                # the bits close every ring: this only splits the arms and
-                # derives their loads, in the form every ringed producer uses
-                split_rings_and_calc_loads(S, A)
-            else:
-                calcload(S)
+            calcload(S)
         S.graph.update(
             topology=topology,
             capacity=metadata.capacity,
@@ -796,63 +800,8 @@ class Solver(abc.ABC):
             _linkset_id=A.graph['_linkset_id'],
             creator='MILP.' + self.name,
             solver_details={},
+            **self._power_attrs,
         )
-        return S
-
-    def _topology_from_mip_flows(self) -> nx.Graph:
-        """Build the topology from the solver's flow variables.
-
-        Used for RINGED models with non-unit terminal power. The flows define the
-        path forest and subtree IDs. :func:`_finalize_ringed_mip_S` closes the rings
-        and recalculates loads at one unit per terminal, discarding declared power.
-
-        Supporting non-unit power requires changes to the ring model as well as
-        the decoder: doubling cable capacity does not guarantee that a ring can
-        be split into two arms whose loads each fit within the cable capacity.
-        """
-        metadata = self.metadata
-        topology = metadata.model_options['topology']
-        R = metadata.R
-        S = nx.Graph(R=R, T=metadata.T)
-        S.add_nodes_from(range(-R, 0))
-        # Get active links and if flow is reversed (i.e. from small to big)
-        rev_from_link = {
-            (u, v): u < v
-            for (u, v), var in metadata.link_.items()
-            if self._link_val(var)
-        }
-        flow_links = {
-            link: reverse
-            for link, reverse in rev_from_link.items()
-            if link in metadata.flow_
-        }
-        S.add_weighted_edges_from(
-            ((u, v, self._flow_val(metadata.flow_[u, v])) for u, v in flow_links),
-            weight='load',
-        )
-        nx.set_edge_attributes(S, flow_links, name='reverse')
-        # Propagate the decoded flow-tree attributes for every topology. A RINGED
-        # model is a path forest until its flowless starsʹ links are restored.
-        subtree = -1
-        max_load = 0
-        for r in range(-R, 0):
-            for u, v in nx.edge_dfs(S, r):
-                S.nodes[v]['load'] = S[u][v]['load']
-                if u == r:
-                    subtree += 1
-                S.nodes[v]['subtree'] = subtree
-            rootload = 0
-            for nbr in S.neighbors(r):
-                subtree_load = S.nodes[nbr]['load']
-                max_load = max(max_load, subtree_load)
-                rootload += subtree_load
-            S.nodes[r]['load'] = rootload
-        if topology is Topology.RINGED:
-            closing_links = [
-                link for link in rev_from_link if link not in metadata.flow_
-            ]
-            max_load = _finalize_ringed_mip_S(S, closing_links, self.A)
-        S.graph.update(max_load=max_load, has_loads=True)
         return S
 
 
