@@ -112,7 +112,18 @@ def test_ewrouter_forwards_constructor_options(monkeypatch, feeder_route):
     ]
 
 
-def test_hgsrouter_forwards_low_level_options(monkeypatch):
+@pytest.mark.parametrize(
+    ('ringed', 'feeder_limit', 'expected_vehicles'),
+    [
+        (True, 4, 2),
+        (False, 3, 3),
+        (True, None, None),
+        (False, None, None),
+    ],
+)
+def test_hgsrouter_forwards_low_level_options(
+    monkeypatch, ringed, feeder_limit, expected_vehicles
+):
     solved = tiny_wfn()
     captured = {}
 
@@ -132,11 +143,11 @@ def test_hgsrouter_forwards_low_level_options(monkeypatch):
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
     router = HGSRouter(
         time_limit=0.4,
-        feeder_limit=3,
+        feeder_limit=feeder_limit,
         feeder_exact=True,
         max_retries=7,
         balanced=True,
-        ringed=True,
+        ringed=ringed,
         seed=11,
     )
 
@@ -146,12 +157,21 @@ def test_hgsrouter_forwards_low_level_options(monkeypatch):
         'capacity': solved.cables_capacity,
         'time_limit': 0.4,
         'max_retries': 7,
-        'vehicles': 3,
+        'vehicles': expected_vehicles,
         'vehicles_exact': True,
         'balanced': True,
-        'ringed': True,
+        'ringed': ringed,
         'seed': 11,
     }
+
+
+def test_hgsrouter_rejects_odd_ringed_feeder_limit(monkeypatch):
+    solved = tiny_wfn()
+    monkeypatch.setattr(api, 'hgs_cvrp', lambda A, **kwargs: pytest.fail())
+    router = HGSRouter(time_limit=0.4, feeder_limit=3, ringed=True)
+
+    with pytest.raises(ValueError, match='multiple of 2'):
+        router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
 
 
 @pytest.mark.parametrize(

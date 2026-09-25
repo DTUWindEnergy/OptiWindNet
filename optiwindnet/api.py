@@ -1011,6 +1011,8 @@ class HGSRouter(Router):
           time_limit: Maximum runtime for a single HGS run (in seconds).
           feeder_limit: Maximum number of feeders allowed
               (ignored if multiple substations); the exact number if ``feeder_exact``.
+              With ``ringed=True``, it counts substation connections (two per
+              ring) and must be even.
           feeder_exact: Whether ``feeder_limit`` is the exact number of feeders,
               instead of an upper bound (requires ``balanced=True`` and a single
               substation).
@@ -1040,12 +1042,21 @@ class HGSRouter(Router):
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
         # optimizing
+        vehicles = self.feeder_limit
+        if vehicles is not None and self.ringed:
+            if vehicles % 2:
+                raise ValueError(
+                    f'feeder_limit ({vehicles}) must be a multiple of 2 for a '
+                    'RINGED topology (each ring uses 2 substation connections)'
+                )
+            vehicles //= 2
+
         S = hgs_cvrp(
             as_normalized(A),
             **self._capacity_kwargs(A, cables_capacity),
             time_limit=self.time_limit,
             max_retries=self.max_retries,
-            vehicles=self.feeder_limit,
+            vehicles=vehicles,
             vehicles_exact=self.feeder_exact,
             balanced=self.balanced,
             ringed=self.ringed,
