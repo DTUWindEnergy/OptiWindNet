@@ -2,7 +2,6 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from fractions import Fraction
@@ -46,6 +45,7 @@ from .loads import (
 )
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
+from .MILP._core import hgs_count_kwargs
 from .pathfinding import PathFinder
 from .presenting import _nominal_loads
 from .svg import SvgRepr, svgplot, svgpplot
@@ -1011,9 +1011,11 @@ class HGSRouter(Router):
           time_limit: Maximum runtime for a single HGS run (in seconds).
           feeder_limit: Maximum number of feeders allowed
               (ignored if multiple substations); the exact number if ``feeder_exact``.
+              With ``ringed=True``, it counts substation connections (two per
+              ring) and must be even.
           feeder_exact: Whether ``feeder_limit`` is the exact number of feeders,
               instead of an upper bound (requires ``balanced=True`` and a single
-              substation).
+              substation; with ``ringed=True``, every ring gets two or more turbines).
           max_retries: Maximum number of retries if a feasible solution is not found.
           balanced: Whether to balance turbines/loads across feeders.
           ringed: Whether to produce a RINGED topology (cycles) instead of a
@@ -1040,12 +1042,21 @@ class HGSRouter(Router):
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
         # optimizing
+        vehicles = self.feeder_limit
+        if vehicles is not None and self.ringed:
+            if vehicles % 2:
+                raise ValueError(
+                    f'feeder_limit ({vehicles}) must be a multiple of 2 for a '
+                    'RINGED topology (each ring uses 2 substation connections)'
+                )
+            vehicles //= 2
+
         S = hgs_cvrp(
             as_normalized(A),
             **self._capacity_kwargs(A, cables_capacity),
             time_limit=self.time_limit,
             max_retries=self.max_retries,
-            vehicles=self.feeder_limit,
+            vehicles=vehicles,
             vehicles_exact=self.feeder_exact,
             balanced=self.balanced,
             ringed=self.ringed,
@@ -1221,20 +1232,16 @@ class MILPRouter(Router):
 
         HGS-CVRP gives a radial solution (or a ringed one for a RINGED model),
         and, unlike the constructor heuristics, its feeder count can be controlled
-        -- which is what a pinned or tightly-bounded ``feeder_limit`` needs. The
-        counts here are in *subtrees* (HGS's ``vehicles``): a RINGED subtree is a
-        cycle using two of the model's feeders, so its ``max_feeders`` is halved.
+        -- which is what a pinned or bounded ``feeder_limit`` needs. The count
+        options come from :func:`~optiwindnet.MILP._core.hgs_count_kwargs`, which
+        derives them from the same bounds the model enforces. A branched model
+        with an unbounded count takes the constructor's branched layout instead
+        (a closer warm start), unless terminal inflow is nonunitary, which the
+        constructor does not honour.
 
-        Feeder counts HGS cannot reproduce fall through to the loose default: the
-        branched constructor (a closer warm start for a branched model) or a plain
-        HGS solution. A RINGED model has no exact-vehicles mode, so ``exactly``
-        above the minimum stays there -- and, like every un-reproducible case,
-        ends up solving cold.
-
-        Nonunitary terminal inflow restrict this to a plain HGS solution, the only
-        warm start either producer honours, and only for an unbalanced,
-        single-root, radial solve. The other modes return ``None``, i.e. the
-        model is solved cold.
+        Counts HGS-CVRP cannot reproduce (and, with nonunitary terminal inflow,
+        anything but an unbalanced, single-root, radial solve) return ``None``,
+        i.e. the model is solved cold.
 
         Args:
           A: available-links graph, as given to :meth:`route`.
@@ -1247,69 +1254,16 @@ class MILPRouter(Router):
           A topology to warm-start from, or ``None`` if none can be built.
         """
         mo = self.model_options
-        feeder_limit = mo['feeder_limit']
-        balanced = mo['balanced']
-        # a built warm start must not outlast the solve it primes
-        time_limit = min(self.time_limit, self.warmup_time)
-        ringed = mo['topology'] is Topology.RINGED
-        single_root = A.graph['R'] == 1
-        per_subtree = 2 if ringed else 1
-        min_subtrees = math.ceil(total_inflow(A_solve) / (per_subtree * capacity))
-
-        def _hgs(vehicles, *, exact=False, balance=False):
-            return hgs_cvrp(
-                as_normalized(A),
-                **capacity_kwargs,
-                time_limit=time_limit,
-                vehicles=vehicles,
-                vehicles_exact=exact,
-                balanced=balance,
-                repair=True,
-                ringed=ringed,
-            )
-
-        if terminal_inflow(A_solve):
-            # constructor() fills subtrees by terminal count and hgs_cvrp() honours
-            # inflow only unbalanced, single-root and radial: outside that, no warm
-            # start can be built and the model is solved cold.
-            if ringed or balanced or not single_root:
-                return None
-            # the feeder count HGS derives from the terminals' inflow may miss a
-            # pinned `feeder_limit`; warmup_model() then rejects it and route()
-            # falls back to a cold solve
-            return _hgs(None)
-
-        if feeder_limit == 'minimum':
-            pinned = min_subtrees
-        elif feeder_limit == 'exactly':
-            pinned = mo['max_feeders'] // per_subtree
-        else:
-            pinned = None
-
-        if pinned is not None:
-            # With the count pinned to a single value, `balanced` is enforceable.
-            # A RINGED solve has no exact-vehicles mode, so only a pin at the
-            # minimum is reproducible (its upper bound already yields the minimum),
-            # though balance can still be requested. Radial/branched can pin any
-            # value, but exactly only together with balance (single root, or when
-            # the pin is the minimum).
-            if ringed:
-                if pinned == min_subtrees:
-                    return _hgs(pinned, balance=balanced)
-            else:
-                exact = balanced and (single_root or pinned == min_subtrees)
-                if exact or pinned == min_subtrees:
-                    return _hgs(pinned, exact=exact, balance=exact)
-            # an exact count HGS cannot pin: fall through to the loose default.
-        elif feeder_limit in ('min_plus1', 'min_plus2', 'min_plus3'):
-            # cap the count at min + n (an upper bound HGS honors single-root;
-            # multi-root it settles at the minimum, still within the allowed range)
-            plus = int(feeder_limit[-1])
-            return _hgs(min_subtrees + plus if single_root else None)
-
-        # unlimited / specified (or an un-pinnable 'exactly'): a branched model
-        # takes the constructor's branched layout; radial/ringed take plain HGS.
-        if mo['topology'] is Topology.BRANCHED:
+        count_kwargs = hgs_count_kwargs(
+            A.graph['T'], A.graph['R'], capacity, mo, total_inflow(A_solve)
+        )
+        if count_kwargs is None:
+            return None
+        if (
+            mo['topology'] is Topology.BRANCHED
+            and count_kwargs['vehicles'] is None
+            and not terminal_inflow(A_solve)
+        ):
             straight = mo['feeder_route'] == 'straight'
             return S_from_G(
                 constructor(
@@ -1320,4 +1274,12 @@ class MILPRouter(Router):
                     straight_feeder_route=straight,
                 )
             )
-        return _hgs(None)
+        return hgs_cvrp(
+            as_normalized(A),
+            **capacity_kwargs,
+            # a built warm start must not outlast the solve it primes
+            time_limit=min(self.time_limit, self.warmup_time),
+            repair=True,
+            ringed=mo['topology'] is Topology.RINGED,
+            **count_kwargs,
+        )

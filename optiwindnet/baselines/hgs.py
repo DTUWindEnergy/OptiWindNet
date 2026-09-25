@@ -389,21 +389,33 @@ def hgs_cvrp(
     is doubled internally (``2 * capacity``) so each of the ring's two arms holds
     at most ``capacity`` terminals.
 
+    Each vehicle is one route, so ``vehicles`` bounds the route count (see
+    ``vehicles_exact`` below). The relation of routes to feeders (links to a
+    root) depends on the topology:
+
+    - radial: one route is one subtree with a single feeder, so ``vehicles``
+      caps the feeder count, whose minimum is ``ceil(T / capacity)``;
+    - ringed: one route is one ring with two feeders (one per arm), so
+      ``vehicles`` caps the ring count, the feeder count is twice the ring
+      count, and the minimum is ``ceil(T / (2 * capacity))`` rings.
+
     Normalization of input graph is recommended before calling this function.
 
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered and each cluster is solved concurrently.
 
-    By default, ``vehicles`` is an upper bound on the feeder count: HGS-CVRP is
+    By default, ``vehicles`` is an upper bound on the route count: HGS-CVRP is
     free to use fewer, which it normally does, since a shorter solution seldom
-    needs more than the minimum ``ceil(T / capacity)`` feeders. Pass
-    ``vehicles_exact=True`` to pin the count to ``vehicles`` instead. This is
-    only implemented together with ``balanced=True``: the slack nodes that make
-    the loads balanced also make every route come out full, so no route can be
-    left empty and the feeder count is necessarily ``vehicles``.
+    needs more than the minimum. Pass ``vehicles_exact=True`` to pin the count
+    to ``vehicles`` instead. This is only implemented together with
+    ``balanced=True``: the slack nodes that make the loads balanced also make
+    every route come out full, so no route can be left empty and the route count
+    is necessarily ``vehicles``. A ringed solve pins at most ``T // 2`` rings,
+    which keeps every ring at two or more terminals (a single-terminal ring has
+    one feeder, not two).
 
-    For multi-root instances, the vehicles (feeders) parameter can only be left
-    undefined (meaning unlimited) or set to the minimum feasible value. Any other
+    For multi-root instances, ``vehicles`` can only be left undefined (meaning
+    unlimited) or set to the minimum feasible route count. Any other
     value results in a warning and the minimum being used, or, if
     ``vehicles_exact=True``, in a ``ValueError``.
 
@@ -420,12 +432,14 @@ def hgs_cvrp(
             ``capacity`` (see :func:`~optiwindnet.loads.quantized`)
         power_rtol: quantization tolerance of unequal turbine power
         time_limit: [s] solver run time limit
-        vehicles: maximum number of vehicles (if None, let HGS-CVRP decide;
-            clamped to the minimum for multi-root problems); the exact number of
-            vehicles if ``vehicles_exact=True``
-        vehicles_exact: whether ``vehicles`` is the exact feeder count instead of
-            an upper bound (requires ``balanced=True``, a single root, and
-            ``ceil(T / capacity) <= vehicles <= T``)
+        vehicles: maximum number of routes: feeders if radial, rings (half
+            the feeders) if ``ringed`` (if None, let HGS-CVRP decide; clamped to
+            the minimum for multi-root problems); the exact number of routes if
+            ``vehicles_exact=True``
+        vehicles_exact: whether ``vehicles`` is the exact route count instead of
+            an upper bound (requires ``balanced=True`` and at least the minimum
+            route count; at most ``T`` feeders if radial, ``T // 2`` rings if
+            ``ringed``; only the minimum for multi-root problems)
         seed: random seed for reproducibility
         keep_log: attach solver log to the solution graph
         repair: iteratively fix crossings (default True)
@@ -460,10 +474,6 @@ def hgs_cvrp(
     )
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
-    if ringed and vehicles_exact:
-        raise NotImplementedError(
-            'vehicles_exact is not supported together with ringed=True.'
-        )
     inflow_by_node = terminal_inflow(A)
     if inflow_by_node and (ringed or balanced or R > 1):
         raise NotImplementedError(
@@ -485,6 +495,11 @@ def hgs_cvrp(
             raise ValueError(
                 f'Vehicles (feeders) number ({vehicles}) is below the minimum '
                 f'necessary ({vehicles_min}) for the given capacity ({capacity}).'
+            )
+        if ringed and vehicles > T // 2:
+            raise ValueError(
+                f'Vehicles (rings) number ({vehicles}) is above the maximum '
+                f'({T // 2}) that gives every ring two or more of the {T} terminals.'
             )
         if vehicles > T:
             raise ValueError(
@@ -537,9 +552,10 @@ def hgs_cvrp(
             'ERROR: root node load does not match T.'
         )
         if vehicles_exact:
-            feeder_count = sum(S.degree[r] for r in range(-R, 0))
-            assert feeder_count == vehicles, (
-                f'ERROR: feeder count ({feeder_count}) does not match the exact '
+            # rings are still paths here, so each route has one link to a root
+            route_count = sum(S.degree[r] for r in range(-R, 0))
+            assert route_count == vehicles, (
+                f'ERROR: route count ({route_count}) does not match the exact '
                 f'number requested ({vehicles}).'
             )
         return S
@@ -592,6 +608,10 @@ def hgs_cvrp(
             complete=complete,
             feeders_above_min=feeders_above_min,
             feeders_exact=vehicles_exact,
+            balanced=balanced,
+            ringed=ringed,
+            repair=repair,
+            max_retries=max_retries,
             fun_fingerprint=_hgs_cvrp_fun_fingerprint,
             **S.graph['method_options'],
         ),

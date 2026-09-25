@@ -932,14 +932,25 @@ def lkh3(
     ``capacity`` terminals. Normalization of the input graph is recommended
     before calling this function (use :func:`~optiwindnet.transforming.as_normalized`).
 
+    Each vehicle is one route, so ``vehicles`` bounds the route count from
+    above: LKH-3 may leave vehicles unused, returning fewer routes than
+    ``vehicles``. The relation of routes to feeders (links to a root) depends
+    on the topology:
+
+    - radial: one route is one subtree with a single feeder, so ``vehicles``
+      caps the feeder count, whose minimum is ``ceil(T / capacity)``;
+    - ringed: one route is one ring with two feeders (one per arm), so
+      ``vehicles`` caps the ring count, the feeder count is twice the ring
+      count, and the minimum is ``ceil(T / (2 * capacity))`` rings.
+
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered (one cluster per root) and each cluster is
     solved concurrently.
 
-    For multi-root instances, the vehicles (feeders) parameter is forced per
-    cluster (a warning is issued if a different value is requested): to the
-    minimum feasible value, except for a cluster that fits within ``capacity``,
-    which is offered enough feeders to use as many as lower the cable length.
+    For multi-root instances, ``vehicles`` is forced per cluster (a warning is
+    issued if a different value is requested): to the minimum feasible route
+    count, except for a cluster that fits within a single route, which is
+    offered enough routes to use as many as lower the cable length.
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause
@@ -954,14 +965,15 @@ def lkh3(
             ``capacity`` (see :func:`~optiwindnet.loads.quantized`).
         power_rtol: quantization tolerance of unequal turbine power.
         time_limit: [s] solver run time limit (per cluster).
-        vehicles: number of vehicles (if None or at the minimum, use the
+        vehicles: maximum number of routes: feeders if radial, rings (half
+            the feeders) if ``ringed`` (if None or at the minimum, use the
             per-cluster default described above; ignored for multi-root
             problems).
         seed: random seed for reproducibility (if None, picks a random one).
         keep_log: attach solver log to the solution graph.
         repair: iteratively fix crossings (default True).
         max_retries: maximum repair iterations.
-        balanced: currently not implemented for this solver.
+        balanced: not supported; ``True`` raises ``NotImplementedError``.
         scale: factor to scale lengths (LKH manual).
         runs: number of LKH runs (LKH manual).
         per_run_limit: [s] LKH per-run time limit.
@@ -1001,6 +1013,17 @@ def lkh3(
             "LKH-3's route-size bounds count nodes, and clusterize() partitions "
             'by count.'
         )
+    # TODO: reach parity with hgs_cvrp() on `balanced` and `vehicles_exact`.
+    #   hgs_cvrp() balances loads with slack nodes (depot clones of unit demand
+    #   that fill every route), which also lets it pin the route count exactly.
+    #   lkh3() only sets MTSP_MIN_SIZE, which LKH-3 ignores for TYPE=OVRP and
+    #   which the ringed and nonunitary-inflow solves leave at 0.
+    if balanced:
+        raise NotImplementedError(
+            'lkh3() cannot enforce balanced=True: the only lever it has, '
+            "LKH-3's MTSP_MIN_SIZE, is ignored for open routes (TYPE=OVRP) and "
+            'unused for rings. Use hgs_cvrp(balanced=True) instead.'
+        )
     inflow_total = total_inflow(A)
     demands = [inflow_by_node.get(t, 1) for t in range(T)] if inflow_by_node else ()
 
@@ -1033,6 +1056,10 @@ def lkh3(
         'per_run_limit': per_run_limit,
         'complete': complete,
         'feeders_above_min': feeders_above_min,
+        'balanced': balanced,
+        'ringed': ringed,
+        'repair': repair,
+        'max_retries': max_retries,
         'fun_fingerprint': _lkh3_fun_fingerprint,
     }
     solver_details_extra = {'seed': seed}

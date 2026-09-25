@@ -950,11 +950,16 @@ def _make_warmstart_toy(topology, feeder_limit, balanced, max_feeders):
         ('radial', 'minimum', True, 0),
         ('branched', 'exactly', True, 4),
         ('radial', 'exactly', True, 4),
+        # pinned above the minimum, unbalanced: a balanced HGS solution fits too
+        ('radial', 'exactly', False, 5),
+        # an upper bound on the count
+        ('radial', 'specified', False, 4),
         # tightly bounded count (min + n): an upper bound HGS honours
         ('branched', 'min_plus1', False, 0),
         ('radial', 'min_plus1', False, 0),
-        # RINGED reproduces a pin only at the minimum, but can still balance there
+        # RINGED: pinned + balanced, counted in rings (two feeders each)
         ('ringed', 'minimum', True, 0),
+        ('ringed', 'exactly', True, 6),
         ('ringed', 'min_plus1', False, 0),
     ],
 )
@@ -1615,6 +1620,95 @@ def test_feeder_and_load_bounds_warns_when_balance_is_unenforceable(
     with caplog.at_level(logging.WARNING, logger=core.__name__):
         assert _bounds(12, 5, feeder_limit) == (3, feeders_ub, None, None)
     assert 'will not enforce balanced subtrees' in caplog.text
+
+
+def _hgs_counts(R=1, inflow_total=None, **options):
+    # T=12, capacity=5: at least 3 radial subtrees or 2 rings
+    return core.hgs_count_kwargs(12, R, 5, ModelOptions(**options), inflow_total)
+
+
+@pytest.mark.parametrize(
+    ('R', 'inflow_total', 'options', 'expected'),
+    [
+        # unbounded count
+        (1, None, {}, (None, False, False)),
+        (1, None, {'balanced': True}, (None, False, False)),
+        # a range: an upper bound single-root, the minimum multi-root
+        (1, None, {'feeder_limit': 'min_plus1'}, (4, False, False)),
+        (2, None, {'feeder_limit': 'min_plus1'}, (3, False, False)),
+        (1, None, {'feeder_limit': 'specified', 'max_feeders': 7}, (7, False, False)),
+        # pinned at the minimum
+        (1, None, {'feeder_limit': 'minimum'}, (3, False, False)),
+        (2, None, {'feeder_limit': 'minimum', 'balanced': True}, (3, False, True)),
+        # pinned above the minimum: exact and balanced, single root only
+        (1, None, {'feeder_limit': 'exactly', 'max_feeders': 5}, (5, True, True)),
+        (
+            1,
+            None,
+            {'feeder_limit': 'exactly', 'max_feeders': 5, 'balanced': True},
+            (5, True, True),
+        ),
+        (2, None, {'feeder_limit': 'exactly', 'max_feeders': 5}, None),
+        # RINGED counts rings, at most T // 2 when pinned above the minimum
+        (1, None, {'topology': 'ringed', 'feeder_limit': 'minimum'}, (2, False, False)),
+        (
+            1,
+            None,
+            {'topology': 'ringed', 'feeder_limit': 'specified', 'max_feeders': 8},
+            (4, False, False),
+        ),
+        (
+            1,
+            None,
+            {'topology': 'ringed', 'feeder_limit': 'exactly', 'max_feeders': 12},
+            (6, True, True),
+        ),
+        (
+            1,
+            None,
+            {'topology': 'ringed', 'feeder_limit': 'exactly', 'max_feeders': 14},
+            None,
+        ),
+        # nonunitary inflow: only unbalanced, single-root, radial, not above minimum
+        (1, 14, {}, (None, False, False)),
+        (2, 14, {}, None),
+        (1, 14, {'topology': 'ringed'}, None),
+        (1, 14, {'feeder_limit': 'exactly', 'max_feeders': 3}, (3, False, False)),
+        (
+            1,
+            14,
+            {'feeder_limit': 'exactly', 'max_feeders': 3, 'balanced': True},
+            None,
+        ),
+        (1, 14, {'feeder_limit': 'exactly', 'max_feeders': 4}, None),
+    ],
+)
+def test_hgs_count_kwargs(R, inflow_total, options, expected):
+    counts = _hgs_counts(R, inflow_total, **options)
+    if expected is None:
+        assert counts is None
+    else:
+        vehicles, vehicles_exact, balanced = expected
+        assert counts == {
+            'vehicles': vehicles,
+            'vehicles_exact': vehicles_exact,
+            'balanced': balanced,
+        }
+
+
+def test_hgs_count_kwargs_leaves_the_balance_warning_to_the_model(caplog):
+    with caplog.at_level(logging.WARNING, logger=core.__name__):
+        _hgs_counts(balanced=True, feeder_limit='min_plus1')
+    assert 'will not enforce balanced subtrees' not in caplog.text
+
+
+def test_hgs_count_kwargs_rejects_what_the_model_rejects():
+    with pytest.raises(ValueError, match='below the minimum'):
+        _hgs_counts(feeder_limit='exactly', max_feeders=2)
+    with pytest.raises(ValueError, match='multiple of 2'):
+        _hgs_counts(topology='ringed', feeder_limit='exactly', max_feeders=5)
+    with pytest.raises(ValueError, match='nonunitary terminal inflow'):
+        _hgs_counts(inflow_total=14, feeder_limit='minimum')
 
 
 # --------------------------------------------------------------------------- #

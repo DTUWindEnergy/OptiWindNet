@@ -16,6 +16,7 @@ from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
 
 from .cases import LKH_CASES, case_node_id, expected_topology
+from .producers import lkh_topology
 from .sitecache import get_bundle
 from .topology_assertions import assert_topology
 
@@ -25,14 +26,7 @@ def test_lkh_real_topology_cases(case):
     """Run a small optional matrix when the external LKH binary is installed."""
     if shutil.which('LKH') is None:
         pytest.skip('LKH executable not on PATH')
-    A = get_bundle(case.site).A
-    S = lkh_mod.lkh3(
-        as_normalized(A),
-        capacity=case.capacity,
-        time_limit=case.time_limit,
-        ringed=case.ringed,
-        seed=case.seed,
-    )
+    S = lkh_topology(case)
     assert_topology(S, expected_topology(case), case.capacity)
 
 
@@ -175,21 +169,20 @@ def test_lkh3_single_root_calls_do_lkh_with_expected_args(monkeypatch):
     assert S.graph['solver_details']['vehicles'] == 2
 
 
-def test_lkh3_balanced_sets_min_route_size(monkeypatch):
-    A = _make_A(T=5)  # capacity=2 -> vehicles=3, leftover=1
-    captured = {}
-
-    def fake_do_lkh(L, **kwargs):
-        captured.update(kwargs)
-        return _fake_output(routes=[[0, 1], [2, 3], [4]], vehicles=3)
-
-    monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
-
-    lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, balanced=True, repair=False)
-
-    assert captured['min_route_size'] == 1  # 5 % 2 = 1
-    assert captured['vehicles'] == 3
+def test_lkh3_rejects_balanced(monkeypatch):
+    """No configuration enforces balanced loads, so the request is refused."""
+    monkeypatch.setattr(lkh_mod, '_do_lkh', lambda L, **kw: pytest.fail('solved'))
+    A = _make_A(T=5)
+    for ringed in (False, True):
+        with pytest.raises(NotImplementedError, match='cannot enforce balanced'):
+            lkh_mod.lkh3(
+                A,
+                capacity=2,
+                time_limit=0.1,
+                balanced=True,
+                ringed=ringed,
+                repair=False,
+            )
 
 
 def test_lkh3_seed_none_picks_random_seed(monkeypatch):
@@ -374,6 +367,11 @@ def test_lkh3_complete_that_stays_within_A_is_identified_over_A(monkeypatch):
     S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, complete=True, repair=False)
 
     assert S.graph['method_options']['complete']
+    # the options that shape the solve are part of the stored method
+    assert {
+        key: S.graph['method_options'][key]
+        for key in ('balanced', 'ringed', 'repair', 'max_retries')
+    } == {'balanced': False, 'ringed': False, 'repair': False, 'max_retries': 10}
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
     assert S.graph['_linkset_id'] == A.graph['_linkset_id'] == linkset_id(A)
 

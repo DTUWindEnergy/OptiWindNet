@@ -5,8 +5,8 @@ import copy
 import math
 import warnings
 from collections import Counter
-from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import networkx as nx
 import numpy as np
@@ -41,6 +41,55 @@ TEST_ONLY_SOLVER_OPTIONS: dict[str, dict[str, Any]] = {
     'fscip': _SCIP_LEAVE_ROOT_EARLY,
     'ortools.gscip': _SCIP_LEAVE_ROOT_EARLY,
 }
+
+
+# A time-limited solve that fails at the case's budget is retried once with the
+# budget multiplied by this factor, as a slow or loaded CPU is not a defect.
+RETRY_TIME_LIMIT_FACTOR = 3.0
+
+_Result = TypeVar('_Result')
+
+
+def run_with_retry(
+    solve: Callable[[float], _Result],
+    check: Callable[[_Result], None],
+    *,
+    time_limit: float,
+    label: str,
+) -> _Result:
+    """Run a time-limited ``solve`` and ``check`` it, retrying once on failure.
+
+    Heuristics stopped by a time limit may return an invalid solution (e.g. over
+    capacity or with crossings) when the machine is too slow or too loaded to
+    reach a valid one within the budget. A failed ``check`` (``AssertionError``)
+    therefore triggers a warning and one more solve with the budget multiplied by
+    ``RETRY_TIME_LIMIT_FACTOR``, whose ``check`` failure propagates.
+
+    Args:
+      solve: function of the time limit returning the solution.
+      check: assertions on the solution.
+      time_limit: [s] budget of the first attempt.
+      label: producer name used in the warning.
+
+    Returns:
+      The first solution to pass ``check``.
+    """
+    result = solve(time_limit)
+    try:
+        check(result)
+        return result
+    except AssertionError as exc:
+        reason = str(exc).splitlines()[0] if str(exc) else 'failed its check'
+    fallback_limit = time_limit * RETRY_TIME_LIMIT_FACTOR
+    warnings.warn(
+        f'{label} returned an invalid solution within {time_limit} s ({reason}; '
+        f'likely due to high CPU load); retrying with {fallback_limit} s time limit.',
+        UserWarning,
+        stacklevel=2,
+    )
+    result = solve(fallback_limit)
+    check(result)
+    return result
 
 
 def run_milp_solve_with_retry(
@@ -84,7 +133,7 @@ def run_milp_solve_with_retry(
     except OWNSolutionNotFound:
         reason = 'raised OWNSolutionNotFound'
 
-    fallback_limit = time_limit * 3.0
+    fallback_limit = time_limit * RETRY_TIME_LIMIT_FACTOR
     warnings.warn(
         f'Solver {solver_name!r} {reason} within '
         f'{time_limit} s (likely due to high CPU load); '

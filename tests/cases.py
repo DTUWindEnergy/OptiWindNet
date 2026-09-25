@@ -179,7 +179,7 @@ HGS_CASES = (
 LKH_CASES = (
     BaselineCase('lkh', 'example_location', 3),
     BaselineCase('lkh', 'example_location', 3, ringed=True),
-    BaselineCase('lkh', 'example_location', 5, balanced=True),
+    BaselineCase('lkh', 'rental', 8, ringed=True),
     BaselineCase('lkh', 'morayeast', 8),
     BaselineCase('lkh', 'horns', 10),
 )
