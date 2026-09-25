@@ -22,7 +22,6 @@ from .ortools import SolverORTools, make_min_length_model, warmup_model
 __all__ = ('SolverCbcbox', 'make_min_length_model', 'warmup_model')
 
 _lggr = logging.getLogger(__name__)
-error, warn, info = _lggr.error, _lggr.warning, _lggr.info
 
 _RESULT_PREFIX = 'Result - '
 _TERMINATION_FROM_RESULT = (
@@ -166,7 +165,7 @@ class SolverCbcbox(SolverORTools):
                 if val is not True and val is not None:
                     cmd.append(str(val))
         cmd += ['-solve', '-solu', 'problem.soln', '-quit']
-        log = self.log_callback or (info if verbose else None)
+        log = self.log_callback or (print if verbose else None)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with open(os.path.join(tmpdir, 'problem.mps'), 'w') as f:
