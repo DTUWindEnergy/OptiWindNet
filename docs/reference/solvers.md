@@ -9,14 +9,14 @@ Which MILP backends _OptiWindNet_ can drive, and how to install them. What the e
 | Google OR-Tools | open source | `'ortools.cp_sat'`, `'ortools.gscip'`, `'ortools.highs'` |
 | HiGHS | open source | `'highs'` |
 | SCIP | open source | `'scip'` |
-| COIN-OR CBC | open source | `'cbc'` |
+| COIN-OR CBC | open source | `'ortools.cbcbox'`, `'cbc'` (legacy) |
 | FiberSCIP | open source (experimental) | `'fscip'` |
 | Gurobi | commercial (academic license available) | `'gurobi'` |
 | IBM ILOG CPLEX | commercial (academic license available) | `'cplex'` |
 
 All of them solve the same model, so the choice does not change what counts as a valid solution — but it does change how long the search takes, sometimes by a wide margin on the same instance. If a solve is slower than expected, trying another backend costs a one-word change.
 
-Solvers perform a search across the branch-and-bound tree. On multi-core computers, some solvers parallelize the tree search itself, while others run several coordinated searches in parallel. As of Jul/2026, `gurobi`, `cplex`, `highs`, `cbc`, and `fscip` support multi-threaded tree search in _OptiWindNet_.
+Solvers perform a search across the branch-and-bound tree. On multi-core computers, some solvers parallelize the tree search itself, while others run several coordinated searches in parallel. As of Jul/2026, `gurobi`, `cplex`, `highs`, `ortools.cbcbox`, `cbc`, and `fscip` support multi-threaded tree search in _OptiWindNet_.
 
 The OR-Tools backends and native `scip` can also benefit from multiple cores by running concurrent searches with some information exchange among them. OR-Tools diversifies algorithms and strategies across workers, while SCIP diversifies random seeds and may vary emphasis settings. Both expose user-configurable controls for that behavior.
 
@@ -72,7 +72,14 @@ For the PyPI package, `ortools.highs` is available out of the box. The `highs` b
 
 [COIN-OR's Optimization Suite](https://coin-or.github.io/user_introduction.html) is open source software and its MILP solver is [coin-or/Cbc: COIN-OR Branch-and-Cut solver](https://github.com/coin-or/Cbc).
 
-Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for CBC, but it may also be installed by following the instructions in the links above:
+The recommended way to use CBC is the `ortools.cbcbox` backend: the model is built with OR-Tools (as for the other `ortools.*` backends) and solved by the `cbc` executable bundled in the Python package [cbcbox](https://pypi.org/project/cbcbox/), so no separate executable needs to be installed or placed on the system PATH:
+
+    pip install cbcbox
+    conda install -c conda-forge cbcbox
+
+#### Legacy: `cbc` via Pyomo
+
+The `cbc` backend uses Pyomo. Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for CBC, but it may also be installed by following the instructions in the links above:
 
     conda install -c conda-forge coin-or-cbc
 

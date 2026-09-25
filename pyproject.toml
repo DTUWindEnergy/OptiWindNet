@@ -64,6 +64,7 @@ dependencies = [
 
 [project.optional-dependencies]
 solvers = [
+    "cbcbox",
     "cplex",
     "gurobipy",
     "highspy",
