@@ -973,7 +973,7 @@ def lkh3(
         keep_log: attach solver log to the solution graph.
         repair: iteratively fix crossings (default True).
         max_retries: maximum repair iterations.
-        balanced: currently not implemented for this solver.
+        balanced: not supported; ``True`` raises ``NotImplementedError``.
         scale: factor to scale lengths (LKH manual).
         runs: number of LKH runs (LKH manual).
         per_run_limit: [s] LKH per-run time limit.
@@ -1012,6 +1012,17 @@ def lkh3(
             'unbalanced single-root radial solve: rings split by terminal count, '
             "LKH-3's route-size bounds count nodes, and clusterize() partitions "
             'by count.'
+        )
+    # TODO: reach parity with hgs_cvrp() on `balanced` and `vehicles_exact`.
+    #   hgs_cvrp() balances loads with slack nodes (depot clones of unit demand
+    #   that fill every route), which also lets it pin the route count exactly.
+    #   lkh3() only sets MTSP_MIN_SIZE, which LKH-3 ignores for TYPE=OVRP and
+    #   which the ringed and nonunitary-inflow solves leave at 0.
+    if balanced:
+        raise NotImplementedError(
+            'lkh3() cannot enforce balanced=True: the only lever it has, '
+            "LKH-3's MTSP_MIN_SIZE, is ignored for open routes (TYPE=OVRP) and "
+            'unused for rings. Use hgs_cvrp(balanced=True) instead.'
         )
     inflow_total = total_inflow(A)
     demands = [inflow_by_node.get(t, 1) for t in range(T)] if inflow_by_node else ()

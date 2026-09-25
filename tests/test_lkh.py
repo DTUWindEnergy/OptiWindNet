@@ -175,21 +175,20 @@ def test_lkh3_single_root_calls_do_lkh_with_expected_args(monkeypatch):
     assert S.graph['solver_details']['vehicles'] == 2
 
 
-def test_lkh3_balanced_sets_min_route_size(monkeypatch):
-    A = _make_A(T=5)  # capacity=2 -> vehicles=3, leftover=1
-    captured = {}
-
-    def fake_do_lkh(L, **kwargs):
-        captured.update(kwargs)
-        return _fake_output(routes=[[0, 1], [2, 3], [4]], vehicles=3)
-
-    monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
-    monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
-
-    lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, balanced=True, repair=False)
-
-    assert captured['min_route_size'] == 1  # 5 % 2 = 1
-    assert captured['vehicles'] == 3
+def test_lkh3_rejects_balanced(monkeypatch):
+    """No configuration enforces balanced loads, so the request is refused."""
+    monkeypatch.setattr(lkh_mod, '_do_lkh', lambda L, **kw: pytest.fail('solved'))
+    A = _make_A(T=5)
+    for ringed in (False, True):
+        with pytest.raises(NotImplementedError, match='cannot enforce balanced'):
+            lkh_mod.lkh3(
+                A,
+                capacity=2,
+                time_limit=0.1,
+                balanced=True,
+                ringed=ringed,
+                repair=False,
+            )
 
 
 def test_lkh3_seed_none_picks_random_seed(monkeypatch):
