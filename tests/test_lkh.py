@@ -374,6 +374,11 @@ def test_lkh3_complete_that_stays_within_A_is_identified_over_A(monkeypatch):
     S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, complete=True, repair=False)
 
     assert S.graph['method_options']['complete']
+    # the options that shape the solve are part of the stored method
+    assert {
+        key: S.graph['method_options'][key]
+        for key in ('balanced', 'ringed', 'repair', 'max_retries')
+    } == {'balanced': False, 'ringed': False, 'repair': False, 'max_retries': 10}
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
     assert S.graph['_linkset_id'] == A.graph['_linkset_id'] == linkset_id(A)
 

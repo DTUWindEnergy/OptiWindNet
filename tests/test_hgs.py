@@ -63,6 +63,7 @@ def test_hgs_ringed_capacity_boundaries(capacity):
         seed=0,
     )
     assert_topology(S, Topology.RINGED, capacity)
+    assert S.graph['method_options']['ringed']
 
 
 def _make_A(T: int = 4, R: int = 1, edges=()) -> nx.Graph:
@@ -208,6 +209,11 @@ def test_balanced_exact_vehicles_above_minimum(monkeypatch):
         T / capacity
     )
     assert S.graph['method_options']['feeders_exact']
+    # the options that shape the solve are part of the stored method
+    assert {
+        key: S.graph['method_options'][key]
+        for key in ('balanced', 'ringed', 'repair', 'max_retries')
+    } == {'balanced': True, 'ringed': False, 'repair': False, 'max_retries': 10}
 
 
 def test_balanced_exact_vehicles_with_slack(monkeypatch):

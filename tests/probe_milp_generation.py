@@ -124,7 +124,6 @@ def build_milp_warmstart(
     if count_kwargs is not None:
         from optiwindnet.baselines.hgs import hgs_cvrp
 
-        ringed = topology is Topology.RINGED
         S = hgs_cvrp(
             as_normalized(A),
             capacity=capacity,
@@ -132,7 +131,7 @@ def build_milp_warmstart(
             seed=warmstart_seed,
             repair=True,
             max_retries=warmstart_max_retries,
-            ringed=ringed,
+            ringed=topology is Topology.RINGED,
             **count_kwargs,
         )
         # A radial topology is a valid warm start for the less restrictive branched
@@ -141,16 +140,19 @@ def build_milp_warmstart(
             Topology.RADIAL if topology is Topology.BRANCHED else topology
         )
         assert_topology(S, warmstart_topology, capacity)
-        hgs_options = {
-            'capacity': capacity,
-            'time_limit': warmstart_time_limit,
-            'seed': warmstart_seed,
-            'repair': True,
-            'max_retries': warmstart_max_retries,
-            'ringed': ringed,
-            **count_kwargs,
+        options_recorded = {
+            'capacity': S.graph['capacity'],
+            **{
+                key: value
+                for key, value in S.graph['method_options'].items()
+                if key != 'fun_fingerprint'
+            },
         }
-        return S, {'generator': 'hgs', 'options': hgs_options}
+        return S, {
+            'generator': 'hgs',
+            'options': options_recorded,
+            'details': S.graph['solver_details'],
+        }
 
     return _build_constructor_warmstart(A, case)
 

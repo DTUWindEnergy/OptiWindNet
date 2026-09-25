@@ -1043,6 +1043,10 @@ def lkh3(
         'per_run_limit': per_run_limit,
         'complete': complete,
         'feeders_above_min': feeders_above_min,
+        'balanced': balanced,
+        'ringed': ringed,
+        'repair': repair,
+        'max_retries': max_retries,
         'fun_fingerprint': _lkh3_fun_fingerprint,
     }
     solver_details_extra = {'seed': seed}
