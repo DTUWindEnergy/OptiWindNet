@@ -953,8 +953,9 @@ def _make_warmstart_toy(topology, feeder_limit, balanced, max_feeders):
         # tightly bounded count (min + n): an upper bound HGS honours
         ('branched', 'min_plus1', False, 0),
         ('radial', 'min_plus1', False, 0),
-        # RINGED reproduces a pin only at the minimum, but can still balance there
+        # RINGED: pinned + balanced, counted in rings (two feeders each)
         ('ringed', 'minimum', True, 0),
+        ('ringed', 'exactly', True, 6),
         ('ringed', 'min_plus1', False, 0),
     ],
 )

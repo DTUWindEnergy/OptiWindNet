@@ -1015,7 +1015,7 @@ class HGSRouter(Router):
               ring) and must be even.
           feeder_exact: Whether ``feeder_limit`` is the exact number of feeders,
               instead of an upper bound (requires ``balanced=True`` and a single
-              substation).
+              substation; with ``ringed=True``, every ring gets two or more turbines).
           max_retries: Maximum number of retries if a feasible solution is not found.
           balanced: Whether to balance turbines/loads across feeders.
           ringed: Whether to produce a RINGED topology (cycles) instead of a
@@ -1238,9 +1238,10 @@ class MILPRouter(Router):
 
         Feeder counts HGS cannot reproduce fall through to the loose default: the
         branched constructor (a closer warm start for a branched model) or a plain
-        HGS solution. A RINGED model has no exact-vehicles mode, so ``exactly``
-        above the minimum stays there -- and, like every un-reproducible case,
-        ends up solving cold.
+        HGS solution. HGS pins a count above the minimum only with ``balanced``
+        (and, for a RINGED model, at most ``T // 2`` rings), so any other
+        ``exactly`` above the minimum settles at the minimum -- and, like every
+        un-reproducible case, ends up solving cold.
 
         Nonunitary terminal inflow restrict this to a plain HGS solution, the only
         warm start either producer honours, and only for an unbalanced,
@@ -1299,18 +1300,17 @@ class MILPRouter(Router):
 
         if pinned is not None:
             # With the count pinned to a single value, `balanced` is enforceable.
-            # A RINGED solve has no exact-vehicles mode, so only a pin at the
-            # minimum is reproducible (its upper bound already yields the minimum),
-            # though balance can still be requested. Radial/branched can pin any
-            # value, but exactly only together with balance (single root, or when
-            # the pin is the minimum).
-            if ringed:
-                if pinned == min_subtrees:
-                    return _hgs(pinned, balance=balanced)
-            else:
-                exact = balanced and (single_root or pinned == min_subtrees)
-                if exact or pinned == min_subtrees:
-                    return _hgs(pinned, exact=exact, balance=exact)
+            # HGS pins a count exactly only together with balance (single root, or
+            # when the pin is the minimum), and at most T // 2 rings; a pin at the
+            # minimum is reproducible regardless, as its upper bound already
+            # yields the minimum.
+            exact = (
+                balanced
+                and (single_root or pinned == min_subtrees)
+                and (not ringed or pinned <= A.graph['T'] // 2)
+            )
+            if exact or pinned == min_subtrees:
+                return _hgs(pinned, exact=exact, balance=balanced)
             # an exact count HGS cannot pin: fall through to the loose default.
         elif feeder_limit in ('min_plus1', 'min_plus2', 'min_plus3'):
             # cap the count at min + n (an upper bound HGS honors single-root;

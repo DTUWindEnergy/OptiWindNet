@@ -271,6 +271,43 @@ def test_exact_vehicles_rejected_above_minimum_for_multi_root():
         )
 
 
+@pytest.mark.parametrize('vehicles', (3, 5, 8))
+def test_ringed_exact_vehicles_pins_ring_count(vehicles):
+    # albatros: T=16, so capacity 3 needs at least 3 rings and allows at most 8
+    A = get_bundle('albatros').A
+    S = hgs_mod.hgs_cvrp(
+        as_normalized(A),
+        capacity=3,
+        time_limit=0.5,
+        seed=0,
+        vehicles=vehicles,
+        vehicles_exact=True,
+        balanced=True,
+        ringed=True,
+    )
+    assert_topology(S, Topology.RINGED, 3)
+    # two feeders per ring
+    assert S.degree[-1] == 2 * vehicles
+    # balanced: ring sizes differ by at most one terminal
+    ring_sizes = np.bincount([S.nodes[t]['subtree'] for t in range(16)])
+    assert len(ring_sizes) == vehicles
+    assert ring_sizes.max() - ring_sizes.min() <= 1
+
+
+def test_ringed_exact_vehicles_rejects_rings_below_two_terminals():
+    with pytest.raises(ValueError, match=re.escape('above the maximum (6)')):
+        hgs_mod.hgs_cvrp(
+            _make_A(T=12),
+            capacity=6,
+            time_limit=0.1,
+            vehicles=7,
+            vehicles_exact=True,
+            balanced=True,
+            ringed=True,
+            repair=False,
+        )
+
+
 def test_balanced_rejects_non_minimum_vehicles_without_exact_flag():
     with pytest.raises(ValueError, match='vehicles_exact'):
         hgs_mod.hgs_cvrp(
