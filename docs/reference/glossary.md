@@ -16,10 +16,13 @@ feeder
   The link that connects a root to a group of terminals.
 
 capacity
-  The maximum number of terminals a feeder may serve, derived from the current-carrying capacity of the available cable types.
+  The maximum load a cable can carry. Routers represent it as integer inflow; user inputs can instead declare nominal power with an explicit unit. With unitary inflow, it counts turbines. See [](/reference/input_formats.md#cable-types).
 
 load
-  The number of terminals exporting power through a given node or link, including itself for a terminal. A link's load determines which cable type is assigned to it.
+  The cumulative turbine inflow carried by a node or link, including a terminal's own inflow. It counts turbines only when each turbine contributes one unit. Nominal loads sum the declared turbine powers; cable assignment uses nominal loads when capacities are nominal power.
+
+inflow
+  A turbine's positive integer contribution to the solver's flow, defaulting to one. Unequal nominal powers are quantized to integer inflow for the selected cable capacity; see [](/reference/input_formats.md#turbines-of-unequal-output).
 
 link
   An electrical connection between two nodes, considered without regard to how the cable is physically routed.

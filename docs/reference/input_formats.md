@@ -18,7 +18,7 @@ _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API) · {doc}`/noteb
 
 ## Cable types
 
-Cable capacity is expressed in **number of turbines**, not in amperes: it is the number of terminals whose full output the cable can carry. Three equivalent ways of declaring the available types are accepted:
+In the Network/Router API, cable capacity uses the unit selected by `power_unit`: nominal power when a unit such as `'MW'` is supplied, or integer inflow when it is `None`. With the default unitary turbine inflow, capacity counts turbines. The package does not convert electrical current ratings to power capacities; supply capacities appropriate to the site. Three ways of declaring the available types are accepted:
 
 - a single number — the maximum capacity among all available cables, when cost is not of interest;
 - a list of capacities — one entry per cable type;
