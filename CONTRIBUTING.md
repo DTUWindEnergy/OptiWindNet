@@ -58,7 +58,7 @@ Some project-specific details:
 - Ruff uses single-quoted strings and an 88-column line length. Its hooks cover `.py`, `.pyi`, and `.ipynb` files.
 - Pyrefly targets Python 3.11 and skips `docs/notebooks/`. If changing Pyrefly or the pinned `types-*` packages, run the all-files checks and update any suppressions that the new versions make obsolete.
 - Prefer a narrow, explained suppression when a checker is wrong instead of loosening the project-wide configuration.
-- Solver-dependent tests skip when a backend, executable, or licence is unavailable. The `solvers` extra covers the pip-installable backends; CBC and FiberSCIP also require external executables. The [MILP solver guide](https://optiwindnet.readthedocs.io/latest/reference/solvers.html) gives installation and licensing details for each backend.
+- Solver-dependent tests skip when a backend, executable, or licence is unavailable. The `solvers` extra covers the pip-installable backends; the legacy `cbc` backend and FiberSCIP also require external executables. The [MILP solver guide](https://optiwindnet.readthedocs.io/latest/reference/solvers.html) gives installation and licensing details for each backend.
 - `tests/test_milp_references.py` is sensitive to heavy parallel load. If one of its short solver runs warns or fails, rerun that file serially before treating the result as a regression.
 
 ## Documentation and notebooks

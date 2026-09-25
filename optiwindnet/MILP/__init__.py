@@ -57,8 +57,8 @@ def solver_factory(solver_name: str) -> Solver:
 
     Args:
       solver_name: one of ``'ortools.cp_sat'``, ``'ortools.gscip'``,
-        ``'ortools.highs'``, ``'cplex'``, ``'gurobi'``, ``'cbc'``, ``'scip'``,
-        ``'highs'``.
+        ``'ortools.highs'``, ``'ortools.cbcbox'``, ``'cplex'``, ``'gurobi'``,
+        ``'cbc'``, ``'scip'``, ``'highs'``.
 
     Returns:
       Solver instance that can produce solutions for the cable routing problem.
@@ -74,6 +74,21 @@ def solver_factory(solver_name: str) -> Solver:
         case 'ortools':
             if find_spec('ortools'):
                 _reject_loaded_rivals(requested, 'ortools', 'highspy', 'pyscipopt')
+                if backend and backend[0] == 'cbcbox':
+                    if find_spec('cbcbox'):
+                        import cbcbox
+
+                        from .cbcbox import SolverCbcbox
+
+                        cbc_bin = cbcbox.cbc_bin_path()
+                        if not shutil.which(cbc_bin):
+                            raise FileNotFoundError(
+                                f"Executable 'cbc' not found at {cbc_bin}"
+                            )
+                        return SolverCbcbox(cbc_bin)
+                    raise ModuleNotFoundError(
+                        "Package 'cbcbox' not found. Try 'pip install cbcbox'."
+                    )
                 from .ortools import SolverORTools
 
                 return SolverORTools(backend[0] if backend else 'cp_sat')

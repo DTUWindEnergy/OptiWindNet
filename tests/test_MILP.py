@@ -5,7 +5,7 @@ import importlib
 import logging
 import math
 import pickle
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import networkx as nx
 import numpy as np
@@ -224,6 +224,108 @@ def _exercise_ortools_retrieval_branch(feeder_route):
         pathfinder.return_value.create_detours.return_value = G
         selected, _ = solver.get_solution()
     return calls, selected.graph['source'], pathfinder.call_count
+
+
+def _test_cbcbox_warmstart_job():
+    from optiwindnet.heuristics import constructor
+
+    bundle = get_bundle('toy')
+    P, A = bundle.P, bundle.A
+    solver = solver_factory('ortools.cbcbox')
+    warmstart = constructor(A, _CAPACITY)
+    solver.set_problem(
+        P, A, capacity=_CAPACITY, model_options=ModelOptions(), warmstart=warmstart
+    )
+    assert solver.metadata.warmed_by == 'constructor'
+    info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
+    _, G = solver.get_solution()
+    assert G.graph.get('warmstart') == 'constructor'
+    assert info.termination == 'optimal'
+    return True
+
+
+def _test_cbcbox_missing_binary_job():
+    from unittest import mock
+
+    import cbcbox
+
+    with mock.patch.object(cbcbox, 'cbc_bin_path', return_value='/nonexistent/cbc'):
+        try:
+            solver_factory('ortools.cbcbox')
+        except FileNotFoundError as exc:
+            return str(exc)
+    return 'no exception'
+
+
+_CBC_SUMMARY = """\
+✔ Stopped (time limit) — BestSol: 58763.1   Bound: 56263.5   Gap: 4.25%
+Result - Stopped on time limit
+Objective value:                58763.088
+Lower bound:                    56263.5
+Gap:                            0.0444257
+Enumerated nodes:               193
+Total time (Wallclock seconds): 10.2191   (CPU seconds):             47.6255
+"""
+
+
+def _job_cbcbox_read_log():
+    from optiwindnet.MILP.cbcbox import _read_cbc_log
+
+    logged = []
+    complete = _read_cbc_log(_CBC_SUMMARY.splitlines(keepends=True), logged.append)
+    # time limit reached during the root LP: no result summary
+    truncated = _read_cbc_log(
+        ['✔ LP Optimal — Obj: 144227\n', 'Total time (Wallclock seconds): 0.79\n'],
+        None,
+    )
+    return complete, truncated, logged
+
+
+def test_cbcbox_read_log(ortools_worker):
+    (result, summary), truncated, logged = ortools_worker.run(
+        _job_cbcbox_read_log, (), 30
+    )
+    assert result == 'Stopped on time limit'
+    assert summary['Lower bound'] == 56263.5
+    assert summary['Total time (Wallclock seconds)'] == 10.2191
+    assert 'Bound' not in summary
+    assert truncated == ('', {})
+    assert logged == _CBC_SUMMARY.splitlines()
+
+
+def _job_cbcbox_read_solution(tmp_path, link_value):
+    from optiwindnet.MILP.cbcbox import _read_cbc_solution
+
+    solver = solver_factory('ortools.cbcbox')
+    bundle = get_bundle('toy')
+    solver.set_problem(
+        bundle.P, bundle.A, capacity=_CAPACITY, model_options=ModelOptions()
+    )
+    link = next(iter(solver.metadata.link_.values()))
+    flow = next(iter(solver.metadata.flow_.values()))
+    path = tmp_path / 'problem.soln'
+    path.write_text(
+        'Optimal - objective value 123.45000000\n'
+        f'      0 {link.name}        {link_value}        0\n'
+        f'**    1 {flow.name}        2.0000000001        0\n'
+    )
+    var_from_name = {var.name: var for var in (link, flow)}
+    solution = _read_cbc_solution(str(path), var_from_name)
+    missing = _read_cbc_solution(str(tmp_path / 'missing.soln'), var_from_name)
+    return solution, missing, link.id, flow.id
+
+
+@pytest.mark.parametrize('link_value', ['1', '0.857142857142857'])
+def test_cbcbox_read_solution(ortools_worker, tmp_path, link_value):
+    solution, missing, link_id, flow_id = ortools_worker.run(
+        _job_cbcbox_read_solution, (tmp_path, link_value), 30
+    )
+    assert missing is None
+    if link_value == '1':
+        assert solution == (123.45, {link_id: 1, flow_id: 2})
+    else:
+        # LP relaxation written in place of an integer solution
+        assert solution is None
 
 
 class _FakePool(core.PoolHandler):
@@ -513,10 +615,11 @@ def test_pool_investigation_ranks_routed_candidates(monkeypatch, P_A_toy):
     assert G.graph['pool_count'] == 3
 
 
-def test_ortools_topology_matches_the_toy_golden(ortools_worker):
+@pytest.mark.parametrize('solver_name', ['ortools.cp_sat', 'ortools.cbcbox'])
+def test_ortools_topology_matches_the_toy_golden(ortools_worker, solver_name):
     result = ortools_worker.run(
         _solve_toy_solution,
-        ('ortools.cp_sat', 'branched'),
+        (solver_name, 'branched'),
         30 + _RUNTIME,
     )
     if isinstance(result, BaseException):
@@ -541,11 +644,12 @@ def test_ortools_topology_matches_the_toy_golden(ortools_worker):
     assert len(linkbits) == terminal_link_count + A.graph['R'] * A.graph['T']
 
 
+@pytest.mark.parametrize('solver_name', ['ortools.cp_sat', 'ortools.cbcbox'])
 @pytest.mark.parametrize('topology', ['radial', 'ringed'])
-def test_ortools_solution_decodes_valid_topology(ortools_worker, topology):
+def test_ortools_solution_decodes_valid_topology(ortools_worker, solver_name, topology):
     result = ortools_worker.run(
         _solve_toy_solution,
-        ('ortools.cp_sat', topology),
+        (solver_name, topology),
         30 + _RUNTIME,
     )
     if isinstance(result, BaseException):
@@ -556,8 +660,9 @@ def test_ortools_solution_decodes_valid_topology(ortools_worker, topology):
     assert result['graph']['topology'] == topology
 
 
-def test_ortools_retrieval_before_solve_has_useful_error(ortools_worker):
-    result = ortools_worker.run(_get_solution_before_solve, ('ortools.cp_sat',), 30)
+@pytest.mark.parametrize('solver_name', ['ortools.cp_sat', 'ortools.cbcbox'])
+def test_ortools_retrieval_before_solve_has_useful_error(ortools_worker, solver_name):
+    result = ortools_worker.run(_get_solution_before_solve, (solver_name,), 30)
 
     assert isinstance(result, AttributeError)
     assert '.solve() must be called before solution retrieval' in str(result)
@@ -1321,11 +1426,50 @@ def _job_solver_factory_name(solver_name):
         ('ortools', 'ortools.cp_sat'),
         ('ortools.gscip', 'ortools.gscip'),
         ('ortools.highs', 'ortools.highs'),
+        ('ortools.cbcbox', 'ortools.cbcbox'),
     ],
 )
 def test_solver_factory_ortools_backends(solver_name, expected_name, ortools_worker):
     result = ortools_worker.run(_job_solver_factory_name, (solver_name,), 30)
     assert result == expected_name
+
+
+def test_ortools_cbcbox_warmstart(ortools_worker):
+    result = ortools_worker.run(_test_cbcbox_warmstart_job, (), 30)
+    assert result is True
+
+
+def test_solver_cbcbox_missing_binary(ortools_worker):
+    result = ortools_worker.run(_test_cbcbox_missing_binary_job, (), 30)
+    assert "Executable 'cbc' not found" in result
+
+
+def _job_test_cbcbox_missing_cbcbox():
+    from optiwindnet import MILP
+
+    old_find_spec = MILP.find_spec
+    try:
+
+        def fake_find_spec(name: str, package: str | None = None) -> Any:
+            if name == 'ortools':
+                return object()  # pyrefly: ignore[bad-return]
+            if name == 'cbcbox':
+                return None
+            return old_find_spec(name, package)
+
+        MILP.find_spec = fake_find_spec
+        try:
+            solver_factory('ortools.cbcbox')
+        except ModuleNotFoundError as exc:
+            return str(exc)
+        return 'no exception'
+    finally:
+        MILP.find_spec = old_find_spec
+
+
+def test_solver_factory_ortools_cbcbox_missing_cbcbox(ortools_worker):
+    result = ortools_worker.run(_job_test_cbcbox_missing_cbcbox, (), 30)
+    assert "Package 'cbcbox' not found" in result
 
 
 @pytest.mark.parametrize(
