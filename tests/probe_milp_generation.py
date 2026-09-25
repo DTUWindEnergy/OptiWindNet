@@ -15,15 +15,13 @@ write a golden artifact.
 
 import argparse
 import json
-from math import ceil
 from time import perf_counter
-from typing import TypedDict
 
 import networkx as nx
 
 from optiwindnet.heuristics import constructor
 from optiwindnet.MILP import ModelOptions, OWNWarmupFailed, solver_factory
-from optiwindnet.MILP._core import feeder_and_load_bounds
+from optiwindnet.MILP._core import hgs_count_kwargs
 from optiwindnet.terse import TerseLinks
 from optiwindnet.transforming import as_normalized
 from optiwindnet.types import Topology
@@ -31,18 +29,6 @@ from optiwindnet.types import Topology
 from .cases import MILPCase
 from .sitecache import SiteBundle, get_bundle
 from .topology_assertions import assert_topology
-
-
-class _HGSOptions(TypedDict):
-    capacity: int
-    time_limit: float
-    vehicles: int | None
-    vehicles_exact: bool
-    seed: int | None
-    repair: bool
-    max_retries: int
-    balanced: bool
-    ringed: bool
 
 
 def milp_reference_parser(
@@ -122,60 +108,6 @@ def _constructor_method(topology: Topology) -> str:
     }[topology]
 
 
-def _hgs_kwargs(
-    A: nx.Graph,
-    case: MILPCase,
-    *,
-    warmstart_time_limit: float,
-    warmstart_seed: int,
-    warmstart_max_retries: int,
-) -> _HGSOptions | None:
-    """Return a feasible HGS configuration, or ``None`` if HGS cannot express it."""
-    capacity = case.capacity
-    options = case.model_options
-    topology = options['topology']
-    ringed = topology is Topology.RINGED
-    feeders_per_subtree = 2 if ringed else 1
-    solve_capacity = feeders_per_subtree * capacity
-    feeders_min = ceil(A.graph['T'] / solve_capacity)
-    feeders_lb, feeders_ub, _, _ = feeder_and_load_bounds(
-        A.graph['T'],
-        solve_capacity,
-        options['feeder_limit'],
-        options['max_feeders'],
-        options['balanced'],
-        feeders_per_subtree,
-    )
-
-    # HGS can pin a non-minimum vehicle count only by adding balancing slack
-    # nodes. It cannot do so for rings or a multi-root problem.
-    exact_above_minimum = feeders_lb == feeders_ub and feeders_lb > feeders_min
-    if exact_above_minimum and (ringed or A.graph['R'] > 1):
-        return None
-
-    if feeders_ub is None:
-        vehicles = None
-    elif A.graph['R'] > 1 and feeders_lb != feeders_ub:
-        # HGS distributes only the global minimum reliably across root clusters.
-        vehicles = feeders_lb
-    else:
-        vehicles = feeders_ub
-
-    vehicles_exact = exact_above_minimum
-    balanced = (options['balanced'] and feeders_lb == feeders_ub) or vehicles_exact
-    return {
-        'capacity': capacity,
-        'time_limit': warmstart_time_limit,
-        'vehicles': vehicles,
-        'vehicles_exact': vehicles_exact,
-        'seed': warmstart_seed,
-        'repair': True,
-        'max_retries': warmstart_max_retries,
-        'balanced': balanced,
-        'ringed': ringed,
-    }
-
-
 def build_milp_warmstart(
     A: nx.Graph,
     case: MILPCase,
@@ -188,24 +120,37 @@ def build_milp_warmstart(
     capacity = case.capacity
     options = case.model_options
     topology = options['topology']
-    hgs_kwargs = _hgs_kwargs(
-        A,
-        case,
-        warmstart_time_limit=warmstart_time_limit,
-        warmstart_seed=warmstart_seed,
-        warmstart_max_retries=warmstart_max_retries,
-    )
-    if hgs_kwargs is not None:
+    count_kwargs = hgs_count_kwargs(A.graph['T'], A.graph['R'], capacity, options)
+    if count_kwargs is not None:
         from optiwindnet.baselines.hgs import hgs_cvrp
 
-        S = hgs_cvrp(as_normalized(A), **hgs_kwargs)
+        ringed = topology is Topology.RINGED
+        S = hgs_cvrp(
+            as_normalized(A),
+            capacity=capacity,
+            time_limit=warmstart_time_limit,
+            seed=warmstart_seed,
+            repair=True,
+            max_retries=warmstart_max_retries,
+            ringed=ringed,
+            **count_kwargs,
+        )
         # A radial topology is a valid warm start for the less restrictive branched
         # model; warmup_model() explicitly supports this relationship.
         warmstart_topology = (
             Topology.RADIAL if topology is Topology.BRANCHED else topology
         )
         assert_topology(S, warmstart_topology, capacity)
-        return S, {'generator': 'hgs', 'options': dict(hgs_kwargs)}
+        hgs_options = {
+            'capacity': capacity,
+            'time_limit': warmstart_time_limit,
+            'seed': warmstart_seed,
+            'repair': True,
+            'max_retries': warmstart_max_retries,
+            'ringed': ringed,
+            **count_kwargs,
+        }
+        return S, {'generator': 'hgs', 'options': hgs_options}
 
     return _build_constructor_warmstart(A, case)
 

@@ -15,7 +15,7 @@ from itertools import chain
 from pathlib import Path
 from textwrap import indent
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 import networkx as nx
 from bitarray import bitarray, frozenbitarray
@@ -221,6 +221,94 @@ def feeder_and_load_bounds(
         load_lb if load_lb > 1 else None,
         load_ub if load_ub < capacity else None,
     )
+
+
+class HGSCountKwargs(TypedDict):
+    """Feeder-count keyword arguments of :func:`~optiwindnet.baselines.hgs.hgs_cvrp`."""
+
+    vehicles: int | None
+    vehicles_exact: bool
+    balanced: bool
+
+
+def hgs_count_kwargs(
+    T: int,
+    R: int,
+    capacity: int,
+    model_options: Mapping[str, Any],
+    inflow_total: int | None = None,
+) -> HGSCountKwargs | None:
+    """Translate a model's feeder-count bounds into HGS-CVRP count options.
+
+    The bounds come from :func:`feeder_and_load_bounds`, as in the model
+    builders, so a solution of :func:`~optiwindnet.baselines.hgs.hgs_cvrp` run
+    with the returned options satisfies the model's feeder-count constraints.
+    Counts are in subtrees, which is what ``hgs_cvrp()`` counts as ``vehicles``
+    (rings for a RINGED model, two feeders each).
+
+    HGS-CVRP reproduces:
+
+    - an unbounded count (``vehicles=None``);
+    - a range of counts, as an upper bound (only the minimum if multi-root);
+    - a count pinned at the minimum, balanced if the model asks for it;
+    - a count pinned above the minimum, exactly and balanced (a balanced
+      solution also satisfies an unbalanced model), for a single root and, if
+      RINGED, at most ``T // 2`` rings.
+
+    Nonunitary terminal inflow is only reproduced by an unbalanced, single-root,
+    radial solve that is not pinned above the minimum.
+
+    Args:
+      T: number of terminals.
+      R: number of roots.
+      capacity: cable capacity, in inflow (per arm for RINGED).
+      model_options: the model's :class:`ModelOptions`.
+      inflow_total: sum of terminal inflow (defaults to ``T``).
+
+    Returns:
+      Keyword arguments ``vehicles``, ``vehicles_exact`` and ``balanced`` for
+      ``hgs_cvrp()``, or ``None`` if HGS-CVRP cannot reproduce the bounds.
+
+    Raises:
+      ValueError: as :func:`feeder_and_load_bounds`, if the model options are
+        infeasible or incompatible with nonunitary inflow.
+    """
+    if inflow_total is None:
+        inflow_total = T
+    ringed = model_options['topology'] is Topology.RINGED
+    nonunitary = inflow_total != T
+    if nonunitary and (ringed or R > 1):
+        return None
+    per_subtree = 2 if ringed else 1
+    solve_capacity = per_subtree * capacity
+    # balanced=False: an unenforceable balance is the model builder's to warn about
+    feeders_lb, feeders_ub, _, _ = feeder_and_load_bounds(
+        T,
+        solve_capacity,
+        model_options['feeder_limit'],
+        model_options['max_feeders'],
+        False,
+        per_subtree,
+        inflow_total,
+    )
+    if feeders_ub is None:
+        return {'vehicles': None, 'vehicles_exact': False, 'balanced': False}
+    if feeders_lb != feeders_ub:
+        # multi-root, HGS-CVRP honours only the minimum, which is feeders_lb
+        vehicles = feeders_lb if R > 1 else feeders_ub
+        return {'vehicles': vehicles, 'vehicles_exact': False, 'balanced': False}
+    balanced = model_options['balanced']
+    min_subtrees = math.ceil(inflow_total / solve_capacity)
+    if feeders_lb == min_subtrees:
+        if nonunitary and balanced:
+            return None
+        # an upper bound at the minimum already yields the minimum
+        return {'vehicles': feeders_lb, 'vehicles_exact': False, 'balanced': balanced}
+    # pinning above the minimum takes the balancing slack nodes; a ring with a
+    # single terminal would have one feeder instead of two
+    if nonunitary or R > 1 or (ringed and feeders_lb > T // 2):
+        return None
+    return {'vehicles': feeders_lb, 'vehicles_exact': True, 'balanced': True}
 
 
 class ModelOptions(dict):
