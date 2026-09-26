@@ -52,6 +52,11 @@
 
 - **Consistent complete-graph solves across baselines.** HGS and LKH support complete solves consistently across baselines, with distance-matrix utilities in `optiwindnet.baselines.utils` removed.
 
+- **`svgplot(tight=True)` trims the viewBox to the drawing.** A site taller than 16:9 otherwise sits on the left of a 1920-wide viewBox; `svgpplot()` and the `WindFarmNetwork.plot*()` methods forward the flag. The default output is unchanged.
+  - With a legend, a tight viewBox is at least 9:16 (width to height), padded evenly on both sides of the drawing.
+  - The legend wraps into rows that fit the viewBox width, and the viewBox grows by one row pitch per extra row. Rows remain centred under the drawing, but are shifted inward where that would cross the viewBox edge (a tall site's legend could previously start left of the viewBox).
+  - With `transparent=False`, the opaque background is sized from the final viewBox, covering the legend rows and any padding.
+
 ## Deprecations
 
 - **Relocated functions in `optiwindnet.interarraylib` and `optiwindnet.fingerprint`.** Functions relocated during the modularization of `interarraylib` (`G_from_S`, `L_from_G`, `L_from_site`, `S_from_G`, `S_from_terse_links`, `terse_links_from_S`, `bfs_subtree_loads`, `calcload`, `split_rings_and_calc_loads`, `describe_G`, `TerseLinks`, `as_hooked_to_head`, `as_hooked_to_nearest`, `as_normalized`, `as_obstacle_free`, `as_rescaled`, `as_single_root`, `as_stratified_vertices`, `as_undetoured`, `validate_routeset`, `validate_topology`) remain accessible from `optiwindnet.interarraylib` as deprecated aliases emitting a `DeprecationWarning`, scheduled for removal in v0.4.0. Similarly, `optiwindnet.fingerprint` is a deprecated compatibility shim delegating to `optiwindnet.identity`.

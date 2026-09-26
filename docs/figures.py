@@ -34,6 +34,7 @@ import bisect
 import functools
 import io
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -54,7 +55,7 @@ from optiwindnet.converting import G_from_S
 from optiwindnet.importer import load_repository
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.pathfinding import PathFinder
-from optiwindnet.svg import Drawable
+from optiwindnet.svg import svgplot
 from optiwindnet.synthetic import toyfarm
 from optiwindnet.transforming import as_normalized
 
@@ -98,26 +99,18 @@ Builder = Callable[[str], str]
 def draw(G: nx.Graph, dark: bool) -> tuple[str, int, int]:
     """Draw one graph, cropped to the width its drawing actually occupies.
 
-    ``svgplot()`` always emits a 1920-wide viewBox, so a site taller than 16:9
-    is left-aligned in it with the remainder blank — the toy farm behind
-    `topologies` fills 45% of it. ``Drawable`` is the same drawing code with the
-    viewport still open to adjustment, so the panel comes out already cropped
-    and no markup has to be rewritten afterwards.
+    ``svgplot()`` emits a 1920-wide viewBox unless ``tight`` is set, and a site
+    taller than 16:9 is left-aligned in it with the remainder blank — the toy
+    farm behind `topologies` fills 45% of it.
 
-    This repeats the element order of ``svgplot()`` in ``optiwindnet/svg.py``,
-    minus the infobox and the border tags, and has to stay in step with it.
-
-    Returns the markup and the size it was cropped to, which is what lets
-    `compose` size its cells to the drawing rather than to svgplot's canvas.
+    Returns the markup and the size of its viewBox, which is what lets `compose`
+    size its cells to the drawing rather than to svgplot's canvas.
     """
-    drawable = Drawable(G, landscape=True, dark=dark, transparent=True)
-    drawable.add_edges()
-    if G.graph.get('D', False):
-        drawable.add_detours()
-    drawable.add_nodes()
-    used_w = drawable.bottom_right_anchor['x'] + drawable.margin
-    drawable.viewBox = type(drawable.viewBox)(0, 0, used_w, drawable.h)
-    return prettify_svg(drawable.to_svg()), used_w, drawable.h
+    markup = svgplot(G, infobox=False, dark=dark, tight=True).data
+    viewbox = re.search(r'viewBox="0 0 (\d+) (\d+)"', markup)
+    assert viewbox is not None
+    width, height = (int(size) for size in viewbox.groups())
+    return prettify_svg(markup), width, height
 
 
 def compose(panels: list[tuple[str, str, int, int]], columns: int, theme: str) -> str:

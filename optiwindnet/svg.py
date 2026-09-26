@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import math
 from collections import defaultdict
 from collections.abc import Mapping
 from itertools import chain
@@ -121,6 +122,9 @@ class Drawable:
     """
 
     margin: int = 30
+    #: Narrowest width-to-height ratio of a tight viewBox with a legend, so that
+    #: the legend of a very tall site gets a few items per row.
+    legend_min_aspect: float = 9 / 16
     borderE: list[svg.Element]
     reusableE: list[svg.Element]
     edgesE: list[svg.Element]
@@ -138,8 +142,10 @@ class Drawable:
         dark: bool | None = None,
         transparent: bool = True,
         legend: bool = False,
+        tight: bool = False,
     ):
         self.legend = legend
+        self.transparent = transparent
         self.effective_node_radius = 12
         self.borderE = []
         self.reusableE = []
@@ -225,19 +231,19 @@ class Drawable:
         self.VertexS = VertexS = to_svg(VertexC)
         boundaryS_ = [to_svg(C) for C in boundaryC_]
         self.bottom_right_anchor = {'x': round(W * scale + margin), 'y': h - margin}
-        self.h_orig = h
-        if self.legend:
-            h = h + 80
-        self.viewBox = svg.ViewBoxSpec(0, 0, w, h)
-        self.w, self.h = w, h
+        min_x = 0
+        if tight:
+            w = self.bottom_right_anchor['x'] + margin
+            if legend and w < h * self.legend_min_aspect:
+                # widen evenly on both sides to keep the drawing centred
+                min_x = -math.ceil((h * self.legend_min_aspect - w) / 2)
+        self.viewBox = svg.ViewBoxSpec(min_x, 0, w - 2 * min_x, h)
+        self.w, self.h, self.min_x = w, h, min_x
         self.overflow = None  # set to 'hidden' by add_edges() if needed
 
         #######################
         # Background elements #
         #######################
-        if not transparent:
-            # draw an opaque canvas the same size as the viewport
-            self.toplevelE.append(svg.Rect(fill=c.bg_color, width=w, height=h))
         border, obstacles, landscape_angle = (
             G.graph.get(k) for k in ['border', 'obstacles', 'landscape_angle']
         )
@@ -736,18 +742,26 @@ class Drawable:
                 )
             )
 
-        # Layout metrics
-        item_width = 180
+        # Layout metrics: rows span the viewBox (which a tight one fits to the
+        # drawing), each centred under the drawing unless that crosses an edge
+        item_width, row_pitch = 180, 50
         N = len(legend_items)
-        total_width = N * item_width
-        bbox_center_x = (self.bottom_right_anchor['x'] + self.margin) / 2
-        start_x = bbox_center_x - total_width / 2
-        y_pos = self.h_orig + 40
+        margin = self.margin
+        left, right = self.min_x + margin, self.w - self.min_x - margin
+        center_x = (self.bottom_right_anchor['x'] + margin) / 2
+        per_row = max(1, (right - left) // item_width)
+        rows = -(-N // per_row)
+        self.viewBox.height = self.h + 80 + (rows - 1) * row_pitch
 
         elements = []
         labels = []
         for i, item in enumerate(legend_items):
-            x_pos = start_x + i * item_width
+            row, col = divmod(i, per_row)
+            row_len = min(per_row, N - row * per_row)
+            row_width = row_len * item_width
+            start_x = min(max(center_x - row_width / 2, left), right - row_width)
+            x_pos = start_x + col * item_width
+            y_pos = self.h + 40 + row * row_pitch
             item_type = item[0]
             label = ''
 
@@ -800,6 +814,18 @@ class Drawable:
     def to_svg(self) -> str:
         if self.legend:
             self.add_legend()
+        if not self.transparent:
+            # opaque canvas covering the final viewBox, legend rows included
+            vb = self.viewBox
+            self.toplevelE.insert(
+                0,
+                svg.Rect(
+                    fill=self.c.bg_color,
+                    x=vb.min_x or None,
+                    width=vb.width,
+                    height=vb.height,
+                ),
+            )
         # elements should be added according to the desired z-order
         graphElements = [*self.borderE, *self.edgesE, *self.detoursE, *self.nodesE]
 
@@ -831,6 +857,7 @@ def svgplot(
     dark: bool | None = None,
     transparent: bool = True,
     github_bugfix: bool = True,
+    tight: bool = False,
 ) -> SvgRepr:
     """Draw a NetworkX graph representation as SVG markup.
 
@@ -855,9 +882,17 @@ def svgplot(
         index numbers (useful for geometry debugging).
       infobox: add(?) text box with summary of G's main properties: capacity,
         number of turbines, excess feeders, total feeders, total cable length.
-      legend: if ``True``, add a legend strip at the bottom of the SVG plot.
+      legend: if ``True``, add a legend strip at the bottom of the SVG plot. Its
+        rows are centred under the drawing, shifted inward where that would cross
+        an edge of the viewBox, and wrap where they would not fit its width.
       dark: color theme to use: ``True`` → dark; ``False``: light; ``None`` → guess
       transparent: background color: ``True`` → transparent; ``False`` → theme-based
+      tight: if ``True``, narrow the viewBox to the drawing's width. A site
+        taller than 16:9 otherwise sits on the left of a 1920-wide viewBox, with
+        the rest blank. Wide sites are unaffected, as their viewBox height already
+        fits the drawing. With ``legend``, the viewBox is kept at least 9:16 by
+        padding both sides of the drawing evenly, so that a very tall site's legend
+        still fits a few items per row.
 
     Returns:
       SvgRepr object containing the SVG markup in its ``'data'`` attribute
@@ -869,6 +904,7 @@ def svgplot(
         dark=dark,
         transparent=transparent,
         legend=legend,
+        tight=tight,
     )
 
     drawable.add_edges()

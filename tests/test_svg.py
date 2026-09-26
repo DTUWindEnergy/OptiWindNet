@@ -507,3 +507,78 @@ def test_svgplot_original_boundaries():
     assert d.count('M') == len(wfn.L.graph['_original_boundaries'])
     assert 'pre-buffer' not in _texts(svg.data)
     assert 'pre-buffer' in _texts(svgplot(wfn.L, legend=True).data)
+
+
+# ─────────────────────────────────────────────
+# tight viewBox and legend wrapping
+# ─────────────────────────────────────────────
+
+
+def _viewbox(svg_data: str) -> list[float]:
+    match = re.search(r'viewBox="([^"]*)"', svg_data)
+    assert match is not None
+    return [float(v) for v in match[1].split()]
+
+
+def _scaled(G: nx.Graph, fx: float = 1.0, fy: float = 1.0) -> nx.Graph:
+    H = G.copy()
+    VertexC = H.graph['VertexC'].copy()
+    VertexC *= (fx, fy)
+    H.graph['VertexC'] = VertexC
+    return H
+
+
+def _legend_xs(svg_data: str) -> list[float]:
+    legend = svg_data.split('id="legend"', 1)[1].split('<defs', 1)[0]
+    return [float(x) for x in re.findall(r' x2?="([^"]+)"', legend)]
+
+
+def test_svgplot_tight_narrows_tall_site():
+    G = tiny_wfn().G
+    _, _, width, height = _viewbox(svgplot(G, tight=True).data)
+    assert _viewbox(svgplot(G).data) == [0, 0, 1920, height]
+    # the rightmost vertex lies one margin (30 units) inside the right edge
+    xs = [float(x) for x in re.findall(r'<use[^>]* x="([^"]+)"', svgplot(G).data)]
+    assert max(xs) == width - 30
+
+
+def test_svgplot_tight_leaves_wide_site_unchanged():
+    G = _scaled(tiny_wfn().G, fx=20)
+    assert svgplot(G, tight=True).data == svgplot(G).data
+
+
+def test_svgplot_legend_spans_full_width_unless_tight():
+    G = tiny_wfn().G
+    width = _viewbox(svgplot(G, tight=True).data)[2]
+    # five items fit in one row across the 1920-wide viewBox, pushed right of
+    # the left margin rather than centred under the narrow drawing
+    svg_data = svgplot(G, legend=True).data
+    assert _viewbox(svg_data)[3] == 1080 + 80
+    assert min(_legend_xs(svg_data)) >= 30
+    # a tight viewBox wraps them into two rows under the drawing
+    svg_data = svgplot(G, legend=True, tight=True).data
+    assert _viewbox(svg_data)[3] == 1080 + 80 + 50
+    assert all(0 <= x <= width for x in _legend_xs(svg_data))
+
+
+def test_svgplot_tight_legend_min_width():
+    G = _scaled(tiny_wfn().G, fy=6)
+    drawing_width = _viewbox(svgplot(G, tight=True).data)[2]
+    min_x, _, width, _ = _viewbox(svgplot(G, tight=True, legend=True).data)
+    assert drawing_width < 1080 * 9 / 16 <= width
+    # the padding is split evenly, keeping the drawing centred
+    assert min_x < 0
+    assert abs(2 * min_x + width - drawing_width) <= 1
+    svg_data = svgplot(G, tight=True, legend=True).data
+    assert all(min_x <= x <= min_x + width for x in _legend_xs(svg_data))
+
+
+def test_svgplot_opaque_background_covers_legend():
+    G = _scaled(tiny_wfn().G, fy=6)
+    svg_data = svgplot(G, tight=True, legend=True, transparent=False).data
+    min_x, _, width, height = _viewbox(svg_data)
+    rect = re.search(r'<svg[^>]*><rect([^>]*)/>', svg_data)
+    assert rect is not None
+    assert f'x="{min_x:g}"' in rect[1]
+    assert f'width="{width:g}"' in rect[1]
+    assert f'height="{height:g}"' in rect[1]
