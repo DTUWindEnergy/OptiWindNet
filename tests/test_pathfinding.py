@@ -17,6 +17,7 @@ from optiwindnet.loads import _add_ring_to_S, calcload
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.terse import LinkScope, TerseLinks
 from optiwindnet.types import Topology
+from optiwindnet.validating import validate_routeset
 
 from .cases import (
     CONSTRUCTOR_CASES,
@@ -572,3 +573,66 @@ def test_spanning_chain_detours_crossing_free():
     G_det = pf.create_detours()
     assert _all_turbines_connected(G_det)
     assert _edges_cross(G_det) == []
+
+
+# ---------- collinear pass-through (turbine exactly on a feeder's line) ----------
+
+
+@pytest.mark.parametrize('side', (1.0, -1.0))
+def test_collinear_pass_through_bends_at_the_turbine(side):
+    """A feeder whose straight line passes exactly over a turbine bends there.
+
+    Turbine 0 lies on the line from the root to turbine 1, and its branch to
+    turbine 2 sits on either side of that line. The crossing feeder of 1 is
+    routed through a zero-turn detour node cloning 0 rather than kept as one
+    straight edge touching 0.
+    """
+    wfn = tiny_wfn(
+        turbinesC=[[1.0, 0.0], [2.0, 0.0], [1.5, side * 0.6]],
+        obstacleC_=[],
+        optimize=False,
+    )
+    S = TerseLinks.from_array([-1, -1, 0], topology='radial', R=1).to_topology(
+        wfn.A, capacity=2
+    )
+    pf = PathFinder(G_from_S(S, wfn.A), planar=wfn.P, A=wfn.A)
+    assert pf.Xings == [(-1, 1)]
+    assert pf.get_best_path(1)[0] == [1, 0, -1]
+
+    G = pf.create_detours()
+    assert G.graph['D'] == 1
+    detours = [n for n, kind in G.nodes(data='kind') if kind == 'detour']
+    assert [G.graph['fnT'][n].item() for n in detours] == [0]
+    assert validate_routeset(G) == []
+
+
+# ---------- open layouts (most mesh edges are portals) ----------
+
+
+def _nearest_root_star(A):
+    """Radial topology in which every turbine is a feeder to its nearest root."""
+    R, T = A.graph['R'], A.graph['T']
+    links = (np.argmin(A.graph['d2roots'][:T], axis=1) - R).tolist()
+    return TerseLinks.from_array(links, topology='radial', R=R).to_topology(
+        A, capacity=7
+    )
+
+
+@pytest.mark.parametrize(
+    'site', ('taylor_2023', 'cazzaro_2022G210', 'hornsea2', 'kustzuid')
+)
+def test_star_topology_routes_within_default_budget(site):
+    """Near-star topologies leave most triangles with three portals.
+
+    Paths bending at barrier-free vertices are pruned, so the search ends before
+    ``iterations_limit`` and the detoured routeset is valid.
+    """
+    bundle = get_bundle(site, read_powers=False)
+    S = _nearest_root_star(bundle.A)
+    pf = PathFinder(G_from_S(S, bundle.A), planar=bundle.P, A=bundle.A)
+    assert pf.free_vertices
+    assert pf.iterations < pf.iterations_limit
+
+    G = pf.create_detours()
+    assert validate_routeset(G) == []
+    assert _all_turbines_connected(G)

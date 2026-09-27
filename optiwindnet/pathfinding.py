@@ -28,6 +28,9 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
+# Minimum turn (rad) at a free vertex for it to count as a bend; below this the
+# path merely grazes the vertex (e.g. collinear turbines in a grid).
+FREE_APEX_TURN_EPS = 1e-9
 PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn')
 # Terminology used by PathFinder internals:
 #   wall: one non-traversable mesh segment; route walls are contour edges of
@@ -639,6 +642,14 @@ class PathFinder:
         }
         portal_set = (edges_P - edges_G_primes) - constraint_edges
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
+        # Free vertices have only portals around them (no wall touches them),
+        # so a shortest path never bends at one: an advancer whose funnel apex
+        # lands on a free vertex can only produce dominated paths.
+        self.free_vertices = frozenset(
+            n
+            for n in P.nodes
+            if 0 <= n < ST and all((n, m) in self.portal_set for m in P[n])
+        )
 
         self._precompute_sector_lookup(fences)
         self.best_pn_by_pair_id: list[int | None] = [None] * len(
@@ -1709,11 +1720,20 @@ class PathFinder:
         #     - _node: the index it contains maps to a coordinate in VertexC
         #     - pn_id: pseudonode index in self.paths
         #             translation: _node = paths.prime_from_pn[pn_id]
-        cw, ccw, cross = rotation_checkers_factory(self.VertexC)
+        VertexC = self.VertexC
+        cw, ccw, cross = rotation_checkers_factory(VertexC)
         # Tolerance for treating a numerically-zero cross product as collinear:
         # apex/wall/_new line-of-sight should not flip funnel branches due to
         # float-arithmetic noise.
         EPS_COLLINEAR = 1e-17
+
+        def is_beyond(_a: int, _w: int, _q: int) -> bool:
+            # True if _q, collinear with _a→_w, lies past _w as seen from _a
+            ax, ay = VertexC[_a]
+            wx, wy = VertexC[_w]
+            qx, qy = VertexC[_q]
+            dx, dy = wx - ax, wy - ay
+            return (qx - ax) * dx + (qy - ay) * dy > dx * dx + dy * dy
 
         paths = self.paths
         best_pn_by_pair_id = self.best_pn_by_pair_id
@@ -1727,6 +1747,7 @@ class PathFinder:
         num_traversals = self.num_traversals
         bad_streak_limit = self.bad_streak_limit
         turn_limit = self.turn_limit
+        free_vertices = self.free_vertices
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         while True:
@@ -1745,6 +1766,7 @@ class PathFinder:
                 continue
             portal, side = portal_step
             #  trace('<%d> got (portal, side)', adv_id)
+            dead = False
 
             _new = portal[side]
             opposite = portal[1 - side]
@@ -1784,18 +1806,29 @@ class PathFinder:
                 _funnel,
             )
 
-            # One signed cross per wall; ε folds collinearity into the same
-            # comparison: "test or collinear" ⇔ orient < ε,
-            # "test and not collinear" ⇔ orient < -ε.
+            # One signed cross per wall; |orient| < ε means _new is collinear
+            # with apex→wall-vertex. Collinear _new is in line-of-sight only if
+            # it lies before the wall vertex. Beyond it, ⟨apex, new⟩ passes
+            # through the wall vertex and the path bends there: the zero-turn
+            # detour node avoids relying on collinear-touch predicates.
             orient_near = orient_sign * cross(_nearside, _new, _apex)
             orient_far = orient_sign * cross(_farside, _new, _apex)
 
-            if _nearside == _apex or orient_near < EPS_COLLINEAR:
-                # not infranear (collinear with apex→nearside is treated as
-                # line-of-sight: _new lies on the wall, apex stays put)
-                if orient_far < -EPS_COLLINEAR:
-                    # ultrafar (⟨new, apex⟩ strictly cuts farside; collinear
-                    # with apex→farside is line-of-sight, apex stays put)
+            if (
+                _nearside == _apex
+                or orient_near <= -EPS_COLLINEAR
+                or (
+                    orient_near < EPS_COLLINEAR
+                    and not is_beyond(_apex, _nearside, _new)
+                )
+            ):
+                # not infranear
+                if orient_far <= -EPS_COLLINEAR or (
+                    _farside != _apex
+                    and abs(orient_far) < EPS_COLLINEAR
+                    and is_beyond(_apex, _farside, _new)
+                ):
+                    # ultrafar (⟨new, apex⟩ cuts farside or passes through it)
                     debug('<%d> ultrafar', adv_id)
                     current_wapex = wedge_end[not side]
                     _current_wapex = paths.prime_from_pn[current_wapex]
@@ -1826,6 +1859,18 @@ class PathFinder:
                         _contender_wapex = paths.prime_from_pn[contender_wapex]
                     _apex = _current_wapex
                     apex = current_wapex
+                    if _apex in free_vertices:
+                        # every later path of this advancer bends at _apex
+                        _gp = paths.prime_from_pn[paths[apex].parent]
+                        ax, ay = VertexC[_apex]
+                        gx, gy = VertexC[_gp]
+                        qx, qy = VertexC[_new]
+                        v1x, v1y = ax - gx, ay - gy
+                        v2x, v2y = qx - ax, qy - ay
+                        turn = math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y)
+                        if abs(turn) > FREE_APEX_TURN_EPS:
+                            debug('<%d> apex on free vertex %d: dead', adv_id, _apex)
+                            dead = True
                 else:
                     # not ultrafar nor infranear (⟨new, apex⟩ in line-of-sight)
                     debug('<%d> inside', adv_id)
@@ -1883,11 +1928,19 @@ class PathFinder:
             # candidate pseudonode beyond the threshold marks the advancer
             # as unpromising. bad_streak <= 1 waives the drop — a recently-
             # active advancer gets through.
-            is_promising = bad_streak < bad_streak_limit and (
+            # A step that reaches a new (prime, sector) or matches or improves
+            # its best path makes the streak inherited so far stale.
+            improving = (
+                unseen
+                or d_new < paths[best_pn_id].dist
+                or math.isclose(d_new, paths[best_pn_id].dist)
+            )
+            is_promising = (bad_streak < bad_streak_limit or improving) and (
                 abs(cum_turn) <= turn_limit or bad_streak <= 1
             )
             prio = (score_0, score_1, score_2)
-            yield prio, is_promising
+            # None marks the advancer as dead for `_find_paths`
+            yield prio, None if dead else is_promising
             #  trace('<%d> traverser after second yield', adv_id)
             new_pn_id = self.paths.add(
                 _new, sector_new, apex_eff, d_new, d_hop, cum_turn
@@ -1909,6 +1962,10 @@ class PathFinder:
                 # first arrival at (_new, sector_new) discounts the bad_streak
                 #   but finding a new best_pn_id resets the bad_streak
                 bad_streak = max(0, bad_streak - 1) if best_pn_id is None else 0
+            elif new_pn_id == best_pn_id:
+                # the best pn is shared (another advancer added it through the
+                # same parent): this funnel carries the best path to _new too
+                bad_streak = 0
             elif not math.isclose(d_new, paths[best_pn_id].dist):
                 bad_streak += 1
 
@@ -2026,7 +2083,12 @@ class PathFinder:
                     break
                 _, adv_id, advancer = heapq.heappop(prioqueue)
             else:
-                if is_promising or num_traversals[portal] < traversals_limit:
+                if is_promising is None:
+                    # advancer is dead (apex on a free vertex)
+                    if not prioqueue:
+                        break
+                    _, adv_id, advancer = heapq.heappop(prioqueue)
+                elif is_promising or num_traversals[portal] < traversals_limit:
                     # advancer is still promising, push it back to queue and get top one
                     _, adv_id, advancer = heapq.heappushpop(
                         prioqueue, (prio, adv_id, advancer)
