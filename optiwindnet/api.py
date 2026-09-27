@@ -934,7 +934,8 @@ class EWRouter(Router):
             the margin is a fraction of the best union ``saving`` rather than the
             edge ``extent``).
             Defaults to the constructor's built-in default (0.02) when ``None``.
-          verbose: Enable verbose logging.
+          verbose: Unused: the heuristic is Python code, whose messages go
+            to the ``optiwindnet.heuristics`` logger.
           **kwargs: Options common to all routers (see :class:`Router`).
         """
 
@@ -973,6 +974,11 @@ class EWRouter(Router):
         assign_cables(G, cables)
 
         return S, G
+
+
+def _print_log_line(line: str) -> None:
+    # HGS-CVRP log lines already end with a newline
+    print(line, end='')
 
 
 class HGSRouter(Router):
@@ -1022,7 +1028,7 @@ class HGSRouter(Router):
               radial one. HGS then solves the closed CVRP, so each ring holds up to
               ``2 * cables_capacity`` turbines (two arms of ``cables_capacity`` each).
           seed: Set the seed of the pseudo-random number generator (reproducibility).
-          verbose: Enable verbose logging.
+          verbose: Print the HGS-CVRP log while it runs (single substation only).
           **kwargs: Options common to all routers (see :class:`Router`).
 
         Note:
@@ -1041,6 +1047,7 @@ class HGSRouter(Router):
         self.seed = seed
 
     def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
+        verbose = verbose or self.verbose
         # optimizing
         vehicles = self.feeder_limit
         if vehicles is not None and self.ringed:
@@ -1061,6 +1068,7 @@ class HGSRouter(Router):
             balanced=self.balanced,
             ringed=self.ringed,
             seed=self.seed,
+            log_callback=_print_log_line if verbose else None,
         )
 
         G_tentative = G_from_S(S, A)

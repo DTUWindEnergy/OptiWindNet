@@ -162,7 +162,46 @@ def test_hgsrouter_forwards_low_level_options(
         'balanced': True,
         'ringed': ringed,
         'seed': 11,
+        'log_callback': None,
     }
+
+
+@pytest.mark.parametrize(
+    ('router_verbose', 'route_verbose', 'streamed'),
+    [(False, False, False), (True, False, True), (False, True, True)],
+)
+def test_hgsrouter_verbose_streams_log(
+    monkeypatch, capsys, router_verbose, route_verbose, streamed
+):
+    solved = tiny_wfn()
+
+    def fake_hgs(A, *, log_callback, **kwargs):
+        assert (log_callback is not None) == streamed
+        if log_callback is not None:
+            log_callback('It 1 | T(s) 0.01\n')
+        return solved.S
+
+    monkeypatch.setattr(api, 'hgs_cvrp', fake_hgs)
+    monkeypatch.setattr(api, 'G_from_S', lambda S, A: solved.G)
+    monkeypatch.setattr(
+        api,
+        'PathFinder',
+        lambda *args, **kwargs: type(
+            'PF', (), {'create_detours': lambda self: solved.G}
+        )(),
+    )
+    monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
+    router = HGSRouter(time_limit=0.1, verbose=router_verbose)
+
+    router.route(
+        solved.P,
+        solved.A,
+        solved.cables,
+        solved.cables_capacity,
+        verbose=route_verbose,
+    )
+
+    assert capsys.readouterr().out == ('It 1 | T(s) 0.01\n' if streamed else '')
 
 
 def test_hgsrouter_rejects_odd_ringed_feeder_limit(monkeypatch):
