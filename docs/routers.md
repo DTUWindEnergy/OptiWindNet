@@ -89,7 +89,7 @@ Its distinctive options concern the feeder count:
 - pinning the count to that limit exactly additionally requires balanced subtrees and a single substation (for the ringed topology, the limit is then at most one ring per two turbines);
 - balancing makes feeder loads differ by at most one terminal;
 - with multiple substations the feeder limit is ignored and the count is fixed to the minimum required;
-- a seed is available for reproducible runs.
+- a seed makes the pseudo-random choices repeatable, but since the search stops at a wall-clock time limit, results may still vary slightly with machine load.
 
 _In use:_ {doc}`/notebooks/hi21_hgs` (Network/Router API) · {doc}`/notebooks/lo21_hgs` (Advanced API).
 
