@@ -31,6 +31,7 @@ from ._core import (
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
+    nonclosest_feeders,
     physical_core_count,
     warmstart_links,
 )
@@ -386,6 +387,11 @@ def make_min_length_model(
         link_ |= {
             (r, t): m.add_binary_variable(name=f'link_r{-r}~{t}') for r, t in starsʹ
         }
+    # MathOpt has no fixing call: a binary with ub = 0 (= lb) is a fixed column
+    for t, r in nonclosest_feeders(A):
+        link_[t, r].upper_bound = 0
+        if topology is Topology.RINGED:
+            link_[r, t].upper_bound = 0
     # continuous: single_out_link + flow_conserv pin flows to integers.
     # a link into v carries at most what leaves v less v's own inflow
     flow_ = {

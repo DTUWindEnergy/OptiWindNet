@@ -30,6 +30,7 @@ from ._core import (
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
+    nonclosest_feeders,
     physical_core_count,
     warmstart_links,
 )
@@ -236,6 +237,10 @@ def make_min_length_model(
     link_ |= {(t, r): m.addVar(f'link_{t}~r{-r}', 'B') for t, r in stars}
     if topology is Topology.RINGED:
         link_ |= {(r, t): m.addVar(f'link_r{-r}~{t}', 'B') for r, t in starsʹ}
+    for t, r in nonclosest_feeders(A):
+        m.fixVar(link_[t, r], 0)
+        if topology is Topology.RINGED:
+            m.fixVar(link_[r, t], 0)
     # 'M' (implied integral): single_out_link + flow_conserv pin flows to integers.
     # a link into v carries at most what leaves v less v's own inflow
     flow_ = {

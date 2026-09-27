@@ -34,6 +34,7 @@ from ._core import (
     check_model_enums,
     check_warmstart_topology,
     feeder_and_load_bounds,
+    nonclosest_feeders,
     physical_core_count,
     warmstart_links,
 )
@@ -363,6 +364,10 @@ def make_min_length_model(
     #############
 
     m.link_ = pyo.Var(m.linkset, domain=pyo.Binary, initialize=0)
+    for t, r in nonclosest_feeders(A):
+        m.link_[t, r].fix(0)  # pyrefly: ignore[bad-index, missing-attribute]
+        if topology is Topology.RINGED:
+            m.link_[r, t].fix(0)  # pyrefly: ignore[bad-index, missing-attribute]
 
     def flow_bounds(m, u, v):
         # a link into v carries at most what leaves v less v's own inflow

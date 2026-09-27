@@ -461,6 +461,25 @@ def canonical_linksets(
     return E, Eʹ, stars, starsʹ
 
 
+def nonclosest_feeders(A: nx.Graph) -> Iterator[_Link]:
+    """Yield the feeders ``(t, r)`` whose root is not the closest to ``t``.
+
+    Closeness is by ``A.graph['d2roots']`` (contour-adjusted, not line-of-sight),
+    with ties resolved to the lowest root index. The models fix these feeders to
+    zero, on the premise that an optimal solution never connects a terminal to a
+    root other than its closest one. Nothing is yielded for single-root sites.
+    """
+    R = A.graph['R']
+    if R == 1:
+        return
+    T = A.graph['T']
+    closest_root_ = A.graph['d2roots'][:T].argmin(axis=1) - R
+    for t, closest in enumerate(closest_root_.tolist()):
+        for r in range(-R, 0):
+            if r != closest:
+                yield t, r
+
+
 def linkbits_from_directed(
     values: Iterable[int | bool],
     *,
