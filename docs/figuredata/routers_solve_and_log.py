@@ -32,10 +32,8 @@ Sample = tuple[float, float]
 def subscribe(solver) -> tuple[list[Sample], list[Sample]]:
     """Attach HiGHS MIP callbacks to `solver`, returning their sample lists.
 
-    Pyomo exposes no progress API, so this reaches the underlying ``highspy``
-    model through its persistent-solver wrapper. The model is only built by
-    ``set_instance()``, hence the explicit call: the later ``solve()`` then takes
-    its update path and keeps the callbacks.
+    The ``highs`` solver's model is the ``highspy.Highs`` instance that
+    ``solve()`` runs, so the callbacks subscribed here fire during that search.
 
     The two quantities are collected apart, from the callbacks that report them:
     the dual bound from the interrupt callback, which is polled throughout the
@@ -47,11 +45,7 @@ def subscribe(solver) -> tuple[list[Sample], list[Sample]]:
       The dual-bound samples and the incumbent improvements, both filled in
       during ``solve()``.
     """
-    backend = solver.solver
-    backend.set_instance(solver.model)
-    highs = backend._solver_model
-    if highs is None:
-        raise SystemExit("pyomo's HiGHS wrapper no longer exposes the highspy model")
+    highs = solver.model
     bound: list[Sample] = []
     incumbent: list[Sample] = []
 

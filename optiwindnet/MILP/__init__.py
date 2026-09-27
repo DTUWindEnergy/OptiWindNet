@@ -58,7 +58,8 @@ def solver_factory(solver_name: str) -> Solver:
     Args:
       solver_name: one of ``'ortools.cp_sat'``, ``'ortools.gscip'``,
         ``'ortools.highs'``, ``'ortools.cbcbox'``, ``'cplex'``, ``'gurobi'``,
-        ``'cbc'``, ``'scip'``, ``'highs'``.
+        ``'cbc'``, ``'scip'``, ``'fscip'``, ``'highs'``, ``'pyomo.cbc'``,
+        ``'pyomo.highs'`` (``'cbc'`` is an alias of ``'pyomo.cbc'``).
 
     Returns:
       Solver instance that can produce solutions for the cable routing problem.
@@ -66,9 +67,11 @@ def solver_factory(solver_name: str) -> Solver:
     Raises:
       RuntimeError: if the solver's backend package shares a native library with a
         backend already in use in this interpreter instance (``'ortools*'`` clashes
-        with both ``'highs'`` and ``'scip'``/``'fscip'``).
+        with ``'highs'``, ``'pyomo.highs'`` and ``'scip'``/``'fscip'``).
     """
     requested = solver_name
+    if solver_name == 'cbc':
+        solver_name = 'pyomo.cbc'
     solver_name, *backend = solver_name.split('.', maxsplit=1)
     match solver_name:
         case 'ortools':
@@ -113,15 +116,6 @@ def solver_factory(solver_name: str) -> Solver:
                 "Package 'gurobipy' not found. Try 'pip install gurobipy' or "
                 "'conda install -c Gurobi gurobi'."
             )
-        case 'cbc':
-            if shutil.which('cbc'):
-                from .pyomo import SolverPyomo
-
-                return SolverPyomo(solver_name)
-            raise FileNotFoundError(
-                "Executable 'cbc' not found. Ensure the system PATH includes the "
-                "path to 'cbc' or try 'conda install -c conda-forge coin-or-cbc'."
-            )
         case 'scip':
             if find_spec('pyscipopt'):
                 _reject_loaded_rivals(requested, 'pyscipopt', 'ortools')
@@ -153,17 +147,42 @@ def solver_factory(solver_name: str) -> Solver:
         case 'highs':
             if find_spec('highspy'):
                 _reject_loaded_rivals(requested, 'highspy', 'ortools')
-                # pyomo defers its own 'highspy' import to solve time; import it here
-                # so that a later 'ortools*' request sees it in sys.modules
-                import highspy  # noqa: F401
-                from pyomo.contrib.appsi.solvers.highs import Highs
+                from .highs import SolverHiGHS
 
-                from .pyomo import SolverPyomoAppsi
-
-                return SolverPyomoAppsi(solver_name, Highs)
+                return SolverHiGHS()
             raise ModuleNotFoundError(
                 "Package 'highspy' not found. Try 'pip install highspy' or "
                 "'conda install -c conda-forge highspy'."
             )
+        case 'pyomo':
+            match backend:
+                case ['cbc']:
+                    if shutil.which('cbc'):
+                        from .pyomo import SolverPyomo
+
+                        return SolverPyomo('cbc')
+                    raise FileNotFoundError(
+                        "Executable 'cbc' not found. Ensure the system PATH includes"
+                        " the path to 'cbc' or try"
+                        " 'conda install -c conda-forge coin-or-cbc'."
+                    )
+                case ['highs']:
+                    if find_spec('highspy'):
+                        _reject_loaded_rivals(requested, 'highspy', 'ortools')
+                        # pyomo defers its own 'highspy' import to solve time;
+                        # import it here so that a later 'ortools*' request sees it
+                        # in sys.modules
+                        import highspy  # noqa: F401
+                        from pyomo.contrib.appsi.solvers.highs import Highs
+
+                        from .pyomo import SolverPyomoAppsi
+
+                        return SolverPyomoAppsi('highs', Highs)
+                    raise ModuleNotFoundError(
+                        "Package 'highspy' not found. Try 'pip install highspy' or "
+                        "'conda install -c conda-forge highspy'."
+                    )
+                case _:
+                    raise ValueError(f'Unsupported solver: {requested}')
         case _:
             raise ValueError(f'Unsupported solver: {solver_name}')

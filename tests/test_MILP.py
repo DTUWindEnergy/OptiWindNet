@@ -446,9 +446,10 @@ def test_linkbits_from_directed_rejects_invalid_values(values, message):
     [
         ('optiwindnet.MILP.ortools', 'ortools.cp_sat'),
         ('optiwindnet.MILP.scip', 'scip'),
-        ('optiwindnet.MILP.pyomo', 'highs'),
+        ('optiwindnet.MILP.highs', 'highs'),
+        ('optiwindnet.MILP.pyomo', 'pyomo.highs'),
     ],
-    ids=('ortools', 'scip', 'pyomo'),
+    ids=('ortools', 'scip', 'highs', 'pyomo'),
 )
 @pytest.mark.parametrize('topology', (Topology.BRANCHED, Topology.RINGED))
 def test_milp_builders_share_canonical_linkset(
@@ -1274,6 +1275,7 @@ def test_pyomo_solution_retrieval_glue(monkeypatch, module_name, class_name, P_A
         ('optiwindnet.MILP.scip', 'SolverSCIP'),
         ('optiwindnet.MILP.cplex', 'SolverCplex'),
         ('optiwindnet.MILP.fscip', 'SolverFSCIP'),
+        ('optiwindnet.MILP.highs', 'SolverHiGHS'),
     ),
 )
 @pytest.mark.parametrize('feeder_route', ('segmented', 'straight'))
@@ -1498,6 +1500,117 @@ def test_solver_factory_missing_dependencies(
 def test_solver_factory_rejects_unknown_solver():
     with pytest.raises(ValueError, match='Unsupported solver: unknown'):
         solver_factory('unknown')
+
+
+@pytest.mark.parametrize('solver_name', ['pyomo', 'pyomo.scip'])
+def test_solver_factory_rejects_unknown_pyomo_backend(solver_name):
+    with pytest.raises(ValueError, match=f'Unsupported solver: {solver_name}$'):
+        solver_factory(solver_name)
+
+
+@pytest.mark.parametrize(
+    ('solver_name', 'class_name', 'expected_name'),
+    [
+        ('highs', 'SolverHiGHS', 'highs'),
+        ('pyomo.highs', 'SolverPyomoAppsi', 'pyomo.highs'),
+        ('pyomo.cbc', 'SolverPyomo', 'pyomo.cbc'),
+        ('cbc', 'SolverPyomo', 'pyomo.cbc'),
+    ],
+)
+def test_solver_factory_highs_and_pyomo_names(solver_name, class_name, expected_name):
+    try:
+        solver = solver_factory(solver_name)
+    except (FileNotFoundError, ModuleNotFoundError) as exc:
+        pytest.skip(str(exc))
+    assert type(solver).__name__ == class_name
+    assert solver.name == expected_name
+
+
+def _highs_toy_solver(**model_options):
+    from optiwindnet.MILP.highs import SolverHiGHS
+
+    bundle = get_bundle('toy')
+    solver = SolverHiGHS()
+    solver.set_problem(
+        bundle.P, bundle.A, capacity=_CAPACITY, model_options=model_options
+    )
+    return solver
+
+
+def test_solver_highs_pool_is_sorted_and_saving_is_forced():
+    pytest.importorskip('highspy')
+    solver = _highs_toy_solver()
+    # the pool depends on this option, so solve() overrides a request to disable it
+    info = solver.solve(
+        time_limit=_RUNTIME,
+        mip_gap=_GAP,
+        options={'mip_improving_solution_save': False},
+    )
+    objectives = [objective for objective, _ in solver._solution_pool]
+    assert solver.num_solutions == len(objectives) > 0
+    assert objectives == sorted(objectives)
+    assert math.isclose(objectives[0], info.objective, rel_tol=1e-6)
+    assert solver.model.getOptionValue('mip_improving_solution_save')[1] is True
+    assert solver.model.getOptionValue('mip_rel_gap')[1] == _GAP
+    S, G = solver.get_solution()
+    assert G.graph['pool_count'] == solver.num_solutions
+    assert S.graph['_topology_id'] == G.graph['_topology_id']
+
+
+def test_solver_highs_solves_the_same_model_again():
+    pytest.importorskip('highspy')
+    solver = _highs_toy_solver()
+    first = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
+    # another thread count needs HiGHS's process-wide thread pool to be rebuilt
+    second = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP, options={'threads': 1})
+    assert math.isclose(first.objective, second.objective, rel_tol=1e-6)
+    assert second.runtime < _RUNTIME
+
+
+def test_solver_highs_rejects_an_invalid_option():
+    pytest.importorskip('highspy')
+    solver = _highs_toy_solver()
+    with pytest.raises(ValueError, match='Invalid HiGHS option: no_such_option=1'):
+        solver.solve(time_limit=1.0, mip_gap=_GAP, options={'no_such_option': 1})
+
+
+def test_solver_highs_raises_without_a_solution():
+    pytest.importorskip('highspy')
+    solver = _highs_toy_solver()
+    solver.model.getSavedMipSolutions = list
+    with pytest.raises(MILP.OWNSolutionNotFound, match='Unable to find a solution'):
+        solver.solve(time_limit=1.0, mip_gap=_GAP)
+
+
+@pytest.mark.parametrize(
+    ('feeder_limit', 'accepted'),
+    [
+        ('unlimited', True),
+        # toy needs 3 feeders at capacity 5, but the constructor uses 4
+        ('minimum', False),
+    ],
+)
+def test_highs_warmup_rejects_solutions_that_violate_the_model(feeder_limit, accepted):
+    pytest.importorskip('highspy')
+    from optiwindnet.converting import S_from_G
+    from optiwindnet.heuristics import constructor
+    from optiwindnet.MILP.highs import make_min_length_model, warmup_model
+
+    A = get_bundle('toy').A
+    S = S_from_G(constructor(A, capacity=_CAPACITY, method='rootlust'))
+    model, metadata = make_min_length_model(
+        A, _CAPACITY, **ModelOptions(feeder_limit=feeder_limit)
+    )
+    if accepted:
+        warmup_model(model, metadata, S)
+        assert metadata.warmed_by == 'constructor'
+    else:
+        with pytest.raises(
+            MILP.OWNWarmupFailed,
+            match='violates model constraint feeder_limit_eq',
+        ):
+            warmup_model(model, metadata, S)
+        assert metadata.warmed_by == ''
 
 
 def test_physical_core_count_linux_counts_unique_physical_cores(monkeypatch):
@@ -1946,9 +2059,10 @@ def test_set_problem_coerces_a_plain_mapping(P_A_toy):
     [
         ('optiwindnet.MILP.ortools', 'ortools.cp_sat'),
         ('optiwindnet.MILP.scip', 'scip'),
-        ('optiwindnet.MILP.pyomo', 'highs'),
+        ('optiwindnet.MILP.highs', 'highs'),
+        ('optiwindnet.MILP.pyomo', 'pyomo.highs'),
     ],
-    ids=('ortools', 'scip', 'pyomo'),
+    ids=('ortools', 'scip', 'highs', 'pyomo'),
 )
 def test_make_min_length_model_rejects_an_off_contract_str(
     run_isolated, module_name, solver_name
@@ -2064,9 +2178,10 @@ def test_only_a_ringed_model_refuses_unequal_terminal_inflow(topology):
     [
         ('optiwindnet.MILP.ortools', 'ortools.cp_sat'),
         ('optiwindnet.MILP.scip', 'scip'),
-        ('optiwindnet.MILP.pyomo', 'highs'),
+        ('optiwindnet.MILP.highs', 'highs'),
+        ('optiwindnet.MILP.pyomo', 'pyomo.highs'),
     ],
-    ids=('ortools', 'scip', 'pyomo'),
+    ids=('ortools', 'scip', 'highs', 'pyomo'),
 )
 def test_milp_builders_refuse_a_ringed_model_of_nonunit_inflow(
     run_isolated, module_name, solver_name

@@ -55,7 +55,7 @@ class MILPReferenceExecution:
 _REFERENCE_CASE_INDICES = (0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 13, 14, 15)
 
 # Each backend occurs exactly once cold and once warm. Thirteen distinct reference
-# problems are covered; the remaining five executions repeat cases across
+# problems are covered; the remaining seven executions repeat cases across
 # different adapters.
 _EXECUTION_ASSIGNMENTS = (
     ('ortools.cp_sat', 6, False),
@@ -66,6 +66,8 @@ _EXECUTION_ASSIGNMENTS = (
     ('ortools.highs', 3, True),
     ('highs', 0, False),
     ('highs', 5, True),
+    ('pyomo.highs', 0, False),
+    ('pyomo.highs', 5, True),
     ('scip', 13, False),
     ('scip', 8, True),
     ('gurobi', 3, False),
