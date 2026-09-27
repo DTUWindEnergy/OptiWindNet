@@ -124,7 +124,9 @@ class SolverCbcbox(SolverORTools):
         self.backend = 'cbcbox'
         self.name = 'ortools.cbcbox'
         self.log_callback = None
-        self.options = {}
+        self.options = {
+            'Dins': 'on',
+        }
         self._cbc_result = ''
 
     def solve(
