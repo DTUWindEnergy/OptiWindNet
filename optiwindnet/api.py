@@ -204,8 +204,7 @@ class WindFarmNetwork:
           handle: Short instance identifier. Defaults to "".
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to :class:`EWRouter`.
-          buffer_dist: Buffer distance to dilate borders / erode obstacles.
-            Defaults to 0.
+          verbose: Enable verbose logging during network construction.
           turbine_powers: Enables mixed power ratings (not required if the location
             uses uniform generators). Passed as a sequence of power values in the
             same order as the turbine coordinates: positive integers (inflow) if
@@ -221,13 +220,14 @@ class WindFarmNetwork:
 
         **Cable Specs** (``capacity`` in inflow if ``power_unit`` is None, in
         ``power_unit`` otherwise):
-            * List of 2-tuple cable specifications:
-              ``[(capacity, linear_cost), ...]``.
 
-            * List of capacity per cable type:
-              ``[capacity, ...]``.
+        * List of 2-tuple cable specifications:
+          ``[(capacity, linear_cost), ...]``.
 
-            * Maximum capacity of all available cables (single value): ``capacity``.
+        * List of capacity per cable type:
+          ``[capacity, ...]``.
+
+        * Maximum capacity of all available cables (single value): ``capacity``.
 
         Note:
           * If both ``L`` and coordinates are provided, ``L`` takes precedence.

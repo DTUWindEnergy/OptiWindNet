@@ -49,6 +49,8 @@ Those differences must be taken into account when chaining routers; see [](/rout
 
 _In use:_ {doc}`/notebooks/hi31_options` (Network/Router API) · {doc}`/notebooks/lo30_topologies` (Advanced API).
 
+The capability table assumes uniform turbine power. Unequal powers restrict supported topologies and feeder limits; see [](/reference/input_formats.md#turbines-of-unequal-output). Some unsupported option combinations raise errors; others are ignored with a warning, including MILP balancing when the feeder count is not pinned.
+
 ## Constructive heuristics
 
 These build a solution incrementally, starting from every terminal connected directly to a root and repeatedly merging subtrees while capacity allows. They are extensions of the Esau-Williams heuristic for the CMSTP, modified to account for cable crossings. They run in a fraction of a second even on large layouts, which makes them the right default for interactive work, for warm-starting the slower routers, and for use inside an outer optimization loop where the network is re-solved on every iteration.
@@ -73,7 +75,9 @@ _In use:_ {doc}`/notebooks/hi20_heuristic` (Network/Router API) · {doc}`/notebo
 
 Meta-heuristics search the solution space under a time budget you set. They treat the problem as a capacitated vehicle routing problem (CVRP), which is why they produce radial topologies by default: a CVRP route is a path, not a tree. Solving the _closed_ CVRP instead, where every route returns to the depot, yields a ringed topology.
 
-Both wrappers handle multiple substations by clustering the terminals by root and solving one instance per cluster, and both repair crossings iteratively after the search. That repair work is bounded by a retry count, so total wall time can exceed the time limit you set — with `max_retries` retries, up to `(max_retries + 1) × time_limit`.
+Both wrappers handle multiple substations by clustering terminals by root and solving each cluster concurrently. When iterative repair is enabled, an invalid solution (crossings in HGS; crossings or capacity violations in LKH) can trigger a re-solve up to `max_retries` times. For both solvers, the search budget can therefore reach `(max_retries + 1) * time_limit` per cluster, plus time spent on clustering and graph repair (typically much smaller than `time_limit`). Within each invocation, time_limit bounds the total search time per cluster; LKH internally subdivides this budget across multiple trials governed by `runs` and `per_run_limit`.
+
+Because both meta-heuristics produce radial topologies, and radial is a special case of branched, their solutions can warm-start both branched and radial models.
 
 ### HGS-CVRP
 
@@ -81,19 +85,17 @@ Both wrappers handle multiple substations by clustering the terminals by root an
 
 Its distinctive options concern the feeder count:
 
-- the feeder limit is normally an **upper bound** — the search is free to use fewer, and normally settles at the minimum feasible number;
+- the feeder limit is normally an **upper bound** — the search is free to use fewer, and usually settles at the minimum feasible number;
 - pinning the count to that limit exactly additionally requires balanced subtrees and a single substation (for the ringed topology, the limit is then at most one ring per two turbines);
-- balancing makes subtree loads differ by at most one terminal;
+- balancing makes feeder loads differ by at most one terminal;
 - with multiple substations the feeder limit is ignored and the count is fixed to the minimum required;
 - a seed is available for reproducible runs.
-
-Because HGS produces radial topologies, and radial is a special case of branched, its solutions can warm-start both branched and radial models.
 
 _In use:_ {doc}`/notebooks/hi21_hgs` (Network/Router API) · {doc}`/notebooks/lo21_hgs` (Advanced API).
 
 ### LKH-3
 
-[LKH-3](http://akira.ruc.dk/~keld/research/LKH-3/) is Keld Helsgaun's implementation of the Lin-Kernighan-Helsgaun meta-heuristic, extended to constrained TSP and vehicle routing problems.
+[LKH-3](http://akira.ruc.dk/~keld/research/LKH-3/) is Keld Helsgaun's implementation of the Lin-Kernighan-Helsgaun meta-heuristic, extended to constrained TSP and vehicle routing problems. This method is only exposed in the {doc}`/low_level_api`.
 
 Unlike HGS-CVRP, it is **not bundled**: _OptiWindNet_ interfaces with it through temporary files and system calls, so the `LKH` executable must be on the `PATH` as seen from the Python process. Keld Helsgaun distributes it as C source code and as a Windows binary, for academic and non-commercial use.
 

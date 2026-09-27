@@ -48,7 +48,7 @@ make -C docs figures   # regenerate _static/fig_*.svg (outputs are committed)
 Both invoke `$(PYTHON)`, which defaults to bare `python`. Where only the virtualenv has one, point it there — on the command line or from the environment, both work:
 
 ```sh
-make -C docs html PYTHON=.venv/bin/python
+make -C docs html PYTHON="$PWD/.venv/bin/python"
 export PYTHON=$PWD/.venv/bin/python
 ```
 

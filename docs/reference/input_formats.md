@@ -26,6 +26,8 @@ In the Network/Router API, cable capacity uses the unit selected by `power_unit`
 
 Only the last form supplies prices for reporting a network cost. All built-in routers optimize cable length using the largest capacity, including when prices are supplied. Cable types are assigned afterwards: each link receives the first type in increasing capacity order that can carry its load. Use costs that are nondecreasing with capacity if this is to select the cheapest feasible type. A shorter network need not have a lower cost when its loads require more expensive cables.
 
+In the Advanced API, pass `capacity` (integer inflow) or `capacity_nominal` (declared power units) to the routing function, then use `assign_cables()` with `(capacity, linear_cost)` pairs to price the routed result.
+
 _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API).
 
 ### Turbines of unequal output
@@ -48,7 +50,15 @@ The graph attribute `power_quantization_inexact` on a routeset `G` records wheth
 
 This convention breaks compatibility with v0.3.0 graphs that used `'power'` for integer injections: rename that attribute to `'inflow'`. The integer-injection helpers are `terminal_inflow()` and `total_inflow()`, and `TerseLinks.to_topology()` and `to_routeset()` quantize the power of the site graph they are given.
 
-**Router support.** Nonunitary inflow restricts the routers. `MILPRouter` supports it for the `radial` and `branched` topologies, with `feeder_limit` at `'unlimited'` (the default), `'exactly'` or `'specified'`. The `'minimum'` and `'min_plus*'` modes are rejected, since the count they derive from total inflow treats a turbine as divisible among feeders, and a `ringed` model is rejected, since a ring within twice the capacity need not split into two arms that each fit within it. `HGSRouter`, `hgs_cvrp()` and `lkh3()` support only unbalanced, single-substation `radial` solves, passing inflow as customer demand. `EWRouter` and `constructor()` reject it, since they fill a subtree by counting terminals. With a loose `power_rtol`, unequal powers may quantize to unitary inflow, which every router supports.
+**Router support.** Nonunitary inflow restricts the routers:
+
+| Router | Topology | `feeder_limit` | Other conditions |
+| --- | --- | --- | --- |
+| `MILPRouter`, `solver_factory()` backends | radial, branched | `'unlimited'`, `'exactly'`, `'specified'` | — |
+| `HGSRouter`, `hgs_cvrp()`, `lkh3()` | radial | upper bound only | unbalanced, single substation; inflow becomes customer demand |
+| `EWRouter`, `constructor()` | unsupported | — | they fill subtrees by counting terminals |
+
+`'minimum'` and `'min_plus*'` are rejected because the count they derive from total inflow treats a turbine as divisible among feeders. A `ringed` model is rejected because a ring within twice the capacity need not split into two arms that each fit within it. With a loose `power_rtol`, unequal powers may quantize to unitary inflow, which every router supports.
 
 **Storage.** The database and the compact link encoding keep no terminal power. `pack_G()`, and so `store_G()`, refuses a routeset with nonunitary inflow or `powers_set`; a routeset of equal powers is stored with its power attributes. `WindFarmNetwork.update_from_terse_links()` quantizes the location as its router does, so a round trip through that method keeps the loads.
 
@@ -60,7 +70,7 @@ Four formats are accepted. All of them produce the same location graph `L` descr
 
 ### Coordinate arrays
 
-Coordinates are passed as _numpy_ arrays of `(x, y)` pairs — if the coordinates are held in separate arrays `X` and `Y`, use `np.hstack((X, Y))`. A border polygon is defined by its sequence of vertices, with the segment closing the last vertex back to the first left implicit. Obstacles are given as a sequence of such polygons.
+Coordinates are passed as _numpy_ arrays of `(x, y)` pairs — if the coordinates are held in separate one-dimensional arrays `X` and `Y`, use `np.column_stack((X, Y))`. Use a common planar coordinate system and length unit for turbines, substations and boundaries; reported lengths use that unit, and linear cable costs must use it too. A border polygon is defined by its sequence of vertices, with the segment closing the last vertex back to the first left implicit. Obstacles are given as a sequence of such polygons.
 
 This is the format to use when the layout is generated programmatically, for instance inside an optimization loop driven by another tool.
 
@@ -162,6 +172,8 @@ _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API) · {doc}`/noteb
 {py:func}`load_repository() <optiwindnet.importer.load_repository>` reads every `.osm.pbf` and `.yaml` file in a directory into a _namedtuple_ of NetworkX graphs, one per location. Called without arguments, it loads the locations distributed with _OptiWindNet_; called with a path, it loads a repository of your own. `read_powers=False` loads the locations without their declared turbine power.
 
 The bundled locations are real offshore wind farms and are used throughout this documentation as ready-made examples.
+
+Power declarations are read by default. In particular, Borssele, Trianel Windpark Borkum, and Walney Extension declare unequal turbine ratings: low-level routing calls on these sites require `capacity_nominal` and a router that supports the resulting inflow. To study them with capacity measured in turbine counts, load them with `load_repository(read_powers=False)`. The Network/Router API makes this choice through `power_unit`; its default `None` ignores imported nominal ratings.
 
 _In use:_ {doc}`/notebooks/hi12_locations` (Network/Router API) · {doc}`/notebooks/lo12_locations` (Advanced API).
 

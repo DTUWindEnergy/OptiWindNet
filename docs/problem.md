@@ -28,6 +28,8 @@ The routers select a solution topology `S` using the lengths of available links 
 
 The complete mixed-integer formulation is given in [](/reference/milp_formulation.md#milp-formulation).
 
+Turbines are assumed to have equal power by default; unequal ratings can be declared in explicit power units. See [](/reference/input_formats.md#turbines-of-unequal-output).
+
 A detailed analysis of the methodology is available in the open-access article referenced in {doc}`/paper`.
 
 _In use:_ {doc}`/notebooks/hi00_quickstart` (Network/Router API) · {doc}`/notebooks/lo00_quickstart` (Advanced API).
@@ -112,10 +114,11 @@ _In use:_ {doc}`/notebooks/hi30_topologies` (Network/Router API) · {doc}`/noteb
 
 Capacity accounting for rings differs from that of branched and radial topologies:
 
-- each cycle contains one link with `load = 0`, which splits the ring at its midpoint;
+- each multi-terminal cycle contains one link with `load = 0`, which splits the ring into two arms whose terminal counts differ by at most one;
 - `capacity` is the feeder limit of the _split_ ring, so a complete ring can contain up to `2 × capacity` terminals;
 - each ring uses two physical connections at the substation, so `max_feeders` must be an even integer for a ringed topology;
-- if a fault occurs anywhere along a ring, every terminal on it retains an intact path to a substation. The additional cable provides this redundancy.
+- a multi-terminal ring provides an alternative path to a substation after a single cable failure. The model checks capacity in the normal split configuration; it does not guarantee that the surviving arm can carry the entire ring's output after a fault;
+- a single-terminal ring is represented by one feeder, with no zero-load link or redundant path.
 
 With multiple substations, a MILP model for a ringed topology may produce a ring that begins at one root and ends at another. Partitioning the terminals by root and solving each cluster separately ensures that every ring is anchored to a single root.
 

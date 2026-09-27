@@ -11,6 +11,7 @@ A task-oriented index into the rest of the documentation. Each entry names the c
 | Load a windIO, YAML or `.osm.pbf` file | [Input formats](/reference/input_formats.md#input-formats) | {doc}`/notebooks/hi11_data_input` | {doc}`/notebooks/lo11_data_input` |
 | Try it on a real wind farm without any data of my own | [](/reference/input_formats.md#location-repositories) | {doc}`/notebooks/hi12_locations` | {doc}`/notebooks/lo12_locations` |
 | Report the resulting network's cost | [](/reference/input_formats.md#cable-types) | {doc}`/notebooks/hi10_windfarmnetwork` | — |
+| Model unequal turbine ratings or capacities in MW | [](/reference/input_formats.md#turbines-of-unequal-output) | {doc}`/notebooks/hi16_mixed_power` | {doc}`/notebooks/lo16_mixed_power` |
 
 ## Shape the solution
 
@@ -82,6 +83,12 @@ The MILP solver ignored my warm start
 
 The result is not what the options asked for
 : Check the router's supported options and their combination rules. Some unsupported combinations raise errors; others are ignored with a warning, including MILP balancing without a pinned feeder count. See [](/routers.md#problem-options).
+
+An imported location rejects integer `capacity`
+: The graph may declare unequal turbine power. Pass `capacity_nominal` to a compatible low-level router, or load with `read_powers=False` to count turbines. See [](/reference/input_formats.md#turbines-of-unequal-output).
+
+Switching MILP backends raises `RuntimeError`
+: OR-Tools cannot share a process with standalone HiGHS or SCIP packages. Restart the kernel or use separate processes; see [](/reference/solvers.md#switching-backends-in-a-notebook).
 
 I need to see what the algorithm is doing
 : Logging is configured per module, and non-Python solvers have their own verbosity — see {doc}`/notebooks/hi15_debugging`.

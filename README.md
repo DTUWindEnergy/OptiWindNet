@@ -39,7 +39,7 @@ or
 conda install --channel conda-forge optiwindnet
 ```
 
-Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/setup.html#installation).
+Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/install.html#installation).
 
 Requirements
 ------------
