@@ -307,7 +307,10 @@ def _code_state() -> str | None:
                 capture_output=True,
                 check=True,
             ).stdout
-            for args in (('rev-parse', '--short', 'HEAD'), ('diff', 'HEAD'))
+            for args in (
+                ('rev-parse', '--short', 'HEAD'),
+                ('diff', '--no-ext-diff', '--no-textconv', 'HEAD'),
+            )
         )
     except (OSError, subprocess.CalledProcessError):
         return None
