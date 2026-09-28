@@ -1,6 +1,6 @@
 # Which API?
 
-_OptiWindNet_ offers two ways in, and **learning one of them is enough** — they solve the same problems, with the same routers, and produce the same graphs. This page is the one place that asks you to choose; the rest of the documentation assumes you have.
+_OptiWindNet_ offers two ways in, and **learning one of them is enough** — they share the main optimization approaches and graph representations. The Advanced API also exposes additional methods such as LKH. You can choose an interface here, or read the Concepts pages first and return to this decision.
 
 ## 📦 Network/Router API
 
@@ -26,4 +26,4 @@ Start at {doc}`/notebooks/lo00_quickstart`, then work through {doc}`/low_level_a
 
 ## Either way
 
-{doc}`/problem` and {doc}`/routers` describe what the tool computes and how, without reference to either API — read them once, whichever you picked. [](/reference/tasks.md#paired-examples) lists the notebooks that exist in both sections, so a task you learned through one API is easy to find in the other.
+{doc}`/problem` and {doc}`/routers` explain the problem and optimization approaches shared by both APIs. Read them before choosing if you want more context, or use them alongside either set of guides. [](/reference/tasks.md#paired-examples) lists the notebooks that exist in both sections, so a task you learned through one API is easy to find in the other.

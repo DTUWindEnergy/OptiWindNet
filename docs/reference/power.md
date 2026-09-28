@@ -45,7 +45,7 @@ Routers use integer inflow internally. Unequal ratings are converted for each so
 | `HGSRouter`, `hgs_cvrp()`, `lkh3()` | radial | upper bound only | unbalanced, single substation; inflow becomes customer demand |
 | `EWRouter`, `constructor()` | unsupported | — | subtree construction uses turbine counts rather than unequal demands |
 
-`'minimum'` and `'min_plus*'` are rejected because the count they derive from total inflow treats a turbine as divisible among feeders. A `ringed` model is rejected because a ring within twice the capacity need not split into two arms that each fit within it. These restrictions also limit which models can be warm-started; see [](/routers.md#warm-starting).
+`'minimum'` and `'min_plus*'` are rejected because the count they derive from total inflow treats a turbine as divisible among feeders. A `ringed` model is rejected because a ring within twice the capacity need not split into two arms that each fit within it. These restrictions also limit which models can be warm-started; see [](/reference/warm_starting.md#warm-start-acceptance-requirements).
 
 ## Quantization
 

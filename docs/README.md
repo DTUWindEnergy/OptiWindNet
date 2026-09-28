@@ -17,7 +17,7 @@ docs/
 ├── apis.md               ┘ Start
 ├── problem.md            ┐ Concepts
 ├── routers.md            ┘
-├── reference/            Task Index · Glossary · MILP Solvers and Formulation · Validation
+├── reference/            Task Index · Glossary · MILP Solvers and Formulation · Warm-starting · Validation
 ├── high_level_api.md     Network/Router API — toctrees over the hi* notebooks
 ├── low_level_api.md      Advanced API — toctrees over the lo* notebooks
 ├── paper.md              framework article + toctree over the p0* notebooks

@@ -1,6 +1,6 @@
 # MILP Solvers
 
-Which MILP backends _OptiWindNet_ can drive, and how to install them. What the exact routers do with them is described in [](/routers.md#exact-optimization), and the settings they accept in [](/routers.md#solver-options).
+Which MILP backends _OptiWindNet_ can drive, how to configure them, and how to install them. What the exact routers do with them is described in [](/routers.md#exact-optimization), and the settings they accept in [](#solver-options).
 
 ## Supported solvers
 
@@ -23,6 +23,24 @@ The OR-Tools backends and native `scip` can also benefit from multiple cores by 
 The base installation includes a solver backend; additional backends are optional dependencies. The rest of this page describes both.
 
 _In use:_ {doc}`/notebooks/hi23_milp` (Network/Router API) · {doc}`/notebooks/lo23_milp_ortools` and the other MILP notebooks (Advanced API).
+
+## Solver options
+
+Solver options say **how** the solver searches, once the model is already built. They do not change what counts as a valid solution, and they apply to this approach only.
+
+| Option | Effect |
+| --- | --- |
+| `time_limit` | Maximum solve time, in seconds. |
+| `mip_gap` | Optimality tolerance — stop once the gap falls below this, e.g. `0.01` for 1%. |
+| `threads` | Number of threads or workers the solver may use. |
+| `mip_emphasis` | Whether to prioritize bound quality, feasibility, or integrality. |
+| `verbose` | Whether to surface the solver's own log. |
+
+Through the {doc}`/high_level_api`, `time_limit`, `mip_gap` and `verbose` are arguments of {py:class}`MILPRouter <optiwindnet.api.MILPRouter>` itself, while the rest are passed in its `solver_options` mapping.
+
+_OptiWindNet_ sets a handful of solver-specific defaults when a solver is initialized, chosen to suit this problem class; these are readable afterwards from the router or solver object. Every solver accepts many more options than the ones above — consult the solver's own documentation, and pass them through as additional options.
+
+_In use:_ {doc}`/notebooks/hi31_options` (Network/Router API) · {doc}`/notebooks/lo23_milp_ortools` (Advanced API).
 
 ## Switching backends in a notebook
 

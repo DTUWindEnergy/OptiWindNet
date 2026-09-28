@@ -19,9 +19,9 @@ A task-oriented index into the rest of the documentation. Each entry names the c
 | --- | --- | --- | --- |
 | Avoid branching at turbines (radial network) | [](/problem.md#network-topologies) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo30_topologies` |
 | Build rings for fault redundancy | [](/problem.md#ring-semantics) | {doc}`/notebooks/hi30_topologies` | {doc}`/notebooks/lo30_topologies` |
-| Limit or pin the number of feeders | [](/routers.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
-| Balance the load across subtrees | [](/routers.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
-| Keep feeder routes straight | [](/routers.md#problem-options) | {doc}`/notebooks/hi20_heuristic` | {doc}`/notebooks/lo20_heuristic` |
+| Limit or pin the number of feeders | [](/problem.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
+| Balance the load across subtrees | [](/problem.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
+| Keep feeder routes straight | [](/problem.md#problem-options) | {doc}`/notebooks/hi20_heuristic` | {doc}`/notebooks/lo20_heuristic` |
 | Keep cables out of an exclusion zone | [](/problem.md#crossings-contours-and-detours) | {doc}`/notebooks/hi13_border_obstacles` | — |
 | Add a safety margin to the boundaries | [](/reference/input_formats.md#preparing-geometry) | {doc}`/notebooks/hi13_border_obstacles` | — |
 | Handle several substations | [](/routers.md#meta-heuristics) · [](/problem.md#ring-semantics) | — | {doc}`/notebooks/lo32_clustering` |
@@ -80,10 +80,10 @@ Some material exists in one section only: the {py:class}`WindFarmNetwork <optiwi
 : The input check requires all turbines and substations to lie within the allowed area. Either the coordinates are wrong, or the border is — see [](/reference/input_formats.md#preparing-geometry). Plotting the location before optimizing is the fastest way to tell which.
 
 The MILP solver ignored my warm start
-: A warm start must satisfy the target model's topology, capacity, feeder and crossing constraints. With `warmup=True`, `MILPRouter` attempts to replace an incompatible stored solution; with `warmup=False`, it ignores all warm starts. See [](/routers.md#warm-starting) and inspect `solver.metadata.warmed_by` for the accepted producer.
+: A warm start must satisfy the target model's topology, capacity, feeder and crossing constraints. With `warmup=True`, `MILPRouter` attempts to replace an incompatible stored solution; with `warmup=False`, it ignores all warm starts. See {doc}`/reference/warm_starting` and inspect `solver.metadata.warmed_by` for the accepted producer.
 
 The result is not what the options asked for
-: Check the router's supported options and their combination rules. Some unsupported combinations raise errors; others are ignored with a warning, including MILP balancing without a pinned feeder count. See [](/routers.md#problem-options).
+: Check the router's supported options and their combination rules. Some unsupported combinations raise errors; others are ignored with a warning, including MILP balancing without a pinned feeder count. See [](/problem.md#problem-options).
 
 An imported location rejects integer `capacity`
 : The graph may declare unequal turbine power. Pass `capacity_nominal` to a compatible low-level router, or load with `read_powers=False` to count turbines. See [](/reference/power.md#quantization-contract).
