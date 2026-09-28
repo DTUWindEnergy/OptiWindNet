@@ -2,9 +2,11 @@
 
 This page defines the optimization problem that _OptiWindNet_ solves. The definition is independent of the API: the concepts apply equally to the {doc}`/high_level_api` and the {doc}`/low_level_api`. The {doc}`/reference/glossary` collects the terms used throughout the documentation.
 
+In the graph model, a wind turbine is a **terminal** and a substation is a **root**. These are two names for the same components, not different kinds of equipment. This page uses turbine and substation for the physical network, and introduces terminal and root where they help explain the graph representation used by the Advanced API.
+
 ## Formulation
 
-The design of an offshore wind farm collection system can be formulated as a graph problem. Its vertices represent the predefined positions of the wind farm components. A solution consists of edges that specify electrical connections between these components and routes that specify where to lay the corresponding cables.
+The design of an offshore wind farm collection system can be formulated as a graph problem. Its nodes represent the predefined positions of the wind farm components. A solution consists of links that specify electrical connections between these components and routes that specify where to lay the corresponding cables.
 
 To be feasible, a solution must satisfy the following electrical and geometric constraints:
 
@@ -28,7 +30,7 @@ The routers select a solution topology `S` using the lengths of available links 
 
 The complete mixed-integer formulation is given in [](/reference/milp_formulation.md#milp-formulation).
 
-Turbines are assumed to have equal power by default; unequal ratings can be declared in explicit power units. See [](/reference/input_formats.md#turbines-of-unequal-output).
+Turbines are assumed to have equal power by default, which translates to unitary power inflow from each turbine node in the graph model; unequal ratings can be declared in explicit power units. See [](/reference/input_formats.md#turbines-of-unequal-output).
 
 A detailed analysis of the methodology is available in the open-access article referenced in {doc}`/paper`.
 
@@ -69,8 +71,7 @@ This sequence describes the data pipeline rather than a required user workflow. 
 ```{admonition} Two meanings of "topology"
 :class: note
 
-*Topology* may refer to the solution graph `S` or to its network architecture
-(*branched*, *radial* or *ringed*). Where the distinction matters, this documentation uses "the topology `S`" for the former.
+*Topology* may refer to the solution graph `S` or to its network architecture (*branched*, *radial* or *ringed*). Where the distinction matters, this documentation uses "the topology `S`" for the former.
 ```
 
 _In use:_ {doc}`/notebooks/hi10_windfarmnetwork` and {doc}`/notebooks/hi14_plotting` (Network/Router API) · {doc}`/notebooks/lo30_topologies` and {doc}`/notebooks/lo14_plotting` (Advanced API).
@@ -81,13 +82,13 @@ _OptiWindNet_ supports three electrical topologies. Each constrains the structur
 
 ```{glossary}
 branched
-  A forest of rooted trees; terminals may have any number of neighbors. This is the default and least constrained topology, and therefore generally permits the shortest networks.
+  Each subtree connects a group of turbines to a substation, with branching allowed at any turbine. In graph terms, the network is a forest of rooted trees. This is the default and least constrained topology, and therefore generally permits the shortest networks.
 
 radial
-  A collection of root-to-leaf paths; each terminal has at most two neighbors. Cables do not branch at turbines, which simplifies switchgear but may increase cable length.
+  Each subtree follows a single path from a substation through its turbines. A turbine has at most two neighbors, so cables do not branch there. This simplifies switchgear but may increase cable length.
 
 ringed
-  A collection of cyclic paths (multi-terminal *loops*), each including one or two roots (roots are implicitly neighboring each other). Only roots may belong to more than one path. Each terminal has exactly two neighbors, and single-terminal cycles degenerate to a single link.
+  Turbines are arranged in loops that begin and end at a substation, or connect two substations that are implicitly electrically interconnected. Only substations may belong to more than one loop. Each turbine has exactly two neighbors, except that a loop serving just one turbine is represented by a single link.
 ```
 
 The following figure shows the same example wind farm solved under each topology:
@@ -104,7 +105,7 @@ The following figure shows the same example wind farm solved under each topology
 :width: 100%
 ```
 
-Allowing branches at turbines generally reduces the cable length of a branched network. A radial network prohibits these junctions and may require additional cable. A ringed network requires more cable to preserve a path from every turbine to a substation after the failure of any single ring segment.
+Allowing branches at turbines generally enables the shortest network (total cable length). A radial network prohibits these junctions and may require additional cable. A ringed network requires more cable to preserve a path from every turbine to a substation after the failure of any single ring link.
 
 Not all routers support every topology; see [](/routers.md#optimization-approaches) for the capability matrix.
 
@@ -114,13 +115,13 @@ _In use:_ {doc}`/notebooks/hi30_topologies` (Network/Router API) · {doc}`/noteb
 
 Capacity accounting for rings differs from that of branched and radial topologies:
 
-- each multi-terminal cycle contains one link with `load = 0`, which splits the ring into two arms whose terminal counts differ by at most one;
-- `capacity` is the feeder limit of the _split_ ring, so a complete ring can contain up to `2 × capacity` terminals;
+- a ring serving two or more turbines contains one link with `load = 0`; this splits the ring into two arms serving equal numbers of turbines, or differing by one;
+- `capacity` limits the load on each feeder of the _split_ ring; with unitary inflow, the two arms together can serve up to `2 × capacity` turbines;
 - each ring uses two physical connections at the substation, so `max_feeders` must be an even integer for a ringed topology;
-- a multi-terminal ring provides an alternative path to a substation after a single cable failure. The model checks capacity in the normal split configuration; it does not guarantee that the surviving arm can carry the entire ring's output after a fault;
-- a single-terminal ring is represented by one feeder, with no zero-load link or redundant path.
+- a ring serving two or more turbines provides an alternative path to a substation after a single cable failure. The model checks capacity in the normal split configuration; it does not guarantee that the surviving arm can carry the entire ring's output after a fault;
+- the single-turbine case uses just one feeder, with no zero-load link or redundant path.
 
-With multiple substations, a MILP model for a ringed topology may produce a ring that begins at one root and ends at another. Partitioning the terminals by root and solving each cluster separately ensures that every ring is anchored to a single root.
+With multiple substations, a MILP model may connect the two ends of a ring to different substations. To require both ends to connect to the same substation, assign the turbines to one cluster per substation and solve the clusters separately.
 
 _In use:_ {doc}`/notebooks/hi30_topologies` (Network/Router API) · {doc}`/notebooks/lo30_topologies` (Advanced API) · {doc}`/notebooks/lo32_clustering` (multiple substations).
 

@@ -3,23 +3,29 @@
 The vocabulary used throughout this documentation. The network topologies — _branched_, _radial_ and _ringed_ — are defined separately, in [](/problem.md#network-topologies).
 
 ```{glossary}
+turbine
+  A wind turbine, represented by a terminal node in the graph model. Network/Router guides and shared explanations normally use the physical name, turbine.
+
+substation
+  The collection point for power from a group of turbines, represented by a root node in the graph model.
+
 terminal
-  A wind turbine. Terminals are numbered from `0` in the order they appear in the input data.
+  The graph node representing a turbine. This term is common in the Advanced API. Terminal nodes are numbered `0` through `T - 1` in the order they appear in the input data.
 
 root
-  A substation. Roots carry negative node numbers, also assigned in order of appearance.
+  The graph node representing a substation. This term is common in the Advanced API. Root nodes are numbered `-R` through `-1` in the order they appear in the input data.
 
 subtree
-  For *branched* or *radial* topology: the group of terminals served through a single connection to a root. For *ringed* topology: the group of terminals in a ring.
+  For *branched* or *radial* topology: the group of turbines served through a single connection to a substation. For *ringed* topology: the group of turbines in a ring.
 
 feeder
-  The link that connects a root to a group of terminals.
+  The link from a substation to the first turbine in a subtree or an arm of a ring.
 
 capacity
   The maximum load a cable can carry. Routers represent it as integer inflow; user inputs can instead declare nominal power with an explicit unit. With unitary inflow, it counts turbines. See [](/reference/input_formats.md#cable-types).
 
 load
-  The cumulative turbine inflow carried by a node or link, including a terminal's own inflow. It counts turbines only when each turbine contributes one unit. Nominal loads sum the declared turbine powers; cable assignment uses nominal loads when capacities are nominal power.
+  The cumulative inflow carried by a node or link. At a turbine, this includes its own contribution and those of the turbines feeding into it. Load counts turbines only when each contributes one unit. Nominal loads sum the declared turbine powers; cable assignment uses nominal loads when capacities are nominal power.
 
 inflow
   A turbine's positive integer contribution to the solver's flow, defaulting to one. Unequal nominal powers are quantized to integer inflow for the selected cable capacity; see [](/reference/input_formats.md#turbines-of-unequal-output).

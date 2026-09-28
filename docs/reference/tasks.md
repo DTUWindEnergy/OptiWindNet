@@ -76,7 +76,7 @@ Some material exists in one section only: the {py:class}`WindFarmNetwork <optiwi
 <!-- prettier-ignore-start -->
 
 `ValueError` about turbines outside the border
-: Every terminal and root is checked against the allowed area before optimizing. Either the coordinates are wrong, or the border is — see [](/reference/input_formats.md#preparing-the-geometry). Plotting the location before optimizing is the fastest way to tell which.
+: The input check requires all turbines and substations to lie within the allowed area. Either the coordinates are wrong, or the border is — see [](/reference/input_formats.md#preparing-the-geometry). Plotting the location before optimizing is the fastest way to tell which.
 
 The MILP solver ignored my warm start
 : A warm start must satisfy the target model's topology, capacity, feeder and crossing constraints. With `warmup=True`, `MILPRouter` attempts to replace an incompatible stored solution; with `warmup=False`, it ignores all warm starts. See [](/routers.md#warm-starting) and inspect `solver.metadata.warmed_by` for the accepted producer.
@@ -94,7 +94,7 @@ I need to see what the algorithm is doing
 : Logging is configured per module, and non-Python solvers have their own verbosity — see {doc}`/notebooks/hi15_debugging`.
 
 The MILP solve is taking too long
-: Solve time grows steeply with the terminal count and the cable capacity — see [](/routers.md#how-long-a-solve-takes) for the three ways to bound it.
+: Larger sites and higher cable capacities make the search harder. See [](/routers.md#how-long-a-solve-takes) for three ways to bound the solve time.
 
 <!-- prettier-ignore-end -->
 

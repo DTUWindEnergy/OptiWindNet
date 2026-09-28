@@ -2,6 +2,8 @@
 
 These notebooks are developer-facing examples that import lower-level modules directly. Those modules may evolve independently of the Network/Router API, so pin an integration built on them to a tested _OptiWindNet_ version.
 
+Graph descriptions call turbines **terminals** and substations **roots**. Terminal nodes are numbered `0` through `T - 1`, and root nodes `-R` through `-1`. Physical descriptions also use turbine and substation; the two vocabularies refer to the same components. See {doc}`/reference/glossary` for the related terms.
+
 The graphs these notebooks pass between functions — `L`, `P`, `A`, `S` and `G` — are described in [](/problem.md#graph-representations); the routers they call, and the model and solver options they pass, are in {doc}`/routers`. Checking a result is covered by {doc}`/reference/validation`.
 
 [](/reference/tasks.md#paired-examples) maps each notebook here to its counterpart in the {doc}`/high_level_api`, and the {doc}`/reference/tasks` indexes them by goal. Complete signatures are in the generated {doc}`API Reference </autoapi/index>`.

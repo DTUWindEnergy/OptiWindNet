@@ -1,6 +1,6 @@
 # Validation
 
-A solution can be invalid in two independent ways: it can be electrically infeasible (capacity exceeded, a terminal not connected to any root, a degree limit broken), or it can be geometrically invalid (two routes crossing). _OptiWindNet_ currently lacks a check for route×boundaries crossings.
+A solution can be invalid in two independent ways: it can be electrically infeasible (a cable exceeds capacity, a turbine has no connection to a substation, or a node has too many neighbors for the chosen topology), or it can be geometrically invalid (two routes crossing). _OptiWindNet_ currently lacks a check for route×boundaries crossings.
 
 Use `validate_routeset(wfn.G)` to check a delivered network, especially when using custom graph transformations, hand-built topologies or path-finder settings. The function returns a list of violations, empty when the checks pass, and leaves the graph unchanged:
 
@@ -12,7 +12,7 @@ if violations:
     raise ValueError('\n'.join(violations))
 ```
 
-For capacities 2 and 3 with more than 40 terminals, the default `PathFinder` search limits may leave feeder crossings. Its arguments allow those limits to be increased. Report invalid results that persist after tuning, including the site, capacity and router settings.
+On sites with more than 40 turbines and capacities of 2 or 3, the default `PathFinder` search limits may leave feeder crossings. Its arguments allow those limits to be increased. Report invalid results that persist after tuning, including the site, capacity and router settings.
 
 These checks cover the graph's declared topology and integer capacity, stored loads and route intersections. They do not check every requested model option, such as an exact feeder count, or replace a check of route containment within the site boundaries.
 

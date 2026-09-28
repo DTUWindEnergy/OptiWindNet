@@ -6,8 +6,8 @@ A problem instance for _OptiWindNet_ consists of a **location** — the geometry
 
 | Item | Required | Notes |
 | --- | --- | --- |
-| Turbine coordinates | yes | 2D planar coordinates, one `(x, y)` pair per terminal. |
-| Substation coordinates | yes | One `(x, y)` pair per root. |
+| Turbine coordinates | yes | One planar `(x, y)` position for each turbine. |
+| Substation coordinates | yes | One planar `(x, y)` position for each substation, in the same coordinate system. |
 | Cable types | yes | See [](/reference/input_formats.md#cable-types). |
 | Border | no | A polygon delimiting the area where cables may be laid. |
 | Obstacles | no | Polygons inside the border where cables may not be laid. |
@@ -56,11 +56,11 @@ This convention breaks compatibility with v0.3.0 graphs that used `'power'` for 
 | --- | --- | --- | --- |
 | `MILPRouter`, `solver_factory()` backends | radial, branched | `'unlimited'`, `'exactly'`, `'specified'` | — |
 | `HGSRouter`, `hgs_cvrp()`, `lkh3()` | radial | upper bound only | unbalanced, single substation; inflow becomes customer demand |
-| `EWRouter`, `constructor()` | unsupported | — | they fill subtrees by counting terminals |
+| `EWRouter`, `constructor()` | unsupported | — | subtree construction uses turbine counts rather than unequal demands |
 
 `'minimum'` and `'min_plus*'` are rejected because the count they derive from total inflow treats a turbine as divisible among feeders. A `ringed` model is rejected because a ring within twice the capacity need not split into two arms that each fit within it. With a loose `power_rtol`, unequal powers may quantize to unitary inflow, which every router supports.
 
-**Storage.** The database and the compact link encoding keep no terminal power. `pack_G()`, and so `store_G()`, refuses a routeset with nonunitary inflow or `powers_set`; a routeset of equal powers is stored with its power attributes. `WindFarmNetwork.update_from_terse_links()` quantizes the location as its router does, so a round trip through that method keeps the loads.
+**Storage.** The database and the compact link encoding do not preserve individual turbine ratings. `pack_G()`, and so `store_G()`, refuses a routeset with nonunitary inflow or `powers_set`; a routeset of equal powers is stored with its power attributes. `WindFarmNetwork.update_from_terse_links()` quantizes the location as its router does, so a round trip through that method keeps the loads.
 
 _In use:_ {doc}`/notebooks/hi16_mixed_power` (Network/Router API), {doc}`/notebooks/lo16_mixed_power` (Advanced API).
 
@@ -91,9 +91,9 @@ _OptiWindNet_'s own YAML schema is a compact way to keep a location in a file:
 | `COORDINATE_FORMAT` | no | `planar` or `latlon` — defaults to `latlon`. |
 | `EXTENTS` | yes | The border polygon. Do not repeat the initial vertex at the end. |
 | `OBSTACLES` | no | A list of polygons, even when there is only one. |
-| `SUBSTATIONS` | yes | Root coordinates. |
+| `SUBSTATIONS` | yes | Positions of the substations. |
 | `TURBINE` | no | The turbine model's `make`, `model` and `power_MW` — a list of them, each with its `qty` and optional `prefix`, for a site of turbines of unequal power. |
-| `TURBINES` | yes | Terminal coordinates. |
+| `TURBINES` | yes | Positions of the turbines, in input order. |
 
 Coordinates are given either as lists of `[x, y]` pairs, for `planar`, or as a text block of latitude/longitude, for `latlon`:
 
@@ -110,7 +110,7 @@ TURBINES: |-
 
 In the `latlon` form, any identifier placed _before_ the coordinates — `OSS`, `A01`, `A02` above — is loaded as the node's `label` attribute and can be shown in plots. Several examples are bundled in the folder `optiwindnet/data`; look for them in Python's `site-packages` or in [the repository](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/tree/main/optiwindnet/data).
 
-The `TURBINE` section declares the turbines' nominal power in MW. A mapping states one `power_MW` for the whole site. A list states one entry per turbine model, each claiming its turbines by `qty` — a block of consecutive terminals, the entries in the order given, their quantities adding up to the number of turbines:
+The `TURBINE` section declares the turbines' nominal power in MW. A mapping states one `power_MW` for the whole site. A list gives one entry per turbine model. Each entry's `qty` claims the next group of positions in `TURBINES`, so the groups must follow the coordinate order and their quantities must add up to the total turbine count:
 
 ```yaml
 TURBINE:
@@ -124,7 +124,7 @@ TURBINE:
     qty: 79
 ```
 
-Where `TURBINES` is not grouped by turbine model, each entry takes a `prefix` instead, claiming every turbine whose label starts with it, wherever those turbines sit among the terminals:
+Where `TURBINES` is not grouped by turbine model, use a `prefix` for each model entry instead. It selects turbines by the start of their labels, regardless of their position in the coordinate list:
 
 ```yaml
 TURBINE:

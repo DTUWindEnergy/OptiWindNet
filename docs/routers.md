@@ -31,7 +31,7 @@ Problem options complement the problem data (component counts, positions, bounda
 - `topology` picks the architecture of the subtrees (branched, radial, ringed); see [](/problem.md#network-topologies) for details.
 - `feeder_route` decides whether feeder routes may be detoured (multiple straight segments) or must run straight. Even when straight feeders are requested, exclusion zones may introduce some bends in the route.
 - `feeder_limit`, together with `max_feeders`, bounds how many feeders the solution may use, which may be given as an absolute count or relative to the minimum count that meets other constraints. For a ringed topology each ring uses two feeders, which entails that bounds must include at least one even number.
-- `balanced` requires the subtree loads to differ by at most one terminal. It is only enforceable when the feeder count is pinned to a single value.
+- `balanced` distributes turbines among subtrees so that their counts differ by at most one. This assumes unitary inflow and is only enforceable when the feeder count is pinned to a single value.
 
 Only {py:class}`MILPRouter <optiwindnet.api.MILPRouter>` accepts these as a {py:class}`ModelOptions <optiwindnet.MILP.ModelOptions>` mapping; {py:class}`EWRouter <optiwindnet.api.EWRouter>` and {py:class}`HGSRouter <optiwindnet.api.HGSRouter>` expose the subset they can enforce as ordinary constructor arguments instead. Permitted values and the defaults can be displayed with {py:meth}`ModelOptions.help() <optiwindnet.MILP.ModelOptions.help>`, and {doc}`/notebooks/hi31_options` compares the effects of different choices.
 
@@ -53,17 +53,17 @@ The capability table assumes uniform turbine power. Unequal powers restrict supp
 
 ## Constructive heuristics
 
-These build a solution incrementally, starting from every terminal connected directly to a root and repeatedly merging subtrees while capacity allows. They are extensions of the Esau-Williams heuristic for the CMSTP, modified to account for cable crossings. They run in a fraction of a second even on large layouts, which makes them the right default for interactive work, for warm-starting the slower routers, and for use inside an outer optimization loop where the network is re-solved on every iteration.
+These build a solution incrementally. Initially, each turbine has its own connection to a substation; the heuristic then merges subtrees while capacity allows. They are extensions of the Esau-Williams heuristic for the CMSTP, modified to account for cable crossings. They run in a fraction of a second even on large layouts, which makes them the right default for interactive work, for warm-starting the slower routers, and for use inside an outer optimization loop where the network is re-solved on every iteration.
 
-The variants differ in how they break ties and how strongly they bias growth towards the root. They are selected by the `method` argument, which names a variant of the constructive-heuristic approach — it never selects among the optimization approaches:
+The variants differ in how they break ties and how strongly they favor growth towards a substation. This preference is called a _rootward bias_, since substations are roots in the graph model. The `method` argument selects a variant of the constructive heuristic, as listed below; it never selects among the optimization approaches:
 
 | `method` | Topology | Description |
 | --- | --- | --- |
 | `'esau_williams'` | branched | The classic Esau-Williams C-MST heuristic, modified to avoid crossings. |
 | `'biased_EW'` | branched | Esau-Williams with a rootward bias in near-tie cases. The default for {py:class}`EWRouter <optiwindnet.api.EWRouter>`. |
 | `'rootlust'` | branched | A configurable rootward bias that increases as remaining capacity decreases. The default for {py:func}`constructor() <optiwindnet.heuristics.constructor>`. |
-| `'radial_EW'` | radial | Produces radial subtrees — simple paths from the root. |
-| `'ringed'` | ringed | Network of closed paths starting and ending on a root. |
+| `'radial_EW'` | radial | Connects each group of turbines along a single path from a substation. |
+| `'ringed'` | ringed | Connects each group of turbines in a loop with both ends at the same substation. |
 
 The two entry points use different default variants and may therefore produce different networks for the same input.
 
@@ -75,7 +75,7 @@ _In use:_ {doc}`/notebooks/hi20_heuristic` (Network/Router API) · {doc}`/notebo
 
 Meta-heuristics search the solution space under a time budget you set. They treat the problem as a capacitated vehicle routing problem (CVRP), which is why they produce radial topologies by default: a CVRP route is a path, not a tree. Solving the _closed_ CVRP instead, where every route returns to the depot, yields a ringed topology.
 
-Both wrappers handle multiple substations by clustering terminals by root and solving each cluster concurrently. When iterative repair is enabled, an invalid solution (crossings in HGS; crossings or capacity violations in LKH) can trigger a re-solve up to `max_retries` times. For both solvers, the search budget can therefore reach `(max_retries + 1) * time_limit` per cluster, plus time spent on clustering and graph repair (typically much smaller than `time_limit`). Within each invocation, time_limit bounds the total search time per cluster; LKH internally subdivides this budget across multiple trials governed by `runs` and `per_run_limit`.
+Both wrappers handle multiple substations by assigning turbines to one cluster per substation, then solving the clusters concurrently. When iterative repair is enabled, an invalid solution (crossings in HGS; crossings or capacity violations in LKH) can trigger a re-solve up to `max_retries` times. For both solvers, the search budget can therefore reach `(max_retries + 1) * time_limit` per cluster, plus time spent on clustering and graph repair (typically much smaller than `time_limit`). Within each invocation, time_limit bounds the total search time per cluster; LKH internally subdivides this budget across multiple trials governed by `runs` and `per_run_limit`.
 
 Because both meta-heuristics produce radial topologies, and radial is a special case of branched, their solutions can warm-start both branched and radial models.
 
@@ -87,7 +87,7 @@ Its distinctive options concern the feeder count:
 
 - the feeder limit is normally an **upper bound** — the search is free to use fewer, and usually settles at the minimum feasible number;
 - pinning the count to that limit exactly additionally requires balanced subtrees and a single substation (for the ringed topology, the limit is then at most one ring per two turbines);
-- balancing makes feeder loads differ by at most one terminal;
+- balancing assigns equal numbers of turbines to the feeders, or counts differing by one, under the unitary-inflow assumption;
 - with multiple substations the feeder limit is ignored and the count is fixed to the minimum required;
 - a seed makes the pseudo-random choices repeatable, but since the search stops at a wall-clock time limit, results may still vary slightly with machine load.
 
@@ -137,9 +137,9 @@ _In use:_ {doc}`/notebooks/hi31_options` (Network/Router API) · {doc}`/notebook
 
 ## Warm-starting
 
-A feasible solution supplied up front lets a MILP solver start from a known bound instead of searching for its first incumbent, which may shorten the time to a small gap. The natural chain is fast to slow: a constructive heuristic or a meta-heuristic produces a solution, and the MILP model starts from it.
+A feasible solution supplied up front lets a MILP solver start from a known bound instead of searching for its first incumbent, which may shorten the time to a small gap. A constructive heuristic or a meta-heuristic produces a solution, and the MILP model starts from it.
 
-A warm start is only usable if it satisfies the model it is given to. The model checks it against its own definition and refuses it at the first failure. Its **topology** must be the model's own, with a single relaxation: a radial solution also satisfies a branched model, since a path is a valid tree. Every **link** it uses must exist in the model, which holds whenever both derive from the same available-link set `A`. And every **constraint** the model emitted must hold. The last check is where the capability gaps in [](/routers.md#which-constraints-each-approach-can-enforce) become concrete, one model option at a time:
+A warm start is only usable if it satisfies the model it is given to. The model checks it against its own definition and refuses it at the first failure. Its **topology** and the model's must match, with a single exception: a radial warm start also satisfies a branched model, since a path is a valid tree. Every **link** it uses must exist in the model, which holds whenever both derive from the same available-link set `A`. And every **constraint** the model enforces must hold. The last check is where the capability gaps in [](/routers.md#which-constraints-each-approach-can-enforce) become concrete, one model option at a time:
 
 | Model option | What it demands of a warm start | Fast routers that produce it |
 | --- | --- | --- |
@@ -151,7 +151,7 @@ A warm start is only usable if it satisfies the model it is given to. The model 
 | `feeder_limit='unlimited'` | no requirement | any router |
 | `feeder_limit='minimum'`, `'min_plus1..3'`, `'specified'` | a feeder count within the allowed range | `HGSRouter(feeder_limit=n)`, `n` being the highest count the model allows |
 | `feeder_limit='exactly'` | exactly `max_feeders` feeders | `HGSRouter(feeder_limit=max_feeders, feeder_exact=True, balanced=True)`, single substation only |
-| `balanced=True` | feeder loads within one terminal of each other | `HGSRouter(balanced=True)`, with the feeder count pinned |
+| `balanced=True` | turbine counts per feeder differing by at most one, with unitary inflow | `HGSRouter(balanced=True)`, with the feeder count pinned |
 
 The requirements are cumulative: a model imposes all of them at once, and no single option decides acceptance on its own. The two fast routers satisfy disjoint subsets of them. A constructive heuristic does not constrain the feeder count, so its feeder count must be checked before using it to warm-start a model that constrains the count, but it is the only router that can be required to keep the links clear of the feeder routes. HGS constrains the feeder count and the load balance, and its solutions are repaired until no two non-feeder links cross, but that repair does not examine the feeders — a link blocking a feeder route may remain. Under `feeder_route='segmented'` this is not a defect, since path-finding detours the feeder around the link; a straight-feeder model forbids the detour and refuses such a solution. Some models consequently have no fast producer at all, `feeder_route='straight'` together with a constrained feeder count being the clearest example.
 
@@ -185,7 +185,7 @@ The routers differ by orders of magnitude in runtime and show diminishing improv
 
 The differences between optimization approaches depend on the site, capacity, and model options. This figure represents a single instance and should be interpreted qualitatively.
 
-- **Interactive exploration, or a network re-solved inside an outer loop** — constructive heuristic. Sub-second, and the quality is adequate for comparing layouts against each other.
+- **Interactive exploration, or a network re-solved inside a loop** — constructive heuristic. Sub-second, and the quality is adequate for comparing layouts against each other.
 - **A good network without a long wait** — meta-heuristic with a modest time limit. Check the reported solution times: if raising the limit stops improving the length, lower it and save the time.
 - **A network you intend to defend** — MILP, warm-started by one of the above, stopped at an optimality gap you consider acceptable.
 - **A specific structure is required** — ringed for redundancy, radial to avoid branching at turbines, a pinned feeder count to match available switchgear — check [](/routers.md#problem-options) for which approaches can enforce it, and use MILP when the constraint must be guaranteed.
@@ -194,8 +194,8 @@ _In use:_ {doc}`/notebooks/hi00_quickstart` (Network/Router API) · {doc}`/noteb
 
 ### How long a solve takes
 
-Constructive heuristics are usually the fastest choice. Meta-heuristics have a search budget, but clustering, crossing repair and retries add to wall time. MILP model construction, warm-start construction and routing also happen outside the solver search budget; `MILPRouter` can repeat the search if it finds no feasible incumbent.
+Constructive heuristics are usually the fastest choice. Meta-heuristics have a search time budget, but clustering, crossing repair and retries add to wall time. MILP model construction, warm-start construction and routing also happen outside the solver budget, but the solving step is the dominant one; `MILPRouter` can repeat the search if it finds no feasible incumbent.
 
-A MILP solve is different: it gets harder with the number of terminals and with the cable capacity — a larger capacity admits more feasible subtrees, so the tree the solver has to explore grows — and the growth is steep enough that predicting a runtime is not worth the effort. Bound it instead. Set a `time_limit` and a `mip_gap` and let whichever comes first end the solve; both are in [](/routers.md#solver-options). Warm-starting shortens the way to a usable gap, and the backends themselves differ in speed on the same model — see {doc}`/reference/solvers`. The {doc}`/paper` reports solve times across a range of problem sizes.
+A MILP solve becomes harder as the turbine count increases. The capacity also influences problem difficulty, which is easiest at capacities 2 and 3, and gets increasingly harder until around 7–9; higher capacities then cause difficulty to decrease. The sensible approach to sizing the solver budget is experimentation in the available optimization setup (representative problem set, a chosen solver, hardware, competing CPU loads). Set a `time_limit` and a `mip_gap` and let whichever comes first end the solve; both are in [](/routers.md#solver-options). Warm-starting shortens the way to a usable gap, and the backends themselves differ in speed on the same model — see {doc}`/reference/solvers`. The {doc}`/paper` reports solve times across a range of problem sizes.
 
 _In use:_ {doc}`/notebooks/hi23_milp` (Network/Router API) · {doc}`/notebooks/lo23_milp_ortools` (Advanced API).

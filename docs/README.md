@@ -37,6 +37,14 @@ docs/
 
 `milp_formulation/problem_formulation.html` is an insertion-ready MathML fragment generated from the LaTeX source alongside it. Sphinx includes the fragment directly and copies the scoped CSS and subsetted fonts into the built site's `_static/milp_formulation/` directory. The normal documentation build must not run `milp_formulation/Makefile`: its Pandoc, FontTools, XeLaTeX and font-subsetting toolchain is intentionally outside _OptiWindNet_'s documentation dependencies.
 
+## Terminology
+
+Network/Router notebooks use **turbine** and **substation** almost exclusively. Introduce **terminal** or **root** only when needed to explain an exposed API name or graph convention, and give its physical meaning alongside it.
+
+Shared prose favors turbine and substation. Use terminal and root selectively to introduce the graph vocabulary or explain graph operations; establish their equivalence before relying on them. Advanced API guides use terminal and root for graph nodes and algorithms, while physical descriptions may use turbine and substation. The glossary records the mapping.
+
+Edit complete sentences and passages for their audience; do not convert terminology with plain string replacement. Preserve identifiers such as `rootlust`, `d2roots`, `T` and `R`, and distinguish turbine counts from integer inflow and nominal power when describing loads or capacities.
+
 ## Building and checking
 
 ```sh
