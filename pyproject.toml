@@ -75,7 +75,7 @@ test  = [
     "pytest",  # for testing
     "pytest-cov",  # for calculating coverage
     "pytest-xdist",  # for testing in parallel
-    "tabulate",  # summary tables of tests/sweep.py
+    "prettyTables",  # summary tables of tests/sweep.py
     "psutil",  # memory profiling
     "memory_profiler",  # memory profiling
     "line_profiler",  # to check speed
@@ -106,7 +106,7 @@ docs = [
     "sphinx-autoapi",
     "sphinx_copybutton", 
     "sphinx_sitemap",
-    "tabulate",
+    "prettyTables",  # result tables in docs/notebooks
     # Imported directly by docs/run_notebooks.py. They also arrive transitively through
     # myst-nb, but the type checker covers docs/, so the imports it must resolve are
     # declared here rather than left to another package's dependency tree.

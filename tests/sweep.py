@@ -73,7 +73,7 @@ from typing import Any, Literal
 
 import networkx as nx
 from bitarray.util import deserialize, serialize
-from tabulate import tabulate
+from prettyTables import Table
 
 from optiwindnet.converting import (
     G_from_S,
@@ -635,8 +635,8 @@ def load_solution(db_path: Path | str, row_id: int) -> tuple[nx.Graph, SiteBundl
     return S, bundle
 
 
-def _spread(rows: list[dict[str, Any]], column: str) -> float | None:
-    """Return the median over cases of the reps' range relative to their median."""
+def _spread(rows: list[dict[str, Any]], column: str) -> str | None:
+    """Return the median over cases of the reps' relative range, as a % string."""
     by_case = defaultdict(list)
     for r in rows:
         if r['status'] == 'ok':
@@ -646,7 +646,7 @@ def _spread(rows: list[dict[str, Any]], column: str) -> float | None:
         for values in by_case.values()
         if len(values) > 1
     ]
-    return 100 * statistics.median(spreads) if spreads else None
+    return f'{100 * statistics.median(spreads):.4g}' if spreads else None
 
 
 def report(
@@ -743,9 +743,9 @@ def report(
                 'ok': sum(r['status'] == 'ok' for r in lrows),
                 'invalid': sum(r['status'] == 'invalid' for r in lrows),
                 'error': sum(r['status'] == 'error' for r in lrows),
-                'median_s': statistics.median(times) if times else None,
-                'total_s': sum(times),
-                'Δlength_%': 100 * statistics.mean(rel) if rel else None,
+                'median_s': f'{statistics.median(times):.4g}' if times else None,
+                'total_s': f'{sum(times):.4g}',
+                'Δlength_%': f'{100 * statistics.mean(rel):.4g}' if rel else None,
                 'better': sum(x < -1e-9 for x in rel),
                 'worse': sum(x > 1e-9 for x in rel),
                 'time_spread_%': _spread(lrows, 'time_s'),
@@ -758,7 +758,7 @@ def report(
                 del entry[column]
     out = [
         '\n'.join(headers),
-        tabulate(table, headers='keys', tablefmt='github', floatfmt='.4g'),
+        Table.from_dicts(table).to_markdown(),
     ]
 
     if per_case:
@@ -780,13 +780,13 @@ def report(
                 lengths = [r['length'] for r in crows if r['status'] == 'ok']
                 times = [r['time_s'] for r in crows if r['time_s'] is not None]
                 entry[f'{label} length'] = (
-                    statistics.median(lengths) if lengths else None
+                    f'{statistics.median(lengths):.6g}' if lengths else None
                 )
-                entry[f'{label} s'] = statistics.median(times) if times else None
+                entry[f'{label} s'] = (
+                    f'{statistics.median(times):.6g}' if times else None
+                )
             case_table.append(entry)
-        out.append(
-            tabulate(case_table, headers='keys', tablefmt='github', floatfmt='.6g')
-        )
+        out.append(Table.from_dicts(case_table).to_markdown())
 
     failed = [r for r in rows if r['status'] != 'ok']
     if failed:
