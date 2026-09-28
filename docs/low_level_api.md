@@ -22,7 +22,7 @@ Use `solver.get_solution()` for the topology and routed graph. The removed `get_
 
 `ModelOptions` accepts strings such as `topology='radial'`. Direct calls to backend `make_min_length_model()` functions require enum members for `topology`, `feeder_route` and `feeder_limit`.
 
-For power declarations, use `set_turbine_powers()` for nominal ratings and `'inflow'` for integer demands. Graphs that used `'power'` for integer demands need that attribute renamed. Imported locations read nominal powers by default; use `read_powers=False` for turbine-count examples, or follow [](/reference/power.md#advanced-api) for nominal capacities and [](/reference/power.md#router-support) for router restrictions.
+For power declarations, use `set_terminal_power()` for nominal ratings and `'inflow'` for integer demands. Graphs that used `'power'` for integer demands need that attribute renamed. Imported locations read nominal powers by default; use `read_powers=False` for turbine-count examples, or follow [](/reference/power.md#advanced-api) for nominal capacities and [](/reference/power.md#router-support) for router restrictions.
 
 ```{toctree}
 :titlesonly:

@@ -101,7 +101,7 @@ TURBINE:
 
 Prefixes are all or nothing, must claim every turbine exactly once, and turn `qty` into a cross-check on how many each one matched.
 
-`power_unit` becomes `MW` and the declared values are set with `set_turbine_powers()`. See [](/reference/power.md#power-inputs-and-defaults) for how to use the imported ratings. A list whose entries carry no `power_MW` declares no power. `L_from_yaml(..., read_powers=False)` ignores the section. A list entry with neither `qty` nor `prefix`, quantities that do not add up, prefixes that do not claim every turbine exactly once, and a `power_MW` that is not a positive finite number all raise `ValueError`.
+`power_unit` becomes `MW` and the declared values are set with `set_terminal_power()`. See [](/reference/power.md#power-inputs-and-defaults) for how to use the imported ratings. A list whose entries carry no `power_MW` declares no power. `L_from_yaml(..., read_powers=False)` ignores the section. A list entry with neither `qty` nor `prefix`, quantities that do not add up, prefixes that do not claim every turbine exactly once, and a `power_MW` that is not a positive finite number all raise `ValueError`.
 
 _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API) · {doc}`/notebooks/lo11_data_input` (Advanced API).
 
@@ -122,7 +122,7 @@ The OpenStreetMap objects used to represent a wind farm location are _nodes_, _w
 
 A substation based on a _way_ is reduced to the centroid of the polygon that the _way_ defines. The node tags `name` or `ref` are loaded as the node's `label` attribute.
 
-A generator's `generator:output:electricity` tag — a number followed by an optional unit, such as `8 MW` — declares its nominal power. It is loaded only if every generator declares a positive output in a common unit: the unit becomes the graph attribute `power_unit` and the outputs are set with `set_turbine_powers()`. See [](/reference/power.md#power-inputs-and-defaults) for how to use the imported ratings. Values with no number, such as `yes`, are ignored, and a location where only some generators declare their output carries no power at all. Generators declaring their output in more than one unit raise `ValueError`. `L_from_pbf(..., read_powers=False)` ignores the tags.
+A generator's `generator:output:electricity` tag — a number followed by an optional unit, such as `8 MW` — declares its nominal power. It is loaded only if every generator declares a positive output in a common unit: the unit becomes the graph attribute `power_unit` and the outputs are set with `set_terminal_power()`. See [](/reference/power.md#power-inputs-and-defaults) for how to use the imported ratings. Values with no number, such as `yes`, are ignored, and a location where only some generators declare their output carries no power at all. Generators declaring their output in more than one unit raise `ValueError`. `L_from_pbf(..., read_powers=False)` ignores the tags.
 
 _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API) · {doc}`/notebooks/lo11_data_input` (Advanced API).
 

@@ -83,7 +83,7 @@ Power declarations belong to the site graphs; quantization belongs to each solve
 
 ### Power declarations
 
-In graph vocabulary, turbines are **terminals**. `set_turbine_powers(L, powers, power_unit=None)` declares power on a location or available-links graph. `validate_terminal_power()` checks the following conventions at graph-input boundaries and normalizes declared powers to fractions.
+In graph vocabulary, turbines are **terminals**. `set_terminal_power(L, powers, power_unit=None)` declares power on a location or available-links graph. `validate_terminal_power()` checks the following conventions at graph-input boundaries and normalizes declared powers to fractions.
 
 | Declaration | Graph representation |
 | --- | --- |
@@ -91,7 +91,7 @@ In graph vocabulary, turbines are **terminals**. `set_turbine_powers(L, powers, 
 | Unequal nominal powers | Each terminal's `power` is a `Fraction`; graph `powers_set` holds the sorted distinct powers. `L` and `A` carry no quantized inflow. |
 | Integer inflow without a unit | Terminal `inflow` is a positive integer; absence means one. |
 
-The integer-injection helpers are `terminal_inflow()` and `total_inflow()`.
+The integer-injection helpers are `nonunit_inflow()` and `total_inflow()`.
 
 ### Quantization contract
 
