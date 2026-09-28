@@ -18,7 +18,7 @@ from optiwindnet.importer import (
     LocationsRepository,
     load_repository,
 )
-from optiwindnet.loads import _clear_turbine_powers
+from optiwindnet.loads import _clear_terminal_power
 from optiwindnet.mesh import make_planar_embedding
 from optiwindnet.synthetic import toyfarm
 from optiwindnet.transforming import as_single_root
@@ -186,8 +186,8 @@ def _bundle_cached(
 def _without_turbine_powers(bundle: SiteBundle) -> SiteBundle:
     """Return a bundle whose ``L`` and ``A`` are copies without turbine power."""
     L, A = bundle.L.copy(), bundle.A.copy()
-    _clear_turbine_powers(L)
-    _clear_turbine_powers(A)
+    _clear_terminal_power(L)
+    _clear_terminal_power(A)
     return SiteBundle(bundle.handle, bundle.coordinate_digest, L, bundle.P, A)
 
 

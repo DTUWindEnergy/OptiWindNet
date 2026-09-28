@@ -18,8 +18,8 @@ from .identity import fingerprint_coordinates
 from .loads import (
     DEFAULT_POWER_RTOL,
     calcload,
+    nonunit_inflow,
     quantized,
-    terminal_inflow,
     validate_terminal_power,
 )
 from .types import Topology
@@ -463,7 +463,7 @@ class TerseLinks(Sequence[int]):
             A, capacity, power_attrs = _quantized_site(
                 A, capacity, capacity_nominal, power_rtol
             )
-            inflow = terminal_inflow(A)
+            inflow = nonunit_inflow(A)
         S = nx.Graph(T=self.T, R=self.R, topology=self.topology, **graph_attrs)
         S.graph.update(power_attrs)
         S.add_nodes_from(range(-self.R, 0), kind='oss')

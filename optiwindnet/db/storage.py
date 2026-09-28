@@ -16,7 +16,7 @@ import networkx as nx
 import numpy as np
 
 from ..identity import fingerprint_coordinates
-from ..loads import calcload, terminal_inflow, validate_terminal_power
+from ..loads import calcload, nonunit_inflow, validate_terminal_power
 from ..terse import LinkScope, TerseLinks
 from ..types import Topology
 from ..utils import make_handle
@@ -294,7 +294,7 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
             below what its cables carry.
     """
     validate_terminal_power(G)
-    if terminal_inflow(G) or 'powers_set' in G.graph:
+    if nonunit_inflow(G) or 'powers_set' in G.graph:
         raise NotImplementedError(
             'a routeset whose terminals declare unequal power or an inflow other '
             'than 1 cannot be stored: the record keeps no terminal power, so its '

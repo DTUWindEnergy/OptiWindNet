@@ -25,7 +25,7 @@ from optiwindnet.loads import (
     _simplest_between,
     quantize_for_capacity,
     quantized,
-    set_turbine_powers,
+    set_terminal_power,
     validate_terminal_power,
 )
 from optiwindnet.mesh import make_planar_embedding
@@ -235,10 +235,10 @@ def _bare_L():
     return WindFarmNetwork(cables=2, **_SITE).L.copy()
 
 
-def test_set_turbine_powers_declares_unequal_or_uniform_power():
+def test_set_terminal_power_declares_unequal_or_uniform_power():
     L = _bare_L()
     L.nodes[0]['inflow'] = 2
-    set_turbine_powers(L, [1.0, 1.25], 'MW')
+    set_terminal_power(L, [1.0, 1.25], 'MW')
     assert L.graph['powers_set'] == (Fraction(1), Fraction(5, 4))
     assert L.graph['power_unit'] == 'MW'
     assert 'power_per_inflow' not in L.graph
@@ -247,13 +247,13 @@ def test_set_turbine_powers_declares_unequal_or_uniform_power():
         {'kind': 'wtg', 'power': Fraction(5, 4)},
     ]
 
-    set_turbine_powers(L, [0.5, 0.5])
+    set_terminal_power(L, [0.5, 0.5])
     assert L.graph['power_per_inflow'] == Fraction(1, 2)
     assert not {'powers_set', 'power_unit'} & L.graph.keys()
     assert all(dict(L.nodes[t]) == {'kind': 'wtg'} for t in range(2))
 
     with pytest.raises(ValueError, match='entries but T='):
-        set_turbine_powers(L, [1.0])
+        set_terminal_power(L, [1.0])
 
 
 @pytest.mark.parametrize(

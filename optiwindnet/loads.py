@@ -18,12 +18,11 @@ from .types import Topology
 __all__ = (
     'bfs_subtree_loads',
     'calcload',
+    'nonunit_inflow',
     'quantize_for_capacity',
     'quantized',
-    'set_turbine_powers',
+    'set_terminal_power',
     'split_rings_and_calc_loads',
-    'terminal_inflow',
-    'terminal_power_attrs',
     'total_inflow',
     'validate_terminal_power',
 )  # fmt: skip
@@ -412,7 +411,7 @@ def total_inflow(G: nx.Graph) -> int:
     return sum(G.nodes[t].get('inflow', 1) for t in range(G.graph['T']))
 
 
-def terminal_inflow(G: nx.Graph) -> dict[int, int]:
+def nonunit_inflow(G: nx.Graph) -> dict[int, int]:
     """Return terminal injections differing from one inflow, keyed by node."""
     return {
         t: inflow
@@ -500,18 +499,7 @@ def validate_terminal_power(G: nx.Graph) -> None:
         graph['power_quantization_inexact'] = inexact
 
 
-def terminal_power_attrs(G: nx.Graph) -> dict[int, dict]:
-    """Return the terminal attributes that declare power, keyed by node.
-
-    These are ``'power'`` if ``G`` has ``'powers_set'``, and ``'inflow'`` other
-    than one otherwise.
-    """
-    if 'powers_set' in G.graph:
-        return {t: {'power': G.nodes[t]['power']} for t in range(G.graph['T'])}
-    return {t: {'inflow': inflow} for t, inflow in terminal_inflow(G).items()}
-
-
-def _clear_turbine_powers(G: nx.Graph) -> None:
+def _clear_terminal_power(G: nx.Graph) -> None:
     """Remove the terminals' power and inflow and the graph's power attributes."""
     nodes = G.nodes
     for t in range(G.graph['T']):
@@ -521,7 +509,7 @@ def _clear_turbine_powers(G: nx.Graph) -> None:
         G.graph.pop(key, None)
 
 
-def set_turbine_powers(
+def set_terminal_power(
     L: nx.Graph,
     powers: Sequence[float | Fraction] | np.ndarray,
     power_unit: str | None = None,
@@ -540,7 +528,7 @@ def set_turbine_powers(
       ValueError: ``powers`` are not ``T`` positive finite numbers.
     """
     fractions = _validated_powers(powers, L.graph['T'])
-    _clear_turbine_powers(L)
+    _clear_terminal_power(L)
     powers_set = tuple(sorted(set(fractions)))
     if len(powers_set) == 1:
         L.graph['power_per_inflow'] = powers_set[0]

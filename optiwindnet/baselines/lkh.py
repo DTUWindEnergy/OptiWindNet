@@ -25,9 +25,9 @@ from ..interarraylib import add_link_blockmap
 from ..loads import (
     DEFAULT_POWER_RTOL,
     calcload,
+    nonunit_inflow,
     quantized,
     split_rings_and_calc_loads,
-    terminal_inflow,
     total_inflow,
 )
 from ..repair import repair_routeset_path
@@ -1005,7 +1005,7 @@ def lkh3(
     A, capacity, power_attrs = quantized(
         A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
     )
-    inflow_by_node = terminal_inflow(A)
+    inflow_by_node = nonunit_inflow(A)
     if inflow_by_node and (ringed or balanced or R > 1):
         raise NotImplementedError(
             "lkh3() honours a terminal 'inflow' other than 1 only for an "

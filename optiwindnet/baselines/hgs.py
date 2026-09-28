@@ -17,9 +17,9 @@ from ..identity import fingerprint_function
 from ..loads import (
     DEFAULT_POWER_RTOL,
     calcload,
+    nonunit_inflow,
     quantized,
     split_rings_and_calc_loads,
-    terminal_inflow,
     total_inflow,
 )
 from ..repair import repair_routeset_path
@@ -223,7 +223,7 @@ def _solve_single_root(
     coordinates = np.hstack((rootC, VertexC[:T].T, *((rootC,) * num_slack)))
 
     demands = None
-    inflow_by_node = terminal_inflow(A)
+    inflow_by_node = nonunit_inflow(A)
     if inflow_by_node:
         # The depot precedes the terminals in the demand array.
         # hgs_cvrp() rejects balanced solves with nonunitary inflow.
@@ -474,7 +474,7 @@ def hgs_cvrp(
     )
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
-    inflow_by_node = terminal_inflow(A)
+    inflow_by_node = nonunit_inflow(A)
     if inflow_by_node and (ringed or balanced or R > 1):
         raise NotImplementedError(
             "hgs_cvrp() honours a terminal 'inflow' other than 1 only for an "

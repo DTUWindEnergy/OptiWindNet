@@ -16,8 +16,8 @@ from optiwindnet.loads import (
     _add_ring_to_S,
     bfs_subtree_loads,
     calcload,
+    nonunit_inflow,
     split_rings_and_calc_loads,
-    terminal_inflow,
     validate_terminal_power,
 )
 from optiwindnet.MILP import Topology
@@ -158,8 +158,8 @@ def test_terminal_inflow_reports_only_the_departures_from_unitary_inflow():
     S = _chain_S(4, (1, 2, 1, 3))
     S.add_node(-1, inflow=99)  # a root sources nothing; it is never reported
 
-    assert terminal_inflow(S) == {1: 2, 3: 3}
-    assert terminal_inflow(_chain_S(4)) == {}
+    assert nonunit_inflow(S) == {1: 2, 3: 3}
+    assert nonunit_inflow(_chain_S(4)) == {}
 
 
 def test_nominal_export_preserves_integer_loads_with_clones_and_open_ring():

@@ -33,13 +33,13 @@ from .importer import (
 from .interarraylib import assign_cables
 from .loads import (
     DEFAULT_POWER_RTOL,
-    _clear_turbine_powers,
+    _clear_terminal_power,
     _is_positive_integer,
     _validated_capacity_nominal,
     _validated_rtol,
+    nonunit_inflow,
     quantized,
-    set_turbine_powers,
-    terminal_inflow,
+    set_terminal_power,
     total_inflow,
     validate_terminal_power,
 )
@@ -312,7 +312,7 @@ class WindFarmNetwork:
                     L_power_unit,
                 )
             if declared or turbine_powers is not None:
-                _clear_turbine_powers(L)
+                _clear_terminal_power(L)
             if turbine_powers is not None:
                 inflow = _validated_inflow(turbine_powers, T)
                 nx.set_node_attributes(
@@ -333,7 +333,7 @@ class WindFarmNetwork:
                     )
                 validate_terminal_power(L)
             else:
-                set_turbine_powers(L, turbine_powers, power_unit)
+                set_terminal_power(L, turbine_powers, power_unit)
         self._assign_cables(cables)
 
     # -------- helpers --------
@@ -496,7 +496,7 @@ class WindFarmNetwork:
             if 'powers_set' in L.graph:
                 return [L.nodes[t]['power'] for t in range(T)]
             return [Fraction(L.graph.get('power_per_inflow', 1))] * T
-        if not terminal_inflow(L):
+        if not nonunit_inflow(L):
             return None
         return [L.nodes[t].get('inflow', 1) for t in range(T)]
 
@@ -1167,7 +1167,7 @@ class MILPRouter(Router):
         solver = self.solver
         capacity_kwargs = self._capacity_kwargs(A, cables_capacity)
         A_solve, capacity, _ = quantized(A, **capacity_kwargs)
-        has_nonunit_inflow = bool(terminal_inflow(A_solve))
+        has_nonunit_inflow = bool(nonunit_inflow(A_solve))
 
         if not self.warmup:
             # master switch off: solve cold, ignoring any carried/provided solution
@@ -1270,7 +1270,7 @@ class MILPRouter(Router):
         if (
             mo['topology'] is Topology.BRANCHED
             and count_kwargs['vehicles'] is None
-            and not terminal_inflow(A_solve)
+            and not nonunit_inflow(A_solve)
         ):
             straight = mo['feeder_route'] == 'straight'
             return S_from_G(

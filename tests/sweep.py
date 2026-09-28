@@ -82,7 +82,7 @@ from optiwindnet.converting import (
     linkbits_from_S,
 )
 from optiwindnet.identity import linkset_id
-from optiwindnet.loads import calcload, split_rings_and_calc_loads, terminal_inflow
+from optiwindnet.loads import calcload, nonunit_inflow, split_rings_and_calc_loads
 from optiwindnet.MILP._core import physical_core_count
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.types import Topology
@@ -626,7 +626,7 @@ def load_solution(db_path: Path | str, row_id: int) -> tuple[nx.Graph, SiteBundl
         raise ValueError(f'available links of {row["site"]!r} changed since the run')
     S = S_from_linkbits(deserialize(row['linkbits']), A)
     topology = Topology(json.loads(row['extras']).get('topology', 'branched'))
-    nx.set_node_attributes(S, terminal_inflow(A), 'inflow')
+    nx.set_node_attributes(S, nonunit_inflow(A), 'inflow')
     if topology is Topology.RINGED:
         split_rings_and_calc_loads(S, A)
     else:

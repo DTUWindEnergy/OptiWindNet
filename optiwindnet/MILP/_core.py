@@ -27,9 +27,9 @@ from ..interarraylib import directed_links
 from ..loads import (
     DEFAULT_POWER_RTOL,
     calcload,
+    nonunit_inflow,
     quantized,
     split_rings_and_calc_loads,
-    terminal_inflow,
     total_inflow,
     validate_terminal_power,
 )
@@ -750,8 +750,8 @@ class Solver(abc.ABC):
         )
         self.P, self.A = P, A
         self.model_options = ModelOptions(**model_options)
-        inflow = terminal_inflow(A)
-        if warmstart is not None and terminal_inflow(warmstart) != inflow:
+        inflow = nonunit_inflow(A)
+        if warmstart is not None and nonunit_inflow(warmstart) != inflow:
             # a warm start quantized otherwise carries loads in other inflow
             warmstart = warmstart.copy()
             for t in range(A.graph['T']):
@@ -892,7 +892,7 @@ class Solver(abc.ABC):
         A = self.A
         S = S_from_linkbits(linkbits, A)
         # Preserve terminal inflow so validation can reproduce the loads.
-        nx.set_node_attributes(S, terminal_inflow(A), 'inflow')
+        nx.set_node_attributes(S, nonunit_inflow(A), 'inflow')
         if topology is Topology.RINGED:
             # the bits close every ring: this only splits the arms and
             # derives their loads, in the form every ringed producer uses

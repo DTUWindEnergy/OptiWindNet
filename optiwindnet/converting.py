@@ -16,7 +16,7 @@ import numpy as np
 from bitarray import bitarray, frozenbitarray
 
 from .identity import _CANONICAL_TERMINAL_LINKS
-from .loads import calcload, terminal_power_attrs, validate_terminal_power
+from .loads import calcload, nonunit_inflow, validate_terminal_power
 from .terse import TerseLinks
 from .types import Topology
 
@@ -633,9 +633,9 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
 
     The returned location graph ``L`` retains only roots, nodes and basic graph
     attributes. All edges and remaining attributes are not carried from ``G``.
-    Of the turbine power, only the declaration is kept (see
-    :func:`~optiwindnet.loads.terminal_power_attrs`), not the quantization of
-    the solve.
+    Of the turbine power, only the declaration is kept (terminal ``'power'``
+    under ``'powers_set'``, otherwise ``'power_per_inflow'`` and the inflow
+    other than one), not the quantization of the solve.
 
     Args:
       G: routeset graph to extract site data from.
@@ -670,7 +670,10 @@ def L_from_G(G: nx.Graph) -> nx.Graph:
         ((n, {'label': label}) for n, label in G.nodes(data='label') if 0 <= n < T),
         kind='wtg',
     )
-    nx.set_node_attributes(L, terminal_power_attrs(G))
+    if 'powers_set' in G.graph:
+        nx.set_node_attributes(L, {t: G.nodes[t]['power'] for t in range(T)}, 'power')
+    else:
+        nx.set_node_attributes(L, nonunit_inflow(G), 'inflow')
     for r in range(-R, 0):
         L.add_node(r, label=G.nodes[r].get('label'), kind='oss')
     return L

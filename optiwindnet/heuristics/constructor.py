@@ -23,9 +23,9 @@ from ..interarraylib import add_link_blockmap, add_terminal_closest_root
 from ..loads import (
     DEFAULT_POWER_RTOL,
     calcload,
+    nonunit_inflow,
     quantized,
     split_rings_and_calc_loads,
-    terminal_inflow,
 )
 from ..types import Topology
 from .priorityqueue import PriorityQueue
@@ -138,7 +138,7 @@ def constructor(
     Aʹ, capacity, power_attrs = quantized(
         Aʹ, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
     )
-    if terminal_inflow(Aʹ):
+    if nonunit_inflow(Aʹ):
         raise NotImplementedError(
             'constructor() fills a subtree up to `capacity` terminals, so it '
             "cannot honour a terminal 'inflow' other than 1."

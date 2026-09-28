@@ -23,7 +23,7 @@ from scipy.spatial import ConvexHull
 
 from .converting import L_from_site
 from .geometric import rotating_calipers
-from .loads import _validated_powers, set_turbine_powers
+from .loads import _validated_powers, set_terminal_power
 from .utils import make_handle
 
 _lggr = logging.getLogger(__name__)
@@ -308,7 +308,7 @@ def L_from_yaml(
       LABEL [234.2, 5212.5]
 
     The optional ``TURBINE`` section declares the turbines' nominal power in
-    MW (see :func:`~optiwindnet.loads.set_turbine_powers`), with graph
+    MW (see :func:`~optiwindnet.loads.set_terminal_power`), with graph
     attribute ``'power_unit'`` set to ``'MW'``. A mapping states one
     ``power_MW`` for the whole site; a
     list states one entry per turbine model, each claiming its turbines by
@@ -461,7 +461,7 @@ def L_from_yaml(
             parsed_dict.get('TURBINE'), T, name, TerminalLabel
         )
         if turbine_powers is not None:
-            set_turbine_powers(G, turbine_powers, 'MW')
+            set_terminal_power(G, turbine_powers, 'MW')
     return G
 
 
@@ -529,7 +529,7 @@ def L_from_pbf(
     """Import wind farm data from .osm.pbf file.
 
     Generators tagged with ``generator:output:electricity`` declare their
-    nominal power (see :func:`~optiwindnet.loads.set_turbine_powers`) and
+    nominal power (see :func:`~optiwindnet.loads.set_terminal_power`) and
     set the graph attribute ``'power_unit'``, provided every generator declares
     a positive output in a common unit.
 
@@ -743,7 +743,7 @@ def L_from_pbf(
     )
     if declaration is not None:
         turbine_powers, power_unit = declaration
-        set_turbine_powers(L, turbine_powers, power_unit or None)
+        set_terminal_power(L, turbine_powers, power_unit or None)
     if border_list:
         border = np.array(border_list, dtype=np.int_)
         L.graph['border'] = border
