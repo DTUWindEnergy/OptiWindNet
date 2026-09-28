@@ -26,11 +26,11 @@ Neither classical formulation accounts for route crossings. _OptiWindNet_ extend
 
 A low-cost network is often the practical goal. The built-in routers seek a short feasible network: their optimization objective is cable length, which often correlates strongly with total cable cost. When cable types have different prices per unit of length, the shortest feasible network need not be the cheapest.
 
-The routers select a solution topology `S` using the lengths of available links and feeders. Path-finding then adds any necessary detours to produce the physical routeset `G`, so its total cable length can exceed the objective value used by a solver. If priced cable types are supplied, _OptiWindNet_ assigns a type to each routed link according to its load and reports the sum of routed length times that type's price per unit of length. This is the **cost of the resulting network**, not a claim that its cost is minimal. See [](/reference/input_formats.md#cable-types) for cable inputs and [](/routers.md#exact-optimization) for the meaning of a MILP optimality gap.
+The routers select a solution topology `S` using the lengths of available links and feeders. Path-finding then adds any necessary detours to produce the physical routeset `G`, so its total cable length can exceed the objective value used by a solver. If priced cable types are supplied, _OptiWindNet_ assigns a type to each routed link according to its load and reports the sum of routed length times that type's price per unit of length. This is the **cost of the resulting network**, not a claim that its cost is minimal. See [](/reference/power.md#cable-specifications) for cable inputs and [](/routers.md#exact-optimization) for the meaning of a MILP optimality gap.
 
 The complete mixed-integer formulation is given in [](/reference/milp_formulation.md#milp-formulation).
 
-Turbines are assumed to have equal power by default, which translates to unitary power inflow from each turbine node in the graph model; unequal ratings can be declared in explicit power units. See [](/reference/input_formats.md#turbines-of-unequal-output).
+Turbines are assumed to have equal power by default, which translates to unitary power inflow from each turbine node in the graph model; unequal ratings can be declared in explicit power units. See [](/reference/power.md#power-inputs-and-defaults).
 
 A detailed analysis of the methodology is available in the open-access article referenced in {doc}`/paper`.
 

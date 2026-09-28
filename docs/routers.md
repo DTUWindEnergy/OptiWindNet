@@ -49,7 +49,7 @@ Those differences must be taken into account when chaining routers; see [](/rout
 
 _In use:_ {doc}`/notebooks/hi31_options` (Network/Router API) · {doc}`/notebooks/lo30_topologies` (Advanced API).
 
-The capability table assumes uniform turbine power. Unequal powers restrict supported topologies and feeder limits; see [](/reference/input_formats.md#turbines-of-unequal-output). Some unsupported option combinations raise errors; others are ignored with a warning, including MILP balancing when the feeder count is not pinned.
+The capability table assumes uniform turbine power. Unequal powers restrict supported topologies and feeder limits; see [](/reference/power.md#router-support). Some unsupported option combinations raise errors; others are ignored with a warning, including MILP balancing when the feeder count is not pinned.
 
 ## Constructive heuristics
 
@@ -137,9 +137,45 @@ _In use:_ {doc}`/notebooks/hi31_options` (Network/Router API) · {doc}`/notebook
 
 ## Warm-starting
 
-A feasible solution supplied up front lets a MILP solver start from a known bound instead of searching for its first incumbent, which may shorten the time to a small gap. A constructive heuristic or a meta-heuristic produces a solution, and the MILP model starts from it.
+A feasible solution supplied up front gives a MILP solver its first incumbent and a known bound, which may shorten the time to a small gap. A constructive heuristic or meta-heuristic can produce that initial solution.
 
-A warm start is only usable if it satisfies the model it is given to. The model checks it against its own definition and refuses it at the first failure. Its **topology** and the model's must match, with a single exception: a radial warm start also satisfies a branched model, since a path is a valid tree. Every **link** it uses must exist in the model, which holds whenever both derive from the same available-link set `A`. And every **constraint** the model enforces must hold. The last check is where the capability gaps in [](/routers.md#which-constraints-each-approach-can-enforce) become concrete, one model option at a time:
+### Automatic warm starts with MILPRouter
+
+{py:class}`MILPRouter <optiwindnet.api.MILPRouter>` warm-starts by default. When optimizing a `WindFarmNetwork`, it:
+
+1. Tries the solution already carried by the network, if there is one.
+2. Attempts to build a suitable solution if none is available or the model refuses the existing one, subject to the producer restrictions below.
+3. Solves cold if no accepted warm start is available.
+
+| Setting | Effect |
+| --- | --- |
+| `warmup=True` (default) | Enable reuse and construction of a warm start. |
+| `warmup=False` | Disable both, even when the network already has a solution. |
+| `warmup_time=0.2` (default, seconds) | Budget the HGS warm-start search, capped by `time_limit`. Repair retries can extend it; the constructive heuristic runs without a budget. |
+
+For unitary inflow, the router uses the constructive heuristic for a branched model with `feeder_limit='unlimited'`, keeping links clear of feeder routes when straight feeders are required. For other models it uses HGS with its feeder count set to the model's bounds, where HGS can produce the requested solution. Unequal powers restrict the available producers; see [](/reference/power.md#router-support).
+
+### Supplying a warm start in the Advanced API
+
+Pass a topology `S` explicitly:
+
+```python
+solver.set_problem(P, A, model_options=options, capacity=capacity, warmstart=S)
+```
+
+All arguments after `P` and `A` are keyword-only. For nominal power inputs, use `capacity_nominal` according to [](/reference/power.md#quantization-contract).
+
+`set_problem()` checks the supplied topology and raises `OWNWarmupFailed` at the first incompatibility. It does not construct a replacement: the caller must supply another warm start or omit it to solve cold. Automatic replacement belongs to `MILPRouter`.
+
+### Warm-start acceptance requirements
+
+A warm start must satisfy all of the target model's requirements:
+
+- **Topology:** the topologies must match, except that a radial warm start also satisfies a branched model because a path is a valid tree.
+- **Links:** every link in the warm start must exist in the model. Using the same available-links graph `A` for both ensures this.
+- **Constraints:** every enforced model constraint must hold, including feeder routing, feeder count and balancing.
+
+The table helps choose a fast producer for each option. Its rows are cumulative, not independent guarantees of acceptance. It assumes unitary inflow; for nonunitary inflow, apply [](/reference/power.md#router-support) as well.
 
 | Model option | What it demands of a warm start | Fast routers that produce it |
 | --- | --- | --- |
@@ -153,15 +189,16 @@ A warm start is only usable if it satisfies the model it is given to. The model 
 | `feeder_limit='exactly'` | exactly `max_feeders` feeders | `HGSRouter(feeder_limit=max_feeders, feeder_exact=True, balanced=True)`, single substation only |
 | `balanced=True` | turbine counts per feeder differing by at most one, with unitary inflow | `HGSRouter(balanced=True)`, with the feeder count pinned |
 
-The requirements are cumulative: a model imposes all of them at once, and no single option decides acceptance on its own. The two fast routers satisfy disjoint subsets of them. A constructive heuristic does not constrain the feeder count, so its feeder count must be checked before using it to warm-start a model that constrains the count, but it is the only router that can be required to keep the links clear of the feeder routes. HGS constrains the feeder count and the load balance, and its solutions are repaired until no two non-feeder links cross, but that repair does not examine the feeders — a link blocking a feeder route may remain. Under `feeder_route='segmented'` this is not a defect, since path-finding detours the feeder around the link; a straight-feeder model forbids the detour and refuses such a solution. Some models consequently have no fast producer at all, `feeder_route='straight'` together with a constrained feeder count being the clearest example.
+### Constraint combinations and producer limits
 
-Two restrictions apply to the last column. Option `balanced` is only enforced where the feeder count is pinned to a single value (`'minimum'` or `'exactly'`), which is where the router settings above pin it. For a ringed model, `max_feeders` and the router's `feeder_limit` both count substation connections, two per ring, so either must be even; an exact count is also limited to one ring per two turbines.
+A constructive heuristic can be required to keep links clear of straight feeder routes, but it cannot constrain the feeder count. Check its actual count before using its solution to warm-start a model with a feeder-count constraint.
 
-A solution that does not fit can be replaced instead of dropped: a heuristic matched to the model's topology and feeder limit attempts to build a fitting one. The model itself does not arrange that — it accepts the warm start it is given or refuses it — so wherever the warm start is passed explicitly, replacing a refused one is the caller's move. {py:class}`MILPRouter <optiwindnet.api.MILPRouter>` is the exception, and the only one: it warm-starts by default, starting from the solution its network already carries when the model takes it and building a replacement when it does not, with `warmup` and `warmup_time` to switch that off or to budget the build. It builds the replacement with the constructive heuristic for a branched model with `feeder_limit='unlimited'`, keeping the links clear of the feeder routes if the model requires straight ones, and with HGS, its feeder count set to the model's bounds, for every other model. Either way, a model that no quickly built solution fits is solved cold.
+HGS can constrain the feeder count and load balance. Its crossing repair, however, examines non-feeder links only, so a link blocking a feeder route may remain. A segmented-feeder model permits path-finding to detour around that link; a straight-feeder model forbids the detour and refuses the solution. Consequently, no fast producer guarantees a fitting warm start for every combination — straight feeders together with a constrained feeder count are one example.
 
-`warmup_time` defaults to 0.2 seconds and bounds the HGS search, capped by `time_limit`; HGS repair retries can extend it, and the constructive heuristic runs without a budget. `warmup=False` disables both construction and reuse, even when the network already has a solution. With unequal turbine powers, fewer models can be warm-started; see [](/reference/input_formats.md#turbines-of-unequal-output).
+Two additional restrictions apply to the producer settings in the table:
 
-In the Advanced API, supply a topology through `solver.set_problem(P, A, model_options=options, capacity=capacity, warmstart=S)`. This call does not build a replacement warm start; an incompatible one raises `OWNWarmupFailed`. All arguments after `P` and `A` are keyword-only.
+- **Balancing:** `balanced` is enforced only when the feeder count is pinned to one value (`'minimum'` or `'exactly'`).
+- **Rings:** `max_feeders` and the router's `feeder_limit` count substation connections, two per ring, so either must be even. An exact count is also limited to one ring per two turbines.
 
 _In use:_ {doc}`/notebooks/hi31_options` and {doc}`/notebooks/hi40_example_taylor_2023` (Network/Router API) · {doc}`/notebooks/lo40_example_taylor_2023` (Advanced API).
 

@@ -22,13 +22,13 @@ feeder
   The link from a substation to the first turbine in a subtree or an arm of a ring.
 
 capacity
-  The maximum load a cable can carry. Routers represent it as integer inflow; user inputs can instead declare nominal power with an explicit unit. With unitary inflow, it counts turbines. See [](/reference/input_formats.md#cable-types).
+  The maximum load a cable can carry. Routers represent it as integer inflow; user inputs can instead declare nominal power with an explicit unit. With unitary inflow, it counts turbines. See [](/reference/power.md#cable-specifications).
 
 load
-  The cumulative inflow carried by a node or link. At a turbine, this includes its own contribution and those of the turbines feeding into it. Load counts turbines only when each contributes one unit. Nominal loads sum the declared turbine powers; cable assignment uses nominal loads when capacities are nominal power.
+  The cumulative inflow carried by a node or link. At a turbine, this includes its own contribution and those of the turbines feeding into it. Load counts turbines only when each contributes one unit. Nominal loads sum the declared turbine powers; cable assignment uses nominal loads when capacities are nominal power. See [](/reference/power.md#interpreting-results).
 
 inflow
-  A turbine's positive integer contribution to the solver's flow, defaulting to one. Unequal nominal powers are quantized to integer inflow for the selected cable capacity; see [](/reference/input_formats.md#turbines-of-unequal-output).
+  A turbine's positive integer contribution to the solver's flow, defaulting to one. Unequal nominal powers are quantized to integer inflow for the selected cable capacity; see [](/reference/power.md#quantization).
 
 link
   An electrical connection between two nodes, considered without regard to how the cable is physically routed.

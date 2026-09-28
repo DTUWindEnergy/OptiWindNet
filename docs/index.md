@@ -40,7 +40,7 @@ The tool is distributed as the open-source Python package **optiwindnet**, which
 
 **{doc}`/high_level_api`** and **{doc}`/low_level_api`** are the two sets of worked notebooks. Most notebooks have a counterpart in the other section that performs the same task.
 
-**Reference** holds the lookup material, meant to be consulted rather than read through: the {doc}`/reference/tasks` finds a page by what you are trying to do, plus the {doc}`/reference/glossary`, {doc}`/reference/input_formats`, {doc}`/reference/solvers`, {doc}`/reference/milp_formulation`, {doc}`/reference/validation` and the generated {doc}`API Reference </autoapi/index>`.
+**Reference** holds the lookup material, meant to be consulted rather than read through: the {doc}`/reference/tasks` finds a page by what you are trying to do, plus the {doc}`/reference/glossary`, {doc}`/reference/input_formats`, {doc}`/reference/power`, {doc}`/reference/solvers`, {doc}`/reference/milp_formulation`, {doc}`/reference/validation` and the generated {doc}`API Reference </autoapi/index>`.
 
 **Papers** holds the two scientific articles behind the tool: {doc}`/paper` presents the framework and reproduces the computational experiments of the article below, while {doc}`/dataset` presents the open database of routing solutions produced with it.
 
@@ -107,6 +107,7 @@ low_level_api
 reference/tasks
 reference/glossary
 reference/input_formats
+reference/power
 reference/solvers
 reference/milp_formulation
 reference/validation

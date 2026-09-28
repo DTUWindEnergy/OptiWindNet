@@ -923,6 +923,7 @@ class EWRouter(Router):
             using a cyclic path starting and ending on a substation (also uses
             ``bias_margin``). Since each turbine group has two feeders, a ring can
             generate up to twice the total power of the groups in other topologies.
+
         Args:
           maxiter: Maximum iterations.
           feeder_route: Feeder routing mode (``'segmented'`` or ``'straight'``).

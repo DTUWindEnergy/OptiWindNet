@@ -12,6 +12,7 @@ Worth consulting as needed:
 - [`../reference/tasks.md`](../reference/tasks.md) — a task-oriented index into all of the above
 - [`../reference/glossary.md`](../reference/glossary.md) — the vocabulary used throughout
 - [`../reference/input_formats.md`](../reference/input_formats.md) — input formats and location repositories
+- [`../reference/power.md`](../reference/power.md) — turbine power, cable capacity, and load interpretation
 - [`../reference/solvers.md`](../reference/solvers.md) — the MILP backends and how to install them
 
 ## Naming scheme
