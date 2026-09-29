@@ -33,7 +33,7 @@ radial
   Each subtree follows a single path from a substation through its turbines. A turbine has at most two neighbors, so cables do not branch there. This simplifies switchgear but may increase cable length.
 
 ringed
-  Turbines are arranged in loops that begin and end at a substation, or connect two substations that are implicitly electrically interconnected. Only substations may belong to more than one loop. Each turbine has exactly two neighbors, except that a loop serving just one turbine is represented by a single link.
+  Turbines are arranged in cycles that begin and end at a substation, or connect two substations that are implicitly electrically interconnected. Only substations may belong to more than one cycle. Each turbine has exactly two neighbors, except that a cycle serving just one turbine is represented by a single link.
 ```
 
 The following figure shows the same example wind farm solved under each topology:
