@@ -624,13 +624,13 @@ def _nearest_root_star(A):
 def test_star_topology_routes_within_default_budget(site):
     """Near-star topologies leave most triangles with three portals.
 
-    Paths bending at barrier-free vertices are pruned, so the search ends before
+    Paths bending at wall-free vertices are pruned, so the search ends before
     ``iterations_limit`` and the detoured routeset is valid.
     """
     bundle = get_bundle(site, read_powers=False)
     S = _nearest_root_star(bundle.A)
     pf = PathFinder(G_from_S(S, bundle.A), planar=bundle.P, A=bundle.A)
-    assert pf.free_vertices
+    assert pf.wall_free_vertices
     assert pf.iterations < pf.iterations_limit
 
     G = pf.create_detours()

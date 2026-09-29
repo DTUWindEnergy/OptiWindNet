@@ -28,9 +28,9 @@ _lggr = logging.getLogger(__name__)
 debug, info, warn, error = _lggr.debug, _lggr.info, _lggr.warning, _lggr.error
 
 NULL = np.iinfo(int).min
-# Minimum turn (rad) at a free vertex for it to count as a bend; below this the
+# Minimum turn (rad) at a wall-free vertex for it to count as a bend; below this the
 # path merely grazes the vertex (e.g. collinear turbines in a grid).
-FREE_APEX_TURN_EPS = 1e-9
+_WALL_FREE_APEX_TURN_EPS = 1e-9
 PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn')
 # Terminology used by PathFinder internals:
 #   wall: one non-traversable mesh segment; route walls are contour edges of
@@ -53,10 +53,11 @@ PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn')
 #     the fence's own inside/outside, which is not traversable.
 #   prime: a geometry vertex id; pn_id: a pseudonode id in the PathNodes tree.
 # Funnel mechanics:
-#   portal advance: one `traverser.send((portal, side))` step that feeds a new
-#     vertex `_new = portal[side]` into the funnel. It is the unit of channel
-#     progress; whether the funnel narrows or the apex moves is decided
-#     downstream, inside `_traverse_channel`, from the geometry of `_new`.
+#   portal advance: one `traverser.send((portal, side, phantom))` step that
+#     feeds a new vertex `_new = portal[side]` into the funnel. It is the unit
+#     of channel progress; whether the funnel narrows or the apex moves is
+#     decided downstream, inside `_traverse_channel`, from the geometry of
+#     `_new`. Phantom advances (dead-end triangles) commit at once, unrated.
 #   apex (lagging): the funnel's convergence vertex (`_apex` / `apex`). It
 #     stays fixed across "inside" portal advances and only moves when an
 #     ultrafar or infranear step forces a wapex walk-back. Comments separate
@@ -642,10 +643,10 @@ class PathFinder:
         }
         portal_set = (edges_P - edges_G_primes) - constraint_edges
         self.portal_set = portal_set | {(v, u) for u, v in portal_set}
-        # Free vertices have only portals around them (no wall touches them),
+        # Wall-free vertices have only portals around them (no wall touches them),
         # so a shortest path never bends at one: an advancer whose funnel apex
-        # lands on a free vertex can only produce dominated paths.
-        self.free_vertices = frozenset(
+        # lands on a wall-free vertex can only produce dominated paths.
+        self.wall_free_vertices = frozenset(
             n
             for n in P.nodes
             if 0 <= n < ST and all((n, m) in self.portal_set for m in P[n])
@@ -1000,7 +1001,10 @@ class PathFinder:
         traverser = self._traverse_channel(adv_id, *funnel_state)
         next(traverser)
         if side is not None:
-            prio, is_promising = traverser.send((portal, side))
+            try:
+                prio, is_promising = traverser.send((portal, side, False))
+            except StopIteration:
+                return
             yield prio, portal, is_promising
             next(traverser)
             # NOTE: do NOT fire portal-side-trigger here — this branch only runs for
@@ -1066,10 +1070,8 @@ class PathFinder:
                 )
                 if access is not None and num_traversals[(n, n)] < traversals_limit:
                     chain, c_side = access
-                    traverser.send(((left, n), 1))
-                    next(traverser)
-                    traverser.send(((n, right), 0))
-                    next(traverser)
+                    traverser.send(((left, n), 1, True))
+                    traverser.send(((n, right), 0, True))
                     num_traversals[(n, n)] += 1
                     self._walk_chain(
                         n,
@@ -1079,8 +1081,7 @@ class PathFinder:
                         is_triangle_seen,
                     )
                 elif 0 <= n < T:
-                    prio, is_promising = traverser.send(((left, n), 1))
-                    next(traverser)
+                    traverser.send(((left, n), 1, True))
                 debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
                 return
             # process  portal
@@ -1088,7 +1089,10 @@ class PathFinder:
                 portal, side = portal_left, 1
             else:
                 portal, side = portal_right, 0
-            prio, is_promising = traverser.send((portal, side))
+            try:
+                prio, is_promising = traverser.send((portal, side, False))
+            except StopIteration:
+                return
             yield prio, portal, is_promising
             next(traverser)
             # portal-side-trigger: the portal-advance next step y=n is a chain-end.
@@ -1713,8 +1717,11 @@ class PathFinder:
     ) -> Generator[Any, Any, None]:
         # The yielded shape depends on the protocol phase, so it cannot be typed
         # more precisely than Any: a bare `yield` asks for the next
-        # (portal, side); sending None yields the 6-tuple funnel state; sending
-        # a (portal, side) yields (prio, is_promising).
+        # (portal, side, phantom); sending None yields the 6-tuple funnel
+        # state; sending (portal, side, False) yields (prio, is_promising), or
+        # returns if the advancer is dead, and the following `next()` commits
+        # the step; sending (portal, side, True) commits the step at once, with
+        # no yield and no dead-apex check.
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
         #     - _node: the index it contains maps to a coordinate in VertexC
@@ -1747,7 +1754,7 @@ class PathFinder:
         num_traversals = self.num_traversals
         bad_streak_limit = self.bad_streak_limit
         turn_limit = self.turn_limit
-        free_vertices = self.free_vertices
+        wall_free_vertices = self.wall_free_vertices
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         while True:
@@ -1764,9 +1771,9 @@ class PathFinder:
                     bad_streak,
                 )
                 continue
-            portal, side = portal_step
-            #  trace('<%d> got (portal, side)', adv_id)
-            dead = False
+            portal, side, phantom = portal_step
+            #  trace('<%d> got (portal, side, phantom)', adv_id)
+            apex_on_wall_free = False
 
             _new = portal[side]
             opposite = portal[1 - side]
@@ -1859,18 +1866,7 @@ class PathFinder:
                         _contender_wapex = paths.prime_from_pn[contender_wapex]
                     _apex = _current_wapex
                     apex = current_wapex
-                    if _apex in free_vertices:
-                        # every later path of this advancer bends at _apex
-                        _gp = paths.prime_from_pn[paths[apex].parent]
-                        ax, ay = VertexC[_apex]
-                        gx, gy = VertexC[_gp]
-                        qx, qy = VertexC[_new]
-                        v1x, v1y = ax - gx, ay - gy
-                        v2x, v2y = qx - ax, qy - ay
-                        turn = math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y)
-                        if abs(turn) > FREE_APEX_TURN_EPS:
-                            debug('<%d> apex on free vertex %d: dead', adv_id, _apex)
-                            dead = True
+                    apex_on_wall_free = _apex in wall_free_vertices
                 else:
                     # not ultrafar nor infranear (⟨new, apex⟩ in line-of-sight)
                     debug('<%d> inside', adv_id)
@@ -1919,6 +1915,14 @@ class PathFinder:
                 v1x, v1y = ax[0] - gp[0], ax[1] - gp[1]
                 v2x, v2y = nv[0] - ax[0], nv[1] - ax[1]
                 step_turn = math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y)
+            if (
+                not phantom
+                and apex_on_wall_free
+                and abs(step_turn) > _WALL_FREE_APEX_TURN_EPS
+            ):
+                # every later path of this advancer bends at _apex
+                debug('<%d> apex on wall-free vertex %d: dead', adv_id, _apex)
+                return
             cum_turn = apex_pn.cum_turn + step_turn
             d_prio = d_new if _new < ST else prio[0]
             score_0 = d_prio
@@ -1939,8 +1943,8 @@ class PathFinder:
                 abs(cum_turn) <= turn_limit or bad_streak <= 1
             )
             prio = (score_0, score_1, score_2)
-            # None marks the advancer as dead for `_find_paths`
-            yield prio, None if dead else is_promising
+            if not phantom:
+                yield prio, is_promising
             #  trace('<%d> traverser after second yield', adv_id)
             new_pn_id = self.paths.add(
                 _new, sector_new, apex_eff, d_new, d_hop, cum_turn
@@ -2083,12 +2087,7 @@ class PathFinder:
                     break
                 _, adv_id, advancer = heapq.heappop(prioqueue)
             else:
-                if is_promising is None:
-                    # advancer is dead (apex on a free vertex)
-                    if not prioqueue:
-                        break
-                    _, adv_id, advancer = heapq.heappop(prioqueue)
-                elif is_promising or num_traversals[portal] < traversals_limit:
+                if is_promising or num_traversals[portal] < traversals_limit:
                     # advancer is still promising, push it back to queue and get top one
                     _, adv_id, advancer = heapq.heappushpop(
                         prioqueue, (prio, adv_id, advancer)
