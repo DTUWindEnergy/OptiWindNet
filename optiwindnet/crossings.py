@@ -458,27 +458,61 @@ def _routeset_polylines(G: nx.Graph) -> list[_RoutePolyline]:
     return polylines
 
 
+def _polyline_primes(
+    VertexC: np.ndarray, fnT: np.ndarray, path: tuple[int, ...]
+) -> np.ndarray:
+    """A path's primes, with consecutive coordinate duplicates collapsed."""
+    primes = fnT[list(path)]
+    if len(primes) <= 1:
+        return primes
+    raw = VertexC[primes]
+    keep = np.empty(len(raw), dtype=bool)
+    keep[0] = True
+    keep[1:] = np.any(raw[1:] != raw[:-1], axis=1)
+    return primes[keep]
+
+
 def _polyline_coords(
     VertexC: np.ndarray, fnT: np.ndarray, path: tuple[int, ...]
 ) -> np.ndarray:
     """(N, 2) coords of a path's primes, with consecutive duplicates collapsed."""
-    raw = VertexC[fnT[list(path)]]
-    if len(raw) <= 1:
-        return raw
-    keep = np.empty(len(raw), dtype=bool)
-    keep[0] = True
-    keep[1:] = np.any(raw[1:] != raw[:-1], axis=1)
-    return raw[keep]
+    return VertexC[_polyline_primes(VertexC, fnT, path)]
 
 
-def _shared_run_swaps_sides(coords_a: np.ndarray, coords_b: np.ndarray) -> bool:
-    """``True`` iff two polylines share an interior run and exit on the same side
-    at each end.
+def _run_end_side(
+    run_ray: np.ndarray, ray_a: np.ndarray, ray_b: np.ndarray, *, angle_tol: float
+) -> int:
+    """Order two rays leaving a run's end, counterclockwise from ``run_ray``.
 
-    When two polylines overlap on a shared sub-sequence of vertices, an actual *cross*
-    requires the two paths to enter the overlap from opposite half-planes and exit to
-    opposite half-planes — equivalently, the orientation (cross-product sign) of the
-    two approach vectors equals that of the two separation vectors.
+    ``run_ray`` points from the end into the run. Returns ``1`` if ``ray_a``
+    comes first, ``-1`` if ``ray_b`` does, and ``0`` if a ray is null or along
+    ``run_ray`` or the two rays coincide.
+    """
+    angles = []
+    for ray in (run_ray, ray_a, ray_b):
+        norm = np.hypot(*ray)
+        if norm == 0.0:
+            return 0
+        angles.append(math.atan2(ray[1], ray[0]))
+    run_angle, angle_a, angle_b = angles
+    angle_a = (angle_a - run_angle) % (2 * math.pi)
+    angle_b = (angle_b - run_angle) % (2 * math.pi)
+    if min(angle_a, angle_b, 2 * math.pi - max(angle_a, angle_b)) <= angle_tol:
+        return 0
+    if abs(angle_a - angle_b) <= angle_tol:
+        return 0
+    return 1 if angle_a < angle_b else -1
+
+
+def _shared_run_swaps_sides(
+    coords_a: np.ndarray, coords_b: np.ndarray, *, angle_tol: float
+) -> bool:
+    """``True`` iff two polylines cross along their longest shared vertex run.
+
+    The run may be traversed in either direction. The polylines cross iff they
+    leave it on opposite sides at both ends, i.e. their exits come in the same
+    counterclockwise order (see :func:`_run_end_side`) at both ends. Both need
+    a segment of context beyond each end of the run.
 
     Operates on raw polyline coords (with consecutive duplicates collapsed) rather
     than canonical prime paths, so root-leg context preserved in the geometry —
@@ -513,22 +547,20 @@ def _shared_run_swaps_sides(coords_a: np.ndarray, coords_b: np.ndarray) -> bool:
     if not (0 < start_a and end_a < Na and 0 < start_b and end_b < Nb):
         return False
 
-    shared_start = coords_a[start_a]
-    shared_end = coords_a[end_a - 1]
-    approach_a = shared_start - coords_a[start_a - 1]
-    approach_b = shared_start - oriented_b[start_b - 1]
-    separation_a = coords_a[end_a] - shared_end
-    separation_b = oriented_b[end_b] - shared_end
-
-    EPS = 1e-15
-
-    def _cross_sign(u, v):
-        c = u[0] * v[1] - u[1] * v[0]
-        return 0 if abs(c) <= EPS else (1 if c > 0 else -1)
-
-    approach_sign = _cross_sign(approach_a, approach_b)
-    separation_sign = _cross_sign(separation_a, separation_b)
-    return approach_sign != 0 and approach_sign == separation_sign
+    ends = (
+        (start_a, start_a + 1, start_a - 1, start_b - 1),
+        (end_a - 1, end_a - 2, end_a, end_b),
+    )
+    sides = [
+        _run_end_side(
+            coords_a[inward] - coords_a[end],
+            coords_a[out_a] - coords_a[end],
+            oriented_b[out_b] - coords_a[end],
+            angle_tol=angle_tol,
+        )
+        for end, inward, out_a, out_b in ends
+    ]
+    return sides[0] != 0 and sides[0] == sides[1]
 
 
 def _split_branch_nodes(
@@ -704,13 +736,88 @@ def _intersection_only_at_excluded(
     return bool(np.all(np.any(dists <= endpoint_tol, axis=1)))
 
 
+@dataclass(frozen=True)
+class _RetracedRun:
+    """A corridor that one open polyline traverses twice.
+
+    ``run_segments``: segment indices of both traversals; ``members``: those
+    plus the segments entering or leaving the corridor; ``vertices``: the
+    corridor's coordinates.
+    """
+
+    run_segments: frozenset[int]
+    members: frozenset[int]
+    vertices: np.ndarray
+    crosses: bool
+
+
+def _retraced_runs(
+    coords: np.ndarray, foreign_turbine_at: list[bool], *, angle_tol: float
+) -> list[_RetracedRun]:
+    """Find the corridors that an open polyline traverses more than once.
+
+    Returns one run per maximal pair of traversals of a common vertex sequence.
+    A pair crosses as decided by :func:`_shared_run_swaps_sides`, except a fold
+    (the route turning back along the corridor), which never crosses. No run is
+    returned for a fold at a vertex flagged in ``foreign_turbine_at``: a
+    turbine with cables off the route, which the fold would wrap around.
+    """
+    n = len(coords)
+    _, vid = np.unique(coords, axis=0, return_inverse=True)
+    vid = vid.ravel().tolist()
+    occurrences: dict[tuple[int, int], list[int]] = {}
+    for k in range(n - 1):
+        u, v = vid[k], vid[k + 1]
+        occurrences.setdefault((u, v) if u < v else (v, u), []).append(k)
+    # (i, j) -> step of j along the corridor: 1 if parallel, -1 if antiparallel
+    pairs = {
+        (i, j): 1 if vid[i] == vid[j] else -1
+        for ks in occurrences.values()
+        for i, j in combinations(ks, 2)
+    }
+
+    runs = []
+    for (i, j), step in pairs.items():
+        if pairs.get((i - 1, j - step)) == step:
+            # not the start of a maximal run
+            continue
+        m = 1
+        while pairs.get((i + m, j + step * m)) == step and (
+            i + m < j if step > 0 else i + m < j - m
+        ):
+            m += 1
+        # segments are i..i+m-1 for traversal a and b_segments for b; the
+        # vertex spans lo:hi extend each by one segment at both ends
+        b_segments = range(j, j + m) if step > 0 else range(j - m + 1, j + 1)
+        fold = step < 0 and b_segments.start == i + m
+        if fold and foreign_turbine_at[i + m]:
+            continue
+        lo_a, hi_a = max(i - 1, 0), min(i + m + 2, n)
+        lo_b, hi_b = max(b_segments.start - 1, 0), min(b_segments.stop + 2, n)
+        runs.append(
+            _RetracedRun(
+                run_segments=frozenset((*range(i, i + m), *b_segments)),
+                members=frozenset((*range(lo_a, hi_a - 1), *range(lo_b, hi_b - 1))),
+                vertices=coords[i : i + m + 1],
+                crosses=not fold
+                and _shared_run_swaps_sides(
+                    coords[lo_a:hi_a], coords[lo_b:hi_b], angle_tol=angle_tol
+                ),
+            )
+        )
+    return runs
+
+
 def _self_intersection_findings(
     polyline: _RoutePolyline,
     prime_path: tuple[int, ...],
     coords: np.ndarray,
     line,
+    foreign_turbine_at: list[bool],
     *,
+    include_touches: bool,
     length_tol: float,
+    angle_tol: float,
     endpoint_tol: float,
 ) -> list[dict[str, Any]]:
     """Return improper intersections between segments of one route.
@@ -718,6 +825,10 @@ def _self_intersection_findings(
     A closed RINGED route has cyclic adjacency at its root. Its two arms may
     also share a corridor or meet at a routing vertex, just as two separate
     radial routes may; only a proper interior crossing is invalid there.
+
+    The intersections of an open route along a corridor it traverses twice
+    (see :func:`_retraced_runs`) are replaced by one ``self_overlap_cross`` if
+    the traversals cross, else by a ``touch`` if ``include_touches``.
     """
     if line.is_simple:
         return []
@@ -725,8 +836,24 @@ def _self_intersection_findings(
     closed = polyline.nodes[0] == polyline.nodes[-1]
     segments = [shp.LineString(segment) for segment in pairwise(coords)]
     scale = max((segment.length for segment in segments), default=1.0) or 1.0
+    runs = (
+        []
+        if closed
+        else _retraced_runs(coords, foreign_turbine_at, angle_tol=angle_tol)
+    )
+    findings = [
+        {
+            'kind': 'self_overlap_cross' if run.crosses else 'touch',
+            'path_nodes_a': polyline.nodes,
+            'path_nodes_b': polyline.nodes,
+            'path_a': prime_path,
+            'path_b': prime_path,
+            'geometry': shp.LineString(run.vertices),
+        }
+        for run in runs
+        if run.crosses or include_touches
+    ]
     tree = shp.STRtree(segments)
-    findings = []
     seen = set()
     for i, segment_a in enumerate(segments):
         for j in tree.query(segment_a, predicate='intersects').tolist():
@@ -734,6 +861,16 @@ def _self_intersection_findings(
                 continue
             intersection = segment_a.intersection(segments[j])
             if intersection.is_empty:
+                continue
+            if any(
+                {i, j} <= run.run_segments
+                if intersection.length > 0
+                else {i, j} <= run.members
+                and _intersection_only_at_excluded(
+                    intersection, run.vertices, endpoint_tol=endpoint_tol * scale
+                )
+                for run in runs
+            ):
                 continue
             if closed:
                 if intersection.geom_type != 'Point':
@@ -792,6 +929,13 @@ def find_geometric_crossings(
     distinct routes are classified from their cable centerlines in the same way,
     regardless of topology.
 
+    An open route may traverse a corridor (a vertex sequence) twice, e.g. when
+    contouring into a pocket behind an obstacle corner and back out. As with two
+    routes sharing a run, the traversals cross only if they leave the corridor
+    on opposite sides at both ends; a fold (the route turning back along the
+    corridor) or a traversal ending at the route's endpoint never does.
+    Traversals that do not cross are reported only as a ``'touch'``.
+
     Args:
       G: routeset graph with ``T``, ``R``, ``B`` and ``VertexC`` graph
         attributes. ``fnT`` is required when ``C > 0`` or ``D > 0``.
@@ -816,7 +960,11 @@ def find_geometric_crossings(
           - ``'self_cross'``: non-adjacent segments of one route cross (for a
             closed ring, adjacency is cyclic and coincident runs are tolerated,
             as they are between two separate routes);
-          - ``'self_overlap'``: one route retraces part of itself;
+          - ``'self_overlap_cross'``: like ``'overlap_cross'``, for two
+            traversals of one corridor by the same route;
+          - ``'self_overlap'``: any other retrace of a route over itself, e.g.
+            a partially coincident segment or a U-turn around a turbine with
+            cables off the route;
           - ``'degenerate'``: a route lacks two finite distinct coordinates;
           - ``'touch'`` (only when ``include_touches=True``): point contact
             that is not classified as a cross (e.g. tangent kiss).
@@ -833,7 +981,8 @@ def find_geometric_crossings(
     polylines = _routeset_polylines(G)
     paths = [polyline.nodes for polyline in polylines]
     prime_paths = [_canonical_prime_path(G, path, fnT) for path in paths]
-    path_coords = [_polyline_coords(VertexC, fnT, path) for path in paths]
+    path_vertices = [_polyline_primes(VertexC, fnT, path) for path in paths]
+    path_coords = [VertexC[primes] for primes in path_vertices]
     path_primes = [{int(fnT[node]) for node in path} for path in paths]
     splits = _detour_splits(
         G,
@@ -858,8 +1007,8 @@ def find_geometric_crossings(
 
     lines = []
     line_paths = []
-    for path_i, (polyline, prime_path, coords) in enumerate(
-        zip(polylines, prime_paths, path_coords)
+    for path_i, (polyline, prime_path, coords, vertices) in enumerate(
+        zip(polylines, prime_paths, path_coords, path_vertices)
     ):
         if len(coords) < 2 or not np.isfinite(coords).all():
             geometry = (
@@ -897,7 +1046,13 @@ def find_geometric_crossings(
             prime_path,
             coords,
             line,
+            [
+                0 <= prime < G.graph['T'] and prime not in polyline.nodes[1:-1]
+                for prime in vertices.tolist()
+            ],
+            include_touches=include_touches,
             length_tol=length_tol,
+            angle_tol=angle_tol,
             endpoint_tol=endpoint_tol,
         )
         lines.append(line)
@@ -976,7 +1131,7 @@ def find_geometric_crossings(
             ):
                 continue
             if intersection.length > length_tol and _shared_run_swaps_sides(
-                path_coords[path_i], path_coords[path_j]
+                path_coords[path_i], path_coords[path_j], angle_tol=angle_tol
             ):
                 kind = 'overlap_cross'
             else:

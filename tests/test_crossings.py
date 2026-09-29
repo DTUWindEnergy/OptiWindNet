@@ -387,6 +387,119 @@ def test_find_geometric_crossings_ignores_common_trunk_overlap():
     assert find_geometric_crossings(G) == []
 
 
+def test_find_geometric_crossings_detects_overlap_entered_from_beyond_its_end():
+    """Route a reaches corridor S=4 → E=5 from above but beyond E, and leaves
+    below; route b comes from below and leaves above: they swap sides."""
+    G = _graph_with_clones(
+        T=4,
+        B=2,
+        C=4,
+        D=0,
+        VertexC=[(2, 1), (2, -1), (-1, -1), (3, 1), (0, 0), (1, 0), (0.5, 3)],
+        edges=[(-1, 0), (0, 6), (6, 7), (7, 1), (-1, 2), (2, 8), (8, 9), (9, 3)],
+    )
+    G.graph['fnT'] = np.array([0, 1, 2, 3, 4, 5, 4, 5, 4, 5, -1])
+
+    assert [crossing['kind'] for crossing in find_geometric_crossings(G)] == [
+        'overlap_cross'
+    ]
+
+
+def _self_touches(G):
+    return [
+        crossing['geometry']
+        for crossing in find_geometric_crossings(G, include_touches=True)
+        if crossing['kind'] == 'touch'
+        and crossing['path_nodes_a'] == crossing['path_nodes_b']
+    ]
+
+
+def test_find_geometric_crossings_ignores_feeder_detour_fold():
+    """A feeder detours past terminal 1 to reach the string head 0 and the
+    string returns to 1, retracing 1–0 in a U-turn at 0."""
+    G = _graph_with_clones(
+        T=3,
+        B=0,
+        C=0,
+        D=1,
+        VertexC=[(0, 0), (1, 0), (2, 1), (1, -1)],
+        edges=[(-1, 3), (3, 0), (0, 1), (1, 2)],
+    )
+    G.graph['fnT'] = np.array([0, 1, 2, 1, -1])
+
+    assert find_geometric_crossings(G) == []
+    assert _self_touches(G) == ['LINESTRING (1 0, 0 0)']
+
+
+def test_find_geometric_crossings_ignores_contour_fold():
+    """The links 0–1 and 1–2 both contour around concave border corner 3, so
+    the route turns back at terminal 1 in the pocket behind the corner."""
+    G = _graph_with_clones(
+        T=3,
+        B=1,
+        C=2,
+        D=0,
+        VertexC=[(0, 0), (1, 1), (2, 0), (1, 0), (-1, 0)],
+        edges=[(-1, 0), (0, 4), (4, 1), (1, 5), (5, 2)],
+    )
+    G.graph['fnT'] = np.array([0, 1, 2, 3, 3, 3, -1])
+
+    assert find_geometric_crossings(G) == []
+    assert _self_touches(G) == ['LINESTRING (1 0, 1 1)']
+
+
+def _corridor_retrace_graph(VertexC):
+    """Route -1 → S → E → 0 → 1 → E → S → 2 along corridor S=3, E=4."""
+    G = _graph_with_clones(
+        T=3,
+        B=2,
+        C=4,
+        D=0,
+        VertexC=VertexC,
+        edges=[(-1, 5), (5, 6), (6, 0), (0, 1), (1, 7), (7, 8), (8, 2)],
+    )
+    G.graph['fnT'] = np.array([0, 1, 2, 3, 4, 3, 4, 4, 3, -1])
+    return G
+
+
+def test_find_geometric_crossings_detects_retrace_swapping_sides():
+    """The route enters the corridor from above and leaves below the first
+    time, then enters from above and leaves below again: it crosses itself."""
+    G = _corridor_retrace_graph([(2, -1), (2, 1), (-1, -1), (0, 0), (1, 0), (-1, 1)])
+
+    assert [
+        (crossing['kind'], crossing['geometry'])
+        for crossing in find_geometric_crossings(G)
+    ] == [('self_overlap_cross', 'LINESTRING (0 0, 1 0)')]
+
+
+def test_find_geometric_crossings_ignores_retrace_keeping_sides():
+    """The first traversal stays above the corridor at both ends and the second
+    stays below: the route loops around without crossing itself."""
+    G = _corridor_retrace_graph([(2, 1), (2, -1), (-1, -1), (0, 0), (1, 0), (-1, 1)])
+
+    assert find_geometric_crossings(G) == []
+    assert _self_touches(G) == ['LINESTRING (0 0, 1 0)']
+
+
+def test_find_geometric_crossings_reports_u_turn_around_passed_turbine():
+    """A U-turn at a detour clone wraps the cable around terminal 1, which the
+    route does not connect to, so the retrace is reported."""
+    G = _graph_with_clones(
+        T=3,
+        B=0,
+        C=0,
+        D=2,
+        VertexC=[(0, 0), (1, 0), (-1, -1), (-1, 1)],
+        edges=[(-1, 0), (0, 3), (3, 4), (4, 2), (-1, 1)],
+    )
+    G.graph['fnT'] = np.array([0, 1, 2, 1, 0, -1])
+
+    assert 'self_overlap' in {
+        crossing['kind'] for crossing in find_geometric_crossings(G)
+    }
+
+
 def test_find_geometric_crossings_ignores_endpoint_touch():
     G = nx.Graph(
         T=4,
