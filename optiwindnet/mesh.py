@@ -13,7 +13,6 @@ import networkx as nx
 import numba as nb
 import numpy as np
 import shapely as shp
-from bidict import bidict
 from scipy.spatial.distance import cdist
 
 from .geometric import (
@@ -27,6 +26,7 @@ from .geometric import (
 )
 from .identity import linkset_id
 from .loads import validate_terminal_power
+from .utils import BiMap
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset')
 
@@ -923,8 +923,8 @@ def make_planar_embedding(
     A_terminal_edges = {(u, v) for u, v in P_A_edges if 0 <= u < T and 0 <= v < T}
 
     # Extend A with diagonals.
-    # accumulate in a plain dict: bidict.__setitem__ is ~9x costlier per item
-    # than validating the whole mapping once, at construction.
+    # accumulate in a plain dict: BiMap.__setitem__ is costlier per item than
+    # validating the whole mapping once, at construction.
     diagonals_ = {}
     XYS = VertexS.tolist()
     # pyrefly: ignore[missing-attribute]
@@ -944,7 +944,7 @@ def make_planar_embedding(
     A_terminal_edges.update(
         st for st in diagonals_ if 0 <= st[0] < T and 0 <= st[1] < T
     )
-    diagonals = bidict(diagonals_)
+    diagonals = BiMap(diagonals_)
 
     # ##########################
     # G) Build the hull-concave.
@@ -1278,7 +1278,7 @@ def make_planar_embedding(
             s, t = (s, t) if s < t else (t, s)
             P_diags_[(s, t)] = (u, v)
     P_paths.add_edges_from(P_diags_)
-    P_diags = bidict(P_diags_)
+    P_diags = BiMap(P_diags_)
 
     nx.set_edge_attributes(P_paths, A_edge_length, name='length')
     for u, v, edgeD in P_paths.edges(data=True):
@@ -1460,7 +1460,7 @@ def make_planar_embedding(
                 # contradict its new role as an ordinary edge.
                 del diagonals[parent]
             if parent in diagonals.inv:
-                # `bidict` cannot map multiple losing diagonals to the same
+                # `BiMap` cannot map multiple losing diagonals to the same
                 # promoted edge.  Keeping st in A without a diagonal relation
                 # would make it look like an ordinary non-crossing edge.
                 A.remove_edge(*st)
@@ -1680,7 +1680,7 @@ def make_planar_embedding(
     # P: PlanarEmbedding
     # A: Graph (carries the updated VertexC)
     #   P_A: PlanarEmbedding
-    #   diagonals: bidict
+    #   diagonals: BiMap
     return P, A
 
 
@@ -1690,7 +1690,7 @@ def planar_flipped_by_routeset(
     planar: nx.PlanarEmbedding,
     VertexC: CoordPairs,
     ST: int,
-    diagonals: bidict | None = None,
+    diagonals: BiMap | None = None,
 ) -> nx.PlanarEmbedding:
     """Adjust ``planar`` to include the edges actually used by a routeset.
 
@@ -1778,7 +1778,9 @@ def planar_flipped_by_routeset(
         if diags:
             # diagonal (u_, v_) is added to P -> forbid diagonals that cross it
             for wx in wx_:
-                diags.inv.pop(wx, None)
+                st = diags.inv.get(wx)
+                if st is not None:
+                    del diags[st]
         P.remove_edge(s, t)
         P.add_half_edge(u, v, cw=s)
         P.add_half_edge(v, u, cw=t)

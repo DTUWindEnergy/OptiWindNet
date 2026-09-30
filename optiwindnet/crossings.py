@@ -10,7 +10,6 @@ from typing import Any
 import networkx as nx
 import numpy as np
 import shapely as shp
-from bidict import bidict
 
 from .geometric import (
     angle_helpers,
@@ -19,6 +18,7 @@ from .geometric import (
     polyline_rays_at_point,
     rays_alternate,
 )
+from .utils import BiMap
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,7 @@ def get_interferences_list(
     return crossings
 
 
-def edge_conflicts(u: int, v: int, diagonals: bidict) -> Iterator[tuple[int, int]]:
+def edge_conflicts(u: int, v: int, diagonals: BiMap) -> Iterator[tuple[int, int]]:
     """Iterate over edges conflicting with ``(u, v)``.
 
     Args:
@@ -163,7 +163,7 @@ def edge_conflicts(u: int, v: int, diagonals: bidict) -> Iterator[tuple[int, int
 
 
 def edge_crossings(
-    u: int, v: int, G: nx.Graph, diagonals: bidict
+    u: int, v: int, G: nx.Graph, diagonals: BiMap
 ) -> list[tuple[int, int]]:
     u, v = (u, v) if u < v else (v, u)
     st = diagonals.get((u, v))
@@ -190,7 +190,7 @@ def edge_crossings(
     return [edge for edge in conflicting if edge in G.edges]
 
 
-def edgeset_edgeXing_iter(diagonals: bidict) -> Iterator[list[tuple[int, int]]]:
+def edgeset_edgeXing_iter(diagonals: BiMap) -> Iterator[list[tuple[int, int]]]:
     """Iterator over all edge crossings in an expanded Delaunay edge set ``A``.
 
     Each crossing is a 2 or 3-tuple of (u, v) edges. Does not include gates.

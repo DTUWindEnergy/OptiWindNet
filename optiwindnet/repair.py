@@ -368,7 +368,7 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx
                     # crossing with Delaunay edge
                     return False
 
-                # TODO: update the code below to use the bidict diagonals
+                # TODO: update the code below to use the BiMap diagonals
                 # ensure u–s–v–t is ccw
                 u, v = (u, v) if (P[u][t]['cw'] == s and P[v][s]['cw'] == t) else (v, u)
                 # examine the two triangles ⟨s, t⟩ belongs to

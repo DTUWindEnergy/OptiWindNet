@@ -5,7 +5,6 @@ import networkx as nx
 import numpy as np
 import pytest
 import shapely as shp
-from bidict import bidict
 
 from optiwindnet.crossings import (
     _routeset_polylines,
@@ -14,13 +13,14 @@ from optiwindnet.crossings import (
     find_routeset_crossings,
     get_interferences_list,
 )
+from optiwindnet.utils import BiMap
 from optiwindnet.validating import validate_routeset
 
 from .helpers import tiny_wfn
 
 
 def test_edge_crossings_handles_delaunay_and_diagonal_directions():
-    diagonals = bidict({(0, 2): (1, 3)})
+    diagonals = BiMap({(0, 2): (1, 3)})
     G = nx.Graph()
     G.add_edges_from(((0, 2), (1, 3)))
 
