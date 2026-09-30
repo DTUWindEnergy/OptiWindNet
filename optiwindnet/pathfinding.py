@@ -6,7 +6,7 @@ import logging
 import math
 from bisect import bisect_left
 from collections import defaultdict, namedtuple
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from itertools import chain, pairwise
 from typing import Any
 
@@ -121,10 +121,10 @@ def _sorted3(a: int, b: int, c: int) -> tuple[int, int, int]:
     return a, b, c
 
 
-def _node_dist(VertexC: np.ndarray, u: int, v: int) -> float:
-    """Euclidean distance between two indexed coordinate rows."""
-    ux, uy = VertexC[u]
-    vx, vy = VertexC[v]
+def _node_dist(XY: Sequence[Sequence[float]], u: int, v: int) -> float:
+    """Euclidean distance between two indexed coordinate pairs."""
+    ux, uy = XY[u]
+    vx, vy = XY[v]
     return math.hypot(ux - vx, uy - vy)
 
 
@@ -616,6 +616,8 @@ class PathFinder:
         self.topology = Gʹ.graph['topology']
         self.R, self.T, self.B, self.C = R, T, B, C
         self.P, self.VertexC, self.clone2prime = P, VertexC, clone2prime
+        # unpacking a list row is ~40x faster than unpacking a numpy row
+        self.XY = VertexC.tolist()
         self.stunts_primes = A.graph.get('stunts_primes')
         self.adv_counter = 0
 
@@ -1133,14 +1135,14 @@ class PathFinder:
         exit_cone = chain.cones[1 - side]
 
         paths = self.paths
-        VertexC = self.VertexC
+        XY = self.XY
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
         best_pn_by_pair_id = self.best_pn_by_pair_id
 
         cur = y_entry
         parent_pn = entry_pn
         for c_next in walk:
-            d_hop = _node_dist(VertexC, cur, c_next)
+            d_hop = _node_dist(XY, cur, c_next)
             pn_parent = paths[parent_pn]
             d_total = pn_parent.dist + d_hop
             parent_pn = paths.add(
@@ -1616,7 +1618,7 @@ class PathFinder:
         paths = self.paths
         prioqueue = self.prioqueue
         portal_set = self.portal_set
-        VertexC = self.VertexC
+        XY = self.XY
         best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
         w = cone.vertex
@@ -1627,7 +1629,7 @@ class PathFinder:
             """Pseudonode at ``v`` parented by ``pn_w``; returns ``(pn_id, d_hop)``."""
             if v == w:
                 return pn_w_id, 0.0
-            d_hop = _node_dist(VertexC, w, v)
+            d_hop = _node_dist(XY, w, v)
             d_total = pn_w.dist + d_hop
             sec_v = self._get_sector_from_opposite(v, w) if v >= 0 else NULL
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
@@ -1724,11 +1726,11 @@ class PathFinder:
         # no yield and no dead-apex check.
         # variable naming notation:
         # for variables that represent a node, they may occur in two versions:
-        #     - _node: the index it contains maps to a coordinate in VertexC
+        #     - _node: the index it contains maps to a coordinate in XY
         #     - pn_id: pseudonode index in self.paths
         #             translation: _node = paths.prime_from_pn[pn_id]
-        VertexC = self.VertexC
-        cw, ccw, cross = rotation_checkers_factory(VertexC)
+        XY = self.XY
+        cw, ccw, cross = rotation_checkers_factory(XY)
         # Tolerance for treating a numerically-zero cross product as collinear:
         # apex/wall/_new line-of-sight should not flip funnel branches due to
         # float-arithmetic noise.
@@ -1736,9 +1738,9 @@ class PathFinder:
 
         def is_beyond(_a: int, _w: int, _q: int) -> bool:
             # True if _q, collinear with _a→_w, lies past _w as seen from _a
-            ax, ay = VertexC[_a]
-            wx, wy = VertexC[_w]
-            qx, qy = VertexC[_q]
+            ax, ay = XY[_a]
+            wx, wy = XY[_w]
+            qx, qy = XY[_q]
             dx, dy = wx - ax, wy - ay
             return (qx - ax) * dx + (qy - ay) * dy > dx * dx + dy * dy
 
@@ -1897,7 +1899,7 @@ class PathFinder:
                 _apex_eff, apex_eff = _current_wapex, current_wapex
 
             # rate, wait, add
-            d_hop = _node_dist(self.VertexC, _apex_eff, _new)
+            d_hop = _node_dist(XY, _apex_eff, _new)
             apex_pn = paths[apex_eff]
             d_new = apex_pn.dist + d_hop
             best_pn_id = best_pn_by_pair_id[pair_id]
@@ -1909,9 +1911,9 @@ class PathFinder:
                 step_turn = 0.0
             else:
                 _gp = paths.prime_from_pn[gp_pn_id]
-                ax = self.VertexC[_apex_eff]
-                gp = self.VertexC[_gp]
-                nv = self.VertexC[_new]
+                ax = XY[_apex_eff]
+                gp = XY[_gp]
+                nv = XY[_new]
                 v1x, v1y = ax[0] - gp[0], ax[1] - gp[1]
                 v2x, v2y = nv[0] - ax[0], nv[1] - ax[1]
                 step_turn = math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y)

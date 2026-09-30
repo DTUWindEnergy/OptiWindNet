@@ -4,7 +4,7 @@
 import math
 import operator
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from itertools import combinations, pairwise
 from math import isclose
 from typing import Any, Literal
@@ -1028,7 +1028,7 @@ def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
 
 
 def rotation_checkers_factory(
-    VertexC: CoordPairs,
+    VertexC: CoordPairs | Sequence[Sequence[float]],
 ) -> tuple[
     Callable[[int, int, int], bool],
     Callable[[int, int, int], bool],
