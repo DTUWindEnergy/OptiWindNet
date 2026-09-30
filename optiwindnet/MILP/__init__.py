@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import os
 import shutil
 import sys
+from importlib.metadata import PackageNotFoundError, distribution
 from importlib.util import find_spec
+from pathlib import Path
 
 from ._core import (
     FeederLimit,
@@ -22,6 +25,30 @@ __all__ = (
     'OWNSolutionNotFound', 'OWNWarmupFailed', 'SolutionInfo', 'Solver',
     'Topology', 'solver_factory',
 )  # fmt: skip
+
+
+def _pyomo_cbc_executable() -> str | None:
+    """Find CBC on PATH excluding binaries and launchers owned by cbcbox."""
+    executable = shutil.which('cbc')
+    if executable is None:
+        return None
+    try:
+        package = distribution('cbcbox')
+    except PackageNotFoundError:
+        return executable
+    # cbcbox's development build uses output that Pyomo's CBC parser cannot read.
+    excluded = {
+        Path(str(package.locate_file(file))).resolve()
+        for file in package.files or ()
+        if file.name.lower() in ('cbc', 'cbc.exe')
+    }
+    if Path(executable).resolve() not in excluded:
+        return executable
+    for directory in os.get_exec_path():
+        candidate = shutil.which('cbc', path=directory)
+        if candidate is not None and Path(candidate).resolve() not in excluded:
+            return candidate
+    return None
 
 
 def _reject_loaded_rivals(solver_name: str, package: str, *rivals: str) -> None:
@@ -157,13 +184,14 @@ def solver_factory(solver_name: str) -> Solver:
         case 'pyomo':
             match backend:
                 case ['cbc']:
-                    if shutil.which('cbc'):
+                    if executable := _pyomo_cbc_executable():
                         from .pyomo import SolverPyomo
 
-                        return SolverPyomo('cbc')
+                        return SolverPyomo('cbc', executable=executable)
                     raise FileNotFoundError(
                         "Executable 'cbc' not found. Ensure the system PATH includes"
-                        " the path to 'cbc' or try"
+                        ' the path to a standalone CBC installation (the cbcbox'
+                        ' launcher is incompatible with Pyomo), or try'
                         " 'conda install -c conda-forge coin-or-cbc'."
                     )
                 case ['highs']:
