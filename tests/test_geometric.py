@@ -3,12 +3,14 @@
 
 import numpy as np
 import pytest
+import shapely
 
 from optiwindnet.geometric import (
     angle,
     any_pairs_opposite_edge,
     area_from_polygon_vertices,
     complete_graph,
+    find_segments_crossing_any,
     is_bunch_split_by_corner,
     is_crossing,
     is_crossing_no_bbox,
@@ -248,6 +250,101 @@ def test_crossings_corner_cases():
     assert is_crossing_numpy(u, v, s, t) is False
     assert is_crossing_no_bbox(u, v, s, t) is False
     assert is_crossing(u, v, s, t) is False
+
+
+# --- find_segments_crossing_any ---
+
+
+def test_find_segments_crossing_any_cases():
+    segmentsC = np.array([[[0.0, 0.0], [2.0, 0.0]], [[5.0, 5.0], [6.0, 6.0]]])
+    probesC = np.array(
+        [
+            [[1.0, -1.0], [1.0, 1.0]],  # proper crossing
+            [[2.0, 0.0], [3.0, 1.0]],  # shares an endpoint
+            [[1.0, 0.0], [1.0, 1.0]],  # endpoint on the segment's interior
+            [[1.0, 0.0], [3.0, 0.0]],  # collinear overlap
+            [[0.0, 1.0], [2.0, 1.0]],  # parallel
+            [[3.0, -1.0], [3.0, 1.0]],  # disjoint
+        ]
+    )
+    assert find_segments_crossing_any(probesC, segmentsC).tolist() == [
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+    ]
+
+
+def test_find_segments_crossing_any_shared_endpoint_is_a_touch():
+    # A probe ending exactly at a segment's endpoint (a root-to-border-vertex
+    # line of sight at Race Bank). Is a touch, not a crossing; the parametric
+    # test of is_crossing_no_bbox() misses by one ulp and would flag it.
+    probesC = np.array(
+        [
+            [
+                [-0.07603445744258204, 0.08381560382070354],
+                [-0.1499433763903498, 0.020403148550092887],
+            ]
+        ]
+    )
+    segmentsC = np.array(
+        [
+            [
+                [-0.06931984687711679, -0.12457352221799783],
+                [-0.1499433763903498, 0.020403148550092887],
+            ]
+        ]
+    )
+    assert not find_segments_crossing_any(probesC, segmentsC)[0]
+
+
+@pytest.mark.parametrize(
+    'uC, vC, sC, tC',
+    [
+        # orientation signs certified by the float filter
+        (
+            [0.10033256982245087, 1.2471068907925238],
+            [0.6258883699967324, 0.8936754814926915],
+            [0.625095466604667, 0.8972138009695755],
+            [0.7756856902451935, 0.22520718999059186],
+        ),
+        # orientation signs not certified by the float filter
+        (
+            [0.2752636022214574, 0.1460726925164133],
+            [0.8303115232139779, 0.3159018758546133],
+            [0.8713393766928806, 0.3612640590141576],
+            [0.5981840672072131, 0.05925164234550362],
+        ),
+    ],
+)
+def test_find_segments_crossing_any_rounded_touch(uC, vC, sC, tC):
+    # vC is within rounding of the interior of ⟨sC, tC⟩, beyond it in exact
+    # arithmetic, but the intersection point GEOS computes is vC itself: a touch
+    probe = shapely.LineString([uC, vC])
+    segment = shapely.LineString([sC, tC])
+    assert probe.touches(segment) and not probe.crosses(segment)
+    assert not find_segments_crossing_any(np.array([[uC, vC]]), np.array([[sC, tC]]))[0]
+
+
+def test_find_segments_crossing_any_matches_shapely_near_degenerate():
+    rng = np.random.default_rng(0)
+    n = 500
+    sC, tC = rng.random((n, 2)), rng.random((n, 2))
+    uC = rng.random((n, 2)) * 2 - 0.5
+    # probe ends within rounding of the segment's line
+    vC = sC + rng.random((n, 1)) * (tC - sC)
+    probesC = np.stack((uC, vC), axis=1)
+    segmentsC = np.stack((sC, tC), axis=1)
+    expected = shapely.crosses(
+        shapely.linestrings(probesC), shapely.linestrings(segmentsC)
+    )
+    got = [
+        find_segments_crossing_any(probesC[i : i + 1], segmentsC[i : i + 1])[0]
+        for i in range(n)
+    ]
+    assert got == expected.tolist()
 
 
 # --- perimeter ---

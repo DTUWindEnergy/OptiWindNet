@@ -19,6 +19,7 @@ from scipy.spatial.distance import cdist
 from .geometric import (
     CoordPairs,
     Indices,
+    find_segments_crossing_any,
     is_triangle_pair_a_convex_quadrilateral,
     rotation_checkers_factory,
     triangle_AR,
@@ -996,7 +997,6 @@ def make_planar_embedding(
     debug('PART H')
     constraint_edges = set()
     obstacle_constraint_edges = ()
-    obstacle_constraint_lines = np.empty(0, dtype=object)
     edgesCDT_obstacles = []
     #  hard_constraints_xy_ = set()
     V2d_holes = []
@@ -1042,7 +1042,7 @@ def make_planar_embedding(
         edges_to_examine = P_A_edges - P_edges
         (
             obstacle_constraint_edges,
-            obstacle_constraint_lines,
+            _,
             obstacle_constraint_tree,
         ) = _build_edge_line_tree(VertexS, constraint_edges)
         while edges_to_examine:
@@ -1135,21 +1135,11 @@ def make_planar_embedding(
     extra_constraint_edges = tuple(
         sorted(constraint_edges - set(obstacle_constraint_edges))
     )
-    if extra_constraint_edges:
-        extra_constraint_lines = cast(
-            'np.ndarray',
-            shp.linestrings(VertexS[np.asarray(extra_constraint_edges, dtype=int)]),
-        )
-        constraint_los_lines = (
-            np.concatenate((obstacle_constraint_lines, extra_constraint_lines))
-            if obstacle_constraint_lines.size > 0
-            else extra_constraint_lines
-        )
-    else:
-        constraint_los_lines = obstacle_constraint_lines
-    constraint_los_tree = (
-        shp.STRtree(constraint_los_lines) if constraint_los_lines.size > 0 else None  # type: ignore
-    )
+    constraint_los_segmentsS = VertexS[
+        np.array(
+            (*obstacle_constraint_edges, *extra_constraint_edges), dtype=int
+        ).reshape(-1, 2)
+    ]
 
     # ############################################################
     # J) Add coordinates for stunts, supertriangle and scale back.
@@ -1533,12 +1523,12 @@ def make_planar_embedding(
         los_idx[:, 1] = np.arange(T)
         for r in range(-R, 0):
             los_idx[:, 0] = r
-            crossing_pairs = constraint_los_tree.query(  # type: ignore
-                shp.linestrings(VertexS[los_idx]), predicate='crosses'
+            blocked = find_segments_crossing_any(
+                VertexS[los_idx], constraint_los_segmentsS
             )
-            if crossing_pairs.size == 0:
+            if not blocked.any():
                 continue
-            los_crossing_nodes = set(crossing_pairs[0].tolist())
+            los_crossing_nodes = set(np.flatnonzero(blocked).tolist())
             # The stub's return type is a union over the `target` argument it does
             # not overload on; without `target` only the mapping variant applies.
             lengths, paths = cast(
