@@ -4,6 +4,8 @@
 """Tests for the sweep harness."""
 
 import json
+import multiprocessing
+import signal
 import sqlite3
 import time
 from pathlib import Path
@@ -106,6 +108,8 @@ def test_inline_sweep_records_and_resumes(tmp_path: Path) -> None:
 def test_concurrent_sweep(
     tmp_path: Path, executor: Literal['process', 'thread']
 ) -> None:
+    if executor == 'process' and 'fork' not in multiprocessing.get_all_start_methods():
+        pytest.skip('Process sweeps require fork')
     db_path = tmp_path / 'sweep.sqlite'
     method = 'esau_williams'
 
@@ -156,6 +160,10 @@ def test_report_compares_runs_and_refuses_code_change(
 
 @pytest.mark.parametrize('workers', [1, 2])
 def test_timeout(tmp_path: Path, workers: int) -> None:
+    if not hasattr(signal, 'setitimer'):
+        pytest.skip('Sweep timeouts require signal.setitimer')
+    if workers > 1 and 'fork' not in multiprocessing.get_all_start_methods():
+        pytest.skip('Process sweeps require fork')
     db_path = tmp_path / 'sweep.sqlite'
     t0 = time.perf_counter()
     run_sweep(
@@ -170,3 +178,28 @@ def test_timeout(tmp_path: Path, workers: int) -> None:
     rows = _rows(db_path)
     assert len(rows) == 2
     assert all('TimeoutError' in r['error'] for r in rows)
+
+
+def test_process_sweep_requires_fork(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(multiprocessing, 'get_all_start_methods', lambda: ['spawn'])
+    with pytest.raises(ValueError, match="executor='process' needs fork"):
+        run_sweep(CASES, {'ew': ew}, tmp_path / 'sweep.sqlite', workers=2, threads=1)
+
+
+def test_timeout_requires_setitimer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delattr(signal, 'setitimer', raising=False)
+    with pytest.raises(ValueError, match='timeout needs SIGALRM'):
+        run_sweep(CASES, {'ew': ew}, tmp_path / 'sweep.sqlite', timeout=0.2, threads=1)
+
+
+def test_thread_sweep_rejects_timeout(tmp_path: Path):
+    with pytest.raises(ValueError, match='timeout needs SIGALRM'):
+        run_sweep(
+            CASES,
+            {'ew': ew},
+            tmp_path / 'sweep.sqlite',
+            workers=2,
+            threads=1,
+            executor='thread',
+            timeout=0.2,
+        )

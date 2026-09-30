@@ -117,7 +117,9 @@ def run_milp_solve_with_retry(
             warmstart=warmstart,
         )
         info = solver.solve(time_limit=limit, mip_gap=mip_gap, options=solve_options)
-        if not math.isfinite(info.bound) and info.termination.lower() != 'optimal':
+        if info.termination.lower() != 'optimal' and (
+            info.bound is None or not math.isfinite(info.bound)
+        ):
             raise OWNSolutionNotFound(
                 f'Solver {solver_name!r} returned non-finite dual bound '
                 f'({info.bound}) within {limit} s'
