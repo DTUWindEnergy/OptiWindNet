@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+import heapq
 import logging
 import math
 from bisect import bisect_left
@@ -82,6 +83,54 @@ def _record_nonstraight_root_distance(
     else:
         los_d2root.update({r: d2roots[n, r].item()})
     d2roots[n, r] = new_length
+
+
+def _astar_path(
+    adj: dict[int, dict[int, dict]], XY: list[list[float]], s: int, t: int
+) -> tuple[float, list[int]]:
+    """Find the shortest ``s``→``t`` path over an adjacency with edge ``length``.
+
+    The straight-line distance to ``t`` is the heuristic, which is admissible
+    as long as every edge ``length`` is at least the straight-line distance
+    between its ends. Reading the adjacency dicts directly avoids NetworkX's
+    per-call overhead, which dominates the short searches of :func:`make_mesh`.
+
+    Args:
+      adj: adjacency mapping, e.g. ``nx.Graph._adj``.
+      XY: vertex coordinates as Python floats, indexed by node.
+      s: source node.
+      t: target node.
+
+    Returns:
+      Length of the path and its node sequence from ``s`` to ``t``.
+
+    Raises:
+      nx.NetworkXNoPath: if ``t`` is unreachable from ``s``.
+    """
+    tx, ty = XY[t]
+    sx, sy = XY[s]
+    dist = {s: 0.0}
+    parent = {s: s}
+    heap = [(math.hypot(sx - tx, sy - ty), 0.0, s)]
+    closed = set()
+    while heap:
+        _, d_u, u = heapq.heappop(heap)
+        if u == t:
+            path = [t]
+            while path[-1] != s:
+                path.append(parent[path[-1]])
+            return d_u, path[::-1]
+        if u in closed:
+            continue
+        closed.add(u)
+        for v, edgeD in adj[u].items():
+            d_v = d_u + edgeD['length']
+            if d_v < dist.get(v, math.inf):
+                dist[v] = d_v
+                parent[v] = u
+                x, y = XY[v]
+                heapq.heappush(heap, (d_v + math.hypot(x - tx, y - ty), d_v, v))
+    raise nx.NetworkXNoPath(f'Node {t} not reachable from {s}')
 
 
 @nb.njit(cache=True)
@@ -1292,13 +1341,12 @@ def make_planar_embedding(
     corner_to_A_edges = defaultdict(list)
     A_edges_to_revisit = []
     remove_from_A = []
+    XY = VertexC.tolist()
     for u, v in A.edges - P_paths.edges:
         # For the edges in A that are not in P, we find their corresponding
         # shortest path in P_path and update the length attribute in A.
-        length, path = cast(
-            'tuple[float, list[int]]',
-            nx.bidirectional_dijkstra(P_paths, u, v, weight='length'),
-        )
+        # pyrefly: ignore[missing-attribute]
+        length, path = _astar_path(P_paths._adj, XY, u, v)
         debug('A_edge: %d–%d length: %.3f; path: %s', u, v, length, path)
         uv_uniq = (u, v) if u < v else (v, u)
         if any(n < T for n in path[1:-1]):
