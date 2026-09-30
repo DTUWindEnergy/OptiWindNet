@@ -6,7 +6,7 @@ import logging
 
 import networkx as nx
 
-from .crossings import list_edge_crossings
+from .crossings import edge_conflicts, list_edge_crossings
 from .loads import calcload
 
 __all__ = ('repair_routeset_path',)
@@ -328,12 +328,11 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx
             '`Sʹ` as a topology.'
         )
         return Sʹ
-    P = A.graph['planar']
     diagonals = A.graph['diagonals']
     S = Sʹ.copy()
 
     def not_crossing(choice):
-        # reads from parent scope: diagonals, S, P
+        # reads from parent scope: diagonals, S
         #  gateD, tailD, swapD, freeS, edges_del, edges_add = choice
         *_, edges_del, edges_add = choice
         edges_del_ = {(u, v) if u < v else (v, u) for u, v in edges_del}
@@ -341,59 +340,9 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx
         edges_add = edges_add_ - edges_del_
         edges_del = edges_del_ - edges_add_
         for u, v in edges_add:
-            st = diagonals.get((u, v))
-            if st is None:
-                # ⟨u, v⟩ is a Delaunay edge, find its diagonal
-                st = diagonals.inv.get((u, v))
-                if st is None:
-                    # ⟨u, v⟩ has no diagonal
-                    continue
-                s, t = st
-                if s < 0 or t < 0:
-                    # diagonal of ⟨u, v⟩ is a gate
-                    continue
-                if ((s, t) in S.edges or (s, t) in edges_add) and (
-                    s,
-                    t,
-                ) not in edges_del:
-                    # crossing with diagonal
+            for st in edge_conflicts(u, v, diagonals):
+                if (st in S.edges or st in edges_add) and st not in edges_del:
                     return False
-            else:
-                # ⟨u, v⟩ is a diagonal of Delaunay ⟨s, t⟩
-                s, t = st
-                if ((s, t) in S.edges or (s, t) in edges_add) and (
-                    s,
-                    t,
-                ) not in edges_del:
-                    # crossing with Delaunay edge
-                    return False
-
-                # TODO: update the code below to use the bidict diagonals
-                # ensure u–s–v–t is ccw
-                u, v = (u, v) if (P[u][t]['cw'] == s and P[v][s]['cw'] == t) else (v, u)
-                # examine the two triangles ⟨s, t⟩ belongs to
-                for a, b, c in ((s, t, u), (t, s, v)):
-                    # this is for diagonals crossing diagonals (4 checks)
-                    cbD = P[c].get(b)
-                    if cbD is not None:
-                        d = cbD['ccw']
-                        diag_da = (a, d) if a < d else (d, a)
-                        if (
-                            d == P[b][c]['cw']
-                            and (diag_da in S.edges or diag_da in edges_add)
-                            and diag_da not in edges_del
-                        ):
-                            return False
-                    acD = P[a].get(c)
-                    if acD is not None:
-                        e = acD['ccw']
-                        diag_eb = (e, b) if e < b else (b, e)
-                        if (
-                            e == P[c][a]['cw']
-                            and (diag_eb in S.edges or diag_eb in edges_add)
-                            and diag_eb not in edges_del
-                        ):
-                            return False
         return True
 
     outstanding_crossings = []

@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+import heapq
 import logging
 import math
 from bisect import bisect_left
@@ -12,18 +13,20 @@ import networkx as nx
 import numba as nb
 import numpy as np
 import shapely as shp
-from bidict import bidict
 from scipy.spatial.distance import cdist
 
 from .geometric import (
     CoordPairs,
     Indices,
+    find_segments_crossing_any,
     is_triangle_pair_a_convex_quadrilateral,
+    is_triangle_pair_a_convex_quadrilateral_XY,
     rotation_checkers_factory,
     triangle_AR,
 )
 from .identity import linkset_id
 from .loads import validate_terminal_power
+from .utils import BiMap
 
 __all__ = ('make_planar_embedding', 'planar_flipped_by_routeset')
 
@@ -82,6 +85,54 @@ def _record_nonstraight_root_distance(
     else:
         los_d2root.update({r: d2roots[n, r].item()})
     d2roots[n, r] = new_length
+
+
+def _astar_path(
+    adj: dict[int, dict[int, dict]], XY: list[list[float]], s: int, t: int
+) -> tuple[float, list[int]]:
+    """Find the shortest ``s``→``t`` path over an adjacency with edge ``length``.
+
+    The straight-line distance to ``t`` is the heuristic, which is admissible
+    as long as every edge ``length`` is at least the straight-line distance
+    between its ends. Reading the adjacency dicts directly avoids NetworkX's
+    per-call overhead, which dominates the short searches of :func:`make_mesh`.
+
+    Args:
+      adj: adjacency mapping, e.g. ``nx.Graph._adj``.
+      XY: vertex coordinates as Python floats, indexed by node.
+      s: source node.
+      t: target node.
+
+    Returns:
+      Length of the path and its node sequence from ``s`` to ``t``.
+
+    Raises:
+      nx.NetworkXNoPath: if ``t`` is unreachable from ``s``.
+    """
+    tx, ty = XY[t]
+    sx, sy = XY[s]
+    dist = {s: 0.0}
+    parent = {s: s}
+    heap = [(math.hypot(sx - tx, sy - ty), 0.0, s)]
+    closed = set()
+    while heap:
+        _, d_u, u = heapq.heappop(heap)
+        if u == t:
+            path = [t]
+            while path[-1] != s:
+                path.append(parent[path[-1]])
+            return d_u, path[::-1]
+        if u in closed:
+            continue
+        closed.add(u)
+        for v, edgeD in adj[u].items():
+            d_v = d_u + edgeD['length']
+            if d_v < dist.get(v, math.inf):
+                dist[v] = d_v
+                parent[v] = u
+                x, y = XY[v]
+                heapq.heappush(heap, (d_v + math.hypot(x - tx, y - ty), d_v, v))
+    raise nx.NetworkXNoPath(f'Node {t} not reachable from {s}')
 
 
 @nb.njit(cache=True)
@@ -865,35 +916,35 @@ def make_planar_embedding(
 
     A: nx.Graph[int] = nx.Graph()
     A.add_nodes_from(L.nodes(data=True))
-    A.add_edges_from(P_A_edges)
+    A.add_edges_from(P_A_edges, kind='delaunay')
     # Keep a plain normalized-edge ledger through the remaining mutations.
     # This avoids scanning NetworkX adjacency when the final canonical bit
     # positions are installed in Part P.
     A_terminal_edges = {(u, v) for u, v in P_A_edges if 0 <= u < T and 0 <= v < T}
-    # a scalar `values` is applied to every edge; the stubs only cover mappings
-    # pyrefly: ignore[no-matching-overload]
-    nx.set_edge_attributes(A, 'delaunay', name='kind')
 
     # Extend A with diagonals.
-    # accumulate in a plain dict: bidict.__setitem__ is ~9x costlier per item
-    # than validating the whole mapping once, at construction.
+    # accumulate in a plain dict: BiMap.__setitem__ is costlier per item than
+    # validating the whole mapping once, at construction.
     diagonals_ = {}
+    XYS = VertexS.tolist()
+    # pyrefly: ignore[missing-attribute]
+    P_A_adj = P_A._adj
     for u, v in P_A_edges - hull_pruned_edges:
-        uvD = P_A[u][v]
+        uvD = P_A_adj[u][v]
         s, t = uvD['cw'], uvD['ccw']
 
         # SANITY check (if hull edges were skipped, this should always hold)
-        vuD = P_A[v][u]
+        vuD = P_A_adj[v][u]
         assert s == vuD['ccw'] and t == vuD['cw']
 
-        if is_triangle_pair_a_convex_quadrilateral(*VertexS[[u, v, s, t]]):
+        if is_triangle_pair_a_convex_quadrilateral_XY(XYS, u, v, s, t):
             s, t = (s, t) if s < t else (t, s)
             diagonals_[(s, t)] = (u, v)
-            A.add_edge(s, t, kind='extended')
+    A.add_edges_from(diagonals_, kind='extended')
     A_terminal_edges.update(
         st for st in diagonals_ if 0 <= st[0] < T and 0 <= st[1] < T
     )
-    diagonals = bidict(diagonals_)
+    diagonals = BiMap(diagonals_)
 
     # ##########################
     # G) Build the hull-concave.
@@ -947,7 +998,6 @@ def make_planar_embedding(
     debug('PART H')
     constraint_edges = set()
     obstacle_constraint_edges = ()
-    obstacle_constraint_lines = np.empty(0, dtype=object)
     edgesCDT_obstacles = []
     #  hard_constraints_xy_ = set()
     V2d_holes = []
@@ -993,7 +1043,7 @@ def make_planar_embedding(
         edges_to_examine = P_A_edges - P_edges
         (
             obstacle_constraint_edges,
-            obstacle_constraint_lines,
+            _,
             obstacle_constraint_tree,
         ) = _build_edge_line_tree(VertexS, constraint_edges)
         while edges_to_examine:
@@ -1086,21 +1136,11 @@ def make_planar_embedding(
     extra_constraint_edges = tuple(
         sorted(constraint_edges - set(obstacle_constraint_edges))
     )
-    if extra_constraint_edges:
-        extra_constraint_lines = cast(
-            'np.ndarray',
-            shp.linestrings(VertexS[np.asarray(extra_constraint_edges, dtype=int)]),
-        )
-        constraint_los_lines = (
-            np.concatenate((obstacle_constraint_lines, extra_constraint_lines))
-            if obstacle_constraint_lines.size > 0
-            else extra_constraint_lines
-        )
-    else:
-        constraint_los_lines = obstacle_constraint_lines
-    constraint_los_tree = (
-        shp.STRtree(constraint_los_lines) if constraint_los_lines.size > 0 else None  # type: ignore
-    )
+    constraint_los_segmentsS = VertexS[
+        np.array(
+            (*obstacle_constraint_edges, *extra_constraint_edges), dtype=int
+        ).reshape(-1, 2)
+    ]
 
     # ############################################################
     # J) Add coordinates for stunts, supertriangle and scale back.
@@ -1228,14 +1268,17 @@ def make_planar_embedding(
             border_edges.add((s, t) if s < t else (t, s))
 
     P_diags_ = {}
+    XY = VertexC.tolist()
+    # pyrefly: ignore[missing-attribute]
+    P_adj = P._adj
     for u, v in P_edges.difference(hull_pruned_edges, constraint_edges, border_edges):
-        uvD = P[u][v]
+        uvD = P_adj[u][v]
         s, t = uvD['cw'], uvD['ccw']
-        if is_triangle_pair_a_convex_quadrilateral(*VertexC[[u, v, s, t]]):
+        if is_triangle_pair_a_convex_quadrilateral_XY(XY, u, v, s, t):
             s, t = (s, t) if s < t else (t, s)
             P_diags_[(s, t)] = (u, v)
-            P_paths.add_edge(s, t)
-    P_diags = bidict(P_diags_)
+    P_paths.add_edges_from(P_diags_)
+    P_diags = BiMap(P_diags_)
 
     nx.set_edge_attributes(P_paths, A_edge_length, name='length')
     for u, v, edgeD in P_paths.edges(data=True):
@@ -1247,7 +1290,7 @@ def make_planar_embedding(
     # ###################################################################
     debug('PART M')
 
-    cw, ccw, _ = rotation_checkers_factory(VertexC)
+    cw, ccw, _ = rotation_checkers_factory(XY)
     # auxiliary function for parts M and N
 
     def is_midpoint_shortable(s, b, t):
@@ -1295,10 +1338,8 @@ def make_planar_embedding(
     for u, v in A.edges - P_paths.edges:
         # For the edges in A that are not in P, we find their corresponding
         # shortest path in P_path and update the length attribute in A.
-        length, path = cast(
-            'tuple[float, list[int]]',
-            nx.bidirectional_dijkstra(P_paths, u, v, weight='length'),
-        )
+        # pyrefly: ignore[missing-attribute]
+        length, path = _astar_path(P_paths._adj, XY, u, v)
         debug('A_edge: %d–%d length: %.3f; path: %s', u, v, length, path)
         uv_uniq = (u, v) if u < v else (v, u)
         if any(n < T for n in path[1:-1]):
@@ -1315,9 +1356,8 @@ def make_planar_embedding(
                 if wx_uniq is None or wx_uniq == diag:
                     continue
                 if all(n < T for n in wx_uniq):
-                    if is_triangle_pair_a_convex_quadrilateral(
-                        *VertexC[wx_uniq,], *VertexC[uv_uniq,]
-                    ):
+                    w, x = wx_uniq
+                    if is_triangle_pair_a_convex_quadrilateral_XY(XY, w, x, *uv_uniq):
                         continue
                     # remove the edge because its crossings do not match its A origin
                     skip = True
@@ -1420,7 +1460,7 @@ def make_planar_embedding(
                 # contradict its new role as an ordinary edge.
                 del diagonals[parent]
             if parent in diagonals.inv:
-                # `bidict` cannot map multiple losing diagonals to the same
+                # `BiMap` cannot map multiple losing diagonals to the same
                 # promoted edge.  Keeping st in A without a diagonal relation
                 # would make it look like an ordinary non-crossing edge.
                 A.remove_edge(*st)
@@ -1485,12 +1525,12 @@ def make_planar_embedding(
         los_idx[:, 1] = np.arange(T)
         for r in range(-R, 0):
             los_idx[:, 0] = r
-            crossing_pairs = constraint_los_tree.query(  # type: ignore
-                shp.linestrings(VertexS[los_idx]), predicate='crosses'
+            blocked = find_segments_crossing_any(
+                VertexS[los_idx], constraint_los_segmentsS
             )
-            if crossing_pairs.size == 0:
+            if not blocked.any():
                 continue
-            los_crossing_nodes = set(crossing_pairs[0].tolist())
+            los_crossing_nodes = set(np.flatnonzero(blocked).tolist())
             # The stub's return type is a union over the `target` argument it does
             # not overload on; without `target` only the mapping variant applies.
             lengths, paths = cast(
@@ -1640,7 +1680,7 @@ def make_planar_embedding(
     # P: PlanarEmbedding
     # A: Graph (carries the updated VertexC)
     #   P_A: PlanarEmbedding
-    #   diagonals: bidict
+    #   diagonals: BiMap
     return P, A
 
 
@@ -1650,7 +1690,7 @@ def planar_flipped_by_routeset(
     planar: nx.PlanarEmbedding,
     VertexC: CoordPairs,
     ST: int,
-    diagonals: bidict | None = None,
+    diagonals: BiMap | None = None,
 ) -> nx.PlanarEmbedding:
     """Adjust ``planar`` to include the edges actually used by a routeset.
 
@@ -1738,7 +1778,9 @@ def planar_flipped_by_routeset(
         if diags:
             # diagonal (u_, v_) is added to P -> forbid diagonals that cross it
             for wx in wx_:
-                diags.inv.pop(wx, None)
+                st = diags.inv.get(wx)
+                if st is not None:
+                    del diags[st]
         P.remove_edge(s, t)
         P.add_half_edge(u, v, cw=s)
         P.add_half_edge(v, u, cw=t)

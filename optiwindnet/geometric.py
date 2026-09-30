@@ -4,7 +4,7 @@
 import math
 import operator
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from itertools import combinations, pairwise
 from math import isclose
 from typing import Any, Literal
@@ -12,6 +12,7 @@ from typing import Any, Literal
 import networkx as nx
 import numba as nb
 import numpy as np
+import shapely as shp
 from numpy.typing import NDArray
 from scipy.sparse import coo_array
 from scipy.sparse.csgraph import minimum_spanning_tree as scipy_mst
@@ -21,8 +22,9 @@ __all__ = (
     'CoordPair', 'CoordPairs', 'IndexPairs',
     'angle', 'angle_helpers', 'angle_numpy', 'angle_oracles_factory',
     'any_pairs_opposite_edge', 'area_from_polygon_vertices', 'complete_graph',
-    'find_edges_bbox_overlaps', 'get_crossings_map', 'is_bunch_split_by_corner',
-    'is_crossing', 'is_crossing_no_bbox', 'is_crossing_numpy', 'is_same_side',
+    'find_edges_bbox_overlaps', 'find_segments_crossing_any', 'get_crossings_map',
+    'is_bunch_split_by_corner', 'is_crossing', 'is_crossing_no_bbox',
+    'is_crossing_numpy', 'is_same_side',
     'is_triangle_pair_a_convex_quadrilateral', 'minimum_spanning_forest',
     'perimeter', 'point_d2line', 'point_to_segment_distance',
     'polyline_rays_at_point', 'polylines_cross_at_point', 'rays_alternate',
@@ -432,6 +434,157 @@ def is_crossing_no_bbox(
     return True
 
 
+# Shewchuk's first-stage error bound for orient2d (float64, epsilon = 2**-53):
+# a determinant larger in magnitude than this times the sum of the magnitudes
+# of its two products has the sign of the exact determinant.
+_ORIENT2D_ERRBOUND = (3.0 + 16.0 * 2.0**-53) * 2.0**-53
+# A certified crossing is left to GEOS if an endpoint is within this many units
+# in the last place (of the largest coordinate) from the other segment's line,
+# or if the sine of the angle between the segments is below the second bound.
+_CROSSING_MARGIN_ULPS = 64.0
+_CROSSING_MIN_SINE = 1e-6
+
+
+@nb.njit(cache=True)
+def _orient2d_filtered(
+    ax: float, ay: float, bx: float, by: float, cx: float, cy: float
+) -> tuple[float, bool]:
+    """Orientation determinant of ⟨a, b, c⟩ and whether its sign is certain.
+
+    Implements the floating-point filter of Shewchuk's adaptive ``orient2d``
+    (Robust Adaptive Floating-Point Geometric Predicates, 1996, public domain).
+    Coincident points yield an exact 0.
+
+    Returns:
+      The float determinant (twice the signed area) and whether its sign is
+      the sign of the exact determinant.
+    """
+    if (ax == cx and ay == cy) or (bx == cx and by == cy) or (ax == bx and ay == by):
+        return 0.0, True
+    detleft = (ax - cx) * (by - cy)
+    detright = (ay - cy) * (bx - cx)
+    det = detleft - detright
+    # the sign of a rounded difference or product is exact, so the determinant's
+    # sign is certain when the two products do not have the same sign
+    if detleft > 0.0:
+        if detright <= 0.0:
+            return det, True
+        detsum = detleft + detright
+    elif detleft < 0.0:
+        if detright >= 0.0:
+            return det, True
+        detsum = -detleft - detright
+    else:
+        return det, True
+    return det, abs(det) >= _ORIENT2D_ERRBOUND * detsum
+
+
+@nb.njit(cache=True)
+def _find_segments_crossing_any_filtered(
+    probesC: np.ndarray, segmentsC: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Decide :func:`find_segments_crossing_any` where float arithmetic can.
+
+    A pair is decided here if its orientation signs are certain and either
+    show no proper crossing, or show one whose intersection point cannot
+    round onto an endpoint (every endpoint far from the other segment's line,
+    segments not nearly parallel). Otherwise it is left undecided.
+
+    Returns:
+      Two boolean arrays of shape ``(N,)``: probes crossing some segment, and
+      probes not found crossing any segment but with some undecided pair.
+    """
+    N = probesC.shape[0]
+    M = segmentsC.shape[0]
+    crossed = np.zeros(N, dtype=np.bool_)
+    undecided = np.zeros(N, dtype=np.bool_)
+    lo = np.empty((M, 2))
+    hi = np.empty((M, 2))
+    for j in range(M):
+        for k in range(2):
+            lo[j, k] = min(segmentsC[j, 0, k], segmentsC[j, 1, k])
+            hi[j, k] = max(segmentsC[j, 0, k], segmentsC[j, 1, k])
+    for i in range(N):
+        ux, uy = probesC[i, 0, 0], probesC[i, 0, 1]
+        vx, vy = probesC[i, 1, 0], probesC[i, 1, 1]
+        ulo0, uhi0 = min(ux, vx), max(ux, vx)
+        ulo1, uhi1 = min(uy, vy), max(uy, vy)
+        uv_len = math.hypot(vx - ux, vy - uy)
+        for j in range(M):
+            if uhi0 < lo[j, 0] or hi[j, 0] < ulo0 or uhi1 < lo[j, 1] or hi[j, 1] < ulo1:
+                continue
+            sx, sy = segmentsC[j, 0, 0], segmentsC[j, 0, 1]
+            tx, ty = segmentsC[j, 1, 0], segmentsC[j, 1, 1]
+            # s and t on the same side of (or touching) the line through u, v
+            d1, c1 = _orient2d_filtered(ux, uy, vx, vy, sx, sy)
+            d2, c2 = _orient2d_filtered(ux, uy, vx, vy, tx, ty)
+            if c1 and c2 and not ((d1 > 0.0 and d2 < 0.0) or (d1 < 0.0 and d2 > 0.0)):
+                continue
+            # u and v on the same side of (or touching) the line through s, t
+            d3, c3 = _orient2d_filtered(sx, sy, tx, ty, ux, uy)
+            d4, c4 = _orient2d_filtered(sx, sy, tx, ty, vx, vy)
+            if c3 and c4 and not ((d3 > 0.0 and d4 < 0.0) or (d3 < 0.0 and d4 > 0.0)):
+                continue
+            if c1 and c2 and c3 and c4:
+                # a proper crossing of the exact segments; GEOS reports it as a
+                # touch if the intersection point it computes equals an endpoint
+                st_len = math.hypot(tx - sx, ty - sy)
+                scale = max(
+                    abs(ux),
+                    abs(uy),
+                    abs(vx),
+                    abs(vy),
+                    abs(sx),
+                    abs(sy),
+                    abs(tx),
+                    abs(ty),
+                )
+                margin = _CROSSING_MARGIN_ULPS * 2.0**-52 * scale
+                dmin_uv = min(abs(d1), abs(d2)) / uv_len
+                dmin_st = min(abs(d3), abs(d4)) / st_len
+                sine = abs((vx - ux) * (ty - sy) - (vy - uy) * (tx - sx)) / (
+                    uv_len * st_len
+                )
+                if dmin_uv > margin and dmin_st > margin and sine > _CROSSING_MIN_SINE:
+                    crossed[i] = True
+                    break
+            undecided[i] = True
+        if crossed[i]:
+            undecided[i] = False
+    return crossed, undecided
+
+
+def find_segments_crossing_any(
+    probesC: np.ndarray, segmentsC: np.ndarray
+) -> np.ndarray:
+    """Flag which probe segments cross at least one of ``segmentsC``.
+
+    The result is shapely's (GEOS) ``crosses`` predicate for two-point line
+    strings: the segments meet in a single point interior to both. Touching
+    (including common endpoints or an endpoint lying on the other segment) and
+    parallel or collinear segments (including superposition) are not
+    crossings. As in GEOS, a crossing whose intersection point rounds onto an
+    endpoint is a touch, which keeps the answer consistent with the
+    intersection point floating-point coordinates can represent.
+
+    Pairs are decided in float arithmetic with certified orientation signs;
+    the rare ones near that rounding limit are passed to shapely.
+
+    Args:
+      probesC: (N×2×2) coordinates of the probe segments' ends.
+      segmentsC: (M×2×2) coordinates of the segments to check against.
+
+    Returns:
+      Boolean array of shape ``(N,)``.
+    """
+    crossed, undecided = _find_segments_crossing_any_filtered(probesC, segmentsC)
+    if undecided.any():
+        segmentsS = shp.linestrings(segmentsC)
+        for i in np.flatnonzero(undecided).tolist():
+            crossed[i] = shp.crosses(shp.linestrings(probesC[i]), segmentsS).any()
+    return crossed
+
+
 def is_crossing(
     uC: CoordPair,
     vC: CoordPair,
@@ -685,6 +838,12 @@ def polylines_cross_at_point(
     return rays_alternate(rays_a, rays_b)
 
 
+# A quadrilateral whose angle at u or v has a sine below this is degenerate
+# (a triangle): decimal coordinates of collinear points leave float residuals of
+# at most ~1e-14 in the sine, while angles of actual layouts are above ~1e-7.
+_CONVEX_QUAD_MIN_SINE_SQ = 1e-10**2
+
+
 @nb.njit(cache=True)
 def is_triangle_pair_a_convex_quadrilateral(
     uC: CoordPair, vC: CoordPair, sC: CoordPair, tC: CoordPair
@@ -694,18 +853,79 @@ def is_triangle_pair_a_convex_quadrilateral(
     ⟨u, v⟩ is the common side; ⟨s, t⟩ are the opposing vertices;
     only works if ⟨s, t⟩ crosses the line defined by ⟨u, v⟩
 
+    A quadrilateral with a (nearly) straight angle at u or v is a triangle,
+    i.e. u or v lies on ⟨s, t⟩. The test for it is relative to the side
+    lengths, so it gives the same answer in any translation or scale of the
+    coordinates.
+
     Returns:
       ``True`` if the quadrilateral is convex and is not a triangle
     """
     # this used to be called `is_quadrilateral_convex()`
+    us = sC - uC
+    ut = tC - uC
+    vs = sC - vC
+    vt = tC - vC
     # us × ut
-    usut = _cross_prod_2d(sC - uC, tC - uC)
+    usut = _cross_prod_2d(us, ut)
     # vt × vs
-    vtvs = _cross_prod_2d(tC - vC, sC - vC)
-    if usut == 0.0 or vtvs == 0.0:
-        # the four vertices form a triangle
+    vtvs = _cross_prod_2d(vt, vs)
+    if not ((usut > 0.0 and vtvs > 0.0) or (usut < 0.0 and vtvs < 0.0)):
         return False
-    return (usut > 0.0) == (vtvs > 0.0)
+    # the four vertices must not form a triangle
+    us2 = us[0] * us[0] + us[1] * us[1]
+    ut2 = ut[0] * ut[0] + ut[1] * ut[1]
+    vs2 = vs[0] * vs[0] + vs[1] * vs[1]
+    vt2 = vt[0] * vt[0] + vt[1] * vt[1]
+    return (
+        usut * usut > _CONVEX_QUAD_MIN_SINE_SQ * us2 * ut2
+        and vtvs * vtvs > _CONVEX_QUAD_MIN_SINE_SQ * vs2 * vt2
+    )
+
+
+def is_triangle_pair_a_convex_quadrilateral_XY(
+    XY: Sequence[Sequence[float]], u: int, v: int, s: int, t: int
+) -> bool:
+    """Check convexity of quadrilateral given by vertex indices.
+
+    Same test as :func:`is_triangle_pair_a_convex_quadrilateral`, but reads the
+    coordinates from a list of pairs (e.g. ``VertexC.tolist()``). In a Python
+    loop, this is ~10x faster than indexing a numpy array and calling the
+    numba-compiled version.
+
+    Args:
+      XY: coordinate pairs indexed by vertex
+      u: vertex of the common side ⟨u, v⟩
+      v: vertex of the common side ⟨u, v⟩
+      s: opposing vertex
+      t: opposing vertex
+
+    Returns:
+      ``True`` if the quadrilateral is convex and is not a triangle
+    """
+    ux, uy = XY[u]
+    vx, vy = XY[v]
+    sx, sy = XY[s]
+    tx, ty = XY[t]
+    usx, usy = sx - ux, sy - uy
+    utx, uty = tx - ux, ty - uy
+    vsx, vsy = sx - vx, sy - vy
+    vtx, vty = tx - vx, ty - vy
+    # us × ut
+    usut = usx * uty - usy * utx
+    # vt × vs
+    vtvs = vtx * vsy - vty * vsx
+    if not ((usut > 0.0 and vtvs > 0.0) or (usut < 0.0 and vtvs < 0.0)):
+        return False
+    # the four vertices must not form a triangle
+    us2 = usx * usx + usy * usy
+    ut2 = utx * utx + uty * uty
+    vs2 = vsx * vsx + vsy * vsy
+    vt2 = vtx * vtx + vty * vty
+    return (
+        usut * usut > _CONVEX_QUAD_MIN_SINE_SQ * us2 * ut2
+        and vtvs * vtvs > _CONVEX_QUAD_MIN_SINE_SQ * vs2 * vt2
+    )
 
 
 def perimeter(VertexC, vertices_ordered):
@@ -875,7 +1095,7 @@ def minimum_spanning_forest(A: nx.Graph) -> nx.Graph:
 
 
 def rotation_checkers_factory(
-    VertexC: CoordPairs,
+    VertexC: CoordPairs | Sequence[Sequence[float]],
 ) -> tuple[
     Callable[[int, int, int], bool],
     Callable[[int, int, int], bool],
