@@ -208,9 +208,12 @@ class PathNodes(dict):
     prime_from_pn: dict
     pn_ids_from_prime_sector: defaultdict
     last_added_pn: int
+    is_debug: bool
 
     def __init__(self):
         super().__init__()
+        # snapshot: a disabled debug() call costs ~0.3 µs even with no output
+        self.is_debug = _lggr.isEnabledFor(logging.DEBUG)
         self.count = 0
         self.prime_from_pn = {}
         self.pn_ids_from_prime_sector = defaultdict(list)
@@ -240,7 +243,8 @@ class PathNodes(dict):
         self[pn_id] = PseudoNode(prime, sector, parent_pn, dist, d_hop, cum_turn)
         self.pn_ids_from_prime_sector[prime, sector].append(pn_id)
         self.prime_from_pn[pn_id] = prime
-        debug('pseudoedge «%d->%d» added', prime, parent_prime)
+        if self.is_debug:
+            debug('pseudoedge «%d->%d» added', prime, parent_prime)
         self.last_added_pn = pn_id
         return pn_id
 
@@ -1000,6 +1004,7 @@ class PathFinder:
         traversals_limit = self.traversals_limit
         num_traversals = self.num_traversals
         triangles = P.graph['triangles']
+        is_debug = self.paths.is_debug
         traverser = self._traverse_channel(adv_id, *funnel_state)
         next(traverser)
         if side is not None:
@@ -1019,11 +1024,13 @@ class PathFinder:
             left, right = portal
             n = P[left][right]['ccw']
             if n not in P[right] or P[left][n]['ccw'] == right or n < 0:
-                debug('{%d} advancer reached DEAD-END (root or mesh edge)', adv_id)
+                if is_debug:
+                    debug('{%d} advancer reached DEAD-END (root or mesh edge)', adv_id)
                 return
             triangle_idx = bisect_left(triangles, _sorted3(left, right, n))
             if is_triangle_seen[triangle_idx]:
-                debug('{%d} advancer revisited triangle', adv_id)
+                if is_debug:
+                    debug('{%d} advancer revisited triangle', adv_id)
                 return
             is_triangle_seen[triangle_idx] = 1
             # check whether the other two sides of the triangle are portals
@@ -1084,7 +1091,8 @@ class PathFinder:
                     )
                 elif 0 <= n < T:
                     traverser.send(((left, n), 1, True))
-                debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
+                if is_debug:
+                    debug('{%d} advancer reached DEAD-END (not portals)', adv_id)
                 return
             # process  portal
             if has_left_portal:
@@ -1757,6 +1765,7 @@ class PathFinder:
         bad_streak_limit = self.bad_streak_limit
         turn_limit = self.turn_limit
         wall_free_vertices = self.wall_free_vertices
+        is_debug = paths.is_debug
 
         # for next_left, next_right, new_portal_iter in portal_iter:
         while True:
@@ -1801,19 +1810,20 @@ class PathFinder:
             #  if _nearside == _apex:  # debug info
             #      print(f"{'RIGHT' if side else 'LEFT '} "
             #            f'nearside({_nearside}) == apex({_apex})')
-            debug(
-                '<%d> %s _new(%d) _nearside(%d) _farside(%d) _apex(%d),'
-                ' _wedge_end: %d %d, _funnel: %s',
-                adv_id,
-                'RIGHT' if side else 'LEFT ',
-                _new,
-                _nearside,
-                _farside,
-                _apex,
-                paths.prime_from_pn[wedge_end[0]],
-                paths.prime_from_pn[wedge_end[1]],
-                _funnel,
-            )
+            if is_debug:
+                debug(
+                    '<%d> %s _new(%d) _nearside(%d) _farside(%d) _apex(%d),'
+                    ' _wedge_end: %d %d, _funnel: %s',
+                    adv_id,
+                    'RIGHT' if side else 'LEFT ',
+                    _new,
+                    _nearside,
+                    _farside,
+                    _apex,
+                    paths.prime_from_pn[wedge_end[0]],
+                    paths.prime_from_pn[wedge_end[1]],
+                    _funnel,
+                )
 
             # One signed cross per wall; |orient| < ε means _new is collinear
             # with apex→wall-vertex. Collinear _new is in line-of-sight only if
@@ -1838,7 +1848,8 @@ class PathFinder:
                     and is_beyond(_apex, _farside, _new)
                 ):
                     # ultrafar (⟨new, apex⟩ cuts farside or passes through it)
-                    debug('<%d> ultrafar', adv_id)
+                    if is_debug:
+                        debug('<%d> ultrafar', adv_id)
                     current_wapex = wedge_end[not side]
                     _current_wapex = paths.prime_from_pn[current_wapex]
                     _funnel[not side] = _current_wapex
@@ -1871,12 +1882,14 @@ class PathFinder:
                     apex_on_wall_free = _apex in wall_free_vertices
                 else:
                     # not ultrafar nor infranear (⟨new, apex⟩ in line-of-sight)
-                    debug('<%d> inside', adv_id)
+                    if is_debug:
+                        debug('<%d> inside', adv_id)
                 _apex_eff, apex_eff = _apex, apex
                 _funnel[side] = _new
             else:
                 # infranear (⟨new, apex⟩ cuts nearside)
-                debug('<%d> infranear', adv_id)
+                if is_debug:
+                    debug('<%d> infranear', adv_id)
                 current_wapex = wedge_end[side]
                 _current_wapex = paths.prime_from_pn[current_wapex]
                 contender_wapex = paths[current_wapex].parent
@@ -1923,7 +1936,8 @@ class PathFinder:
                 and abs(step_turn) > _WALL_FREE_APEX_TURN_EPS
             ):
                 # every later path of this advancer bends at _apex
-                debug('<%d> apex on wall-free vertex %d: dead', adv_id, _apex)
+                if is_debug:
+                    debug('<%d> apex on wall-free vertex %d: dead', adv_id, _apex)
                 return
             cum_turn = apex_pn.cum_turn + step_turn
             d_prio = d_new if _new < ST else prio[0]
@@ -1957,14 +1971,15 @@ class PathFinder:
             best_pn_id = best_pn_by_pair_id[pair_id]
             if best_pn_id is None or d_new < paths[best_pn_id].dist:
                 best_pn_by_pair_id[pair_id] = new_pn_id
-                debug(
-                    '<%d> new best pn for (%d, %d) via %d: d_path = %.2f',
-                    adv_id,
-                    _new,
-                    sector_new,
-                    _apex_eff,
-                    d_new,
-                )
+                if is_debug:
+                    debug(
+                        '<%d> new best pn for (%d, %d) via %d: d_path = %.2f',
+                        adv_id,
+                        _new,
+                        sector_new,
+                        _apex_eff,
+                        d_new,
+                    )
                 # first arrival at (_new, sector_new) discounts the bad_streak
                 #   but finding a new best_pn_id resets the bad_streak
                 bad_streak = max(0, bad_streak - 1) if best_pn_id is None else 0
@@ -1985,6 +2000,7 @@ class PathFinder:
         self.num_traversals = num_traversals
         traversals_limit = self.traversals_limit
         paths = self.paths = PathNodes()
+        is_debug = paths.is_debug
         triangles = P.graph['triangles']
         portal_set = self.portal_set
 
@@ -2079,7 +2095,8 @@ class PathFinder:
         iter = 0
         while iter < iterations_limit:
             iter += 1
-            debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
+            if is_debug:
+                debug('_find_paths[%d]: advancer id <%d>', iter, adv_id)
             try:
                 # advance one portal
                 prio, portal, is_promising = next(advancer)
