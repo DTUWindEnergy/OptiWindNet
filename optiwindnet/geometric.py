@@ -861,6 +861,40 @@ def is_triangle_pair_a_convex_quadrilateral(
     return (usut > 0.0) == (vtvs > 0.0)
 
 
+def is_triangle_pair_a_convex_quadrilateral_XY(
+    XY: Sequence[Sequence[float]], u: int, v: int, s: int, t: int
+) -> bool:
+    """Check convexity of quadrilateral given by vertex indices.
+
+    Same test as :func:`is_triangle_pair_a_convex_quadrilateral`, but reads the
+    coordinates from a list of pairs (e.g. ``VertexC.tolist()``). In a Python
+    loop, this is ~10x faster than indexing a numpy array and calling the
+    numba-compiled version.
+
+    Args:
+      XY: coordinate pairs indexed by vertex
+      u: vertex of the common side ⟨u, v⟩
+      v: vertex of the common side ⟨u, v⟩
+      s: opposing vertex
+      t: opposing vertex
+
+    Returns:
+      ``True`` if the quadrilateral is convex and is not a triangle
+    """
+    ux, uy = XY[u]
+    vx, vy = XY[v]
+    sx, sy = XY[s]
+    tx, ty = XY[t]
+    # us × ut
+    usut = (sx - ux) * (ty - uy) - (sy - uy) * (tx - ux)
+    # vt × vs
+    vtvs = (tx - vx) * (sy - vy) - (ty - vy) * (sx - vx)
+    if usut == 0.0 or vtvs == 0.0:
+        # the four vertices form a triangle
+        return False
+    return (usut > 0.0) == (vtvs > 0.0)
+
+
 def perimeter(VertexC, vertices_ordered):
     """Calculate the perimeter of the polygon defined by ``vertices_ordered``.
 

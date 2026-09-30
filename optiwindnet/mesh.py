@@ -21,6 +21,7 @@ from .geometric import (
     Indices,
     find_segments_crossing_any,
     is_triangle_pair_a_convex_quadrilateral,
+    is_triangle_pair_a_convex_quadrilateral_XY,
     rotation_checkers_factory,
     triangle_AR,
 )
@@ -928,6 +929,7 @@ def make_planar_embedding(
     # accumulate in a plain dict: bidict.__setitem__ is ~9x costlier per item
     # than validating the whole mapping once, at construction.
     diagonals_ = {}
+    XYS = VertexS.tolist()
     for u, v in P_A_edges - hull_pruned_edges:
         uvD = P_A[u][v]
         s, t = uvD['cw'], uvD['ccw']
@@ -936,7 +938,7 @@ def make_planar_embedding(
         vuD = P_A[v][u]
         assert s == vuD['ccw'] and t == vuD['cw']
 
-        if is_triangle_pair_a_convex_quadrilateral(*VertexS[[u, v, s, t]]):
+        if is_triangle_pair_a_convex_quadrilateral_XY(XYS, u, v, s, t):
             s, t = (s, t) if s < t else (t, s)
             diagonals_[(s, t)] = (u, v)
             A.add_edge(s, t, kind='extended')
@@ -1267,10 +1269,11 @@ def make_planar_embedding(
             border_edges.add((s, t) if s < t else (t, s))
 
     P_diags_ = {}
+    XY = VertexC.tolist()
     for u, v in P_edges.difference(hull_pruned_edges, constraint_edges, border_edges):
         uvD = P[u][v]
         s, t = uvD['cw'], uvD['ccw']
-        if is_triangle_pair_a_convex_quadrilateral(*VertexC[[u, v, s, t]]):
+        if is_triangle_pair_a_convex_quadrilateral_XY(XY, u, v, s, t):
             s, t = (s, t) if s < t else (t, s)
             P_diags_[(s, t)] = (u, v)
             P_paths.add_edge(s, t)
@@ -1286,7 +1289,7 @@ def make_planar_embedding(
     # ###################################################################
     debug('PART M')
 
-    cw, ccw, _ = rotation_checkers_factory(VertexC)
+    cw, ccw, _ = rotation_checkers_factory(XY)
     # auxiliary function for parts M and N
 
     def is_midpoint_shortable(s, b, t):
@@ -1331,7 +1334,6 @@ def make_planar_embedding(
     corner_to_A_edges = defaultdict(list)
     A_edges_to_revisit = []
     remove_from_A = []
-    XY = VertexC.tolist()
     for u, v in A.edges - P_paths.edges:
         # For the edges in A that are not in P, we find their corresponding
         # shortest path in P_path and update the length attribute in A.
@@ -1353,9 +1355,8 @@ def make_planar_embedding(
                 if wx_uniq is None or wx_uniq == diag:
                     continue
                 if all(n < T for n in wx_uniq):
-                    if is_triangle_pair_a_convex_quadrilateral(
-                        *VertexC[wx_uniq,], *VertexC[uv_uniq,]
-                    ):
+                    w, x = wx_uniq
+                    if is_triangle_pair_a_convex_quadrilateral_XY(XY, w, x, *uv_uniq):
                         continue
                     # remove the edge because its crossings do not match its A origin
                     skip = True
