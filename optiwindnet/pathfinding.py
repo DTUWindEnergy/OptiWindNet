@@ -826,7 +826,8 @@ class PathFinder:
         """Uncached sector scan for one ``(prime, opposite)`` pair."""
         T = self.T
         G = self.G
-        P = self.P
+        # pyrefly: ignore[missing-attribute]
+        P_adj = self.P._adj
         tentative = self.tentative
         if prime >= T:
             # `prime` is on a constraint wall or is a supertriangle vertex,
@@ -836,15 +837,15 @@ class PathFinder:
             # special case: visiting a DEAD-END
             return opposite
         prime_adj = G._adj.get(prime, {})  # type: ignore
-        nbr = P[prime][opposite]['ccw']
-        for _ in range(len(P._adj[prime])):  # type: ignore
+        nbr = P_adj[prime][opposite]['ccw']
+        for _ in range(len(P_adj[prime])):
             if (
                 nbr < T
                 and nbr in prime_adj
                 and (nbr >= 0 or (nbr, prime) not in tentative)
             ):
                 return nbr
-            nbr = P[prime][nbr]['ccw']
+            nbr = P_adj[prime][nbr]['ccw']
         # could not find a non-tentative G edge around prime
         return NULL
 
@@ -862,6 +863,8 @@ class PathFinder:
     def _precompute_sector_lookup(self, fences: list[Fence]) -> None:
         """Precompute sector and dense ``(prime, sector)`` ids for pathfinding."""
         P = self.P
+        # pyrefly: ignore[missing-attribute]
+        P_adj = P._adj
         T = self.T
         ST = self.ST
         R = self.R
@@ -908,12 +911,12 @@ class PathFinder:
                 if opposite in G._adj.get(prime, {}):  # type: ignore
                     sector = opposite
                 else:
-                    nbr = P[prime][opposite]['ccw']
+                    nbr = P_adj[prime][opposite]['ccw']
                     for _ in range(len(cw_nbrs)):
                         if nbr in valid_sector:
                             sector = nbr
                             break
-                        nbr = P[prime][nbr]['ccw']
+                        nbr = P_adj[prime][nbr]['ccw']
                     else:
                         sector = NULL
                 by_opposite[opposite] = sector
@@ -947,7 +950,7 @@ class PathFinder:
             if r not in P:
                 continue
             for left in P.neighbors(r):
-                right = P[r][left]['cw']
+                right = P_adj[r][left]['cw']
                 if (left, right) not in portal_set:
                     continue
                 sec_left = self._fan_init_sector(left, right) if left < ST else NULL
@@ -974,14 +977,16 @@ class PathFinder:
         inconsistent G).
         """
         P = self.P
+        # pyrefly: ignore[missing-attribute]
+        P_adj = P._adj
         G = self.G
         edges_G_primes = self.edges_G_primes
         constraint_edges = P.graph['constraint_edges']
         if prime in G.nodes and len(G._adj[prime]) == 0:  # type: ignore
             return NULL
         sector = opposite
-        for _ in P[prime]:
-            sector = P[prime][sector]['ccw']
+        for _ in P_adj[prime]:
+            sector = P_adj[prime][sector]['ccw']
             incr_edge = (sector, prime) if sector < prime else (prime, sector)
             if incr_edge in edges_G_primes or incr_edge in constraint_edges:
                 return sector
@@ -996,6 +1001,8 @@ class PathFinder:
         side: int | None = None,
     ):
         P = self.P
+        # pyrefly: ignore[missing-attribute]
+        P_adj = P._adj
         T = self.T
         prioqueue = self.prioqueue
         portal_set = self.portal_set
@@ -1022,8 +1029,8 @@ class PathFinder:
         while True:
             # look for children portals
             left, right = portal
-            n = P[left][right]['ccw']
-            if n not in P[right] or P[left][n]['ccw'] == right or n < 0:
+            n = P_adj[left][right]['ccw']
+            if n not in P_adj[right] or P_adj[left][n]['ccw'] == right or n < 0:
                 if is_debug:
                     debug('{%d} advancer reached DEAD-END (root or mesh edge)', adv_id)
                 return
@@ -1622,7 +1629,8 @@ class PathFinder:
         primes delimiting the wedge in CW order around ``cone.vertex``;
         ``cone.spokes`` are the non-bound spokes inside.
         """
-        P = self.P
+        # pyrefly: ignore[missing-attribute]
+        P_adj = self.P._adj
         paths = self.paths
         prioqueue = self.prioqueue
         portal_set = self.portal_set
@@ -1678,8 +1686,8 @@ class PathFinder:
             # same chain-end (third vertex of the new triangle is w).
             if (
                 (cone.left, cone.right) in portal_set
-                and cone.right in P[cone.left]
-                and P[cone.left][cone.right].get('ccw') != w
+                and cone.right in P_adj[cone.left]
+                and P_adj[cone.left][cone.right].get('ccw') != w
             ):
                 _launch(cone.left, cone.right, 1)
 
@@ -1695,7 +1703,8 @@ class PathFinder:
         """
         if y not in self.chain_end_set:
             return NULL
-        P_y = self.P[y]
+        # pyrefly: ignore[missing-attribute]
+        P_y = self.P._adj[y]
         if opposite not in P_y:
             return NULL
         edge = P_y[opposite]
@@ -1993,6 +2002,8 @@ class PathFinder:
     def _find_paths(self):
         #  print('[exp] starting _explore()')
         P, R = self.P, self.R
+        # pyrefly: ignore[missing-attribute]
+        P_adj = P._adj
         d2roots, d2rootsRank = self.d2roots, self.d2rootsRank
         iterations_limit = self.iterations_limit
         self.prioqueue = prioqueue = []
@@ -2013,7 +2024,7 @@ class PathFinder:
             paths.prime_from_pn[r] = r
             paths.pn_ids_from_prime_sector[r, r] = [r]
             for left in P.neighbors(r):
-                right = P[r][left]['cw']
+                right = P_adj[r][left]['cw']
                 portal = (left, right)
                 portal_sorted = (right, left) if right < left else portal
 
@@ -2049,7 +2060,7 @@ class PathFinder:
                             left, chain, c_side, pn_c, bitarray(len(triangles))
                         )
 
-                if right not in P[r] or portal_sorted not in portal_set:
+                if right not in P_adj[r] or portal_sorted not in portal_set:
                     # (left, right, root) not a triangle
                     # or (left, right) is not a portal
                     continue

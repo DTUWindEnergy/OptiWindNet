@@ -916,32 +916,31 @@ def make_planar_embedding(
 
     A: nx.Graph[int] = nx.Graph()
     A.add_nodes_from(L.nodes(data=True))
-    A.add_edges_from(P_A_edges)
+    A.add_edges_from(P_A_edges, kind='delaunay')
     # Keep a plain normalized-edge ledger through the remaining mutations.
     # This avoids scanning NetworkX adjacency when the final canonical bit
     # positions are installed in Part P.
     A_terminal_edges = {(u, v) for u, v in P_A_edges if 0 <= u < T and 0 <= v < T}
-    # a scalar `values` is applied to every edge; the stubs only cover mappings
-    # pyrefly: ignore[no-matching-overload]
-    nx.set_edge_attributes(A, 'delaunay', name='kind')
 
     # Extend A with diagonals.
     # accumulate in a plain dict: bidict.__setitem__ is ~9x costlier per item
     # than validating the whole mapping once, at construction.
     diagonals_ = {}
     XYS = VertexS.tolist()
+    # pyrefly: ignore[missing-attribute]
+    P_A_adj = P_A._adj
     for u, v in P_A_edges - hull_pruned_edges:
-        uvD = P_A[u][v]
+        uvD = P_A_adj[u][v]
         s, t = uvD['cw'], uvD['ccw']
 
         # SANITY check (if hull edges were skipped, this should always hold)
-        vuD = P_A[v][u]
+        vuD = P_A_adj[v][u]
         assert s == vuD['ccw'] and t == vuD['cw']
 
         if is_triangle_pair_a_convex_quadrilateral_XY(XYS, u, v, s, t):
             s, t = (s, t) if s < t else (t, s)
             diagonals_[(s, t)] = (u, v)
-            A.add_edge(s, t, kind='extended')
+    A.add_edges_from(diagonals_, kind='extended')
     A_terminal_edges.update(
         st for st in diagonals_ if 0 <= st[0] < T and 0 <= st[1] < T
     )
@@ -1270,13 +1269,15 @@ def make_planar_embedding(
 
     P_diags_ = {}
     XY = VertexC.tolist()
+    # pyrefly: ignore[missing-attribute]
+    P_adj = P._adj
     for u, v in P_edges.difference(hull_pruned_edges, constraint_edges, border_edges):
-        uvD = P[u][v]
+        uvD = P_adj[u][v]
         s, t = uvD['cw'], uvD['ccw']
         if is_triangle_pair_a_convex_quadrilateral_XY(XY, u, v, s, t):
             s, t = (s, t) if s < t else (t, s)
             P_diags_[(s, t)] = (u, v)
-            P_paths.add_edge(s, t)
+    P_paths.add_edges_from(P_diags_)
     P_diags = bidict(P_diags_)
 
     nx.set_edge_attributes(P_paths, A_edge_length, name='length')
