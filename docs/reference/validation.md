@@ -1,12 +1,20 @@
 # Validation
 
-A solution can be invalid in two independent ways: it can be electrically infeasible (capacity exceeded, a terminal not connected to any root, a degree limit broken), or it can be geometrically invalid (two routes crossing). _OptiWindNet_ currently lacks a check for route×boundaries crossings.
+A solution can be invalid in two independent ways: it can be electrically infeasible (a cable exceeds capacity, a turbine has no connection to a substation, or a node has too many neighbors for the chosen topology), or it can be geometrically invalid (two routes crossing). _OptiWindNet_ currently lacks a check for route×boundaries crossings.
 
-_OptiWindNet_ releases are expected to produce valid solution topologies and routesets, hence these functions are intended primarily for developers attempting to modify the solvers or the path-finder, or to code their own implementations.
+Use `validate_routeset(wfn.G)` to check a delivered network, especially when using custom graph transformations, hand-built topologies or path-finder settings. The function returns a list of violations, empty when the checks pass, and leaves the graph unchanged:
 
-End-users are advised to validate a solution ({py:func}`find_geometric_crossings(G) <optiwindnet.crossings.find_geometric_crossings>`) only for problem instances with capacities 2 and 3 and more than 40 terminals, for which {py:class}`PathFinder <optiwindnet.pathfinding.PathFinder>` (with the default parameters) may produce routesets with feeder crossings. These require increasing some internal limits of {py:class}`PathFinder <optiwindnet.pathfinding.PathFinder>` via its arguments.
+```python
+from optiwindnet.validating import validate_routeset
 
-Please report any invalid solution topology or invalid routesets that are not resolved by the tuning of {py:class}`PathFinder <optiwindnet.pathfinding.PathFinder>`'s parameters.
+violations = validate_routeset(wfn.G)
+if violations:
+    raise ValueError('\n'.join(violations))
+```
+
+On sites with more than 40 turbines and capacities of 2 or 3, the default `PathFinder` search limits may leave feeder crossings. Its arguments allow those limits to be increased. Report invalid results that persist after tuning, including the site, capacity and router settings.
+
+These checks cover the graph's declared topology and integer capacity, stored loads and route intersections. They do not check every requested model option, such as an exact feeder count, or replace a check of route containment within the site boundaries.
 
 ## Electrical feasibility
 
@@ -32,6 +40,6 @@ _In use:_ {doc}`/notebooks/lo30_topologies` (Advanced API).
 <!-- prettier-ignore-start -->
 
 {py:func}`validate_routeset(G) <optiwindnet.validating.validate_routeset>`
-: Checks the complete routed solution. It verifies stored loads against the routes, reduces the routes to their solution topology and calls {py:func}`validate_topology() <optiwindnet.validating.validate_topology>`, then checks the complete route polylines with {py:func}`find_geometric_crossings() <optiwindnet.crossings.find_geometric_crossings>`. Calling `validate_topology()` separately is redundant.
+: Checks the complete routed solution. It verifies stored loads against the routes, reduces the routes to their solution topology and calls {py:func}`validate_topology() <optiwindnet.validating.validate_topology>`, then checks route crossings, self-intersections, invalid overlaps, branch splits and degenerate geometry with {py:func}`find_geometric_crossings() <optiwindnet.crossings.find_geometric_crossings>`. Calling `validate_topology()` separately is redundant.
 
 <!-- prettier-ignore-end -->

@@ -1,0 +1,19 @@
+/* Solver backends print hundreds of log lines, and nbsphinx renders each cell's output
+   at full height: one MILP cell can be taller than the rest of the page put together.
+   Cap text outputs and let them scroll instead. `max-height` only bites when the cap is
+   reached, so short outputs are unaffected; images and rendered HTML are not wrapped in
+   a `div.highlight`, so plots and tables keep their full size. */
+div.nboutput.container div.output_area div.highlight {
+  max-height: 22em;
+  overflow: auto;
+  /* nbsphinx strips the border and padding off output areas; the frame is the only cue
+     that the text continues below the fold. */
+  border: 1px solid var(--color-background-border);
+  /* the theme sets `width: 100%` here; without this the frame and padding are added on
+     top of that width, pushing the vertical scrollbar past the output area's right edge. */
+  box-sizing: border-box;
+  border-radius: 2px;
+  padding: 0.4em 0.6em;
+  /* let the reader trade page length for context */
+  resize: vertical;
+}

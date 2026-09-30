@@ -204,8 +204,7 @@ class WindFarmNetwork:
           handle: Short instance identifier. Defaults to "".
           L: Location geometry (takes precedence over coordinate inputs).
           router: Routing algorithm instance. Defaults to :class:`EWRouter`.
-          buffer_dist: Buffer distance to dilate borders / erode obstacles.
-            Defaults to 0.
+          verbose: Enable verbose logging during network construction.
           turbine_powers: Enables mixed power ratings (not required if the location
             uses uniform generators). Passed as a sequence of power values in the
             same order as the turbine coordinates: positive integers (inflow) if
@@ -221,13 +220,14 @@ class WindFarmNetwork:
 
         **Cable Specs** (``capacity`` in inflow if ``power_unit`` is None, in
         ``power_unit`` otherwise):
-            * List of 2-tuple cable specifications:
-              ``[(capacity, linear_cost), ...]``.
 
-            * List of capacity per cable type:
-              ``[capacity, ...]``.
+        * List of 2-tuple cable specifications:
+          ``[(capacity, linear_cost), ...]``.
 
-            * Maximum capacity of all available cables (single value): ``capacity``.
+        * List of capacity per cable type:
+          ``[capacity, ...]``.
+
+        * Maximum capacity of all available cables (single value): ``capacity``.
 
         Note:
           * If both ``L`` and coordinates are provided, ``L`` takes precedence.
@@ -910,26 +910,26 @@ class EWRouter(Router):
           ``'esau_williams'``
             Esau-Williams C-MST heuristic modified to avoid crossings (EW).
           ``'biased_EW'``
-            EW with a bias towards moving radially (root-ward) on quasi-ties.
+            EW that favors growth towards the substation when candidates are
+            nearly tied (the ``bias_margin`` defines the tie tolerance).
           ``'rootlust'``
-            EW with a tunable root-ward bias that increases as capacity decreases.
+            EW with a tunable preference for growth towards the substation,
+            increasing as remaining capacity decreases.
           ``'radial_EW'``
-            EW variant that produces radial subtrees (simple paths from root).
+            EW variant that connects each group of turbines along a single path
+            from a substation (also uses ``bias_margin``).
           ``'ringed'``
-            Closes each subtree into a ring: both endpoints connect to the same
-            root (two feeders) joined at a zero-load link. ``cables_capacity`` is
-            the per-arm limit, so a ring holds up to twice as many terminals.
-            Unions are ranked by their total saving — the feeders shed at the
-            two joined endpoints minus the connecting edge's length
-            (Clarke-Wright style) — with a ``bias_margin`` window favoring the
-            more root-ward union on quasi-ties.
+            A mix of EW and Clarke-Wright algorithms to connect groups of turbines
+            using a cyclic path starting and ending on a substation (also uses
+            ``bias_margin``). Since each turbine group has two feeders, a ring can
+            generate up to twice the total power of the groups in other topologies.
 
         Args:
           maxiter: Maximum iterations.
           feeder_route: Feeder routing mode (``'segmented'`` or ``'straight'``).
           method: one of the **Available Methods**, defaults to ``'biased_EW'``).
           bias_margin: Fractional margin within which candidates are considered
-            equivalent, resolving the quasi-tie root-ward (used by
+            equivalent, with a preference for growth towards the substation (used by
             ``'biased_EW'``, ``'radial_EW'`` and ``'ringed'``; for ``'ringed'``
             the margin is a fraction of the best union ``saving`` rather than the
             edge ``extent``).
@@ -1107,8 +1107,9 @@ class MILPRouter(Router):
         """Create a MILP-based router.
 
         Args:
-          solver_name: Name of solver (e.g., ``'gurobi'``, ``'cbc'``, ``'ortools'``,
-            ``'cplex'``, ``'highs'``, ``'scip'``).
+          solver_name: Name of solver (e.g., ``'gurobi'``, ``'ortools.cbcbox'``,
+            ``'cbc'``, ``'ortools'``, ``'cplex'``, ``'highs'``, ``'pyomo.highs'``,
+            ``'scip'``); see :func:`~optiwindnet.MILP.solver_factory`.
           time_limit: Maximum runtime (seconds).
           mip_gap: Relative MIP optimality gap tolerance.
           solver_options: Extra solver-specific options.

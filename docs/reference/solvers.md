@@ -1,28 +1,50 @@
 # MILP Solvers
 
-Which MILP backends _OptiWindNet_ can drive, and how to install them. What the exact routers do with them is described in [](/routers.md#exact-optimization), and the settings they accept in [](/routers.md#solver-options).
+Which MILP backends _OptiWindNet_ can drive, how to configure them, and how to install them. What the exact routers do with them is described in [](/routers.md#exact-optimization), and the settings they accept in [](#solver-options).
 
 ## Supported solvers
 
 | Solver | Licensing | Identifier |
 | --- | --- | --- |
 | Google OR-Tools | open source | `'ortools.cp_sat'`, `'ortools.gscip'`, `'ortools.highs'` |
-| HiGHS | open source | `'highs'` |
+| HiGHS | open source | `'highs'`, `'pyomo.highs'` |
 | SCIP | open source | `'scip'` |
-| COIN-OR CBC | open source | `'ortools.cbcbox'`, `'cbc'` (legacy) |
+| COIN-OR CBC | open source | `'ortools.cbcbox'`, `'pyomo.cbc'` (alias `'cbc'`) |
 | FiberSCIP | open source (experimental) | `'fscip'` |
 | Gurobi | commercial (academic license available) | `'gurobi'` |
 | IBM ILOG CPLEX | commercial (academic license available) | `'cplex'` |
 
 All of them solve the same model, so the choice does not change what counts as a valid solution — but it does change how long the search takes, sometimes by a wide margin on the same instance. If a solve is slower than expected, trying another backend costs a one-word change.
 
-Solvers perform a search across the branch-and-bound tree. On multi-core computers, some solvers parallelize the tree search itself, while others run several coordinated searches in parallel. As of Jul/2026, `gurobi`, `cplex`, `highs`, `ortools.cbcbox`, `cbc`, and `fscip` support multi-threaded tree search in _OptiWindNet_.
+Solvers perform a search across the branch-and-bound tree. On multi-core computers, some solvers parallelize the tree search itself, while others run several coordinated searches in parallel. As of Jul/2026, `gurobi`, `cplex`, `highs`, `pyomo.highs`, `ortools.cbcbox`, `cbc`, and `fscip` support multi-threaded tree search in _OptiWindNet_.
 
 The OR-Tools backends and native `scip` can also benefit from multiple cores by running concurrent searches with some information exchange among them. OR-Tools diversifies algorithms and strategies across workers, while SCIP diversifies random seeds and may vary emphasis settings. Both expose user-configurable controls for that behavior.
 
-Solvers are optional dependencies and are installed separately; the rest of this page covers that.
+The base installation includes a solver backend; additional backends are optional dependencies. The rest of this page describes both.
 
 _In use:_ {doc}`/notebooks/hi23_milp` (Network/Router API) · {doc}`/notebooks/lo23_milp_ortools` and the other MILP notebooks (Advanced API).
+
+## Solver options
+
+Solver options say **how** the solver searches, once the model is already built. They do not change what counts as a valid solution, and they apply to this approach only.
+
+| Option | Effect |
+| --- | --- |
+| `time_limit` | Maximum solve time, in seconds. |
+| `mip_gap` | Optimality tolerance — stop once the gap falls below this, e.g. `0.01` for 1%. |
+| `threads` | Number of threads or workers the solver may use. |
+| `mip_emphasis` | Whether to prioritize bound quality, feasibility, or integrality. |
+| `verbose` | Whether to surface the solver's own log. |
+
+Through the {doc}`/high_level_api`, `time_limit`, `mip_gap` and `verbose` are arguments of {py:class}`MILPRouter <optiwindnet.api.MILPRouter>` itself, while the rest are passed in its `solver_options` mapping.
+
+_OptiWindNet_ sets a handful of solver-specific defaults when a solver is initialized, chosen to suit this problem class; these are readable afterwards from the router or solver object. Every solver accepts many more options than the ones above — consult the solver's own documentation, and pass them through as additional options.
+
+_In use:_ {doc}`/notebooks/hi31_options` (Network/Router API) · {doc}`/notebooks/lo23_milp_ortools` (Advanced API).
+
+## Switching backends in a notebook
+
+OR-Tools bundles native HiGHS and SCIP libraries. Loading it alongside standalone `highspy` or `pyscipopt` can cause a native library conflict, so `solver_factory()` raises `RuntimeError` if a rival package is already imported. Restart the Python interpreter or Jupyter kernel before switching between `ortools*` and native `highs`, `pyomo.highs`, `scip` or `fscip`, or run the backends in separate processes. Switching among `ortools.cp_sat`, `ortools.gscip` and `ortools.highs` does not require a restart.
 
 ## Installing a solver
 
@@ -59,14 +81,17 @@ See below for specific instructions for each solver.
 [HiGHS](https://highs.dev/) can be called from _OptiWindNet_ in two ways:
 
 - `ortools.highs`: uses the HiGHS backend exposed through OR-Tools;
-- `highs`: uses the native Pyomo + `highspy` backend.
+- `highs`: uses the native **highspy** backend;
+- `pyomo.highs`: uses **highspy** through Pyomo.
 
-For the PyPI package, `ortools.highs` is available out of the box. The `highs` backend requires `highspy` to be installed separately when it is not already present in the environment:
+Of these, only `highs` keeps the solutions found during the search in a pool, from which the one with the shortest routed length is taken (see [](/routers.md#exact-optimization)); the other two take the best-objective solution. The `solver_options` of `highs` are HiGHS option names, passed unchanged to `highspy`.
+
+For the PyPI package, `ortools.highs` is available out of the box. The `highs` and `pyomo.highs` backends require `highspy` to be installed separately when it is not already present in the environment:
 
       pip install highspy
       conda install -c conda-forge highspy
 
-> **Attention**: Avoid loading both `highs` and `ortools*` solvers within the same Python interpreter instance, since `ortools` contains a vendored copy of HiGHS and its version may be different from the one used by **highspy**.
+> **Attention**: Avoid loading both `highs`/`pyomo.highs` and `ortools*` solvers within the same Python interpreter instance, since `ortools` contains a vendored copy of HiGHS and its version may be different from the one used by **highspy**.
 
 ### CBC
 
@@ -77,9 +102,9 @@ The recommended way to use CBC is the `ortools.cbcbox` backend: the model is bui
     pip install cbcbox
     conda install -c conda-forge cbcbox
 
-#### Legacy: `cbc` via Pyomo
+#### Alternative: `pyomo.cbc`
 
-The `cbc` backend uses Pyomo. Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for CBC, but it may also be installed by following the instructions in the links above:
+The `pyomo.cbc` backend (also accepted as `cbc`) uses Pyomo. Pyomo's interface with CBC is through a system call, so it does not need to be part of a python environment, but Pyomo must be able to find the solver's executable file. Conda has a package for CBC, but it may also be installed by following the instructions in the links above:
 
     conda install -c conda-forge coin-or-cbc
 

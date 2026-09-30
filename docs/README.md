@@ -9,7 +9,7 @@ docs/
 ├── conf.py               Sphinx configuration
 ├── Makefile              `make html`, `make check`
 ├── check_docs.py         checks the Sphinx build cannot do (see below)
-├── run_notebooks.py      re-executes notebooks and normalises their JSON
+├── run_notebooks.py      re-executes notebooks and normalizes their JSON
 ├── figures.py            builds the SVG figures the prose pages embed
 ├── index.md              landing page; holds every toctree
 │
@@ -17,7 +17,7 @@ docs/
 ├── apis.md               ┘ Start
 ├── problem.md            ┐ Concepts
 ├── routers.md            ┘
-├── reference/            Task Index · Glossary · MILP Solvers and Formulation · Validation
+├── reference/            Task Index · Glossary · MILP Solvers and Formulation · Warm-starting · Validation
 ├── high_level_api.md     Network/Router API — toctrees over the hi* notebooks
 ├── low_level_api.md      Advanced API — toctrees over the lo* notebooks
 ├── paper.md              framework article + toctree over the p0* notebooks
@@ -37,6 +37,14 @@ docs/
 
 `milp_formulation/problem_formulation.html` is an insertion-ready MathML fragment generated from the LaTeX source alongside it. Sphinx includes the fragment directly and copies the scoped CSS and subsetted fonts into the built site's `_static/milp_formulation/` directory. The normal documentation build must not run `milp_formulation/Makefile`: its Pandoc, FontTools, XeLaTeX and font-subsetting toolchain is intentionally outside _OptiWindNet_'s documentation dependencies.
 
+## Terminology
+
+Network/Router notebooks use **turbine** and **substation** almost exclusively. Introduce **terminal** or **root** only when needed to explain an exposed API name or graph convention, and give its physical meaning alongside it.
+
+Shared prose favors turbine and substation. Use terminal and root selectively to introduce the graph vocabulary or explain graph operations; establish their equivalence before relying on them. Advanced API guides use terminal and root for graph nodes and algorithms, while physical descriptions may use turbine and substation. The glossary records the mapping.
+
+Edit complete sentences and passages for their audience; do not convert terminology with plain string replacement. Preserve identifiers such as `rootlust`, `d2roots`, `T` and `R`, and distinguish turbine counts from integer inflow and nominal power when describing loads or capacities.
+
 ## Building and checking
 
 ```sh
@@ -48,7 +56,7 @@ make -C docs figures   # regenerate _static/fig_*.svg (outputs are committed)
 Both invoke `$(PYTHON)`, which defaults to bare `python`. Where only the virtualenv has one, point it there — on the command line or from the environment, both work:
 
 ```sh
-make -C docs html PYTHON=.venv/bin/python
+make -C docs html PYTHON="$PWD/.venv/bin/python"
 export PYTHON=$PWD/.venv/bin/python
 ```
 
@@ -142,7 +150,7 @@ prettier --write "**/*.md"                     # the pages
 python docs/format_notebook_prose.py --write   # the notebooks' markdown cells
 ```
 
-`never` unwraps paragraphs, which is the point: a contribution hard-wrapped at 80 columns normalises to the shape every other page has, and editing a paragraph no longer reflows its neighbours. The cost is that a paragraph is one long line — break it where the topic changes, not at a column.
+`never` unwraps paragraphs, which is the point: a contribution hard-wrapped at 80 columns normalizes to the shape every other page has, and editing a paragraph no longer reflows its neighbors. The cost is that a paragraph is one long line — break it where the topic changes, not at a column.
 
 Prettier has no `.ipynb` parser, so the notebooks are invisible to it. That is what `docs/format_notebook_prose.py` is for: it lifts the markdown cells out, formats them as Markdown, and puts them back, leaving code cells and outputs alone.
 
@@ -161,7 +169,7 @@ Two things need protecting from `never`, both with Prettier's own fences:
 .venv/bin/python docs/run_notebooks.py --kernel <name> --changed
 ```
 
-It executes, then normalises the JSON so diffs stay small (drops transient metadata, renumbers execution counts, prettifies SVG, marks long-output cells `scrolled`). MILP notebooks are skipped unless `--milp` or explicit paths are given, because they are slow.
+It executes, then normalizes the JSON so diffs stay small (drops transient metadata, renumbers execution counts, prettifies SVG, marks long-output cells `scrolled`). MILP notebooks are skipped unless `--milp` or explicit paths are given, because they are slow.
 
 ### Editing notebook JSON by hand
 

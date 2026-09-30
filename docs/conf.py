@@ -287,6 +287,7 @@ html_theme = 'furo'
 html_static_path = ['_static']
 html_css_files = [
     'apilinks.css',
+    'nboutput_scroll.css',
     'milp_formulation/problem_formulation.css',
 ]
 html_theme_options = {

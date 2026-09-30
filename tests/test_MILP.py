@@ -1497,6 +1497,26 @@ def test_solver_factory_missing_dependencies(
         solver_factory(solver_name)
 
 
+@pytest.mark.parametrize('standalone', [None, 'system/cbc'])
+def test_pyomo_cbc_executable_avoids_cbcbox(monkeypatch, tmp_path, standalone):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    wrapper = str(tmp_path / 'venv' / 'cbc')
+    package = SimpleNamespace(
+        files=[Path('venv/cbc')], locate_file=lambda file: tmp_path / file
+    )
+    monkeypatch.setattr(MILP, 'distribution', lambda name: package)
+    monkeypatch.setattr(MILP.os, 'get_exec_path', lambda: ['venv', 'system'])
+    monkeypatch.setattr(
+        MILP.shutil,
+        'which',
+        lambda name, path=None: standalone if path == 'system' else wrapper,
+    )
+
+    assert MILP._pyomo_cbc_executable() == standalone
+
+
 def test_solver_factory_rejects_unknown_solver():
     with pytest.raises(ValueError, match='Unsupported solver: unknown'):
         solver_factory('unknown')

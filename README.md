@@ -13,7 +13,7 @@
 OptiWindNet
 ===========
 
-Tool for designing and optimizing the electrical cable network of offshore wind farms.
+Tool for designing offshore wind farm electrical cable networks. Its built-in routers use cable length as a proxy for cost; when cable prices are supplied, OptiWindNet reports the cost of the resulting network, which need not be the minimum-cost network.
 
 | Documentation:<br>[optiwindnet.readthedocs.io][docs] |  |
 | :-- | :-: |
@@ -39,7 +39,7 @@ or
 conda install --channel conda-forge optiwindnet
 ```
 
-Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/setup.html#installation).
+Detailed instructions in [Installation](https://optiwindnet.readthedocs.io/stable/install.html#installation).
 
 Requirements
 ------------

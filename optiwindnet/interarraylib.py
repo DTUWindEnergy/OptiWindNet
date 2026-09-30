@@ -81,8 +81,9 @@ def assign_cables(
 ):
     """Assign a cable type to each edge of ``G`` and update attribute ``'cost'``.
 
-    Each edge is assigned the cheapest cable type that can carry its load. The
-    edge attribute ``'cable'`` is the index in ``cables`` of the type chosen.
+    Each edge is assigned the first cable type that can carry its load in
+    increasing capacity order. With nondecreasing costs, this is the cheapest
+    feasible type. The edge attribute ``'cable'`` is its index in ``cables``.
     Capacities are nominal power if ``G`` has ``'capacity_nominal'``, compared
     with nominal loads, and inflow otherwise, compared with integer loads.
 

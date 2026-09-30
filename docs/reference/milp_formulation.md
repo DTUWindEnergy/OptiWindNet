@@ -1,8 +1,8 @@
 # MILP Formulation
 
-The exact optimization approach uses a flow-based mixed-integer linear program to select a minimum-length, crossing-free cable topology. The generated formulation below states the common model: binary variables select directed links, continuous flow variables carry turbine power towards a substation, and the constraints enforce capacity, connectivity and planarity.
+The exact optimization approach uses a flow-based mixed-integer linear program to select a minimum-length, crossing-free cable topology. Cable prices are not part of this objective; they are used when reporting the cost of the resulting routed network. See [](/problem.md#objective-and-reported-cost). The generated formulation below states the common model: binary variables select directed links, continuous flow variables carry turbine power towards a substation, and the constraints enforce capacity, connectivity and planarity.
 
-{py:class}`ModelOptions <optiwindnet.MILP.ModelOptions>` selects the applicable model variant and additional constraints for branched, radial or ringed topology, feeder routing and count, and balanced subtree loads. See [](/routers.md#model-options) for the meaning of those choices and {doc}`/reference/solvers` for the interchangeable solver backends.
+{py:class}`ModelOptions <optiwindnet.MILP.ModelOptions>` selects the applicable model variant and additional constraints for branched, radial or ringed topology, feeder routing and count, and balanced subtree loads. See [](/problem.md#problem-options) for the meaning of those choices and {doc}`/reference/solvers` for the interchangeable solver backends.
 
 The formulation is rendered as native MathML and uses self-hosted, subsetted STIX Two fonts. On narrow displays, scroll the formulation horizontally to see the complete constraints.
 

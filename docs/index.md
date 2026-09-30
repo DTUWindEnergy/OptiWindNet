@@ -20,7 +20,7 @@
 
 ## About OptiWindNet
 
-OptiWindNet is an electrical network design tool for offshore wind farms developed at the Technical University of Denmark -- DTU. The package offers a framework to obtain optimal or near-optimal cable routes for a given turbine layout within the cable-laying boundaries. It provides high-level access to constructive-heuristic, meta-heuristic and exact optimization routers.
+OptiWindNet is an electrical network design tool for offshore wind farms developed at the Technical University of Denmark -- DTU. Its built-in routers seek short feasible cable networks for a given turbine layout within the cable-laying boundaries. Cable length is used as a proxy for cost; when cable prices are supplied, the cost of the resulting network can also be reported. It provides high-level access to constructive-heuristic, meta-heuristic and exact optimization routers. See [](/problem.md#objective-and-reported-cost) for the distinction between the length objective and reported cost.
 
 The tool is distributed as the open-source Python package **optiwindnet**, which can be used either within an interactive Python session (e.g. Jupyter notebook) or as a library, by invoking OptiWindNet's API directly from another application (e.g. [TOPFARM](https://topfarm.pages.windenergy.dtu.dk/TopFarm2/notebooks/cables.html), [Ard](https://github.com/NLRWindSystems/Ard)).
 
@@ -36,11 +36,11 @@ The tool is distributed as the open-source Python package **optiwindnet**, which
 
 **Start** gets you running: {doc}`/install`, the {doc}`Quick Start </notebooks/hi00_quickstart>`, and {doc}`/apis`, which introduces the two APIs and helps you pick one.
 
-**Concepts** is two pages, API-agnostic and worth reading once whichever API you pick: what the tool computes ({doc}`/problem`) and how it solves it ({doc}`/routers`).
+**Concepts** explains what the tool computes ({doc}`/problem`) and how to choose an optimization approach ({doc}`/routers`). These pages are shared by both APIs and can be read before choosing one.
 
 **{doc}`/high_level_api`** and **{doc}`/low_level_api`** are the two sets of worked notebooks. Most notebooks have a counterpart in the other section that performs the same task.
 
-**Reference** holds the lookup material, meant to be consulted rather than read through: the {doc}`/reference/tasks` finds a page by what you are trying to do, plus the {doc}`/reference/glossary`, {doc}`/reference/input_formats`, {doc}`/reference/solvers`, {doc}`/reference/milp_formulation`, {doc}`/reference/validation` and the generated {doc}`API Reference </autoapi/index>`.
+**Reference** holds the lookup material, meant to be consulted rather than read through: the {doc}`/reference/tasks` finds a page by what you are trying to do, plus the {doc}`/reference/glossary`, {doc}`/reference/input_formats`, {doc}`/reference/power`, {doc}`/reference/solvers`, {doc}`/reference/warm_starting`, {doc}`/reference/milp_formulation`, {doc}`/reference/validation` and the generated {doc}`API Reference </autoapi/index>`.
 
 **Papers** holds the two scientific articles behind the tool: {doc}`/paper` presents the framework and reproduces the computational experiments of the article below, while {doc}`/dataset` presents the open database of routing solutions produced with it.
 
@@ -107,7 +107,9 @@ low_level_api
 reference/tasks
 reference/glossary
 reference/input_formats
+reference/power
 reference/solvers
+reference/warm_starting
 reference/milp_formulation
 reference/validation
 autoapi/index

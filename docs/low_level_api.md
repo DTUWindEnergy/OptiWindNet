@@ -2,9 +2,27 @@
 
 These notebooks are developer-facing examples that import lower-level modules directly. Those modules may evolve independently of the Network/Router API, so pin an integration built on them to a tested _OptiWindNet_ version.
 
-The graphs these notebooks pass between functions — `L`, `P`, `A`, `S` and `G` — are described in [](/problem.md#graph-representations); the routers they call, and the model and solver options they pass, are in {doc}`/routers`. Checking a result is covered by {doc}`/reference/validation`.
+Graph descriptions call turbines **terminals** and substations **roots**. Terminal nodes are numbered `0` through `T - 1`, and root nodes `-R` through `-1`. Physical descriptions also use turbine and substation; the two vocabularies refer to the same components. See {doc}`/reference/glossary` for the related terms.
+
+The graphs these notebooks pass between functions — `L`, `P`, `A`, `S` and `G` — are described in [](/problem.md#graph-representations); the optimization approaches are compared in {doc}`/routers`. The meanings of problem options are in [](/problem.md#problem-options), and MILP solver settings are in [](/reference/solvers.md#solver-options). Checking a result is covered by {doc}`/reference/validation`.
 
 [](/reference/tasks.md#paired-examples) maps each notebook here to its counterpart in the {doc}`/high_level_api`, and the {doc}`/reference/tasks` indexes them by goal. Complete signatures are in the generated {doc}`API Reference </autoapi/index>`.
+
+## Updating code written for v0.3.0
+
+Import graph conversions from `optiwindnet.converting`, load calculations from `optiwindnet.loads`, graph transformations from `optiwindnet.transforming`, validation from `optiwindnet.validating`, compact link encodings from `optiwindnet.terse`, and text descriptions from `optiwindnet.presenting`. Their old `interarraylib` aliases are deprecated and scheduled for removal in v0.4.0. Fingerprinting functions move from `optiwindnet.fingerprint` to `optiwindnet.identity`.
+
+Pass every `Solver.set_problem()` argument after `P` and `A` by keyword:
+
+```python
+solver.set_problem(P, A, capacity=capacity, model_options=options, warmstart=S)
+```
+
+Use `solver.get_solution()` for the topology and routed graph. The removed `get_incumbent_topology()` method is replaced, for advanced uses that intentionally skip routing, by decoding `solver.incumbent_linkbits` with `S_from_linkbits()`. This recovers connectivity only: restore the topology type, capacity and terminal inflow, then calculate loads before using or validating it. {doc}`/notebooks/lo32_clustering` demonstrates the ringed, unit-inflow case. `SolutionInfo.topology_id` identifies the model incumbent; a solution pool can deliver a different topology after ranking by routed length.
+
+`ModelOptions` accepts strings such as `topology='radial'`. Direct calls to backend `make_min_length_model()` functions require enum members for `topology`, `feeder_route` and `feeder_limit`.
+
+For power declarations, use `set_terminal_power()` for nominal ratings and `'inflow'` for integer demands. Graphs that used `'power'` for integer demands need that attribute renamed. Imported locations read nominal powers by default; use `read_powers=False` for turbine-count examples, or follow [](/reference/power.md#advanced-api) for nominal capacities and [](/reference/power.md#router-support) for router restrictions.
 
 ```{toctree}
 :titlesonly:
