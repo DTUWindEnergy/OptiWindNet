@@ -838,6 +838,12 @@ def polylines_cross_at_point(
     return rays_alternate(rays_a, rays_b)
 
 
+# A quadrilateral whose angle at u or v has a sine below this is degenerate
+# (a triangle): decimal coordinates of collinear points leave float residuals of
+# at most ~1e-14 in the sine, while angles of actual layouts are above ~1e-7.
+_CONVEX_QUAD_MIN_SINE_SQ = 1e-10**2
+
+
 @nb.njit(cache=True)
 def is_triangle_pair_a_convex_quadrilateral(
     uC: CoordPair, vC: CoordPair, sC: CoordPair, tC: CoordPair
@@ -847,18 +853,34 @@ def is_triangle_pair_a_convex_quadrilateral(
     ⟨u, v⟩ is the common side; ⟨s, t⟩ are the opposing vertices;
     only works if ⟨s, t⟩ crosses the line defined by ⟨u, v⟩
 
+    A quadrilateral with a (nearly) straight angle at u or v is a triangle,
+    i.e. u or v lies on ⟨s, t⟩. The test for it is relative to the side
+    lengths, so it gives the same answer in any translation or scale of the
+    coordinates.
+
     Returns:
       ``True`` if the quadrilateral is convex and is not a triangle
     """
     # this used to be called `is_quadrilateral_convex()`
+    us = sC - uC
+    ut = tC - uC
+    vs = sC - vC
+    vt = tC - vC
     # us × ut
-    usut = _cross_prod_2d(sC - uC, tC - uC)
+    usut = _cross_prod_2d(us, ut)
     # vt × vs
-    vtvs = _cross_prod_2d(tC - vC, sC - vC)
-    if usut == 0.0 or vtvs == 0.0:
-        # the four vertices form a triangle
+    vtvs = _cross_prod_2d(vt, vs)
+    if not ((usut > 0.0 and vtvs > 0.0) or (usut < 0.0 and vtvs < 0.0)):
         return False
-    return (usut > 0.0) == (vtvs > 0.0)
+    # the four vertices must not form a triangle
+    us2 = us[0] * us[0] + us[1] * us[1]
+    ut2 = ut[0] * ut[0] + ut[1] * ut[1]
+    vs2 = vs[0] * vs[0] + vs[1] * vs[1]
+    vt2 = vt[0] * vt[0] + vt[1] * vt[1]
+    return (
+        usut * usut > _CONVEX_QUAD_MIN_SINE_SQ * us2 * ut2
+        and vtvs * vtvs > _CONVEX_QUAD_MIN_SINE_SQ * vs2 * vt2
+    )
 
 
 def is_triangle_pair_a_convex_quadrilateral_XY(
@@ -885,14 +907,25 @@ def is_triangle_pair_a_convex_quadrilateral_XY(
     vx, vy = XY[v]
     sx, sy = XY[s]
     tx, ty = XY[t]
+    usx, usy = sx - ux, sy - uy
+    utx, uty = tx - ux, ty - uy
+    vsx, vsy = sx - vx, sy - vy
+    vtx, vty = tx - vx, ty - vy
     # us × ut
-    usut = (sx - ux) * (ty - uy) - (sy - uy) * (tx - ux)
+    usut = usx * uty - usy * utx
     # vt × vs
-    vtvs = (tx - vx) * (sy - vy) - (ty - vy) * (sx - vx)
-    if usut == 0.0 or vtvs == 0.0:
-        # the four vertices form a triangle
+    vtvs = vtx * vsy - vty * vsx
+    if not ((usut > 0.0 and vtvs > 0.0) or (usut < 0.0 and vtvs < 0.0)):
         return False
-    return (usut > 0.0) == (vtvs > 0.0)
+    # the four vertices must not form a triangle
+    us2 = usx * usx + usy * usy
+    ut2 = utx * utx + uty * uty
+    vs2 = vsx * vsx + vsy * vsy
+    vt2 = vtx * vtx + vty * vty
+    return (
+        usut * usut > _CONVEX_QUAD_MIN_SINE_SQ * us2 * ut2
+        and vtvs * vtvs > _CONVEX_QUAD_MIN_SINE_SQ * vs2 * vt2
+    )
 
 
 def perimeter(VertexC, vertices_ordered):

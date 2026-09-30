@@ -16,6 +16,8 @@ from optiwindnet.geometric import (
     is_crossing_no_bbox,
     is_crossing_numpy,
     is_same_side,
+    is_triangle_pair_a_convex_quadrilateral,
+    is_triangle_pair_a_convex_quadrilateral_XY,
     minimum_spanning_forest,
     perimeter,
     point_d2line,
@@ -345,6 +347,41 @@ def test_find_segments_crossing_any_matches_shapely_near_degenerate():
         for i in range(n)
     ]
     assert got == expected.tolist()
+
+
+@pytest.mark.parametrize(
+    'uC, vC, sC, tC, expected',
+    [
+        # square
+        ([0.0, 0.0], [1.0, 1.0], [1.0, 0.0], [0.0, 1.0], True),
+        # v inside triangle ⟨u, s, t⟩
+        ([0.0, 0.0], [0.3, 0.3], [1.0, 0.0], [0.0, 1.0], False),
+        # u on ⟨s, t⟩ in decimal, but float cross product is ~-3e-18
+        ([0.06, 0.46], [0.16, 0.36], [0.11, 0.51], [0.01, 0.41], False),
+        # same, far from the origin
+        (
+            [6e6 + 60.0, 5e5 + 460.0],
+            [6e6 + 160.0, 5e5 + 360.0],
+            [6e6 + 110.0, 5e5 + 510.0],
+            [6e6 + 10.0, 5e5 + 410.0],
+            False,
+        ),
+        # thin but convex: sine of the angle at u is 2e-8
+        ([0.0, 1e-8], [0.0, -1.0], [-1.0, 0.0], [1.0, 0.0], True),
+        # angle at u straight up to 2e-12
+        ([0.0, 1e-12], [0.0, -1.0], [-1.0, 0.0], [1.0, 0.0], False),
+        # u coincides with s
+        ([1.0, 0.0], [0.0, -1.0], [1.0, 0.0], [-1.0, 0.0], False),
+    ],
+)
+def test_is_triangle_pair_a_convex_quadrilateral(uC, vC, sC, tC, expected):
+    XY = [uC, vC, sC, tC]
+    assert is_triangle_pair_a_convex_quadrilateral_XY(XY, 0, 1, 2, 3) is expected
+    assert (
+        is_triangle_pair_a_convex_quadrilateral(*np.array(XY, dtype=float)) == expected
+    )
+    # the answer does not depend on the side taken as ⟨u, v⟩'s first vertex
+    assert is_triangle_pair_a_convex_quadrilateral_XY(XY, 1, 0, 3, 2) is expected
 
 
 # --- perimeter ---
