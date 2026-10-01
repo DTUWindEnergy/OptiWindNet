@@ -59,9 +59,13 @@ def _clears(RepellerC: CoordPairs, repel_radius_sq: float, point: CoordPair) -> 
     Returns:
       ``True`` if ``point`` clears all discs centered on ``RepellerC``.
     """
-    return bool(
-        (((point[np.newaxis, :] - RepellerC) ** 2).sum(axis=1) >= repel_radius_sq).all()
-    )
+    px, py = point[0], point[1]
+    for k in range(RepellerC.shape[0]):
+        dx = px - RepellerC[k, 0]
+        dy = py - RepellerC[k, 1]
+        if dx * dx + dy * dy < repel_radius_sq:
+            return False
+    return True
 
 
 @nb.njit(cache=True, inline='always')
@@ -194,11 +198,13 @@ def _contains(polyC: CoordPairs, point: CoordPair) -> bool:
       ``True`` if ``point`` inside polygon, ``False`` otherwise
     """
     intersections = 0
-    dx2, dy2 = point - polyC[-1]
+    px, py = point[0], point[1]
+    N = polyC.shape[0]
+    dx2, dy2 = px - polyC[N - 1, 0], py - polyC[N - 1, 1]
 
-    for p in polyC:
+    for k in range(N):
         dx, dy = dx2, dy2
-        dx2, dy2 = point - p
+        dx2, dy2 = px - polyC[k, 0], py - polyC[k, 1]
 
         F = (dx - dx2) * dy - dx * (dy - dy2)
         if np.isclose(F, 0.0, rtol=0.0) and dx * dx2 <= 0 and dy * dy2 <= 0:
@@ -265,12 +271,16 @@ def _poisson_disc_filler_core(
         """
         p_min, p_max = max(0, p - 2), min(i_len, p + 3)
         q_min, q_max = max(0, q - 2), min(j_len, q + 3)
-        cells_window = cells[p_min:p_max, q_min:q_max].copy()
-        mask = neighbormask[
-            2 + p_min - p : 2 + p_max - p, 2 + q_min - q : 2 + q_max - q
-        ] & (cells_window < T)
-        ii = cells_window.reshape(mask.size)[np.where(mask.ravel())[0]]
-        return not (((point[None, :] - points[ii]) ** 2).sum(axis=-1) < 2).any()
+        px, py = point[0], point[1]
+        for a in range(p_min, p_max):
+            for b in range(q_min, q_max):
+                k = cells[a, b]
+                if k < T and neighbormask[2 + a - p, 2 + b - q]:
+                    dx = px - points[k, 0]
+                    dy = py - points[k, 1]
+                    if dx * dx + dy * dy < 2:
+                        return False
+        return True
 
     # `idc_arr[:avail_count]` holds indices into `cell_idc` for the cells
     # still available for dart-throwing. `pos_in_list[i, j]` maps a cell
