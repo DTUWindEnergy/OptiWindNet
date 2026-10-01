@@ -15,7 +15,7 @@ import numpy as np
 from bitarray import bitarray
 from scipy.stats import rankdata
 
-from .crossings import _feeder_crossings
+from .crossings import _FEEDER_ALONG, _feeder_intersections
 from .geometric import rotation_checkers_factory
 from .interarraylib import scaffolded
 from .loads import bfs_subtree_loads
@@ -345,8 +345,11 @@ class PathFinder:
                 for hooks in hooks_by_root
             ]
 
+        # touching counts as crossing: a feeder going over a node is detoured
         Xings = [
-            (r, n) for _, _, r, n in _feeder_crossings(G, hooks=hooks_by_root).tolist()
+            (r, n)
+            for _, _, r, n, kind, _ in _feeder_intersections(G, hooks_by_root).tolist()
+            if kind != _FEEDER_ALONG
         ]
         # Add also feeders whose straight line crosses constraint geometry.
         Xings.extend(

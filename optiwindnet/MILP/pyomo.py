@@ -17,7 +17,7 @@ from pyomo.util.infeasible import (
 )
 
 from ..converting import G_from_S
-from ..crossings import _feeder_crossings, edgeset_edgeXing_iter
+from ..crossings import _feeder_link_conflicts, edgeset_edgeXing_iter
 from ..identity import fingerprint_function
 from ..pathfinding import PathFinder
 from ._core import (
@@ -35,6 +35,7 @@ from ._core import (
     check_warmstart_topology,
     feeder_and_load_bounds,
     nonclosest_feeders,
+    passover_rows,
     physical_core_count,
     warmstart_links,
 )
@@ -411,11 +412,23 @@ def make_min_length_model(
             def feederXedge_rule(m, u, v, r, t):
                 return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
 
+        Xings, passovers = _feeder_link_conflicts(A)
         m.cons_feeder_cross = pyo.Constraint(
-            [tuple(Xing) for Xing in _feeder_crossings(A).tolist()],
+            [tuple(Xing) for Xing in Xings.tolist()],
             rule=feederXedge_rule,
             name='feeder_cross',
         )
+
+        # a feeder over nodes conflicts with links on both of its sides
+        rows = list(passover_rows(passovers, topology == Topology.RINGED))
+        if rows:
+            m.cons_feeder_passover = pyo.Constraint(
+                range(len(rows)),
+                rule=lambda m, i: (
+                    sum(m.link_[link] for link in rows[i][0]) <= rows[i][1]
+                ),
+                name='feeder_passover',
+            )
 
     # edge-edge crossings
     def edgeXedge_rule(m, *vertices):

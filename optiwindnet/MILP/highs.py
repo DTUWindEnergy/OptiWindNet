@@ -14,7 +14,7 @@ from bitarray import frozenbitarray
 from scipy.sparse import csc_array, csr_array
 
 from ..converting import G_from_S
-from ..crossings import _feeder_crossings, edgeset_edgeXing_iter
+from ..crossings import _feeder_link_conflicts, edgeset_edgeXing_iter
 from ..identity import fingerprint_function
 from ..pathfinding import PathFinder
 from ._core import (
@@ -33,6 +33,7 @@ from ._core import (
     check_warmstart_topology,
     feeder_and_load_bounds,
     nonclosest_feeders,
+    passover_rows,
     physical_core_count,
     warmstart_links,
 )
@@ -273,7 +274,8 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
-        for u, v, r, t in _feeder_crossings(A).tolist():
+        Xings, passovers = _feeder_link_conflicts(A)
+        for u, v, r, t in Xings.tolist():
             if topology is Topology.RINGED:
                 m.addConstr(
                     link_[(u, v)] + link_[(v, u)] + link_[t, r] + link_[r, t] <= 1,
@@ -284,6 +286,10 @@ def make_min_length_model(
                     link_[(u, v)] + link_[(v, u)] + link_[t, r] <= 1,
                     name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
                 )
+
+        # a feeder over nodes conflicts with links on both of its sides
+        for links, rhs, name in passover_rows(passovers, topology is Topology.RINGED):
+            m.addConstr(qsum(link_[link] for link in links) <= rhs, name=name)
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):

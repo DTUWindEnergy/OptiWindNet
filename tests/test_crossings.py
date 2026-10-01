@@ -10,8 +10,8 @@ from optiwindnet.crossings import (
     _FEEDER_ALONG,
     _FEEDER_CROSS,
     _FEEDER_TOUCH,
-    _feeder_crossings,
     _feeder_intersections,
+    _feeder_link_conflicts,
     _routeset_polylines,
     edge_crossings,
     find_geometric_crossings,
@@ -806,12 +806,6 @@ def test_feeder_intersections_classify_touch_cross_and_along(frame):
         (4, 5, _FEEDER_ALONG, 0),
         (6, 7, _FEEDER_CROSS, 0),
     ]
-    # touching counts as crossing, lying along does not
-    assert {tuple(row) for row in _feeder_crossings(G).tolist() if row[3] == 1} == {
-        (0, 2, -1, 1),
-        (0, 3, -1, 1),
-        (6, 7, -1, 1),
-    }
 
 
 @pytest.mark.parametrize('frame', FRAMES)
@@ -828,3 +822,51 @@ def test_feeder_intersections_near_miss_is_a_crossing_on_one_side():
         [(0, 2), (0, 3)],
     )
     assert _intersections_of(G, 1) == [(0, 3, _FEEDER_CROSS, 0)]
+
+
+@pytest.mark.parametrize('frame', FRAMES)
+def test_feeder_link_conflicts_pairs_links_on_opposite_sides(frame):
+    """Links at a node under the feeder conflict with it only as a pair."""
+    G = _feeder_graph(
+        [(1.0, 0.0), (2.0, 0.0), (1.0, 1.0), (0.5, 1.0), (1.0, -1.0)],
+        [(0, 2), (0, 3), (0, 4)],
+        frame,
+    )
+    crossings, passovers = _feeder_link_conflicts(G)
+    assert not any(row[3] == 1 for row in crossings.tolist())
+    assert sorted(map(tuple, passovers.tolist())) == [
+        (-1, 1, 0, 2, 0, 4),
+        (-1, 1, 0, 3, 0, 4),
+    ]
+
+
+@pytest.mark.parametrize('frame', FRAMES)
+def test_feeder_link_conflicts_pairs_across_a_link_along_the_feeder(frame):
+    """With link 0–1 along the feeder, a left link at 0 conflicts with a right
+    link at 1."""
+    G = _feeder_graph(
+        [(1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (1.0, 1.0), (2.0, -1.0)],
+        [(0, 1), (0, 3), (1, 4)],
+        frame,
+    )
+    crossings, passovers = _feeder_link_conflicts(G)
+    assert not any(row[3] == 2 for row in crossings.tolist())
+    assert [tuple(row) for row in passovers.tolist() if row[1] == 2] == [
+        (-1, 2, 0, 3, 1, 4)
+    ]
+
+
+@pytest.mark.parametrize('frame', FRAMES)
+def test_feeder_link_conflicts_are_conservative_on_longer_chains(frame):
+    """Over a chain of three nodes, every link touching the feeder crosses it."""
+    G = _feeder_graph(
+        [(1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0), (1.0, 1.0), (3.0, -1.0)],
+        [(0, 1), (1, 2), (0, 4), (2, 5)],
+        frame,
+    )
+    crossings, passovers = _feeder_link_conflicts(G)
+    assert {tuple(row) for row in crossings.tolist() if row[3] == 3} == {
+        (0, 4, -1, 3),
+        (2, 5, -1, 3),
+    }
+    assert not any(row[1] == 3 for row in passovers.tolist())

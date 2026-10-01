@@ -18,6 +18,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
 
 import networkx as nx
+import numpy as np
 from bitarray import bitarray, frozenbitarray
 from makefun import with_signature
 
@@ -478,6 +479,22 @@ def nonclosest_feeders(A: nx.Graph) -> Iterator[_Link]:
         for r in range(-R, 0):
             if r != closest:
                 yield t, r
+
+
+def passover_rows(
+    passovers: np.ndarray, ringed: bool
+) -> Iterator[tuple[list[_Link], int, str]]:
+    """Yield the constraints for the pass-over rows of ``_feeder_link_conflicts()``.
+
+    Each constraint is ``(links, rhs, name)``: the sum of the directed links
+    must not exceed ``rhs``. The feeder and the links ⟨w1, a⟩, ⟨w2, b⟩ (and
+    ⟨w1, w2⟩ if ``w1 != w2``) cannot all be active.
+    """
+    for r, t, w1, a, w2, b in passovers.tolist():
+        pairs = [(w1, a), (w2, b)] + ([] if w1 == w2 else [(w1, w2)])
+        links = [(t, r), (r, t)] if ringed else [(t, r)]
+        links += [link for x, y in pairs for link in ((x, y), (y, x))]
+        yield links, len(pairs), f'feeder_passover_{t}~r{-r}_{w1}~{a}_{w2}~{b}'
 
 
 def linkbits_from_directed(

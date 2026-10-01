@@ -432,22 +432,68 @@ def _feeder_intersections_by_geos(rows: np.ndarray, VertexC: np.ndarray) -> np.n
     return out
 
 
-def _feeder_crossings(G: nx.Graph, hooks: Iterable | None = None) -> np.ndarray:
-    """Find the crossings between feeders and the non-feeder edges of ``G``.
+def _feeder_link_conflicts(A: nx.Graph) -> tuple[np.ndarray, np.ndarray]:
+    """Find the conflicts between feeders and links of ``A`` for MILP models.
 
-    Same arguments as :func:`_feeder_intersections`. Touching (a feeder going
-    over a node) counts as crossing; an edge lying along a feeder does not.
+    A feeder going exactly over a node ``w`` conflicts with ``w``'s links only
+    as a pair: the feeder can pass ``w`` on either side, crossing the links on
+    the other side. Same goes for a chain of two nodes over which the feeder
+    goes, joined by a link along the feeder (it forces passing both on the same
+    side). For longer chains, every link touching the feeder is treated as
+    crossing it.
+
+    Args:
+      A: Available-links graph.
 
     Returns:
-      (X, 4) int array of crossings, each row as ``(u, v, root, n)``: edge ⟨u, v⟩
-      (``u < v``) crosses the feeder ⟨root, n⟩.
+      Tuple ``(crossings, passovers)``:
+
+      * (X, 4) int array, rows ``(u, v, root, n)``: link ⟨u, v⟩ (``u < v``)
+        crosses the feeder ⟨root, n⟩ (at most one of them can be active);
+      * (P, 6) int array, rows ``(root, n, w1, a, w2, b)``: ``w1`` and ``w2``
+        are under the feeder ⟨root, n⟩, while ``a`` and ``b`` are on opposite
+        sides of it; the feeder, ⟨w1, a⟩, ⟨w2, b⟩ and, if ``w1 != w2``, the
+        link ⟨w1, w2⟩ along the feeder cannot all be active.
     """
-    found = _feeder_intersections(G, hooks)
-    crossings = found[found[:, 4] != _FEEDER_ALONG, :4]
-    # only touches may have the edge's ends swapped
+    found = _feeder_intersections(A)
+    kind = found[:, 4]
+    crossings = [found[kind == _FEEDER_CROSS, :4]]
+    # touches and links along, per feeder
+    touches: dict[tuple[int, int], dict[int, tuple[list[int], list[int]]]] = {}
+    alongs: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for a, b, root, n, kind_, side in found[kind != _FEEDER_CROSS].tolist():
+        if kind_ == _FEEDER_TOUCH:
+            sides = touches.setdefault((root, n), {}).setdefault(a, ([], []))
+            sides[0 if side > 0 else 1].append(b)
+        else:
+            alongs.setdefault((root, n), []).append((a, b))
+    passovers = []
+    for (root, n), touches_ in touches.items():
+        along = alongs.get((root, n), [])
+        chain = nx.Graph(along)
+        # nodes in chains of more than two nodes get the conservative treatment
+        long_chain = {
+            w for comp in nx.connected_components(chain) if len(comp) > 2 for w in comp
+        }
+        conservative = []
+        for w, (left, right) in touches_.items():
+            if w in long_chain:
+                conservative.extend((w, x, root, n) for x in left + right)
+            else:
+                passovers.extend((root, n, w, a, w, b) for a in left for b in right)
+        for w1, w2 in along:
+            if w1 in long_chain:
+                continue
+            left1, right1 = touches_.get(w1, ((), ()))
+            left2, right2 = touches_.get(w2, ((), ()))
+            passovers.extend((root, n, w1, a, w2, b) for a in left1 for b in right2)
+            passovers.extend((root, n, w1, a, w2, b) for a in right1 for b in left2)
+        if conservative:
+            crossings.append(np.array(conservative, dtype=np.int64))
+    crossings = np.concatenate(crossings)
     flip = np.flatnonzero(crossings[:, 0] > crossings[:, 1])
     crossings[flip, :2] = crossings[flip, 1::-1]
-    return crossings
+    return crossings, np.array(passovers, dtype=np.int64).reshape(-1, 6)
 
 
 def gateXing_iter(
@@ -471,9 +517,11 @@ def gateXing_iter(
         DeprecationWarning,
         stacklevel=2,
     )
+    # touching counts as crossing, lying along does not
     return (
-        ((u, v), (root, n))
-        for u, v, root, n in _feeder_crossings(G, hooks=hooks).tolist()
+        ((min(a, b), max(a, b)), (root, n))
+        for a, b, root, n, kind, _ in _feeder_intersections(G, hooks).tolist()
+        if kind != _FEEDER_ALONG
     )
 
 
