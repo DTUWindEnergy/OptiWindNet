@@ -7,6 +7,11 @@ import pytest
 import shapely as shp
 
 from optiwindnet.crossings import (
+    _FEEDER_ALONG,
+    _FEEDER_CROSS,
+    _FEEDER_TOUCH,
+    _feeder_crossings,
+    _feeder_intersections,
     _routeset_polylines,
     edge_crossings,
     find_geometric_crossings,
@@ -755,3 +760,71 @@ def test_ring_sharing_a_detour_corridor_with_itself_is_tolerated():
     G.graph['fnT'] = np.array([0, 1, 2, 3, 3, 3, -1])
 
     assert find_geometric_crossings(G) == []
+
+
+# ---------- feeders going over nodes ----------
+
+
+# Collinearity on a skewed line is exact but not certified by the float filter,
+# so these frames exercise both the kernel and the GEOS classification.
+FRAMES = {
+    'axis': np.eye(2),
+    'skewed': np.array([[3.0, -1.0], [1.0, 3.0]]),
+}
+
+
+def _feeder_graph(terminalsC, edges, frame='axis'):
+    """Single-root graph with the root at the origin."""
+    VertexC = np.array([*terminalsC, (0.0, 0.0)], dtype=float) @ FRAMES[frame].T
+    G = nx.Graph(T=len(terminalsC), R=1, B=0, VertexC=VertexC)
+    G.add_node(-1, kind='oss')
+    G.add_nodes_from(range(len(terminalsC)), kind='wtg')
+    G.add_edges_from(edges)
+    return G
+
+
+def _intersections_of(G, n):
+    return sorted(
+        tuple(row[:2] + row[4:])
+        for row in _feeder_intersections(G).tolist()
+        if row[3] == n
+    )
+
+
+@pytest.mark.parametrize('frame', FRAMES)
+def test_feeder_intersections_classify_touch_cross_and_along(frame):
+    """Feeder ⟨-1, 1⟩ goes over 0 (links to 2 above, 3 below) and over 4–5."""
+    G = _feeder_graph(
+        [(1.0, 0.0), (6.0, 0.0), (1.0, 1.0), (1.0, -1.0), (3.0, 0.0), (4.0, 0.0),
+         (5.0, 1.0), (5.0, -1.0)],
+        [(0, 2), (0, 3), (4, 5), (6, 7)],
+        frame,
+    )  # fmt: skip
+    assert _intersections_of(G, 1) == [
+        (0, 2, _FEEDER_TOUCH, 1),
+        (0, 3, _FEEDER_TOUCH, -1),
+        (4, 5, _FEEDER_ALONG, 0),
+        (6, 7, _FEEDER_CROSS, 0),
+    ]
+    # touching counts as crossing, lying along does not
+    assert {tuple(row) for row in _feeder_crossings(G).tolist() if row[3] == 1} == {
+        (0, 2, -1, 1),
+        (0, 3, -1, 1),
+        (6, 7, -1, 1),
+    }
+
+
+@pytest.mark.parametrize('frame', FRAMES)
+def test_feeder_intersections_ignore_feeder_ending_before_the_node(frame):
+    """Feeder ⟨-1, 1⟩ stops short of node 0, which is on its line."""
+    G = _feeder_graph([(2.0, 0.0), (1.0, 0.0), (2.0, 1.0)], [(0, 2)], frame)
+    assert _intersections_of(G, 1) == []
+
+
+def test_feeder_intersections_near_miss_is_a_crossing_on_one_side():
+    """Node 0 is an ulp above the feeder's line: only its link below crosses."""
+    G = _feeder_graph(
+        [(1.0, np.nextafter(0.0, 1.0)), (2.0, 0.0), (1.0, 1.0), (1.0, -1.0)],
+        [(0, 2), (0, 3)],
+    )
+    assert _intersections_of(G, 1) == [(0, 3, _FEEDER_CROSS, 0)]

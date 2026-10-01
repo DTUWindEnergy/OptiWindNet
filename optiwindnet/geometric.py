@@ -480,6 +480,42 @@ def _orient2d_filtered(
 
 
 @nb.njit(cache=True)
+def _is_crossing_clear(
+    ux: float,
+    uy: float,
+    vx: float,
+    vy: float,
+    sx: float,
+    sy: float,
+    tx: float,
+    ty: float,
+    d1: float,
+    d2: float,
+    d3: float,
+    d4: float,
+) -> bool:
+    """Whether a certified proper crossing of ⟨u, v⟩ and ⟨s, t⟩ is one for GEOS.
+
+    GEOS reports a crossing as a touch if the intersection point it computes
+    equals an endpoint. That cannot happen if every endpoint is far from the
+    other segment's line and the segments are not nearly parallel.
+
+    Args:
+      ux, uy, vx, vy, sx, sy, tx, ty: coordinates of the segments' ends.
+      d1, d2: orientation determinants of ``s`` and ``t`` wrt ⟨u, v⟩.
+      d3, d4: orientation determinants of ``u`` and ``v`` wrt ⟨s, t⟩.
+    """
+    uv_len = math.hypot(vx - ux, vy - uy)
+    st_len = math.hypot(tx - sx, ty - sy)
+    scale = max(abs(ux), abs(uy), abs(vx), abs(vy), abs(sx), abs(sy), abs(tx), abs(ty))
+    margin = _CROSSING_MARGIN_ULPS * 2.0**-52 * scale
+    dmin_uv = min(abs(d1), abs(d2)) / uv_len
+    dmin_st = min(abs(d3), abs(d4)) / st_len
+    sine = abs((vx - ux) * (ty - sy) - (vy - uy) * (tx - sx)) / (uv_len * st_len)
+    return dmin_uv > margin and dmin_st > margin and sine > _CROSSING_MIN_SINE
+
+
+@nb.njit(cache=True)
 def _find_segments_crossing_any_filtered(
     probesC: np.ndarray, segmentsC: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -509,7 +545,6 @@ def _find_segments_crossing_any_filtered(
         vx, vy = probesC[i, 1, 0], probesC[i, 1, 1]
         ulo0, uhi0 = min(ux, vx), max(ux, vx)
         ulo1, uhi1 = min(uy, vy), max(uy, vy)
-        uv_len = math.hypot(vx - ux, vy - uy)
         for j in range(M):
             if uhi0 < lo[j, 0] or hi[j, 0] < ulo0 or uhi1 < lo[j, 1] or hi[j, 1] < ulo1:
                 continue
@@ -525,29 +560,15 @@ def _find_segments_crossing_any_filtered(
             d4, c4 = _orient2d_filtered(sx, sy, tx, ty, vx, vy)
             if c3 and c4 and not ((d3 > 0.0 and d4 < 0.0) or (d3 < 0.0 and d4 > 0.0)):
                 continue
-            if c1 and c2 and c3 and c4:
-                # a proper crossing of the exact segments; GEOS reports it as a
-                # touch if the intersection point it computes equals an endpoint
-                st_len = math.hypot(tx - sx, ty - sy)
-                scale = max(
-                    abs(ux),
-                    abs(uy),
-                    abs(vx),
-                    abs(vy),
-                    abs(sx),
-                    abs(sy),
-                    abs(tx),
-                    abs(ty),
-                )
-                margin = _CROSSING_MARGIN_ULPS * 2.0**-52 * scale
-                dmin_uv = min(abs(d1), abs(d2)) / uv_len
-                dmin_st = min(abs(d3), abs(d4)) / st_len
-                sine = abs((vx - ux) * (ty - sy) - (vy - uy) * (tx - sx)) / (
-                    uv_len * st_len
-                )
-                if dmin_uv > margin and dmin_st > margin and sine > _CROSSING_MIN_SINE:
-                    crossed[i] = True
-                    break
+            if (
+                c1
+                and c2
+                and c3
+                and c4
+                and _is_crossing_clear(ux, uy, vx, vy, sx, sy, tx, ty, d1, d2, d3, d4)
+            ):
+                crossed[i] = True
+                break
             undecided[i] = True
         if crossed[i]:
             undecided[i] = False

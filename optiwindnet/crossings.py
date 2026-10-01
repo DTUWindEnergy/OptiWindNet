@@ -14,9 +14,10 @@ import shapely as shp
 from numba import njit
 
 from .geometric import (
+    _is_crossing_clear,
+    _orient2d_filtered,
     angle_helpers,
     is_bunch_split_by_corner,
-    is_same_side,
     polyline_rays_at_point,
     rays_alternate,
 )
@@ -224,8 +225,15 @@ def edgeset_edgeXing_iter(diagonals: BiMap) -> Iterator[list[tuple[int, int]]]:
                 yield conflicting
 
 
+# kinds of feeder-edge intersections found by _feeder_intersections_core()
+_FEEDER_CROSS = 0
+_FEEDER_TOUCH = 1
+_FEEDER_ALONG = 2
+_FEEDER_UNDECIDED = 3
+
+
 @njit(cache=True)
-def _feeder_crossings_core(
+def _feeder_intersections_core(
     edges: np.ndarray,
     VertexC: np.ndarray,
     angle__: np.ndarray,
@@ -234,62 +242,107 @@ def _feeder_crossings_core(
     hooks: np.ndarray,
     hooks_start: np.ndarray,
 ) -> np.ndarray:
-    """Find the crossings between ``edges`` and the feeders to ``hooks``.
+    """Find the intersections of ``edges`` with the feeders to ``hooks``.
 
-    Kernel of :func:`_feeder_crossings`. Each row of ``edges`` is an edge
-    ``(u, v)``, reported as given. Root ``j - R`` is checked against nodes
-    ``hooks[hooks_start[j]:hooks_start[j + 1]]``.
+    Kernel of :func:`_feeder_intersections`. Each row of ``edges`` is an edge
+    ``(u, v)``. Root ``j - R`` is checked against nodes
+    ``hooks[hooks_start[j]:hooks_start[j + 1]]``. Orientation signs are
+    certified by :func:`~optiwindnet.geometric._orient2d_filtered`. Pairs with
+    an uncertain sign, or crossing so close to an endpoint or so nearly parallel
+    that GEOS might find a touch, are returned as undecided.
 
     Returns:
-      (X, 4) array of crossings, each row as ``(u, v, root, n)``.
+      (X, 6) array of intersections, each row as ``(a, b, root, n, kind, side)``:
+
+      * ``_FEEDER_CROSS``: ⟨a, b⟩ properly crosses the feeder ⟨root, n⟩;
+      * ``_FEEDER_TOUCH``: ``a`` lies inside the feeder and ``b`` off its line,
+        on ``side`` (1: left of root→n, -1: right);
+      * ``_FEEDER_ALONG``: ``a`` and ``b`` both lie inside the feeder;
+      * ``_FEEDER_UNDECIDED``: to be classified by GEOS.
     """
-    out = np.empty((max(16, edges.shape[0]), 4), dtype=np.int64)
+    out = np.empty((max(16, edges.shape[0]), 6), dtype=np.int64)
     k = 0
     for i in range(edges.shape[0]):
         u = edges[i, 0]
         v = edges[i, 1]
-        uC = VertexC[u]
-        vC = VertexC[v]
+        ux, uy = VertexC[u]
+        vx, vy = VertexC[v]
         for j in range(hooks_start.shape[0] - 1):
             root = j - R
-            rootC = VertexC[root]
+            rx, ry = VertexC[root]
             uvA = angle__[v, root] - angle__[u, root]
             if -np.pi < uvA < 0.0 or np.pi < uvA:
                 loR, hiR = angle_rank__[v, root], angle_rank__[u, root]
             else:
                 loR, hiR = angle_rank__[u, root], angle_rank__[v, root]
             wraps = loR > hiR
+            dr, cr = _orient2d_filtered(ux, uy, vx, vy, rx, ry)
             for h in range(hooks_start[j], hooks_start[j + 1]):
                 n = hooks[h]
                 pR = angle_rank__[n, root]
-                # touch counts as crossing: a feeder going precisely over a node
-                # would leave nothing to prevent it from splitting that node's
-                # subtree
+                # closed window: a feeder going over u or v is a candidate
                 supL = loR <= pR
                 infH = pR <= hiR
                 if not ((supL != infH) if wraps else (supL and infH)):
                     continue
-                # the rank test established that root–n is on a line crossing u–v
                 if n == u or n == v:
                     continue
-                if not is_same_side(uC, vC, rootC, VertexC[n]):
-                    if k == out.shape[0]:
-                        grown = np.empty((2 * k, 4), dtype=np.int64)
-                        grown[:k] = out
-                        out = grown
-                    out[k, 0] = u
-                    out[k, 1] = v
-                    out[k, 2] = root
-                    out[k, 3] = n
-                    k += 1
+                nx_, ny = VertexC[n]
+                # most candidates end before reaching the edge
+                dn, cn = _orient2d_filtered(ux, uy, vx, vy, nx_, ny)
+                if cr and cn and ((dr > 0.0 and dn > 0.0) or (dr < 0.0 and dn < 0.0)):
+                    continue
+                du, cu = _orient2d_filtered(rx, ry, nx_, ny, ux, uy)
+                dv, cv = _orient2d_filtered(rx, ry, nx_, ny, vx, vy)
+                a, b, side = u, v, 0
+                if not (cr and cn and cu and cv):
+                    kind = _FEEDER_UNDECIDED
+                elif (du > 0.0 and dv < 0.0) or (du < 0.0 and dv > 0.0):
+                    if dr == 0.0 or dn == 0.0:
+                        continue
+                    kind = (
+                        _FEEDER_CROSS
+                        if _is_crossing_clear(
+                            ux, uy, vx, vy, rx, ry, nx_, ny, dr, dn, du, dv
+                        )
+                        else _FEEDER_UNDECIDED
+                    )
+                elif du == 0.0 and dv == 0.0:
+                    # collinear points are ordered as their coordinates along
+                    # the dominant axis
+                    c = 0 if abs(nx_ - rx) >= abs(ny - ry) else 1
+                    rc, nc = (rx, nx_) if c == 0 else (ry, ny)
+                    uc, vc = (ux, vx) if c == 0 else (uy, vy)
+                    lo, hi = min(rc, nc), max(rc, nc)
+                    if not (lo < uc < hi and lo < vc < hi):
+                        continue
+                    kind = _FEEDER_ALONG
+                elif du != 0.0 and dv != 0.0 or dr == 0.0 or dn == 0.0:
+                    # same side; or the end on the feeder's line (the only
+                    # point where the edge's line meets it) is not inside it
+                    continue
+                else:
+                    kind = _FEEDER_TOUCH
+                    if du == 0.0:
+                        side = 1 if dv > 0.0 else -1
+                    else:
+                        a, b, side = v, u, 1 if du > 0.0 else -1
+                if k == out.shape[0]:
+                    grown = np.empty((2 * k, 6), dtype=np.int64)
+                    grown[:k] = out
+                    out = grown
+                out[k] = a, b, root, n, kind, side
+                k += 1
     return out[:k]
 
 
-def _feeder_crossings(G: nx.Graph, hooks: Iterable | None = None) -> np.ndarray:
-    """Find the crossings between feeders and the non-feeder edges of ``G``.
+def _feeder_intersections(G: nx.Graph, hooks: Iterable | None = None) -> np.ndarray:
+    """Find the intersections of the non-feeder edges of ``G`` with feeders.
 
-    Feeders are the straight lines from each root to each of its hooks. Touching
-    (a feeder going over a node) counts as crossing.
+    Feeders are the straight lines from each root to each of its hooks. An edge
+    intersects a feeder by crossing it, by touching it with one end (the feeder
+    goes over that node) or by lying along it (both ends inside the feeder).
+    Not reported: edges ending at the hook, and edges going over the hook.
 
     Args:
       G: Routeset or edgeset (A) to examine. If ``G`` has ``'fnT'``, edges are
@@ -298,8 +351,9 @@ def _feeder_crossings(G: nx.Graph, hooks: Iterable | None = None) -> np.ndarray:
         to ``-1``. If ``None``, every terminal is checked against every root.
 
     Returns:
-      (X, 4) int array of crossings, each row as ``(u, v, root, n)``: edge ⟨u, v⟩
-      (``u < v``) crosses the feeder ⟨root, n⟩.
+      (X, 6) int array of intersections, each row as ``(a, b, root, n, kind, side)``,
+      with ``kind`` one of ``_FEEDER_CROSS``, ``_FEEDER_TOUCH`` or
+      ``_FEEDER_ALONG`` (see :func:`_feeder_intersections_core`).
 
     Raises:
       IndexError: if an edge end or hook has no angle rank wrt the roots.
@@ -333,9 +387,67 @@ def _feeder_crossings(G: nx.Graph, hooks: Iterable | None = None) -> np.ndarray:
         hooks_flat.size and hooks_flat.max() >= num_ranked
     ):
         raise IndexError('node without angle rank wrt the roots')
-    return _feeder_crossings_core(
+    found = _feeder_intersections_core(
         edges, VertexC, angle__, angle_rank__, R, hooks_flat, hooks_start
     )
+    undecided = found[:, 4] == _FEEDER_UNDECIDED
+    if undecided.any():
+        found[undecided] = _feeder_intersections_by_geos(found[undecided], VertexC)
+        found = found[found[:, 4] >= 0]
+    return found
+
+
+def _feeder_intersections_by_geos(rows: np.ndarray, VertexC: np.ndarray) -> np.ndarray:
+    """Classify undecided rows of :func:`_feeder_intersections_core` with GEOS.
+
+    The DE-9IM matrix of edge ⟨a, b⟩ against feeder ⟨root, n⟩ tells a crossing
+    (interiors meet in a point), an edge along the feeder (within it) or a touch
+    (an edge end in the feeder's interior), consistently with shapely's
+    ``crosses`` and ``touches``.
+
+    Returns:
+      ``rows`` classified, with ``kind = -1`` where there is no intersection.
+    """
+    a, b, root, n = rows[:, :4].T
+    feedersS = shp.linestrings(np.stack((VertexC[root], VertexC[n]), axis=1))
+    edgesS = shp.linestrings(np.stack((VertexC[a], VertexC[b]), axis=1))
+    # DE-9IM order: II IB IE BI BB BE EI EB EE (edge first)
+    matrices = np.asarray(shp.relate(edgesS, feedersS), dtype='U9').view('U1')
+    matrices = matrices.reshape(-1, 9)
+    crosses = matrices[:, 0] == '0'
+    along = (matrices[:, 0] == '1') & (matrices[:, 2] == 'F') & (matrices[:, 5] == 'F')
+    touches = (matrices[:, 0] == 'F') & (matrices[:, 3] == '0')
+    a_on = np.asarray(shp.intersects(shp.points(VertexC[a]), feedersS), dtype=bool)
+    on, off = np.where(a_on, a, b), np.where(a_on, b, a)
+    rings = shp.linearrings(np.stack((VertexC[root], VertexC[n], VertexC[off]), axis=1))
+    side = np.where(np.asarray(shp.is_ccw(rings), dtype=bool), 1, -1)
+    out = rows.copy()
+    out[:, 4] = -1
+    out[crosses, 4] = _FEEDER_CROSS
+    out[along, 4] = _FEEDER_ALONG
+    out[touches, 0] = on[touches]
+    out[touches, 1] = off[touches]
+    out[touches, 4] = _FEEDER_TOUCH
+    out[:, 5] = np.where(touches, side, 0)
+    return out
+
+
+def _feeder_crossings(G: nx.Graph, hooks: Iterable | None = None) -> np.ndarray:
+    """Find the crossings between feeders and the non-feeder edges of ``G``.
+
+    Same arguments as :func:`_feeder_intersections`. Touching (a feeder going
+    over a node) counts as crossing; an edge lying along a feeder does not.
+
+    Returns:
+      (X, 4) int array of crossings, each row as ``(u, v, root, n)``: edge ⟨u, v⟩
+      (``u < v``) crosses the feeder ⟨root, n⟩.
+    """
+    found = _feeder_intersections(G, hooks)
+    crossings = found[found[:, 4] != _FEEDER_ALONG, :4]
+    # only touches may have the edge's ends swapped
+    flip = np.flatnonzero(crossings[:, 0] > crossings[:, 1])
+    crossings[flip, :2] = crossings[flip, 1::-1]
+    return crossings
 
 
 def gateXing_iter(
