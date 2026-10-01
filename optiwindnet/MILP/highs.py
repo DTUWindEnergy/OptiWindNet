@@ -14,7 +14,7 @@ from bitarray import frozenbitarray
 from scipy.sparse import csc_array, csr_array
 
 from ..converting import G_from_S
-from ..crossings import edgeset_edgeXing_iter, gateXing_iter
+from ..crossings import _feeder_crossings, edgeset_edgeXing_iter
 from ..identity import fingerprint_function
 from ..pathfinding import PathFinder
 from ._core import (
@@ -273,30 +273,17 @@ def make_min_length_model(
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
-        for (u, v), (r, t) in gateXing_iter(A):
-            if u >= 0:
-                if topology is Topology.RINGED:
-                    m.addConstr(
-                        link_[(u, v)] + link_[(v, u)] + link_[t, r] + link_[r, t] <= 1,
-                        name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
-                    )
-                else:
-                    m.addConstr(
-                        link_[(u, v)] + link_[(v, u)] + link_[t, r] <= 1,
-                        name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
-                    )
+        for u, v, r, t in _feeder_crossings(A).tolist():
+            if topology is Topology.RINGED:
+                m.addConstr(
+                    link_[(u, v)] + link_[(v, u)] + link_[t, r] + link_[r, t] <= 1,
+                    name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
+                )
             else:
-                # a feeder crossing another feeder (possible in multi-root instances)
-                if topology is Topology.RINGED:
-                    m.addConstr(
-                        link_[(u, v)] + link_[t, r] + link_[r, t] <= 1,
-                        name=f'feeder_feeder_cross_r{-u}~{v}_{t}~r{-r}',
-                    )
-                else:
-                    m.addConstr(
-                        link_[(u, v)] + link_[t, r] <= 1,
-                        name=f'feeder_feeder_cross_r{-u}~{v}_{t}~r{-r}',
-                    )
+                m.addConstr(
+                    link_[(u, v)] + link_[(v, u)] + link_[t, r] <= 1,
+                    name=f'feeder_link_cross_{u}~{v}_{t}~r{-r}',
+                )
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):

@@ -17,7 +17,7 @@ from pyomo.util.infeasible import (
 )
 
 from ..converting import G_from_S
-from ..crossings import edgeset_edgeXing_iter, gateXing_iter
+from ..crossings import _feeder_crossings, edgeset_edgeXing_iter
 from ..identity import fingerprint_function
 from ..pathfinding import PathFinder
 from ._core import (
@@ -403,28 +403,18 @@ def make_min_length_model(
         if topology == Topology.RINGED:
 
             def feederXedge_rule(m, u, v, r, t):
-                if u >= 0:
-                    return (
-                        m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t]
-                        <= 1
-                    )
-                else:
-                    # feeder-feeder crossing (possible in multi-root instances)
-                    return (
-                        m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t]
-                        <= 1
-                    )
+                return (
+                    m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t] <= 1
+                )
         else:
 
             def feederXedge_rule(m, u, v, r, t):
-                if u >= 0:
-                    return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
-                else:
-                    # feeder-feeder crossing (possible in multi-root instances)
-                    return m.link_[u, v] + m.link_[t, r] <= 1
+                return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
 
         m.cons_feeder_cross = pyo.Constraint(
-            gateXing_iter(A), rule=feederXedge_rule, name='feeder_cross'
+            [tuple(Xing) for Xing in _feeder_crossings(A).tolist()],
+            rule=feederXedge_rule,
+            name='feeder_cross',
         )
 
     # edge-edge crossings

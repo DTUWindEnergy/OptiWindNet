@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
+import warnings
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from itertools import combinations, pairwise
@@ -10,6 +11,7 @@ from typing import Any
 import networkx as nx
 import numpy as np
 import shapely as shp
+from numba import njit
 
 from .geometric import (
     angle_helpers,
@@ -222,30 +224,88 @@ def edgeset_edgeXing_iter(diagonals: BiMap) -> Iterator[list[tuple[int, int]]]:
                 yield conflicting
 
 
-def gateXing_iter(
-    G: nx.Graph,
-    *,
-    hooks: Iterable | None = None,
-    touch_is_cross: bool = True,
-) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
-    """Iterate over all crossings between gates and edges/borders in G.
+@njit(cache=True)
+def _feeder_crossings_core(
+    edges: np.ndarray,
+    VertexC: np.ndarray,
+    angle__: np.ndarray,
+    angle_rank__: np.ndarray,
+    R: int,
+    hooks: np.ndarray,
+    hooks_start: np.ndarray,
+) -> np.ndarray:
+    """Find the crossings between ``edges`` and the feeders to ``hooks``.
 
-    If ``hooks`` is ``None``, all nodes that are not a root neighbor are
-    considered. Used in constraint generation for ILP model.
+    Kernel of :func:`_feeder_crossings`. Each row of ``edges`` is an edge
+    ``(u, v)``, reported as given. Root ``j - R`` is checked against nodes
+    ``hooks[hooks_start[j]:hooks_start[j + 1]]``.
+
+    Returns:
+      (X, 4) array of crossings, each row as ``(u, v, root, n)``.
+    """
+    out = np.empty((max(16, edges.shape[0]), 4), dtype=np.int64)
+    k = 0
+    for i in range(edges.shape[0]):
+        u = edges[i, 0]
+        v = edges[i, 1]
+        uC = VertexC[u]
+        vC = VertexC[v]
+        for j in range(hooks_start.shape[0] - 1):
+            root = j - R
+            rootC = VertexC[root]
+            uvA = angle__[v, root] - angle__[u, root]
+            if -np.pi < uvA < 0.0 or np.pi < uvA:
+                loR, hiR = angle_rank__[v, root], angle_rank__[u, root]
+            else:
+                loR, hiR = angle_rank__[u, root], angle_rank__[v, root]
+            wraps = loR > hiR
+            for h in range(hooks_start[j], hooks_start[j + 1]):
+                n = hooks[h]
+                pR = angle_rank__[n, root]
+                # touch counts as crossing: a feeder going precisely over a node
+                # would leave nothing to prevent it from splitting that node's
+                # subtree
+                supL = loR <= pR
+                infH = pR <= hiR
+                if not ((supL != infH) if wraps else (supL and infH)):
+                    continue
+                # the rank test established that root–n is on a line crossing u–v
+                if n == u or n == v:
+                    continue
+                if not is_same_side(uC, vC, rootC, VertexC[n]):
+                    if k == out.shape[0]:
+                        grown = np.empty((2 * k, 4), dtype=np.int64)
+                        grown[:k] = out
+                        out = grown
+                    out[k, 0] = u
+                    out[k, 1] = v
+                    out[k, 2] = root
+                    out[k, 3] = n
+                    k += 1
+    return out[:k]
+
+
+def _feeder_crossings(G: nx.Graph, hooks: Iterable | None = None) -> np.ndarray:
+    """Find the crossings between feeders and the non-feeder edges of ``G``.
+
+    Feeders are the straight lines from each root to each of its hooks. Touching
+    (a feeder going over a node) counts as crossing.
 
     Args:
-      G: Routeset or edgeset (A) to examine.
+      G: Routeset or edgeset (A) to examine. If ``G`` has ``'fnT'``, edges are
+        tested (and reported) by their prime nodes.
       hooks: Nodes to check, grouped by root in subsequences from root ``-R``
-        to ``-1``. If ``None``, all non-root nodes are checked using ``'root'``
-        node attribute.
-      touch_is_cross: If ``True``, count as crossing a gate going over a node.
+        to ``-1``. If ``None``, every terminal is checked against every root.
 
-    Yields:
-      Pair of (edge, gate) that cross (each a 2-tuple of nodes).
+    Returns:
+      (X, 4) int array of crossings, each row as ``(u, v, root, n)``: edge ⟨u, v⟩
+      (``u < v``) crosses the feeder ⟨root, n⟩.
+
+    Raises:
+      IndexError: if an edge end or hook has no angle rank wrt the roots.
     """
     R, T, VertexC = (G.graph[k] for k in ('R', 'T', 'VertexC'))
     fnT = G.graph.get('fnT')
-    roots = range(-R, 0)
     angle_rank__ = G.graph.get('angle_rank__', None)
     if angle_rank__ is None:
         angle__, angle_rank__, _ = angle_helpers(G)
@@ -253,44 +313,56 @@ def gateXing_iter(
         angle__ = G.graph['angle__']
     # TODO: There is a corner case here: for multiple roots, the gates are not
     #       being checked between different roots. Unlikely but possible case.
-    # iterable of non-gate edges:
-    Edge = nx.subgraph_view(G, filter_node=lambda n: n >= 0).edges()
+    # non-gate edges:
+    edges = np.array(
+        [(u, v) for u, v in G.edges if u >= 0 and v >= 0], dtype=np.int64
+    ).reshape(-1, 2)
+    if fnT is not None:
+        edges = fnT[edges]
+    edges.sort(axis=1)
     if hooks is None:
-        all_nodes = np.arange(T)
-        IGate = [all_nodes] * R
+        hooks_ = [np.arange(T)] * R
     else:
-        IGate = hooks
-    # it is important to consider touch as crossing
-    # because if a gate goes precisely through a node
-    # there will be nothing to prevent it from spliting
-    # that node's subtree
-    less = np.less_equal if touch_is_cross else np.less
-    for u, v in Edge:
-        if fnT is not None:
-            u, v = fnT[u], fnT[v]
-        uC = VertexC[u]
-        vC = VertexC[v]
-        for root, iGate in zip(roots, IGate):
-            angle_ = angle__[:, root]
-            rank_ = angle_rank__[:, root]
-            rootC = VertexC[root]
-            uvA = angle_[v] - angle_[u]
-            swaped = (-np.pi < uvA) & (uvA < 0.0) | (np.pi < uvA)
-            lo, hi = (v, u) if swaped else (u, v)
-            loR, hiR = rank_[lo], rank_[hi]
-            pR_ = rank_[iGate]
-            W = loR > hiR  # wraps +-pi
-            supL = less(loR, pR_)  # angle(low) <= angle(probe)
-            infH = less(pR_, hiR)  # angle(probe) <= angle(high)
-            is_rank_within = ~W & supL & infH | W & ~supL & infH | W & supL & ~infH
-            for n in iGate[np.flatnonzero(is_rank_within)].tolist():
-                # this test confirms the crossing because `is_rank_within`
-                # established that root–n is on a line crossing u–v
-                if n == u or n == v:
-                    continue
-                if not is_same_side(uC, vC, rootC, VertexC[n]):
-                    u, v = (u, v) if u < v else (v, u)
-                    yield (u, v), (root, n)
+        hooks_ = [np.asarray(h, dtype=np.int64) for h in hooks][:R]
+    hooks_start = np.zeros(len(hooks_) + 1, dtype=np.int64)
+    np.cumsum([len(h) for h in hooks_], out=hooks_start[1:])
+    hooks_flat = np.concatenate([np.empty(0, dtype=np.int64), *hooks_])
+    # the kernel does not check bounds
+    num_ranked = angle_rank__.shape[0]
+    if (edges.size and edges.max() >= num_ranked) or (
+        hooks_flat.size and hooks_flat.max() >= num_ranked
+    ):
+        raise IndexError('node without angle rank wrt the roots')
+    return _feeder_crossings_core(
+        edges, VertexC, angle__, angle_rank__, R, hooks_flat, hooks_start
+    )
+
+
+def gateXing_iter(
+    G: nx.Graph, *, hooks: Iterable | None = None
+) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
+    """Iterate over all crossings between gates and edges in G.
+
+    Deprecated: internal function, to be removed in v0.4.0.
+
+    Args:
+      G: Routeset or edgeset (A) to examine.
+      hooks: Nodes to check, grouped by root in subsequences from root ``-R``
+        to ``-1``. If ``None``, every terminal is checked against every root.
+
+    Returns:
+      Iterator over pairs of (edge, gate) that cross (each a 2-tuple of nodes).
+    """
+    warnings.warn(
+        'optiwindnet.crossings.gateXing_iter is deprecated and will be removed in '
+        'v0.4.0; it is internal and has no public replacement',
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return (
+        ((u, v), (root, n))
+        for u, v, root, n in _feeder_crossings(G, hooks=hooks).tolist()
+    )
 
 
 def find_routeset_crossings(G: nx.Graph) -> list[tuple[int, int, int, int]]:

@@ -15,7 +15,7 @@ import numpy as np
 from bitarray import bitarray
 from scipy.stats import rankdata
 
-from .crossings import gateXing_iter
+from .crossings import _feeder_crossings
 from .geometric import rotation_checkers_factory
 from .interarraylib import scaffolded
 from .loads import bfs_subtree_loads
@@ -345,7 +345,9 @@ class PathFinder:
                 for hooks in hooks_by_root
             ]
 
-        Xings = [feeder for _, feeder in gateXing_iter(G, hooks=hooks_by_root)]
+        Xings = [
+            (r, n) for _, _, r, n in _feeder_crossings(G, hooks=hooks_by_root).tolist()
+        ]
         # Add also feeders whose straight line crosses constraint geometry.
         Xings.extend(
             (r, n)
