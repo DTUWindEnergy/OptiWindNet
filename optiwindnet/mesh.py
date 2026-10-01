@@ -109,11 +109,10 @@ def _astar_path(
     Raises:
       nx.NetworkXNoPath: if ``t`` is unreachable from ``s``.
     """
-    tx, ty = XY[t]
-    sx, sy = XY[s]
+    XYt = XY[t]
     dist = {s: 0.0}
     parent = {s: s}
-    heap = [(math.hypot(sx - tx, sy - ty), 0.0, s)]
+    heap = [(math.dist(XY[s], XYt), 0.0, s)]
     closed = set()
     while heap:
         _, d_u, u = heapq.heappop(heap)
@@ -130,8 +129,7 @@ def _astar_path(
             if d_v < dist.get(v, math.inf):
                 dist[v] = d_v
                 parent[v] = u
-                x, y = XY[v]
-                heapq.heappush(heap, (d_v + math.hypot(x - tx, y - ty), d_v, v))
+                heapq.heappush(heap, (d_v + math.dist(XY[v], XYt), d_v, v))
     raise nx.NetworkXNoPath(f'Node {t} not reachable from {s}')
 
 
@@ -614,7 +612,7 @@ def make_planar_embedding(
                         ref = VertexS[u]
                         for pt in intersection.geoms:
                             ptC = pt.coords[0]
-                            pts.append((np.hypot(*(ptC - ref)), ptC))
+                            pts.append((math.dist(ptC, ref), ptC))
                         # sort by closeness to VertexC[u]
                         pts.sort()
                         for _, ptC in pts:
@@ -661,7 +659,7 @@ def make_planar_embedding(
     #    create stunt concavity vertices to the inside of the concavity.
     # ###################################################################
     debug('PART C')
-    offset = offset_scale * np.hypot(*(VertexS.max(axis=0) - VertexS.min(axis=0)))
+    offset = offset_scale * math.hypot(*(VertexS.max(axis=0) - VertexS.min(axis=0)))
     #  debug(f'offset: {offset}')
     stuntS = []
     stunts_primes = []
@@ -703,8 +701,8 @@ def make_planar_embedding(
                     # Therefore, create a stunt vertex for the border.
                     XY = VertexS[Y] - VertexS[X]
                     YZ = VertexS[Z] - VertexS[Y]
-                    _XY_ = np.hypot(*XY)
-                    _YZ_ = np.hypot(*YZ)
+                    _XY_ = math.hypot(*XY)
+                    _YZ_ = math.hypot(*YZ)
                     nXY = XY[::-1] / _XY_
                     nYZ = YZ[::-1] / _YZ_
                     # normal to XY, pointing inward
@@ -1283,7 +1281,7 @@ def make_planar_embedding(
     nx.set_edge_attributes(P_paths, A_edge_length, name='length')
     for u, v, edgeD in P_paths.edges(data=True):
         if 'length' not in edgeD:
-            edgeD['length'] = np.hypot(*(VertexC[u] - VertexC[v])).item()
+            edgeD['length'] = math.dist(XY[u], XY[v])
 
     # ###################################################################
     # M) Revisit A to update edges crossing borders with P_path contours.
@@ -1381,7 +1379,7 @@ def make_planar_embedding(
                 )
                 del path[i + 1]
                 length -= P_paths[s][b]['length'] + P_paths[b][t]['length']
-                shortcut_length = np.hypot(*(VertexC[s] - VertexC[t]).T).item()
+                shortcut_length = math.dist(XY[s], XY[t])
                 length += shortcut_length
                 # changing P_paths for the case of revisiting this block
                 P_paths.add_edge(s, t, length=shortcut_length)

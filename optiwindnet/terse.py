@@ -547,7 +547,7 @@ class TerseLinks(Sequence[int]):
         for edge in self._edge_specs():
             u_coord, v_coord = coordinate_index(edge.u), coordinate_index(edge.v)
             attrs = {
-                'length': float(np.hypot(*(VertexC[u_coord] - VertexC[v_coord]))),
+                'length': math.dist(VertexC[u_coord], VertexC[v_coord]),
             }
             if edge.is_open:
                 attrs.update(load=0, reverse=False)

@@ -700,10 +700,10 @@ def point_to_segment_distance(pC: np.ndarray, aC: np.ndarray, bC: np.ndarray) ->
     ab = bC - aC
     denom = np.dot(ab, ab)
     if denom == 0.0:
-        return np.hypot(*(pC - aC)).item()
+        return math.dist(pC, aC)
     t = np.clip(np.dot(pC - aC, ab) / denom, 0.0, 1.0)
     closest = aC + t * ab
-    return np.hypot(*(pC - closest)).item()
+    return math.dist(pC, closest)
 
 
 def unique_rays(rays: list[np.ndarray], angle_tol: float) -> list[np.ndarray]:
@@ -722,7 +722,7 @@ def unique_rays(rays: list[np.ndarray], angle_tol: float) -> list[np.ndarray]:
     """
     unique: list[np.ndarray] = []
     for ray in rays:
-        norm = np.hypot(*ray).item()
+        norm = math.hypot(*ray)
         if norm == 0.0:
             continue
         unit = ray / norm
@@ -765,9 +765,9 @@ def polyline_rays_at_point(
     for aC, bC in pairwise(coords):
         if point_to_segment_distance(pC, aC, bC) > tol:
             continue
-        if np.hypot(*(aC - pC)).item() > tol:
+        if math.dist(aC, pC) > tol:
             rays.append(aC - pC)
-        if np.hypot(*(bC - pC)).item() > tol:
+        if math.dist(bC, pC) > tol:
             rays.append(bC - pC)
     return unique_rays(rays, angle_tol)
 
@@ -939,8 +939,8 @@ def perimeter(VertexC, vertices_ordered):
       The perimeter length.
     """
     vec = VertexC[vertices_ordered[:-1]] - VertexC[vertices_ordered[1:]]
-    return np.hypot(*vec.T).sum() + np.hypot(
-        *(VertexC[vertices_ordered[-1]] - VertexC[vertices_ordered[0]])
+    return np.hypot(*vec.T).sum() + math.dist(
+        VertexC[vertices_ordered[-1]], VertexC[vertices_ordered[0]]
     )
 
 

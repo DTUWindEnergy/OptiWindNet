@@ -9,6 +9,7 @@ obstacle-free, undetoured, rehooked. For a conversion between kinds, see
 :mod:`optiwindnet.converting`.
 """
 
+import math
 from itertools import pairwise
 
 import networkx as nx
@@ -226,7 +227,7 @@ def as_undetoured(Gʹ: nx.Graph) -> nx.Graph:
                 load=G.nodes[n]['load'],
                 kind='tentative',
                 reverse=False,
-                length=np.hypot(*(VertexC[n] - VertexC[r])).item(),
+                length=math.dist(VertexC[n], VertexC[r]),
             )
             tentative.append((r, n))
     del G.graph['D']

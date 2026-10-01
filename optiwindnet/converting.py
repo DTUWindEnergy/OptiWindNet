@@ -356,7 +356,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                         kind='tentative',
                         reverse=False,
                         load=load,
-                        length=math.hypot(*(VertexC[s] - VertexC[t])),
+                        length=math.dist(VertexC[s], VertexC[t]),
                     )
                     tentative.append((s, t))
                     continue
@@ -444,7 +444,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
             G.add_edge(
                 s,
                 t,
-                length=np.hypot(*(VertexC[s] - VertexC[t])).item(),
+                length=math.dist(VertexC[s], VertexC[t]),
                 kind='rogue',
                 load=load,
                 reverse=st_reverse,

@@ -490,7 +490,7 @@ def _run_end_side(
     """
     angles = []
     for ray in (run_ray, ray_a, ray_b):
-        norm = np.hypot(*ray)
+        norm = math.hypot(*ray)
         if norm == 0.0:
             return 0
         angles.append(math.atan2(ray[1], ray[0]))
@@ -583,7 +583,7 @@ def _split_branch_nodes(
     for nb in G[prime]:
         nb_ = int(fnT[nb])
         ray = VertexC[nb_] - pC
-        norm = np.hypot(*ray)
+        norm = math.hypot(*ray)
         if norm <= tol:
             continue
         unit = ray / norm
