@@ -121,7 +121,9 @@ variables:
     - pip install --progress-bar off --no-build-isolation -e .[test]
     - python --version
   script:
-    - pytest --numprocesses auto --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
+    # serial: the runner has only 2 CPUs, and xdist workers competing with the
+    # (multithreaded) MILP solvers starve the time-limited solves
+    - pytest --cov-report term-missing:skip-covered --cov=optiwindnet --cov-config .coveragerc
   cache:
     key: windows-scip-downloads
     paths:
