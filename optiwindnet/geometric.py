@@ -1024,12 +1024,14 @@ def complete_graph(
     G.graph.update(G_base.graph)
     G.graph['d2roots'] = cdist(TerminalC, RootC)
     nx.set_node_attributes(G, G_base.nodes)
-    for u, v, edgeD in G.edges(data=True):
-        edgeD['length'] = C[u, v]
-        # assign the edge to the root closest to the edge's middle point
-        edgeD['root'] = -R + np.argmin(
-            cdist(((VertexC[u] + VertexC[v]) / 2)[np.newaxis, :], RootC)
-        )
+    u_, v_ = Edge.T
+    lengths = C[u_, v_].tolist()
+    # assign each edge to the root closest to the edge's middle point
+    roots = (-R + cdist((VertexC[u_] + VertexC[v_]) / 2, RootC).argmin(axis=1)).tolist()
+    for u, v, length, root in zip(u_.tolist(), v_.tolist(), lengths, roots):
+        edgeD = G[u][v]
+        edgeD['length'] = length
+        edgeD['root'] = root
     return G
 
 
