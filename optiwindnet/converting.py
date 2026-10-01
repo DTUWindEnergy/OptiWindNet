@@ -9,6 +9,7 @@ to or from its bit and terse encodings. For a variant of the same kind, see
 :mod:`optiwindnet.transforming`.
 """
 
+import math
 from itertools import chain
 
 import networkx as nx
@@ -345,6 +346,7 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
             if len(shortcuts) == len(midpath):
                 # contour is a glitch of make_planar_embedding's P_paths
                 if s < 0:
+                    # Likely unreachable if the glitch above no longer occurs
                     # ⟨s, t⟩ is a gate -> make it tentative
                     # This is a hack. It will force PathFinder to check for
                     # crossings and the edge will be confirmed a non-A gate.
@@ -354,8 +356,8 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
                         kind='tentative',
                         reverse=False,
                         load=load,
-                        length=np.hypot(*(VertexC[s] - VertexC[t]).T),
-                    ).item()
+                        length=math.hypot(*(VertexC[s] - VertexC[t])),
+                    )
                     tentative.append((s, t))
                     continue
                 G.add_edge(
