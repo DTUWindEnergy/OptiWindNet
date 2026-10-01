@@ -540,15 +540,15 @@ class TerseLinks(Sequence[int]):
             fnT = None
 
         VertexC = G.graph['VertexC']
-
-        def coordinate_index(node: int) -> int:
-            return int(fnT[node]) if fnT is not None else node
-
-        for edge in self._edge_specs():
-            u_coord, v_coord = coordinate_index(edge.u), coordinate_index(edge.v)
-            attrs = {
-                'length': float(np.hypot(*(VertexC[u_coord] - VertexC[v_coord]))),
-            }
+        edges = list(self._edge_specs())
+        coord_idx = np.array([(edge.u, edge.v) for edge in edges])
+        if fnT is not None:
+            coord_idx = fnT[coord_idx]
+        lengths = np.hypot(
+            *(VertexC[coord_idx[:, 0]] - VertexC[coord_idx[:, 1]]).T
+        ).tolist()
+        for edge, length in zip(edges, lengths):
+            attrs = {'length': length}
             if edge.is_open:
                 attrs.update(load=0, reverse=False)
             G.add_edge(edge.u, edge.v, **attrs)

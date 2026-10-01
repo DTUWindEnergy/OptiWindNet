@@ -17,7 +17,7 @@ from pyomo.util.infeasible import (
 )
 
 from ..converting import G_from_S
-from ..crossings import edgeset_edgeXing_iter, gateXing_iter
+from ..crossings import _feeder_link_conflicts, edgeset_edgeXing_iter
 from ..identity import fingerprint_function
 from ..pathfinding import PathFinder
 from ._core import (
@@ -35,6 +35,7 @@ from ._core import (
     check_warmstart_topology,
     feeder_and_load_bounds,
     nonclosest_feeders,
+    passover_rows,
     physical_core_count,
     warmstart_links,
 )
@@ -403,29 +404,31 @@ def make_min_length_model(
         if topology == Topology.RINGED:
 
             def feederXedge_rule(m, u, v, r, t):
-                if u >= 0:
-                    return (
-                        m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t]
-                        <= 1
-                    )
-                else:
-                    # feeder-feeder crossing (possible in multi-root instances)
-                    return (
-                        m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t]
-                        <= 1
-                    )
+                return (
+                    m.link_[u, v] + m.link_[v, u] + m.link_[t, r] + m.link_[r, t] <= 1
+                )
         else:
 
             def feederXedge_rule(m, u, v, r, t):
-                if u >= 0:
-                    return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
-                else:
-                    # feeder-feeder crossing (possible in multi-root instances)
-                    return m.link_[u, v] + m.link_[t, r] <= 1
+                return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
 
+        Xings, passovers = _feeder_link_conflicts(A)
         m.cons_feeder_cross = pyo.Constraint(
-            gateXing_iter(A), rule=feederXedge_rule, name='feeder_cross'
+            [tuple(Xing) for Xing in Xings.tolist()],
+            rule=feederXedge_rule,
+            name='feeder_cross',
         )
+
+        # a feeder over nodes conflicts with links on both of its sides
+        rows = list(passover_rows(passovers, topology == Topology.RINGED))
+        if rows:
+            m.cons_feeder_passover = pyo.Constraint(
+                range(len(rows)),
+                rule=lambda m, i: (
+                    sum(m.link_[link] for link in rows[i][0]) <= rows[i][1]
+                ),
+                name='feeder_passover',
+            )
 
     # edge-edge crossings
     def edgeXedge_rule(m, *vertices):

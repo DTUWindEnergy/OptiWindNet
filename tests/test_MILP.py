@@ -1418,6 +1418,43 @@ def test_balanced_pins_loads_to_floor_and_ceil(
     assert result == expected_loads
 
 
+def _solve_feeder_over_turbine(solver_name):
+    from optiwindnet.mesh import make_planar_embedding
+    from optiwindnet.synthetic import L_from_synthetic
+
+    # the feeder to turbine 1 goes over turbine 0, whose only link is above it
+    L = L_from_synthetic(
+        np.zeros((1, 2)),
+        np.array([[1.0, 0.0], [2.0, 0.0], [1.2, 1.2], [2.8, -0.4]]),
+        BorderC=np.array([[-1.0, -2.0], [4.0, -2.0], [4.0, 2.0], [-1.0, 2.0]]),
+    )
+    P, A = make_planar_embedding(L)
+    solver = solver_factory(solver_name)
+    solver.set_problem(
+        P, A, capacity=2, model_options=ModelOptions(feeder_route='straight')
+    )
+    solver.solve(time_limit=_RUNTIME, mip_gap=0.0)
+    S, _ = solver.get_solution()
+    return sorted((min(u, v), max(u, v)) for u, v in S.edges)
+
+
+@pytest.mark.parametrize(
+    'solver_name', ['ortools.cp_sat', 'highs', 'scip', 'pyomo.highs']
+)
+def test_straight_feeder_may_go_over_a_turbine_with_links_on_one_side(
+    solver_name, run_isolated
+):
+    result = run_isolated(
+        solver_name, _solve_feeder_over_turbine, (solver_name,), 30 + _RUNTIME
+    )
+    if isinstance(result, BaseException) and solver_unavailable(result):
+        pytest.skip(f'{solver_name} not available')
+    if isinstance(result, BaseException):
+        raise result
+
+    assert result == [(-1, 0), (-1, 1), (0, 2), (1, 3)]
+
+
 def _job_solver_factory_name(solver_name):
     return solver_factory(solver_name).name
 

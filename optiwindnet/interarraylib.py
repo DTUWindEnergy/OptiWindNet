@@ -3,6 +3,7 @@
 
 import importlib
 import logging
+import math
 import warnings
 from bisect import bisect_left
 from collections.abc import Iterator, Sequence
@@ -154,7 +155,7 @@ def pathdist(G, path):
     dist = 0.0
     p = path[0]
     for n in path[1:]:
-        dist += np.hypot(*(VertexC[p] - VertexC[n]).T).item()
+        dist += math.dist(VertexC[p], VertexC[n])
         p = n
     return dist
 
@@ -258,12 +259,12 @@ def make_remap(G, refG, H, refH):
     VertexC = G.graph['VertexC'][:T]
     vecref = VertexC[refG[1]] - VertexC[refG[0]]
     angleG = np.arctan2(*vecref)
-    scaleG = np.hypot(*vecref)
+    scaleG = math.hypot(*vecref)
     GvertC = (VertexC - VertexC[refG[0]]) / scaleG
     VertexC = H.graph['VertexC'][:T]
     vecref = VertexC[refH[1]] - VertexC[refH[0]]
     angleH = np.arctan2(*vecref)
-    scaleH = np.hypot(*vecref)
+    scaleH = math.hypot(*vecref)
     HvertC = rotate(
         (VertexC - VertexC[refH[0]]) / scaleH, 180 * (angleH - angleG) / np.pi
     )

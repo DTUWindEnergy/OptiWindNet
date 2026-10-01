@@ -2,13 +2,13 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
+import math
 import time
 from collections import defaultdict
 from fractions import Fraction
 from itertools import chain, tee
 
 import networkx as nx
-import numpy as np
 from bitarray import bitarray
 from bitarray.util import ones, zeros
 from scipy.stats import rankdata
@@ -165,7 +165,7 @@ def constructor(
         # `capacity`); the path is closed into a ring at finalization, with the
         # zero-load link placed at the load midpoint so neither arm exceeds capacity.
         capacity *= 2
-    VertexC = Aʹ.graph['VertexC']
+    VertexC = Aʹ.graph['VertexC'].tolist()
     diagonals = Aʹ.graph['diagonals']
     d2roots = Aʹ.graph['d2roots']
     S = nx.Graph(R=R, T=T)
@@ -588,13 +588,13 @@ def constructor(
                 # move to the previous coordinate in the detour
                 for hop in detours_via_prime_[prime]:
                     #  former_extent = d2roots[prime, r] + extent
-                    former_extent = d2roots[prime, r] + np.hypot(
-                        *(VertexC[hop] - VertexC[prime])
+                    former_extent = d2roots[prime, r] + math.dist(
+                        VertexC[hop], VertexC[prime]
                     )
                     hops.append((hop, former_extent, prime))
             for hop, former_extent, dropped in hops:
-                extent_lo = d2roots[lo, r] + np.hypot(*(VertexC[lo] - VertexC[hop]))
-                extent_hi = d2roots[hi, r] + np.hypot(*(VertexC[hi] - VertexC[hop]))
+                extent_lo = d2roots[lo, r] + math.dist(VertexC[lo], VertexC[hop])
+                extent_hi = d2roots[hi, r] + math.dist(VertexC[hi], VertexC[hop])
                 extent, corner = (
                     (extent_lo, lo) if extent_lo <= extent_hi else (extent_hi, hi)
                 )

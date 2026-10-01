@@ -6,7 +6,7 @@ import logging
 import math
 from bisect import bisect_left
 from collections import defaultdict, namedtuple
-from collections.abc import Generator, Sequence
+from collections.abc import Generator
 from itertools import chain, pairwise
 from typing import Any
 
@@ -15,7 +15,7 @@ import numpy as np
 from bitarray import bitarray
 from scipy.stats import rankdata
 
-from .crossings import gateXing_iter
+from .crossings import _FEEDER_ALONG, _feeder_intersections
 from .geometric import rotation_checkers_factory
 from .interarraylib import scaffolded
 from .loads import bfs_subtree_loads
@@ -119,13 +119,6 @@ def _sorted3(a: int, b: int, c: int) -> tuple[int, int, int]:
     if a > b:
         a, b = b, a
     return a, b, c
-
-
-def _node_dist(XY: Sequence[Sequence[float]], u: int, v: int) -> float:
-    """Euclidean distance between two indexed coordinate pairs."""
-    ux, uy = XY[u]
-    vx, vy = XY[v]
-    return math.hypot(ux - vx, uy - vy)
 
 
 def _compact_stunt_clones(
@@ -352,7 +345,12 @@ class PathFinder:
                 for hooks in hooks_by_root
             ]
 
-        Xings = [feeder for _, feeder in gateXing_iter(G, hooks=hooks_by_root)]
+        # touching counts as crossing: a feeder going over a node is detoured
+        Xings = [
+            (r, n)
+            for _, _, r, n, kind, _ in _feeder_intersections(G, hooks_by_root).tolist()
+            if kind != _FEEDER_ALONG
+        ]
         # Add also feeders whose straight line crosses constraint geometry.
         Xings.extend(
             (r, n)
@@ -1157,7 +1155,7 @@ class PathFinder:
         cur = y_entry
         parent_pn = entry_pn
         for c_next in walk:
-            d_hop = _node_dist(XY, cur, c_next)
+            d_hop = math.dist(XY[cur], XY[c_next])
             pn_parent = paths[parent_pn]
             d_total = pn_parent.dist + d_hop
             parent_pn = paths.add(
@@ -1645,7 +1643,7 @@ class PathFinder:
             """Pseudonode at ``v`` parented by ``pn_w``; returns ``(pn_id, d_hop)``."""
             if v == w:
                 return pn_w_id, 0.0
-            d_hop = _node_dist(XY, w, v)
+            d_hop = math.dist(XY[w], XY[v])
             d_total = pn_w.dist + d_hop
             sec_v = self._get_sector_from_opposite(v, w) if v >= 0 else NULL
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
@@ -1921,7 +1919,7 @@ class PathFinder:
                 _apex_eff, apex_eff = _current_wapex, current_wapex
 
             # rate, wait, add
-            d_hop = _node_dist(XY, _apex_eff, _new)
+            d_hop = math.dist(XY[_apex_eff], XY[_new])
             apex_pn = paths[apex_eff]
             d_new = apex_pn.dist + d_hop
             best_pn_id = best_pn_by_pair_id[pair_id]
