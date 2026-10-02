@@ -1218,6 +1218,39 @@ def test_scip_family_option_names_are_scip_parameters():
         assert not unknown, f'{solver.name}: unknown SCIP parameters {sorted(unknown)}'
 
 
+def _solved_scip(**options):
+    bundle = get_bundle('toy')
+    try:
+        solver = solver_factory('scip')
+    except BaseException as exc:
+        if solver_unavailable(exc):
+            pytest.skip(f'scip unavailable: {exc}')
+        raise
+    solver.set_problem(
+        bundle.P, bundle.A, capacity=_CAPACITY, model_options=ModelOptions()
+    )
+    # concurrency needs more than one thread, whatever the host's core count
+    solver.solve(
+        time_limit=_RUNTIME, mip_gap=_GAP, options={'parallel/maxnthreads': 2} | options
+    )
+    return solver
+
+
+def test_scip_second_concurrent_solve_raises():
+    """Two live models that ran a concurrent solve crash SCIP once both are freed."""
+    first = _solved_scip()
+    with pytest.raises(RuntimeError, match='concurrent solve is still alive'):
+        _solved_scip()
+    first.get_solution()
+    _solved_scip().get_solution()
+
+
+def test_scip_one_thread_skips_concurrent():
+    first = _solved_scip()
+    _solved_scip(**{'parallel/maxnthreads': 1}).get_solution()
+    first.get_solution()
+
+
 def test_segmented_get_solution_still_investigates_pool(ortools_worker):
     calls, source, pathfinder_calls = ortools_worker.run(
         _exercise_ortools_retrieval_branch, ('segmented',), 30
