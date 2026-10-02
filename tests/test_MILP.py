@@ -46,8 +46,7 @@ _GAP = 0.001
 # hell). 'ortools*' work is dispatched to the shared `ortools_worker`
 # subprocess fixture (see tests/conftest.py); solver-parametrized tests go
 # through the `run_isolated` fixture, which picks the process each solver is
-# allowed to use -- the ortools worker, a throwaway one (SCIP on Windows), or
-# this one.
+# allowed to use -- the ortools worker or this one.
 #
 # Note: this module must not import optiwindnet.MILP.ortools or
 # optiwindnet.MILP.scip (or anything else that transitively loads either one's

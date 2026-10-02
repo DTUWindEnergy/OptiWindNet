@@ -11,18 +11,8 @@ soname as the standalone highspy/pyscipopt packages; loading ortools and one
 of those standalone packages into the same process breaks whichever one loads
 second (undefined native symbols) -- and `solver_factory()` refuses the second
 one outright. Rather than isolate every solver defensively, only `ortools` is
-pushed into a subprocess for that reason -- it's the party vendoring copies of
-other solvers' libraries.
-
-Windows adds a second, unrelated reason to isolate: consecutive calls to SCIP's
-native concurrent solver (solveConcurrent()) can trigger an access violation in
-C thread state on msvcrt. That one is not solved by *a* subprocess but by a
-*fresh* one per job -- and never by the ortools worker, which holds precisely
-the package pyscipopt must not meet.
-
-Hence two shapes of isolation, one per hazard:
- - `'ortools'`: one persistent, pre-warmed worker, reused across jobs;
- - `'scip'`: a throwaway worker per job (`run_disposable`).
+pushed into a subprocess -- it's the party vendoring copies of other solvers'
+libraries -- namely one persistent, pre-warmed worker reused across jobs.
 
 This module has no pytest dependency so it can be used both from
 `conftest.py` (as the `ortools_worker` and `run_isolated` fixtures) and from
@@ -32,26 +22,19 @@ plain scripts such as topology-golden generation.
 import multiprocessing
 import multiprocessing.queues
 import queue
-import sys
 
 
 def worker_kind(solver_name: str) -> str | None:
     """Which isolated worker family a solver's test execution needs, if any.
 
     Returns:
-      ``'ortools'``, ``'scip'``, or None if the solver may run in-process.
+      ``'ortools'``, or None if the solver may run in-process.
 
     OR-Tools always requires process isolation (DLL symbol collision with
-    highspy/pyscipopt). SCIP and FSCIP on Windows also require process isolation
-    because consecutive calls to SCIP's native C concurrent solver
-    (solveConcurrent()) can trigger an access violation in C thread state on
-    msvcrt -- but they need a *different* process from the ortools one, since
-    pyscipopt and ortools cannot share an interpreter instance.
+    highspy/pyscipopt).
     """
     if solver_name.startswith('ortools'):
         return 'ortools'
-    if sys.platform == 'win32' and solver_name in ('scip', 'fscip'):
-        return 'scip'
     return None
 
 
@@ -159,18 +142,3 @@ def ortools_worker_factory() -> IsolatedWorker:
     # the desired outcome (fail fast in setup rather than once per test).
     worker.run(_warmup_ortools, (), _WARMUP_TIMEOUT)
     return worker
-
-
-def run_disposable(func, args: tuple, timeout: float):
-    """Run one job in a throwaway worker process, then dispose of it.
-
-    Used for the SCIP family on Windows, where the point is not just "some
-    other process" but a *pristine* one: no ortools (which pyscipopt cannot
-    share an interpreter instance with) and no earlier SCIP solve (whose
-    solveConcurrent() thread state is what faults on the next call).
-    """
-    worker = IsolatedWorker(multiprocessing.get_context('spawn'))
-    try:
-        return worker.run(func, args, timeout)
-    finally:
-        worker.shutdown()
