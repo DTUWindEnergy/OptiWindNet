@@ -62,8 +62,6 @@ def run_isolated(request):
                 return request.getfixturevalue('ortools_worker').run(
                     func, args, timeout
                 )
-            case 'scip':
-                return isolation.run_disposable(func, args, timeout)
             case _:
                 try:
                     return func(*args)

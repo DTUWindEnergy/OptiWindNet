@@ -2,6 +2,8 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
+import threading
+import weakref
 from collections.abc import Mapping
 from itertools import chain
 from types import MappingProxyType
@@ -40,6 +42,31 @@ __all__ = ('make_min_length_model', 'warmup_model')
 
 _lggr = logging.getLogger(__name__)
 error, warn, info = _lggr.error, _lggr.warning, _lggr.info
+
+# SCIP keeps a single process-wide thread pool for concurrent solves, yet every
+# model that ran one tears that pool down when freed: two such models alive at
+# once crash the interpreter when the second is freed.
+_concurrent_holder: weakref.ref[Model] | None = None
+_concurrent_lock = threading.Lock()
+
+
+def _solve_concurrent(model: Model) -> None:
+    """Run ``model.solveConcurrent()`` if no other live model holds the pool.
+
+    Raises:
+      RuntimeError: if another model that ran a concurrent solve is alive.
+    """
+    global _concurrent_holder
+    with _concurrent_lock:
+        holder = _concurrent_holder and _concurrent_holder()
+        if holder is not None and holder is not model:
+            raise RuntimeError(
+                'Another SCIP model that ran a concurrent solve is still alive: '
+                'call get_solution() on its solver (or delete the solver) first, '
+                "or pass options={'concurrent': False}."
+            )
+        _concurrent_holder = weakref.ref(model)
+    model.solveConcurrent()
 
 
 class SolverSCIP(Solver, PoolHandler):
@@ -86,13 +113,17 @@ class SolverSCIP(Solver, PoolHandler):
             If ``True`` (default), launches SCIP's multi-threaded concurrent
             solvers via ``Model.solveConcurrent()``. Pass
             ``options={'concurrent': False}`` to run standard single-threaded
-            ``Model.optimize()``.
+            ``Model.optimize()``, which is also used if
+            ``'parallel/maxnthreads'`` is 1.
 
-        Note for Windows users:
-          Invoking ``solveConcurrent()`` multiple times sequentially within the
-          same Python process on Windows may cause an access violation due to
-          an uncleaned native C thread pool state in SCIP. Set ``concurrent=False``
-          or run consecutive solves in isolated subprocesses on Windows.
+        Only one model at a time may have run a concurrent solve: call
+        ``get_solution()``, which frees the model, before another solver solves
+        concurrently. A forked process inherits its parent's models, so fork
+        first, then solve -- not the other way around.
+
+        Raises:
+          RuntimeError: if another solver's model that ran a concurrent solve
+            is still alive.
         """
         try:
             model = self.model
@@ -100,7 +131,11 @@ class SolverSCIP(Solver, PoolHandler):
             exc.args += ('.set_problem() must be called before .solve()',)
             raise
         applied_options = {**self.options, **options}
-        use_concurrent = applied_options.pop('concurrent', True)
+        # a one-thread concurrent solve would still take SCIP's thread pool
+        use_concurrent = (
+            applied_options.pop('concurrent', True)
+            and applied_options['parallel/maxnthreads'] > 1
+        )
         if model.getStage() != SCIP_STAGE.PROBLEM:
             # SCIP refuses to (re)solve unless the model is back in the PROBLEM
             # stage; callers may solve the same model more than once (e.g. the
@@ -116,7 +151,7 @@ class SolverSCIP(Solver, PoolHandler):
             model.setParam('display/verblevel', 1)  # 1: warnings; 0: no output
         info('>>> SCIP parameters <<<\n%s\n', model.getParams())
         if use_concurrent:
-            model.solveConcurrent()
+            _solve_concurrent(model)
         else:
             model.optimize()
         num_solutions = model.getNSols()
@@ -147,16 +182,28 @@ class SolverSCIP(Solver, PoolHandler):
         return self._read_incumbent_linkbits_from_pool()
 
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+        """Output solution topology S and routeset G, then free the SCIP model.
+
+        Freeing the model releases SCIP's thread pool for the next concurrent
+        solve (see :meth:`solve`). ``solve()`` cannot be called afterwards.
+        """
         if A is None:
             A = self.A
         P, model_options = self.P, self.model_options
-        if model_options['feeder_route'] is FeederRoute.STRAIGHT:
-            S = self._incumbent_topology()
-            G = PathFinder(G_from_S(S, A), P, A).create_detours()
-        else:
-            S, G = self._investigate_pool(P, A)
-        G.graph.update(self._make_graph_attributes())
-        return S, G
+        try:
+            if model_options['feeder_route'] is FeederRoute.STRAIGHT:
+                S = self._incumbent_topology()
+                G = PathFinder(G_from_S(S, A), P, A).create_detours()
+            else:
+                S, G = self._investigate_pool(P, A)
+            G.graph.update(self._make_graph_attributes())
+            return S, G
+        finally:
+            # drop every reference to the model's native objects, the last one
+            # being the model itself, whose deallocation calls SCIPfree()
+            self._solution_pool = []
+            self.__dict__.pop('_value_map', None)
+            self.__dict__.pop('model', None)
 
     def _objective_at(self, index: int) -> float:
         objective_value, self._value_map = self._solution_pool[index]

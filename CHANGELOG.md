@@ -1,3 +1,11 @@
+# v0.3.2
+
+[Commit history since v0.3.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.1...HEAD)
+
+## Bug Fixes
+
+- **SCIP crash on freeing solvers:** freeing the second of two SCIP models that ran a concurrent solve no longer crashes the interpreter, on any platform. `SolverSCIP.get_solution()` frees the SCIP model, so `solve()` cannot be called after it, and a concurrent solve raises `RuntimeError` while another solver's model that ran one is alive: call `get_solution()` on that solver first, or pass `options={'concurrent': False}`. With `'parallel/maxnthreads'` set to 1, SCIP runs a plain `optimize()`. [a997f136](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/a997f136f3e4b72e583456f770ca09ee055d9cd4)
+
 # v0.3.1
 
 [Commit history since v0.3.0](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.0...HEAD)

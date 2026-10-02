@@ -23,7 +23,10 @@ from .sitecache import get_bundle, location_repository
 
 MESH_GOLDENS_FILE = Path(__file__).with_name('mesh_goldens.py')
 
-_TEMPLATE = '''"""Expected canonical available-links sets of the bundled locations.
+_TEMPLATE = '''# SPDX-License-Identifier: MIT
+# https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
+
+"""Expected canonical available-links sets of the bundled locations.
 
 Each entry maps a location handle to the number of canonical terminal-terminal
 links in its mesh and the hexadecimal id of the whole available-links set (that

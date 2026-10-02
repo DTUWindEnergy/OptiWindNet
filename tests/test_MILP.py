@@ -46,8 +46,7 @@ _GAP = 0.001
 # hell). 'ortools*' work is dispatched to the shared `ortools_worker`
 # subprocess fixture (see tests/conftest.py); solver-parametrized tests go
 # through the `run_isolated` fixture, which picks the process each solver is
-# allowed to use -- the ortools worker, a throwaway one (SCIP on Windows), or
-# this one.
+# allowed to use -- the ortools worker or this one.
 #
 # Note: this module must not import optiwindnet.MILP.ortools or
 # optiwindnet.MILP.scip (or anything else that transitively loads either one's
@@ -1216,6 +1215,39 @@ def test_scip_family_option_names_are_scip_parameters():
     for solver in (SolverSCIP(), SolverFSCIP()):
         unknown = solver.options.keys() - known
         assert not unknown, f'{solver.name}: unknown SCIP parameters {sorted(unknown)}'
+
+
+def _solved_scip(**options):
+    bundle = get_bundle('toy')
+    try:
+        solver = solver_factory('scip')
+    except BaseException as exc:
+        if solver_unavailable(exc):
+            pytest.skip(f'scip unavailable: {exc}')
+        raise
+    solver.set_problem(
+        bundle.P, bundle.A, capacity=_CAPACITY, model_options=ModelOptions()
+    )
+    # concurrency needs more than one thread, whatever the host's core count
+    solver.solve(
+        time_limit=_RUNTIME, mip_gap=_GAP, options={'parallel/maxnthreads': 2} | options
+    )
+    return solver
+
+
+def test_scip_second_concurrent_solve_raises():
+    """Two live models that ran a concurrent solve crash SCIP once both are freed."""
+    first = _solved_scip()
+    with pytest.raises(RuntimeError, match='concurrent solve is still alive'):
+        _solved_scip()
+    first.get_solution()
+    _solved_scip().get_solution()
+
+
+def test_scip_one_thread_skips_concurrent():
+    first = _solved_scip()
+    _solved_scip(**{'parallel/maxnthreads': 1}).get_solution()
+    first.get_solution()
 
 
 def test_segmented_get_solution_still_investigates_pool(ortools_worker):
