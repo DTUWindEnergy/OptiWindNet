@@ -1046,7 +1046,9 @@ class HGSRouter(Router):
         self.ringed = ringed
         self.seed = seed
 
-    def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
+    def route(
+        self, P, A, cables, cables_capacity, verbose=False, S_warm=None, **kwargs
+    ):
         verbose = verbose or self.verbose
         # optimizing
         vehicles = self.feeder_limit
@@ -1058,20 +1060,36 @@ class HGSRouter(Router):
                 )
             vehicles //= 2
 
-        S = hgs_cvrp(
-            as_normalized(A),
-            **self._capacity_kwargs(A, cables_capacity),
-            time_limit=self.time_limit,
-            max_retries=self.max_retries,
-            vehicles=vehicles,
-            vehicles_exact=self.feeder_exact,
-            balanced=self.balanced,
-            ringed=self.ringed,
-            seed=self.seed,
-            log_callback=_print_log_line if verbose else None,
-        )
+        # seed HGS-CVRP with the carried solution if it has the topology sought
+        topology = Topology.RINGED if self.ringed else Topology.RADIAL
+        if S_warm is not None and S_warm.graph.get('topology') is not topology:
+            S_warm = None
 
-        G_tentative = G_from_S(S, A)
+        # a warm start is an optimization, not a requirement: if HGS-CVRP cannot
+        # use it, solve cold (which never raises OWNWarmupFailed)
+        for warmstart in (S_warm, None):
+            try:
+                S = hgs_cvrp(
+                    as_normalized(A),
+                    **self._capacity_kwargs(A, cables_capacity),
+                    time_limit=self.time_limit,
+                    max_retries=self.max_retries,
+                    vehicles=vehicles,
+                    vehicles_exact=self.feeder_exact,
+                    balanced=self.balanced,
+                    ringed=self.ringed,
+                    seed=self.seed,
+                    log_callback=_print_log_line if verbose else None,
+                    warmstart=warmstart,
+                )
+                break
+            except OWNWarmupFailed as exc:
+                if warmstart is None:
+                    raise
+                _warning('Unable to warm-start HGS-CVRP (%s): solving without it.', exc)
+
+        # the cold pass either breaks out of the loop with S or raises
+        G_tentative = G_from_S(S, A)  # pyrefly: ignore[unbound-name]
 
         G = PathFinder(G_tentative, planar=P, A=A).create_detours()
 
