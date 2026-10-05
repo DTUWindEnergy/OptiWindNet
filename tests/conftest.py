@@ -9,6 +9,7 @@ Responsibilities:
  - Ensure deterministic test environment (disable numba JIT).
  - Provide the persistent OR-Tools isolation worker and the per-solver dispatch
    that routes each job to the process it is allowed to run in.
+ - Run SCIP's concurrent solves in opportunistic mode.
  - Load the whole repository only for tests that intentionally exercise it.
 """
 
@@ -70,6 +71,36 @@ def run_isolated(request):
                     return exc
 
     return run
+
+
+# -----------------------
+# SCIP concurrent mode
+# -----------------------
+@pytest.fixture(scope='session', autouse=True)
+def scip_opportunistic_mode():
+    """Make every SolverSCIP in the tests solve in opportunistic parallel mode.
+
+    SCIP 10.0's deterministic mode (`parallel/mode` = 1, the default) can
+    deadlock in `solveConcurrent()`: a solver waits at a synchronization point
+    for others that have already stopped. The ringed albatros model of
+    `test_ringed_warmstart_is_accepted_by_scip` hangs this way every time.
+    Opportunistic mode does not wait for the other solvers; the test problems are
+    simple enough that its run-to-run variability does not affect the checks.
+    """
+    try:
+        from optiwindnet.MILP.scip import SolverSCIP
+    except ModuleNotFoundError:
+        yield
+        return
+    original_init = SolverSCIP.__init__
+
+    def __init__(self):
+        original_init(self)
+        self.options['parallel/mode'] = 0  # 0: opportunistic
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(SolverSCIP, '__init__', __init__)
+        yield
 
 
 # -----------------------
