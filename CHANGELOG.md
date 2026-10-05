@@ -1,6 +1,11 @@
-# v0.3.2
+# v0.3.2 (unreleased)
 
 [Commit history since v0.3.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.1...HEAD)
+
+## Features & Improvements
+
+- **HGS-CVRP warm starts:** `hgs_cvrp(warmstart=S)` seeds the HGS-CVRP population with the routes of a radial (or, if `ringed`, ringed) solution topology; on multi-root locations, the warm start's assignment of turbines to substations replaces the clustering. Only the first solve of the repair loop is seeded. An unusable warm start raises `OWNWarmupFailed`, now importable from `optiwindnet.types` (it remains available from `optiwindnet.MILP`). Requires hybgensea 0.2.0 or newer.
+- **Warm starts in `HGSRouter`:** re-optimizing a `WindFarmNetwork` with `HGSRouter` seeds HGS-CVRP with the previous solution if its topology matches; a warm start HGS-CVRP cannot use is dropped with a warning and the solve starts cold, as with `MILPRouter`.
 
 ## Bug Fixes
 

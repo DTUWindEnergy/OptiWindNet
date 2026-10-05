@@ -23,7 +23,7 @@ from ..loads import (
     total_inflow,
 )
 from ..repair import repair_routeset_path
-from ..types import Topology
+from ..types import OWNWarmupFailed, Topology
 from ._core import (
     add_branches_to_S,
     clamp_vehicles_to_min,
@@ -169,8 +169,103 @@ def _solution_time(log, objective) -> float:
         return 0.0
 
 
+def _routes_from_warmstart(
+    warmstart: nx.Graph, R: int, T: int
+) -> list[list[list[int]]]:
+    """Walk the routes of a warm-start solution topology, grouped by root.
+
+    Each route lists the terminals of one feeder's subtree (radial) or of one
+    ring, in depth-first order from its gate: a path comes out from the gate to
+    its tail and a ring from one gate around to the other.
+
+    Raises:
+        OWNWarmupFailed: ``warmstart`` is not a topology over the same ``R`` roots and
+            ``T`` terminals, leaves terminals out of the routes, or has a route
+            that reaches two roots.
+    """
+    if (warmstart.graph.get('R'), warmstart.graph.get('T')) != (R, T):
+        raise OWNWarmupFailed(
+            f'Warm start has R={warmstart.graph.get("R")}, '
+            f'T={warmstart.graph.get("T")}, but the problem has R={R}, T={T}.'
+        )
+    alien = [n for n in warmstart.nodes if not -R <= n < T]
+    if alien:
+        raise OWNWarmupFailed(
+            f'Warm start has nodes {alien[:5]} that are neither terminals nor roots '
+            '(pass a solution topology S, not a routeset G).'
+        )
+    seen = set()
+    routes_ = []
+    for r in range(-R, 0):
+        routes = []
+        for gate in warmstart.neighbors(r):
+            if gate < 0:
+                raise OWNWarmupFailed(f'Warm start links root {r} to root {gate}.')
+            if gate in seen:
+                # the other gate of a ring already walked
+                continue
+            seen.add(gate)
+            route = []
+            stack = [gate]
+            while stack:
+                n = stack.pop()
+                route.append(n)
+                for nbr in warmstart.neighbors(n):
+                    if nbr < 0:
+                        if nbr != r:
+                            raise OWNWarmupFailed(
+                                f'Warm start route from root {r} reaches root '
+                                f'{nbr} at terminal {n}.'
+                            )
+                    elif nbr not in seen:
+                        seen.add(nbr)
+                        stack.append(nbr)
+            routes.append(route)
+        routes_.append(routes)
+    if len(seen) != T:
+        missing = sorted(set(range(T)) - seen)
+        raise OWNWarmupFailed(
+            f'Warm start leaves {len(missing)} terminals out of its routes '
+            f'(e.g. {missing[:5]}).'
+        )
+    return routes_
+
+
+def _initial_routes(
+    routes: list[list[int]], n_from_i: np.ndarray, num_slack: int, capacity: int
+) -> list[list[int]]:
+    """Translate one root's warm-start routes into an HGS-CVRP initial solution.
+
+    HGS-CVRP refers to a client by its row in the distance matrix (the depot is
+    row 0, see ``n_from_i``). In a balanced solve, each route is topped up to
+    ``capacity`` with slack nodes, which open the route since only the depot
+    reaches them.
+
+    Raises:
+        OWNWarmupFailed: a balanced solve's slack nodes cannot top up exactly the
+            warm start's routes (i.e. the route counts differ).
+    """
+    end = len(n_from_i) - num_slack
+    i_from_n = {n: i for i, n in enumerate(n_from_i[1:end].tolist(), start=1)}
+    initial = [[i_from_n[n] for n in route] for route in routes]
+    if num_slack:
+        deficits = [capacity - len(route) for route in initial]
+        if sum(deficits) != num_slack:
+            raise OWNWarmupFailed(
+                f'Balanced solve of root {n_from_i[0]} needs '
+                f'{(end - 1 + num_slack) // capacity} routes, but the warm start '
+                f'has {len(initial)}.'
+            )
+        slack = iter(range(end, len(n_from_i)))
+        initial = [
+            [next(slack) for _ in range(deficit)] + route
+            for deficit, route in zip(deficits, initial)
+        ]
+    return initial
+
+
 def _do_hgs(W, coordinates, vehicles, capacity, hgs_options, log_callback=None,
-            demands=None):  # fmt: skip
+            demands=None, initial_routes=None):  # fmt: skip
     """Multithreading worker function that calls the external library"""
     n = coordinates.shape[1]
     if demands is None:
@@ -178,16 +273,23 @@ def _do_hgs(W, coordinates, vehicles, capacity, hgs_options, log_callback=None,
         demands[0] = 0.0  # depot demand = 0
 
     num_vehicles = vehicles if vehicles is not None else -1
-    result = hybgensea.solve_cvrp_dist_mtx(
-        W,
-        demands,
-        float(capacity),
-        x_coords=coordinates[0],
-        y_coords=coordinates[1],
-        num_vehicles=num_vehicles,
-        log_callback=log_callback,
-        **hgs_options,
-    )
+    try:
+        result = hybgensea.solve_cvrp_dist_mtx(
+            W,
+            demands,
+            float(capacity),
+            x_coords=coordinates[0],
+            y_coords=coordinates[1],
+            num_vehicles=num_vehicles,
+            initial_solutions=None if initial_routes is None else [initial_routes],
+            log_callback=log_callback,
+            **hgs_options,
+        )
+    except ValueError as exc:
+        # HybGenSea validates the initial solutions before solving
+        if initial_routes is None or not str(exc).startswith('Input solution'):
+            raise
+        raise OWNWarmupFailed(f'HGS-CVRP rejected the warm start: {exc}') from exc
 
     solution_time = _solution_time(result.log, result.cost)
     return (
@@ -209,6 +311,7 @@ def _solve_single_root(
     log_callback,
     closed=False,
     complete=False,
+    warm_routes_=None,
 ):
     T, VertexC = A.graph['T'], A.graph['VertexC']
     if balanced:
@@ -232,6 +335,11 @@ def _solve_single_root(
         for t, inflow in inflow_by_node.items():
             demands[t + 1] = inflow
 
+    initial_routes = (
+        None
+        if warm_routes_ is None
+        else _initial_routes(warm_routes_[0], n_from_i, num_slack, capacity)
+    )
     outputs = _do_hgs(
         distance_matrix,
         coordinates,
@@ -240,6 +348,7 @@ def _solve_single_root(
         hgs_options,
         log_callback,
         demands,
+        initial_routes,
     )
 
     inputs_ = (vehicles,), (T,), (n_from_i,), (num_slack,), (capacity,)
@@ -265,13 +374,17 @@ def _solve_multi_root(
     log_callback,
     closed=False,
     complete=False,
+    cluster_=None,
+    warm_routes_=None,
 ):
     R, VertexC = A.graph['R'], A.graph['VertexC']
-    cluster_ = clusterize(A, capacity)
+    if cluster_ is None:
+        cluster_ = clusterize(A, capacity)
     len_cluster_ = tuple(len(cluster) for cluster in cluster_)
     if balanced:
         # each cluster is balanced independently; clusterize() already ensures
         # that the per-cluster minimum feeder counts sum to the global minimum
+        # (hgs_cvrp() checks a warm start's clustering for vehicles_exact)
         capacity_, vehicles_, num_slack_ = (
             list(values)
             for values in zip(
@@ -295,7 +408,20 @@ def _solve_multi_root(
     )
     populated_ = [c for c, len_cluster in enumerate(len_cluster_) if len_cluster]
     cluster_data = [
-        (W_[c], VertexC[indices_[c]].T, vehicles_[c], capacity_[c], hgs_options)
+        (
+            W_[c],
+            VertexC[indices_[c]].T,
+            vehicles_[c],
+            capacity_[c],
+            hgs_options,
+            None,
+            None,
+            None
+            if warm_routes_ is None
+            else _initial_routes(
+                warm_routes_[c], indices_[c], num_slack_[c], capacity_[c]
+            ),
+        )
         for c in populated_
     ]
 
@@ -378,6 +504,7 @@ def hgs_cvrp(
     complete: bool = False,
     ringed: bool = False,
     log_callback: Callable | None = None,
+    warmstart: nx.Graph | None = None,
 ) -> nx.Graph:
     """Solves the O/CVRP using HGS-CVRP with links from ``A``.
 
@@ -403,6 +530,15 @@ def hgs_cvrp(
 
     For single-root problems, the solver runs on the full graph. For multi-root
     problems, the graph is clustered and each cluster is solved concurrently.
+
+    A ``warmstart`` solution topology seeds the HGS-CVRP population with its
+    routes (one per feeder subtree, or one per ring), and, for multi-root
+    problems, its assignment of terminals to roots replaces the clustering. Only
+    the first solve of the repair loop is seeded, since a retry runs on fewer
+    links. An unusable warm start raises ``OWNWarmupFailed``: one that does not cover
+    every terminal exactly once with routes hanging from a single root each, or
+    whose routes HGS-CVRP rejects (over capacity, more routes than the fleet, or,
+    if ``balanced``, a route count other than the balanced one).
 
     By default, ``vehicles`` is an upper bound on the route count: HGS-CVRP is
     free to use fewer, which it normally does, since a shorter solution seldom
@@ -454,6 +590,8 @@ def hgs_cvrp(
             for links that route around obstacles.
         log_callback: callback to receive each log line produced by HGS-CVRP
             (only for single-root instances)
+        warmstart: solution topology S (radial, or ringed if ``ringed``) to seed
+            the search and, for multi-root instances, to cluster the terminals
 
     Returns:
         Solution topology S
@@ -528,6 +666,25 @@ def hgs_cvrp(
         vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
     feeders_above_min = None if vehicles is None else vehicles - vehicles_min
 
+    warm_routes_ = None
+    cluster_kwargs = {}
+    if warmstart is not None:
+        warm_routes_ = _routes_from_warmstart(warmstart, R, T)
+        if R > 1:
+            cluster_ = [
+                {n for route in routes for n in route} for routes in warm_routes_
+            ]
+            if vehicles_exact:
+                vehicles_clustered = sum(
+                    math.ceil(len(cluster) / solve_capacity) for cluster in cluster_
+                )
+                if vehicles_clustered != vehicles:
+                    raise OWNWarmupFailed(
+                        f'The clustering of the warm start needs {vehicles_clustered}'
+                        f' routes, not the exact count requested ({vehicles}).'
+                    )
+            cluster_kwargs['cluster_'] = cluster_
+
     if seed is None:
         seed = random.randrange(0, 2**31)
     hgs_options = {
@@ -535,7 +692,7 @@ def hgs_cvrp(
         'seed': seed,
     }
 
-    def _solve():
+    def _solve(warm_routes_=None):
         solve = _solve_single_root if R == 1 else _solve_multi_root
         results_ = solve(
             A,
@@ -546,6 +703,8 @@ def hgs_cvrp(
             log_callback,
             ringed,
             complete,
+            warm_routes_=warm_routes_,
+            **cluster_kwargs,
         )
         S = _process_results(A, keep_log, balanced, *results_)
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
@@ -570,10 +729,11 @@ def hgs_cvrp(
     crossings = []
     i = 0
     if not repair:
-        S = _solve()
+        S = _solve(warm_routes_)
     else:
         while True:
-            S = _solve()
+            # retries run on a pruned A, so only the first solve is seeded
+            S = _solve(warm_routes_ if i == 0 else None)
             S = repair_routeset_path(S, A, ringed=ringed)
             crossings = S.graph.get('outstanding_crossings', [])
             if not crossings or i == max_retries:

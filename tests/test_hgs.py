@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import itertools
 import math
 import re
 
@@ -14,7 +15,7 @@ from optiwindnet.baselines.hgs import _balanced_capacity
 from optiwindnet.converting import linkbits_from_S
 from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
-from optiwindnet.types import Topology
+from optiwindnet.types import OWNWarmupFailed, Topology
 
 from .cases import (
     DEFAULT_BASELINE_TIME_LIMIT,
@@ -22,7 +23,7 @@ from .cases import (
     case_node_id,
     expected_topology,
 )
-from .helpers import terminal_terminal_crossings
+from .helpers import ringed_S, terminal_terminal_crossings
 from .producers import hgs_topology
 from .sitecache import get_bundle
 from .topology_assertions import assert_topology
@@ -140,7 +141,14 @@ def _capture_do_hgs(monkeypatch, routes):
     captured = {}
 
     def fake_do_hgs(
-        W, coordinates, vehicles, capacity, hgs_options, log_callback=None, demands=None
+        W,
+        coordinates,
+        vehicles,
+        capacity,
+        hgs_options,
+        log_callback=None,
+        demands=None,
+        initial_routes=None,
     ):
         captured.update(
             vehicles=vehicles,
@@ -149,6 +157,7 @@ def _capture_do_hgs(monkeypatch, routes):
             W=W,
             demands=demands,
         )
+        captured.setdefault('initial_routes', []).append(initial_routes)
         return (routes, 0.01, 0.0, 1.0, '', {})
 
     monkeypatch.setattr(hgs_mod, '_do_hgs', fake_do_hgs)
@@ -382,7 +391,7 @@ def test_unbalanced_vehicle_count_is_clamped_up(monkeypatch):
 
 
 def test_multiroot_nonminimum_vehicle_count_is_reset(monkeypatch, caplog):
-    def fake_multi_root(*args):
+    def fake_multi_root(*args, **kwargs):
         inputs = (
             [1, 1],
             [6, 6],
@@ -457,3 +466,190 @@ def test_hgs_rejects_non_unit_terminal_inflow_it_cannot_honour(site, options):
         hgs_mod.hgs_cvrp(
             A, capacity=8, time_limit=DEFAULT_BASELINE_TIME_LIMIT, **options
         )
+
+
+def _radial_S(R: int, T: int, routes_: dict[int, list[list[int]]]) -> nx.Graph:
+    """Path-form solution topology: ``{root: [route, ...]}``, routes from the gate."""
+    S = nx.Graph(R=R, T=T, topology=Topology.RADIAL)
+    S.add_nodes_from(range(-R, T))
+    for r, routes in routes_.items():
+        for route in routes:
+            nx.add_path(S, [r, *route])
+    return S
+
+
+def test_routes_from_warmstart_walks_paths_and_branches_from_the_gate():
+    S = _radial_S(1, 5, {-1: [[1, 0], [2, 3]]})
+    S.add_edge(2, 4)  # branch: 2 -> {3, 4}
+
+    routes_ = hgs_mod._routes_from_warmstart(S, R=1, T=5)
+
+    assert len(routes_) == 1
+    path, branched = sorted(routes_[0])
+    assert path == [1, 0]
+    # depth first from the gate, whichever branch comes first
+    assert branched[0] == 2
+    assert sorted(branched) == [2, 3, 4]
+
+
+def test_routes_from_warmstart_walks_a_ring_from_gate_to_gate():
+    S = ringed_S(1, [(-1, [3, 1, 0, 2])])
+
+    routes_ = hgs_mod._routes_from_warmstart(S, R=1, T=4)
+
+    assert len(routes_[0]) == 1
+    route = routes_[0][0]
+    # a single route around the ring, starting and ending at its two gates
+    assert sorted(route) == [0, 1, 2, 3]
+    assert {route[0], route[-1]} == set(S.neighbors(-1))
+    assert all(S.has_edge(u, v) for u, v in itertools.pairwise(route))
+
+
+def test_routes_from_warmstart_groups_routes_by_root():
+    S = _radial_S(2, 4, {-2: [[3], [0]], -1: [[2, 1]]})
+
+    routes_ = hgs_mod._routes_from_warmstart(S, R=2, T=4)
+
+    assert sorted(routes_[0]) == [[0], [3]]
+    assert routes_[1] == [[2, 1]]
+
+
+@pytest.mark.parametrize(
+    ('mutate', 'match'),
+    [
+        (lambda S: S.remove_edge(1, 2), 'leaves 1 terminals out'),
+        (lambda S: S.add_edge(2, -2), 'reaches root'),
+        (lambda S: S.add_edge(-2, -1), 'links root'),
+        (lambda S: S.add_edge(2, 4), 'neither terminals nor roots'),
+        (lambda S: S.graph.update(T=5), 'but the problem has'),
+    ],
+)
+def test_routes_from_warmstart_rejects_unusable_warmstart(mutate, match):
+    S = _radial_S(2, 4, {-2: [[0, 3]], -1: [[1, 2]]})
+    mutate(S)
+
+    with pytest.raises(OWNWarmupFailed, match=match):
+        hgs_mod._routes_from_warmstart(S, R=2, T=4)
+
+
+def test_initial_routes_refer_to_distance_matrix_rows():
+    n_from_i = np.array([-2, 10, 20, 30])
+
+    assert hgs_mod._initial_routes([[30, 10], [20]], n_from_i, 0, 3) == [
+        [3, 1],
+        [2],
+    ]
+
+
+def test_initial_routes_open_balanced_routes_with_slack_nodes():
+    # T=5, effective capacity 3: 2 routes, 1 slack node (row 6)
+    n_from_i = np.array([-1, 0, 1, 2, 3, 4, -1])
+
+    initial = hgs_mod._initial_routes([[0, 1, 2], [3, 4]], n_from_i, 1, 3)
+
+    assert initial == [[1, 2, 3], [6, 4, 5]]
+
+
+def test_initial_routes_reject_balanced_route_count_mismatch():
+    n_from_i = np.array([-1, 0, 1, 2, 3, 4, -1])
+
+    with pytest.raises(
+        OWNWarmupFailed, match='needs 2 routes, but the warm start has 3'
+    ):
+        hgs_mod._initial_routes([[0, 1], [2], [3, 4]], n_from_i, 1, 3)
+
+
+def test_hgs_seeds_only_the_first_solve_of_the_repair_loop(monkeypatch):
+    captured = _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
+    calls = []
+
+    def fake_repair(S, A, ringed=False):
+        calls.append(None)
+        S = S.copy()
+        if len(calls) == 1:
+            S.graph['outstanding_crossings'] = [((0, 1), (2, 3))]
+        return S
+
+    monkeypatch.setattr(hgs_mod, 'repair_routeset_path', fake_repair)
+    monkeypatch.setattr(hgs_mod, 'remove_offending_crossings', lambda *args: None)
+    A = _make_A(T=4, edges=[(0, 1, 1.0), (2, 3, 1.0), (1, 2, 1.0)])
+    warmstart = _radial_S(1, 4, {-1: [[3, 2], [0, 1]]})
+
+    hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, warmstart=warmstart)
+
+    assert captured['initial_routes'] == [[[4, 3], [1, 2]], None]
+
+
+def test_hgs_clusters_multi_root_solve_by_the_warmstart(monkeypatch):
+    def echo_do_hgs(W, coordinates, vehicles, capacity, hgs_options, log_callback=None,
+                    demands=None, initial_routes=None):  # fmt: skip
+        return (initial_routes, 0.01, 0.0, 1.0, '', {})
+
+    monkeypatch.setattr(hgs_mod, '_do_hgs', echo_do_hgs)
+    monkeypatch.setattr(hgs_mod, 'clusterize', lambda *args: pytest.fail())
+    # every terminal is closest to root -1 (d2roots is all ones: argmin picks -2)
+    warmstart = _radial_S(2, 4, {-2: [[3]], -1: [[0, 2, 1]]})
+
+    S = hgs_mod.hgs_cvrp(
+        _make_A(T=4, R=2),
+        capacity=3,
+        time_limit=0.1,
+        seed=1,
+        repair=False,
+        warmstart=warmstart,
+    )
+
+    assert {frozenset(e) for e in S.edges} == {frozenset(e) for e in warmstart.edges}
+
+
+def test_hgs_rejects_warmstart_clustering_off_the_exact_vehicle_count():
+    # T=4 at capacity 2 needs 2 routes, but clusters of 1 and 3 terminals need 3
+    warmstart = _radial_S(2, 4, {-2: [[3]], -1: [[0, 2], [1]]})
+
+    with pytest.raises(OWNWarmupFailed, match='needs 3 routes'):
+        hgs_mod.hgs_cvrp(
+            _make_A(T=4, R=2),
+            capacity=2,
+            time_limit=0.1,
+            vehicles=2,
+            vehicles_exact=True,
+            balanced=True,
+            repair=False,
+            warmstart=warmstart,
+        )
+
+
+def test_hgs_raises_on_warmstart_hgs_cvrp_rejects():
+    A = as_normalized(get_bundle('example_location').A)
+    T = A.graph['T']
+    # a single route holding every terminal exceeds the capacity
+    warmstart = _radial_S(1, T, {-1: [list(range(T))]})
+
+    with pytest.raises(OWNWarmupFailed, match='exceeds the vehicle capacity'):
+        hgs_mod.hgs_cvrp(A, capacity=3, time_limit=0.1, seed=0, warmstart=warmstart)
+
+
+@pytest.mark.parametrize(
+    ('site', 'options'),
+    [
+        ('example_location', {}),
+        ('albatros', {'ringed': True}),
+        ('albatros', {'balanced': True}),
+        ('neart', {}),
+    ],
+)
+def test_hgs_warmstart_never_ends_worse_than_its_seed(site, options):
+    A = as_normalized(get_bundle(site).A)
+    S0 = hgs_mod.hgs_cvrp(
+        A, capacity=4, time_limit=0.2, seed=0, repair=False, **options
+    )
+
+    S1 = hgs_mod.hgs_cvrp(
+        A, capacity=4, time_limit=0.1, seed=1, repair=False, warmstart=S0, **options
+    )
+
+    assert S1.graph['objective'] <= S0.graph['objective'] + 1e-9
+    # the warm start's root assignment is kept
+    assert [set(nx.descendants(S1, r) - {r}) for r in range(-A.graph['R'], 0)] == [
+        set(nx.descendants(S0, r) - {r}) for r in range(-A.graph['R'], 0)
+    ]

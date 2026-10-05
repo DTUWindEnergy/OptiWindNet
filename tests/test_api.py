@@ -19,8 +19,9 @@ from optiwindnet.api import (
     Router,
     WindFarmNetwork,
 )
-from optiwindnet.MILP import ModelOptions
+from optiwindnet.MILP import ModelOptions, OWNWarmupFailed
 from optiwindnet.svg import SvgRepr
+from optiwindnet.types import Topology
 
 from .helpers import tiny_wfn
 
@@ -163,6 +164,7 @@ def test_hgsrouter_forwards_low_level_options(
         'ringed': ringed,
         'seed': 11,
         'log_callback': None,
+        'warmstart': None,
     }
 
 
@@ -202,6 +204,110 @@ def test_hgsrouter_verbose_streams_log(
     )
 
     assert capsys.readouterr().out == ('It 1 | T(s) 0.01\n' if streamed else '')
+
+
+@pytest.mark.parametrize(
+    ('ringed', 'warm_topology', 'forwarded'),
+    [
+        (False, Topology.RADIAL, True),
+        (True, Topology.RINGED, True),
+        (True, Topology.RADIAL, False),
+        (False, Topology.BRANCHED, False),
+    ],
+)
+def test_hgsrouter_forwards_warmstart_of_matching_topology(
+    monkeypatch, ringed, warm_topology, forwarded
+):
+    solved = tiny_wfn()
+    S_warm = solved.S.copy()
+    S_warm.graph['topology'] = warm_topology
+    captured = {}
+
+    def fake_hgs(A, **kwargs):
+        captured.update(kwargs)
+        return solved.S
+
+    monkeypatch.setattr(api, 'hgs_cvrp', fake_hgs)
+    monkeypatch.setattr(api, 'G_from_S', lambda S, A: solved.G)
+    monkeypatch.setattr(
+        api,
+        'PathFinder',
+        lambda *args, **kwargs: type(
+            'PF', (), {'create_detours': lambda self: solved.G}
+        )(),
+    )
+    monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
+    router = HGSRouter(time_limit=0.1, ringed=ringed)
+
+    router.route(
+        solved.P, solved.A, solved.cables, solved.cables_capacity, S_warm=S_warm
+    )
+
+    assert captured['warmstart'] is (S_warm if forwarded else None)
+
+
+def test_hgsrouter_solves_cold_when_the_warmstart_is_unusable(monkeypatch, caplog):
+    solved = tiny_wfn()
+    warmstarts = []
+
+    def fake_hgs(A, *, warmstart, **kwargs):
+        warmstarts.append(warmstart)
+        if warmstart is not None:
+            raise OWNWarmupFailed('rejected')
+        return solved.S
+
+    monkeypatch.setattr(api, 'hgs_cvrp', fake_hgs)
+    monkeypatch.setattr(api, 'G_from_S', lambda S, A: solved.G)
+    monkeypatch.setattr(
+        api,
+        'PathFinder',
+        lambda *args, **kwargs: type(
+            'PF', (), {'create_detours': lambda self: solved.G}
+        )(),
+    )
+    monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
+    router = HGSRouter(time_limit=0.1)
+    S_warm = solved.S.copy()
+    S_warm.graph['topology'] = Topology.RADIAL
+
+    with caplog.at_level('WARNING'):
+        S, _ = router.route(
+            solved.P, solved.A, solved.cables, solved.cables_capacity, S_warm=S_warm
+        )
+
+    assert warmstarts == [S_warm, None]
+    assert S is solved.S
+    assert 'Unable to warm-start HGS-CVRP (rejected)' in caplog.text
+
+
+def test_hgsrouter_reoptimization_survives_a_tighter_feeder_limit():
+    two_feeders = HGSRouter(
+        time_limit=0.1, feeder_limit=2, feeder_exact=True, balanced=True, seed=0
+    )
+    wfn = tiny_wfn(router=two_feeders)
+    assert wfn.S.degree[-1] == 2
+
+    # the carried solution has more routes than the new fleet allows
+    wfn.optimize(router=HGSRouter(time_limit=0.1, feeder_limit=1, seed=0))
+
+    assert wfn.S.degree[-1] == 1
+
+
+def test_hgsrouter_reoptimization_is_warm_started(monkeypatch):
+    wfn = tiny_wfn(router=HGSRouter(time_limit=0.1, seed=0))
+    S_first = wfn.S
+    warmstarts = []
+    hgs_cvrp = api.hgs_cvrp
+
+    def spy_hgs(A, **kwargs):
+        warmstarts.append(kwargs['warmstart'])
+        return hgs_cvrp(A, **kwargs)
+
+    monkeypatch.setattr(api, 'hgs_cvrp', spy_hgs)
+    wfn.optimize()
+
+    assert len(warmstarts) == 1
+    assert warmstarts[0] is S_first
 
 
 def test_hgsrouter_rejects_odd_ringed_feeder_limit(monkeypatch):

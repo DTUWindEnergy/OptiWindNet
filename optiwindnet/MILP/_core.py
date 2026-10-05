@@ -35,7 +35,7 @@ from ..loads import (
     validate_terminal_power,
 )
 from ..pathfinding import PathFinder
-from ..types import Topology
+from ..types import OWNWarmupFailed, Topology
 
 _lggr = logging.getLogger(__name__)
 error, info, warn = _lggr.error, _lggr.info, _lggr.warning
@@ -76,10 +76,6 @@ def _identifier_from_class_name(c: type) -> str:
     "Convert a camel-case class name to a snake-case identifier"
     s = c.__name__
     return s[0].lower() + ''.join('_' + c.lower() if c.isupper() else c for c in s[1:])
-
-
-class OWNWarmupFailed(Exception):
-    pass
 
 
 class OWNSolutionNotFound(Exception):

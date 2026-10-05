@@ -5,7 +5,7 @@
 
 from enum import StrEnum, auto
 
-__all__ = ('Topology',)
+__all__ = ('OWNWarmupFailed', 'Topology')
 
 
 class Topology(StrEnum):
@@ -21,3 +21,7 @@ class Topology(StrEnum):
     BRANCHED = auto()
     RINGED = auto()
     DEFAULT = BRANCHED
+
+
+class OWNWarmupFailed(Exception):
+    """A warm start is unusable for the model or solver it was given to."""
