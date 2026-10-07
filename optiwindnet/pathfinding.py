@@ -199,6 +199,7 @@ class PathNodes(dict):
 
     count: int
     prime_from_pn: dict
+    dominated: set
     pn_ids_from_prime_sector: defaultdict
     last_added_pn: int
     is_debug: bool
@@ -209,6 +210,9 @@ class PathNodes(dict):
         self.is_debug = _lggr.isEnabledFor(logging.DEBUG)
         self.count = 0
         self.prime_from_pn = {}
+        # pseudonodes whose path bends at a vertex no wall touches: they stay
+        # in their funnels but are never a best path
+        self.dominated = set()
         self.pn_ids_from_prime_sector = defaultdict(list)
         self.last_added_pn = NULL
 
@@ -220,6 +224,7 @@ class PathNodes(dict):
         dist: float,
         d_hop: float,
         cum_turn: float = 0.0,
+        dominated: bool = False,
     ) -> int:
         if parent_pn not in self:
             error(
@@ -236,6 +241,8 @@ class PathNodes(dict):
         self[pn_id] = PseudoNode(prime, sector, parent_pn, dist, d_hop, cum_turn)
         self.pn_ids_from_prime_sector[prime, sector].append(pn_id)
         self.prime_from_pn[pn_id] = prime
+        if dominated or parent_pn in self.dominated:
+            self.dominated.add(pn_id)
         if self.is_debug:
             debug('pseudoedge «%d->%d» added', prime, parent_prime)
         self.last_added_pn = pn_id
@@ -1163,7 +1170,9 @@ class PathFinder:
             )
             pair_id = pair_id_by_prime_sector[(c_next, chain.subtree)]
             best_pn_id = best_pn_by_pair_id[pair_id]
-            if best_pn_id is None or d_total < paths[best_pn_id].dist:
+            if parent_pn not in paths.dominated and (
+                best_pn_id is None or d_total < paths[best_pn_id].dist
+            ):
                 best_pn_by_pair_id[pair_id] = parent_pn
             cur = c_next
 
@@ -1649,7 +1658,9 @@ class PathFinder:
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
             pair_id = pair_id_by_prime_sector[(v, sec_v)]
             best_pn_id = best_pn_by_pair_id[pair_id]
-            if best_pn_id is None or d_total < paths[best_pn_id].dist:
+            if pn_v not in paths.dominated and (
+                best_pn_id is None or d_total < paths[best_pn_id].dist
+            ):
                 best_pn_by_pair_id[pair_id] = pn_v
             return pn_v, d_hop
 
@@ -1946,6 +1957,22 @@ class PathFinder:
                 if is_debug:
                     debug('<%d> apex on wall-free vertex %d: dead', adv_id, _apex)
                 return
+            if not phantom and apex in paths.dominated:
+                # every later path of this advancer passes through its apex
+                if is_debug:
+                    debug('<%d> apex %d on a dominated path: dead', adv_id, _apex)
+                return
+            # A path that bends where no wall binds it is dominated by a
+            # straighter one. The funnel apex is checked above; a bend at a
+            # vertex of a funnel side (infranear) or at an apex that was only
+            # grazed when the funnel reached it is caught here.
+            dominated = apex_eff in paths.dominated
+            if (
+                not dominated
+                and not phantom
+                and abs(step_turn) > _WALL_FREE_APEX_TURN_EPS
+            ):
+                dominated = _apex_eff in wall_free_vertices
             cum_turn = apex_pn.cum_turn + step_turn
             d_prio = d_new if _new < ST else prio[0]
             score_0 = d_prio
@@ -1957,7 +1984,7 @@ class PathFinder:
             # active advancer gets through.
             # A step that reaches a new (prime, sector) or matches or improves
             # its best path makes the streak inherited so far stale.
-            improving = (
+            improving = not dominated and (
                 unseen
                 or d_new < paths[best_pn_id].dist
                 or math.isclose(d_new, paths[best_pn_id].dist)
@@ -1970,10 +1997,13 @@ class PathFinder:
                 yield prio, is_promising
             #  trace('<%d> traverser after second yield', adv_id)
             new_pn_id = self.paths.add(
-                _new, sector_new, apex_eff, d_new, d_hop, cum_turn
+                _new, sector_new, apex_eff, d_new, d_hop, cum_turn, dominated
             )
             wedge_end[side] = new_pn_id
             num_traversals[portal] += 1
+            if dominated:
+                # neither a best path nor evidence against this funnel
+                continue
             # get best_pn_id again, as the situation may have changed
             best_pn_id = best_pn_by_pair_id[pair_id]
             if best_pn_id is None or d_new < paths[best_pn_id].dist:
