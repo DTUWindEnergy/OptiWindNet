@@ -139,6 +139,11 @@ class NetworkBounds:
         return self.feeders_ub // self.feeders_per_group
 
     @property
+    def balanced(self) -> bool:
+        """Whether the subtree (or ring) loads are balanced."""
+        return self.group_load_lb is not None
+
+    @property
     def has_root_bounds(self) -> bool:
         """Whether any root's feeders or load are bounded."""
         return any(

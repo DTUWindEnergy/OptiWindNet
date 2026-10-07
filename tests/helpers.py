@@ -113,7 +113,7 @@ def run_milp_solve_with_retry(
             P,
             A,
             capacity=capacity,
-            model_options=model_options,
+            constraints=ModelOptions(**model_options).to_constraints(),
             warmstart=warmstart,
         )
         info = solver.solve(time_limit=limit, mip_gap=mip_gap, options=solve_options)

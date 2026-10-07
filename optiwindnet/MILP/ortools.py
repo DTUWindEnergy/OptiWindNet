@@ -12,26 +12,26 @@ import networkx as nx
 from bitarray import frozenbitarray
 from ortools.math_opt.python import mathopt
 
-from ..converting import G_from_S
 from ..crossings import _feeder_link_conflicts, edgeset_edgeXing_iter
 from ..identity import fingerprint_function
-from ..pathfinding import PathFinder
 from ._core import (
     FeederLimit,
     FeederRoute,
     ModelMetadata,
+    NetworkBounds,
     OWNSolutionNotFound,
     OWNWarmupFailed,
     PoolHandler,
     SolutionInfo,
     Solver,
     Topology,
+    balance_bounds,
+    bound_rows,
     canonical_linksets,
     check_inflow_support,
-    check_model_enums,
     check_warmstart_topology,
-    feeder_and_load_bounds,
-    nonclosest_feeders,
+    feeders_to_fix,
+    model_bounds,
     passover_rows,
     physical_core_count,
     warmstart_links,
@@ -108,9 +108,7 @@ class SolverORTools(Solver, PoolHandler):
         return self._value_map[var.id]
 
     def _set_model(self, warmstart: nx.Graph | None) -> None:
-        model, metadata = make_min_length_model(
-            self.A, self.capacity, **self.model_options
-        )
+        model, metadata = make_min_length_model(self.A, self.capacity, self.bounds)
         self.model, self.metadata = model, metadata
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
@@ -215,10 +213,10 @@ class SolverORTools(Solver, PoolHandler):
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
-        P, model_options = self.P, self.model_options
-        if model_options['feeder_route'] is FeederRoute.STRAIGHT:
+        P, bounds = self.P, self.bounds
+        if bounds.feeder_route is FeederRoute.STRAIGHT:
             S = self._incumbent_topology()
-            G = PathFinder(G_from_S(S, A), P, A).create_detours()
+            G = self._create_detours(S, P, A)
         else:
             S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())
@@ -315,12 +313,13 @@ class SolverORTools(Solver, PoolHandler):
 def make_min_length_model(
     A: nx.Graph,
     capacity: int,
+    bounds: NetworkBounds | None = None,
     *,
-    topology: Topology = Topology.BRANCHED,
-    feeder_route: FeederRoute = FeederRoute.SEGMENTED,
-    feeder_limit: FeederLimit = FeederLimit.UNLIMITED,
-    balanced: bool = False,
-    max_feeders: int = 0,
+    topology: Topology | str | None = None,
+    feeder_route: FeederRoute | str | None = None,
+    feeder_limit: FeederLimit | str | None = None,
+    balanced: bool | None = None,
+    max_feeders: int | None = None,
 ) -> tuple[mathopt.Model, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -329,18 +328,28 @@ def make_min_length_model(
     Args:
       A: graph with the available links to choose from
       capacity: maximum link flow capacity
-      topology: one of ``Topology.{BRANCHED, RADIAL, RINGED}``
-      feeder_route:
-        ``FeederRoute.SEGMENTED`` → feeder routes may be detoured around subtrees;
-        ``FeederRoute.STRAIGHT`` → feeder routes must be straight, direct lines
-      feeder_limit: one of ``FeederLimit.{MINIMUM, UNLIMITED, EXACTLY, SPECIFIED,
-        MIN_PLUS1, MIN_PLUS2, MIN_PLUS3}``
-      balanced: enforce subtree loads differing at most by one unit (only
-        possible if ``feeder_limit`` pins the feeder count to a single value)
-      max_feeders: upper bound if ``feeder_limit`` is ``FeederLimit.SPECIFIED``,
-        exact count if it is ``FeederLimit.EXACTLY``, unused otherwise
+      bounds: topology, feeder route, counts and loads to enforce (see
+        :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`); defaults
+        to those of ``NetworkConstraints()``
+      topology, feeder_route, feeder_limit, balanced, max_feeders: deprecated,
+        use ``bounds``: the options of :class:`~optiwindnet.MILP.ModelOptions`
+
+    Raises:
+      ValueError: the bounds limit the load of the roots of a RINGED model.
     """
-    check_model_enums(topology, feeder_route, feeder_limit)
+    bounds = model_bounds(
+        A,
+        capacity,
+        bounds,
+        {
+            'topology': topology,
+            'feeder_route': feeder_route,
+            'feeder_limit': feeder_limit,
+            'balanced': balanced,
+            'max_feeders': max_feeders,
+        },
+    )
+    topology, feeder_route = bounds.topology, bounds.feeder_route
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
@@ -389,7 +398,7 @@ def make_min_length_model(
             (r, t): m.add_binary_variable(name=f'link_r{-r}~{t}') for r, t in starsʹ
         }
     # MathOpt has no fixing call: a binary with ub = 0 (= lb) is a fixed column
-    for t, r in nonclosest_feeders(A):
+    for t, r in feeders_to_fix(A, bounds):
         link_[t, r].upper_bound = 0
         if topology is Topology.RINGED:
             link_[r, t].upper_bound = 0
@@ -472,33 +481,19 @@ def make_min_length_model(
             name=f'flow_conserv_{t}',
         )
 
-    # feeder limits. A RINGED subtree is a cycle with two feeders, so the
-    # user-facing feeder count is in substation connections (two per ring), while
-    # the model counts rings (one flow-feeder var each): convert between them.
-    feeders_per_subtree = 2 if topology is Topology.RINGED else 1
-    feeders_lb, feeders_ub, load_lb, load_ub = feeder_and_load_bounds(
-        T, k, feeder_limit, max_feeders, balanced, feeders_per_subtree, inflow_total
-    )
-    if feeders_ub is not None and feeder_limit.name.startswith('MIN_PLUS'):
-        # derived from the minimum: surface it in the solution's metadata
-        max_feeders = feeders_per_subtree * feeders_ub
-    all_feeder_vars_sum = sum(link_[t, r] for r in _R for t in _T)
-    if feeders_lb == feeders_ub:
-        m.add_linear_constraint(
-            all_feeder_vars_sum == feeders_lb, name='feeder_limit_eq'
-        )
-    elif feeders_ub is None:
-        # valid inequality: number of feeders is at least the minimum
-        m.add_linear_constraint(
-            all_feeder_vars_sum >= feeders_lb, name='feeder_limit_lb'
-        )
-    else:
-        m.add_linear_constraint(
-            expr=all_feeder_vars_sum,
-            lb=feeders_lb,
-            ub=feeders_ub,
-            name='feeder_limit_interval',
-        )
+    # feeder count and per-root bounds
+    for row in bound_rows(bounds, R, T):
+        var_ = flow_ if row.flow else link_
+        row_sum = sum(var_[link] for link in row.links)
+        if row.lb is not None and row.lb == row.ub:
+            m.add_linear_constraint(row_sum == row.lb, name=f'{row.name}_eq')
+            continue
+        if row.lb is not None:
+            m.add_linear_constraint(row_sum >= row.lb, name=f'{row.name}_lb')
+        if row.ub is not None:
+            m.add_linear_constraint(row_sum <= row.ub, name=f'{row.name}_ub')
+
+    load_lb, load_ub = balance_bounds(bounds, k)
 
     # enforce balanced subtrees (subtree loads differ at most by one unit)
     if load_lb is not None:
@@ -559,13 +554,6 @@ def make_min_length_model(
     # Store metadata #
     ##################
 
-    model_options = {
-        'topology': topology,
-        'feeder_route': feeder_route,
-        'feeder_limit': feeder_limit,
-        'max_feeders': max_feeders,
-        'balanced': balanced,
-    }
     metadata = ModelMetadata(
         R,
         T,
@@ -573,7 +561,7 @@ def make_min_length_model(
         linkset,
         link_,
         flow_,
-        model_options,
+        topology,
         _make_min_length_model_fingerprint,
         weight_=weight_,
     )

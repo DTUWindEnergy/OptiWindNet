@@ -51,7 +51,7 @@ from .presenting import _nominal_loads
 from .svg import SvgRepr, svgplot, svgpplot
 from .terse import LinkScope, TerseLinks
 from .transforming import as_normalized, as_stratified_vertices
-from .types import Topology
+from .types import FeederRoute, Topology
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -1185,22 +1185,30 @@ class MILPRouter(Router):
         # loop below then warm-starts the model some other way.
         solver = self.solver
         capacity_kwargs = self._capacity_kwargs(A, cables_capacity)
-        A_solve, capacity, _ = quantized(A, **capacity_kwargs)
+        A_solve, capacity, power_attrs = quantized(A, **capacity_kwargs)
         has_nonunit_inflow = bool(nonunit_inflow(A_solve))
+        constraints = self.model_options.to_constraints()
+        bounds = constraints.resolve(
+            T=A.graph['T'],
+            R=A.graph['R'],
+            capacity=capacity,
+            inflow_total=total_inflow(A_solve),
+            power_per_inflow=power_attrs.get('power_per_inflow'),
+        )
 
         if not self.warmup:
             # master switch off: solve cold, ignoring any carried/provided solution
             S_warm = None
         elif S_warm is None:
             # warm-starting on, nothing to reuse: build a warm start
-            S_warm = self._make_warmstart(A, capacity_kwargs, A_solve, capacity)
+            S_warm = self._make_warmstart(A, capacity_kwargs, A_solve, capacity, bounds)
 
         for _ in range(2):
             try:
                 solver.set_problem(
                     P,
                     A,
-                    model_options=self.model_options,
+                    constraints=constraints,
                     warmstart=S_warm,
                     **capacity_kwargs,
                 )
@@ -1211,15 +1219,15 @@ class MILPRouter(Router):
                         raise
                     S_warm = None
                     continue
-                S_warm = self._make_warmstart(A, capacity_kwargs, A_solve, capacity)
+                S_warm = self._make_warmstart(
+                    A, capacity_kwargs, A_solve, capacity, bounds
+                )
 
         else:
             # No available solution can warm-start this model, so solve it cold
             # rather than give up: a warm start is an optimization, not a requirement.
             _warning('Unable to warm-start model: solving without a warm start.')
-            solver.set_problem(
-                P, A, model_options=self.model_options, **capacity_kwargs
-            )
+            solver.set_problem(P, A, constraints=constraints, **capacity_kwargs)
 
         for _ in range(num_retries + 1):
             try:
@@ -1244,7 +1252,7 @@ class MILPRouter(Router):
 
         return S, G
 
-    def _make_warmstart(self, A, capacity_kwargs, A_solve, capacity):
+    def _make_warmstart(self, A, capacity_kwargs, A_solve, capacity, bounds):
         """Build a warm start matched to the model's topology and feeder limit.
 
         Called (only when ``warmup`` is enabled) to obtain a warm start the model
@@ -1276,22 +1284,22 @@ class MILPRouter(Router):
             quantize ``A`` themselves.
           A_solve: ``A`` as quantized by :func:`~optiwindnet.loads.quantized`.
           capacity: cable capacity in inflow.
+          bounds: the bounds the model enforces.
 
         Returns:
           A topology to warm-start from, or ``None`` if none can be built.
         """
-        mo = self.model_options
         count_kwargs = hgs_count_kwargs(
-            A.graph['T'], A.graph['R'], capacity, mo, total_inflow(A_solve)
+            bounds, A.graph['T'], A.graph['R'], capacity, total_inflow(A_solve)
         )
         if count_kwargs is None:
             return None
         if (
-            mo['topology'] is Topology.BRANCHED
+            bounds.topology is Topology.BRANCHED
             and count_kwargs['vehicles'] is None
             and not nonunit_inflow(A_solve)
         ):
-            straight = mo['feeder_route'] == 'straight'
+            straight = bounds.feeder_route is FeederRoute.STRAIGHT
             return S_from_G(
                 constructor(
                     A,
@@ -1307,6 +1315,6 @@ class MILPRouter(Router):
             # a built warm start must not outlast the solve it primes
             time_limit=min(self.time_limit, self.warmup_time),
             repair=True,
-            ringed=mo['topology'] is Topology.RINGED,
+            ringed=bounds.topology is Topology.RINGED,
             **count_kwargs,
         )

@@ -399,7 +399,7 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
         (
             (solved.P, solved.A),
             {
-                'model_options': options,
+                'constraints': options.to_constraints(),
                 'capacity': solved.cables_capacity,
                 'warmstart': solved.S,
             },
@@ -939,10 +939,9 @@ def test_milp_router_warmup_fallback_and_retry_exhaustion(monkeypatch):
     # Create a fake solver that raises OWNWarmupFailed on set_problem with warmstart
     class FakeSolver:
         def __init__(self):
-            self.model_options = ModelOptions()
             self.metadata = type('Meta', (), {'warmed_by': ''})()
 
-        def set_problem(self, P, A, *, model_options, warmstart=None, **capacity):
+        def set_problem(self, P, A, *, constraints, warmstart=None, **capacity):
             if warmstart is not None and not getattr(self, '_passed_warmup', False):
                 self._passed_warmup = True
                 raise OWNWarmupFailed('Warmup failed')

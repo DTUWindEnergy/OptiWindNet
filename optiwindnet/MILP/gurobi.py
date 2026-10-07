@@ -10,8 +10,6 @@ import networkx as nx
 import pyomo.environ as pyo
 from bitarray import frozenbitarray
 
-from ..converting import G_from_S
-from ..pathfinding import PathFinder
 from ._core import (
     FeederRoute,
     OWNSolutionNotFound,
@@ -119,9 +117,9 @@ class SolverGurobi(SolverPyomo, PoolHandler):
             A = self.A
         P = self.P
         try:
-            if self.model_options['feeder_route'] is FeederRoute.STRAIGHT:
+            if self.bounds.feeder_route is FeederRoute.STRAIGHT:
                 S = self._incumbent_topology()
-                G = PathFinder(G_from_S(S, A), P, A).create_detours()
+                G = self._create_detours(S, P, A)
             else:
                 S, G = self._investigate_pool(P, A)
             G.graph.update(self._make_graph_attributes())

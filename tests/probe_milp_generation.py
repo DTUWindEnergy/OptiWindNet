@@ -120,7 +120,9 @@ def build_milp_warmstart(
     capacity = case.capacity
     options = case.model_options
     topology = options['topology']
-    count_kwargs = hgs_count_kwargs(A.graph['T'], A.graph['R'], capacity, options)
+    T, R = A.graph['T'], A.graph['R']
+    bounds = options.to_constraints().resolve(T=T, R=R, capacity=capacity)
+    count_kwargs = hgs_count_kwargs(bounds, T, R, capacity)
     if count_kwargs is not None:
         from optiwindnet.baselines.hgs import hgs_cvrp
 
@@ -242,7 +244,7 @@ def solve_milp_reference(
                 P,
                 A,
                 capacity=case.capacity,
-                model_options=options,
+                constraints=options.to_constraints(),
                 warmstart=warmstart,
             )
         except OWNWarmupFailed as exc:
