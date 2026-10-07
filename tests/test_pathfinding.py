@@ -316,8 +316,9 @@ def test_get_best_path_dist_is_sum_of_hops():
         # get the stored total from paths
         best_pn_ids = [
             pn_id
+            for best_pn_by_pair_id in pf.best_pn_by_root.values()
             for pair_id in pf.pair_ids_by_prime.get(n, ())
-            if (pn_id := pf.best_pn_by_pair_id[pair_id]) is not None
+            if (pn_id := best_pn_by_pair_id[pair_id]) is not None
         ]
         if best_pn_ids:
             best_pn_id = min((pf.paths[pn_id].dist, pn_id) for pn_id in best_pn_ids)[1]
@@ -636,3 +637,51 @@ def test_star_topology_routes_within_default_budget(site):
     G = pf.create_detours()
     assert validate_routeset(G) == []
     assert _all_turbines_connected(G)
+
+
+# ---------- roots of the subtrees ----------
+
+
+def _terminal_roots(G):
+    """Map every terminal to the root its subtree connects to."""
+    R, T = G.graph['R'], G.graph['T']
+    roots = {}
+    for r in range(-R, 0):
+        H = G.subgraph(n for n in G if n >= 0 or n == r)
+        component = nx.node_connected_component(H, r)
+        roots.update((n, r) for n in range(T) if n in component)
+    return roots
+
+
+def test_allow_root_change_false_keeps_subtree_roots():
+    # three roots; by default some subtrees are re-rooted by their detours
+    from optiwindnet.heuristics import constructor
+
+    bundle = get_bundle('cazzaro_2022G140', read_powers=False)
+    P, A = bundle.P, bundle.A
+    S = constructor(A, capacity=9)
+    roots = _terminal_roots(G_from_S(S, A))
+
+    G_default = PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
+    assert _terminal_roots(G_default) != roots
+
+    G_kept = PathFinder(
+        G_from_S(S, A), planar=P, A=A, allow_root_change=False
+    ).create_detours()
+    assert _terminal_roots(G_kept) == roots
+    assert validate_routeset(G_kept) == []
+
+
+def test_incumbents_are_shared_unless_per_root():
+    from optiwindnet.heuristics import constructor
+
+    bundle = get_bundle('cazzaro_2022G140', read_powers=False)
+    P, A = bundle.P, bundle.A
+    S = constructor(A, capacity=9)
+
+    def distinct_lists(pf):
+        return len({id(v) for v in pf.best_pn_by_root.values()})
+
+    assert distinct_lists(PathFinder(G_from_S(S, A), planar=P, A=A)) == 1
+    pf = PathFinder(G_from_S(S, A), planar=P, A=A, allow_root_change=False)
+    assert distinct_lists(pf) == A.graph['R']
