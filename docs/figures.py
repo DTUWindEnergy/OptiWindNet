@@ -49,8 +49,9 @@ import networkx as nx
 
 from docs.figuredata import routers_problem
 from docs.svg_utils import prettify_svg
-from optiwindnet.api import MILPRouter, ModelOptions, WindFarmNetwork
+from optiwindnet.api import MILPRouter, WindFarmNetwork
 from optiwindnet.baselines.hgs import hgs_cvrp
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import G_from_S
 from optiwindnet.importer import load_repository
 from optiwindnet.mesh import make_planar_embedding
@@ -210,13 +211,14 @@ def topologies(capacity: int = 4, time_limit: int = 5) -> Panels:
     """
     panels = []
     for topology in ('branched', 'radial', 'ringed'):
-        wfn = WindFarmNetwork(L=toyfarm(), cables=capacity)
+        wfn = WindFarmNetwork(
+            L=toyfarm(),
+            cables=capacity,
+            constraints=NetworkConstraints(topology=topology, feeders='min'),
+        )
         wfn.optimize(
             router=MILPRouter(
-                solver_name='ortools.cp_sat',
-                time_limit=time_limit,
-                mip_gap=0.001,
-                model_options=ModelOptions(topology=topology, feeder_limit='minimum'),
+                solver_name='ortools.cp_sat', time_limit=time_limit, mip_gap=0.001
             )
         )
         panels.append((topology.capitalize(), wfn.G))
