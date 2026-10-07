@@ -15,12 +15,12 @@ Import graph conversions from `optiwindnet.converting`, load calculations from `
 Pass every `Solver.set_problem()` argument after `P` and `A` by keyword:
 
 ```python
-solver.set_problem(P, A, capacity=capacity, model_options=options, warmstart=S)
+solver.set_problem(P, A, capacity=capacity, constraints=constraints, warmstart=S)
 ```
 
 Use `solver.get_solution()` for the topology and routed graph. The removed `get_incumbent_topology()` method is replaced, for advanced uses that intentionally skip routing, by decoding `solver.incumbent_linkbits` with `S_from_linkbits()`. This recovers connectivity only: restore the topology type, capacity and terminal inflow, then calculate loads before using or validating it. {doc}`/notebooks/lo32_clustering` demonstrates the ringed, unit-inflow case. `SolutionInfo.topology_id` identifies the model incumbent; a solution pool can deliver a different topology after ranking by routed length.
 
-`ModelOptions` accepts strings such as `topology='radial'`. Direct calls to backend `make_min_length_model()` functions require enum members for `topology`, `feeder_route` and `feeder_limit`.
+`NetworkConstraints` (in `optiwindnet.constraints`) supersedes `ModelOptions`: pass it as `set_problem(constraints=...)`; `ModelOptions.to_constraints()` translates existing options, and `model_options=` still works with a deprecation warning. Backend `make_min_length_model()` functions and `hgs_cvrp()` take the `NetworkBounds` that `NetworkConstraints.resolve()` returns for an instance; their former topology and count options are deprecated.
 
 For power declarations, use `set_terminal_power()` for nominal ratings and `'inflow'` for integer demands. Graphs that used `'power'` for integer demands need that attribute renamed. Imported locations read nominal powers by default; use `read_powers=False` for turbine-count examples, or follow [](/reference/power.md#advanced-api) for nominal capacities and [](/reference/power.md#router-support) for router restrictions.
 

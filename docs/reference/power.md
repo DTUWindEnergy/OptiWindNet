@@ -39,13 +39,13 @@ _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API).
 
 Routers use integer inflow internally. Unequal ratings are converted for each solve (see [](#quantization)); the following restrictions apply when the resulting inflow is nonunitary. The default `EWRouter` does not support that case. With a loose `power_rtol`, unequal ratings may quantize to unitary inflow, which every router supports.
 
-| Router | Topology | `feeder_limit` | Other conditions |
+| Router | Topology | Feeder count | Other conditions |
 | --- | --- | --- | --- |
-| `MILPRouter`, `solver_factory()` backends | radial, branched | `'unlimited'`, `'exactly'`, `'specified'` | — |
-| `HGSRouter`, `hgs_cvrp()`, `lkh3()` | radial | upper bound only | unbalanced, single substation; inflow becomes customer demand |
+| `MILPRouter`, `solver_factory()` backends | radial, branched | absolute | — |
+| `HGSRouter`, `hgs_cvrp()`, `lkh3()` | radial | absolute upper bound only | unbalanced, single substation; inflow becomes customer demand |
 | `EWRouter`, `constructor()` | unsupported | — | subtree construction uses turbine counts rather than unequal demands |
 
-`'minimum'` and `'min_plus*'` are rejected because the count they derive from total inflow treats a turbine as divisible among feeders. A `ringed` model is rejected because a ring within twice the capacity need not split into two arms that each fit within it. These restrictions also limit which models can be warm-started; see [](/reference/warm_starting.md#warm-start-acceptance-requirements).
+Counts relative to the minimum (`'min'`, `'min+k'`) are rejected because the minimum derived from total inflow treats a turbine as divisible among feeders. A `ringed` model is rejected because a ring within twice the capacity need not split into two arms that each fit within it. These restrictions also limit which models can be warm-started; see [](/reference/warm_starting.md#warm-start-acceptance-requirements).
 
 ## Quantization
 

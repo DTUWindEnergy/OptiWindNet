@@ -51,17 +51,19 @@ The differences between optimization approaches depend on the site, capacity, an
 
 The [](/problem.md#problem-options) define the feeder requirements; [](/problem.md#network-topologies) describes the architectures. Required constraints should guide the choice of approach before speed or solution quality.
 
-| Approach | Topology | Feeder route | Feeder (count) limit | Balanced feeder loads |
-| --- | --- | --- | --- | --- |
-| Heuristic | branched, radial, ringed | straight, segmented | no | no |
-| Meta-heuristic | radial, ringed | segmented | upper bound, exact countᵃ | yes |
-| Exact optimization | branched, radial, ringed | straight, segmented | yes | yes |
+| Approach | Topology | Feeder route | Feeder count (farm, substation) | Substation load | Balanced feeder loads |
+| --- | --- | --- | --- | --- | --- |
+| Heuristic | branched, radial, ringed | straight, segmented | no | no | no |
+| Meta-heuristic | radial, ringed | segmented | yesᵃ | yes | yes |
+| Exact optimization | branched, radial, ringed | straight, segmented | yes | yesᵇ | yes |
 
-ᵃ only if _balanced_ is also enforced
+ᵃ an exact count is held by balancing the loads of the routes concerned; rings stay on one substation, so a substation's exact count must be even
+
+ᵇ not for ringed networks, whose rings may connect two substations
 
 Those differences must be taken into account when chaining routers; see [](/reference/warm_starting.md#warm-start-acceptance-requirements).
 
-The capability table assumes uniform turbine power. Unequal powers restrict supported topologies and feeder limits; see [](/reference/power.md#router-support). Some unsupported option combinations raise errors; others are ignored with a warning, including MILP balancing when the feeder count is not pinned.
+The capability table assumes uniform turbine power. Unequal powers restrict supported topologies and feeder limits; see [](/reference/power.md#router-support). A router given constraints it cannot enforce raises an error.
 
 ## How the approaches work
 
@@ -79,11 +81,11 @@ _In use:_ {doc}`/notebooks/hi20_heuristic` (Network/Router API) · {doc}`/notebo
 
 Meta-heuristics search the solution space under a time budget you set. They treat the problem as a capacitated vehicle routing problem (CVRP), which is why they produce radial topologies by default: a CVRP route is a path, not a tree. Solving the _closed_ CVRP instead, where every route returns to the depot, yields a ringed topology.
 
-Both implementations handle multiple substations by assigning turbines to one cluster per substation, then solving the clusters concurrently. This fixes the assignment before the per-cluster search. Crossing repair and repeated searches can add to the total runtime.
+Both implementations handle multiple substations by assigning turbines to one cluster per substation, then solving the clusters concurrently. This fixes the assignment before the per-cluster search. With HGS-CVRP, the clustering gives each substation a number of routes within its constraints, and only as many turbines as those routes, its load limit and balancing allow. Crossing repair and repeated searches can add to the total runtime.
 
 #### HGS-CVRP
 
-HGS-CVRP uses hybrid genetic search for the CVRP. It is bundled with _OptiWindNet_ and available through both APIs. It supports radial and ringed networks; feeder-count and balancing support depends on the topology, turbine powers and number of substations.
+HGS-CVRP uses hybrid genetic search for the CVRP. It is bundled with _OptiWindNet_ and available through both APIs. It supports radial and ringed networks, and every feeder-count, substation-load and balancing constraint; unequal turbine powers restrict them (see [](/reference/power.md#router-support)).
 
 _In use:_ {doc}`/notebooks/hi21_hgs` (Network/Router API) · {doc}`/notebooks/lo21_hgs` (Advanced API).
 
@@ -101,7 +103,7 @@ The solver maintains a lower bound and reports the remaining **optimality gap** 
 
 The certificate applies to the selected candidate links and model constraints. Detours are computed after the search and can increase the delivered length, so the reported gap is not automatically the gap of the final routeset, and it is not a cost guarantee. Compare the routed length with the bound in the same length units when assessing the delivered network. Solver backends with a solution pool may select a different topology than that of the best incumbent solution after ranking candidates by routed length.
 
-The exact routers support the model options in [](/problem.md#problem-options), subject to their combination rules and the restrictions for mixed powers. Feeder load balancing requires a pinned feeder count; otherwise it is not enforced.
+The exact routers support the constraints in [](/problem.md#problem-options), subject to the restrictions for mixed powers.
 
 The common flow model, objective and crossing constraints are given in {doc}`/reference/milp_formulation`.
 
