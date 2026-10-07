@@ -970,7 +970,10 @@ class PoolHandler(abc.ABC):
         self, P: nx.PlanarEmbedding, A: nx.Graph
     ) -> tuple[nx.Graph, nx.Graph]:
         """Go through the solver's solutions checking which has the shortest length
-        after applying the detours with PathFinder."""
+        after applying the detours with PathFinder.
+
+        An entry with feeders PathFinder cannot detour is skipped, with a warning.
+        """
         Λ = float('inf')
         S = G = None
         num_solutions = self.num_solutions
@@ -985,6 +988,19 @@ class PoolHandler(abc.ABC):
             Sʹ = self._S_from_linkbits(self._linkbits_from_mip_sol())
             Gʹ = PathFinder(G_from_S(Sʹ, A), planar=P, A=A).create_detours()
             Λʹ = Gʹ.size(weight='length')
+            if Gʹ.graph.get('tentative'):
+                warn(
+                    '#%d skipped (objective: %.3f, length: %.3f): PathFinder found '
+                    'no non-crossing path for feeders %s',
+                    i,
+                    λ,
+                    Λʹ,
+                    ', '.join(
+                        f'{r}→{n} (load {Gʹ.nodes[n]["load"]})'
+                        for r, n in Gʹ.graph['tentative']
+                    ),
+                )
+                continue
             if Λʹ < Λ:
                 S, G, Λ = Sʹ, Gʹ, Λʹ
                 G.graph['pool_entry'] = i, λ

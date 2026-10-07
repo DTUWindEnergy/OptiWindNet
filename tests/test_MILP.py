@@ -572,7 +572,13 @@ def test_solver_graph_attributes_preserve_warmstart_and_feeder_limit():
     )
 
 
-def test_pool_investigation_ranks_routed_candidates(monkeypatch, P_A_toy):
+@pytest.mark.parametrize(
+    ('undetoured', 'expected'),
+    [((), 0), ((0,), 1), ((0, 1, 2), None)],
+)
+def test_pool_investigation_ranks_detoured_candidates(
+    monkeypatch, P_A_toy, caplog, undetoured, expected
+):
     class Pool(core.PoolHandler):
         num_solutions = 3
 
@@ -603,16 +609,28 @@ def test_pool_investigation_ranks_routed_candidates(monkeypatch, P_A_toy):
         def create_detours(self):
             G = nx.Graph()
             G.add_edge(0, 1, length=lengths[self.S.graph['candidate']])
+            if self.S.graph['candidate'] in undetoured:
+                G.nodes[0]['load'] = 3
+                G.graph['tentative'] = [(-1, 0)]
             return G
 
     monkeypatch.setattr(core, 'PathFinder', FakePathFinder)
     P, A = P_A_toy
 
-    S, G = pool._investigate_pool(P, A)
+    if expected is None:
+        with pytest.raises(ValueError, match='no usable solution'):
+            pool._investigate_pool(P, A)
+        return
+    with caplog.at_level(logging.WARNING, logger=core.__name__):
+        S, G = pool._investigate_pool(P, A)
 
-    assert S.graph['candidate'] == 0
-    assert G.graph['pool_entry'] == (0, 1.0)
+    # an entry left without detours is skipped, so it does not halt the search
+    assert S.graph['candidate'] == expected
+    assert G.graph['pool_entry'] == (expected, (1.0, 2.0, 10.0)[expected])
     assert G.graph['pool_count'] == 3
+    if undetoured:
+        assert '#0 skipped (objective: 1.000, length: 5.000)' in caplog.text
+        assert 'feeders -1→0 (load 3)' in caplog.text
 
 
 @pytest.mark.parametrize('solver_name', ['ortools.cp_sat', 'ortools.cbcbox'])
