@@ -199,6 +199,7 @@ class PathNodes(dict):
 
     count: int
     prime_from_pn: dict
+    dominated: set
     pn_ids_from_prime_sector: defaultdict
     last_added_pn: int
     is_debug: bool
@@ -209,6 +210,9 @@ class PathNodes(dict):
         self.is_debug = _lggr.isEnabledFor(logging.DEBUG)
         self.count = 0
         self.prime_from_pn = {}
+        # pseudonodes whose path bends at a vertex no wall touches: they stay
+        # in their funnels but are never a best path
+        self.dominated = set()
         self.pn_ids_from_prime_sector = defaultdict(list)
         self.last_added_pn = NULL
 
@@ -220,6 +224,7 @@ class PathNodes(dict):
         dist: float,
         d_hop: float,
         cum_turn: float = 0.0,
+        dominated: bool = False,
     ) -> int:
         if parent_pn not in self:
             error(
@@ -236,6 +241,8 @@ class PathNodes(dict):
         self[pn_id] = PseudoNode(prime, sector, parent_pn, dist, d_hop, cum_turn)
         self.pn_ids_from_prime_sector[prime, sector].append(pn_id)
         self.prime_from_pn[pn_id] = prime
+        if dominated or parent_pn in self.dominated:
+            self.dominated.add(pn_id)
         if self.is_debug:
             debug('pseudoedge «%d->%d» added', prime, parent_prime)
         self.last_added_pn = pn_id
@@ -266,6 +273,9 @@ class PathFinder:
       traversals_limit: maximum number of times a single portal may be traversed
       bad_streak_limit: limit on how many steps in a row without finding an improved
         path the traverser is allowed to take
+      allow_root_change: if False, :meth:`create_detours` connects each subtree to
+        the root it has in ``Gʹ``, and the paths from each root are searched as if
+        the other roots did not compete for the same terminals
 
     Example::
 
@@ -291,8 +301,10 @@ class PathFinder:
         traversals_limit: int = 3,
         bad_streak_limit: int = 5,
         turn_limit: float | None = None,
+        allow_root_change: bool = True,
     ) -> None:
         self.iterations_limit = iterations_limit
+        self.allow_root_change = allow_root_change
         self.traversals_limit = traversals_limit
         self.bad_streak_limit = bad_streak_limit
         # Path-cumulative turn limit (advancers whose path winding exceeds
@@ -657,9 +669,19 @@ class PathFinder:
         )
 
         self._precompute_sector_lookup(fences)
-        self.best_pn_by_pair_id: list[int | None] = [None] * len(
-            self.pair_id_by_prime_sector
-        )
+        # The best path found to each (prime, sector), per root of origin when
+        # the roots of the subtrees are kept, so that an advancer competes only
+        # with paths from its own root. Otherwise all roots share one list.
+        num_pairs = len(self.pair_id_by_prime_sector)
+        if allow_root_change:
+            shared: list[int | None] = [None] * num_pairs
+            self._incumbent_lists = [shared]
+            self.best_pn_by_root: dict[int, list[int | None]] = dict.fromkeys(
+                range(-R, 0), shared
+            )
+        else:
+            self._incumbent_lists = [[None] * num_pairs for _ in range(R)]
+            self.best_pn_by_root = dict(zip(range(-R, 0), self._incumbent_lists))
 
         # Build the chain topology: one Chain per route fence, with
         # chain_access mapping
@@ -807,11 +829,11 @@ class PathFinder:
         ``dists`` contains the lengths of the segments defined by ``paths``.
         """
         paths = self.paths
-        best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_ids_by_prime = self.pair_ids_by_prime
         try:
             _, pn_id = min(
                 (paths[pn_id].dist, pn_id)
+                for best_pn_by_pair_id in self._incumbent_lists
                 for pair_id in pair_ids_by_prime.get(n, ())
                 if (pn_id := best_pn_by_pair_id[pair_id]) is not None
             )
@@ -925,7 +947,7 @@ class PathFinder:
         # Route-fence pseudonode buckets: each on-constraint prime visited by
         # a route fence gets a (prime, subtree_id) bucket. Chain walks add
         # pseudonodes here, keeping overlapping chains' descents in distinct
-        # `best_pn_by_pair_id` slots.
+        # `best_pn_by_root` slots.
         for fence in fences:
             for prime in fence.primes_on_constraint:
                 add_pair(prime, fence.subtree)
@@ -993,6 +1015,7 @@ class PathFinder:
     def _advance_portal(
         self,
         adv_id: int,
+        root: int,
         portal: tuple[int, int],
         funnel_state: tuple,
         is_triangle_seen: bitarray,
@@ -1010,7 +1033,7 @@ class PathFinder:
         num_traversals = self.num_traversals
         triangles = P.graph['triangles']
         is_debug = self.paths.is_debug
-        traverser = self._traverse_channel(adv_id, *funnel_state)
+        traverser = self._traverse_channel(adv_id, root, *funnel_state)
         next(traverser)
         if side is not None:
             try:
@@ -1056,6 +1079,7 @@ class PathFinder:
                         self.adv_counter,
                         self._advance_portal(
                             self.adv_counter,
+                            root,
                             portal_right,
                             funnel_state,
                             is_triangle_seen.copy(),
@@ -1093,6 +1117,7 @@ class PathFinder:
                         c_side,
                         self.paths.last_added_pn,
                         is_triangle_seen,
+                        root,
                     )
                 elif 0 <= n < T:
                     traverser.send(((left, n), 1, True))
@@ -1123,7 +1148,7 @@ class PathFinder:
                 chain, c_side = access
                 num_traversals[(y, y)] += 1
                 self._walk_chain(
-                    y, chain, c_side, self.paths.last_added_pn, is_triangle_seen
+                    y, chain, c_side, self.paths.last_added_pn, is_triangle_seen, root
                 )
 
     def _walk_chain(
@@ -1133,6 +1158,7 @@ class PathFinder:
         side: int,
         entry_pn: int,
         is_triangle_seen: bitarray,
+        root: int,
     ) -> None:
         """Walk ``chain`` from its ``cones[side]`` access cone (entered via
         the trigger that called us) to its ``cones[1 - side]`` cone,
@@ -1150,7 +1176,7 @@ class PathFinder:
         paths = self.paths
         XY = self.XY
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
-        best_pn_by_pair_id = self.best_pn_by_pair_id
+        best_pn_by_pair_id = self.best_pn_by_root[root]
 
         cur = y_entry
         parent_pn = entry_pn
@@ -1163,11 +1189,13 @@ class PathFinder:
             )
             pair_id = pair_id_by_prime_sector[(c_next, chain.subtree)]
             best_pn_id = best_pn_by_pair_id[pair_id]
-            if best_pn_id is None or d_total < paths[best_pn_id].dist:
+            if parent_pn not in paths.dominated and (
+                best_pn_id is None or d_total < paths[best_pn_id].dist
+            ):
                 best_pn_by_pair_id[pair_id] = parent_pn
             cur = c_next
 
-        self._spawn_exit_cone(exit_cone, parent_pn, is_triangle_seen)
+        self._spawn_exit_cone(exit_cone, parent_pn, is_triangle_seen, root)
 
     def _partition_into_cones(
         self, c: int, cone_bounds: set[int], rotated: list[int]
@@ -1621,6 +1649,7 @@ class PathFinder:
         cone: AccessCone,
         pn_w_id: int,
         is_triangle_seen: bitarray,
+        root: int,
     ) -> None:
         """Spawn end-spoke and intermediate-pair advancers covering exit
         through ``cone``. ``cone.left`` and ``cone.right`` are the wall-neighbor
@@ -1633,7 +1662,7 @@ class PathFinder:
         prioqueue = self.prioqueue
         portal_set = self.portal_set
         XY = self.XY
-        best_pn_by_pair_id = self.best_pn_by_pair_id
+        best_pn_by_pair_id = self.best_pn_by_root[root]
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
         w = cone.vertex
         pn_w = paths[pn_w_id]
@@ -1649,7 +1678,9 @@ class PathFinder:
             pn_v = paths.add(v, sec_v, pn_w_id, d_total, d_hop, cum_turn_w)
             pair_id = pair_id_by_prime_sector[(v, sec_v)]
             best_pn_id = best_pn_by_pair_id[pair_id]
-            if best_pn_id is None or d_total < paths[best_pn_id].dist:
+            if pn_v not in paths.dominated and (
+                best_pn_id is None or d_total < paths[best_pn_id].dist
+            ):
                 best_pn_by_pair_id[pair_id] = pn_v
             return pn_v, d_hop
 
@@ -1662,6 +1693,7 @@ class PathFinder:
             funnel_state = (sub_prio, w, pn_w_id, [left, right], [wl, wr], 0)
             sub_advancer = self._advance_portal(
                 self.adv_counter,
+                root,
                 (left, right),
                 funnel_state,
                 is_triangle_seen.copy(),
@@ -1725,6 +1757,7 @@ class PathFinder:
     def _traverse_channel(
         self,
         adv_id,
+        root: int,
         prio: tuple,
         _apex: int,
         apex: int,
@@ -1760,7 +1793,7 @@ class PathFinder:
             return (qx - ax) * dx + (qy - ay) * dy > dx * dx + dy * dy
 
         paths = self.paths
-        best_pn_by_pair_id = self.best_pn_by_pair_id
+        best_pn_by_pair_id = self.best_pn_by_root[root]
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
         sector_by_prime_opposite = self.sector_by_prime_opposite
         scan_sector = self._scan_sector_from_opposite
@@ -1946,6 +1979,22 @@ class PathFinder:
                 if is_debug:
                     debug('<%d> apex on wall-free vertex %d: dead', adv_id, _apex)
                 return
+            if not phantom and apex in paths.dominated:
+                # every later path of this advancer passes through its apex
+                if is_debug:
+                    debug('<%d> apex %d on a dominated path: dead', adv_id, _apex)
+                return
+            # A path that bends where no wall binds it is dominated by a
+            # straighter one. The funnel apex is checked above; a bend at a
+            # vertex of a funnel side (infranear) or at an apex that was only
+            # grazed when the funnel reached it is caught here.
+            dominated = apex_eff in paths.dominated
+            if (
+                not dominated
+                and not phantom
+                and abs(step_turn) > _WALL_FREE_APEX_TURN_EPS
+            ):
+                dominated = _apex_eff in wall_free_vertices
             cum_turn = apex_pn.cum_turn + step_turn
             d_prio = d_new if _new < ST else prio[0]
             score_0 = d_prio
@@ -1957,7 +2006,7 @@ class PathFinder:
             # active advancer gets through.
             # A step that reaches a new (prime, sector) or matches or improves
             # its best path makes the streak inherited so far stale.
-            improving = (
+            improving = not dominated and (
                 unseen
                 or d_new < paths[best_pn_id].dist
                 or math.isclose(d_new, paths[best_pn_id].dist)
@@ -1970,10 +2019,13 @@ class PathFinder:
                 yield prio, is_promising
             #  trace('<%d> traverser after second yield', adv_id)
             new_pn_id = self.paths.add(
-                _new, sector_new, apex_eff, d_new, d_hop, cum_turn
+                _new, sector_new, apex_eff, d_new, d_hop, cum_turn, dominated
             )
             wedge_end[side] = new_pn_id
             num_traversals[portal] += 1
+            if dominated:
+                # neither a best path nor evidence against this funnel
+                continue
             # get best_pn_id again, as the situation may have changed
             best_pn_id = best_pn_by_pair_id[pair_id]
             if best_pn_id is None or d_new < paths[best_pn_id].dist:
@@ -2014,10 +2066,10 @@ class PathFinder:
         portal_set = self.portal_set
 
         # launch channel traversers around the roots to the prioqueue
-        best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_id_by_prime_sector = self.pair_id_by_prime_sector
         fan_sectors = self.fan_sectors
         for r in range(-R, 0):
+            best_pn_by_pair_id = self.best_pn_by_root[r]
             paths[r] = PseudoNode(r, r, None, 0.0, 0.0, 0.0)
             paths.prime_from_pn[r] = r
             paths.pn_ids_from_prime_sector[r, r] = [r]
@@ -2055,7 +2107,7 @@ class PathFinder:
                             best_pn_by_pair_id[pair_id] = pn_c
                         num_traversals[(left, left)] = traversals_limit
                         self._walk_chain(
-                            left, chain, c_side, pn_c, bitarray(len(triangles))
+                            left, chain, c_side, pn_c, bitarray(len(triangles)), r
                         )
 
                 if right not in P_adj[r] or portal_sorted not in portal_set:
@@ -2092,6 +2144,7 @@ class PathFinder:
                 funnel_state = (prio, r, r, [left, right], wedge_end, 0)
                 advancer = self._advance_portal(
                     self.adv_counter,
+                    r,
                     (left, right),
                     funnel_state,
                     bitarray(len(triangles)),
@@ -2217,7 +2270,6 @@ class PathFinder:
         R, T, B, C = self.R, self.T, self.B, self.C
         clone2prime = self.clone2prime.copy()
         paths = self.paths
-        best_pn_by_pair_id = self.best_pn_by_pair_id
         pair_ids_by_prime = self.pair_ids_by_prime
         clone_idx = T + B + C
         failed_detours = []
@@ -2247,6 +2299,11 @@ class PathFinder:
             try:
                 dist, pn_id, hook = min(
                     (paths[pn_id].dist, pn_id, hook)
+                    for best_pn_by_pair_id in (
+                        self._incumbent_lists
+                        if self.allow_root_change
+                        else (self.best_pn_by_root[r],)
+                    )
                     for hook in hook_candidates
                     for pair_id in pair_ids_by_prime.get(hook, ())
                     if (pn_id := best_pn_by_pair_id[pair_id]) is not None
