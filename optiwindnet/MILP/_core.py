@@ -16,7 +16,7 @@ from itertools import chain
 from pathlib import Path
 from textwrap import indent
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import networkx as nx
 import numpy as np
@@ -283,79 +283,6 @@ def balance_bounds(
         lb if lb is not None and lb > 1 else None,
         ub if ub is not None and ub < capacity else None,
     )
-
-
-class HGSCountKwargs(TypedDict):
-    """Feeder-count keyword arguments of :func:`~optiwindnet.baselines.hgs.hgs_cvrp`."""
-
-    vehicles: int | None
-    vehicles_exact: bool
-    balanced: bool
-
-
-def hgs_count_kwargs(
-    bounds: NetworkBounds,
-    T: int,
-    R: int,
-    capacity: int,
-    inflow_total: int | None = None,
-) -> HGSCountKwargs | None:
-    """Translate a model's feeder-count bounds into HGS-CVRP count options.
-
-    A solution of :func:`~optiwindnet.baselines.hgs.hgs_cvrp` run with the
-    returned options satisfies the model's feeder-count constraints. Counts are
-    in groups (subtrees, or rings for a RINGED model), which is what
-    ``hgs_cvrp()`` counts as ``vehicles``.
-
-    HGS-CVRP reproduces:
-
-    - an unbounded count (``vehicles=None``);
-    - a range of counts, as an upper bound (only the minimum if multi-root);
-    - a count pinned at the minimum, balanced if the model asks for it;
-    - a count pinned above the minimum, exactly and balanced (a balanced
-      solution also satisfies an unbalanced model), for a single root and, if
-      RINGED, at most ``T // 2`` rings.
-
-    Nonunitary terminal inflow is only reproduced by an unbalanced, single-root,
-    radial solve that is not pinned above the minimum. Per-root bounds are not
-    reproduced.
-
-    Args:
-      bounds: the model's bounds.
-      T: number of terminals.
-      R: number of roots.
-      capacity: cable capacity, in inflow (per arm for RINGED).
-      inflow_total: sum of terminal inflow (defaults to ``T``).
-
-    Returns:
-      Keyword arguments ``vehicles``, ``vehicles_exact`` and ``balanced`` for
-      ``hgs_cvrp()``, or ``None`` if HGS-CVRP cannot reproduce the bounds.
-    """
-    if inflow_total is None:
-        inflow_total = T
-    ringed = bounds.topology is Topology.RINGED
-    nonunitary = inflow_total != T
-    if (nonunitary and (ringed or R > 1)) or bounds.has_root_bounds:
-        return None
-    groups_lb, groups_ub = bounds.groups_lb, bounds.groups_ub
-    if groups_ub is None:
-        return {'vehicles': None, 'vehicles_exact': False, 'balanced': False}
-    if groups_lb != groups_ub:
-        # multi-root, HGS-CVRP honours only the minimum, which is groups_lb
-        vehicles = groups_lb if R > 1 else groups_ub
-        return {'vehicles': vehicles, 'vehicles_exact': False, 'balanced': False}
-    balanced = bounds.balanced
-    min_groups = math.ceil(inflow_total / (bounds.feeders_per_group * capacity))
-    if groups_lb == min_groups:
-        if nonunitary and balanced:
-            return None
-        # an upper bound at the minimum already yields the minimum
-        return {'vehicles': groups_lb, 'vehicles_exact': False, 'balanced': balanced}
-    # pinning above the minimum takes the balancing slack nodes; a ring with a
-    # single terminal would have one feeder instead of two
-    if nonunitary or R > 1 or (ringed and groups_lb > T // 2):
-        return None
-    return {'vehicles': groups_lb, 'vehicles_exact': True, 'balanced': True}
 
 
 class ModelOptions(dict):

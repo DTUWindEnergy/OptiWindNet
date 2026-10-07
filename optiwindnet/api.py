@@ -4,6 +4,7 @@
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from fractions import Fraction
 from itertools import pairwise
 from pathlib import Path
@@ -20,6 +21,7 @@ from .api_utils import (
     merge_obs_into_border,
     parse_cables_input,
 )
+from .baselines.hgs import _legacy_bounds as _hgs_legacy_bounds
 from .baselines.hgs import hgs_cvrp
 from .converting import G_from_S, S_from_G, terse_links_from_S
 from .heuristics import constructor
@@ -45,7 +47,6 @@ from .loads import (
 )
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
-from .MILP._core import hgs_count_kwargs
 from .pathfinding import PathFinder
 from .presenting import _nominal_loads
 from .svg import SvgRepr, svgplot, svgpplot
@@ -1059,6 +1060,18 @@ class HGSRouter(Router):
                     'RINGED topology (each ring uses 2 substation connections)'
                 )
             vehicles //= 2
+        capacity_kwargs = self._capacity_kwargs(A, cables_capacity)
+        A_solve, capacity, _ = quantized(A, **capacity_kwargs)
+        bounds = _hgs_legacy_bounds(
+            A.graph['T'],
+            A.graph['R'],
+            capacity,
+            total_inflow(A_solve),
+            vehicles,
+            self.feeder_exact,
+            self.balanced,
+            self.ringed,
+        )
 
         # seed HGS-CVRP with the carried solution if it has the topology sought
         topology = Topology.RINGED if self.ringed else Topology.RADIAL
@@ -1071,13 +1084,10 @@ class HGSRouter(Router):
             try:
                 S = hgs_cvrp(
                     as_normalized(A),
-                    **self._capacity_kwargs(A, cables_capacity),
+                    **capacity_kwargs,
                     time_limit=self.time_limit,
                     max_retries=self.max_retries,
-                    vehicles=vehicles,
-                    vehicles_exact=self.feeder_exact,
-                    balanced=self.balanced,
-                    ringed=self.ringed,
+                    bounds=bounds,
                     seed=self.seed,
                     log_callback=_print_log_line if verbose else None,
                     warmstart=warmstart,
@@ -1266,15 +1276,14 @@ class MILPRouter(Router):
         given ``warmup_time`` (capped by ``time_limit``).
 
         HGS-CVRP gives a radial solution (or a ringed one for a RINGED model),
-        and, unlike the constructor heuristics, its feeder count can be controlled
-        -- which is what a pinned or bounded ``feeder_limit`` needs. The count
-        options come from :func:`~optiwindnet.MILP._core.hgs_count_kwargs`, which
-        derives them from the same bounds the model enforces. A branched model
-        with an unbounded count takes the constructor's branched layout instead
-        (a closer warm start), unless terminal inflow is nonunitary, which the
-        constructor does not honour.
+        and, unlike the constructor heuristics, it keeps the count and load
+        bounds the model enforces (see :func:`~optiwindnet.baselines.hgs.hgs_cvrp`).
+        A branched model with no upper bound on its count and no bounded
+        substation takes the constructor's branched layout instead (a closer warm
+        start), unless terminal inflow is nonunitary, which the constructor does
+        not honour.
 
-        Counts HGS-CVRP cannot reproduce (and, with nonunitary terminal inflow,
+        Bounds HGS-CVRP cannot keep (and, with nonunitary terminal inflow,
         anything but an unbalanced, single-root, radial solve) return ``None``,
         i.e. the model is solved cold.
 
@@ -1289,14 +1298,10 @@ class MILPRouter(Router):
         Returns:
           A topology to warm-start from, or ``None`` if none can be built.
         """
-        count_kwargs = hgs_count_kwargs(
-            bounds, A.graph['T'], A.graph['R'], capacity, total_inflow(A_solve)
-        )
-        if count_kwargs is None:
-            return None
         if (
             bounds.topology is Topology.BRANCHED
-            and count_kwargs['vehicles'] is None
+            and bounds.feeders_ub is None
+            and not bounds.has_root_bounds
             and not nonunit_inflow(A_solve)
         ):
             straight = bounds.feeder_route is FeederRoute.STRAIGHT
@@ -1309,12 +1314,16 @@ class MILPRouter(Router):
                     straight_feeder_route=straight,
                 )
             )
-        return hgs_cvrp(
-            as_normalized(A),
-            **capacity_kwargs,
-            # a built warm start must not outlast the solve it primes
-            time_limit=min(self.time_limit, self.warmup_time),
-            repair=True,
-            ringed=bounds.topology is Topology.RINGED,
-            **count_kwargs,
-        )
+        try:
+            return hgs_cvrp(
+                as_normalized(A),
+                **capacity_kwargs,
+                # a built warm start must not outlast the solve it primes
+                time_limit=min(self.time_limit, self.warmup_time),
+                repair=True,
+                # HGS-CVRP does not keep feeders straight: the model checks them
+                bounds=replace(bounds, feeder_route=FeederRoute.SEGMENTED),
+            )
+        except (NotImplementedError, ValueError) as exc:
+            _info('No warm start from HGS-CVRP: %s', exc)
+            return None

@@ -15,16 +15,16 @@ write a golden artifact.
 
 import argparse
 import json
+from dataclasses import replace
 from time import perf_counter
 
 import networkx as nx
 
 from optiwindnet.heuristics import constructor
 from optiwindnet.MILP import ModelOptions, OWNWarmupFailed, solver_factory
-from optiwindnet.MILP._core import hgs_count_kwargs
 from optiwindnet.terse import TerseLinks
 from optiwindnet.transforming import as_normalized
-from optiwindnet.types import Topology
+from optiwindnet.types import FeederRoute, Topology
 
 from .cases import MILPCase
 from .sitecache import SiteBundle, get_bundle
@@ -122,10 +122,9 @@ def build_milp_warmstart(
     topology = options['topology']
     T, R = A.graph['T'], A.graph['R']
     bounds = options.to_constraints().resolve(T=T, R=R, capacity=capacity)
-    count_kwargs = hgs_count_kwargs(bounds, T, R, capacity)
-    if count_kwargs is not None:
-        from optiwindnet.baselines.hgs import hgs_cvrp
+    from optiwindnet.baselines.hgs import hgs_cvrp
 
+    try:
         S = hgs_cvrp(
             as_normalized(A),
             capacity=capacity,
@@ -133,9 +132,11 @@ def build_milp_warmstart(
             seed=warmstart_seed,
             repair=True,
             max_retries=warmstart_max_retries,
-            ringed=topology is Topology.RINGED,
-            **count_kwargs,
+            bounds=replace(bounds, feeder_route=FeederRoute.SEGMENTED),
         )
+    except (NotImplementedError, ValueError):
+        S = None
+    if S is not None:
         # A radial topology is a valid warm start for the less restrictive branched
         # model; warmup_model() explicitly supports this relationship.
         warmstart_topology = (

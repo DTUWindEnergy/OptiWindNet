@@ -12,6 +12,7 @@ import pytest
 import optiwindnet.baselines.hgs as hgs_mod
 from optiwindnet.baselines._core import remove_offending_crossings
 from optiwindnet.baselines.hgs import _balanced_capacity
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import linkbits_from_S
 from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
@@ -586,7 +587,7 @@ def test_hgs_clusters_multi_root_solve_by_the_warmstart(monkeypatch):
         return (initial_routes, 0.01, 0.0, 1.0, '', {})
 
     monkeypatch.setattr(hgs_mod, '_do_hgs', echo_do_hgs)
-    monkeypatch.setattr(hgs_mod, 'clusterize', lambda *args: pytest.fail())
+    monkeypatch.setattr(hgs_mod, 'cluster_plan', lambda *args: pytest.fail())
     # every terminal is closest to root -1 (d2roots is all ones: argmin picks -2)
     warmstart = _radial_S(2, 4, {-2: [[3]], -1: [[0, 2, 1]]})
 
@@ -606,7 +607,7 @@ def test_hgs_rejects_warmstart_clustering_off_the_exact_vehicle_count():
     # T=4 at capacity 2 needs 2 routes, but clusters of 1 and 3 terminals need 3
     warmstart = _radial_S(2, 4, {-2: [[3]], -1: [[0, 2], [1]]})
 
-    with pytest.raises(OWNWarmupFailed, match='needs 3 routes'):
+    with pytest.raises(OWNWarmupFailed, match='3 routes, outside the range of 2 to 2'):
         hgs_mod.hgs_cvrp(
             _make_A(T=4, R=2),
             capacity=2,
@@ -653,3 +654,74 @@ def test_hgs_warmstart_never_ends_worse_than_its_seed(site, options):
     assert [set(nx.descendants(S1, r) - {r}) for r in range(-A.graph['R'], 0)] == [
         set(nx.descendants(S0, r) - {r}) for r in range(-A.graph['R'], 0)
     ]
+
+
+# --------------------------------------------------------------------------
+# bounds
+# --------------------------------------------------------------------------
+def _neart_A_and_bounds(**constraints):
+    A = as_normalized(get_bundle('neart', read_powers=False).A)
+    bounds = NetworkConstraints(**constraints).resolve(
+        T=A.graph['T'], R=A.graph['R'], capacity=7
+    )
+    return A, bounds
+
+
+def _per_root(S):
+    return [(S.degree[r], S.nodes[r]['load']) for r in range(-S.graph['R'], 0)]
+
+
+@pytest.mark.parametrize(
+    ('constraints', 'expected'),
+    [
+        # unlimited, neart's root -1 takes 6 feeders and 34 turbines
+        (
+            {'max_substation_feeders': (None, 5), 'max_substation_loads': (None, 26)},
+            lambda feeders, load: feeders <= 5 and load <= 26,
+        ),
+        ({'substation_feeders': (None, 4)}, lambda feeders, load: feeders == 4),
+    ],
+)
+def test_hgs_keeps_the_substation_limits(constraints, expected):
+    from optiwindnet.validating import validate_topology
+
+    A, bounds = _neart_A_and_bounds(**constraints)
+
+    S = hgs_mod.hgs_cvrp(A, capacity=7, time_limit=0.5, seed=1, bounds=bounds)
+
+    assert expected(*_per_root(S)[1])
+    assert validate_topology(S, 7) == []
+    assert S.graph['solver_details']['root_feeders_ub'][0] is None
+
+
+def test_hgs_balances_the_subtrees_of_every_substation_alike():
+    A, bounds = _neart_A_and_bounds(feeders='min', balanced=True)
+    load_lb, load_ub = bounds.group_load_lb, bounds.group_load_ub
+
+    S = hgs_mod.hgs_cvrp(A, capacity=7, time_limit=0.5, seed=1, bounds=bounds)
+
+    loads = [S.nodes[n]['load'] for r in (-2, -1) for n in S.neighbors(r)]
+    assert len(loads) == bounds.groups_lb
+    assert all(load_lb <= load <= load_ub for load in loads)
+
+
+def test_hgs_cvrp_deprecates_its_count_options(monkeypatch):
+    _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
+    A = _make_A(T=4)
+    with pytest.warns(DeprecationWarning, match='balanced'):
+        hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, balanced=True, repair=False)
+    bounds = NetworkConstraints(feeders='min', balanced=True).resolve(
+        T=4, R=1, capacity=2
+    )
+    with pytest.raises(TypeError, match='either bounds or the options'):
+        hgs_mod.hgs_cvrp(
+            A, capacity=2, time_limit=0.1, bounds=bounds, ringed=True, repair=False
+        )
+
+
+def test_hgs_cvrp_does_not_keep_feeders_straight():
+    bounds = NetworkConstraints(feeder_route='straight').resolve(T=4, R=1, capacity=2)
+    with pytest.raises(NotImplementedError, match='straight'):
+        hgs_mod.hgs_cvrp(
+            _make_A(T=4), capacity=2, time_limit=0.1, bounds=bounds, repair=False
+        )

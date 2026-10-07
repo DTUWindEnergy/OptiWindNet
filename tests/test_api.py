@@ -145,7 +145,8 @@ def test_hgsrouter_forwards_low_level_options(
     router = HGSRouter(
         time_limit=0.4,
         feeder_limit=feeder_limit,
-        feeder_exact=True,
+        # an exact count needs a count
+        feeder_exact=feeder_limit is not None,
         max_retries=7,
         balanced=True,
         ringed=ringed,
@@ -154,18 +155,21 @@ def test_hgsrouter_forwards_low_level_options(
 
     router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
 
+    bounds = captured.pop('bounds')
     assert captured == {
         'capacity': solved.cables_capacity,
         'time_limit': 0.4,
         'max_retries': 7,
-        'vehicles': expected_vehicles,
-        'vehicles_exact': True,
-        'balanced': True,
-        'ringed': ringed,
         'seed': 11,
         'log_callback': None,
         'warmstart': None,
     }
+    assert bounds.topology is (Topology.RINGED if ringed else Topology.RADIAL)
+    assert bounds.balanced
+    # balanced: the count is exact, the minimum unless given
+    assert bounds.groups_lb == bounds.groups_ub
+    if expected_vehicles is not None:
+        assert bounds.groups_lb == expected_vehicles
 
 
 @pytest.mark.parametrize(

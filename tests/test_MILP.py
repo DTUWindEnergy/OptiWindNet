@@ -2042,102 +2042,20 @@ def test_model_options_min_plus_counts_rings():
     assert (bounds.feeders_lb, bounds.feeders_ub) == (4, 6)
 
 
-def _hgs_counts(R=1, inflow_total=None, **options):
+def _resolve_options(R=1, inflow_total=None, **options):
     # T=12, capacity=5: at least 3 radial subtrees or 2 rings
-    bounds = core._constraints_from_options(**options).resolve(
+    return core._constraints_from_options(**options).resolve(
         T=12, R=R, capacity=5, inflow_total=inflow_total
     )
-    return core.hgs_count_kwargs(bounds, 12, R, 5, inflow_total)
-
-
-@pytest.mark.parametrize(
-    ('R', 'inflow_total', 'options', 'expected'),
-    [
-        # unbounded count
-        (1, None, {}, (None, False, False)),
-        # a range: an upper bound single-root, the minimum multi-root
-        (1, None, {'feeder_limit': 'min_plus1'}, (4, False, False)),
-        (2, None, {'feeder_limit': 'min_plus1'}, (3, False, False)),
-        (1, None, {'feeder_limit': 'specified', 'max_feeders': 7}, (7, False, False)),
-        # pinned at the minimum
-        (1, None, {'feeder_limit': 'minimum'}, (3, False, False)),
-        (2, None, {'feeder_limit': 'minimum', 'balanced': True}, (3, False, True)),
-        # pinned above the minimum: exact and balanced, single root only
-        (1, None, {'feeder_limit': 'exactly', 'max_feeders': 5}, (5, True, True)),
-        (
-            1,
-            None,
-            {'feeder_limit': 'exactly', 'max_feeders': 5, 'balanced': True},
-            (5, True, True),
-        ),
-        (2, None, {'feeder_limit': 'exactly', 'max_feeders': 5}, None),
-        # RINGED counts rings, at most T // 2 when pinned above the minimum
-        (1, None, {'topology': 'ringed', 'feeder_limit': 'minimum'}, (2, False, False)),
-        (
-            1,
-            None,
-            {'topology': 'ringed', 'feeder_limit': 'specified', 'max_feeders': 8},
-            (4, False, False),
-        ),
-        (
-            1,
-            None,
-            {'topology': 'ringed', 'feeder_limit': 'exactly', 'max_feeders': 12},
-            (6, True, True),
-        ),
-        (
-            1,
-            None,
-            {'topology': 'ringed', 'feeder_limit': 'exactly', 'max_feeders': 14},
-            None,
-        ),
-        # nonunitary inflow: only unbalanced, single-root, radial, not above minimum
-        (1, 14, {}, (None, False, False)),
-        (2, 14, {}, None),
-        (1, 14, {'feeder_limit': 'exactly', 'max_feeders': 3}, (3, False, False)),
-        (
-            1,
-            14,
-            {'feeder_limit': 'exactly', 'max_feeders': 3, 'balanced': True},
-            None,
-        ),
-        (1, 14, {'feeder_limit': 'exactly', 'max_feeders': 4}, None),
-    ],
-)
-def test_hgs_count_kwargs(R, inflow_total, options, expected):
-    counts = _hgs_counts(R, inflow_total, **options)
-    if expected is None:
-        assert counts is None
-    else:
-        vehicles, vehicles_exact, balanced = expected
-        assert counts == {
-            'vehicles': vehicles,
-            'vehicles_exact': vehicles_exact,
-            'balanced': balanced,
-        }
-
-
-def test_hgs_count_kwargs_does_not_reproduce_root_bounds():
-    bounds = NetworkConstraints(max_substation_feeders=(2, None)).resolve(
-        T=12, R=2, capacity=5
-    )
-    assert core.hgs_count_kwargs(bounds, 12, 2, 5) is None
-
-
-def test_ringed_nonunit_inflow_is_out_of_hgs_reach():
-    bounds = NetworkConstraints(topology='ringed').resolve(
-        T=12, R=1, capacity=5, inflow_total=14
-    )
-    assert core.hgs_count_kwargs(bounds, 12, 1, 5, 14) is None
 
 
 def test_model_options_reject_what_the_constraints_reject():
     with pytest.raises(ValueError, match='below the minimum'):
-        _hgs_counts(feeder_limit='exactly', max_feeders=2)
+        _resolve_options(feeder_limit='exactly', max_feeders=2)
     with pytest.raises(ValueError, match='even'):
-        _hgs_counts(topology='ringed', feeder_limit='exactly', max_feeders=5)
+        _resolve_options(topology='ringed', feeder_limit='exactly', max_feeders=5)
     with pytest.raises(ValueError, match='relative to the minimum'):
-        _hgs_counts(inflow_total=14, feeder_limit='minimum')
+        _resolve_options(inflow_total=14, feeder_limit='minimum')
 
 
 # --------------------------------------------------------------------------- #
@@ -2485,3 +2403,18 @@ def test_ringed_models_refuse_substation_loads():
     )
     with pytest.raises(ValueError, match='not available for RINGED MILP'):
         core.model_bounds(A, _CAPACITY, bounds, {})
+
+
+def test_milp_warmstart_keeps_the_substation_limits():
+    from optiwindnet.api import MILPRouter
+
+    A = get_bundle('neart', read_powers=False).A
+    bounds = NetworkConstraints(
+        max_substation_feeders=(None, 5), max_substation_loads=(None, 26)
+    ).resolve(T=A.graph['T'], R=A.graph['R'], capacity=7)
+    router = MILPRouter(solver_name='highs', time_limit=1, mip_gap=0.05)
+
+    S = router._make_warmstart(A, {'capacity': 7}, A, 7, bounds)
+
+    assert S is not None and S.graph['creator'] == 'baselines.hgs'
+    assert S.degree[-1] <= 5 and S.nodes[-1]['load'] <= 26
