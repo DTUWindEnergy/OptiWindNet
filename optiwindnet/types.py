@@ -5,7 +5,7 @@
 
 from enum import StrEnum, auto
 
-__all__ = ('OWNWarmupFailed', 'Topology')
+__all__ = ('FeederRoute', 'OWNWarmupFailed', 'Topology')
 
 
 class Topology(StrEnum):
@@ -21,6 +21,14 @@ class Topology(StrEnum):
     BRANCHED = auto()
     RINGED = auto()
     DEFAULT = BRANCHED
+
+
+class FeederRoute(StrEnum):
+    "If feeder routes must be ``'straight'`` or can be detoured (``'segmented'``)."
+
+    STRAIGHT = auto()
+    SEGMENTED = auto()
+    DEFAULT = SEGMENTED
 
 
 class OWNWarmupFailed(Exception):

@@ -35,7 +35,7 @@ from ..loads import (
     validate_terminal_power,
 )
 from ..pathfinding import PathFinder
-from ..types import OWNWarmupFailed, Topology
+from ..types import FeederRoute, OWNWarmupFailed, Topology
 
 _lggr = logging.getLogger(__name__)
 error, info, warn = _lggr.error, _lggr.info, _lggr.warning
@@ -80,14 +80,6 @@ def _identifier_from_class_name(c: type) -> str:
 
 class OWNSolutionNotFound(Exception):
     pass
-
-
-class FeederRoute(StrEnum):
-    "If feeder routes must be ``'straight'`` or can be detoured (``'segmented'``)."
-
-    STRAIGHT = auto()
-    SEGMENTED = auto()
-    DEFAULT = SEGMENTED
 
 
 class FeederLimit(StrEnum):
