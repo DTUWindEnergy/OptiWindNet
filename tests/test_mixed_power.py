@@ -15,6 +15,7 @@ from optiwindnet import loads
 from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
 from optiwindnet.baselines.hgs import hgs_cvrp
 from optiwindnet.baselines.lkh import lkh3
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import G_from_S, L_from_G, S_from_G
 from optiwindnet.db.storage import pack_G
 from optiwindnet.heuristics.constructor import constructor
@@ -597,20 +598,15 @@ def test_milp_warmstart_is_built_only_for_plain_radial_solves():
     wfn = _mixed_wfn()
     A = wfn.A
     capacity_kwargs = {'capacity_nominal': Fraction(5, 2), 'power_rtol': 0.01}
-    A_solve, capacity, power_attrs = quantized(A, **capacity_kwargs)
+    A_solve, capacity, _ = quantized(A, **capacity_kwargs)
 
     def warmstart(model_options):
         router = MILPRouter(
             'highs', time_limit=1, mip_gap=0.01, model_options=model_options
         )
-        bounds = router.model_options.to_constraints().resolve(
-            T=A.graph['T'],
-            R=A.graph['R'],
-            capacity=capacity,
-            inflow_total=total_inflow(A_solve),
-            power_per_inflow=power_attrs['power_per_inflow'],
-        )
-        return router._make_warmstart(A, capacity_kwargs, A_solve, capacity, bounds)
+        constraints = router.model_options.to_constraints()
+        bounds = constraints.resolve(A, **capacity_kwargs)
+        return router._make_warmstart(A, capacity_kwargs, A_solve, constraints, bounds)
 
     S_warm = warmstart({'topology': 'radial'})
     assert S_warm is not None and S_warm.graph['max_load'] <= capacity
@@ -897,3 +893,19 @@ def test_gplot_terminal_shapes_per_power_level():
                 assert size == NODESIZE
     finally:
         plt.close(fig)
+
+
+def test_constraints_resolve_with_the_quantization_of_the_solve():
+    A = _mixed_wfn().A
+    capacity_kwargs = {'capacity_nominal': Fraction(5, 2), 'power_rtol': 0.01}
+    A_solve, capacity, power_attrs = quantized(A, **capacity_kwargs)
+    constraints = NetworkConstraints(max_substation_loads=Fraction(5, 2))
+    bounds = constraints.resolve(A, **capacity_kwargs)
+    assert bounds == constraints._resolve(
+        T=A.graph['T'],
+        R=A.graph['R'],
+        capacity=capacity,
+        inflow_total=total_inflow(A_solve),
+        power_per_inflow=power_attrs['power_per_inflow'],
+    )
+    assert bounds.root_load_ub == (capacity,) * A.graph['R']

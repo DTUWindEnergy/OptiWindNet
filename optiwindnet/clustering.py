@@ -2,6 +2,7 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
+import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from itertools import combinations_with_replacement
@@ -40,7 +41,7 @@ class ClusterPlan:
 class _Limits:
     """Per-root limits of a clustering, in routes and terminals."""
 
-    capacity: int
+    group_capacity: int
     lo_: tuple[int, ...]
     hi_: tuple[int, ...]
     load_cap_: tuple[int, ...]
@@ -50,7 +51,7 @@ class _Limits:
 
     def window(self, c: int, routes: int) -> tuple[int, int]:
         """Range of the number of terminals root ``c`` may take with ``routes``."""
-        hi = min(routes * self.capacity, self.load_cap_[c])
+        hi = min(routes * self.group_capacity, self.load_cap_[c])
         if self.balance is not None:
             load_lb, load_ub = self.balance
             return routes * max(load_lb, self.min_route), min(hi, routes * load_ub)
@@ -68,10 +69,10 @@ def _assign(
     than any total distance, so that they are all filled whenever the slots
     allow it.
 
-    With ``sum(budget) == ceil(T/capacity)`` and every terminal dealt, the result
-    cannot waste a feeder::
+    With ``sum(budget) == ceil(T/K)`` (``K`` the group capacity) and every
+    terminal dealt, the result cannot waste a feeder::
 
-        ceil(T/capacity) <= Σ_c ceil(T_c/capacity) <= Σ_c budget[c] == ceil(T/capacity)
+        ceil(T/K) <= Σ_c ceil(T_c/K) <= Σ_c budget[c] == ceil(T/K)
 
     Returns:
         One set of terminals per root, the number of terminals left out plus the
@@ -154,7 +155,7 @@ def _best_budget(
 
 
 def _limits(
-    R: int, T: int, capacity: int, bounds: NetworkBounds | None
+    R: int, T: int, group_capacity: int, bounds: NetworkBounds | None
 ) -> tuple[_Limits, int, int]:
     """Translate ``bounds`` into per-root limits and the range of the route count.
 
@@ -163,9 +164,11 @@ def _limits(
     Raises:
       NotImplementedError: a root's exact feeder count is odd for rings.
     """
-    min_routes = math.ceil(T / capacity)
+    min_routes = math.ceil(T / group_capacity)
     if bounds is None:
-        limits = _Limits(capacity, (0,) * R, (T,) * R, (T,) * R, (False,) * R, 1, None)
+        limits = _Limits(
+            group_capacity, (0,) * R, (T,) * R, (T,) * R, (False,) * R, 1, None
+        )
         return limits, min_routes, T
     per_group = bounds.feeders_per_group
     lo_ = bounds.root_feeders_lb or (0,) * R
@@ -192,12 +195,12 @@ def _limits(
         if bounds.group_load_lb is not None and bounds.group_load_ub is not None
         else None
     )
-    limits = _Limits(capacity, lo_, hi_, load_cap_, pinned_, per_group, balance)
+    limits = _Limits(group_capacity, lo_, hi_, load_cap_, pinned_, per_group, balance)
     return limits, max(groups_lb, min_routes), T if groups_ub is None else groups_ub
 
 
 def cluster_plan(
-    A: nx.Graph, capacity: int, bounds: NetworkBounds | None = None
+    A: nx.Graph, group_capacity: int, bounds: NetworkBounds | None = None
 ) -> ClusterPlan:
     """Partition the terminals of ``A`` among the roots, within ``bounds``.
 
@@ -209,17 +212,23 @@ def cluster_plan(
     count of its own.
 
     Raises:
-      NotImplementedError: a root's exact feeder count is odd for rings.
+      NotImplementedError: a terminal has an inflow other than 1, or a root's
+        exact feeder count is odd for rings.
       ValueError: no clustering satisfies the bounds.
     """
     R, T = (A.graph[k] for k in 'RT')
+    if any(data.get('inflow', 1) != 1 for n, data in A.nodes(data=True) if n >= 0):
+        raise NotImplementedError(
+            "clusterize() partitions by terminal count: terminal 'inflow' other "
+            'than 1 is not available.'
+        )
     d2roots = A.graph['d2roots']
-    limits, routes_lb, routes_ub = _limits(R, T, capacity, bounds)
+    limits, routes_lb, routes_ub = _limits(R, T, group_capacity, bounds)
 
     cluster_: list[set[int]] = [set() for _ in range(R)]
     for n, c in enumerate(d2roots[:T].argmin(axis=1).tolist()):
         cluster_[c].add(n)
-    voronoi = tuple(math.ceil(len(cluster) / capacity) for cluster in cluster_)
+    voronoi = tuple(math.ceil(len(cluster) / group_capacity) for cluster in cluster_)
     if (bounds is None or not (bounds.has_root_bounds or any(limits.pinned_))) and sum(
         voronoi
     ) == routes_lb:
@@ -243,7 +252,7 @@ def cluster_plan(
 
 def plan_from_clusters(
     A: nx.Graph,
-    capacity: int,
+    group_capacity: int,
     bounds: NetworkBounds | None,
     cluster_: list[set[int]],
     budget_: tuple[int, ...],
@@ -256,7 +265,7 @@ def plan_from_clusters(
       ValueError: the route counts or the clusters break the bounds.
     """
     R, T = (A.graph[k] for k in 'RT')
-    limits, routes_lb, routes_ub = _limits(R, T, capacity, bounds)
+    limits, routes_lb, routes_ub = _limits(R, T, group_capacity, bounds)
     if not routes_lb <= sum(budget_) <= routes_ub:
         raise ValueError(
             f'{sum(budget_)} routes, outside the range of {routes_lb} to {routes_ub}.'
@@ -272,13 +281,23 @@ def plan_from_clusters(
 
 
 def clusterize(
-    A: nx.Graph, capacity: int, bounds: NetworkBounds | None = None
+    A: nx.Graph,
+    group_capacity: int | None = None,
+    bounds: NetworkBounds | None = None,
+    *,
+    capacity: int | None = None,
 ) -> list[set[int]]:
     """Partition the terminals of ``A`` into one cluster per root.
 
-    Without ``bounds``, clustering never costs the location a feeder::
+    A group is a route of the clustered problem: a subtree, or a whole ring.
+    ``group_capacity`` is the most terminals one group may hold, so it is twice
+    the cable capacity for rings. Terminals are counted: an inflow other than 1
+    is not available.
 
-        Σ_c ceil(T_c / capacity) == ceil(T / capacity)
+    Without ``bounds``, clustering never costs the location a feeder (``K`` the
+    group capacity)::
+
+        Σ_c ceil(T_c / K) == ceil(T / K)
 
     Several clusters may hold a partly filled feeder, as long as their remainders
     together need no more feeders than they occupy.
@@ -305,19 +324,35 @@ def clusterize(
 
     A cluster is empty iff its budget is zero, which happens when no terminal is
     closest to that root, or when the feeders are too few to go around
-    (``ceil(T / capacity) < R``), or when draining the root is simply cheaper.
+    (``ceil(T / K) < R``), or when draining the root is simply cheaper.
     Callers must handle a root with no terminals.
 
     Args:
       A: available-links graph, needs graph attributes ``R``, ``T`` and ``d2roots``
-      capacity: maximum number of terminals a route (subtree or ring) may serve
-      bounds: count and load bounds; loads count terminals (unit inflow)
+      group_capacity: maximum number of terminals a group (subtree or ring) may
+        hold
+      bounds: count and load bounds, as resolved for the cable capacity (see
+        :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`)
+      capacity: deprecated, use ``group_capacity``
 
     Returns:
       One set of terminals per root, in root order (``-R`` to ``-1``).
 
     Raises:
-      NotImplementedError: a root's exact feeder count is odd for rings.
+      TypeError: neither or both of ``group_capacity`` and ``capacity`` are given.
+      NotImplementedError: a terminal has an inflow other than 1, or a root's
+        exact feeder count is odd for rings.
       ValueError: no clustering satisfies the bounds.
     """
-    return cluster_plan(A, capacity, bounds).cluster_
+    if capacity is not None:
+        if group_capacity is not None:
+            raise TypeError('Give group_capacity, not capacity.')
+        warnings.warn(
+            'clusterize(capacity=...) is deprecated: pass group_capacity=... instead.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        group_capacity = capacity
+    if group_capacity is None:
+        raise TypeError('clusterize() requires group_capacity.')
+    return cluster_plan(A, group_capacity, bounds).cluster_

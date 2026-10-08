@@ -547,7 +547,7 @@ def _legacy_bounds(
         balanced=balanced,
         **count,  # pyrefly: ignore[bad-argument-type]
     )
-    return constraints.resolve(T=T, R=R, capacity=capacity, inflow_total=inflow_total)
+    return constraints._resolve(T=T, R=R, capacity=capacity, inflow_total=inflow_total)
 
 
 def _fleet_(bounds: NetworkBounds, plan: ClusterPlan) -> list[int | None]:
@@ -572,7 +572,7 @@ def hgs_cvrp(
     capacity_nominal: float | Fraction | None = None,
     power_rtol: float = DEFAULT_POWER_RTOL,
     time_limit: float,
-    bounds: NetworkBounds | None = None,
+    constraints: NetworkConstraints | None = None,
     vehicles: int | None = None,
     vehicles_exact: bool = False,
     seed: int | None = None,
@@ -595,11 +595,12 @@ def hgs_cvrp(
     is doubled internally (``2 * capacity``) so each of the ring's two arms holds
     at most ``capacity`` terminals.
 
-    ``bounds`` (see :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`)
-    give the topology (RADIAL or BRANCHED yield radial layouts) and the count and
-    load bounds. Each vehicle is one route: a subtree with one feeder, or a ring
-    with two (one per arm). Feeder routes are not kept straight
-    (``FeederRoute.STRAIGHT`` is refused).
+    ``constraints`` give the topology (RADIAL or BRANCHED yield radial layouts)
+    and the count and load bounds, which are resolved after the turbine power is
+    quantized (see :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
+    Each vehicle is one route: a subtree with one feeder, or a ring with two (one
+    per arm). Feeder routes are not kept straight (``FeederRoute.STRAIGHT`` is
+    refused).
 
     HGS-CVRP bounds the route count from above. A route count that must be exact
     (fixed above the minimum, or fixed for a root) is held by balancing the loads
@@ -627,7 +628,7 @@ def hgs_cvrp(
     an exact count, a route count other than it).
 
     The options ``vehicles``, ``vehicles_exact``, ``balanced`` and ``ringed`` are
-    deprecated in favour of ``bounds``, which they are translated into: a
+    deprecated in favour of ``constraints``, which they are translated into: a
     maximum (or, if ``vehicles_exact``, exact) route count, which requires
     ``balanced=True`` to be exact; with several roots, only the minimum count.
 
@@ -647,15 +648,16 @@ def hgs_cvrp(
             ``capacity`` (see :func:`~optiwindnet.loads.quantized`)
         power_rtol: quantization tolerance of unequal turbine power
         time_limit: [s] solver run time limit
-        bounds: topology, counts and loads to keep (defaults to those of
+        constraints: topology, counts and loads to keep (defaults to those of
             ``NetworkConstraints(topology='radial')``)
-        vehicles: deprecated, use ``bounds``: maximum number of routes
-        vehicles_exact: deprecated, use ``bounds``: whether ``vehicles`` is exact
+        vehicles: deprecated, use ``constraints``: maximum number of routes
+        vehicles_exact: deprecated, use ``constraints``: whether ``vehicles`` is
+            exact
         seed: random seed for reproducibility
         keep_log: attach solver log to the solution graph
         repair: iteratively fix crossings (default True)
         max_retries: maximum repair iterations
-        balanced: deprecated, use ``bounds``: balance the route loads
+        balanced: deprecated, use ``constraints``: balance the route loads
         complete: allow every terminal pair, using Euclidean distances for
             links absent from ``A``. Enabled automatically when ``A`` has no
             edges. Requires ``repair=False`` because mesh-based crossing
@@ -673,7 +675,7 @@ def hgs_cvrp(
         Solution topology S
 
     Raises:
-        TypeError: both ``bounds`` and deprecated options are given.
+        TypeError: both ``constraints`` and deprecated options are given.
         NotImplementedError: the bounds ask for straight feeders, for something
             unequal turbine power rules out (see below), or for an odd exact
             feeder count of a root with rings.
@@ -713,13 +715,13 @@ def hgs_cvrp(
         'minimum: rings split by terminal count, the balanced slack nodes are '
         'counted, and clusterize() partitions by count.'
     )
-    if bounds is None:
+    if constraints is None:
         if inflow_by_node and (ringed or balanced or R > 1):
             raise NotImplementedError(unit_inflow_only)
         if legacy:
             warnings.warn(
                 f'hgs_cvrp() options {sorted(legacy)} are deprecated: pass '
-                'bounds=NetworkConstraints(...).resolve(...) instead.',
+                'constraints=NetworkConstraints(...) instead.',
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -727,7 +729,15 @@ def hgs_cvrp(
             T, R, capacity, inflow_total, vehicles, vehicles_exact, balanced, ringed
         )
     elif legacy:
-        raise TypeError(f'Give either bounds or the options {sorted(legacy)}.')
+        raise TypeError(f'Give either constraints or the options {sorted(legacy)}.')
+    else:
+        bounds = constraints._resolve(
+            T=T,
+            R=R,
+            capacity=capacity,
+            inflow_total=inflow_total,
+            power_per_inflow=power_attrs.get('power_per_inflow'),
+        )
     if bounds.feeder_route is FeederRoute.STRAIGHT:
         raise NotImplementedError('hgs_cvrp() does not keep feeder routes straight.')
     ringed = bounds.topology is Topology.RINGED

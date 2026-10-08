@@ -120,8 +120,7 @@ def build_milp_warmstart(
     capacity = case.capacity
     options = case.model_options
     topology = options['topology']
-    T, R = A.graph['T'], A.graph['R']
-    bounds = options.to_constraints().resolve(T=T, R=R, capacity=capacity)
+    constraints = options.to_constraints()
     from optiwindnet.baselines.hgs import hgs_cvrp
 
     try:
@@ -132,7 +131,7 @@ def build_milp_warmstart(
             seed=warmstart_seed,
             repair=True,
             max_retries=warmstart_max_retries,
-            bounds=replace(bounds, feeder_route=FeederRoute.SEGMENTED),
+            constraints=replace(constraints, feeder_route=FeederRoute.SEGMENTED),
         )
     except (NotImplementedError, ValueError):
         S = None

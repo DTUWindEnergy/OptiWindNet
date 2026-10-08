@@ -11,7 +11,7 @@ def test_defaults_leave_only_the_capacity_minimum():
     nc = NetworkConstraints()
     assert nc.topology is Topology.BRANCHED
     assert nc.feeder_route is FeederRoute.SEGMENTED
-    b = nc.resolve(T=20, R=1, capacity=5)
+    b = nc._resolve(T=20, R=1, capacity=5)
     assert (b.feeders_lb, b.feeders_ub) == (4, None)
     assert not b.has_root_bounds
     assert (b.group_load_lb, b.group_load_ub) == (None, None)
@@ -40,7 +40,7 @@ def test_is_immutable_hashable_and_coerces_strings():
     ],
 )
 def test_farm_counts(kwargs, bounds):
-    b = NetworkConstraints(**kwargs).resolve(T=20, R=1, capacity=5)
+    b = NetworkConstraints(**kwargs)._resolve(T=20, R=1, capacity=5)
     assert (b.feeders_lb, b.feeders_ub) == bounds
 
 
@@ -53,7 +53,7 @@ def test_farm_counts(kwargs, bounds):
 )
 def test_farm_counts_out_of_range(kwargs, match):
     with pytest.raises(ValueError, match=match):
-        NetworkConstraints(**kwargs).resolve(T=20, R=1, capacity=5)
+        NetworkConstraints(**kwargs)._resolve(T=20, R=1, capacity=5)
 
 
 @pytest.mark.parametrize(
@@ -78,7 +78,7 @@ def test_exact_and_maximum_on_different_substations():
     nc = NetworkConstraints(
         substation_feeders=(2, None), max_substation_feeders=(None, 3)
     )
-    b = nc.resolve(T=20, R=2, capacity=5)
+    b = nc._resolve(T=20, R=2, capacity=5)
     assert b.root_feeders_lb == (2, 0)
     assert b.root_feeders_ub == (2, 3)
     assert (b.feeders_lb, b.feeders_ub) == (4, 5)
@@ -91,7 +91,7 @@ def test_ringed_counts_are_even(kwargs):
 
 
 def test_ringed_minimum_counts_both_feeders_of_a_ring():
-    b = NetworkConstraints(topology='ringed', feeders='min+2').resolve(
+    b = NetworkConstraints(topology='ringed', feeders='min+2')._resolve(
         T=20, R=1, capacity=5
     )
     assert b.feeders_per_group == 2
@@ -100,20 +100,22 @@ def test_ringed_minimum_counts_both_feeders_of_a_ring():
 
 
 def test_substation_values_broadcast_and_need_one_entry_per_substation():
-    b = NetworkConstraints(max_substation_feeders=3).resolve(T=20, R=2, capacity=5)
+    b = NetworkConstraints(max_substation_feeders=3)._resolve(T=20, R=2, capacity=5)
     assert b.root_feeders_ub == (3, 3)
     assert (b.feeders_lb, b.feeders_ub) == (4, 6)
     with pytest.raises(ValueError, match='3 substations'):
-        NetworkConstraints(max_substation_feeders=(3, 3)).resolve(T=20, R=3, capacity=5)
+        NetworkConstraints(max_substation_feeders=(3, 3))._resolve(
+            T=20, R=3, capacity=5
+        )
 
 
 def test_single_substation_limits_bound_the_farm():
-    b = NetworkConstraints(max_substation_feeders=5).resolve(T=20, R=1, capacity=5)
+    b = NetworkConstraints(max_substation_feeders=5)._resolve(T=20, R=1, capacity=5)
     assert (b.feeders_lb, b.feeders_ub) == (4, 5)
 
 
 def test_substation_counts_narrow_the_farm_range():
-    b = NetworkConstraints(substation_feeders=(3, 3), max_feeders=8).resolve(
+    b = NetworkConstraints(substation_feeders=(3, 3), max_feeders=8)._resolve(
         T=20, R=2, capacity=5
     )
     assert (b.feeders_lb, b.feeders_ub) == (6, 6)
@@ -134,27 +136,27 @@ def test_substation_counts_narrow_the_farm_range():
 )
 def test_incompatible_substation_limits(kwargs, match):
     with pytest.raises(ValueError, match=match):
-        NetworkConstraints(**kwargs).resolve(T=20, R=2, capacity=5)
+        NetworkConstraints(**kwargs)._resolve(T=20, R=2, capacity=5)
 
 
 def test_substation_loads_in_inflow_and_in_power():
     nc = NetworkConstraints(max_substation_loads=(12, None))
-    assert nc.resolve(T=20, R=2, capacity=5).root_load_ub == (12, None)
+    assert nc._resolve(T=20, R=2, capacity=5).root_load_ub == (12, None)
     nc = NetworkConstraints(max_substation_loads=(40.0, None))
-    b = nc.resolve(T=20, R=2, capacity=5, power_per_inflow=Fraction(3))
+    b = nc._resolve(T=20, R=2, capacity=5, power_per_inflow=Fraction(3))
     assert b.root_load_ub == (13, None)
     with pytest.raises(ValueError, match='integers'):
-        NetworkConstraints(max_substation_loads=(12.5, None)).resolve(
+        NetworkConstraints(max_substation_loads=(12.5, None))._resolve(
             T=20, R=2, capacity=5
         )
 
 
 def test_relative_counts_need_equal_turbine_power():
     with pytest.raises(ValueError, match='relative'):
-        NetworkConstraints(feeders='min').resolve(
+        NetworkConstraints(feeders='min')._resolve(
             T=20, R=1, capacity=5, inflow_total=26
         )
-    b = NetworkConstraints(max_feeders=8).resolve(
+    b = NetworkConstraints(max_feeders=8)._resolve(
         T=20, R=1, capacity=5, inflow_total=26
     )
     assert (b.feeders_lb, b.feeders_ub) == (6, 8)
@@ -162,11 +164,11 @@ def test_relative_counts_need_equal_turbine_power():
 
 def test_balanced_needs_a_fixed_count():
     with pytest.raises(ValueError, match='fixed feeder count'):
-        NetworkConstraints(balanced=True).resolve(T=22, R=1, capacity=6)
-    b = NetworkConstraints(feeders='min', balanced=True).resolve(T=22, R=1, capacity=6)
+        NetworkConstraints(balanced=True)._resolve(T=22, R=1, capacity=6)
+    b = NetworkConstraints(feeders='min', balanced=True)._resolve(T=22, R=1, capacity=6)
     assert (b.group_load_lb, b.group_load_ub) == (5, 6)
     # the substation counts fix the farm count
-    b = NetworkConstraints(substation_feeders=(2, 2), balanced=True).resolve(
+    b = NetworkConstraints(substation_feeders=(2, 2), balanced=True)._resolve(
         T=20, R=2, capacity=5
     )
     assert (b.feeders_lb, b.feeders_ub) == (4, 4)
@@ -178,4 +180,14 @@ def test_balanced_subtrees_must_fit_the_substation_load():
         balanced=True,
     )  # fmt: skip
     with pytest.raises(ValueError, match='Substation -2 cannot hold'):
-        nc.resolve(T=20, R=2, capacity=5)
+        nc._resolve(T=20, R=2, capacity=5)
+
+
+def test_resolve_reads_the_instance_from_the_graph():
+    from .sitecache import get_bundle
+
+    A = get_bundle('toy').A
+    constraints = NetworkConstraints(feeders='min', balanced=True)
+    assert constraints.resolve(A, capacity=5) == constraints._resolve(
+        T=A.graph['T'], R=A.graph['R'], capacity=5
+    )

@@ -156,7 +156,8 @@ def test_hgsrouter_forwards_low_level_options(
 
     router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
 
-    bounds = captured.pop('bounds')
+    constraints = captured.pop('constraints')
+    bounds = constraints.resolve(solved.A, capacity=solved.cables_capacity)
     assert captured == {
         'capacity': solved.cables_capacity,
         'time_limit': 0.4,

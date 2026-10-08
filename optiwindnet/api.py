@@ -193,7 +193,7 @@ class Router(ABC):
             constraints = self._default_constraints()
         capacity_kwargs = self._capacity_kwargs(A, cables_capacity)
         A_solve, capacity, power_attrs = quantized(A, **capacity_kwargs)
-        bounds = constraints.resolve(
+        bounds = constraints._resolve(
             T=A.graph['T'],
             R=A.graph['R'],
             capacity=capacity,
@@ -1254,7 +1254,7 @@ class HGSRouter(Router):
                     **resolved.capacity_kwargs,
                     time_limit=self.time_limit,
                     max_retries=self.max_retries,
-                    bounds=bounds,
+                    constraints=resolved.constraints,
                     seed=self.seed,
                     log_callback=_print_log_line if verbose else None,
                     warmstart=warmstart,
@@ -1371,7 +1371,7 @@ class MILPRouter(Router):
         # loop below then warm-starts the model some other way.
         solver = self.solver
         resolved = self._resolve(A, cables_capacity, constraints)
-        capacity_kwargs, constraints, bounds, A_solve, capacity = resolved
+        capacity_kwargs, constraints, bounds, A_solve, _ = resolved
         has_nonunit_inflow = bool(nonunit_inflow(A_solve))
 
         if not self.warmup:
@@ -1379,7 +1379,9 @@ class MILPRouter(Router):
             S_warm = None
         elif S_warm is None:
             # warm-starting on, nothing to reuse: build a warm start
-            S_warm = self._make_warmstart(A, capacity_kwargs, A_solve, capacity, bounds)
+            S_warm = self._make_warmstart(
+                A, capacity_kwargs, A_solve, constraints, bounds
+            )
 
         for _ in range(2):
             try:
@@ -1398,7 +1400,7 @@ class MILPRouter(Router):
                     S_warm = None
                     continue
                 S_warm = self._make_warmstart(
-                    A, capacity_kwargs, A_solve, capacity, bounds
+                    A, capacity_kwargs, A_solve, constraints, bounds
                 )
 
         else:
@@ -1430,7 +1432,7 @@ class MILPRouter(Router):
 
         return S, G
 
-    def _make_warmstart(self, A, capacity_kwargs, A_solve, capacity, bounds):
+    def _make_warmstart(self, A, capacity_kwargs, A_solve, constraints, bounds):
         """Build a warm start matched to the model's topology and feeder limit.
 
         Called (only when ``warmup`` is enabled) to obtain a warm start the model
@@ -1460,8 +1462,8 @@ class MILPRouter(Router):
           capacity_kwargs: capacity keyword arguments for the producers, which
             quantize ``A`` themselves.
           A_solve: ``A`` as quantized by :func:`~optiwindnet.loads.quantized`.
-          capacity: cable capacity in inflow.
-          bounds: the bounds the model enforces.
+          constraints: the constraints the model enforces.
+          bounds: their bounds for ``A_solve``.
 
         Returns:
           A topology to warm-start from, or ``None`` if none can be built.
@@ -1490,7 +1492,7 @@ class MILPRouter(Router):
                 time_limit=min(self.time_limit, self.warmup_time),
                 repair=True,
                 # HGS-CVRP does not keep feeders straight: the model checks them
-                bounds=replace(bounds, feeder_route=FeederRoute.SEGMENTED),
+                constraints=replace(constraints, feeder_route=FeederRoute.SEGMENTED),
             )
         except (NotImplementedError, ValueError) as exc:
             _info('No warm start from HGS-CVRP: %s', exc)

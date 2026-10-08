@@ -659,12 +659,9 @@ def test_hgs_warmstart_never_ends_worse_than_its_seed(site, options):
 # --------------------------------------------------------------------------
 # bounds
 # --------------------------------------------------------------------------
-def _neart_A_and_bounds(**constraints):
+def _neart_A_and_constraints(**kwargs):
     A = as_normalized(get_bundle('neart', read_powers=False).A)
-    bounds = NetworkConstraints(**constraints).resolve(
-        T=A.graph['T'], R=A.graph['R'], capacity=7
-    )
-    return A, bounds
+    return A, NetworkConstraints(**kwargs)
 
 
 def _per_root(S):
@@ -685,9 +682,9 @@ def _per_root(S):
 def test_hgs_keeps_the_substation_limits(constraints, expected):
     from optiwindnet.validating import validate_topology
 
-    A, bounds = _neart_A_and_bounds(**constraints)
+    A, constraints = _neart_A_and_constraints(**constraints)
 
-    S = hgs_mod.hgs_cvrp(A, capacity=7, time_limit=0.5, seed=1, bounds=bounds)
+    S = hgs_mod.hgs_cvrp(A, capacity=7, time_limit=0.5, seed=1, constraints=constraints)
 
     assert expected(*_per_root(S)[1])
     assert validate_topology(S, 7) == []
@@ -695,10 +692,11 @@ def test_hgs_keeps_the_substation_limits(constraints, expected):
 
 
 def test_hgs_balances_the_subtrees_of_every_substation_alike():
-    A, bounds = _neart_A_and_bounds(feeders='min', balanced=True)
+    A, constraints = _neart_A_and_constraints(feeders='min', balanced=True)
+    bounds = constraints.resolve(A, capacity=7)
     load_lb, load_ub = bounds.group_load_lb, bounds.group_load_ub
 
-    S = hgs_mod.hgs_cvrp(A, capacity=7, time_limit=0.5, seed=1, bounds=bounds)
+    S = hgs_mod.hgs_cvrp(A, capacity=7, time_limit=0.5, seed=1, constraints=constraints)
 
     loads = [S.nodes[n]['load'] for r in (-2, -1) for n in S.neighbors(r)]
     assert len(loads) == bounds.groups_lb
@@ -710,18 +708,25 @@ def test_hgs_cvrp_deprecates_its_count_options(monkeypatch):
     A = _make_A(T=4)
     with pytest.warns(DeprecationWarning, match='balanced'):
         hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, balanced=True, repair=False)
-    bounds = NetworkConstraints(feeders='min', balanced=True).resolve(
-        T=4, R=1, capacity=2
-    )
-    with pytest.raises(TypeError, match='either bounds or the options'):
+    constraints = NetworkConstraints(feeders='min', balanced=True)
+    with pytest.raises(TypeError, match='either constraints or the options'):
         hgs_mod.hgs_cvrp(
-            A, capacity=2, time_limit=0.1, bounds=bounds, ringed=True, repair=False
+            A,
+            capacity=2,
+            time_limit=0.1,
+            constraints=constraints,
+            ringed=True,
+            repair=False,
         )
 
 
 def test_hgs_cvrp_does_not_keep_feeders_straight():
-    bounds = NetworkConstraints(feeder_route='straight').resolve(T=4, R=1, capacity=2)
+    constraints = NetworkConstraints(feeder_route='straight')
     with pytest.raises(NotImplementedError, match='straight'):
         hgs_mod.hgs_cvrp(
-            _make_A(T=4), capacity=2, time_limit=0.1, bounds=bounds, repair=False
+            _make_A(T=4),
+            capacity=2,
+            time_limit=0.1,
+            constraints=constraints,
+            repair=False,
         )

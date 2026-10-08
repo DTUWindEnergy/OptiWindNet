@@ -160,12 +160,12 @@ class _OptionsConstraints(NetworkConstraints):
             type(self).__qualname__
         )
 
-    def resolve(self, **kwargs) -> NetworkBounds:
+    def _resolve(self, **kwargs) -> NetworkBounds:
         if not self.balanced or self.feeders is not None:
-            return super().resolve(**kwargs)
-        bounds = replace(self, balanced=False).resolve(**kwargs)
+            return super()._resolve(**kwargs)
+        bounds = replace(self, balanced=False)._resolve(**kwargs)
         if bounds.feeders_lb == bounds.feeders_ub:
-            return super().resolve(**kwargs)
+            return super()._resolve(**kwargs)
         warn(
             'Model option <balanced = True> requires a single possible feeder '
             'count, but the feeder limit allows a range: model will not enforce '
@@ -197,11 +197,11 @@ def model_bounds(
         if given:
             warnings.warn(
                 f'make_min_length_model() options {sorted(given)} are deprecated: '
-                'pass bounds=NetworkConstraints(...).resolve(...) instead.',
+                'pass bounds=NetworkConstraints(...).resolve(A, capacity=...) instead.',
                 DeprecationWarning,
                 stacklevel=3,
             )
-        bounds = _constraints_from_options(**given).resolve(
+        bounds = _constraints_from_options(**given)._resolve(
             T=A.graph['T'],
             R=A.graph['R'],
             capacity=capacity,
@@ -770,7 +770,7 @@ class Solver(abc.ABC):
         )
         self.P, self.A = P, A
         self.constraints = constraints
-        self.bounds = constraints.resolve(
+        self.bounds = constraints._resolve(
             T=A.graph['T'],
             R=A.graph['R'],
             capacity=self.capacity,

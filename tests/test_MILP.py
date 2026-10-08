@@ -57,12 +57,12 @@ _GAP = 0.001
 # stay single-solver-family.
 def _fake_bounds(**constraints):
     """Bounds of a 12-terminal, single-root instance, for faked solver state."""
-    return NetworkConstraints(**constraints).resolve(T=12, R=1, capacity=_CAPACITY)
+    return NetworkConstraints(**constraints)._resolve(T=12, R=1, capacity=_CAPACITY)
 
 
 def _toy_bounds(A, capacity=_CAPACITY, **options):
     """Resolve options of ModelOptions into the bounds a model builder takes."""
-    return core._constraints_from_options(**options).resolve(
+    return core._constraints_from_options(**options)._resolve(
         T=A.graph['T'], R=A.graph['R'], capacity=capacity, inflow_total=total_inflow(A)
     )
 
@@ -1086,8 +1086,9 @@ def _make_warmstart_toy(topology, feeder_limit, balanced, max_feeders):
     router = MILPRouter(
         solver_name='ortools', time_limit=1, mip_gap=0.01, model_options=options
     )
-    bounds = _toy_bounds(A, **options)
-    S = router._make_warmstart(A, {'capacity': _CAPACITY}, A, _CAPACITY, bounds)
+    constraints = core._constraints_from_options(**options)
+    bounds = constraints.resolve(A, capacity=_CAPACITY)
+    S = router._make_warmstart(A, {'capacity': _CAPACITY}, A, constraints, bounds)
     # unitary inflow: a warm start is always built
     assert S is not None
     model, metadata = make_min_length_model(A, _CAPACITY, bounds)
@@ -1187,12 +1188,13 @@ def _warmup_time_budget_toy(warmup_time):
             warmup_time=warmup_time,
             model_options=ModelOptions(feeder_limit='minimum'),
         )
+        constraints = core._constraints_from_options(feeder_limit='minimum')
         router._make_warmstart(
             A,
             {'capacity': _CAPACITY},
             A,
-            _CAPACITY,
-            _toy_bounds(A, feeder_limit='minimum'),
+            constraints,
+            constraints.resolve(A, capacity=_CAPACITY),
         )
     finally:
         api.hgs_cvrp = original
@@ -1952,7 +1954,7 @@ def _bounds(T, capacity, feeder_limit, max_feeders=0, balanced=True, inflow_tota
     """Bounds of ModelOptions, as ``(groups_lb, groups_ub, load_lb, load_ub)``."""
     bounds = core._constraints_from_options(
         feeder_limit=feeder_limit, max_feeders=max_feeders, balanced=balanced
-    ).resolve(T=T, R=1, capacity=capacity, inflow_total=inflow_total)
+    )._resolve(T=T, R=1, capacity=capacity, inflow_total=inflow_total)
     return (
         bounds.groups_lb,
         bounds.groups_ub,
@@ -2045,7 +2047,7 @@ def test_translated_options_read_as_network_constraints():
 def test_model_options_min_plus_counts_rings():
     bounds = core._constraints_from_options(
         topology='ringed', feeder_limit='min_plus1'
-    ).resolve(T=12, R=1, capacity=5)
+    )._resolve(T=12, R=1, capacity=5)
     # two rings minimum, plus one ring
     assert (bounds.groups_lb, bounds.groups_ub) == (2, 3)
     assert (bounds.feeders_lb, bounds.feeders_ub) == (4, 6)
@@ -2053,7 +2055,7 @@ def test_model_options_min_plus_counts_rings():
 
 def _resolve_options(R=1, inflow_total=None, **options):
     # T=12, capacity=5: at least 3 radial subtrees or 2 rings
-    return core._constraints_from_options(**options).resolve(
+    return core._constraints_from_options(**options)._resolve(
         T=12, R=R, capacity=5, inflow_total=inflow_total
     )
 
@@ -2202,7 +2204,7 @@ def test_model_options_help(capsys):
 
 def test_feeder_bounds_scale_with_total_inflow_not_terminal_count():
     def bounds(inflow_total=None, **constraints):
-        return NetworkConstraints(**constraints).resolve(
+        return NetworkConstraints(**constraints)._resolve(
             T=6, R=1, capacity=3, inflow_total=inflow_total
         )
 
@@ -2270,7 +2272,7 @@ def test_model_options_reject_minimum_derived_limits_for_nonunit_inflow(feeder_l
     # three terminals of 2 units each and a capacity of 3: ceil(6/3) = 2 feeders,
     # yet no two of those terminals fit a single cable, so 3 feeders are needed
     with pytest.raises(ValueError, match='relative to the minimum'):
-        core._constraints_from_options(feeder_limit=feeder_limit).resolve(
+        core._constraints_from_options(feeder_limit=feeder_limit)._resolve(
             T=3, R=1, capacity=3, inflow_total=6
         )
 
@@ -2358,7 +2360,7 @@ def test_feeders_to_fix_keep_every_feeder_under_root_bounds():
     A = get_bundle('neart', read_powers=False).A
 
     def bounds(**constraints):
-        return NetworkConstraints(**constraints).resolve(
+        return NetworkConstraints(**constraints)._resolve(
             T=A.graph['T'], R=2, capacity=7
         )
 
@@ -2407,7 +2409,7 @@ def test_highs_keeps_the_substation_limits(constraints, feeders, loads):
 
 def test_ringed_models_refuse_substation_loads():
     A = get_bundle('toy').A
-    bounds = NetworkConstraints(topology='ringed', max_substation_loads=12).resolve(
+    bounds = NetworkConstraints(topology='ringed', max_substation_loads=12)._resolve(
         T=A.graph['T'], R=A.graph['R'], capacity=_CAPACITY
     )
     with pytest.raises(ValueError, match='not available for RINGED MILP'):
@@ -2418,12 +2420,14 @@ def test_milp_warmstart_keeps_the_substation_limits():
     from optiwindnet.api import MILPRouter
 
     A = get_bundle('neart', read_powers=False).A
-    bounds = NetworkConstraints(
+    constraints = NetworkConstraints(
         max_substation_feeders=(None, 5), max_substation_loads=(None, 26)
-    ).resolve(T=A.graph['T'], R=A.graph['R'], capacity=7)
+    )
     router = MILPRouter(solver_name='highs', time_limit=1, mip_gap=0.05)
 
-    S = router._make_warmstart(A, {'capacity': 7}, A, 7, bounds)
+    S = router._make_warmstart(
+        A, {'capacity': 7}, A, constraints, constraints.resolve(A, capacity=7)
+    )
 
     assert S is not None and S.graph['creator'] == 'baselines.hgs'
     assert S.degree[-1] <= 5 and S.nodes[-1]['load'] <= 26

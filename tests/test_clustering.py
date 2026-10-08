@@ -109,7 +109,7 @@ def test_root_may_be_drained_when_feeders_are_scarce():
     A = _make_A(d2roots)
     assert d2roots.argmin(axis=1)[0] == 0, 'terminal 0 is closest to root 0'
 
-    cluster_ = clusterize(A, capacity=10)
+    cluster_ = clusterize(A, group_capacity=10)
 
     _check_partition(cluster_, A, capacity=10)
     assert cluster_[0] == set()
@@ -131,7 +131,7 @@ def test_two_balanced_roots_are_not_collapsed():
     d2roots = np.array([[near, far]] * 9 + [[far, near]] * 9)
     A = _make_A(d2roots)
 
-    cluster_ = clusterize(A, capacity=10)
+    cluster_ = clusterize(A, group_capacity=10)
 
     _check_partition(cluster_, A, capacity=10)
     assert [len(c) for c in cluster_] == [9, 9]
@@ -148,7 +148,7 @@ def test_empty_cluster_when_voronoi_cell_is_empty():
     d2roots = np.array([[50.0, 1.0]] * 8)
     A = _make_A(d2roots)
 
-    cluster_ = clusterize(A, capacity=4)
+    cluster_ = clusterize(A, group_capacity=4)
 
     _check_partition(cluster_, A, capacity=4)
     assert cluster_[0] == set()
@@ -228,7 +228,7 @@ def test_invariant_holds_on_the_many_roots_fallback(monkeypatch):
 # bounds
 # --------------------------------------------------------------------------
 def _bounds(A, capacity, **constraints):
-    return NetworkConstraints(**constraints).resolve(
+    return NetworkConstraints(**constraints)._resolve(
         T=A.graph['T'], R=A.graph['R'], capacity=capacity
     )
 
@@ -300,7 +300,7 @@ def test_balanced_clusters_fit_the_farm_loads():
 def test_bounds_no_clustering_can_meet_raise():
     # each root holds at most 5 terminals, but 10 must fit two routes of 4 each
     A = _make_A(np.array([[1.0, 2.0]] * 10))
-    bounds = NetworkConstraints(substation_feeders=(1, 1)).resolve(
+    bounds = NetworkConstraints(substation_feeders=(1, 1))._resolve(
         T=10, R=2, capacity=5
     )
     with pytest.raises(ValueError, match='No clustering'):
@@ -320,7 +320,7 @@ def test_odd_ring_count_at_a_substation_is_not_available():
     A = _make_A(np.array([[1.0, 2.0]] * 10))
     bounds = NetworkConstraints(
         topology='ringed', substation_feeders=(3, None)
-    ).resolve(T=10, R=2, capacity=5)
+    )._resolve(T=10, R=2, capacity=5)
     with pytest.raises(NotImplementedError, match='odd number of feeders'):
         clusterize(A, 10, bounds)
 
@@ -339,3 +339,18 @@ def test_caps_hold_on_the_bundled_multiroot_locations(multiroot_instances):
         )
         assert sorted(n for c in cluster_ for n in c) == list(range(T)), handle
         assert len(cluster_[busiest]) <= load_caps[busiest], handle
+
+
+def test_capacity_is_a_deprecated_name_of_group_capacity():
+    A = _make_A(np.array([[1.0, 2.0]] * 6))
+    with pytest.warns(DeprecationWarning, match='group_capacity'):
+        assert clusterize(A, capacity=4) == clusterize(A, 4)
+    with pytest.raises(TypeError, match='not capacity'):
+        clusterize(A, 4, capacity=4)
+
+
+def test_unequal_inflow_is_not_available():
+    A = _make_A(np.array([[1.0, 2.0]] * 6))
+    A.add_node(0, inflow=2)
+    with pytest.raises(NotImplementedError, match='terminal count'):
+        clusterize(A, 4)

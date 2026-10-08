@@ -5,8 +5,9 @@
 
 :class:`NetworkConstraints` states the constraints in the terms of the wind farm:
 substations, feeders (substation connections) and power. Its
-:meth:`~NetworkConstraints.resolve` checks them against a problem instance and
-returns a :class:`NetworkBounds`, the bounds the routers enforce.
+:meth:`~NetworkConstraints.resolve` checks them against a problem instance (a
+graph and a cable capacity) and returns a :class:`NetworkBounds`, the bounds the
+routers enforce.
 """
 
 import math
@@ -17,7 +18,14 @@ from fractions import Fraction
 from numbers import Integral, Real
 from typing import Any
 
-from .loads import _validated_capacity_nominal
+import networkx as nx
+
+from .loads import (
+    DEFAULT_POWER_RTOL,
+    _validated_capacity_nominal,
+    quantized,
+    total_inflow,
+)
 from .types import FeederRoute, Topology
 
 __all__ = ('NetworkBounds', 'NetworkConstraints')
@@ -279,6 +287,58 @@ class NetworkConstraints:
 
     def resolve(
         self,
+        A: nx.Graph,
+        *,
+        capacity: int | None = None,
+        capacity_nominal: float | Fraction | None = None,
+        power_rtol: float = DEFAULT_POWER_RTOL,
+    ) -> NetworkBounds:
+        """Check the constraints against a problem instance and bound it.
+
+        The instance is ``A`` (a location or available-links graph) at a cable
+        capacity, given as for the routers' producers: ``capacity`` in inflow,
+        or ``capacity_nominal`` in the unit of the turbine power, which is then
+        quantized (see :func:`~optiwindnet.loads.quantized`). The bounds are
+        those that :func:`~optiwindnet.baselines.hgs.hgs_cvrp` and
+        :meth:`Solver.set_problem() <optiwindnet.MILP.Solver.set_problem>` derive
+        for the same arguments.
+
+        The per-substation counts must be compatible with the whole-farm count:
+        their sums must leave a count within the whole-farm bounds, which are
+        narrowed to it. The substations must also have room for the total load,
+        given their feeders (each carrying up to the capacity) and their load
+        limits.
+
+        Args:
+          A: location or available-links graph.
+          capacity: cable capacity, in inflow (per arm, for rings).
+          capacity_nominal: cable capacity, in the unit of the turbine power,
+            instead of ``capacity``.
+          power_rtol: quantization tolerance of unequal turbine power.
+
+        Returns:
+          The bounds the routers enforce.
+
+        Raises:
+          ValueError: the constraints do not suit the instance, or cannot all
+            be met; or the capacity does not suit the power ``A`` declares.
+        """
+        A_solve, capacity_inflow, power_attrs = quantized(
+            A,
+            capacity=capacity,
+            capacity_nominal=capacity_nominal,
+            power_rtol=power_rtol,
+        )
+        return self._resolve(
+            T=A.graph['T'],
+            R=A.graph['R'],
+            capacity=capacity_inflow,
+            inflow_total=total_inflow(A_solve),
+            power_per_inflow=power_attrs.get('power_per_inflow'),
+        )
+
+    def _resolve(
+        self,
         *,
         T: int,
         R: int,
@@ -286,13 +346,9 @@ class NetworkConstraints:
         inflow_total: int | None = None,
         power_per_inflow: Fraction | None = None,
     ) -> NetworkBounds:
-        """Check the constraints against a problem instance and bound it.
+        """Check the constraints against a problem instance given by numbers.
 
-        The per-substation counts must be compatible with the whole-farm count:
-        their sums must leave a count within the whole-farm bounds, which are
-        narrowed to it. The substations must also have room for the total load,
-        given their feeders (each carrying up to ``capacity``) and their load
-        limits.
+        See :meth:`resolve`, which derives the numbers from a graph.
 
         Args:
           T: number of turbines.
