@@ -32,6 +32,13 @@ NULL = np.iinfo(int).min
 # path merely grazes the vertex (e.g. collinear turbines in a grid).
 _WALL_FREE_APEX_TURN_EPS = 1e-9
 PseudoNode = namedtuple('PseudoNode', 'prime sector parent dist d_hop cum_turn')
+
+
+def _is_promising(bad, bad_limit, improving, turn, turn_limit, raw):
+    """Check progress and winding for portal or chain admission."""
+    return (bad < bad_limit or improving) and (abs(turn) <= turn_limit or raw <= 1)
+
+
 # Terminology used by PathFinder internals:
 #   wall: one non-traversable mesh segment; route walls are contour edges of
 #     the route, constraint walls are planar constraint edges (borders and
@@ -1029,8 +1036,6 @@ class PathFinder:
         portal_set = self.portal_set
         chain_end_set = self.chain_end_set
         chain_access = self.chain_access
-        traversals_limit = self.traversals_limit
-        num_traversals = self.num_traversals
         triangles = P.graph['triangles']
         is_debug = self.paths.is_debug
         traverser = self._traverse_channel(adv_id, root, *funnel_state)
@@ -1093,8 +1098,7 @@ class PathFinder:
                 # DEAD-END: both triangle sides are not portals.
                 # triangle-trigger: if (left, right) is a chain-entry pair
                 # at chain-end `n` (i.e. the cone-at-`n` it bounds is a
-                # chain interior) and the per-vertex budget hasn't been
-                # consumed, engage the chain. The two phantom portal sends
+                # chain interior), evaluate admission. The phantom portal sends
                 # force the funnel apex onto pn_n via a standard portal
                 # advance, mirroring the apex motion an exit-side advancer
                 # will need on the partner side.
@@ -1106,19 +1110,11 @@ class PathFinder:
                 access = (
                     chain_access.get((n, left, right)) if n in chain_end_set else None
                 )
-                if access is not None and num_traversals[(n, n)] < traversals_limit:
+                if access is not None:
                     chain, c_side = access
                     traverser.send(((left, n), 1, True))
                     traverser.send(((n, right), 0, True))
-                    num_traversals[(n, n)] += 1
-                    self._walk_chain(
-                        n,
-                        chain,
-                        c_side,
-                        self.paths.last_added_pn,
-                        is_triangle_seen,
-                        root,
-                    )
+                    self._enter_chain(chain, c_side, traverser, is_triangle_seen, root)
                 elif 0 <= n < T:
                     traverser.send(((left, n), 1, True))
                 if is_debug:
@@ -1144,12 +1140,44 @@ class PathFinder:
             # no-ops and the budget is preserved.
             y = portal[side]
             access = chain_access.get((y, left, right)) if y in chain_end_set else None
-            if access is not None and num_traversals[(y, y)] < traversals_limit:
+            if access is not None:
                 chain, c_side = access
-                num_traversals[(y, y)] += 1
-                self._walk_chain(
-                    y, chain, c_side, self.paths.last_added_pn, is_triangle_seen, root
-                )
+                self._enter_chain(chain, c_side, traverser, is_triangle_seen, root)
+
+    def _admit_chain(self, chain, side, entry_pn, root, bad, raw):
+        """Apply directional traversal and progress checks before a chain walk."""
+        if entry_pn in self.paths.dominated:
+            return False
+        direction = (id(chain), side)
+        key = (root, *direction)
+        node = self.paths[entry_pn]
+        previous = self.chain_best.get(key, math.inf)
+        improving = node.dist < previous or math.isclose(node.dist, previous)
+        promising = _is_promising(
+            bad,
+            self.bad_streak_limit,
+            improving,
+            node.cum_turn,
+            self.turn_limit,
+            raw,
+        )
+        if not (promising or self.chain_counts[direction] < self.traversals_limit):
+            return False
+        self.chain_counts[direction] += 1
+        if node.dist < previous:
+            self.chain_best[key] = node.dist
+        return True
+
+    def _enter_chain(self, chain, side, traverser, is_triangle_seen, root):
+        """Read the committed funnel state and admit its chain continuation."""
+        entry = self.paths.last_added_pn
+        state = next(traverser)
+        next(traverser)
+        bad_streak = state[5]
+        if self._admit_chain(chain, side, entry, root, bad_streak, bad_streak):
+            self._walk_chain(
+                self.paths[entry].prime, chain, side, entry, is_triangle_seen, root
+            )
 
     def _walk_chain(
         self,
@@ -2011,8 +2039,13 @@ class PathFinder:
                 or d_new < paths[best_pn_id].dist
                 or math.isclose(d_new, paths[best_pn_id].dist)
             )
-            is_promising = (bad_streak < bad_streak_limit or improving) and (
-                abs(cum_turn) <= turn_limit or bad_streak <= 1
+            is_promising = _is_promising(
+                bad_streak,
+                bad_streak_limit,
+                improving,
+                cum_turn,
+                turn_limit,
+                bad_streak,
             )
             prio = (score_0, score_1, score_2)
             if not phantom:
@@ -2059,6 +2092,8 @@ class PathFinder:
         self.prioqueue = prioqueue = []
         num_traversals = defaultdict(lambda: 0)
         self.num_traversals = num_traversals
+        self.chain_counts = defaultdict(int)
+        self.chain_best = {}
         traversals_limit = self.traversals_limit
         paths = self.paths = PathNodes()
         is_debug = paths.is_debug
@@ -2105,10 +2140,10 @@ class PathFinder:
                             or d_c < paths[best_pn_by_pair_id[pair_id]].dist
                         ):
                             best_pn_by_pair_id[pair_id] = pn_c
-                        num_traversals[(left, left)] = traversals_limit
-                        self._walk_chain(
-                            left, chain, c_side, pn_c, bitarray(len(triangles)), r
-                        )
+                        if self._admit_chain(chain, c_side, pn_c, r, 0.0, 0):
+                            self._walk_chain(
+                                left, chain, c_side, pn_c, bitarray(len(triangles)), r
+                            )
 
                 if right not in P_adj[r] or portal_sorted not in portal_set:
                     # (left, right, root) not a triangle

@@ -685,3 +685,41 @@ def test_incumbents_are_shared_unless_per_root():
     assert distinct_lists(PathFinder(G_from_S(S, A), planar=P, A=A)) == 1
     pf = PathFinder(G_from_S(S, A), planar=P, A=A, allow_root_change=False)
     assert distinct_lists(pf) == A.graph['R']
+
+
+def test_chain_admission_uses_directional_allowances_and_progress():
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    from optiwindnet.pathfinding import PathNodes, PseudoNode
+
+    finder = object.__new__(PathFinder)
+    finder.paths = PathNodes()
+    finder.chain_counts = defaultdict(int)
+    finder.chain_best = {}
+    finder.traversals_limit = 1
+    finder.bad_streak_limit = 3
+    finder.turn_limit = 5.0
+    chain = SimpleNamespace()  # Both directions may meet at the same vertex.
+    for i, (distance, turn) in enumerate(
+        ((10.0, 0.0), (12.0, 0.0), (9.0, 0.0), (8.0, 10.0))
+    ):
+        finder.paths[i] = PseudoNode(3, 0, -1, distance, distance, turn)
+
+    def admit(entry, side=0, root=-1, bad=4.0, raw=3):
+        return finder._admit_chain(chain, side, entry, root, bad, raw)
+
+    assert admit(0)
+    assert not admit(1)
+    assert admit(2)
+    assert admit(2)  # Equal-length progress also waives a stale streak.
+    assert admit(1, bad=0.0)  # Healthy streak bypasses the exhausted allowance.
+    assert not admit(3)  # Improvement cannot bypass the winding guard.
+    assert finder.chain_best[-1, id(chain), 0] == 9.0
+    assert admit(3, raw=1)
+    finder.chain_best[-1, id(chain), 1] = 5.0
+    assert admit(1, side=1)  # Independent allowance, despite a worse prefix.
+    assert admit(1, root=-2)  # Independent incumbent for another origin.
+    finder.paths.dominated.add(3)
+    assert not admit(3, root=-2, raw=1)
+    assert finder.chain_best[-2, id(chain), 0] == 12.0
