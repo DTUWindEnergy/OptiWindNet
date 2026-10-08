@@ -15,7 +15,12 @@ import numpy as np
 from bitarray import bitarray
 from scipy.stats import rankdata
 
-from .crossings import _FEEDER_ALONG, _feeder_intersections
+from .crossings import (
+    _FEEDER_ALONG,
+    _feeder_intersections,
+    _split_branch_nodes,
+    get_interferences_list,
+)
 from .geometric import rotation_checkers_factory
 from .interarraylib import scaffolded
 from .loads import bfs_subtree_loads
@@ -284,6 +289,9 @@ class PathFinder:
         the root it has in ``Gʹ``, and the paths from each root are searched as if
         the other roots did not compete for the same terminals
 
+    Warns:
+      UserWarning: if the input routeset contains links absent from the mesh.
+
     Example::
 
       P, A = make_planar_embedding(L)  # L represents the geometry of the location
@@ -310,6 +318,9 @@ class PathFinder:
         turn_limit: float | None = None,
         allow_root_change: bool = True,
     ) -> None:
+        if Gʹ.graph.get('rogue'):
+            _lggr.warning('Routeset has rogue links; PathFinder may produce crossings.')
+
         self.iterations_limit = iterations_limit
         self.allow_root_change = allow_root_change
         self.traversals_limit = traversals_limit
@@ -2265,6 +2276,74 @@ class PathFinder:
                     del scaff.edges[st]['kind']
         return scaff
 
+    @staticmethod
+    def _warn_routes_across_rogue_links(G: nx.Graph) -> None:
+        """Warn if feeder routes were chosen across rogue links.
+
+        Rogue links cannot be encoded as walls in the navigation mesh, so
+        PathFinder may route a feeder (detour) across one. Logs a warning for
+        each crossing between a rogue link and a detour or feeder edge, and for
+        each detour clone that splits the branch at a rogue link's endpoint.
+        """
+        rogue = G.graph.get('rogue')
+        if not rogue:
+            return
+
+        detours = (
+            (u, v)
+            for u, v, kind in G.edges(data='kind')
+            if kind == 'detour' and u >= 0 and v >= 0
+        )
+        R = G.graph['R']
+        feeders = ((r, n) for r in range(-R, 0) for n in G.neighbors(r))
+        conflicts = [
+            (u, v, s, t)
+            for (u, v, s, t), touch in get_interferences_list(
+                np.array(rogue, dtype=np.int64),
+                G.graph['VertexC'],
+                G.graph.get('fnT'),
+                against=np.array([*detours, *feeders], dtype=np.int64).reshape(-1, 2),
+            )
+            if touch is None
+        ]
+
+        if conflicts:
+            pairs = ', '.join(f'{(u, v)} crosses {(s, t)}' for u, v, s, t in conflicts)
+            warn('PathFinder routed feeders across rogue links: %s', pairs)
+
+        if G.graph.get('D', 0):
+            T, B = G.graph['T'], G.graph['B']
+            start = T + B + G.graph.get('C', 0)
+            rogue_ends = set(chain.from_iterable(rogue))
+            fnT = G.graph['fnT']
+            VertexC = G.graph['VertexC']
+            for d in range(start, start + G.graph['D']):
+                prime = int(fnT[d])
+                if prime not in rogue_ends or G.degree[prime] < 2 or G.degree[d] != 2:
+                    continue
+                dA, dB = (int(fnT[nb]) for nb in G[d])
+                route_coords = VertexC[[dA, prime, dB]]
+                scale = np.linalg.norm(np.diff(route_coords, axis=0), axis=1).max(
+                    initial=1.0
+                )
+                split_nodes = _split_branch_nodes(
+                    G,
+                    prime,
+                    route_coords,
+                    fnT,
+                    VertexC,
+                    tol=1e-9 * scale,
+                    angle_tol=1e-10,
+                )
+                if split_nodes is not None:
+                    warn(
+                        'PathFinder detour clone %d splits the branch at '
+                        'rogue endpoint %d: %s',
+                        d,
+                        prime,
+                        split_nodes,
+                    )
+
     def create_detours(self) -> nx.Graph:
         """Reroute all feeder edges in G with crossings using detour paths.
 
@@ -2299,6 +2378,7 @@ class PathFinder:
                 fnT[T + B : clone_idx] = clone2prime
                 fnT[-R:] = range(-R, 0)
                 G.graph.update(B=B, fnT=fnT)
+            self._warn_routes_across_rogue_links(G)
             debug('<PathFinder: no crossings, detagged all tentative edges.')
             return G
 
@@ -2468,6 +2548,7 @@ class PathFinder:
             detextra=detextra,
             iterations_pfinder=self.iterations,
         )
+        self._warn_routes_across_rogue_links(G)
         debug(
             '<PathFinder: created %d detour vertices, total length changed by %.2f%%',
             D,

@@ -93,6 +93,29 @@ def test_get_interferences_list():
     assert check_interferences(crossings_3, expected)
 
 
+def test_get_interferences_list_against():
+    # 2-3 and 4-5 cross each other; 6-7 crosses both; 0-1 crosses nothing
+    coords = np.array(
+        [[0, 3], [2, 3], [0, 0], [2, 2], [0, 2], [2, 0], [1, -1], [1, 2.5]]
+    )
+    edges = np.array([[0, 1], [2, 3], [4, 5], [6, 7]])
+
+    assert get_interferences_list(edges, coords) == [
+        ((2, 3, 4, 5), None),
+        ((2, 3, 6, 7), None),
+        ((4, 5, 6, 7), None),
+    ]
+    # only Edge × against pairs are tested
+    assert get_interferences_list(edges[[0, 3]], coords, against=edges[1:3]) == [
+        ((6, 7, 2, 3), None),
+        ((6, 7, 4, 5), None),
+    ]
+    assert get_interferences_list(edges[2:], coords, against=edges[:2]) == [
+        ((4, 5, 2, 3), None),
+        ((6, 7, 2, 3), None),
+    ]
+
+
 def test_find_routeset_crossings():
     G = tiny_wfn().G
     assert find_routeset_crossings(G) == []

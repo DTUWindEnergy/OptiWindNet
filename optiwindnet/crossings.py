@@ -34,15 +34,25 @@ class _RoutePolyline:
 
 
 def get_interferences_list(
-    Edge: np.ndarray, VertexC: np.ndarray, fnT: np.ndarray | None = None, EPSILON=1e-15
+    Edge: np.ndarray,
+    VertexC: np.ndarray,
+    fnT: np.ndarray | None = None,
+    EPSILON=1e-15,
+    *,
+    against: np.ndarray | None = None,
 ) -> list[tuple[tuple[int, int, int, int], int | None]]:
-    """List all crossings between edges in the ``Edge`` (E×2) numpy array.
+    """List crossings among edges in ``Edge`` or between ``Edge`` and ``against``.
 
     Coordinates must be provided in the ``VertexC`` (V×2) array.
 
     ``Edge`` contains indices to VertexC. If ``Edge`` includes detour nodes
     (i.e. indices go beyond ``VertexC``'s length), ``fnT`` translation table
     must be provided.
+
+    If ``against`` (F×2) is not given, every pair of edges in ``Edge`` is tested.
+    If it is given, each edge in ``Edge`` is tested only against every edge in
+    ``against`` (O(E·F)); edges within ``Edge`` and within ``against`` are not
+    tested among themselves. ``fnT`` applies to both arrays.
 
     Should be used when edges are not limited to the expanded Delaunay set.
 
@@ -53,14 +63,22 @@ def get_interferences_list(
       cases of touching (not crossing).
     """
     crossings = []
+    if against is None:
+        n_sources = len(Edge) - 1
+    else:
+        n_sources = len(Edge)
+        Edge = np.concatenate((Edge, against))
     if fnT is None:
         V = VertexC[Edge[:, 1]] - VertexC[Edge[:, 0]]
     else:
         V = VertexC[fnT[Edge[:, 1]]] - VertexC[fnT[Edge[:, 0]]]
-    for i, ((UVx, UVy), (u, v)) in enumerate(zip(V[:-1], Edge[:-1].tolist())):
+    for i, ((UVx, UVy), (u, v)) in enumerate(
+        zip(V[:n_sources], Edge[:n_sources].tolist())
+    ):
         u_, v_ = (u, v) if fnT is None else fnT[[u, v]]
         (uCx, uCy), (vCx, vCy) = VertexC[[u_, v_]]
-        for (STx, STy), (s, t) in zip(-V[i + 1 :], Edge[i + 1 :].tolist()):
+        j = i + 1 if against is None else n_sources
+        for (STx, STy), (s, t) in zip(-V[j:], Edge[j:].tolist()):
             s_, t_ = (s, t) if fnT is None else fnT[[s, t]]
             if s_ == u_ or t_ == u_ or s_ == v_ or t_ == v_:
                 # <edges have a common node>

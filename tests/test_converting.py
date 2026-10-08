@@ -5,6 +5,7 @@
 
 import copy
 import itertools
+import logging
 import pickle
 
 import networkx as nx
@@ -281,7 +282,7 @@ def test_S_from_G_rejects_a_route_node_that_is_not_part_of_a_chain():
         S_from_G(G)
 
 
-def test_G_from_S():
+def test_G_from_S(caplog):
     wfn = tiny_wfn()
     A = wfn.A
     S = wfn.S
@@ -360,7 +361,13 @@ def test_G_from_S():
         S_copy.nodes[t]['subtree'] = 0
 
         # Run G_from_S
-        G = G_from_S(S_copy, A_copy)
+        if s >= 0:
+            caplog.clear()
+            with caplog.at_level(logging.WARNING, logger='optiwindnet.converting'):
+                G = G_from_S(S_copy, A_copy)
+            assert 'rogue links absent from the mesh: [(1, 3)]' in caplog.text
+        else:
+            G = G_from_S(S_copy, A_copy)
 
         # Check edge exists
         assert (s, t) in G.edges
