@@ -154,6 +154,12 @@ class _OptionsConstraints(NetworkConstraints):
     into no balance, with a warning, instead of raising.
     """
 
+    def __repr__(self) -> str:
+        # it stands for the NetworkConstraints that the options translate into
+        return 'NetworkConstraints' + super().__repr__().removeprefix(
+            type(self).__qualname__
+        )
+
     def resolve(self, **kwargs) -> NetworkBounds:
         if not self.balanced or self.feeders is not None:
             return super().resolve(**kwargs)

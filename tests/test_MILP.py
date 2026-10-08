@@ -2033,6 +2033,15 @@ def test_model_options_drop_an_unenforceable_balance(caplog, feeder_limit, feede
     assert 'will not enforce balanced subtrees' in caplog.text
 
 
+def test_translated_options_read_as_network_constraints():
+    translated = ModelOptions(
+        topology='ringed', feeder_limit='minimum'
+    ).to_constraints()
+    assert repr(translated) == repr(
+        NetworkConstraints(topology='ringed', feeders='min')
+    )
+
+
 def test_model_options_min_plus_counts_rings():
     bounds = core._constraints_from_options(
         topology='ringed', feeder_limit='min_plus1'
