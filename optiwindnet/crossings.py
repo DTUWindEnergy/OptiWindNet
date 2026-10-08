@@ -14,6 +14,7 @@ import shapely as shp
 from numba import njit
 
 from .geometric import (
+    _CROSSING_MARGIN_ULPS,
     _is_crossing_clear,
     _orient2d_filtered,
     angle_helpers,
@@ -416,8 +417,16 @@ def _feeder_intersections_by_geos(rows: np.ndarray, VertexC: np.ndarray) -> np.n
     matrices = matrices.reshape(-1, 9)
     crosses = matrices[:, 0] == '0'
     along = (matrices[:, 0] == '1') & (matrices[:, 2] == 'F') & (matrices[:, 5] == 'F')
-    touches = (matrices[:, 0] == 'F') & (matrices[:, 3] == '0')
-    a_on = np.asarray(shp.intersects(shp.points(VertexC[a]), feedersS), dtype=bool)
+    scale = np.maximum(
+        np.abs(VertexC[np.stack((a, b, root, n), axis=1)]).max(axis=(1, 2)),
+        1.0,
+    )
+    margin = _CROSSING_MARGIN_ULPS * 2.0**-52 * scale
+    a_on = np.asarray(shp.dwithin(shp.points(VertexC[a]), feedersS, margin), dtype=bool)
+    b_on = np.asarray(shp.dwithin(shp.points(VertexC[b]), feedersS, margin), dtype=bool)
+    touches = ((matrices[:, 0] == 'F') & (matrices[:, 3] == '0')) | (
+        ~crosses & ~along & (a_on ^ b_on)
+    )
     on, off = np.where(a_on, a, b), np.where(a_on, b, a)
     rings = shp.linearrings(np.stack((VertexC[root], VertexC[n], VertexC[off]), axis=1))
     side = np.where(np.asarray(shp.is_ccw(rings), dtype=bool), 1, -1)
