@@ -31,7 +31,7 @@ from ._core import (
     canonical_linksets,
     check_inflow_support,
     check_warmstart_topology,
-    feeders_to_fix,
+    links_to_fix,
     model_bounds,
     passover_rows,
     physical_core_count,
@@ -253,10 +253,8 @@ def make_min_length_model(
     if topology is Topology.RINGED:
         link_ |= {(r, t): m.addBinary(name=f'link_r{-r}~{t}') for r, t in starsʹ}
     # HiGHS has no fixing call: lb == ub is a fixed column, removed by presolve
-    for t, r in feeders_to_fix(A, bounds):
-        m.changeColBounds(link_[t, r].index, 0, 0)
-        if topology is Topology.RINGED:
-            m.changeColBounds(link_[r, t].index, 0, 0)
+    for link in links_to_fix(A, bounds):
+        m.changeColBounds(link_[link].index, 0, 0)
     # continuous: single_out_link + flow_conserv pin flows to integers.
     # a link into v carries at most what leaves v less v's own inflow
     flow_ = {
@@ -481,8 +479,8 @@ def warmup_model(
       The same model instance that was provided, now with a solution.
 
     Raises:
-      OWNWarmupFailed: if some link in S is not available in model or if S
-        violates some model constraint.
+      optiwindnet.types.OWNWarmupFailed: if some link in S is not available in
+        model or if S violates some model constraint.
     """
     check_warmstart_topology(metadata, S)
     # a complete solution spares HiGHS from having to fill in the gaps, so

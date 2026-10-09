@@ -31,7 +31,7 @@ from ._core import (
     canonical_linksets,
     check_inflow_support,
     check_warmstart_topology,
-    feeders_to_fix,
+    links_to_fix,
     model_bounds,
     passover_rows,
     physical_core_count,
@@ -294,10 +294,8 @@ def make_min_length_model(
     link_ |= {(t, r): m.addVar(f'link_{t}~r{-r}', 'B') for t, r in stars}
     if topology is Topology.RINGED:
         link_ |= {(r, t): m.addVar(f'link_r{-r}~{t}', 'B') for r, t in starsʹ}
-    for t, r in feeders_to_fix(A, bounds):
-        m.fixVar(link_[t, r], 0)
-        if topology is Topology.RINGED:
-            m.fixVar(link_[r, t], 0)
+    for link in links_to_fix(A, bounds):
+        m.fixVar(link_[link], 0)
     # 'M' (implied integral): single_out_link + flow_conserv pin flows to integers.
     # a link into v carries at most what leaves v less v's own inflow
     flow_ = {
@@ -472,7 +470,7 @@ def warmup_model(model: Model, metadata: ModelMetadata, S: nx.Graph) -> Model:
       The same model instance that was provided, now with a solution.
 
     Raises:
-      OWNWarmupFailed: if some link in S is not available in model.
+      optiwindnet.types.OWNWarmupFailed: if some link in S is not available in model.
     """
     check_warmstart_topology(metadata, S)
     # createSol() zero-initializes every variable, so only the links S activates

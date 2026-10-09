@@ -2344,7 +2344,7 @@ def test_solver_pyomo_error_branches(monkeypatch):
         solver.solve(time_limit=1.0, mip_gap=1e-3)
 
 
-def test_feeders_to_fix_keep_every_feeder_under_root_bounds():
+def test_links_to_fix_keep_every_feeder_under_root_bounds():
     A = get_bundle('neart', read_powers=False).A
 
     def bounds(**constraints):
@@ -2353,10 +2353,10 @@ def test_feeders_to_fix_keep_every_feeder_under_root_bounds():
         )
 
     assert list(core.nonclosest_feeders(A))
-    assert list(core.feeders_to_fix(A, bounds())) == list(core.nonclosest_feeders(A))
-    assert not list(core.feeders_to_fix(A, bounds(max_substation_feeders=(None, 5))))
-    assert not list(core.feeders_to_fix(A, bounds(substation_feeders=(None, 4))))
-    assert not list(core.feeders_to_fix(A, bounds(max_substation_loads=(None, 30))))
+    assert list(core.links_to_fix(A, bounds())) == list(core.nonclosest_feeders(A))
+    assert not list(core.links_to_fix(A, bounds(max_substation_feeders=(None, 5))))
+    assert not list(core.links_to_fix(A, bounds(substation_feeders=(None, 4))))
+    assert not list(core.links_to_fix(A, bounds(max_substation_loads=(None, 30))))
 
 
 @pytest.mark.parametrize(

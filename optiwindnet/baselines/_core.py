@@ -124,6 +124,7 @@ def resolve_bounds(
     vehicles_exact: bool,
     balanced: bool,
     ringed: bool,
+    link_length_ub: float | None = None,
 ) -> NetworkBounds:
     """Resolve the bounds of a VRP solve from ``constraints`` or deprecated options.
 
@@ -164,6 +165,7 @@ def resolve_bounds(
             capacity=capacity,
             inflow_total=inflow_total,
             power_per_inflow=power_per_inflow,
+            link_length_ub=link_length_ub,
         )
     if bounds.feeder_route is FeederRoute.STRAIGHT:
         raise NotImplementedError(f'{solver}() does not keep feeder routes straight.')

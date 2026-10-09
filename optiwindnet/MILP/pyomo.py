@@ -33,7 +33,7 @@ from ._core import (
     canonical_linksets,
     check_inflow_support,
     check_warmstart_topology,
-    feeders_to_fix,
+    links_to_fix,
     model_bounds,
     passover_rows,
     physical_core_count,
@@ -372,10 +372,8 @@ def make_min_length_model(
     #############
 
     m.link_ = pyo.Var(m.linkset, domain=pyo.Binary, initialize=0)
-    for t, r in feeders_to_fix(A, bounds):
-        m.link_[t, r].fix(0)  # pyrefly: ignore[bad-index, missing-attribute]
-        if topology is Topology.RINGED:
-            m.link_[r, t].fix(0)  # pyrefly: ignore[bad-index, missing-attribute]
+    for link in links_to_fix(A, bounds):
+        m.link_[link].fix(0)  # pyrefly: ignore[bad-index, missing-attribute]
 
     def flow_bounds(m, u, v):
         # a link into v carries at most what leaves v less v's own inflow
@@ -637,7 +635,7 @@ def warmup_model(
       The same model instance that was provided, now with a solution.
 
     Raises:
-      OWNWarmupFailed: if some link in S is not available in model.
+      optiwindnet.types.OWNWarmupFailed: if some link in S is not available in model.
     """
     check_warmstart_topology(metadata, S)
     # Pyomo Vars are initialize=0, so the inactive baseline is already in place;

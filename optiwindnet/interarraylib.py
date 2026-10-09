@@ -8,14 +8,14 @@ import warnings
 from bisect import bisect_left
 from collections.abc import Iterator, Sequence
 from fractions import Fraction
-from itertools import chain
+from itertools import chain, pairwise
 
 import networkx as nx
 import numba as nb
 import numpy as np
 from bitarray import bitarray
 
-from .converting import _rings_from_S
+from .converting import _chains, _rings_from_S
 from .geometric import angle_helpers, rotate
 from .loads import _rationalize, calcload
 from .types import Topology
@@ -49,7 +49,7 @@ _DEPRECATED_EXPORTS = {
 
 __all__ = (  # noqa: PLE0604
     'add_link_blockmap', 'add_link_cosines', 'add_terminal_closest_root',
-    'assign_cables', 'count_diagonals', 'directed_links',
+    'assign_cables', 'count_diagonals', 'directed_links', 'links_over_length',
     'make_remap', 'pathdist', 'scaffolded', 'update_lengths',
     *_DEPRECATED_EXPORTS,
 )  # fmt: skip
@@ -273,6 +273,77 @@ def make_remap(G, refG, H, refH):
         j = np.argmin(np.hypot(*(GvertC - coordH).T))
         remap[j] = i
     return remap
+
+
+def _links_over_limit(
+    S: nx.Graph, A: nx.Graph, link_length_ub: float
+) -> list[tuple[int, int]]:
+    """List the links of topology ``S`` longer than ``link_length_ub``.
+
+    A feeder is measured by ``A.graph['d2roots']``, a link of ``A`` by its
+    ``'length'`` and a link absent from ``A`` by its straight-line length (a
+    lower bound of any route it may take).
+
+    Args:
+      S: solution topology.
+      A: available-links graph, in the scale of ``link_length_ub``.
+      link_length_ub: maximum length of a single cable section.
+
+    Returns:
+      The offending links of ``S``; empty if none.
+    """
+    R = A.graph['R']
+    d2roots, VertexC = A.graph['d2roots'], A.graph['VertexC']
+    offending = []
+    for u, v in S.edges:
+        if u < 0 or v < 0:
+            t, r = (v, u) if u < 0 else (u, v)
+            length = d2roots[t, R + r]
+        elif A.has_edge(u, v):
+            length = A[u][v]['length']
+        else:
+            length = np.hypot(*(VertexC[u] - VertexC[v]))
+        if length > link_length_ub:
+            offending.append((u, v))
+    return offending
+
+
+def links_over_length(
+    G: nx.Graph, max_link_length: float | None = None
+) -> list[tuple[int, int, float]]:
+    """List the cable sections of routeset ``G`` that exceed a length limit.
+
+    A cable section joins two terminals or a terminal and a root. Contour and
+    detour clones are bends within a section, so the segments they split are
+    summed back into it.
+
+    Args:
+      G: routeset to check.
+      max_link_length: the limit; taken from ``G.graph['max_link_length']`` if
+        omitted.
+
+    Returns:
+      ``(u, v, length)`` per offending section, longest first; empty if none.
+
+    Raises:
+      ValueError: if no limit is given and ``G`` carries none.
+    """
+    if max_link_length is None:
+        max_link_length = G.graph.get('max_link_length')
+        if max_link_length is None:
+            raise ValueError('no max_link_length given and G carries none')
+    T = G.graph['T']
+    sections = chain(
+        ((u, v, length) for u, v, length in G.edges(data='length') if u < T and v < T),
+        (
+            (s, t, sum(G[a][b]['length'] for a, b in pairwise(path)))
+            for s, t, path in _chains(G)
+        ),
+    )
+    return sorted(
+        (section for section in sections if section[2] > max_link_length),
+        key=lambda section: -section[2],
+    )
 
 
 def add_terminal_closest_root(A: nx.Graph) -> None:

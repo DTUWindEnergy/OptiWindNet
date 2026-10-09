@@ -33,7 +33,7 @@ from .importer import (
     L_from_yaml,
     load_repository,
 )
-from .interarraylib import assign_cables
+from .interarraylib import assign_cables, links_over_length
 from .loads import (
     DEFAULT_POWER_RTOL,
     _clear_terminal_power,
@@ -200,6 +200,7 @@ class Router(ABC):
             capacity=capacity,
             inflow_total=total_inflow(A_solve),
             power_per_inflow=power_attrs.get('power_per_inflow'),
+            link_length_ub=constraints._link_length_ub(A),
         )
         return _Resolved(capacity_kwargs, constraints, bounds, A_solve, capacity)
 
@@ -288,12 +289,13 @@ class WindFarmNetwork:
             declares a ``'power_unit'`` requires the same string, or None, in which
             case its power declarations are dropped.
           constraints: Constraints on the network: topology, feeder route,
-            feeder counts, substation loads and load balance (see
+            feeder counts, substation loads, load balance and link length (see
             :class:`~optiwindnet.constraints.NetworkConstraints`). Per-substation
             values follow the order of the substations (``substationsC``, or
             roots ``-R`` to ``-1`` of ``L``); loads are in ``power_unit``, or in
             inflow if ``power_unit`` is None. If None (default), the router's
-            defaults apply.
+            defaults apply. With a ``max_link_length``, :meth:`optimize` warns
+            if detours stretch a link past it.
 
         **Cable Specs** (``capacity`` in inflow if ``power_unit`` is None, in
         ``power_unit`` otherwise):
@@ -732,12 +734,25 @@ class WindFarmNetwork:
         return svgplot(self.L, **kwargs)
 
     def plot_available_links(self, **kwargs):
-        """Plot available links from planar embedding."""
+        """Plot available links from planar embedding.
+
+        Links longer than the constraints' ``max_link_length``, which no router
+        may use, are left out of the plot (``A`` itself keeps them).
+        """
+        A = self.A
+        max_link_length = (
+            None if self._constraints is None else self._constraints.max_link_length
+        )
+        if max_link_length is not None:
+            adj = A.adj
+            A = nx.subgraph_view(
+                A, filter_edge=lambda u, v: adj[u][v]['length'] <= max_link_length
+            )
         if 'ax' in kwargs:
             from .plotting import gplot
 
-            return gplot(self.A, **kwargs)
-        return svgplot(self.A, **kwargs)
+            return gplot(A, **kwargs)
+        return svgplot(A, **kwargs)
 
     def plot_navigation_mesh(self, **kwargs):
         """Plot navigation mesh (planar graph and adjacency)."""
@@ -957,6 +972,26 @@ class WindFarmNetwork:
         )
         self._is_stale_SG = False
 
+        max_link_length = (
+            None if self._constraints is None else self._constraints.max_link_length
+        )
+        if max_link_length is not None:
+            self._G.graph['max_link_length'] = max_link_length
+            over_limit = links_over_length(self._G, max_link_length)
+            if over_limit:
+                u, v, longest = over_limit[0]
+                _warning(
+                    '%d link(s) of the routed network exceed max_link_length=%g, '
+                    'the longest being ⟨%d, %d⟩ at %g (%.1f%% over): detours '
+                    'stretched them past it.',
+                    len(over_limit),
+                    max_link_length,
+                    u,
+                    v,
+                    longest,
+                    100.0 * (longest / max_link_length - 1.0),
+                )
+
         terse_links = self.terse_links()
         return terse_links
 
@@ -998,7 +1033,7 @@ class EWRouter(Router):
     * Uses a modified Esau-Williams (EW) heuristic (segmented or straight feeders).
     * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
     * Keeps the topology and feeder route of the network constraints, but not
-      feeder counts, substation loads or balance.
+      feeder counts, substation loads, balance or link length.
     """
 
     _summary_attrs = ('iterations',)
@@ -1091,6 +1126,13 @@ class EWRouter(Router):
             raise NotImplementedError(
                 'EWRouter does not limit feeder counts or substation loads, nor '
                 'balance loads: use HGSRouter or MILPRouter.'
+            )
+        if resolved.constraints.max_link_length is not None:
+            # each subtree is fed from its node closest to a root, so a subtree
+            # the limit cannot feed needs a different partition of the
+            # terminals, which the heuristic has no means to seek
+            raise NotImplementedError(
+                'EWRouter does not limit the link length: use HGSRouter or MILPRouter.'
             )
         method = self.method or _EW_TOPOLOGY_METHOD[bounds.topology]
         method_topology = _EW_METHOD_TOPOLOGY[method]
@@ -1453,8 +1495,8 @@ class MILPRouter(Router):
         bounds the model enforces (see :func:`~optiwindnet.baselines.hgs.hgs_cvrp`).
         A branched model with no upper bound on its count and no bounded
         substation takes the constructor's branched layout instead (a closer warm
-        start), unless terminal inflow is nonunitary, which the constructor does
-        not honour.
+        start), unless terminal inflow is nonunitary or the link length is
+        limited, neither of which the constructor honours.
 
         Bounds HGS-CVRP cannot keep (and, with nonunitary terminal inflow,
         anything but an unbalanced, single-root, radial solve) return ``None``,
@@ -1476,6 +1518,7 @@ class MILPRouter(Router):
             and bounds.feeders_ub is None
             and not bounds.has_root_bounds
             and not nonunit_inflow(A_solve)
+            and constraints.max_link_length is None
         ):
             straight = bounds.feeder_route is FeederRoute.STRAIGHT
             return S_from_G(

@@ -79,10 +79,13 @@ Beyond the architecture, the following choices define what counts as an acceptab
 - **Feeder count of each substation:** bound (`max_substation_feeders`) or pin (`substation_feeders`) the feeders of each substation, e.g. to the number of its switchgear bays; a substation may have one or the other. The counts of the substations must be compatible with that of the wind farm.
 - **Load of each substation:** bound the power each substation collects (`max_substation_loads`), in the unit of the turbine power.
 - **Balancing:** require the turbine counts of all subtrees (or rings) of the network to differ by at most one. This assumes equal turbine power and requires a pinned feeder count; it does not mean balancing unequal power outputs.
+- **Link length:** cap the length of each individual cable section (`max_link_length`), for sites where the shortest network reaches out with a cable too long to build. The cap applies per section, not per subtree, and is measured along the route, including contours around obstacles. Detours created after the solve may still stretch a feeder past it; `WindFarmNetwork.optimize()` warns when they do.
 
 Per-substation values are either one value for every substation or one entry per substation, in the order of the substations (`None` leaves a substation free). With any substation bounded, every subtree stays on the substation it was solved for when detours are created. Constraints that cannot all be met raise an error before any optimization.
 
 These choices define the problem independently of the optimization method, but methods differ in which choices they can enforce. See [](/routers.md#which-constraints-each-approach-can-enforce).
+
+_In use:_ {doc}`/notebooks/hi31_options` (Network/Router API) · {doc}`/notebooks/lo31_constraints` (Advanced API).
 
 ## Objective and reported cost
 

@@ -30,7 +30,7 @@ from ._core import (
     canonical_linksets,
     check_inflow_support,
     check_warmstart_topology,
-    feeders_to_fix,
+    links_to_fix,
     model_bounds,
     passover_rows,
     physical_core_count,
@@ -398,10 +398,8 @@ def make_min_length_model(
             (r, t): m.add_binary_variable(name=f'link_r{-r}~{t}') for r, t in starsʹ
         }
     # MathOpt has no fixing call: a binary with ub = 0 (= lb) is a fixed column
-    for t, r in feeders_to_fix(A, bounds):
-        link_[t, r].upper_bound = 0
-        if topology is Topology.RINGED:
-            link_[r, t].upper_bound = 0
+    for link in links_to_fix(A, bounds):
+        link_[link].upper_bound = 0
     # continuous: single_out_link + flow_conserv pin flows to integers.
     # a link into v carries at most what leaves v less v's own inflow
     flow_ = {
@@ -619,7 +617,7 @@ def warmup_model(
       The same model instance that was provided, now with a solution.
 
     Raises:
-      OWNWarmupFailed: if some link in S is not available in model.
+      optiwindnet.types.OWNWarmupFailed: if some link in S is not available in model.
     """
     check_warmstart_topology(metadata, S)
     # CP-SAT should not have to complete the hint, so initialize every variable to 0

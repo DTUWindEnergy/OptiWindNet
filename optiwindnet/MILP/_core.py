@@ -26,7 +26,7 @@ from makefun import with_signature
 from ..constraints import NetworkBounds, NetworkConstraints
 from ..converting import G_from_S, S_from_linkbits
 from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
-from ..interarraylib import directed_links
+from ..interarraylib import _links_over_limit, directed_links
 from ..loads import (
     DEFAULT_POWER_RTOL,
     calcload,
@@ -479,15 +479,33 @@ def nonclosest_feeders(A: nx.Graph) -> Iterator[_Link]:
                 yield t, r
 
 
-def feeders_to_fix(A: nx.Graph, bounds: NetworkBounds) -> Iterator[_Link]:
-    """Yield the feeders a model fixes to zero.
+def links_to_fix(A: nx.Graph, bounds: NetworkBounds) -> Iterator[_Link]:
+    """Yield the link variables a model fixes to zero, in both directions.
 
-    These are the feeders to a root other than the terminal's closest (see
-    :func:`nonclosest_feeders`), unless per-root bounds are given: a bound may
-    require a terminal to connect to another root.
+    These are the links and feeders over the link length limit
+    (``bounds.link_length_ub``) and the feeders to a root other than the
+    terminal's closest (see :func:`nonclosest_feeders`), unless per-root bounds
+    are given: a bound may require a terminal to connect to another root. A
+    feeder's reverse direction (root to terminal) only exists in RINGED models.
     """
+    ub = bounds.link_length_ub
+    ringed = bounds.topology is Topology.RINGED
+    # a dict keeps the feeders unique and in a reproducible order
+    feeders: dict[_Link, None] = {}
+    if ub is not None:
+        T, R = A.graph['T'], A.graph['R']
+        for t, r_index in zip(*np.nonzero(A.graph['d2roots'][:T] > ub)):
+            feeders[int(t), int(r_index) - R] = None
+        for u, v, length in A.edges(data='length'):
+            if u >= 0 and v >= 0 and length > ub:
+                yield u, v
+                yield v, u
     if not bounds.has_root_bounds:
-        yield from nonclosest_feeders(A)
+        feeders.update(dict.fromkeys(nonclosest_feeders(A)))
+    for t, r in feeders:
+        yield t, r
+        if ringed:
+            yield r, t
 
 
 def passover_rows(
@@ -759,6 +777,7 @@ class Solver(abc.ABC):
           TypeError: both ``constraints`` and ``model_options`` are given.
           ValueError: the constraints do not suit the problem (see
             :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
+          OWNWarmupFailed: ``warmstart`` has a link over the link length limit.
         """
         if model_options is not None:
             if constraints is not None:
@@ -788,7 +807,17 @@ class Solver(abc.ABC):
             capacity=self.capacity,
             inflow_total=total_inflow(A),
             power_per_inflow=self._power_attrs.get('power_per_inflow'),
+            link_length_ub=constraints._link_length_ub(A),
         )
+        if warmstart is not None and self.bounds.link_length_ub is not None:
+            # a fixed variable is a bound, which backends do not check a warm
+            # start against
+            over_limit = _links_over_limit(warmstart, A, self.bounds.link_length_ub)
+            if over_limit:
+                raise OWNWarmupFailed(
+                    f'warmup_model() failed: S link {over_limit[0]} is over the '
+                    'link length limit'
+                )
         inflow = nonunit_inflow(A)
         if warmstart is not None and nonunit_inflow(warmstart) != inflow:
             # a warm start quantized otherwise carries loads in other inflow

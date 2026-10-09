@@ -11,6 +11,7 @@ to or from its bit and terse encodings. For a variant of the same kind, see
 
 import logging
 import math
+from collections.abc import Iterator
 from itertools import chain
 
 import networkx as nx
@@ -518,6 +519,51 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     return G
 
 
+def _chains(G: nx.Graph) -> Iterator[tuple[int, int, list[int]]]:
+    """Yield ``(s, t, path)`` for each chain of non-real nodes of routeset ``G``.
+
+    Real nodes are terminals and roots (``n < T``); border vertices, contour and
+    detour clones are not. A chain starts at a real node ``s``, runs through
+    non-real nodes only and ends at the next real node ``t``: it is a single
+    cable section bent around obstacles or detoured. ``path`` lists its nodes
+    from ``s`` to ``t``. Each chain is yielded once, from its end that comes
+    first in ascending node order.
+
+    Walking outward from each real node -- rather than following a DFS *tree*
+    -- keeps the cycle-closing links of a RINGED topology: a ring's second
+    feeder is a DFS back edge, so a tree traversal drops it.
+
+    Raises:
+      ValueError: a chain branches, does not reach a real node or returns to
+        its start.
+    """
+    T = G.graph['T']
+    walked = set()
+    for s in sorted(n for n in G if n < T):
+        for nbr in G[s]:
+            if nbr < T or nbr in walked:
+                continue
+            path = [s, nbr]
+            prev, node = s, nbr
+            remaining = G.number_of_nodes()
+            while node >= T:
+                walked.add(node)
+                fwd = [x for x in G[node] if x != prev]
+                if len(fwd) != 1:
+                    raise ValueError(
+                        f'route from {s} is not a chain at {node}: '
+                        f'expected one forward link, got {len(fwd)}'
+                    )
+                prev, node = node, fwd[0]
+                path.append(node)
+                remaining -= 1
+                if remaining < 0:
+                    raise ValueError(f'route from {s} does not reach another real node')
+            if node == s:
+                raise ValueError(f'route from {s} returns to itself')
+            yield s, node, path
+
+
 def S_from_G(G: nx.Graph) -> nx.Graph:
     """Get ``G``'s topology (contours, detours, lengths and coords are dropped).
 
@@ -583,43 +629,21 @@ def S_from_G(G: nx.Graph) -> nx.Graph:
             else:
                 S.add_edge(u, v)
 
-    # Every remaining link runs through a chain of non-real nodes (border
-    # vertices, contour and detour clones), which collapses to the single link
-    # joining the real nodes at its ends. Walking outward from each real node --
-    # rather than following a DFS *tree* -- is what keeps the cycle-closing links
-    # of a RINGED topology: a ring's second feeder is a DFS back edge, so a tree
-    # traversal drops it and silently merges the two rings it separates.
-    for s in sorted(n for n in G if is_real(n)):
-        for nbr in G[s]:
-            if is_real(nbr):
-                continue
-            prev, node = s, nbr
-            remaining = G.number_of_nodes()
-            while not is_real(node):
-                fwd = [x for x in G[node] if x != prev]
-                if len(fwd) != 1:
-                    raise ValueError(
-                        f'route from {s} is not a chain at {node}: '
-                        f'expected one forward link, got {len(fwd)}'
-                    )
-                prev, node = node, fwd[0]
-                remaining -= 1
-                if remaining < 0:
-                    raise ValueError(f'route from {s} does not reach another real node')
-            if node == s:
-                raise ValueError(f'route from {s} returns to itself')
-            if S.has_edge(s, node):
-                continue
-            if has_loads:
-                # orient parent -> child (the parent carries the heavier load,
-                # being the closer of the two to a root). A chain spanning a root
-                # is a feeder, which both conventions above agree to leave
-                # unreversed (a root's id is negative, so always the lower one).
-                s_load, node_load = G.nodes[s]['load'], G.nodes[node]['load']
-                u, v = (s, node) if s_load >= node_load else (node, s)
-                S.add_edge(u, v, load=G.edges[s, nbr]['load'], reverse=u > v)
-            else:
-                S.add_edge(s, node)
+    # every remaining link runs through a chain of non-real nodes, which
+    # collapses to the single link joining the real nodes at its ends
+    for s, node, path in _chains(G):
+        if S.has_edge(s, node):
+            continue
+        if has_loads:
+            # orient parent -> child (the parent carries the heavier load,
+            # being the closer of the two to a root). A chain spanning a root
+            # is a feeder, which both conventions above agree to leave
+            # unreversed (a root's id is negative, so always the lower one).
+            s_load, node_load = G.nodes[s]['load'], G.nodes[node]['load']
+            u, v = (s, node) if s_load >= node_load else (node, s)
+            S.add_edge(u, v, load=G.edges[s, path[1]]['load'], reverse=u > v)
+        else:
+            S.add_edge(s, node)
 
     creator = G.graph.get('creator')
     if creator is not None:

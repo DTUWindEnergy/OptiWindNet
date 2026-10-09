@@ -51,15 +51,17 @@ The differences between optimization approaches depend on the site, capacity, an
 
 The [](/problem.md#problem-options) define the feeder requirements; [](/problem.md#network-topologies) describes the architectures. Required constraints should guide the choice of approach before speed or solution quality.
 
-| Approach | Topology | Feeder route | Feeder count (farm, substation) | Substation load | Balanced feeder loads |
-| --- | --- | --- | --- | --- | --- |
-| Heuristic | branched, radial, ringed | straight, segmented | no | no | no |
-| Meta-heuristic | radial, ringed | segmented | yesᵃ | yes | yes |
-| Exact optimization | branched, radial, ringed | straight, segmented | yes | yesᵇ | yes |
+| Approach | Topology | Feeder route | Feeder count (farm, substation) | Substation load | Balanced feeder loads | Link length |
+| --- | --- | --- | --- | --- | --- | --- |
+| Heuristic | branched, radial, ringed | straight, segmented | no | no | no | no |
+| Meta-heuristic | radial, ringed | segmented | yesᵃ | yes | yes | yesᶜ |
+| Exact optimization | branched, radial, ringed | straight, segmented | yes | yesᵇ | yes | yes |
 
 ᵃ an exact count is held by balancing the loads of the routes concerned, except that LKH-3 holds rings only within size bounds of two or more turbines; rings stay on one substation, so a substation's exact count must be even
 
 ᵇ not for ringed networks, whose rings may connect two substations
+
+ᶜ over-limit links are priced, not forbidden: a solution that still uses one raises an error
 
 Those differences must be taken into account when chaining routers; see [](/reference/warm_starting.md#warm-start-acceptance-requirements).
 
