@@ -19,8 +19,9 @@ A task-oriented index into the rest of the documentation. Each entry names the c
 | --- | --- | --- | --- |
 | Avoid branching at turbines (radial network) | [](/problem.md#network-topologies) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo30_topologies` |
 | Build rings for fault redundancy | [](/problem.md#ring-semantics) | {doc}`/notebooks/hi30_topologies` | {doc}`/notebooks/lo30_topologies` |
-| Limit or pin the number of feeders | [](/problem.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
-| Balance the load across subtrees | [](/problem.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo23_milp_ortools` |
+| Limit or pin the number of feeders | [](/problem.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo31_constraints` |
+| Balance the load across subtrees | [](/problem.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo31_constraints` |
+| Limit the feeders or the load of each substation | [](/problem.md#problem-options) | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo31_constraints` |
 | Keep feeder routes straight | [](/problem.md#problem-options) | {doc}`/notebooks/hi20_heuristic` | {doc}`/notebooks/lo20_heuristic` |
 | Keep cables out of an exclusion zone | [](/problem.md#crossings-contours-and-detours) | {doc}`/notebooks/hi13_border_obstacles` | — |
 | Add a safety margin to the boundaries | [](/reference/input_formats.md#preparing-geometry) | {doc}`/notebooks/hi13_border_obstacles` | — |
@@ -67,6 +68,7 @@ Most notebooks have a counterpart in the other section that performs the same ta
 | Meta-heuristic | {doc}`/notebooks/hi21_hgs` | {doc}`/notebooks/lo21_hgs` |
 | Exact optimization | {doc}`/notebooks/hi23_milp` | {doc}`/notebooks/lo23_milp_ortools` |
 | Network topologies | {doc}`/notebooks/hi30_topologies` | {doc}`/notebooks/lo30_topologies` |
+| Network constraints | {doc}`/notebooks/hi31_options` | {doc}`/notebooks/lo31_constraints` |
 | Example: Taylor 2023 | {doc}`/notebooks/hi40_example_taylor_2023` | {doc}`/notebooks/lo40_example_taylor_2023` |
 | Example: IEA Wind Task 55 | {doc}`/notebooks/hi41_example_iea_wind_task_55` | {doc}`/notebooks/lo41_example_iea_wind_task_55` |
 

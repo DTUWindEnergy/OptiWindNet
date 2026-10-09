@@ -59,6 +59,7 @@ Imports the internal modules directly, calling each intermediate step (mesh gene
 - `lo20_heuristic`, `lo21_hgs`, `lo22_lkh`: the constructive-heuristic and meta-heuristic routers
 - `lo23_milp_ortools`–`lo28_milp_cbc`: one notebook per MILP backend
 - `lo30_topologies`: topologies and validation
+- `lo31_constraints`: network constraints and the bounds they resolve to
 - `lo32_clustering`: automatic vs. manual substation clustering
 - `lo40_example_taylor_2023`, `lo41_example_iea_wind_task_55`: worked examples
 - `lo90_removed_heuristics`: migration from removed entry points
@@ -82,6 +83,7 @@ Imports the internal modules directly, calling each intermediate step (mesh gene
 | Meta-heuristic | `hi21_hgs` | `lo21_hgs` |
 | Exact optimization | `hi23_milp` | `lo23_milp_ortools` |
 | Topologies | `hi30_topologies` | `lo30_topologies` |
+| Network constraints | `hi31_options` | `lo31_constraints` |
 | Example: Taylor 2023 | `hi40_example_taylor_2023` | `lo40_example_taylor_2023` |
 | Example: IEA Wind Task 55 | `hi41_example_iea_wind_task_55` | `lo41_example_iea_wind_task_55` |
 

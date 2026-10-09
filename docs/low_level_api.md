@@ -67,6 +67,7 @@ notebooks/lo28_milp_cbc
 :caption: Shaping the solution
 
 notebooks/lo30_topologies
+notebooks/lo31_constraints
 notebooks/lo32_clustering
 ```
 
