@@ -571,16 +571,14 @@ def test_heuristics_reject_unsupported_modes_with_unequal_power(producer, kwargs
 
 
 @pytest.mark.parametrize(
-    ('model_options', 'error', 'match'),
+    ('constraints', 'error', 'match'),
     (
         ({'topology': 'ringed'}, NotImplementedError, 'RINGED model'),
-        ({'feeder_limit': 'minimum'}, ValueError, 'relative to the minimum'),
-        ({'feeder_limit': 'min_plus1'}, ValueError, 'relative to the minimum'),
+        ({'feeders': 'min'}, ValueError, 'relative to the minimum'),
+        ({'max_feeders': 'min+1'}, ValueError, 'relative to the minimum'),
     ),
 )
-def test_milp_rejects_unsupported_models_with_unequal_power(
-    model_options, error, match
-):
+def test_milp_rejects_unsupported_models_with_unequal_power(constraints, error, match):
     try:
         solver = solver_factory('highs')
     except BaseException as exc:
@@ -590,7 +588,10 @@ def test_milp_rejects_unsupported_models_with_unequal_power(
     wfn = _mixed_wfn()
     with pytest.raises(error, match=match):
         solver.set_problem(
-            wfn.P, wfn.A, model_options=model_options, capacity_nominal=2.5
+            wfn.P,
+            wfn.A,
+            constraints=NetworkConstraints(**constraints),
+            capacity_nominal=2.5,
         )
 
 
@@ -600,22 +601,16 @@ def test_milp_warmstart_is_built_only_for_plain_radial_solves():
     capacity_kwargs = {'capacity_nominal': Fraction(5, 2), 'power_rtol': 0.01}
     A_solve, capacity, _ = quantized(A, **capacity_kwargs)
 
-    def warmstart(model_options):
-        router = MILPRouter(
-            'highs', time_limit=1, mip_gap=0.01, model_options=model_options
-        )
-        constraints = router._legacy_constraints
-        assert constraints is not None
+    def warmstart(**kwargs):
+        router = MILPRouter('highs', time_limit=1, mip_gap=0.01)
+        constraints = NetworkConstraints(**kwargs)
         bounds = constraints.resolve(A, **capacity_kwargs)
         return router._make_warmstart(A, capacity_kwargs, A_solve, constraints, bounds)
 
-    S_warm = warmstart({'topology': 'radial'})
+    S_warm = warmstart(topology='radial')
     assert S_warm is not None and S_warm.graph['max_load'] <= capacity
-    assert warmstart({'topology': 'ringed'}) is None
-    assert (
-        warmstart({'balanced': True, 'feeder_limit': 'exactly', 'max_feeders': 2})
-        is None
-    )
+    assert warmstart(topology='ringed') is None
+    assert warmstart(balanced=True, feeders=2) is None
 
 
 # --- cable reassignment ---

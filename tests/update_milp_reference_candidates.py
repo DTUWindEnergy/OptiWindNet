@@ -22,9 +22,9 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from optiwindnet.MILP import ModelOptions
+from optiwindnet.constraints import NetworkConstraints
 
-from .cases import MILPCase
+from .cases import MILPCase, _token, constraint_items, constraints_record
 from .paths import REPO_ROOT
 from .probe_milp_generation import (
     milp_case_from_args,
@@ -34,7 +34,7 @@ from .probe_milp_generation import (
 from .sitecache import SiteBundle, get_bundle
 
 DEFAULT_OUTPUT = REPO_ROOT / 'artifacts' / 'milp_reference_candidates.json'
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 def reference_candidate_matrix(
@@ -50,7 +50,7 @@ def reference_candidate_matrix(
             'neart',
             solver_name,
             8,
-            ModelOptions(feeder_route='straight', feeder_limit='min_plus2'),
+            NetworkConstraints(feeder_route='straight', max_feeders='min+2'),
             time_limit,
             mip_gap,
         ),
@@ -58,11 +58,7 @@ def reference_candidate_matrix(
             'neart',
             solver_name,
             7,
-            ModelOptions(
-                topology='radial',
-                feeder_limit='minimum',
-                balanced=True,
-            ),
+            NetworkConstraints(topology='radial', feeders='min', balanced=True),
             time_limit,
             mip_gap,
         ),
@@ -70,7 +66,7 @@ def reference_candidate_matrix(
             'galloper',
             solver_name,
             4,
-            ModelOptions(topology='ringed'),
+            NetworkConstraints(topology='ringed'),
             time_limit,
             mip_gap,
         ),
@@ -78,7 +74,7 @@ def reference_candidate_matrix(
             'neart',
             solver_name,
             3,
-            ModelOptions(topology='ringed'),
+            NetworkConstraints(topology='ringed'),
             time_limit,
             mip_gap,
         ),
@@ -93,10 +89,8 @@ def reference_candidate_matrix(
             'borkum2',
             solver_name,
             8,
-            ModelOptions(
-                topology='radial',
-                feeder_route='straight',
-                feeder_limit='minimum',
+            NetworkConstraints(
+                topology='radial', feeder_route='straight', feeders='min'
             ),
             time_limit,
             mip_gap,
@@ -105,7 +99,7 @@ def reference_candidate_matrix(
             'borkum2',
             solver_name,
             2,
-            ModelOptions(topology='ringed'),
+            NetworkConstraints(topology='ringed'),
             time_limit,
             mip_gap,
         ),
@@ -120,11 +114,8 @@ def reference_candidate_matrix(
             'cazzaro_2022',
             solver_name,
             6,
-            ModelOptions(
-                topology='radial',
-                feeder_route='straight',
-                feeder_limit='specified',
-                max_feeders=10,
+            NetworkConstraints(
+                topology='radial', feeder_route='straight', max_feeders=10
             ),
             time_limit,
             mip_gap,
@@ -133,7 +124,7 @@ def reference_candidate_matrix(
             'cazzaro_2022',
             solver_name,
             3,
-            ModelOptions(topology='ringed'),
+            NetworkConstraints(topology='ringed'),
             time_limit,
             mip_gap,
         ),
@@ -141,12 +132,7 @@ def reference_candidate_matrix(
             'galloper',
             solver_name,
             5,
-            ModelOptions(
-                topology='radial',
-                feeder_limit='exactly',
-                max_feeders=9,
-                balanced=True,
-            ),
+            NetworkConstraints(topology='radial', feeders=9, balanced=True),
             time_limit,
             mip_gap,
         ),
@@ -154,7 +140,7 @@ def reference_candidate_matrix(
             'galloper',
             solver_name,
             8,
-            ModelOptions(feeder_limit='min_plus2'),
+            NetworkConstraints(max_feeders='min+2'),
             time_limit,
             mip_gap,
         ),
@@ -169,7 +155,7 @@ def reference_candidate_matrix(
             'mermaid',
             solver_name,
             3,
-            ModelOptions(topology='ringed', feeder_route='straight'),
+            NetworkConstraints(topology='ringed', feeder_route='straight'),
             time_limit,
             mip_gap,
         ),
@@ -185,13 +171,12 @@ def reference_candidate_matrix(
 
 def reference_problem_key(case: MILPCase) -> str:
     """Return a solver/control-independent key for one candidate problem."""
-    options = case.model_options
     tokens = [
         f'site-{case.site}',
         f'capacity-{case.capacity}',
         *(
-            f'{name.replace("_", "-")}-{str(getattr(value, "value", value)).lower()}'
-            for name, value in options.items()
+            f'{name.replace("_", "-")}-{_token(value)}'
+            for name, value in constraint_items(case.constraints)
         ),
     ]
     return '__'.join(tokens)
@@ -255,10 +240,7 @@ def update_candidates(
                     'site': case.site,
                     'capacity': case.capacity,
                     'solver_name': case.solver_name,
-                    'model_options': {
-                        name: getattr(value, 'value', value)
-                        for name, value in case.model_options.items()
-                    },
+                    'constraints': constraints_record(case.constraints),
                 },
                 'solution': {
                     'termination': f'error:{type(exc).__name__}',

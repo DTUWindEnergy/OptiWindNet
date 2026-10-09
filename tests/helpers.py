@@ -5,23 +5,22 @@ import copy
 import math
 import warnings
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import networkx as nx
 import numpy as np
 
 from optiwindnet.api import WindFarmNetwork
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import _rings_from_S
 from optiwindnet.geometric import is_crossing
 from optiwindnet.loads import _add_ring_to_S
 from optiwindnet.MILP import (
-    ModelOptions,
     OWNSolutionNotFound,
     SolutionInfo,
     solver_factory,
 )
-from optiwindnet.MILP._core import _constraints_from_options
 
 from .sitecache import get_bundle
 
@@ -99,7 +98,7 @@ def run_milp_solve_with_retry(
     *,
     solver_name: str,
     capacity: int,
-    model_options: ModelOptions | Mapping[str, Any],
+    constraints: NetworkConstraints,
     time_limit: float,
     mip_gap: float,
     warmstart: nx.Graph | None = None,
@@ -114,7 +113,7 @@ def run_milp_solve_with_retry(
             P,
             A,
             capacity=capacity,
-            constraints=_constraints_from_options(**model_options),
+            constraints=constraints,
             warmstart=warmstart,
         )
         info = solver.solve(time_limit=limit, mip_gap=mip_gap, options=solve_options)
@@ -155,7 +154,7 @@ def solve_milp_case(case: 'MILPCase') -> tuple[SolutionInfo, nx.Graph]:
         bundle.A,
         solver_name=case.solver_name,
         capacity=case.capacity,
-        model_options=case.model_options,
+        constraints=case.constraints,
         time_limit=case.time_limit,
         mip_gap=case.mip_gap,
         retry_on_suboptimal=case.exact_golden,

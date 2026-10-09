@@ -20,15 +20,20 @@ from time import perf_counter
 
 import networkx as nx
 
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.heuristics import constructor
-from optiwindnet.MILP import ModelOptions, OWNWarmupFailed, solver_factory
+from optiwindnet.MILP import OWNWarmupFailed, solver_factory
 from optiwindnet.terse import TerseLinks
 from optiwindnet.transforming import as_normalized
 from optiwindnet.types import FeederRoute, Topology
 
-from .cases import MILPCase
+from .cases import MILPCase, constraints_record
 from .sitecache import SiteBundle, get_bundle
 from .topology_assertions import assert_topology
+
+
+def _feeder_count(text: str) -> int | str:
+    return int(text) if text.isdigit() else text
 
 
 def milp_reference_parser(
@@ -54,14 +59,11 @@ def milp_reference_parser(
         default='segmented',
     )
     parser.add_argument(
-        '--feeder-limit',
-        choices=(
-            'unlimited', 'minimum', 'min_plus1', 'min_plus2', 'min_plus3',
-            'exactly', 'specified',
-        ),
-        default='unlimited',
-    )  # fmt: skip
-    parser.add_argument('--max-feeders', type=int, default=0)
+        '--feeders', type=_feeder_count, help="exact count: int, 'min' or 'min+k'"
+    )
+    parser.add_argument(
+        '--max-feeders', type=_feeder_count, help="upper bound: int, 'min' or 'min+k'"
+    )
     parser.add_argument('--balanced', action='store_true')
     parser.add_argument('--time-limit', type=float, default=30.0)
     parser.add_argument('--mip-gap', type=float, default=1e-8)
@@ -88,12 +90,12 @@ def milp_case_from_args(args: argparse.Namespace) -> MILPCase:
         site=args.site,
         solver_name=args.solver_name,
         capacity=args.capacity,
-        model_options=ModelOptions(
+        constraints=NetworkConstraints(
             topology=args.topology,
             feeder_route=args.feeder_route,
-            feeder_limit=args.feeder_limit,
-            balanced=args.balanced,
+            feeders=args.feeders,
             max_feeders=args.max_feeders,
+            balanced=args.balanced,
         ),
         time_limit=args.time_limit,
         mip_gap=args.mip_gap,
@@ -116,11 +118,10 @@ def build_milp_warmstart(
     warmstart_seed: int,
     warmstart_max_retries: int,
 ) -> tuple[nx.Graph, dict[str, object]]:
-    """Choose a ModelOptions-compatible warm-start producer, preferring HGS."""
+    """Choose a warm-start producer that meets the constraints, preferring HGS."""
     capacity = case.capacity
-    options = case.model_options
-    topology = options['topology']
-    constraints = options.to_constraints()
+    constraints = case.constraints
+    topology = constraints.topology
     from optiwindnet.baselines.hgs import hgs_cvrp
 
     try:
@@ -165,11 +166,10 @@ def _build_constructor_warmstart(
 ) -> tuple[nx.Graph, dict[str, object]]:
     """Build the topology-appropriate deterministic fallback warm start."""
     capacity = case.capacity
-    options = case.model_options
-    topology = options['topology']
+    topology = case.constraints.topology
     method = _constructor_method(topology)
-    weigh_detours = options['feeder_route'].value == 'segmented'
-    straight_feeder_route = options['feeder_route'].value == 'straight'
+    weigh_detours = case.constraints.feeder_route is FeederRoute.SEGMENTED
+    straight_feeder_route = not weigh_detours
     S = constructor(
         A,
         capacity=capacity,
@@ -206,8 +206,7 @@ def solve_milp_reference(
     :func:`tests.sitecache.get_bundle` cache supplies it.
     """
     started = perf_counter()
-    topology = case.model_options['topology']
-    options = case.model_options
+    topology = case.constraints.topology
 
     phase = perf_counter()
     if bundle is None:
@@ -244,7 +243,7 @@ def solve_milp_reference(
                 P,
                 A,
                 capacity=case.capacity,
-                constraints=options.to_constraints(),
+                constraints=case.constraints,
                 warmstart=warmstart,
             )
         except OWNWarmupFailed as exc:
@@ -326,10 +325,7 @@ def solve_milp_reference(
             'site': case.site,
             'capacity': case.capacity,
             'solver_name': case.solver_name,
-            'model_options': {
-                name: value.value if hasattr(value, 'value') else value
-                for name, value in options.items()
-            },
+            'constraints': constraints_record(case.constraints),
             'warmstart': warmstart is not None,
             'warmstart_details': warmstart_details,
             'time_limit': case.time_limit,

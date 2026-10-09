@@ -60,9 +60,9 @@ def _fake_bounds(**constraints):
     return NetworkConstraints(**constraints)._resolve(T=12, R=1, capacity=_CAPACITY)
 
 
-def _toy_bounds(A, capacity=_CAPACITY, **options):
-    """Resolve options of ModelOptions into the bounds a model builder takes."""
-    return core._constraints_from_options(**options)._resolve(
+def _toy_bounds(A, capacity=_CAPACITY, **constraints):
+    """Resolve network constraints into the bounds a model builder takes."""
+    return NetworkConstraints(**constraints)._resolve(
         T=A.graph['T'], R=A.graph['R'], capacity=capacity, inflow_total=total_inflow(A)
     )
 
@@ -1009,7 +1009,7 @@ def test_ringed_warmstart_is_accepted_by_scip():
     assert solver.metadata.warmed_by == S.graph['creator']
 
 
-def _warmup_toy_with(feeder_limit, warm_source):
+def _warmup_toy_with(feeders, warm_source):
     """Warm-start a toy model, reporting what MathOpt's warmup_model() decided."""
     import math
 
@@ -1030,36 +1030,36 @@ def _warmup_toy_with(feeder_limit, warm_source):
             time_limit=0.2,
             vehicles=math.ceil(A.graph['T'] / _CAPACITY),
         )
-    feeders = sum(S.degree[r] for r in range(-A.graph['R'], 0))
+    S_feeders = sum(S.degree[r] for r in range(-A.graph['R'], 0))
     model, metadata = make_min_length_model(
-        A, _CAPACITY, _toy_bounds(A, feeder_limit=feeder_limit)
+        A, _CAPACITY, _toy_bounds(A, feeders=feeders)
     )
     try:
         warmup_model(model, metadata, S)
     except OWNWarmupFailed as exc:
-        return feeders, None, str(exc)
-    return feeders, metadata.warmed_by, None
+        return S_feeders, None, str(exc)
+    return S_feeders, metadata.warmed_by, None
 
 
 @pytest.mark.parametrize(
-    ('feeder_limit', 'warm_source', 'accepted'),
+    ('feeders', 'warm_source', 'accepted'),
     [
-        ('unlimited', 'constructor', True),
+        (None, 'constructor', True),
         # toy needs 3 feeders at capacity 5, but the constructor uses 4: a model
         # pinning the minimum cannot take that warm start, while HGS held to
         # `vehicles=minimum` produces one it can (see MILPRouter.route).
-        ('minimum', 'constructor', False),
-        ('minimum', 'hgs', True),
+        ('min', 'constructor', False),
+        ('min', 'hgs', True),
     ],
 )
 def test_warmup_rejects_hints_that_violate_the_model(
-    ortools_worker, feeder_limit, warm_source, accepted
+    ortools_worker, feeders, warm_source, accepted
 ):
-    feeders, warmed_by, error = ortools_worker.run(
-        _warmup_toy_with, (feeder_limit, warm_source), 60
+    S_feeders, warmed_by, error = ortools_worker.run(
+        _warmup_toy_with, (feeders, warm_source), 60
     )
 
-    assert feeders == (4 if warm_source == 'constructor' else 3)
+    assert S_feeders == (4 if warm_source == 'constructor' else 3)
     if accepted:
         assert error is None
         assert warmed_by == (
@@ -1070,23 +1070,14 @@ def test_warmup_rejects_hints_that_violate_the_model(
         assert 'violates model constraint feeder_limit_eq' in error
 
 
-def _make_warmstart_toy(topology, feeder_limit, balanced, max_feeders):
+def _make_warmstart_toy(constraints):
     """Warm-start a toy model via MILPRouter._make_warmstart, reporting whether
     MathOpt's warmup_model() accepted it (``warmed_by``, empty when rejected)."""
     from optiwindnet.api import MILPRouter
     from optiwindnet.MILP.ortools import make_min_length_model, warmup_model
 
     A = get_bundle('toy').A
-    options = ModelOptions(
-        topology=topology,
-        feeder_limit=feeder_limit,
-        balanced=balanced,
-        max_feeders=max_feeders,
-    )
-    router = MILPRouter(
-        solver_name='ortools', time_limit=1, mip_gap=0.01, model_options=options
-    )
-    constraints = core._constraints_from_options(**options)
+    router = MILPRouter(solver_name='ortools', time_limit=1, mip_gap=0.01)
     bounds = constraints.resolve(A, capacity=_CAPACITY)
     S = router._make_warmstart(A, {'capacity': _CAPACITY}, A, constraints, bounds)
     # unitary inflow: a warm start is always built
@@ -1097,38 +1088,32 @@ def _make_warmstart_toy(topology, feeder_limit, balanced, max_feeders):
 
 
 @pytest.mark.parametrize(
-    ('topology', 'feeder_limit', 'balanced', 'max_feeders'),
+    'constraints',
     [
         # toy: T=12, capacity=5 -> 3 radial feeders minimum (2 rings minimum).
         # These feeder limits used to drop to a cold solve; the fallback now
         # rebuilds a warm start HGS can reproduce, so warmup_model() accepts it.
         #
         # pinned + balanced: reproducible by HGS for radial and branched
-        ('branched', 'minimum', True, 0),
-        ('radial', 'minimum', True, 0),
-        ('branched', 'exactly', True, 4),
-        ('radial', 'exactly', True, 4),
+        NetworkConstraints('branched', feeders='min', balanced=True),
+        NetworkConstraints('radial', feeders='min', balanced=True),
+        NetworkConstraints('branched', feeders=4, balanced=True),
+        NetworkConstraints('radial', feeders=4, balanced=True),
         # pinned above the minimum, unbalanced: a balanced HGS solution fits too
-        ('radial', 'exactly', False, 5),
+        NetworkConstraints('radial', feeders=5),
         # an upper bound on the count
-        ('radial', 'specified', False, 4),
+        NetworkConstraints('radial', max_feeders=4),
         # tightly bounded count (min + n): an upper bound HGS honours
-        ('branched', 'min_plus1', False, 0),
-        ('radial', 'min_plus1', False, 0),
+        NetworkConstraints('branched', max_feeders='min+1'),
+        NetworkConstraints('radial', max_feeders='min+1'),
         # RINGED: pinned + balanced, counted in rings (two feeders each)
-        ('ringed', 'minimum', True, 0),
-        ('ringed', 'exactly', True, 6),
-        ('ringed', 'min_plus1', False, 0),
+        NetworkConstraints('ringed', feeders='min', balanced=True),
+        NetworkConstraints('ringed', feeders=6, balanced=True),
+        NetworkConstraints('ringed', max_feeders='min+2'),
     ],
 )
-def test_make_warmstart_matches_feeder_limit(
-    ortools_worker, topology, feeder_limit, balanced, max_feeders
-):
-    warmed_by = ortools_worker.run(
-        _make_warmstart_toy,
-        (topology, feeder_limit, balanced, max_feeders),
-        60,
-    )
+def test_make_warmstart_matches_feeder_count(ortools_worker, constraints):
+    warmed_by = ortools_worker.run(_make_warmstart_toy, (constraints,), 60)
     if isinstance(warmed_by, BaseException):
         raise warmed_by
     assert warmed_by
@@ -1186,9 +1171,8 @@ def _warmup_time_budget_toy(warmup_time):
             time_limit=2,
             mip_gap=0.05,
             warmup_time=warmup_time,
-            model_options=ModelOptions(feeder_limit='minimum'),
         )
-        constraints = core._constraints_from_options(feeder_limit='minimum')
+        constraints = NetworkConstraints(feeders='min')
         router._make_warmstart(
             A,
             {'capacity': _CAPACITY},
@@ -1245,7 +1229,7 @@ def test_scip_warmstart_rejects_pinned_feeder_mismatch():
         bundle.P,
         A,
         capacity=_CAPACITY,
-        model_options=ModelOptions(feeder_limit='minimum'),
+        constraints=NetworkConstraints(feeders='min'),
     )
     with pytest.raises(MILP.OWNWarmupFailed, match='violates some model constraint'):
         warmup_model(solver.model, solver.metadata, S)
@@ -1424,7 +1408,7 @@ def test_milp_adapter_topology_golden(case, run_isolated):
 
     solution_info, S = result
     warn_if_not_optimal(case, solution_info)
-    assert_topology(S, case.model_options['topology'], case.capacity)
+    assert_topology(S, case.constraints.topology, case.capacity)
     assert_golden_topology_id(solution_info.topology_id, topology_golden_key(case))
 
 
@@ -1437,7 +1421,7 @@ def test_milp_required_formulation_topologies(case, run_isolated):
         raise result
     info, S = result
     warn_if_not_optimal(case, info)
-    assert_topology(S, case.model_options['topology'], case.capacity)
+    assert_topology(S, case.constraints.topology, case.capacity)
     if case.exact_golden:
         assert_golden_topology_id(info.topology_id, topology_golden_key(case))
 
@@ -1454,7 +1438,7 @@ def test_milp_distinct_formulation_families(case, run_isolated):
 
     info, S = result
     warn_if_not_optimal(case, info)
-    assert_topology(S, case.model_options['topology'], case.capacity)
+    assert_topology(S, case.constraints.topology, case.capacity)
 
 
 @pytest.mark.parametrize('case', MILP_BOUNDARY_CASES, ids=case_node_id)
@@ -1466,7 +1450,7 @@ def test_milp_required_boundary_solves(case, run_isolated):
         raise result
     info, S = result
     assert info.bound <= info.objective * (1 + 1e-6)
-    assert_topology(S, case.model_options['topology'], case.capacity)
+    assert_topology(S, case.constraints.topology, case.capacity)
 
 
 def _solve_toy_balanced(solver_name, max_feeders):
@@ -1735,14 +1719,14 @@ def test_solver_highs_raises_without_a_solution():
 
 
 @pytest.mark.parametrize(
-    ('feeder_limit', 'accepted'),
+    ('feeders', 'accepted'),
     [
-        ('unlimited', True),
+        (None, True),
         # toy needs 3 feeders at capacity 5, but the constructor uses 4
-        ('minimum', False),
+        ('min', False),
     ],
 )
-def test_highs_warmup_rejects_solutions_that_violate_the_model(feeder_limit, accepted):
+def test_highs_warmup_rejects_solutions_that_violate_the_model(feeders, accepted):
     pytest.importorskip('highspy')
     from optiwindnet.converting import S_from_G
     from optiwindnet.heuristics import constructor
@@ -1751,7 +1735,7 @@ def test_highs_warmup_rejects_solutions_that_violate_the_model(feeder_limit, acc
     A = get_bundle('toy').A
     S = S_from_G(constructor(A, capacity=_CAPACITY, method='rootlust'))
     model, metadata = make_min_length_model(
-        A, _CAPACITY, _toy_bounds(A, feeder_limit=feeder_limit)
+        A, _CAPACITY, _toy_bounds(A, feeders=feeders)
     )
     if accepted:
         warmup_model(model, metadata, S)
@@ -1950,11 +1934,12 @@ def test_make_solve_parameters_highs_rejects_unsupported_option_type(ortools_wor
     assert 'Unsupported type list' in str(result)
 
 
-def _bounds(T, capacity, feeder_limit, max_feeders=0, balanced=True, inflow_total=None):
-    """Bounds of ModelOptions, as ``(groups_lb, groups_ub, load_lb, load_ub)``."""
-    bounds = core._constraints_from_options(
-        feeder_limit=feeder_limit, max_feeders=max_feeders, balanced=balanced
-    )._resolve(T=T, R=1, capacity=capacity, inflow_total=inflow_total)
+def _bounds(T, capacity, bounds=None, balanced=True, **constraints):
+    """Bounds as ``(groups_lb, groups_ub, load_lb, load_ub)``, balanced by default."""
+    if bounds is None:
+        bounds = NetworkConstraints(balanced=balanced, **constraints)._resolve(
+            T=T, R=1, capacity=capacity
+        )
     return (
         bounds.groups_lb,
         bounds.groups_ub,
@@ -1965,7 +1950,7 @@ def _bounds(T, capacity, feeder_limit, max_feeders=0, balanced=True, inflow_tota
 @pytest.mark.parametrize('capacity', range(2, 20))
 def test_balanced_bounds_at_minimum(capacity):
     for T in range(1, 200):
-        feeders_lb, feeders_ub, load_lb, load_ub = _bounds(T, capacity, 'minimum')
+        feeders_lb, feeders_ub, load_lb, load_ub = _bounds(T, capacity, feeders='min')
         F = math.ceil(T / capacity)
         # the feeder count is pinned to the minimum
         assert feeders_lb == feeders_ub == F
@@ -1982,17 +1967,17 @@ def test_balanced_bounds_at_minimum(capacity):
 
 def test_balance_bounds_omit_implied_bounds():
     # T = 12 over 3 feeders: loads are exactly 4, and 4 < capacity=5
-    assert _bounds(12, 5, 'minimum') == (3, 3, 4, 4)
+    assert _bounds(12, 5, feeders='min') == (3, 3, 4, 4)
     # a single feeder carrying everything: only the lower bound says anything
-    assert _bounds(12, 12, 'minimum') == (1, 1, 12, None)
+    assert _bounds(12, 12, feeders='min') == (1, 1, 12, None)
     # capacity 1 forces one terminal per feeder: both bounds are already implied
-    assert _bounds(3, 1, 'minimum') == (3, 3, None, None)
+    assert _bounds(3, 1, feeders='min') == (3, 3, None, None)
 
 
-def test_model_options_exactly_pins_the_given_count():
+def test_feeders_pins_the_given_count():
     # 12 terminals over 5 feeders -> loads in {2, 3}, well below capacity 5
-    assert _bounds(12, 5, 'exactly', max_feeders=5) == (5, 5, 2, 3)
-    assert _bounds(12, 5, 'exactly', max_feeders=5, balanced=False) == (
+    assert _bounds(12, 5, feeders=5) == (5, 5, 2, 3)
+    assert _bounds(12, 5, feeders=5, balanced=False) == (
         5,
         5,
         None,
@@ -2000,24 +1985,24 @@ def test_model_options_exactly_pins_the_given_count():
     )
 
 
-def test_model_options_exactly_rejects_infeasible_counts():
+def test_feeders_rejects_infeasible_counts():
     with pytest.raises(ValueError, match='below the minimum'):
-        _bounds(12, 5, 'exactly', max_feeders=2)
+        _bounds(12, 5, feeders=2)
     with pytest.raises(ValueError, match='above the maximum possible'):
-        _bounds(12, 5, 'exactly', max_feeders=13)
+        _bounds(12, 5, feeders=13)
 
 
-def test_model_options_specified_is_an_upper_bound():
-    assert _bounds(12, 5, 'specified', max_feeders=7, balanced=False) == (
+def test_max_feeders_is_an_upper_bound():
+    assert _bounds(12, 5, max_feeders=7, balanced=False) == (
         3,
         7,
         None,
         None,
     )
     # ... unless it coincides with the minimum, which pins the count
-    assert _bounds(12, 5, 'specified', max_feeders=3) == (3, 3, 4, 4)
+    assert _bounds(12, 5, max_feeders=3) == (3, 3, 4, 4)
     with pytest.raises(ValueError, match='below the minimum'):
-        _bounds(12, 5, 'specified', max_feeders=2)
+        _bounds(12, 5, max_feeders=2, balanced=False)
 
 
 @pytest.mark.parametrize(
@@ -2031,7 +2016,10 @@ def test_model_options_specified_is_an_upper_bound():
 )
 def test_model_options_drop_an_unenforceable_balance(caplog, feeder_limit, feeders_ub):
     with caplog.at_level(logging.WARNING, logger=core.__name__):
-        assert _bounds(12, 5, feeder_limit) == (3, feeders_ub, None, None)
+        bounds = core._constraints_from_options(
+            feeder_limit=feeder_limit, balanced=True
+        )._resolve(T=12, R=1, capacity=5)
+        assert _bounds(12, 5, bounds) == (3, feeders_ub, None, None)
     assert 'will not enforce balanced subtrees' in caplog.text
 
 

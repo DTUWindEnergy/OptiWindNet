@@ -20,7 +20,7 @@ from optiwindnet.api import (
     WindFarmNetwork,
 )
 from optiwindnet.constraints import NetworkConstraints
-from optiwindnet.MILP import ModelOptions, OWNWarmupFailed
+from optiwindnet.MILP import OWNWarmupFailed
 from optiwindnet.svg import SvgRepr
 from optiwindnet.types import Topology
 
@@ -377,13 +377,12 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
         lambda name: factory_calls.append(name) or fake,
     )
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
-    options = ModelOptions(topology='ringed', feeder_route='straight')
+    constraints = NetworkConstraints(topology='ringed', feeder_route='straight')
     router = MILPRouter(
         solver_name='fake',
         time_limit=9,
         mip_gap=0.2,
         solver_options={'threads': 1},
-        model_options=options,
     )
 
     S, G = router.route(
@@ -394,6 +393,7 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
         S_warm=solved.S,
         num_retries=4,
         verbose=True,
+        constraints=constraints,
     )
 
     assert factory_calls == ['fake']
@@ -401,7 +401,7 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
         (
             (solved.P, solved.A),
             {
-                'constraints': options.to_constraints(),
+                'constraints': constraints,
                 'capacity': solved.cables_capacity,
                 'warmstart': solved.S,
             },
