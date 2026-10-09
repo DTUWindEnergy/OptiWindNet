@@ -22,6 +22,7 @@ import numpy as np
 from ..clustering import cluster_plan, plan_from_clusters
 from ..constraints import NetworkBounds, NetworkConstraints
 from ..identity import fingerprint_function
+from ..interarraylib import _links_over_limit
 from ..loads import (
     DEFAULT_POWER_RTOL,
     calcload,
@@ -108,6 +109,7 @@ def _build_weight_matrix(
     scale: float,
     complete: bool,
     w_clip: int,
+    link_length_ub: float | None = None,
 ) -> np.ndarray:
     """Build LKH weight matrix ``L`` with depot at last index.
 
@@ -151,6 +153,11 @@ def _build_weight_matrix(
     )
     _check(fill_max, 'pairwise distance')
     _check(edge_max, 'edge length')
+    if link_length_ub is not None:
+        # links and feeders over the limit get what an absent link gets
+        ub_scaled = link_length_ub * scale
+        block[block > ub_scaled] = w_clip
+        d2root_scaled[d2root_scaled > ub_scaled] = w_clip
 
     # only the upper triangle is passed to LKH, so the depot row and the diagonal
     # are left at the sentinel
@@ -492,6 +499,7 @@ def _build_cluster_weight_matrices(
     scale: float,
     complete: bool,
     precision: int,
+    link_length_ub: float | None = None,
 ) -> list[np.ndarray]:
     """Build one LKH weight matrix per cluster.
 
@@ -503,7 +511,13 @@ def _build_cluster_weight_matrices(
     w_clip = _w_clip(precision)
     return [
         _build_weight_matrix(
-            A, terminals, r, scale=scale, complete=complete, w_clip=w_clip
+            A,
+            terminals,
+            r,
+            scale=scale,
+            complete=complete,
+            w_clip=w_clip,
+            link_length_ub=link_length_ub,
         )
         for r, terminals in zip(range(-R, 0), terminals_)
     ]
@@ -1004,7 +1018,7 @@ def _setup_clusters(
     Raises:
         NotImplementedError: a root's exact feeder count is odd for rings.
         ValueError: no clustering satisfies ``bounds``.
-        OWNWarmupFailed: the warm-start routes break ``bounds``.
+        optiwindnet.types.OWNWarmupFailed: the warm-start routes break ``bounds``.
     """
     R, T = A.graph['R'], A.graph['T']
     if R == 1:
@@ -1159,6 +1173,10 @@ def lkh3(
     ``time_limit``. Repair requires ``A``'s planar mesh. Set ``repair=False``
     when using ``complete=True``.
 
+    A ``max_link_length`` in ``constraints`` is priced, not forbidden: a link or
+    feeder over it costs what a link absent from ``A`` costs. A solution that
+    still uses one raises ``ValueError``.
+
     Args:
         A: available-links graph. No edges implies ``complete=True``.
         capacity: maximum vehicle capacity, in inflow.
@@ -1200,10 +1218,9 @@ def lkh3(
             odd exact feeder count of a root with rings.
         ValueError: the bounds ask for more exact rings than ``T // 2``, or no
             clustering satisfies them; LKH-3 finds no solution for a root, or
-            none within the bounds or without rogue links; or ``A`` is not
-            limited to the constraints' ``max_link_length``, or the solution
-            exceeds the limit of ``A``.
-        OWNWarmupFailed: the warm start is unusable.
+            none within the bounds or without rogue links, or none within the
+            constraints' ``max_link_length``.
+        optiwindnet.types.OWNWarmupFailed: the warm start is unusable.
     """
     R, T = A.graph['R'], A.graph['T']
     # An edgeless A requests the complete graph over all nodes.
@@ -1240,6 +1257,7 @@ def lkh3(
         vehicles_exact=False,
         balanced=balanced,
         ringed=ringed,
+        link_length_ub=None if constraints is None else constraints._link_length_ub(A),
     )
     ringed = bounds.topology is Topology.RINGED
     balanced = bounds.balanced
@@ -1329,7 +1347,12 @@ def lkh3(
     # branch (which mutates A_iter via remove_offending_crossings); the
     # over-capacity branch leaves A_iter intact and reuses the same matrices.
     L_ = _build_cluster_weight_matrices(
-        A_iter, terminals_, scale=scale, complete=complete, precision=precision
+        A_iter,
+        terminals_,
+        scale=scale,
+        complete=complete,
+        precision=precision,
+        link_length_ub=bounds.link_length_ub,
     )
     name = A_iter.graph.get('name', 'unnamed')
 
@@ -1433,6 +1456,7 @@ def lkh3(
                     scale=scale,
                     complete=complete,
                     precision=precision,
+                    link_length_ub=bounds.link_length_ub,
                 )
     if i > 0:
         S.graph['retries'] = i
@@ -1478,6 +1502,16 @@ def lkh3(
                 f'LKH-3 solution uses rogue links absent from the mesh: {rogue}. A '
                 'longer `time_limit` may help.'
             )
+    over_limit = (
+        []
+        if bounds.link_length_ub is None
+        else _links_over_limit(S, A, bounds.link_length_ub)
+    )
+    if over_limit:
+        raise ValueError(
+            f'LKH-3 found no solution within the link length limit: '
+            f'{len(over_limit)} link(s) exceed it, e.g. {over_limit[0]}.'
+        )
 
     if any(pinned_):
         S.graph['solver_details']['capacity_effective'] = (

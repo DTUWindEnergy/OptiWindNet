@@ -15,6 +15,7 @@ import numpy as np
 from ..clustering import cluster_plan, plan_from_clusters
 from ..constraints import NetworkConstraints
 from ..identity import fingerprint_function
+from ..interarraylib import _links_over_limit
 from ..loads import (
     DEFAULT_POWER_RTOL,
     calcload,
@@ -50,6 +51,7 @@ def _length_matrix(
     complete: bool = False,
     closed: bool = False,
     clip_factor: float = 5.0,
+    link_length_ub: float | None = None,
 ) -> np.ndarray:
     """Build the HGS-CVRP distance matrix (depot at index 0).
 
@@ -65,7 +67,7 @@ def _length_matrix(
     HGS-CVRP requires finite entries. Clip the matrix to ``clip_factor`` times
     the largest terminal-to-terminal length, including the Euclidean fill.
     This gives missing links and unreachable slack-node entries a finite
-    penalty.
+    penalty. Links and feeders longer than ``link_length_ub`` get the same.
     """
     terminal_slice = slice(1, -num_slack if num_slack else None)
     terminals = n_from_i[terminal_slice].tolist()
@@ -76,6 +78,9 @@ def _length_matrix(
     w_max = max(fill_max, edge_max)
 
     d2roots = A.graph['d2roots'][n_from_i[terminal_slice], r]
+    if link_length_ub is not None:
+        W[W > link_length_ub] = np.inf
+        d2roots = np.where(d2roots > link_length_ub, np.inf, d2roots)
     W[0, terminal_slice] = d2roots
     if closed:
         # closed CVRP (RINGED): the return leg costs the feeder distance
@@ -100,6 +105,7 @@ def _length_matrices(
     num_slack_: Sequence[int],
     complete: bool = False,
     closed: bool = False,
+    link_length_ub: float | None = None,
 ) -> tuple[list, list]:
     R = A.graph['R']
     W_ = []
@@ -108,7 +114,13 @@ def _length_matrices(
         n_from_i = np.array([r] + sorted(cluster) + [r] * num_slack, dtype=int)
         A_clu = nx.subgraph_view(A, filter_node=lambda n, cluster=cluster: n in cluster)
         W = _length_matrix(
-            A_clu, r, num_slack, n_from_i, complete=complete, closed=closed
+            A_clu,
+            r,
+            num_slack,
+            n_from_i,
+            complete=complete,
+            closed=closed,
+            link_length_ub=link_length_ub,
         )
         W_.append(W)
         indices_.append(n_from_i)
@@ -151,8 +163,9 @@ def _initial_routes(
     reaches them.
 
     Raises:
-        OWNWarmupFailed: a balanced solve's slack nodes cannot top up exactly the
-            warm start's routes (i.e. the route counts differ).
+        optiwindnet.types.OWNWarmupFailed: a balanced solve's slack nodes cannot
+            top up exactly the warm start's routes (i.e. the route counts
+            differ).
     """
     end = len(n_from_i) - num_slack
     i_from_n = {n: i for i, n in enumerate(n_from_i[1:end].tolist(), start=1)}
@@ -221,6 +234,7 @@ def _solve_single_root(
     closed=False,
     complete=False,
     warm_routes_=None,
+    link_length_ub=None,
 ):
     T, VertexC = A.graph['T'], A.graph['VertexC']
     if balanced:
@@ -229,7 +243,13 @@ def _solve_single_root(
         num_slack = 0
     n_from_i = np.array([-1] + list(range(T)) + [-1] * num_slack, dtype=int)
     distance_matrix = _length_matrix(
-        A, -1, num_slack, n_from_i, complete=complete, closed=closed
+        A,
+        -1,
+        num_slack,
+        n_from_i,
+        complete=complete,
+        closed=closed,
+        link_length_ub=link_length_ub,
     )
     rootC = VertexC[-1:].T
     coordinates = np.hstack((rootC, VertexC[:T].T, *((rootC,) * num_slack)))
@@ -284,6 +304,7 @@ def _solve_multi_root(
     closed=False,
     complete=False,
     warm_routes_=None,
+    link_length_ub=None,
 ):
     R, VertexC = A.graph['R'], A.graph['VertexC']
     cluster_ = plan.cluster_
@@ -303,7 +324,12 @@ def _solve_multi_root(
         vehicles_.append(vehicles_c)
         num_slack_.append(num_slack_c)
     W_, indices_ = _length_matrices(
-        A, cluster_, num_slack_, complete=complete, closed=closed
+        A,
+        cluster_,
+        num_slack_,
+        complete=complete,
+        closed=closed,
+        link_length_ub=link_length_ub,
     )
     populated_ = [c for c, len_cluster in enumerate(len_cluster_) if len_cluster]
     cluster_data = [
@@ -429,6 +455,10 @@ def hgs_cvrp(
     satisfies unbalanced bounds. An exact ring count leaves every ring two or
     more terminals.
 
+    A ``max_link_length`` in ``constraints`` is priced, not forbidden: a link or
+    feeder over it costs what a link absent from ``A`` costs. A solution that
+    still uses one raises ``ValueError``.
+
     Normalization of input graph is recommended before calling this function.
 
     For single-root problems, the solver runs on the full graph. For multi-root
@@ -500,8 +530,9 @@ def hgs_cvrp(
             unequal turbine power rules out (see below), or for an odd exact
             feeder count of a root with rings.
         ValueError: the bounds ask for more exact rings than ``T // 2``, or no
-            clustering satisfies them.
-        OWNWarmupFailed: the warm start is unusable.
+            clustering satisfies them; or the solution exceeds the
+            constraints' ``max_link_length``.
+        optiwindnet.types.OWNWarmupFailed: the warm start is unusable.
     """
     R = A.graph['R']
     T = A.graph['T']
@@ -539,6 +570,7 @@ def hgs_cvrp(
         vehicles_exact=vehicles_exact,
         balanced=balanced,
         ringed=ringed,
+        link_length_ub=None if constraints is None else constraints._link_length_ub(A),
     )
     ringed = bounds.topology is Topology.RINGED
     balanced = bounds.balanced
@@ -604,6 +636,7 @@ def hgs_cvrp(
                 ringed,
                 complete,
                 warm_routes_=warm_routes_,
+                link_length_ub=bounds.link_length_ub,
             )
         else:
             results_ = _solve_multi_root(
@@ -616,6 +649,7 @@ def hgs_cvrp(
                 ringed,
                 complete,
                 warm_routes_=warm_routes_,
+                link_length_ub=bounds.link_length_ub,
             )
         S = _process_results(A, keep_log, pinned, *results_)
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
@@ -649,6 +683,16 @@ def hgs_cvrp(
         S.graph['retries'] = i
         if crossings:
             _warn('Solution contains crossings (max_retries reached)')
+    over_limit = (
+        []
+        if bounds.link_length_ub is None
+        else _links_over_limit(S, A_orig, bounds.link_length_ub)
+    )
+    if over_limit:
+        raise ValueError(
+            f'HGS-CVRP found no solution within the link length limit: '
+            f'{len(over_limit)} link(s) exceed it, e.g. {over_limit[0]}.'
+        )
     nx.set_node_attributes(S, inflow_by_node, 'inflow')
     if ringed:
         S.graph['topology'] = Topology.RINGED

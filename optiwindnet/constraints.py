@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from numbers import Integral, Real
-from typing import Any
+from typing import Any, cast
 
 import networkx as nx
 
@@ -128,6 +128,9 @@ class NetworkBounds:
     """Minimum load of a subtree or ring (``None`` if not balanced)."""
     group_load_ub: int | None
     """Maximum load of a subtree or ring (``None`` if not balanced)."""
+    link_length_ub: float | None = None
+    """Maximum length of a single cable section, in the scale of the graph the
+    bounds are resolved against (``None`` if unlimited)."""
 
     @property
     def groups_lb(self) -> int:
@@ -188,6 +191,13 @@ class NetworkConstraints:
     differ at most by one unit of the turbine power quantization. It requires
     the feeder count to be fixed, e.g. ``feeders='min'``.
 
+    ``max_link_length`` caps the length of each individual cable section
+    (feeders included), in the unit of the coordinates and measured as the
+    routers measure: a link that follows a contour around an obstacle is capped
+    along that contour. Detours created after the solve may still stretch a
+    feeder past the limit (see
+    :func:`~optiwindnet.interarraylib.links_over_length`).
+
     Args:
       topology: ``'radial'``, ``'branched'`` or ``'ringed'``.
       feeder_route: ``'segmented'`` or ``'straight'``.
@@ -197,6 +207,7 @@ class NetworkConstraints:
       max_substation_feeders: maximum number of feeders of each substation.
       max_substation_loads: maximum load of each substation.
       balanced: whether the subtree (or ring) loads must be balanced.
+      max_link_length: maximum length of a single cable section.
 
     Raises:
       ValueError: a value has the wrong form, or two constraints exclude each
@@ -215,6 +226,7 @@ class NetworkConstraints:
     max_substation_feeders: int | tuple[int | None, ...] | None
     max_substation_loads: float | Fraction | tuple[float | Fraction | None, ...] | None
     balanced: bool
+    max_link_length: float | None
 
     def __init__(
         self,
@@ -229,6 +241,7 @@ class NetworkConstraints:
         | Sequence[float | Fraction | None]
         | None = None,
         balanced: bool = False,
+        max_link_length: float | None = None,
     ) -> None:
         topology = Topology(topology)
         per_group = 2 if topology is Topology.RINGED else 1
@@ -265,6 +278,11 @@ class NetworkConstraints:
             )
         if not isinstance(balanced, bool):
             raise TypeError(f'balanced must be a bool: got {balanced!r}.')
+        if max_link_length is not None and not _is_load(max_link_length):
+            raise ValueError(
+                'max_link_length must be a positive and finite number: got '
+                f'{max_link_length!r}.'
+            )
         for name, value in (
             ('topology', topology),
             ('feeder_route', FeederRoute(feeder_route)),
@@ -277,6 +295,10 @@ class NetworkConstraints:
                 _per_substation('max_substation_loads', max_substation_loads, _is_load),
             ),
             ('balanced', balanced),
+            (
+                'max_link_length',
+                None if max_link_length is None else float(max_link_length),
+            ),
         ):
             object.__setattr__(self, name, value)
 
@@ -297,6 +319,10 @@ class NetworkConstraints:
         those that :func:`~optiwindnet.baselines.hgs.hgs_cvrp` and
         :meth:`Solver.set_problem() <optiwindnet.MILP.Solver.set_problem>` derive
         for the same arguments.
+
+        A ``max_link_length`` must leave every turbine a way to a substation
+        through links and feeders within it; it is scaled as ``A`` is, if ``A``
+        is normalized (see :func:`~optiwindnet.transforming.as_normalized`).
 
         The per-substation counts must be compatible with the whole-farm count:
         their sums must leave a count within the whole-farm bounds, which are
@@ -330,6 +356,7 @@ class NetworkConstraints:
             capacity=capacity_inflow,
             inflow_total=total_inflow(A_solve),
             power_per_inflow=power_attrs.get('power_per_inflow'),
+            link_length_ub=self._link_length_ub(A),
         )
 
     def _resolve(
@@ -340,6 +367,7 @@ class NetworkConstraints:
         capacity: int,
         inflow_total: int | None = None,
         power_per_inflow: Fraction | None = None,
+        link_length_ub: float | None = None,
     ) -> NetworkBounds:
         """Check the constraints against a problem instance given by numbers.
 
@@ -354,6 +382,8 @@ class NetworkConstraints:
             has a unit (then ``max_substation_loads`` is in that unit, and is
             rounded down to whole inflow); otherwise ``max_substation_loads``
             is in inflow and must be integer.
+          link_length_ub: ``max_link_length`` in the scale of the graph, as
+            given by :meth:`_link_length_ub` (required if it is set).
 
         Returns:
           The bounds the routers enforce.
@@ -362,6 +392,10 @@ class NetworkConstraints:
           ValueError: the constraints do not suit the instance, or cannot all
             be met.
         """
+        if (self.max_link_length is None) != (link_length_ub is None):
+            raise ValueError(
+                'link_length_ub must be given if, and only if, max_link_length is.'
+            )
         if inflow_total is None:
             inflow_total = T
         per_group = 2 if self.topology is Topology.RINGED else 1
@@ -475,7 +509,48 @@ class NetworkConstraints:
             root_load_ub=load_ub_ if any(ub is not None for ub in load_ub_) else None,
             group_load_lb=group_load_lb,
             group_load_ub=group_load_ub,
+            link_length_ub=link_length_ub,
         )
+
+    def _link_length_ub(self, A: nx.Graph) -> float | None:
+        """Return ``max_link_length`` in the scale of ``A``.
+
+        The limit is in the unit of the coordinates, so it is scaled as ``A`` is
+        if ``A`` is normalized. Every terminal must keep a way to a root: a
+        feeder within the limit from some terminal it reaches through links of
+        ``A`` within the limit.
+
+        Raises:
+          ValueError: the limit leaves some terminals unable to reach a root.
+        """
+        if self.max_link_length is None:
+            return None
+        ub = self.max_link_length
+        if A.graph.get('is_normalized', False):
+            ub *= A.graph['norm_scale']
+        T = A.graph['T']
+        feedable_ = (A.graph['d2roots'][:T] <= ub).any(axis=1)
+        within = nx.Graph()
+        within.add_nodes_from(range(T))
+        within.add_edges_from(
+            (u, v)
+            for u, v, length in A.edges(data='length')
+            if u >= 0 and v >= 0 and length <= ub
+        )
+        components = cast('list[set[int]]', list(nx.connected_components(within)))
+        stranded = sorted(
+            n
+            for component in components
+            if not feedable_[list(component)].any()
+            for n in component
+        )
+        if stranded:
+            raise ValueError(
+                f'max_link_length={self.max_link_length:g} leaves {len(stranded)} '
+                f'turbine(s) unable to reach any substation: {stranded[:10]}'
+                f'{"..." if len(stranded) > 10 else ""}'
+            )
+        return ub
 
     def _unlimited(self) -> bool:
         """Whether the whole-farm count is left free (only the implicit bound)."""
