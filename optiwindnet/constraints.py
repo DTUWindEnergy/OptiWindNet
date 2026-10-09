@@ -106,33 +106,28 @@ class NetworkBounds:
     Counts are in feeders (substation connections, two per ring), loads are in
     inflow. Per-root tuples are in root order (``-R`` to ``-1``) and are ``None``
     if no root is bounded.
-
-    Attributes:
-      topology: topology of the network.
-      feeder_route: feeder routing mode.
-      feeders_per_group: feeders of a subtree (1) or of a ring (2).
-      feeders_lb: minimum number of feeders.
-      feeders_ub: maximum number of feeders (``None`` if unlimited).
-      root_feeders_lb: minimum number of feeders of each root.
-      root_feeders_ub: maximum number of feeders of each root (``None`` entries
-        are unlimited).
-      root_load_ub: maximum load of each root (``None`` entries are unlimited).
-      group_load_lb: minimum load of a subtree or ring (``None`` if not
-        balanced).
-      group_load_ub: maximum load of a subtree or ring (``None`` if not
-        balanced).
     """
 
     topology: Topology
+    """Topology of the network."""
     feeder_route: FeederRoute
+    """Feeder routing mode."""
     feeders_per_group: int
+    """Feeders of a subtree (1) or of a ring (2)."""
     feeders_lb: int
+    """Minimum number of feeders."""
     feeders_ub: int | None
+    """Maximum number of feeders (``None`` if unlimited)."""
     root_feeders_lb: tuple[int, ...] | None
+    """Minimum number of feeders of each root."""
     root_feeders_ub: tuple[int | None, ...] | None
+    """Maximum number of feeders of each root (``None`` entries are unlimited)."""
     root_load_ub: tuple[int | None, ...] | None
+    """Maximum load of each root (``None`` entries are unlimited)."""
     group_load_lb: int | None
+    """Minimum load of a subtree or ring (``None`` if not balanced)."""
     group_load_ub: int | None
+    """Maximum load of a subtree or ring (``None`` if not balanced)."""
 
     @property
     def groups_lb(self) -> int:
