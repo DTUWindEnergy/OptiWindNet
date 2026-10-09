@@ -439,6 +439,20 @@ def test_lkh3_holds_exact_counts_and_balance(site, capacity, constraints):
         assert max(loads) <= bounds.group_load_ub
 
 
+def test_lkh3_stops_lkh_that_hangs(monkeypatch):
+    """LKH hangs when its preprocessing takes up the whole time limit."""
+    timeouts = []
+
+    def hanging_run(argv, timeout, **kwargs):
+        timeouts.append(timeout)
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    monkeypatch.setattr(lkh_mod.subprocess, 'run', hanging_run)
+    with pytest.raises(ValueError, match='shorter than its preprocessing'):
+        lkh_mod.lkh3(_make_A(T=4), capacity=2, time_limit=0.1, repair=False)
+    assert timeouts == [1.5 * 0.1 + 2]
+
+
 def test_lkh3_raises_when_lkh_finds_no_solution(monkeypatch):
     monkeypatch.setattr(
         lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[], vehicles=1)
