@@ -16,7 +16,9 @@
 ## Deprecations
 
 - **Router options:** `HGSRouter(feeder_limit, feeder_exact, balanced, ringed)`, `EWRouter(feeder_route)` and `MILPRouter(model_options)` are deprecated in favour of the network constraints, which they conflict with.
+- **`ModelOptions`:** deprecated in favour of `NetworkConstraints`; constructing one warns, so `model_options` given as a `ModelOptions` warns once, where it is made. `MILPRouter.model_options` holds the options as given (`None` if omitted) instead of a `ModelOptions`. [6b66dc6e](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/6b66dc6e)
 - **Advanced API options:** `Solver.set_problem(model_options=...)`, the topology and count options of the `make_min_length_model()` builders and `hgs_cvrp(vehicles, vehicles_exact, balanced, ringed)` are deprecated in favour of `constraints` (`bounds` for the builders). `ModelOptions.to_constraints()` translates existing options. `clusterize(capacity=...)` is deprecated in favour of `group_capacity`, which is twice the cable capacity for rings.
+
 
 ## Features & Improvements
 
