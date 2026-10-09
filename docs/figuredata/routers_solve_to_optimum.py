@@ -55,7 +55,7 @@ def main() -> None:
         P,
         A,
         capacity=problem.CAPACITY,
-        model_options=ModelOptions(**problem.MODEL_OPTIONS),
+        constraints=ModelOptions(**problem.MODEL_OPTIONS).to_constraints(),
         warmstart=S_warm,
     )
     if args.dry_run:

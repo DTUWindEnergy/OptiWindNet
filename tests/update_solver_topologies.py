@@ -66,7 +66,7 @@ def generate() -> dict[str, tuple[str, ...]]:
     # The primary required solver owns the shared adapter problem golden.
     case = next(case for case in MILP_FORMULATION_CASES if case.exact_golden)
     info, S = solve_milp_case(case)
-    assert_topology(S, case.model_options['topology'], case.capacity)
+    assert_topology(S, case.constraints.topology, case.capacity)
     goldens[topology_golden_key(case)] = info.topology_id
 
     if goldens.keys() != golden_keys():

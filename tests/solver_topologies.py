@@ -22,7 +22,7 @@ SOLVER_TOPOLOGY_GOLDENS: dict[str, tuple[str, ...]] = {
     'constructor-site-cazzaro_2022-capacity-5-method-biased-ew-feeder-route-segmented-bias-margin-none': (
         '3a100d44d763de782172ed2ce66236a7',
     ),
-    'milp-site-toy-capacity-5-topology-branched-feeder-route-segmented-feeder-limit-unlimited-balanced-false-max-feeders-0': (
+    'milp-site-toy-capacity-5-topology-branched-feeder-route-segmented': (
         'd6c4791fce89e7b252a11205db708e8c',
     ),
 }

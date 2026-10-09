@@ -9,7 +9,6 @@ import pickle
 from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
 
 import networkx as nx
 
@@ -18,7 +17,7 @@ from optiwindnet.identity import fingerprint_coordinates, topology_id
 from optiwindnet.MILP import SolutionInfo
 from optiwindnet.terse import LinkScope, TerseLinks
 
-from .cases import MILP_ADAPTER_CASES, MILPCase, case_node_id
+from .cases import MILP_ADAPTER_CASES, MILPCase, case_node_id, constraints_record
 from .helpers import run_milp_solve_with_retry
 from .paths import REPO_ROOT
 from .sitecache import get_bundle_from_nodeset_digest, get_location
@@ -147,13 +146,6 @@ def reference_execution_id(execution: MILPReferenceExecution) -> str:
     return f'{case_node_id(execution.case)}-{mode}'
 
 
-def _case_options(case: MILPCase) -> dict[str, Any]:
-    return {
-        name: getattr(value, 'value', value)
-        for name, value in case.model_options.items()
-    }
-
-
 def _expected_cases_by_key() -> dict[str, MILPCase]:
     cases_by_key = {
         reference_problem_key(execution.case): execution.case
@@ -207,7 +199,7 @@ def _validate_milp_references(
         L = bundle.L
         expected_metadata = (
             LinkScope.TOPOLOGY,
-            case.model_options['topology'],
+            case.constraints.topology,
             L.graph['T'],
             L.graph['R'],
         )
@@ -220,7 +212,7 @@ def _validate_milp_references(
         )
         assert_topology(
             reconstructed,
-            case.model_options['topology'],
+            case.constraints.topology,
             case.capacity,
         )
     return references
@@ -250,7 +242,7 @@ def load_provisional_milp_references(
             'Generate them with: python -m tests.update_milp_reference_candidates'
         )
     data = json.loads(path.read_text())
-    if not isinstance(data, dict) or data.get('schema_version') != 1:
+    if not isinstance(data, dict) or data.get('schema_version') != 2:
         raise ValueError(f'{path}: unsupported provisional reference schema')
     stored = data.get('cases')
     if not isinstance(stored, dict):
@@ -276,7 +268,7 @@ def load_provisional_milp_references(
         expected_case = {
             'site': case.site,
             'capacity': case.capacity,
-            'model_options': _case_options(case),
+            'constraints': constraints_record(case.constraints),
         }
         for name, expected in expected_case.items():
             if stored_case.get(name) != expected:
@@ -336,14 +328,14 @@ def solve_milp_reference_execution(
             capacity=case.capacity,
             creator='milp-reference-optimum',
         )
-        assert_topology(warmstart, case.model_options['topology'], case.capacity)
+        assert_topology(warmstart, case.constraints.topology, case.capacity)
 
     return run_milp_solve_with_retry(
         bundle.P,
         bundle.A,
         solver_name=case.solver_name,
         capacity=case.capacity,
-        model_options=case.model_options,
+        constraints=case.constraints,
         time_limit=TEST_TIME_LIMIT,
         mip_gap=case.mip_gap,
         warmstart=warmstart,

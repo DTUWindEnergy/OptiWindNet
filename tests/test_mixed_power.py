@@ -15,6 +15,7 @@ from optiwindnet import loads
 from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
 from optiwindnet.baselines.hgs import hgs_cvrp
 from optiwindnet.baselines.lkh import lkh3
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import G_from_S, L_from_G, S_from_G
 from optiwindnet.db.storage import pack_G
 from optiwindnet.heuristics.constructor import constructor
@@ -26,6 +27,7 @@ from optiwindnet.loads import (
     quantize_for_capacity,
     quantized,
     set_terminal_power,
+    total_inflow,
     validate_terminal_power,
 )
 from optiwindnet.mesh import make_planar_embedding
@@ -569,16 +571,14 @@ def test_heuristics_reject_unsupported_modes_with_unequal_power(producer, kwargs
 
 
 @pytest.mark.parametrize(
-    ('model_options', 'error', 'match'),
+    ('constraints', 'error', 'match'),
     (
         ({'topology': 'ringed'}, NotImplementedError, 'RINGED model'),
-        ({'feeder_limit': 'minimum'}, ValueError, 'nonunitary terminal inflow'),
-        ({'feeder_limit': 'min_plus1'}, ValueError, 'nonunitary terminal inflow'),
+        ({'feeders': 'min'}, ValueError, 'relative to the minimum'),
+        ({'max_feeders': 'min+1'}, ValueError, 'relative to the minimum'),
     ),
 )
-def test_milp_rejects_unsupported_models_with_unequal_power(
-    model_options, error, match
-):
+def test_milp_rejects_unsupported_models_with_unequal_power(constraints, error, match):
     try:
         solver = solver_factory('highs')
     except BaseException as exc:
@@ -588,7 +588,10 @@ def test_milp_rejects_unsupported_models_with_unequal_power(
     wfn = _mixed_wfn()
     with pytest.raises(error, match=match):
         solver.set_problem(
-            wfn.P, wfn.A, model_options=model_options, capacity_nominal=2.5
+            wfn.P,
+            wfn.A,
+            constraints=NetworkConstraints(**constraints),
+            capacity_nominal=2.5,
         )
 
 
@@ -598,19 +601,16 @@ def test_milp_warmstart_is_built_only_for_plain_radial_solves():
     capacity_kwargs = {'capacity_nominal': Fraction(5, 2), 'power_rtol': 0.01}
     A_solve, capacity, _ = quantized(A, **capacity_kwargs)
 
-    def warmstart(model_options):
-        router = MILPRouter(
-            'highs', time_limit=1, mip_gap=0.01, model_options=model_options
-        )
-        return router._make_warmstart(A, capacity_kwargs, A_solve, capacity)
+    def warmstart(**kwargs):
+        router = MILPRouter('highs', time_limit=1, mip_gap=0.01)
+        constraints = NetworkConstraints(**kwargs)
+        bounds = constraints.resolve(A, **capacity_kwargs)
+        return router._make_warmstart(A, capacity_kwargs, A_solve, constraints, bounds)
 
-    S_warm = warmstart({'topology': 'radial'})
+    S_warm = warmstart(topology='radial')
     assert S_warm is not None and S_warm.graph['max_load'] <= capacity
-    assert warmstart({'topology': 'ringed'}) is None
-    assert (
-        warmstart({'balanced': True, 'feeder_limit': 'exactly', 'max_feeders': 2})
-        is None
-    )
+    assert warmstart(topology='ringed') is None
+    assert warmstart(balanced=True, feeders=2) is None
 
 
 # --- cable reassignment ---
@@ -889,3 +889,19 @@ def test_gplot_terminal_shapes_per_power_level():
                 assert size == NODESIZE
     finally:
         plt.close(fig)
+
+
+def test_constraints_resolve_with_the_quantization_of_the_solve():
+    A = _mixed_wfn().A
+    capacity_kwargs = {'capacity_nominal': Fraction(5, 2), 'power_rtol': 0.01}
+    A_solve, capacity, power_attrs = quantized(A, **capacity_kwargs)
+    constraints = NetworkConstraints(max_substation_loads=Fraction(5, 2))
+    bounds = constraints.resolve(A, **capacity_kwargs)
+    assert bounds == constraints._resolve(
+        T=A.graph['T'],
+        R=A.graph['R'],
+        capacity=capacity,
+        inflow_total=total_inflow(A_solve),
+        power_per_inflow=power_attrs['power_per_inflow'],
+    )
+    assert bounds.root_load_ub == (capacity,) * A.graph['R']

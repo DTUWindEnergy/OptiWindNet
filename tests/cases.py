@@ -3,14 +3,13 @@
 
 """Typed low-level producer cases with attribute-derived names and golden keys."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.heuristics.constructor import _METHOD_TOPOLOGY
-from optiwindnet.MILP import ModelOptions
-from optiwindnet.MILP._core import FeederRoute
-from optiwindnet.types import Topology
+from optiwindnet.types import FeederRoute, Topology
 
 DEFAULT_BASELINE_TIME_LIMIT: float = 0.2
 DEFAULT_MILP_TIME_LIMIT: float = 1.0
@@ -50,7 +49,7 @@ class MILPCase:
     site: str
     solver_name: str
     capacity: int
-    model_options: ModelOptions = field(default_factory=ModelOptions)
+    constraints: NetworkConstraints = field(default_factory=NetworkConstraints)
     time_limit: float = DEFAULT_MILP_TIME_LIMIT
     mip_gap: float = DEFAULT_MILP_MIP_GAP
     exact_golden: bool = False
@@ -69,6 +68,33 @@ def _token(value: object) -> str:
     if isinstance(value, float):
         return format(value, '.12g').replace('-', 'm').replace('.', 'p')
     return str(value).lower().replace('_', '-').replace('.', '-')
+
+
+_DEFAULT_CONSTRAINTS = NetworkConstraints()
+
+
+def constraint_items(constraints: NetworkConstraints) -> list[tuple[str, Any]]:
+    """List topology, feeder route and the other fields that differ from default.
+
+    Leaving default fields out keeps the keys derived from these items stable
+    when :class:`NetworkConstraints` gains a field.
+    """
+    return [
+        (f.name, getattr(constraints, f.name))
+        for f in fields(NetworkConstraints)
+        if f.name in {'topology', 'feeder_route'}
+        or getattr(constraints, f.name) != getattr(_DEFAULT_CONSTRAINTS, f.name)
+    ]
+
+
+def constraints_record(constraints: NetworkConstraints) -> dict[str, Any]:
+    """Return the items of :func:`constraint_items` as JSON-compatible values."""
+    return {
+        name: list(value)
+        if isinstance(value, tuple)
+        else getattr(value, 'value', value)
+        for name, value in constraint_items(constraints)
+    }
 
 
 def case_node_id(case: Case) -> str:
@@ -100,24 +126,18 @@ def case_node_id(case: Case) -> str:
             tokens.append(f'tl{_token(case.time_limit)}')
         return '-'.join(tokens)
 
-    options = case.model_options
+    constraints = case.constraints
     tokens = [
         _token(case.solver_name),
         case.site,
-        _token(options['topology']),
-        _token(options['feeder_route']),
-        _token(options['feeder_limit']),
+        constraints.topology.value,
+        constraints.feeder_route.value,
         f'cap{case.capacity}',
     ]
-    defaults = ModelOptions()
-    aliases = {'max_feeders': 'maxf'}
-    for name, value in options.items():
-        if name in {'topology', 'feeder_route', 'feeder_limit'}:
-            continue
-        if value == defaults.get(name):
-            continue
+    aliases = {'feeders': 'f', 'max_feeders': 'maxf'}
+    for name, value in constraint_items(constraints)[2:]:
         if isinstance(value, bool):
-            tokens.append(name.replace('_', '-') if value else f'no-{name}')
+            tokens.append(name.replace('_', '-'))
         else:
             tokens.append(f'{aliases.get(name, name)}{_token(value)}')
     if case.time_limit != DEFAULT_MILP_TIME_LIMIT:
@@ -143,7 +163,7 @@ def topology_golden_key(case: ConstructorCase | MILPCase) -> str:
     tokens = ['milp', f'site-{case.site}', f'capacity-{case.capacity}']
     tokens.extend(
         f'{name.replace("_", "-")}-{_token(value)}'
-        for name, value in case.model_options.items()
+        for name, value in constraint_items(case.constraints)
     )
     return '-'.join(tokens)
 
@@ -189,7 +209,7 @@ MILP_FORMULATION_CASES = tuple(
         'toy',
         'ortools.cp_sat',
         5,
-        ModelOptions(topology=topology, feeder_route=route),
+        NetworkConstraints(topology=topology, feeder_route=route),
         exact_golden=topology is Topology.BRANCHED and route is FeederRoute.SEGMENTED,
     )
     for topology in (Topology.BRANCHED, Topology.RADIAL, Topology.RINGED)
@@ -197,7 +217,7 @@ MILP_FORMULATION_CASES = tuple(
 )
 
 MILP_ADAPTER_CASES = tuple(
-    MILPCase('toy', solver, 5, ModelOptions(), exact_golden=True)
+    MILPCase('toy', solver, 5, exact_golden=True)
     for solver in (
         'ortools.cp_sat', 'ortools.gscip', 'ortools.highs',
         'highs', 'scip', 'gurobi', 'cplex', 'cbc', 'fscip', 'pyomo.highs',
@@ -206,44 +226,39 @@ MILP_ADAPTER_CASES = tuple(
 
 MILP_FAMILY_CASES = (
     MILPCase(
-        'toy', 'highs', 5, ModelOptions(topology='ringed', feeder_route='straight')
+        'toy',
+        'highs',
+        5,
+        NetworkConstraints(topology='ringed', feeder_route='straight'),
     ),
     MILPCase(
-        'toy', 'scip', 5, ModelOptions(topology='ringed', feeder_route='straight')
+        'toy', 'scip', 5, NetworkConstraints(topology='ringed', feeder_route='straight')
     ),
     MILPCase(
-        'toy', 'highs', 5, ModelOptions(topology='radial', feeder_route='straight')
+        'toy',
+        'highs',
+        5,
+        NetworkConstraints(topology='radial', feeder_route='straight'),
     ),
     MILPCase(
-        'toy', 'scip', 5, ModelOptions(topology='radial', feeder_route='straight')
+        'toy', 'scip', 5, NetworkConstraints(topology='radial', feeder_route='straight')
     ),
 )
 
 MILP_BOUNDARY_CASES = (
-    MILPCase('toy', 'ortools.cp_sat', 1, ModelOptions()),
-    MILPCase('toy', 'ortools.cp_sat', 12, ModelOptions()),
-    MILPCase('toy', 'ortools.cp_sat', 5, ModelOptions(feeder_limit='minimum')),
-    MILPCase('toy', 'ortools.cp_sat', 5, ModelOptions(feeder_limit='min_plus1')),
+    MILPCase('toy', 'ortools.cp_sat', 1),
+    MILPCase('toy', 'ortools.cp_sat', 12),
+    MILPCase('toy', 'ortools.cp_sat', 5, NetworkConstraints(feeders='min')),
+    MILPCase('toy', 'ortools.cp_sat', 5, NetworkConstraints(max_feeders='min+1')),
+    MILPCase('toy', 'ortools.cp_sat', 5, NetworkConstraints(max_feeders=4)),
+    MILPCase('toy', 'ortools.cp_sat', 5, NetworkConstraints(feeders=3, balanced=True)),
     MILPCase(
         'toy',
         'ortools.cp_sat',
         5,
-        ModelOptions(feeder_limit='specified', max_feeders=4),
+        NetworkConstraints(topology='ringed', feeder_route='straight'),
     ),
-    MILPCase(
-        'toy',
-        'ortools.cp_sat',
-        5,
-        ModelOptions(feeder_limit='exactly', max_feeders=3, balanced=True),
-    ),
-    MILPCase('toy', 'ortools.cp_sat', 5, ModelOptions(feeder_limit='unlimited')),
-    MILPCase(
-        'toy',
-        'ortools.cp_sat',
-        5,
-        ModelOptions(topology='ringed', feeder_route='straight'),
-    ),
-    MILPCase('toy', 'ortools.cp_sat', 5, ModelOptions(), mip_gap=0.2),
+    MILPCase('toy', 'ortools.cp_sat', 5, mip_gap=0.2),
 )
 
 

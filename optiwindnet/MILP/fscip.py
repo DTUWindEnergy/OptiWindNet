@@ -14,8 +14,6 @@ from typing import Any, ClassVar
 import networkx as nx
 from bitarray import frozenbitarray
 
-from ..converting import G_from_S
-from ..pathfinding import PathFinder
 from ._core import (
     FeederRoute,
     OWNSolutionNotFound,
@@ -56,9 +54,7 @@ class SolverFSCIP(Solver, PoolHandler):
         return round(self._value_map[var])
 
     def _set_model(self, warmstart: nx.Graph | None) -> None:
-        model, metadata = make_min_length_model(
-            self.A, self.capacity, **self.model_options
-        )
+        model, metadata = make_min_length_model(self.A, self.capacity, self.bounds)
         self.var_from_name = {
             var.name: var
             for var in chain(metadata.link_.values(), metadata.flow_.values())
@@ -290,10 +286,10 @@ class SolverFSCIP(Solver, PoolHandler):
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
-        P, model_options = self.P, self.model_options
-        if model_options['feeder_route'] is FeederRoute.STRAIGHT:
+        P, bounds = self.P, self.bounds
+        if bounds.feeder_route is FeederRoute.STRAIGHT:
             S = self._incumbent_topology()
-            G = PathFinder(G_from_S(S, A), P, A).create_detours()
+            G = self._create_detours(S, P, A)
         else:
             S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())

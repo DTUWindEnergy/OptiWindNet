@@ -5,9 +5,8 @@
 
 from dataclasses import replace
 
-from optiwindnet.MILP import ModelOptions
-from optiwindnet.MILP._core import FeederRoute
-from optiwindnet.types import Topology
+from optiwindnet.constraints import NetworkConstraints
+from optiwindnet.types import FeederRoute, Topology
 
 from .cases import (
     CONSTRUCTOR_CASES,
@@ -121,11 +120,11 @@ def test_milp_golden_key_ignores_backend_and_solve_controls():
     assert len({topology_golden_key(item) for item in MILP_ADAPTER_CASES}) == 1
 
 
-def test_milp_golden_key_tracks_model_options():
+def test_milp_golden_key_tracks_constraints():
     case = MILP_ADAPTER_CASES[0]
     different_problem = replace(
         case,
-        model_options=ModelOptions(feeder_limit='minimum'),
+        constraints=NetworkConstraints(feeders='min'),
     )
 
     assert topology_golden_key(different_problem) != topology_golden_key(case)
@@ -167,12 +166,12 @@ def test_baseline_matrices_cover_topologies_and_roots():
 
 
 def test_milp_matrix_separates_formulations_from_adapters():
-    assert {case.model_options['topology'] for case in MILP_FORMULATION_CASES} == set(
+    assert {case.constraints.topology for case in MILP_FORMULATION_CASES} == set(
         Topology
     )
-    assert {
-        case.model_options['feeder_route'] for case in MILP_FORMULATION_CASES
-    } == set(FeederRoute)
+    assert {case.constraints.feeder_route for case in MILP_FORMULATION_CASES} == set(
+        FeederRoute
+    )
     assert len({case.solver_name for case in MILP_ADAPTER_CASES}) >= 3
     assert {case.solver_name for case in MILP_FAMILY_CASES} == {'highs', 'scip'}
 

@@ -62,7 +62,7 @@ Capacity accounting for rings differs from that of branched and radial topologie
 
 - a ring serving two or more turbines is split into two arms serving equal numbers of turbines, or differing by one;
 - cable capacity limits the load on each feeder of the _split_ ring; with equal turbine power, the two arms together can serve up to twice the turbine count allowed on one feeder;
-- each ring uses two physical connections at the substation, so the requested feeder count must be even for a ringed topology;
+- each ring uses two physical connections at the substation, so the requested feeder count of the wind farm must be even for a ringed topology;
 - a ring serving two or more turbines provides an alternative path to a substation after a single cable failure. The model checks capacity in the normal split configuration; it does not guarantee that the surviving arm can carry the entire ring's output after a fault;
 - the single-turbine case uses just one feeder, with no redundant path.
 
@@ -72,11 +72,15 @@ _In use:_ {doc}`/notebooks/hi30_topologies` (Network/Router API) · {doc}`/noteb
 
 ## Problem options
 
-Beyond the architecture, three choices define what counts as an acceptable network:
+Beyond the architecture, the following choices define what counts as an acceptable network. They are stated together, with the topology, as the network's constraints (`NetworkConstraints`, given to `WindFarmNetwork` as `constraints`):
 
 - **Feeder routing:** allow detours made of multiple straight segments, or require straight feeders. Even with straight feeders, exclusion zones may introduce bends.
-- **Feeder count:** leave the count unrestricted, bound it, or pin it to a particular value. Bounds can be absolute or relative to the minimum count required by the other constraints. For rings, the allowed range must include an even count because each ring uses two substation connections.
-- **Balancing:** require turbine counts per subtree to differ by at most one. This assumes equal turbine power and requires a pinned feeder count; it does not mean balancing unequal power outputs.
+- **Feeder count of the wind farm:** leave the count unrestricted, bound it (`max_feeders`), or pin it to a particular value (`feeders`). Either can be absolute or relative to the minimum count required by the cable capacity (`'min'`, `'min+k'`). For rings, the count must be even because each ring uses two substation connections.
+- **Feeder count of each substation:** bound (`max_substation_feeders`) or pin (`substation_feeders`) the feeders of each substation, e.g. to the number of its switchgear bays; a substation may have one or the other. The counts of the substations must be compatible with that of the wind farm.
+- **Load of each substation:** bound the power each substation collects (`max_substation_loads`), in the unit of the turbine power.
+- **Balancing:** require the turbine counts of all subtrees (or rings) of the network to differ by at most one. This assumes equal turbine power and requires a pinned feeder count; it does not mean balancing unequal power outputs.
+
+Per-substation values are either one value for every substation or one entry per substation, in the order of the substations (`None` leaves a substation free). With any substation bounded, every subtree stays on the substation it was solved for when detours are created. Constraints that cannot all be met raise an error before any optimization.
 
 These choices define the problem independently of the optimization method, but methods differ in which choices they can enforce. See [](/routers.md#which-constraints-each-approach-can-enforce).
 

@@ -45,7 +45,7 @@ def test_milp_reference_execution(execution, milp_references, run_isolated):
 
     info, S, warmed_by = result
     assert bool(warmed_by) is execution.warmstart
-    assert_topology(S, case.model_options['topology'], case.capacity)
+    assert_topology(S, case.constraints.topology, case.capacity)
 
     if execution.warmstart or info.termination.lower() == 'optimal':
         # the incumbent, not the routed pool pick: the reference is the optimum

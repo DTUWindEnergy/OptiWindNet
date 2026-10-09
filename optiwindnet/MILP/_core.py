@@ -6,8 +6,9 @@ import logging
 import math
 import os
 import sys
+import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum, auto
 from fractions import Fraction
 from inspect import cleandoc
@@ -15,13 +16,14 @@ from itertools import chain
 from pathlib import Path
 from textwrap import indent
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import networkx as nx
 import numpy as np
 from bitarray import bitarray, frozenbitarray
 from makefun import with_signature
 
+from ..constraints import NetworkBounds, NetworkConstraints
 from ..converting import G_from_S, S_from_linkbits
 from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
 from ..interarraylib import directed_links
@@ -35,7 +37,7 @@ from ..loads import (
     validate_terminal_power,
 )
 from ..pathfinding import PathFinder
-from ..types import OWNWarmupFailed, Topology
+from ..types import FeederRoute, OWNWarmupFailed, Topology
 
 _lggr = logging.getLogger(__name__)
 error, info, warn = _lggr.error, _lggr.info, _lggr.warning
@@ -82,14 +84,6 @@ class OWNSolutionNotFound(Exception):
     pass
 
 
-class FeederRoute(StrEnum):
-    "If feeder routes must be ``'straight'`` or can be detoured (``'segmented'``)."
-
-    STRAIGHT = auto()
-    SEGMENTED = auto()
-    DEFAULT = SEGMENTED
-
-
 class FeederLimit(StrEnum):
     """Whether to limit the number of feeders. Both ``'specified'`` (an upper
     bound) and ``'exactly'`` (an exact count) require the additional kwarg
@@ -111,205 +105,198 @@ class FeederLimit(StrEnum):
     DEFAULT = UNLIMITED
 
 
+_Link = tuple[int, int]
+
 _FEEDER_LIMITS_FROM_MINIMUM = (
     FeederLimit.MINIMUM, FeederLimit.MIN_PLUS1,
     FeederLimit.MIN_PLUS2, FeederLimit.MIN_PLUS3,
 )  # fmt: skip
 
 
-def feeder_and_load_bounds(
-    T: int,
-    capacity: int,
-    feeder_limit: FeederLimit,
-    max_feeders: int,
-    balanced: bool,
-    feeders_per_subtree: int = 1,
-    inflow_total: int | None = None,
-) -> tuple[int, int | None, int | None, int | None]:
-    """Derive the feeder-count and feeder-load bounds a model must enforce.
+def _constraints_from_options(
+    topology: Topology | str = Topology.DEFAULT,
+    feeder_route: FeederRoute | str = FeederRoute.DEFAULT,
+    feeder_limit: FeederLimit | str = FeederLimit.DEFAULT,
+    balanced: bool = False,
+    max_feeders: int = 0,
+) -> NetworkConstraints:
+    """Translate the options of :class:`ModelOptions` into network constraints.
 
-    Bounds are returned in units of **subtrees** (the quantity the model's
-    feeder-sum constraint counts): one feeder per subtree for radial/branched
-    topologies, but a RINGED subtree is a cycle with two feeders. The
-    caller signals this with ``feeders_per_subtree`` (2 for RINGED), so that a
-    user-supplied ``max_feeders`` — always expressed as the number of physical
-    **substation connections** — is converted to the subtree count the model
-    constrains, and the returned bounds are multiplied back by
-    ``feeders_per_subtree`` for reporting.
-
-    ``inflow_total`` is the sum of terminal inflow and defaults to ``T`` (one
-    unit per terminal). It determines the capacity-based bounds. The number
-    of subtrees is still at most ``T``, since each must contain a terminal.
-
-    The subtree count is bounded below by ``min_feeders = ceil(inflow_total /
-    capacity)`` regardless of ``feeder_limit`` (a valid inequality).
-    ``feeders_ub`` is ``None`` when the count is unbounded above; when it equals
-    ``feeders_lb``, the count is pinned and callers should emit an equality
-    constraint.
-
-    Nonunitary terminal inflow make ``min_feeders`` unattainable in general -- it
-    ignores that a terminal's inflow is indivisible, which is a bin-packing
-    question -- so the ``feeder_limit`` modes that derive their bounds from it
-    are rejected rather than pinning the model to an infeasible count.
-
-    Balanced subtrees (loads differing at most by one unit) are only expressible
-    with a pinned feeder count ``F``, in which case the loads must lie in
-    ``{inflow_total // F, ceil(inflow_total / F)}``. A load bound of ``None`` means
-    "do not emit": either ``balanced`` is off, or it is not enforceable (a
-    warning is issued), or the bound is already implied by the flow variable's
-    own bounds. Nonunitary terminal inflow may make these balanced load bounds
-    infeasible.
-
-    Returns:
-        ``(feeders_lb, feeders_ub, load_lb, load_ub)`` in subtree-count units.
+    ``'min_plus<k>'`` adds ``k`` subtrees or rings to the minimum (``2 * k``
+    feeders if RINGED). The constraints drop an unenforceable ``balanced`` (the
+    feeder count not fixed) with a warning, as these options always did.
     """
-    if inflow_total is None:
-        inflow_total = T
-    elif inflow_total != T and feeder_limit in _FEEDER_LIMITS_FROM_MINIMUM:
-        raise ValueError(
-            f'feeder_limit "{feeder_limit.value}" derives the feeder count from '
-            'the minimum, which nonunitary terminal inflow may not attain; use '
-            '"unlimited", "exactly" or "specified" instead'
-        )
-    if feeders_per_subtree != 1 and max_feeders:
-        if max_feeders % feeders_per_subtree:
-            raise ValueError(
-                f'max_feeders ({max_feeders}) must be a multiple of '
-                f'{feeders_per_subtree} for a RINGED topology (each ring uses '
-                f'{feeders_per_subtree} substation connections)'
-            )
-        max_feeders //= feeders_per_subtree
-    min_feeders = math.ceil(inflow_total / capacity)
-    if feeder_limit is FeederLimit.UNLIMITED:
-        feeders_lb, feeders_ub = min_feeders, None
-    elif feeder_limit is FeederLimit.MINIMUM:
-        feeders_lb = feeders_ub = min_feeders
-    elif feeder_limit is FeederLimit.EXACTLY:
-        if max_feeders < min_feeders:
-            raise ValueError('max_feeders is below the minimum necessary')
-        if max_feeders > T:
-            raise ValueError('max_feeders is above the number of terminals')
-        feeders_lb = feeders_ub = max_feeders
+    topology, feeder_limit = Topology(topology), FeederLimit(feeder_limit)
+    per_group = 2 if topology is Topology.RINGED else 1
+    feeders: int | str | None = None
+    most_feeders: int | str | None = None
+    if feeder_limit is FeederLimit.EXACTLY:
+        feeders = max_feeders
     elif feeder_limit is FeederLimit.SPECIFIED:
-        if max_feeders < min_feeders:
-            raise ValueError('max_feeders is below the minimum necessary')
-        feeders_lb, feeders_ub = min_feeders, max_feeders
-    elif feeder_limit in _FEEDER_LIMITS_FROM_MINIMUM[1:]:
-        plus = int(feeder_limit.value[-1])
-        feeders_lb, feeders_ub = min_feeders, min_feeders + plus
-    else:
-        raise NotImplementedError('Unknown value:', feeder_limit)
-
-    if not balanced:
-        return feeders_lb, feeders_ub, None, None
-    if feeders_lb != feeders_ub:
-        warn(
-            'Model option <balanced = True> requires a single possible feeder'
-            f' count, but <feeder_limit = {feeder_limit.value.upper()}> allows a'
-            ' range: model will not enforce balanced subtrees.'
-        )
-        return feeders_lb, feeders_ub, None, None
-    F = feeders_lb
-    load_lb, load_ub = inflow_total // F, math.ceil(inflow_total / F)
-    # bounds at the extremes are already implied by the flow variable's bounds
-    return (
-        feeders_lb,
-        feeders_ub,
-        load_lb if load_lb > 1 else None,
-        load_ub if load_ub < capacity else None,
+        most_feeders = max_feeders
+    elif feeder_limit is FeederLimit.MINIMUM:
+        feeders = 'min'
+    elif feeder_limit in _FEEDER_LIMITS_FROM_MINIMUM:
+        most_feeders = f'min+{per_group * int(feeder_limit.value[-1])}'
+    return _OptionsConstraints(
+        topology=topology,
+        feeder_route=feeder_route,
+        feeders=feeders,
+        max_feeders=most_feeders,
+        balanced=balanced,
     )
 
 
-class HGSCountKwargs(TypedDict):
-    """Feeder-count keyword arguments of :func:`~optiwindnet.baselines.hgs.hgs_cvrp`."""
+class _OptionsConstraints(NetworkConstraints):
+    """Network constraints translated from :class:`ModelOptions`.
 
-    vehicles: int | None
-    vehicles_exact: bool
-    balanced: bool
+    They resolve an unenforceable balance (a feeder count that is not fixed)
+    into no balance, with a warning, instead of raising.
+    """
+
+    def __repr__(self) -> str:
+        # it stands for the NetworkConstraints that the options translate into
+        return 'NetworkConstraints' + super().__repr__().removeprefix(
+            type(self).__qualname__
+        )
+
+    def _resolve(self, **kwargs) -> NetworkBounds:
+        if not self.balanced or self.feeders is not None:
+            return super()._resolve(**kwargs)
+        bounds = replace(self, balanced=False)._resolve(**kwargs)
+        if bounds.feeders_lb == bounds.feeders_ub:
+            return super()._resolve(**kwargs)
+        warn(
+            'Model option <balanced = True> requires a single possible feeder '
+            'count, but the feeder limit allows a range: model will not enforce '
+            'balanced subtrees.'
+        )
+        return bounds
 
 
-def hgs_count_kwargs(
-    T: int,
-    R: int,
+def model_bounds(
+    A: nx.Graph,
     capacity: int,
-    model_options: Mapping[str, Any],
-    inflow_total: int | None = None,
-) -> HGSCountKwargs | None:
-    """Translate a model's feeder-count bounds into HGS-CVRP count options.
+    bounds: NetworkBounds | None,
+    legacy: Mapping[str, Any],
+) -> NetworkBounds:
+    """Return the bounds a model builder enforces.
 
-    The bounds come from :func:`feeder_and_load_bounds`, as in the model
-    builders, so a solution of :func:`~optiwindnet.baselines.hgs.hgs_cvrp` run
-    with the returned options satisfies the model's feeder-count constraints.
-    Counts are in subtrees, which is what ``hgs_cvrp()`` counts as ``vehicles``
-    (rings for a RINGED model, two feeders each).
-
-    HGS-CVRP reproduces:
-
-    - an unbounded count (``vehicles=None``);
-    - a range of counts, as an upper bound (only the minimum if multi-root);
-    - a count pinned at the minimum, balanced if the model asks for it;
-    - a count pinned above the minimum, exactly and balanced (a balanced
-      solution also satisfies an unbalanced model), for a single root and, if
-      RINGED, at most ``T // 2`` rings.
-
-    Nonunitary terminal inflow is only reproduced by an unbalanced, single-root,
-    radial solve that is not pinned above the minimum.
-
-    Args:
-      T: number of terminals.
-      R: number of roots.
-      capacity: cable capacity, in inflow (per arm for RINGED).
-      model_options: the model's :class:`ModelOptions`.
-      inflow_total: sum of terminal inflow (defaults to ``T``).
-
-    Returns:
-      Keyword arguments ``vehicles``, ``vehicles_exact`` and ``balanced`` for
-      ``hgs_cvrp()``, or ``None`` if HGS-CVRP cannot reproduce the bounds.
+    ``legacy`` holds the builder's deprecated keyword arguments (the options of
+    :class:`ModelOptions`), of which only those not ``None`` count. Without
+    ``bounds`` or ``legacy`` options, the defaults of
+    :class:`~optiwindnet.constraints.NetworkConstraints` apply.
 
     Raises:
-      ValueError: as :func:`feeder_and_load_bounds`, if the model options are
-        infeasible or incompatible with nonunitary inflow.
+      TypeError: both ``bounds`` and ``legacy`` options are given.
+      ValueError: the bounds limit the load of the roots of a RINGED model, whose
+        rings may connect to two roots.
     """
-    if inflow_total is None:
-        inflow_total = T
-    ringed = model_options['topology'] is Topology.RINGED
-    nonunitary = inflow_total != T
-    if nonunitary and (ringed or R > 1):
-        return None
-    per_subtree = 2 if ringed else 1
-    solve_capacity = per_subtree * capacity
-    # balanced=False: an unenforceable balance is the model builder's to warn about
-    feeders_lb, feeders_ub, _, _ = feeder_and_load_bounds(
-        T,
-        solve_capacity,
-        model_options['feeder_limit'],
-        model_options['max_feeders'],
+    given = {key: value for key, value in legacy.items() if value is not None}
+    if bounds is None:
+        if given:
+            warnings.warn(
+                f'make_min_length_model() options {sorted(given)} are deprecated: '
+                'pass bounds=NetworkConstraints(...).resolve(A, capacity=...) instead.',
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        bounds = _constraints_from_options(**given)._resolve(
+            T=A.graph['T'],
+            R=A.graph['R'],
+            capacity=capacity,
+            inflow_total=total_inflow(A),
+        )
+    elif given:
+        raise TypeError(f'Give either bounds or the options {sorted(given)}.')
+    if bounds.topology is Topology.RINGED and bounds.root_load_ub is not None:
+        raise ValueError(
+            'Substation load limits are not available for RINGED MILP models: '
+            'the two feeders of a ring may connect it to two substations.'
+        )
+    return bounds
+
+
+@dataclass(frozen=True, slots=True)
+class BoundRow:
+    """A bound on a sum of link (or flow) variables of a model.
+
+    Attributes:
+      name: constraint name, to be suffixed with ``_eq``, ``_lb`` or ``_ub``.
+      links: keys of the variables to sum.
+      flow: whether to sum the flow variables instead of the link variables.
+      lb: lower bound (``None`` if none).
+      ub: upper bound (``None`` if none).
+    """
+
+    name: str
+    links: tuple[_Link, ...]
+    flow: bool
+    lb: int | None
+    ub: int | None
+
+
+def bound_rows(bounds: NetworkBounds, R: int, T: int) -> Iterator[BoundRow]:
+    """Yield the count and load bounds of a model, except for balance.
+
+    The feeder count is bounded in subtrees or rings, i.e. on the feeders that
+    carry flow. Its lower bound is always given, as a valid inequality. A root's
+    feeder count includes the closing feeders of rings.
+    """
+    ringed = bounds.topology is Topology.RINGED
+    yield BoundRow(
+        'feeder_limit',
+        tuple((t, r) for r in range(-R, 0) for t in range(T)),
         False,
-        per_subtree,
-        inflow_total,
+        bounds.groups_lb,
+        bounds.groups_ub,
     )
-    if feeders_ub is None:
-        return {'vehicles': None, 'vehicles_exact': False, 'balanced': False}
-    if feeders_lb != feeders_ub:
-        # multi-root, HGS-CVRP honours only the minimum, which is feeders_lb
-        vehicles = feeders_lb if R > 1 else feeders_ub
-        return {'vehicles': vehicles, 'vehicles_exact': False, 'balanced': False}
-    balanced = model_options['balanced']
-    min_subtrees = math.ceil(inflow_total / solve_capacity)
-    if feeders_lb == min_subtrees:
-        if nonunitary and balanced:
-            return None
-        # an upper bound at the minimum already yields the minimum
-        return {'vehicles': feeders_lb, 'vehicles_exact': False, 'balanced': balanced}
-    # pinning above the minimum takes the balancing slack nodes; a ring with a
-    # single terminal would have one feeder instead of two
-    if nonunitary or R > 1 or (ringed and feeders_lb > T // 2):
-        return None
-    return {'vehicles': feeders_lb, 'vehicles_exact': True, 'balanced': True}
+    for r, lb, ub in zip(
+        range(-R, 0),
+        bounds.root_feeders_lb or (0,) * R,
+        bounds.root_feeders_ub or (None,) * R,
+    ):
+        if lb or ub is not None:
+            yield BoundRow(
+                f'root_feeder_limit_r{-r}',
+                tuple((t, r) for t in range(T))
+                + (tuple((r, t) for t in range(T)) if ringed else ()),
+                False,
+                lb or None,
+                ub,
+            )
+    for r, ub in zip(range(-R, 0), bounds.root_load_ub or (None,) * R):
+        if ub is not None:
+            yield BoundRow(
+                f'root_load_limit_r{-r}',
+                tuple((t, r) for t in range(T)),
+                True,
+                None,
+                ub,
+            )
+
+
+def balance_bounds(
+    bounds: NetworkBounds, capacity: int
+) -> tuple[int | None, int | None]:
+    """Return the load bounds of a feeder under balance, if they bind.
+
+    Bounds at the extremes (``1`` and ``capacity``, which is per ring if RINGED)
+    are already implied by the flow variable's own bounds and are ``None``.
+    """
+    lb, ub = bounds.group_load_lb, bounds.group_load_ub
+    return (
+        lb if lb is not None and lb > 1 else None,
+        ub if ub is not None and ub < capacity else None,
+    )
 
 
 class ModelOptions(dict):
     """Hold options for the modelling of the cable routing problem.
+
+    Deprecated, and constructing one warns: superseded by
+    :class:`~optiwindnet.constraints.NetworkConstraints`, which
+    :meth:`to_constraints` translates the options into.
 
     Use ModelOptions.help() to get the options and their permitted and default
     values. Use ModelOptions() without any parameters to use the defaults.
@@ -374,6 +361,12 @@ class ModelOptions(dict):
             + ')'
         )
         def __init__(self, **kwargs):
+            warnings.warn(
+                'ModelOptions is deprecated: give the network (or set_problem()) '
+                'constraints=NetworkConstraints(...) instead.',
+                DeprecationWarning,
+                stacklevel=3,
+            )
             # dispatch on the key, not on the value's type: a str passed for an
             # int option is a type error, not an enum to look up
             for k, v in kwargs.items():
@@ -406,10 +399,22 @@ class ModelOptions(dict):
 
     @classmethod
     def _from_pickle(cls, values):
-        return cls(**values)
+        # restoring options is not a new use of them
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            return cls(**values)
 
     def __reduce__(self):
         return type(self)._from_pickle, (dict(self),)
+
+    def to_constraints(self) -> NetworkConstraints:
+        """Translate the options into network constraints.
+
+        ``feeder_limit='min_plus<k>'`` becomes ``max_feeders='min+<k>'``, with
+        ``k`` doubled for RINGED (a ring has two feeders). An unenforceable
+        ``balanced`` is dropped with a warning.
+        """
+        return _constraints_from_options(**self)
 
     @classmethod
     def help(cls):
@@ -425,9 +430,6 @@ class ModelOptions(dict):
             )
         for name, (kind, default, desc) in cls.simple.items():
             print(f'{name} [{kind.__name__}] default: {default}\n    {desc}\n')
-
-
-_Link = tuple[int, int]
 
 
 def canonical_linksets(
@@ -475,6 +477,17 @@ def nonclosest_feeders(A: nx.Graph) -> Iterator[_Link]:
         for r in range(-R, 0):
             if r != closest:
                 yield t, r
+
+
+def feeders_to_fix(A: nx.Graph, bounds: NetworkBounds) -> Iterator[_Link]:
+    """Yield the feeders a model fixes to zero.
+
+    These are the feeders to a root other than the terminal's closest (see
+    :func:`nonclosest_feeders`), unless per-root bounds are given: a bound may
+    require a terminal to connect to another root.
+    """
+    if not bounds.has_root_bounds:
+        yield from nonclosest_feeders(A)
 
 
 def passover_rows(
@@ -544,7 +557,7 @@ class ModelMetadata:
     linkset: tuple[_Link, ...]
     link_: Mapping[_Link, Any]
     flow_: Mapping[_Link, Any]
-    model_options: dict[str, Any]
+    topology: Topology
     fun_fingerprint: dict[str, str | bytes]
     weight_: tuple[float, ...] = ()
     solution_hint: dict[Any, float] = field(default_factory=dict)
@@ -613,30 +626,6 @@ def check_inflow_support(A: nx.Graph, topology: Topology) -> int:
     return total
 
 
-def check_model_enums(
-    topology: Topology, feeder_route: FeederRoute, feeder_limit: FeederLimit
-) -> None:
-    """Reject a model option that is not a member of its enum.
-
-    The builders branch on identity, so an equal ``str`` selects the default
-    model and reaches ``ModelMetadata`` unnoticed. Pass the member;
-    :class:`ModelOptions` is where a ``str`` is coerced.
-
-    Raises:
-        TypeError: an option is not a member of its enum.
-    """
-    for value, kind in (
-        (topology, Topology),
-        (feeder_route, FeederRoute),
-        (feeder_limit, FeederLimit),
-    ):
-        if not isinstance(value, kind):
-            raise TypeError(
-                f'{_identifier_from_class_name(kind)} must be a {kind.__name__} '
-                f'member, got {type(value).__name__}: {value!r}'
-            )
-
-
 def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
     """Reject a warm start whose topology the model cannot start from.
 
@@ -649,7 +638,7 @@ def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
         OWNWarmupFailed: ``S``'s topology is one this model cannot start from, or
           is not a ``Topology``.
     """
-    mt = metadata.model_options['topology']
+    mt = metadata.topology
     st = S.graph['topology']
     if not isinstance(st, Topology):
         raise OWNWarmupFailed(
@@ -690,6 +679,12 @@ def warmstart_links(
         )
 
 
+# the bounds recorded in a solution's `solver_details`
+_COUNT_DETAILS = (
+    'feeders_lb', 'feeders_ub', 'root_feeders_lb', 'root_feeders_ub', 'root_load_ub',
+)  # fmt: skip
+
+
 class Solver(abc.ABC):
     "Common interface to multiple MILP solvers"
 
@@ -701,7 +696,8 @@ class Solver(abc.ABC):
     solver: Any
     options: dict[str, Any]
     stopping: dict[str, Any]
-    model_options: ModelOptions
+    constraints: NetworkConstraints
+    bounds: NetworkBounds
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
     _incumbent_linkbits: frozenbitarray
@@ -737,7 +733,8 @@ class Solver(abc.ABC):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         *,
-        model_options: Mapping[str, Any],
+        constraints: NetworkConstraints | None = None,
+        model_options: Mapping[str, Any] | None = None,
         capacity: int | None = None,
         capacity_nominal: float | Fraction | None = None,
         power_rtol: float = DEFAULT_POWER_RTOL,
@@ -748,13 +745,35 @@ class Solver(abc.ABC):
         Args:
           P: planar embedding of the location
           A: available links for the location
-          model_options: tree properties - see ModelOptions.help()
+          constraints: network constraints (defaults to
+            ``NetworkConstraints()``)
+          model_options: deprecated, use ``constraints``: tree properties - see
+            ModelOptions.help()
           capacity: maximum inflow of a subtree
           capacity_nominal: maximum power of a subtree, instead of ``capacity``
             (see :func:`~optiwindnet.loads.quantized`)
           power_rtol: quantization tolerance of unequal turbine power
           warmstart: initial feasible solution to pass to solver
+
+        Raises:
+          TypeError: both ``constraints`` and ``model_options`` are given.
+          ValueError: the constraints do not suit the problem (see
+            :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
         """
+        if model_options is not None:
+            if constraints is not None:
+                raise TypeError('Give either constraints or model_options, not both.')
+            # a ModelOptions warned of its deprecation when it was made
+            if not isinstance(model_options, ModelOptions):
+                warnings.warn(
+                    'set_problem(model_options=...) is deprecated: pass '
+                    'constraints=NetworkConstraints(...) instead.',
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            constraints = _constraints_from_options(**model_options)
+        elif constraints is None:
+            constraints = NetworkConstraints()
         A, self.capacity, self._power_attrs = quantized(
             A,
             capacity=capacity,
@@ -762,7 +781,14 @@ class Solver(abc.ABC):
             power_rtol=power_rtol,
         )
         self.P, self.A = P, A
-        self.model_options = ModelOptions(**model_options)
+        self.constraints = constraints
+        self.bounds = constraints._resolve(
+            T=A.graph['T'],
+            R=A.graph['R'],
+            capacity=self.capacity,
+            inflow_total=total_inflow(A),
+            power_per_inflow=self._power_attrs.get('power_per_inflow'),
+        )
         inflow = nonunit_inflow(A)
         if warmstart is not None and nonunit_inflow(warmstart) != inflow:
             # a warm start quantized otherwise carries loads in other inflow
@@ -775,7 +801,22 @@ class Solver(abc.ABC):
 
     @abc.abstractmethod
     def _set_model(self, warmstart: nx.Graph | None) -> None:
-        "Build the model of ``A``, ``capacity`` and ``model_options``."
+        "Build the model of ``A``, ``capacity`` and ``bounds``."
+
+    def _create_detours(
+        self, S: nx.Graph, P: nx.PlanarEmbedding, A: nx.Graph
+    ) -> nx.Graph:
+        """Create the detours of the solution topology ``S`` with PathFinder.
+
+        Under per-root bounds, every subtree stays connected to its root in ``S``,
+        which is what the bounds were enforced on.
+        """
+        return PathFinder(
+            G_from_S(S, A),
+            planar=P,
+            A=A,
+            allow_root_change=not self.bounds.has_root_bounds,
+        ).create_detours()
 
     @abc.abstractmethod
     def solve(
@@ -846,11 +887,20 @@ class Solver(abc.ABC):
         metadata, solution_info = self.metadata, self.solution_info
         solver_details = self.applied_options.copy()
         # the method_options dict is extracted by db utility function packmethod()
+        bounds = self.bounds
         method_options = dict(
             solver_name=self.name,
             fun_fingerprint=metadata.fun_fingerprint,
             **self.stopping,
-            **metadata.model_options,
+            topology=bounds.topology,
+            feeder_route=bounds.feeder_route,
+            balanced=bounds.balanced,
+        )
+        # like the capacity, the counts are parameters of the method
+        solver_details.update(
+            (name, value)
+            for name in _COUNT_DETAILS
+            if (value := getattr(bounds, name)) is not None
         )
         # the incumbent's id is not a routeset attribute: the delivered
         # topology carries its own `_topology_id`, inherited from S
@@ -865,8 +915,6 @@ class Solver(abc.ABC):
             method_options=method_options,
             solver_details=solver_details,
         )
-        if 'max_feeders' in method_options:
-            solver_details['max_feeders'] = method_options.pop('max_feeders')
         if metadata.warmed_by:
             attr['warmstart'] = metadata.warmed_by
         return attr
@@ -880,7 +928,7 @@ class Solver(abc.ABC):
         """
         metadata = self.metadata
         feeder_link_count = metadata.R * metadata.T
-        ringed = metadata.model_options['topology'] is Topology.RINGED
+        ringed = self.bounds.topology is Topology.RINGED
         terminal_link_count = (
             len(metadata.linkset) - feeder_link_count * (1 + ringed)
         ) // 2
@@ -901,7 +949,7 @@ class Solver(abc.ABC):
         refuses the rest), which is what its terminal-counting arm split needs.
         """
         metadata = self.metadata
-        topology = metadata.model_options['topology']
+        topology = self.bounds.topology
         A = self.A
         S = S_from_linkbits(linkbits, A)
         # Preserve terminal inflow so validation can reproduce the loads.
@@ -935,13 +983,13 @@ class PoolHandler(abc.ABC):
 
     name: str
     num_solutions: int
-    model_options: ModelOptions
     solution_info: SolutionInfo
 
     if TYPE_CHECKING:
         # supplied by the `Solver` every `PoolHandler` is mixed into
         _linkbits_from_mip_sol: Callable[[], frozenbitarray]
         _S_from_linkbits: Callable[[frozenbitarray], nx.Graph]
+        _create_detours: Callable[[nx.Graph, nx.PlanarEmbedding, nx.Graph], nx.Graph]
 
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
@@ -986,7 +1034,7 @@ class PoolHandler(abc.ABC):
                 )
                 break
             Sʹ = self._S_from_linkbits(self._linkbits_from_mip_sol())
-            Gʹ = PathFinder(G_from_S(Sʹ, A), planar=P, A=A).create_detours()
+            Gʹ = self._create_detours(Sʹ, P, A)
             Λʹ = Gʹ.size(weight='length')
             if Gʹ.graph.get('tentative'):
                 warn(

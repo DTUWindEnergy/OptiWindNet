@@ -8,8 +8,6 @@ import networkx as nx
 import pyomo.environ as pyo
 from bitarray import frozenbitarray
 
-from ..converting import G_from_S
-from ..pathfinding import PathFinder
 from ._core import FeederRoute, OWNSolutionNotFound, PoolHandler
 from .pyomo import SolverPyomo
 
@@ -72,10 +70,10 @@ class SolverCplex(SolverPyomo, PoolHandler):
     def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
         if A is None:
             A = self.A
-        P, model_options = self.P, self.model_options
-        if model_options['feeder_route'] is FeederRoute.STRAIGHT:
+        P, bounds = self.P, self.bounds
+        if bounds.feeder_route is FeederRoute.STRAIGHT:
             S = self._incumbent_topology()
-            G = PathFinder(G_from_S(S, A), P, A).create_detours()
+            G = self._create_detours(S, P, A)
         else:
             S, G = self._investigate_pool(P, A)
         G.graph.update(self._make_graph_attributes())

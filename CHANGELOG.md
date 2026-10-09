@@ -2,7 +2,30 @@
 
 [Commit history since v0.3.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.1...HEAD)
 
+## Breaking Changes
+
+### Network–Router API
+
+- **`EWRouter` method:** the method follows the topology of the network constraints, `'rootlust'` for branched networks (previously `'biased_EW'`). A chosen `method` must build networks within that topology.
+- **Balanced subtrees with several substations:** `HGSRouter` and `hgs_cvrp()` balance the subtree (or ring) loads of the whole wind farm alike, as the MILP models do, instead of those of each substation separately.
+
+### Advanced API
+
+- **MILP solvers:** `Solver.set_problem()` stores `constraints` and `bounds` instead of `model_options`, and `ModelMetadata` stores the model's `topology` instead of its options. Solutions record the topology, feeder route and balance in `method_options`, and the count bounds (`feeders_lb`, `feeders_ub` and per-root bounds) in `solver_details` instead of `max_feeders`. `feeder_and_load_bounds()`, `check_model_enums()` and `hgs_count_kwargs()` are removed.
+
+## Deprecations
+
+- **Router options:** `HGSRouter(feeder_limit, feeder_exact, balanced, ringed)`, `EWRouter(feeder_route)` and `MILPRouter(model_options)` are deprecated in favour of the network constraints, which they conflict with.
+- **`ModelOptions`:** deprecated in favour of `NetworkConstraints`; constructing one warns, so `model_options` given as a `ModelOptions` warns once, where it is made. `MILPRouter.model_options` holds the options as given (`None` if omitted) instead of a `ModelOptions`. [6b66dc6e](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/6b66dc6e)
+- **Advanced API options:** `Solver.set_problem(model_options=...)`, the topology and count options of the `make_min_length_model()` builders and `hgs_cvrp(vehicles, vehicles_exact, balanced, ringed)` are deprecated in favour of `constraints` (`bounds` for the builders). `ModelOptions.to_constraints()` translates existing options. `clusterize(capacity=...)` is deprecated in favour of `group_capacity`, which is twice the cable capacity for rings.
+
+
 ## Features & Improvements
+
+- **Network constraints:** `NetworkConstraints` (in `optiwindnet.constraints`, also importable from `optiwindnet.api`) states the topology, feeder route, feeder count of the wind farm (`feeders` exact or `max_feeders`, absolute or `'min'`/`'min+k'`), feeder count of each substation (`substation_feeders` exact or `max_substation_feeders`), load of each substation (`max_substation_loads`) and balance, for any router: `WindFarmNetwork(constraints=...)`. All checks happen before optimization, in `NetworkConstraints.resolve(A, capacity=...)`, which returns the `NetworkBounds` the routers enforce. A router given constraints it cannot enforce raises an error. [b32215a3](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/b32215a3)
+- **Substation limits in MILP models:** the MILP models enforce the feeder count (exact or at most) and load of each substation, except loads for ringed models; with any substation bounded, feeders to every substation are kept and detours keep every subtree on its substation. [0ddeb071](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/0ddeb071)
+- **Substation limits in HGS-CVRP:** `hgs_cvrp(constraints=...)` and `clusterize(A, group_capacity, bounds)` give each substation routes and turbines within its limits; exact counts, including above the minimum with several substations, are held by balancing the routes concerned. `MILPRouter` warm-starts from such a solution. [b456c321](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/b456c321)
+- **MILP solution pool:** a pool entry with feeders PathFinder cannot detour is skipped with a warning. [aa607cde](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/aa607cde)
 
 - **HGS-CVRP warm starts:** `hgs_cvrp(warmstart=S)` seeds the HGS-CVRP population with the routes of a radial (or, if `ringed`, ringed) solution topology; on multi-root locations, the warm start's assignment of turbines to substations replaces the clustering. Only the first solve of the repair loop is seeded. An unusable warm start raises `OWNWarmupFailed`, now importable from `optiwindnet.types` (it remains available from `optiwindnet.MILP`). Requires hybgensea 0.2.0 or newer.
 - **Warm starts in `HGSRouter`:** re-optimizing a `WindFarmNetwork` with `HGSRouter` seeds HGS-CVRP with the previous solution if its topology matches; a warm start HGS-CVRP cannot use is dropped with a warning and the solve starts cold, as with `MILPRouter`.

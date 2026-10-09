@@ -19,7 +19,8 @@ import numpy as np
 import pytest
 
 import optiwindnet.clustering as clustering_mod
-from optiwindnet.clustering import clusterize
+from optiwindnet.clustering import cluster_plan, clusterize, plan_from_clusters
+from optiwindnet.constraints import NetworkConstraints
 
 from .sitecache import get_bundle
 
@@ -108,7 +109,7 @@ def test_root_may_be_drained_when_feeders_are_scarce():
     A = _make_A(d2roots)
     assert d2roots.argmin(axis=1)[0] == 0, 'terminal 0 is closest to root 0'
 
-    cluster_ = clusterize(A, capacity=10)
+    cluster_ = clusterize(A, group_capacity=10)
 
     _check_partition(cluster_, A, capacity=10)
     assert cluster_[0] == set()
@@ -130,7 +131,7 @@ def test_two_balanced_roots_are_not_collapsed():
     d2roots = np.array([[near, far]] * 9 + [[far, near]] * 9)
     A = _make_A(d2roots)
 
-    cluster_ = clusterize(A, capacity=10)
+    cluster_ = clusterize(A, group_capacity=10)
 
     _check_partition(cluster_, A, capacity=10)
     assert [len(c) for c in cluster_] == [9, 9]
@@ -147,7 +148,7 @@ def test_empty_cluster_when_voronoi_cell_is_empty():
     d2roots = np.array([[50.0, 1.0]] * 8)
     A = _make_A(d2roots)
 
-    cluster_ = clusterize(A, capacity=4)
+    cluster_ = clusterize(A, group_capacity=4)
 
     _check_partition(cluster_, A, capacity=4)
     assert cluster_[0] == set()
@@ -221,3 +222,135 @@ def test_invariant_holds_on_the_many_roots_fallback(monkeypatch):
     for capacity in CAPACITIES:
         cluster_ = clusterize(A, capacity)
         _check_partition(cluster_, A, capacity)
+
+
+# --------------------------------------------------------------------------
+# bounds
+# --------------------------------------------------------------------------
+def _bounds(A, capacity, **constraints):
+    return NetworkConstraints(**constraints)._resolve(
+        T=A.graph['T'], R=A.graph['R'], capacity=capacity
+    )
+
+
+def test_feeder_cap_sends_the_farthest_terminals_to_another_root():
+    """A root capped at one feeder keeps its closest terminals, sheds the rest."""
+    # 6 terminals closest to root 0, ordered by their distance to it
+    A = _make_A(np.array([[1.0 + i, 20.0] for i in range(6)]))
+    bounds = _bounds(A, 4, max_substation_feeders=(1, None))
+
+    cluster_ = clusterize(A, 4, bounds)
+
+    _check_partition(cluster_, A, capacity=4)
+    assert cluster_ == [set(range(4)), {4, 5}]
+
+
+def test_load_cap_tighter_than_feeder_cap():
+    """A load cap below a full feeder bounds the cluster size."""
+    A = _make_A(np.array([[1.0 + i, 20.0] for i in range(6)]))
+    bounds = _bounds(
+        A, 4, max_substation_feeders=(2, None), max_substation_loads=(3, None)
+    )
+
+    assert clusterize(A, 4, bounds) == [set(range(3)), {3, 4, 5}]
+
+
+def test_load_caps_may_cost_a_feeder():
+    """Load caps that split the feeders' remainders need more than the minimum."""
+    A = _make_A(np.array([[1.0, 2.0]] * 10))
+    bounds = _bounds(A, 5, max_substation_loads=(7, 3))
+
+    cluster_ = clusterize(A, 5, bounds)
+
+    assert [len(c) for c in cluster_] == [7, 3]
+    assert _feeders(cluster_, 5) == 3 > math.ceil(10 / 5)
+
+
+def test_exact_substation_count_takes_enough_terminals():
+    """A root pinned at 3 routes takes terminals for all of them."""
+    # every terminal is closest to root 0
+    A = _make_A(np.array([[1.0 + i, 20.0] for i in range(8)]))
+    plan = cluster_plan(A, 4, _bounds(A, 4, substation_feeders=(None, 3)))
+
+    # the fewest routes: root -1's three hold all 8 terminals
+    assert plan.budget_ == (0, 3)
+    assert plan.pinned_ == (False, True)
+    assert plan.cluster_ == [set(), set(range(8))]
+
+
+def test_balanced_clusters_fit_the_farm_loads():
+    """Under balance, every root's routes can take loads within the farm's."""
+    # 3 routes of loads in {6, 7} (20 terminals at capacity 8), but 16
+    # terminals are closest to root 0
+    A = _make_A(
+        np.array([[1.0 + i, 30.0 - i] for i in range(20)])
+        + np.array([[0.0, 0.0]] * 16 + [[30.0, 0.0]] * 4)
+    )
+    bounds = _bounds(A, 8, feeders='min', balanced=True)
+    assert (bounds.group_load_lb, bounds.group_load_ub) == (6, 7)
+
+    plan = cluster_plan(A, 8, bounds)
+
+    assert sum(plan.budget_) == 3
+    assert all(plan.pinned_)
+    for cluster, routes in zip(plan.cluster_, plan.budget_):
+        assert routes * 6 <= len(cluster) <= routes * 7
+
+
+def test_bounds_no_clustering_can_meet_raise():
+    # each root holds at most 5 terminals, but 10 must fit two routes of 4 each
+    A = _make_A(np.array([[1.0, 2.0]] * 10))
+    bounds = NetworkConstraints(substation_feeders=(1, 1))._resolve(
+        T=10, R=2, capacity=5
+    )
+    with pytest.raises(ValueError, match='No clustering'):
+        clusterize(A, 4, bounds)
+
+
+def test_given_clusters_are_checked_against_the_bounds():
+    A = _make_A(np.array([[1.0, 2.0]] * 6))
+    bounds = _bounds(A, 4, max_substation_feeders=(1, None))
+    plan = plan_from_clusters(A, 4, bounds, [{0, 1}, {2, 3, 4, 5}], (1, 1))
+    assert plan.budget_ == (1, 1)
+    with pytest.raises(ValueError, match='Root -2 has 2 routes'):
+        plan_from_clusters(A, 4, bounds, [{0, 1, 2, 3, 4}, {5}], (2, 1))
+
+
+def test_odd_ring_count_at_a_substation_is_not_available():
+    A = _make_A(np.array([[1.0, 2.0]] * 10))
+    bounds = NetworkConstraints(
+        topology='ringed', substation_feeders=(3, None)
+    )._resolve(T=10, R=2, capacity=5)
+    with pytest.raises(NotImplementedError, match='odd number of feeders'):
+        clusterize(A, 10, bounds)
+
+
+def test_caps_hold_on_the_bundled_multiroot_locations(multiroot_instances):
+    """Capping the busiest root below its free share still yields a partition."""
+    capacity = 7
+    for handle, A in multiroot_instances.items():
+        R, T = A.graph['R'], A.graph['T']
+        free_ = clusterize(A, capacity)
+        busiest = max(range(R), key=lambda c: len(free_[c]))
+        load_caps = [None] * R
+        load_caps[busiest] = len(free_[busiest]) - capacity // 2
+        cluster_ = clusterize(
+            A, capacity, _bounds(A, capacity, max_substation_loads=load_caps)
+        )
+        assert sorted(n for c in cluster_ for n in c) == list(range(T)), handle
+        assert len(cluster_[busiest]) <= load_caps[busiest], handle
+
+
+def test_capacity_is_a_deprecated_name_of_group_capacity():
+    A = _make_A(np.array([[1.0, 2.0]] * 6))
+    with pytest.warns(DeprecationWarning, match='group_capacity'):
+        assert clusterize(A, capacity=4) == clusterize(A, 4)
+    with pytest.raises(TypeError, match='not capacity'):
+        clusterize(A, 4, capacity=4)
+
+
+def test_unequal_inflow_is_not_available():
+    A = _make_A(np.array([[1.0, 2.0]] * 6))
+    A.add_node(0, inflow=2)
+    with pytest.raises(NotImplementedError, match='terminal count'):
+        clusterize(A, 4)

@@ -4,6 +4,7 @@
 import logging
 import math
 import random
+import warnings
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
@@ -12,7 +13,8 @@ import hybgensea
 import networkx as nx
 import numpy as np
 
-from ..clustering import clusterize
+from ..clustering import ClusterPlan, cluster_plan, plan_from_clusters
+from ..constraints import NetworkBounds, NetworkConstraints
 from ..identity import fingerprint_function
 from ..loads import (
     DEFAULT_POWER_RTOL,
@@ -23,7 +25,7 @@ from ..loads import (
     total_inflow,
 )
 from ..repair import repair_routeset_path
-from ..types import OWNWarmupFailed, Topology
+from ..types import FeederRoute, OWNWarmupFailed, Topology
 from ._core import (
     add_branches_to_S,
     clamp_vehicles_to_min,
@@ -369,40 +371,30 @@ def _solve_multi_root(
     A,
     capacity,
     hgs_options,
-    vehicles,
-    balanced,
+    plan,
+    fleet_,
     log_callback,
     closed=False,
     complete=False,
-    cluster_=None,
     warm_routes_=None,
 ):
     R, VertexC = A.graph['R'], A.graph['VertexC']
-    if cluster_ is None:
-        cluster_ = clusterize(A, capacity)
+    cluster_ = plan.cluster_
     len_cluster_ = tuple(len(cluster) for cluster in cluster_)
-    if balanced:
-        # each cluster is balanced independently; clusterize() already ensures
-        # that the per-cluster minimum feeder counts sum to the global minimum
-        # (hgs_cvrp() checks a warm start's clustering for vehicles_exact)
-        capacity_, vehicles_, num_slack_ = (
-            list(values)
-            for values in zip(
-                *(
-                    _balanced_capacity(len_cluster, capacity)
-                    for len_cluster in len_cluster_
-                )
+    capacity_, vehicles_, num_slack_ = [], [], []
+    for len_cluster, routes, pinned, fleet in zip(
+        len_cluster_, plan.budget_, plan.pinned_, fleet_
+    ):
+        if pinned:
+            # the slack nodes fill every route: exactly `routes` of them
+            capacity_c, vehicles_c, num_slack_c = _balanced_capacity(
+                len_cluster, capacity, routes
             )
-        )
-    else:
-        capacity_ = [capacity] * R
-        num_slack_ = [0] * R
-        if vehicles is None:
-            vehicles_ = [None] * R
         else:
-            vehicles_ = [
-                math.ceil(len_cluster / capacity) for len_cluster in len_cluster_
-            ]
+            capacity_c, vehicles_c, num_slack_c = capacity, fleet, 0
+        capacity_.append(capacity_c)
+        vehicles_.append(vehicles_c)
+        num_slack_.append(num_slack_c)
     W_, indices_ = _length_matrices(
         A, cluster_, num_slack_, complete=complete, closed=closed
     )
@@ -437,17 +429,16 @@ def _solve_multi_root(
     return inputs_, outputs_
 
 
-def _process_results(A, keep_log, balanced, inputs_, outputs_):
+def _process_results(A, keep_log, pinned, inputs_, outputs_):
     R = A.graph['R']
     routes_, runtime_, solution_time_, cost_, log_, algo_params = zip(*outputs_)
     vehicles_, len_cluster_, indices_, num_slack_, capacity_ = inputs_
 
-    if balanced:
-        for num_slack, routes, len_cluster in zip(num_slack_, routes_, len_cluster_):
-            # remove slack nodes from the routes
-            if num_slack != 0:
-                num_nodes = len_cluster + 1
-                routes[:] = [[n for n in route if n < num_nodes] for route in routes]
+    for num_slack, routes, len_cluster in zip(num_slack_, routes_, len_cluster_):
+        # remove slack nodes from the routes
+        if num_slack != 0:
+            num_nodes = len_cluster + 1
+            routes[:] = [[n for n in route if n < num_nodes] for route in routes]
 
     S = nx.Graph(
         R=R,
@@ -460,7 +451,7 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
             vehicles=vehicles_ if R > 1 else vehicles_[0],
             **(
                 {'capacity_effective': capacity_ if R > 1 else capacity_[0]}
-                if balanced
+                if pinned
                 else {}
             ),
         ),
@@ -487,140 +478,23 @@ def _process_results(A, keep_log, balanced, inputs_, outputs_):
     return S
 
 
-def hgs_cvrp(
-    A: nx.Graph,
-    *,
-    capacity: int | None = None,
-    capacity_nominal: float | Fraction | None = None,
-    power_rtol: float = DEFAULT_POWER_RTOL,
-    time_limit: float,
-    vehicles: int | None = None,
-    vehicles_exact: bool = False,
-    seed: int | None = None,
-    keep_log: bool = False,
-    repair: bool = True,
-    max_retries: int = 10,
-    balanced: bool = False,
-    complete: bool = False,
-    ringed: bool = False,
-    log_callback: Callable | None = None,
-    warmstart: nx.Graph | None = None,
-) -> nx.Graph:
-    """Solves the O/CVRP using HGS-CVRP with links from ``A``.
+def _legacy_bounds(
+    T: int,
+    R: int,
+    capacity: int,
+    inflow_total: int,
+    vehicles: int | None,
+    vehicles_exact: bool,
+    balanced: bool,
+    ringed: bool,
+) -> NetworkBounds:
+    """Translate the deprecated count options of :func:`hgs_cvrp` into bounds.
 
-    Wraps HybGenSea, which provides bindings to the HGS-CVRP library (Hybrid
-    Genetic Search solver for Capacitated Vehicle Routing Problems). By default
-    this function solves an Open-CVRP (vehicles do not return to the depot),
-    yielding radial layouts. With ``ringed=True`` it solves the closed CVRP
-    instead: every route returns to the depot, forming a ring. The ring capacity
-    is doubled internally (``2 * capacity``) so each of the ring's two arms holds
-    at most ``capacity`` terminals.
-
-    Each vehicle is one route, so ``vehicles`` bounds the route count (see
-    ``vehicles_exact`` below). The relation of routes to feeders (links to a
-    root) depends on the topology:
-
-    - radial: one route is one subtree with a single feeder, so ``vehicles``
-      caps the feeder count, whose minimum is ``ceil(T / capacity)``;
-    - ringed: one route is one ring with two feeders (one per arm), so
-      ``vehicles`` caps the ring count, the feeder count is twice the ring
-      count, and the minimum is ``ceil(T / (2 * capacity))`` rings.
-
-    Normalization of input graph is recommended before calling this function.
-
-    For single-root problems, the solver runs on the full graph. For multi-root
-    problems, the graph is clustered and each cluster is solved concurrently.
-
-    A ``warmstart`` solution topology seeds the HGS-CVRP population with its
-    routes (one per feeder subtree, or one per ring), and, for multi-root
-    problems, its assignment of terminals to roots replaces the clustering. Only
-    the first solve of the repair loop is seeded, since a retry runs on fewer
-    links. An unusable warm start raises ``OWNWarmupFailed``: one that does not cover
-    every terminal exactly once with routes hanging from a single root each, or
-    whose routes HGS-CVRP rejects (over capacity, more routes than the fleet, or,
-    if ``balanced``, a route count other than the balanced one).
-
-    By default, ``vehicles`` is an upper bound on the route count: HGS-CVRP is
-    free to use fewer, which it normally does, since a shorter solution seldom
-    needs more than the minimum. Pass ``vehicles_exact=True`` to pin the count
-    to ``vehicles`` instead. This is only implemented together with
-    ``balanced=True``: the slack nodes that make the loads balanced also make
-    every route come out full, so no route can be left empty and the route count
-    is necessarily ``vehicles``. A ringed solve pins at most ``T // 2`` rings,
-    which keeps every ring at two or more terminals (a single-terminal ring has
-    one feeder, not two).
-
-    For multi-root instances, ``vehicles`` can only be left undefined (meaning
-    unlimited) or set to the minimum feasible route count. Any other
-    value results in a warning and the minimum being used, or, if
-    ``vehicles_exact=True``, in a ``ValueError``.
-
-    If ``repair=True`` (the default), the solution is iteratively repaired
-    until no crossings remain (or ``max_retries`` is reached). This may cause the
-    actual runtime to be up to ``(max_retries + 1)`` times the given ``time_limit``.
-    Repair requires ``A``'s planar mesh. Set ``repair=False`` when using
-    ``complete=True``.
-
-    Args:
-        A: available-links graph. No edges implies ``complete=True``
-        capacity: maximum vehicle capacity, in inflow
-        capacity_nominal: maximum vehicle capacity, in nominal power, instead of
-            ``capacity`` (see :func:`~optiwindnet.loads.quantized`)
-        power_rtol: quantization tolerance of unequal turbine power
-        time_limit: [s] solver run time limit
-        vehicles: maximum number of routes: feeders if radial, rings (half
-            the feeders) if ``ringed`` (if None, let HGS-CVRP decide; clamped to
-            the minimum for multi-root problems); the exact number of routes if
-            ``vehicles_exact=True``
-        vehicles_exact: whether ``vehicles`` is the exact route count instead of
-            an upper bound (requires ``balanced=True`` and at least the minimum
-            route count; at most ``T`` feeders if radial, ``T // 2`` rings if
-            ``ringed``; only the minimum for multi-root problems)
-        seed: random seed for reproducibility
-        keep_log: attach solver log to the solution graph
-        repair: iteratively fix crossings (default True)
-        max_retries: maximum repair iterations
-        balanced: balance loads across feeders (per root, if multiple roots)
-        complete: allow every terminal pair, using Euclidean distances for
-            links absent from ``A``. Enabled automatically when ``A`` has no
-            edges. Requires ``repair=False`` because mesh-based crossing
-            detection and repair cannot handle the added links. Use this
-            option to assess how missing-link penalties affect solution
-            quality. Pass the meshed ``A`` to preserve stored lengths
-            for links that route around obstacles.
-        log_callback: callback to receive each log line produced by HGS-CVRP
-            (only for single-root instances)
-        warmstart: solution topology S (radial, or ringed if ``ringed``) to seed
-            the search and, for multi-root instances, to cluster the terminals
-
-    Returns:
-        Solution topology S
+    The options keep their former checks and adjustments: an exact count needs
+    ``balanced``; with several roots, only the minimum count is honoured.
     """
-    R = A.graph['R']
-    T = A.graph['T']
-    # An edgeless A requests the complete graph over all nodes.
-    complete = complete or A.number_of_edges() == 0
-    if complete and repair:
-        raise NotImplementedError(
-            'hgs_cvrp() cannot repair a solve over the complete graph over all nodes: '
-            "crossing detection and repair read A's planar embedding and "
-            'diagonals, which say nothing about a link absent from A. Pass '
-            'repair=False (the solution may then cross itself).'
-        )
-    A, capacity, power_attrs = quantized(
-        A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
-    )
-    # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
     solve_capacity = 2 * capacity if ringed else capacity
-    inflow_by_node = nonunit_inflow(A)
-    if inflow_by_node and (ringed or balanced or R > 1):
-        raise NotImplementedError(
-            "hgs_cvrp() honours a terminal 'inflow' other than 1 only for an "
-            'unbalanced single-root radial solve: rings split by terminal count, '
-            'the balanced slack nodes are counted, and clusterize() partitions '
-            'by count.'
-        )
-    vehicles_min: int = math.ceil(total_inflow(A) / solve_capacity)
+    vehicles_min: int = math.ceil(inflow_total / solve_capacity)
     if vehicles_exact:
         if vehicles is None:
             raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
@@ -633,11 +507,6 @@ def hgs_cvrp(
             raise ValueError(
                 f'Vehicles (feeders) number ({vehicles}) is below the minimum '
                 f'necessary ({vehicles_min}) for the given capacity ({capacity}).'
-            )
-        if ringed and vehicles > T // 2:
-            raise ValueError(
-                f'Vehicles (rings) number ({vehicles}) is above the maximum '
-                f'({T // 2}) that gives every ring two or more of the {T} terminals.'
             )
         if vehicles > T:
             raise ValueError(
@@ -664,26 +533,258 @@ def hgs_cvrp(
                 )
                 vehicles = vehicles_min
         vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
-    feeders_above_min = None if vehicles is None else vehicles - vehicles_min
+    per_group = 2 if ringed else 1
+    count: dict[str, int | str] = {}
+    if vehicles is None:
+        if balanced:
+            count['feeders'] = 'min'
+    elif vehicles_exact or balanced:
+        count['feeders'] = per_group * vehicles
+    else:
+        count['max_feeders'] = per_group * vehicles
+    constraints = NetworkConstraints(
+        topology=Topology.RINGED if ringed else Topology.RADIAL,
+        balanced=balanced,
+        **count,  # pyrefly: ignore[bad-argument-type]
+    )
+    return constraints._resolve(T=T, R=R, capacity=capacity, inflow_total=inflow_total)
+
+
+def _fleet_(bounds: NetworkBounds, plan: ClusterPlan) -> list[int | None]:
+    """Fleet of each unpinned root: its budget, or its own cap if the farm has none."""
+    if bounds.feeders_ub is not None:
+        return list(plan.budget_)
+    per_group = bounds.feeders_per_group
+    return [
+        None if hi is None else hi // per_group
+        for hi in bounds.root_feeders_ub or (None,) * len(plan.budget_)
+    ]
+
+
+# the per-root bounds recorded in a solution's `solver_details`
+_ROOT_DETAILS = ('root_feeders_lb', 'root_feeders_ub', 'root_load_ub')
+
+
+def hgs_cvrp(
+    A: nx.Graph,
+    *,
+    capacity: int | None = None,
+    capacity_nominal: float | Fraction | None = None,
+    power_rtol: float = DEFAULT_POWER_RTOL,
+    time_limit: float,
+    constraints: NetworkConstraints | None = None,
+    vehicles: int | None = None,
+    vehicles_exact: bool = False,
+    seed: int | None = None,
+    keep_log: bool = False,
+    repair: bool = True,
+    max_retries: int = 10,
+    balanced: bool = False,
+    complete: bool = False,
+    ringed: bool = False,
+    log_callback: Callable | None = None,
+    warmstart: nx.Graph | None = None,
+) -> nx.Graph:
+    """Solves the O/CVRP using HGS-CVRP with links from ``A``.
+
+    Wraps HybGenSea, which provides bindings to the HGS-CVRP library (Hybrid
+    Genetic Search solver for Capacitated Vehicle Routing Problems). By default
+    this function solves an Open-CVRP (vehicles do not return to the depot),
+    yielding radial layouts. For a RINGED topology it solves the closed CVRP
+    instead: every route returns to the depot, forming a ring. The ring capacity
+    is doubled internally (``2 * capacity``) so each of the ring's two arms holds
+    at most ``capacity`` terminals.
+
+    ``constraints`` give the topology (RADIAL or BRANCHED yield radial layouts)
+    and the count and load bounds, which are resolved after the turbine power is
+    quantized (see :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
+    Each vehicle is one route: a subtree with one feeder, or a ring with two (one
+    per arm). Feeder routes are not kept straight (``FeederRoute.STRAIGHT`` is
+    refused).
+
+    HGS-CVRP bounds the route count from above. A route count that must be exact
+    (fixed above the minimum, or fixed for a root) is held by balancing the loads
+    of those routes: slack nodes, depot clones of unit demand, fill every route
+    up to an even load, so no route is left empty. A balanced solution also
+    satisfies unbalanced bounds. An exact ring count leaves every ring two or
+    more terminals.
+
+    Normalization of input graph is recommended before calling this function.
+
+    For single-root problems, the solver runs on the full graph. For multi-root
+    problems, the terminals are clustered within the bounds (see
+    :func:`~optiwindnet.clustering.clusterize`), each root getting a budget of
+    routes, and each cluster is solved concurrently. Under balance, the routes of
+    every cluster have loads within those balanced for the whole farm.
+
+    A ``warmstart`` solution topology seeds the HGS-CVRP population with its
+    routes (one per feeder subtree, or one per ring), and, for multi-root
+    problems, its assignment of terminals to roots and its route counts replace
+    the clustering. Only the first solve of the repair loop is seeded, since a
+    retry runs on fewer links. An unusable warm start raises
+    ``OWNWarmupFailed``: one that does not cover every terminal exactly once with
+    routes hanging from a single root each, that breaks the bounds, or whose
+    routes HGS-CVRP rejects (over capacity, more routes than the fleet, or, for
+    an exact count, a route count other than it).
+
+    The options ``vehicles``, ``vehicles_exact``, ``balanced`` and ``ringed`` are
+    deprecated in favour of ``constraints``, which they are translated into: a
+    maximum (or, if ``vehicles_exact``, exact) route count, which requires
+    ``balanced=True`` to be exact; with several roots, only the minimum count.
+
+    Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
+    radial solve without a count fixed above the minimum or balance.
+
+    If ``repair=True`` (the default), the solution is iteratively repaired
+    until no crossings remain (or ``max_retries`` is reached). This may cause the
+    actual runtime to be up to ``(max_retries + 1)`` times the given ``time_limit``.
+    Repair requires ``A``'s planar mesh. Set ``repair=False`` when using
+    ``complete=True``.
+
+    Args:
+        A: available-links graph. No edges implies ``complete=True``
+        capacity: maximum vehicle capacity, in inflow
+        capacity_nominal: maximum vehicle capacity, in nominal power, instead of
+            ``capacity`` (see :func:`~optiwindnet.loads.quantized`)
+        power_rtol: quantization tolerance of unequal turbine power
+        time_limit: [s] solver run time limit
+        constraints: topology, counts and loads to keep (defaults to those of
+            ``NetworkConstraints(topology='radial')``)
+        vehicles: deprecated, use ``constraints``: maximum number of routes
+        vehicles_exact: deprecated, use ``constraints``: whether ``vehicles`` is
+            exact
+        seed: random seed for reproducibility
+        keep_log: attach solver log to the solution graph
+        repair: iteratively fix crossings (default True)
+        max_retries: maximum repair iterations
+        balanced: deprecated, use ``constraints``: balance the route loads
+        complete: allow every terminal pair, using Euclidean distances for
+            links absent from ``A``. Enabled automatically when ``A`` has no
+            edges. Requires ``repair=False`` because mesh-based crossing
+            detection and repair cannot handle the added links. Use this
+            option to assess how missing-link penalties affect solution
+            quality. Pass the meshed ``A`` to preserve stored lengths
+            for links that route around obstacles.
+        log_callback: callback to receive each log line produced by HGS-CVRP
+            (only for single-root instances)
+        warmstart: solution topology S (radial, or ringed for a RINGED topology)
+            to seed the search and, for multi-root instances, to cluster the
+            terminals
+
+    Returns:
+        Solution topology S
+
+    Raises:
+        TypeError: both ``constraints`` and deprecated options are given.
+        NotImplementedError: the bounds ask for straight feeders, for something
+            unequal turbine power rules out (see below), or for an odd exact
+            feeder count of a root with rings.
+        ValueError: the bounds ask for more exact rings than ``T // 2``, or no
+            clustering satisfies them.
+        OWNWarmupFailed: the warm start is unusable.
+    """
+    R = A.graph['R']
+    T = A.graph['T']
+    # An edgeless A requests the complete graph over all nodes.
+    complete = complete or A.number_of_edges() == 0
+    if complete and repair:
+        raise NotImplementedError(
+            'hgs_cvrp() cannot repair a solve over the complete graph over all nodes: '
+            "crossing detection and repair read A's planar embedding and "
+            'diagonals, which say nothing about a link absent from A. Pass '
+            'repair=False (the solution may then cross itself).'
+        )
+    A, capacity, power_attrs = quantized(
+        A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
+    )
+    inflow_total = total_inflow(A)
+    legacy = {
+        name
+        for name, value, default in (
+            ('vehicles', vehicles, None),
+            ('vehicles_exact', vehicles_exact, False),
+            ('balanced', balanced, False),
+            ('ringed', ringed, False),
+        )
+        if value != default
+    }
+    inflow_by_node = nonunit_inflow(A)
+    unit_inflow_only = (
+        "hgs_cvrp() honours a terminal 'inflow' other than 1 only for an "
+        'unbalanced single-root radial solve without a count fixed above the '
+        'minimum: rings split by terminal count, the balanced slack nodes are '
+        'counted, and clusterize() partitions by count.'
+    )
+    if constraints is None:
+        if inflow_by_node and (ringed or balanced or R > 1):
+            raise NotImplementedError(unit_inflow_only)
+        if legacy:
+            warnings.warn(
+                f'hgs_cvrp() options {sorted(legacy)} are deprecated: pass '
+                'constraints=NetworkConstraints(...) instead.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        bounds = _legacy_bounds(
+            T, R, capacity, inflow_total, vehicles, vehicles_exact, balanced, ringed
+        )
+    elif legacy:
+        raise TypeError(f'Give either constraints or the options {sorted(legacy)}.')
+    else:
+        bounds = constraints._resolve(
+            T=T,
+            R=R,
+            capacity=capacity,
+            inflow_total=inflow_total,
+            power_per_inflow=power_attrs.get('power_per_inflow'),
+        )
+    if bounds.feeder_route is FeederRoute.STRAIGHT:
+        raise NotImplementedError('hgs_cvrp() does not keep feeder routes straight.')
+    ringed = bounds.topology is Topology.RINGED
+    balanced = bounds.balanced
+    # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
+    solve_capacity = 2 * capacity if ringed else capacity
+    vehicles_min = math.ceil(inflow_total / solve_capacity)
+    groups_lb, groups_ub = bounds.groups_lb, bounds.groups_ub
+    fixed_above_min = groups_lb == groups_ub and groups_lb > vehicles_min
+    if inflow_by_node and (ringed or balanced or fixed_above_min or R > 1):
+        raise NotImplementedError(unit_inflow_only)
+
+    plan = fleet_ = None
+    if R == 1:
+        # the root's bounds are within those of the farm
+        pinned = balanced or fixed_above_min
+        vehicles = groups_lb if pinned else groups_ub
+        if pinned and ringed and groups_lb > T // 2:
+            raise ValueError(
+                f'Rings ({groups_lb}) above the maximum ({T // 2}) that gives every '
+                f'ring two or more of the {T} terminals.'
+            )
+    else:
+        A.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
+        pinned, vehicles = False, None
 
     warm_routes_ = None
-    cluster_kwargs = {}
     if warmstart is not None:
         warm_routes_ = _routes_from_warmstart(warmstart, R, T)
         if R > 1:
-            cluster_ = [
-                {n for route in routes for n in route} for routes in warm_routes_
-            ]
-            if vehicles_exact:
-                vehicles_clustered = sum(
-                    math.ceil(len(cluster) / solve_capacity) for cluster in cluster_
+            try:
+                plan = plan_from_clusters(
+                    A,
+                    solve_capacity,
+                    bounds,
+                    [{n for route in routes for n in route} for routes in warm_routes_],
+                    tuple(len(routes) for routes in warm_routes_),
                 )
-                if vehicles_clustered != vehicles:
-                    raise OWNWarmupFailed(
-                        f'The clustering of the warm start needs {vehicles_clustered}'
-                        f' routes, not the exact count requested ({vehicles}).'
-                    )
-            cluster_kwargs['cluster_'] = cluster_
+            except ValueError as exc:
+                raise OWNWarmupFailed(
+                    f'The warm start breaks the bounds: {exc}'
+                ) from exc
+    if R > 1 and plan is None:
+        plan = cluster_plan(A, solve_capacity, bounds)
+    if plan is not None:
+        fleet_ = _fleet_(bounds, plan)
+        pinned = any(plan.pinned_)
 
     if seed is None:
         seed = random.randrange(0, 2**31)
@@ -693,39 +794,40 @@ def hgs_cvrp(
     }
 
     def _solve(warm_routes_=None):
-        solve = _solve_single_root if R == 1 else _solve_multi_root
-        results_ = solve(
-            A,
-            solve_capacity,
-            hgs_options,
-            vehicles,
-            balanced,
-            log_callback,
-            ringed,
-            complete,
-            warm_routes_=warm_routes_,
-            **cluster_kwargs,
-        )
-        S = _process_results(A, keep_log, balanced, *results_)
+        if plan is None:
+            results_ = _solve_single_root(
+                A,
+                solve_capacity,
+                hgs_options,
+                vehicles,
+                pinned,
+                log_callback,
+                ringed,
+                complete,
+                warm_routes_=warm_routes_,
+            )
+        else:
+            results_ = _solve_multi_root(
+                A,
+                solve_capacity,
+                hgs_options,
+                plan,
+                fleet_,
+                log_callback,
+                ringed,
+                complete,
+                warm_routes_=warm_routes_,
+            )
+        S = _process_results(A, keep_log, pinned, *results_)
         assert sum(S.nodes[r]['load'] for r in range(-R, 0)) == T, (
             'ERROR: root node load does not match T.'
         )
-        if vehicles_exact:
-            # rings are still paths here, so each route has one link to a root
-            route_count = sum(S.degree[r] for r in range(-R, 0))
-            assert route_count == vehicles, (
-                f'ERROR: route count ({route_count}) does not match the exact '
-                f'number requested ({vehicles}).'
-            )
         return S
 
     # iterative repair loop
     A_orig = A  # the loop may rebind A to a pruned copy
     # Without repair, A need not contain mesh diagonals.
     diagonals = A.graph['diagonals'] if repair else A.graph.get('diagonals', {})
-    if R > 1:
-        # needed in clustering
-        A.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
     crossings = []
     i = 0
     if not repair:
@@ -766,8 +868,8 @@ def hgs_cvrp(
         method_options=dict(
             solver_name='HGS-CVRP',
             complete=complete,
-            feeders_above_min=feeders_above_min,
-            feeders_exact=vehicles_exact,
+            feeders_above_min=None if groups_ub is None else groups_ub - vehicles_min,
+            feeders_exact=groups_lb == groups_ub and pinned,
             balanced=balanced,
             ringed=ringed,
             repair=repair,
@@ -778,6 +880,11 @@ def hgs_cvrp(
         solver_details=dict(
             seed=seed,
             **S.graph['solver_details'],
+            **{
+                name: value
+                for name in _ROOT_DETAILS
+                if (value := getattr(bounds, name)) is not None
+            },
         ),
         **power_attrs,
     )
