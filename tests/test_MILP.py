@@ -2431,3 +2431,27 @@ def test_milp_warmstart_keeps_the_substation_limits():
 
     assert S is not None and S.graph['creator'] == 'baselines.hgs'
     assert S.degree[-1] <= 5 and S.nodes[-1]['load'] <= 26
+
+
+def test_model_options_warn_where_they_are_made():
+    import warnings
+
+    from optiwindnet.api import MILPRouter
+
+    with pytest.warns(DeprecationWarning, match='ModelOptions is deprecated'):
+        options = ModelOptions(topology='radial')
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        # made already: neither the router nor unpickling warns again
+        MILPRouter(
+            solver_name='highs', time_limit=1, mip_gap=0.1, model_options=options
+        )
+        pickle.loads(pickle.dumps(options))
+    assert not [w for w in caught if issubclass(w.category, DeprecationWarning)]
+    with pytest.warns(DeprecationWarning, match='MILPRouter options'):
+        MILPRouter(
+            solver_name='highs',
+            time_limit=1,
+            mip_gap=0.1,
+            model_options={'topology': 'radial'},
+        )

@@ -604,7 +604,8 @@ def test_milp_warmstart_is_built_only_for_plain_radial_solves():
         router = MILPRouter(
             'highs', time_limit=1, mip_gap=0.01, model_options=model_options
         )
-        constraints = router.model_options.to_constraints()
+        constraints = router._legacy_constraints
+        assert constraints is not None
         bounds = constraints.resolve(A, **capacity_kwargs)
         return router._make_warmstart(A, capacity_kwargs, A_solve, constraints, bounds)
 

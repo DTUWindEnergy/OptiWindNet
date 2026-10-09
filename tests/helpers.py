@@ -21,6 +21,7 @@ from optiwindnet.MILP import (
     SolutionInfo,
     solver_factory,
 )
+from optiwindnet.MILP._core import _constraints_from_options
 
 from .sitecache import get_bundle
 
@@ -113,7 +114,7 @@ def run_milp_solve_with_retry(
             P,
             A,
             capacity=capacity,
-            constraints=ModelOptions(**model_options).to_constraints(),
+            constraints=_constraints_from_options(**model_options),
             warmstart=warmstart,
         )
         info = solver.solve(time_limit=limit, mip_gap=mip_gap, options=solve_options)

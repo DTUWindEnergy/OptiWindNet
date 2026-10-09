@@ -48,6 +48,7 @@ from .loads import (
 )
 from .mesh import make_planar_embedding
 from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
+from .MILP._core import _constraints_from_options
 from .pathfinding import PathFinder
 from .presenting import _nominal_loads
 from .svg import SvgRepr, svgplot, svgpplot
@@ -1334,10 +1335,12 @@ class MILPRouter(Router):
         self.mip_gap = mip_gap
         self.solver_name = solver_name
         self.solver_options = solver_options or {}
-        self.model_options = ModelOptions(**(model_options or {}))
+        self.model_options = model_options
         if model_options is not None:
-            _warn_deprecated_options('MILPRouter', ('model_options',))
-            self._legacy_constraints = self.model_options.to_constraints()
+            # a ModelOptions warned of its deprecation when it was made
+            if not isinstance(model_options, ModelOptions):
+                _warn_deprecated_options('MILPRouter', ('model_options',))
+            self._legacy_constraints = _constraints_from_options(**model_options)
         self.warmup = warmup
         self.warmup_time = warmup_time
         self.verbose = verbose

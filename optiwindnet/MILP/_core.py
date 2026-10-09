@@ -294,8 +294,9 @@ def balance_bounds(
 class ModelOptions(dict):
     """Hold options for the modelling of the cable routing problem.
 
-    Superseded by :class:`~optiwindnet.constraints.NetworkConstraints`, which
-    :meth:`to_constraints` translates them into.
+    Deprecated, and constructing one warns: superseded by
+    :class:`~optiwindnet.constraints.NetworkConstraints`, which
+    :meth:`to_constraints` translates the options into.
 
     Use ModelOptions.help() to get the options and their permitted and default
     values. Use ModelOptions() without any parameters to use the defaults.
@@ -360,6 +361,12 @@ class ModelOptions(dict):
             + ')'
         )
         def __init__(self, **kwargs):
+            warnings.warn(
+                'ModelOptions is deprecated: give the network (or set_problem()) '
+                'constraints=NetworkConstraints(...) instead.',
+                DeprecationWarning,
+                stacklevel=3,
+            )
             # dispatch on the key, not on the value's type: a str passed for an
             # int option is a type error, not an enum to look up
             for k, v in kwargs.items():
@@ -392,7 +399,10 @@ class ModelOptions(dict):
 
     @classmethod
     def _from_pickle(cls, values):
-        return cls(**values)
+        # restoring options is not a new use of them
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', DeprecationWarning)
+            return cls(**values)
 
     def __reduce__(self):
         return type(self)._from_pickle, (dict(self),)
@@ -753,12 +763,14 @@ class Solver(abc.ABC):
         if model_options is not None:
             if constraints is not None:
                 raise TypeError('Give either constraints or model_options, not both.')
-            warnings.warn(
-                'set_problem(model_options=...) is deprecated: pass '
-                'constraints=NetworkConstraints(...) instead.',
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            # a ModelOptions warned of its deprecation when it was made
+            if not isinstance(model_options, ModelOptions):
+                warnings.warn(
+                    'set_problem(model_options=...) is deprecated: pass '
+                    'constraints=NetworkConstraints(...) instead.',
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             constraints = _constraints_from_options(**model_options)
         elif constraints is None:
             constraints = NetworkConstraints()
