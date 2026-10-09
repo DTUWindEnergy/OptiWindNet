@@ -57,7 +57,7 @@ The [](/problem.md#problem-options) define the feeder requirements; [](/problem.
 | Meta-heuristic | radial, ringed | segmented | yesᵃ | yes | yes |
 | Exact optimization | branched, radial, ringed | straight, segmented | yes | yesᵇ | yes |
 
-ᵃ an exact count is held by balancing the loads of the routes concerned; rings stay on one substation, so a substation's exact count must be even
+ᵃ an exact count is held by balancing the loads of the routes concerned, except that LKH-3 holds rings only within size bounds of two or more turbines; rings stay on one substation, so a substation's exact count must be even
 
 ᵇ not for ringed networks, whose rings may connect two substations
 
@@ -81,7 +81,7 @@ _In use:_ {doc}`/notebooks/hi20_heuristic` (Network/Router API) · {doc}`/notebo
 
 Meta-heuristics search the solution space under a time budget you set. They treat the problem as a capacitated vehicle routing problem (CVRP), which is why they produce radial topologies by default: a CVRP route is a path, not a tree. Solving the _closed_ CVRP instead, where every route returns to the depot, yields a ringed topology.
 
-Both implementations handle multiple substations by assigning turbines to one cluster per substation, then solving the clusters concurrently. This fixes the assignment before the per-cluster search. With HGS-CVRP, the clustering gives each substation a number of routes within its constraints, and only as many turbines as those routes, its load limit and balancing allow. Crossing repair and repeated searches can add to the total runtime.
+Both implementations handle multiple substations by assigning turbines to one cluster per substation, then solving the clusters concurrently. This fixes the assignment before the per-cluster search. The clustering gives each substation a number of routes within its constraints, and only as many turbines as those routes, its load limit and balancing allow. Crossing repair and repeated searches can add to the total runtime.
 
 #### HGS-CVRP
 
@@ -91,7 +91,7 @@ _In use:_ {doc}`/notebooks/hi21_hgs` (Network/Router API) · {doc}`/notebooks/lo
 
 #### LKH-3
 
-LKH-3 uses the Lin–Kernighan–Helsgaun search method for constrained travelling-salesperson and vehicle-routing problems. It is available only through the Advanced API and requires a separate executable. See the guide for setup and usage.
+LKH-3 uses the Lin–Kernighan–Helsgaun search method for constrained travelling-salesperson and vehicle-routing problems. It is available only through the Advanced API and requires a separate executable. See the guide for setup and usage. It supports radial and ringed networks, and every feeder-count, substation-load and balancing constraint; unequal turbine powers restrict them as for HGS-CVRP (see [](/reference/power.md#router-support)). LKH-3 treats constraints as penalties and links absent from the mesh as costly rather than forbidden, so a solution outside the constraints, or one with rogue links, raises an error instead of being returned. On larger sites with exact counts or balancing, a longer time limit makes such errors rarer.
 
 _In use:_ {doc}`/notebooks/lo22_lkh` (Advanced API).
 

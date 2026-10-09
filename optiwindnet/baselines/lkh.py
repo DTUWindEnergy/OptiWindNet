@@ -12,16 +12,16 @@ import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
-from itertools import chain, pairwise
+from itertools import chain, islice, pairwise
 from pathlib import Path
 from typing import Any
 
 import networkx as nx
 import numpy as np
 
-from ..clustering import clusterize
+from ..clustering import cluster_plan, plan_from_clusters
+from ..constraints import NetworkBounds, NetworkConstraints
 from ..identity import fingerprint_function
-from ..interarraylib import add_link_blockmap
 from ..loads import (
     DEFAULT_POWER_RTOL,
     calcload,
@@ -31,12 +31,16 @@ from ..loads import (
     total_inflow,
 )
 from ..repair import repair_routeset_path
-from ..types import Topology
+from ..types import OWNWarmupFailed, Topology
 from ._core import (
     add_branches_to_S,
-    clamp_vehicles_to_min,
+    balanced_capacity,
     linkset_identity,
     remove_offending_crossings,
+    resolve_bounds,
+    root_details,
+    root_fleet_,
+    routes_from_warmstart,
     scaled_length_block,
 )
 
@@ -156,27 +160,14 @@ def _build_weight_matrix(
     return L
 
 
-def _distance_cap(L: np.ndarray, *, capacity: int, scale: float) -> float:
-    """Maximum route length to impose on LKH (in ``L``'s scaled units).
+def _w_clip(precision: int) -> int:
+    """Price of a link missing from ``A`` (in ``L``'s scaled units).
 
-    A route visits at most ``k = min(capacity, T)`` terminals, so its length is
-    the feeder leg plus ``k - 1`` inter-terminal hops. Normalized coordinates
-    put the site's concave hull at unit area, hence the terminal spacing scales
-    as ``1/sqrt(T)`` and the hop total as ``k/sqrt(T)``. The feeder leg is
-    bounded by the longest depot distance, read straight off ``L``'s depot
-    column.
-
-    The coefficients were calibrated against 25453 known-good routesets
-    (HGS-CVRP and LKH-3, both path-shaped) from the bundled instance database:
-    ``0.45`` minimizes the spread of longest-route/predictor (cv 0.063, against
-    0.225 for the previous capacity-blind cap), and ``1.72`` is the smallest
-    margin that still leaves every one of those routesets feasible, with 1.25x
-    to spare on the worst of them.
+    It is the same expression LKH uses to define its big-M value, since the
+    problem file never declares which links exist (see the specs in
+    :func:`_do_lkh`).
     """
-    T = L.shape[0] - 1
-    d2root_max = float(L[:-1, -1].max())
-    hops = scale * 0.45 * min(capacity, T) / math.sqrt(T)
-    return 1.72 * (d2root_max + hops)
+    return np.iinfo(np.int32).max // (2 * precision)
 
 
 def _route_from_tour(tour_fpath: str, L: np.ndarray) -> tuple[list[int], int]:
@@ -230,10 +221,13 @@ def _do_lkh(
     initial_tour_nodes: list[int] | None,
     name: str,
     ringed: bool = False,
+    asymmetric: bool = False,
 ) -> dict:
     """Run LKH-3 on a precomputed weight matrix.
 
-    ``L`` has shape ``(T+1, T+1)`` with the depot at the last index.
+    ``L`` has shape ``(T+1, T+1)`` with the depot at the last index. Only its
+    upper triangle is passed to LKH, unless ``asymmetric``, which passes the
+    whole matrix (see :func:`_with_slack_nodes`).
 
     With ``ringed=False`` (default) LKH solves an Open-CVRP (``TYPE=OVRP``): the
     return leg to the depot is free and routes are radial. With ``ringed=True``
@@ -247,9 +241,12 @@ def _do_lkh(
     """
     T = L.shape[0] - 1
     N = T + 1
-    edge_weights = '\n'.join(
-        ' '.join(str(d) for d in row[i + 1 :]) for i, row in enumerate(L[:-1])
-    )
+    if asymmetric:
+        edge_weights = '\n'.join(' '.join(str(d) for d in row) for row in L)
+    else:
+        edge_weights = '\n'.join(
+            ' '.join(str(d) for d in row[i + 1 :]) for i, row in enumerate(L[:-1])
+        )
 
     problem_fname = 'problem.txt'
     params_fname = 'params.txt'
@@ -257,7 +254,6 @@ def _do_lkh(
     tour_fname = 'solution.tour'
     initial_tour_fname = 'initial.tour'
 
-    distance_cap = _distance_cap(L, capacity=capacity, scale=scale)
     specs: dict[str, str | int | float] = {
         'NAME': name,
         'TYPE': 'CVRP' if ringed else 'OVRP',
@@ -266,7 +262,7 @@ def _do_lkh(
         # MTSP_MAX_SIZE should work for unitary demand, but did not.
         'CAPACITY': capacity,
         'EDGE_WEIGHT_TYPE': 'EXPLICIT',
-        'EDGE_WEIGHT_FORMAT': 'UPPER_ROW',
+        'EDGE_WEIGHT_FORMAT': 'FULL_MATRIX' if asymmetric else 'UPPER_ROW',
         # The available-links set reaches LKH only through the weights: a link
         # absent from A is priced at the big-M of _build_cluster_weight_matrices,
         # never declared missing. Declaring it was tried and only made the solver
@@ -278,12 +274,12 @@ def _do_lkh(
         # set, applies to the transformed problem as well and follows the Concorde
         # format, whose indices start at 0.
     }
-    if not ringed and not math.isinf(distance_cap):
-        # LKH treats DISTANCE as a hard constraint: too low and it reports the
-        # problem infeasible and returns no solution at all. The cap is
-        # calibrated for open (radial) routes; a closed ring pays a second feeder
-        # leg, so the cap is not imposed for ringed solves.
-        specs['DISTANCE'] = distance_cap  # maximum route length
+    if not ringed:
+        # LKH penalizes a route longer than DISTANCE, and any penalty outranks
+        # any cost. A route with a link missing from A is longer than that link's
+        # price, so the cap keeps such links out of every solution that has no
+        # penalty. It is not imposed on rings (untried for TYPE=CVRP).
+        specs['DISTANCE'] = _w_clip(precision)  # maximum route length
     if not demands:
         demands = [1] * T
     data = {
@@ -295,34 +291,33 @@ def _do_lkh(
             )
         ),
     }
-    params = dict(
+    params: dict[str, str | int | float | None] = {
         # SPECIAL is a shorthand for a bundle of large-neighborhood move settings
-        # (MOVE_TYPE='5 SPECIAL', MAX_SWAPS=0, ...). It segfaults LKH-3 on
-        # TYPE=CVRP (the ringed solve), so it is only enabled for the OVRP case.
-        **({} if ringed else {'SPECIAL': None}),  # None -> output only the key
-        DEPOT=N,
-        SEED=seed,  # 0 means pick a random seed
-        PRECISION=precision,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
-        TOTAL_TIME_LIMIT=time_limit,
-        TIME_LIMIT=per_run_limit,
-        RUNS=runs,  # default: 10
+        # (MOVE_TYPE='5 SPECIAL', MAX_SWAPS=0, ...). Without it, LKH-3 often ends
+        # with a penalty (counts or sizes off the bounds) and rings use rogue
+        # links; with it, both topologies come out shorter.
+        'SPECIAL': None,  # None -> output only the key
+        'DEPOT': N,
+        'SEED': seed,  # 0 means pick a random seed
+        'PRECISION': precision,  # d[i][j] = PRECISION*c[i][j] + pi[i] + pi[j]
+        'TOTAL_TIME_LIMIT': time_limit,
+        'TIME_LIMIT': per_run_limit,
+        'RUNS': runs,  # default: 10
         # MAX_TRIALS=100,  # default: number of nodes (DIMENSION)
         # TRACE_LEVEL=1,  # default is 1, 0 supresses output
         #  INITIAL_TOUR_ALGORITHM='GREEDY',  # { … | CVRP | MTSP | SOP } Default: WALK
-        VEHICLES=vehicles,
-        # FIXME: if TYPE=OVRP, LHK-3 does not apply penalties for MTSP_MIN_SIZE:
-        #   MTSP_MIN_SIZE is enforced for TYPE=CVRP, but then an assymetric
-        #   EDGE_WEIGHT_FORMAT='FULL_MATRIX' is required for open routes
-        #   Notably, balanced=True is NOT enforced with the current parameters
-        MTSP_MIN_SIZE=min_route_size,
+        'VEHICLES': vehicles,
+        # penalized for TYPE=CVRP (rings), ignored for TYPE=OVRP, whose routes
+        # are filled up with slack nodes instead (see _with_slack_nodes)
+        'MTSP_MIN_SIZE': min_route_size,
         # a node cap, so it is CAPACITY over the lightest demand a route can hold
-        MTSP_MAX_SIZE=capacity // min(demands, default=1),
-        MTSP_OBJECTIVE='MINSUM',  # [ MINMAX | MINMAX_SIZE | MINSUM ]
-        MTSP_SOLUTION_FILE=output_fname,
+        'MTSP_MAX_SIZE': capacity // min(demands, default=1),
+        'MTSP_OBJECTIVE': 'MINSUM',  # [ MINMAX | MINMAX_SIZE | MINSUM ]
+        'MTSP_SOLUTION_FILE': output_fname,
         # LKH-3 only writes MTSP_SOLUTION_FILE for 2+ salesmen. With a single
         # vehicle it solves the problem but reports it as a plain tour, so ask
         # for TOUR_FILE too and recover the lone route from it (see below).
-        TOUR_FILE=tour_fname,
+        'TOUR_FILE': tour_fname,
         #  MOVE_TYPE='5 SPECIAL',  # <integer> [ SPECIAL ]
         #  GAIN23='NO',
         #  KICKS=1,
@@ -331,7 +326,7 @@ def _do_lkh(
         #  POPULATION_SIZE=12,  # default 10
         #  PATCHING_A=
         #  PATCHING_C=
-    )
+    }
 
     with tempfile.TemporaryDirectory() as tmpdir:
         problem_fpath = os.path.join(tmpdir, problem_fname)
@@ -440,6 +435,41 @@ def _do_lkh(
     return output
 
 
+def _with_slack_nodes(L: np.ndarray, num_slack: int, w_clip: int) -> np.ndarray:
+    """Add slack nodes to a radial weight matrix, making it asymmetric.
+
+    Slack nodes are depot clones of unit demand that fill every route up to the
+    capacity, so that no route is left empty (see
+    :func:`~optiwindnet.baselines._core.balanced_capacity`). They take the rows
+    and columns between the terminals and the depot. Only the depot leads to a
+    slack node, at no cost, and a slack node leads to a terminal at the price of
+    the terminal's feeder. A terminal leading to a slack node, or a slack node
+    to another, costs ``w_clip``, which the route-length limit of
+    :func:`_do_lkh` penalizes. Hence a slack node can only open a route. With a
+    symmetric matrix, LKH would place a slack node between two terminals: an
+    extra feeder that no vehicle accounts for.
+
+    Args:
+        L: symmetric weight matrix of :func:`_build_weight_matrix`, depot last.
+        num_slack: number of slack nodes.
+        w_clip: price of a link missing from ``A``.
+
+    Returns:
+        The full matrix, of shape ``(T_c + num_slack + 1,) * 2``, depot last.
+    """
+    T_c = L.shape[0] - 1
+    n = T_c + num_slack + 1
+    d2root = L[:T_c, -1]
+    M = np.full((n, n), w_clip, dtype=L.dtype)
+    M[:T_c, :T_c] = L[:T_c, :T_c]
+    # LKH frees the leg back to the depot itself (TYPE=OVRP)
+    M[:T_c, -1] = M[-1, :T_c] = d2root
+    M[T_c:-1, :T_c] = d2root
+    M[T_c:-1, -1] = M[-1, T_c:-1] = 0
+    np.fill_diagonal(M, 0)
+    return M
+
+
 def _build_cluster_weight_matrices(
     A: nx.Graph,
     terminals_: list[list[int]],
@@ -455,10 +485,7 @@ def _build_cluster_weight_matrices(
     (terminals, root) pair in root order (-R..-1).
     """
     R = A.graph['R']
-    # the same expression LKH uses to define its big-M value: it is what a link
-    # missing from A costs, since the problem file never declares which links
-    # exist (see the specs in _do_lkh)
-    w_clip = np.iinfo(np.int32).max // (2 * precision)
+    w_clip = _w_clip(precision)
     return [
         _build_weight_matrix(
             A, terminals, r, scale=scale, complete=complete, w_clip=w_clip
@@ -483,6 +510,8 @@ def _solve_cluster(
     initial_tour_nodes: list[int] | None,
     name: str,
     ringed: bool = False,
+    num_slack: int = 0,
+    route_sizes: tuple[int, int] | None = None,
 ) -> dict:
     """Run LKH-3 on a pre-built cluster weight matrix.
 
@@ -491,9 +520,19 @@ def _solve_cluster(
     :func:`_do_lkh`. The matrix is built by :func:`_build_cluster_weight_matrices`,
     decoupled from this call so it can be reused across iterations that do
     not mutate the underlying graph.
+
+    A radial solve with ``num_slack`` slack nodes (see :func:`_with_slack_nodes`)
+    returns its routes without them, and counts in ``'stray_slack'`` the slack
+    nodes found anywhere but at the start of a route. ``route_sizes`` bounds the
+    terminals of every ring (``TYPE=CVRP`` enforces ``MTSP_MIN_SIZE``).
     """
     T_c = L.shape[0] - 1
-    if ringed or demands:
+    if num_slack:
+        L = _with_slack_nodes(L, num_slack, _w_clip(precision))
+        min_route_size = 0
+    elif route_sizes is not None:
+        min_route_size = route_sizes[0]
+    elif ringed or demands:
         # MTSP_MIN_SIZE for TYPE=CVRP would require a FULL_MATRIX (asymmetric)
         # formulation; the symmetric ring solve does not impose a minimum size.
         # It counts nodes, too, which bounds nothing once the demands differ.
@@ -504,7 +543,7 @@ def _solve_cluster(
         min_route_size = (T_c % capacity) or capacity
     else:
         min_route_size = 0
-    return _do_lkh(
+    output = _do_lkh(
         L,
         capacity=capacity,
         vehicles=vehicles,
@@ -519,55 +558,78 @@ def _solve_cluster(
         initial_tour_nodes=initial_tour_nodes,
         name=name,
         ringed=ringed,
+        asymmetric=bool(num_slack),
     )
+    if num_slack:
+        routes = output['routes']
+        output['stray_slack'] = sum(
+            1 for route in routes for k, i in enumerate(route) if i >= T_c and k > 0
+        )
+        output['routes'] = [[i for i in route if i < T_c] for route in routes]
+    return output
 
 
-def _initial_tours_from_warmstart(
-    warmstart: nx.Graph,
+def _initial_tours(
+    routes_: list[list[list[int]]],
     terminals_: list[list[int]],
     vehicles_: list[int],
+    num_slack_: Sequence[int] | None = None,
+    capacity_: Sequence[int] | None = None,
 ) -> list[list[int] | None]:
-    """Per-root LKH initial tours derived from a warmstart solution graph.
+    """Translate warm-start routes into one LKH initial tour per root.
 
-    For each root, walks the warmstart's branches in order. Each visited
-    terminal ``n`` becomes the LKH customer id ``i + 1``, where ``i`` is ``n``'s
-    position in the cluster's sorted ``terminals`` list (i.e., its row index
-    in the LKH weight matrix). The depot clones (``vehicles - 1`` of them)
-    and the final depot id are appended, as required by LKH-3 for OVRP.
+    LKH refers to terminal ``n`` as customer ``i + 1``, where ``i`` is ``n``'s
+    position in the cluster's sorted ``terminals`` list (its row in the LKH
+    weight matrix). Slack nodes (see :func:`_with_slack_nodes`), if any, follow
+    the terminals; then come the depot and its ``vehicles - 1`` clones. In
+    LKH's tour, the depot nodes separate the routes, so a clone follows each
+    route and the vehicles left unused are empty routes: consecutive clones,
+    closed by the depot. Each route opens with the slack nodes that fill it up
+    to its root's capacity, as far as they go; any left over open the next
+    route.
 
-    The walked tour is purely a hint about the *order* in which customers
-    should be visited; LKH evaluates segment costs from the weight matrix.
-    Therefore the warmstart's edges should still be present in ``A_iter``
-    when this tour is fed back to LKH (or those segments will be charged
-    the ``w_clip`` sentinel weight).
+    The tour only hints at the visiting order: LKH costs it from the weight
+    matrix, so a warm-start link absent from it gets the ``w_clip`` price.
 
-    Roots whose warmstart cluster is empty get ``None``.
+    Args:
+        routes_: warm-start routes of each root (see
+            :func:`~optiwindnet.baselines._core.routes_from_warmstart`), whose
+            terminals belong to that root's cluster.
+        terminals_: sorted terminals of each root's cluster.
+        vehicles_: vehicles of each root, at least its number of routes.
+        num_slack_: slack nodes of each root (none if not given).
+        capacity_: capacity of each root's routes (needed with slack nodes).
 
-    Raises:
-        KeyError: a walked terminal is not in the corresponding cluster's
-            ``terminals`` list (i.e., warmstart and clustering disagree).
+    Returns:
+        The tour of each root, or ``None`` for a root without routes.
     """
-    R = warmstart.graph['R']
-    out: list[list[int] | None] = []
-    for r, terminals, vehicles in zip(range(-R, 0), terminals_, vehicles_):
-        idx_from_node = {n: i + 1 for i, n in enumerate(terminals)}
-        ordered_ids: list[int] = []
-        for cur in warmstart.neighbors(r):
-            rev = r
-            while True:
-                ordered_ids.append(idx_from_node[cur])
-                nb = warmstart[cur]
-                if len(nb) == 1:
-                    break  # leaf
-                a, b = nb
-                rev, cur = cur, a if b == rev else b
-        if not ordered_ids:
-            out.append(None)
+    tours: list[list[int] | None] = []
+    for c, (routes, terminals, vehicles) in enumerate(
+        zip(routes_, terminals_, vehicles_)
+    ):
+        if not routes:
+            tours.append(None)
             continue
         T_c = len(terminals)
-        depot_clones = range(T_c + 2, T_c + vehicles + 1)
-        out.append(ordered_ids + list(depot_clones) + [T_c + 1])
-    return out
+        num_slack = 0 if num_slack_ is None else num_slack_[c]
+        n_customers = T_c + num_slack
+        id_from_node = {n: i for i, n in enumerate(terminals, start=1)}
+        slack = iter(range(T_c + 1, n_customers + 1))
+        separators = [
+            *range(n_customers + 2, n_customers + vehicles + 1),
+            n_customers + 1,
+        ]
+        tour = []
+        for route, separator in zip(routes, separators):
+            if num_slack:
+                assert capacity_ is not None
+                tour.extend(islice(slack, max(capacity_[c] - len(route), 0)))
+            tour.extend(id_from_node[n] for n in route)
+            tour.append(separator)
+        tour.extend(slack)
+        tour.extend(separators[len(routes) :])
+        tours.append(tour)
+    return tours
 
 
 def _build_solution(
@@ -580,8 +642,18 @@ def _build_solution(
     method_options: dict,
     solver_details_extra: dict,
 ) -> nx.Graph:
-    """Assemble the final solution graph S from per-root LKH outputs."""
+    """Assemble the final solution graph S from per-root LKH outputs.
+
+    Raises:
+        ValueError: LKH-3 returned no routes for a root with terminals.
+    """
     R, T = A.graph['R'], A.graph['T']
+    for r, output, terminals in zip(range(-R, 0), outputs_, terminals_):
+        if terminals and not output['routes']:
+            raise ValueError(
+                f'LKH-3 found no solution for root {r} ({len(terminals)} '
+                f'terminals, {output["vehicles"]} vehicles).'
+            )
     multi = R > 1
     objective = sum(o['cost'] for o in outputs_)
     runtime = max(o['elapsed_time'] for o in outputs_)
@@ -756,7 +828,7 @@ def _run_lkh_per_cluster(
     L_: list[np.ndarray],
     *,
     name: str,
-    capacity: int,
+    capacity_: Sequence[int],
     time_limit: float,
     vehicles_: list[int],
     warmstart_tours: list[list[int] | None],
@@ -768,8 +840,13 @@ def _run_lkh_per_cluster(
     precision: int,
     seed: int,
     ringed: bool = False,
+    num_slack_: Sequence[int] | None = None,
+    route_sizes_: Sequence[tuple[int, int] | None] | None = None,
 ) -> list[dict]:
     """Solve every root cluster with LKH-3, sequentially or in parallel.
+
+    Each root has its own capacity, slack nodes and route-size bounds (see
+    :func:`_solve_cluster`).
 
     Single-root (R == 1) is solved synchronously; multi-root dispatches one
     :func:`_solve_cluster` per root through a ThreadPoolExecutor (one thread per
@@ -780,10 +857,12 @@ def _run_lkh_per_cluster(
     cluster indices.
     """
     R = len(L_)
+    num_slack_ = num_slack_ or (0,) * R
+    route_sizes_ = route_sizes_ or (None,) * R
     job_kwargs_ = [
         {
             'L': L,
-            'capacity': capacity,
+            'capacity': capacity_c,
             'vehicles': vehicles_c,
             'balanced': balanced,
             'demands': demands,
@@ -796,9 +875,17 @@ def _run_lkh_per_cluster(
             'initial_tour_nodes': init_tour,
             'name': name if R == 1 else f'{name}_root{r}',
             'ringed': ringed,
+            'num_slack': num_slack_c,
+            'route_sizes': route_sizes_c,
         }
-        for r, L, vehicles_c, init_tour in zip(
-            range(-R, 0), L_, vehicles_, warmstart_tours
+        for r, L, capacity_c, vehicles_c, init_tour, num_slack_c, route_sizes_c in zip(
+            range(-R, 0),
+            L_,
+            capacity_,
+            vehicles_,
+            warmstart_tours,
+            num_slack_,
+            route_sizes_,
         )
     ]
     if R == 1:
@@ -851,16 +938,32 @@ def _vehicles_within_capacity(T_c: int) -> int:
 
 
 def _setup_clusters(
-    A: nx.Graph, *, capacity: int, vehicles: int | None, inflow_total: int | None = None
-) -> tuple[list[list[int]], list[int]]:
-    """Compute per-root terminals and vehicle counts.
+    A: nx.Graph,
+    *,
+    capacity: int,
+    bounds: NetworkBounds,
+    inflow_total: int,
+    warm_routes_: list[list[list[int]]] | None = None,
+) -> tuple[list[list[int]], list[int], list[int | None], list[bool]]:
+    """Compute per-root terminals, vehicle counts, vehicle caps and pins.
 
     For R == 1 the only cluster is ``range(T)``; for R > 1 the terminals are
-    partitioned by :func:`clusterize` and each cluster's terminal list is sorted
-    so that LKH customer ids ``[1..T_c]`` correspond to the cluster's nodes in
-    sorted order (and :func:`_initial_tours_from_warmstart` agrees on indexing).
+    partitioned within ``bounds`` by :func:`~optiwindnet.clustering.cluster_plan`
+    and each cluster's terminal list is sorted so that LKH customer ids
+    ``[1..T_c]`` correspond to the cluster's nodes in sorted order (and
+    :func:`_initial_tours` agrees on indexing). Warm-start routes, if given,
+    replace the clustering of R > 1 with their own terminals and route counts,
+    and every root is offered at least as many vehicles as its warm-start
+    routes.
 
-    Clusters are given their minimum feasible vehicle count, except:
+    A pinned root must use exactly its vehicles (see
+    :func:`~optiwindnet.clustering.cluster_plan`): for R == 1, under balance or
+    a route count fixed above the minimum. It is offered its budget in the
+    clustering, or the route count for R == 1. Otherwise, if the wind farm's
+    route count has a maximum, each root is offered its whole fleet: that
+    maximum for R == 1, the root's budget in the clustering otherwise. If not, a
+    root is offered its minimum feasible vehicle count, capped by its own feeder
+    limit, except:
 
     - a cluster that fits within ``capacity`` (``T_c <= capacity``) gets
       :func:`_vehicles_within_capacity` instead of the minimum of 1. Its minimum
@@ -869,32 +972,79 @@ def _setup_clusters(
       joined into a single subtree at the root without exceeding capacity, so the
       layout stays radial and no feeder budget is overspent. Pinning it to 1
       instead demands a single route, which over the sparse (near-planar) link set
-      ``A`` means a Hamiltonian path — and one need not exist, all the more so
-      after :func:`_prune_links` drops the links that would block feeders (a
-      rationale that is vacuous when there is only one feeder to block). LKH then
-      returns nothing at all for the cluster.
-    - for R == 1, a user-supplied ``vehicles > vehicles_min`` is honoured (this
-      knob is meaningless under multi-root clustering).
+      ``A`` means a Hamiltonian path — and one need not exist. LKH then finds no
+      solution for the cluster.
+
+    Returns:
+        The terminals of each root, the vehicles offered to each root, the
+        most vehicles each root may use (``None`` if unlimited) and whether
+        each root is pinned.
+
+    Raises:
+        NotImplementedError: a root's exact feeder count is odd for rings.
+        ValueError: no clustering satisfies ``bounds``.
+        OWNWarmupFailed: the warm-start routes break ``bounds``.
     """
     R, T = A.graph['R'], A.graph['T']
     if R == 1:
         terminals_ = [list(range(T))]
-        len_cluster_ = [T]
-    else:
-        cluster_ = clusterize(A, capacity)
-        terminals_ = [sorted(c) for c in cluster_]
-        len_cluster_ = [len(c) for c in terminals_]
-    # Nonunitary inflow is supported only for a single root and its one cluster.
-    demand_ = len_cluster_ if inflow_total is None else [inflow_total]
-    vehicles_min_ = [math.ceil(demand / capacity) for demand in demand_]
-    if R == 1 and vehicles is not None and vehicles > vehicles_min_[0]:
-        vehicles_ = [vehicles]
-    else:
-        vehicles_ = [
-            _vehicles_within_capacity(T_c) if v_min == 1 else v_min
-            for T_c, v_min in zip(len_cluster_, vehicles_min_)
+        # Nonunitary inflow is supported only for a single root.
+        demand_ = [inflow_total]
+        fleet_ = [bounds.groups_ub]
+        groups_lb, groups_ub = bounds.groups_lb, bounds.groups_ub
+        budget_ = [groups_lb]
+        pinned_ = [
+            bounds.balanced
+            or (groups_lb == groups_ub and groups_lb > math.ceil(T / capacity))
         ]
-    return terminals_, vehicles_
+        if (
+            warm_routes_ is not None
+            and groups_ub is not None
+            and len(warm_routes_[0]) > groups_ub
+        ):
+            raise OWNWarmupFailed(
+                f'The warm start has {len(warm_routes_[0])} routes, more than '
+                f'the maximum of {groups_ub}.'
+            )
+    else:
+        if warm_routes_ is None:
+            plan = cluster_plan(A, capacity, bounds)
+        else:
+            try:
+                plan = plan_from_clusters(
+                    A,
+                    capacity,
+                    bounds,
+                    [{n for route in routes for n in route} for routes in warm_routes_],
+                    tuple(len(routes) for routes in warm_routes_),
+                )
+            except ValueError as exc:
+                raise OWNWarmupFailed(
+                    f'The warm start breaks the bounds: {exc}'
+                ) from exc
+        budget_, pinned_ = list(plan.budget_), list(plan.pinned_)
+        terminals_ = [sorted(c) for c in plan.cluster_]
+        demand_ = [len(c) for c in terminals_]
+        fleet_ = root_fleet_(bounds, plan)
+    vehicles_ = []
+    for terminals, demand, fleet, budget, pinned in zip(
+        terminals_, demand_, fleet_, budget_, pinned_
+    ):
+        if pinned:
+            vehicles_.append(budget)
+            continue
+        vehicles_min = math.ceil(demand / capacity)
+        vehicles = (
+            _vehicles_within_capacity(len(terminals))
+            if vehicles_min == 1
+            else vehicles_min
+        )
+        if fleet is not None:
+            vehicles = fleet if bounds.feeders_ub is not None else min(fleet, vehicles)
+        vehicles_.append(vehicles)
+    if warm_routes_ is not None:
+        vehicles_ = [max(v, len(routes)) for v, routes in zip(vehicles_, warm_routes_)]
+    return terminals_, vehicles_, fleet_, pinned_
 
 
 def lkh3(
@@ -904,6 +1054,7 @@ def lkh3(
     capacity_nominal: float | Fraction | None = None,
     power_rtol: float = DEFAULT_POWER_RTOL,
     time_limit: float,
+    constraints: NetworkConstraints | None = None,
     vehicles: int | None = None,
     seed: int | None = None,
     keep_log: bool = False,
@@ -925,32 +1076,61 @@ def lkh3(
     ``LKH`` executable is in the environment's PATH.
 
     Uses the Lin-Kernighan-Helsgaun meta-heuristic to solve an Open-CVRP
-    (i.e., vehicles do not return to the depot), yielding radial layouts. With
-    ``ringed=True`` it solves the closed CVRP instead (``TYPE=CVRP``): every
+    (i.e., vehicles do not return to the depot), yielding radial layouts. For a
+    RINGED topology it solves the closed CVRP instead (``TYPE=CVRP``): every
     route returns to the depot, forming a ring whose capacity is doubled
     internally (``2 * capacity``) so each of the two arms holds at most
     ``capacity`` terminals. Normalization of the input graph is recommended
     before calling this function (use :func:`~optiwindnet.transforming.as_normalized`).
 
-    Each vehicle is one route, so ``vehicles`` bounds the route count from
-    above: LKH-3 may leave vehicles unused, returning fewer routes than
-    ``vehicles``. The relation of routes to feeders (links to a root) depends
-    on the topology:
+    ``constraints`` give the topology (RADIAL or BRANCHED yield radial layouts)
+    and the count and load bounds, which are resolved after the turbine power is
+    quantized (see :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
+    Each vehicle is one route: a subtree with one feeder, or a ring with two (one
+    per arm). Feeder routes are not kept straight (``FeederRoute.STRAIGHT`` is
+    refused).
 
-    - radial: one route is one subtree with a single feeder, so ``vehicles``
-      caps the feeder count, whose minimum is ``ceil(T / capacity)``;
-    - ringed: one route is one ring with two feeders (one per arm), so
-      ``vehicles`` caps the ring count, the feeder count is twice the ring
-      count, and the minimum is ``ceil(T / (2 * capacity))`` rings.
+    LKH-3 bounds the route count from above only: it may leave vehicles unused.
+    A route count that must be exact (fixed above the minimum, or fixed for a
+    root) or balanced is held by other means. Radial routes are filled up with
+    slack nodes, depot clones of unit demand that only the depot may lead to (the
+    weight matrix becomes asymmetric), so every route comes out full and the
+    loads are balanced, as in :func:`~optiwindnet.baselines.hgs.hgs_cvrp`. Rings
+    are held by LKH-3's route-size bounds (``MTSP_MIN_SIZE`` and
+    ``MTSP_MAX_SIZE``): two or more terminals per ring, balanced only under
+    balance. LKH-3 may still return a solution off these bounds (its constraints
+    are penalties), which raises ``ValueError``; a longer ``time_limit`` may
+    help. A count fixed at the minimum needs none of this, since fewer routes
+    are infeasible.
 
     For single-root problems, the solver runs on the full graph. For multi-root
-    problems, the graph is clustered (one cluster per root) and each cluster is
-    solved concurrently.
+    problems, the terminals are clustered within the bounds (see
+    :func:`~optiwindnet.clustering.clusterize`) and each cluster is solved
+    concurrently. Without a maximum route count, each root is offered its
+    minimum feasible route count, except a root whose cluster fits within a
+    single route, which is offered enough routes to use as many as lower the
+    cable length (within the root's own limit).
 
-    For multi-root instances, ``vehicles`` is forced per cluster (a warning is
-    issued if a different value is requested): to the minimum feasible route
-    count, except for a cluster that fits within a single route, which is
-    offered enough routes to use as many as lower the cable length.
+    The options ``vehicles``, ``balanced`` and ``ringed`` are deprecated in
+    favour of ``constraints``, which they are translated into: a maximum route
+    count (with several roots, only the minimum count), which ``balanced=True``
+    holds at the minimum.
+
+    Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
+    radial solve without a count fixed above the minimum or balance.
+
+    A link absent from ``A`` is priced, not forbidden, so LKH-3 may still use
+    one: a solution with such rogue links raises ``ValueError`` (unless
+    ``complete``).
+
+    A ``warmstart`` solution topology gives LKH-3 its initial tour (its routes,
+    one per feeder subtree or ring), and, for multi-root problems, its
+    assignment of terminals to roots and its route counts replace the
+    clustering. Each root is offered at least as many vehicles as its
+    warm-start routes. Only the first solve of the repair loop is seeded, unless
+    a retry only adds vehicles. An unusable warm start raises
+    ``OWNWarmupFailed``: one that does not cover every terminal exactly once with
+    routes hanging from a single root each, or that breaks the bounds.
 
     If ``repair=True`` (the default), the solution is iteratively repaired
     until no crossings remain (or ``max_retries`` is reached). This may cause
@@ -965,15 +1145,14 @@ def lkh3(
             ``capacity`` (see :func:`~optiwindnet.loads.quantized`).
         power_rtol: quantization tolerance of unequal turbine power.
         time_limit: [s] solver run time limit (per cluster).
-        vehicles: maximum number of routes: feeders if radial, rings (half
-            the feeders) if ``ringed`` (if None or at the minimum, use the
-            per-cluster default described above; ignored for multi-root
-            problems).
+        constraints: topology, counts and loads to keep (defaults to those of
+            ``NetworkConstraints(topology='radial')``)
+        vehicles: deprecated, use ``constraints``: maximum number of routes
         seed: random seed for reproducibility (if None, picks a random one).
         keep_log: attach solver log to the solution graph.
         repair: iteratively fix crossings (default True).
         max_retries: maximum repair iterations.
-        balanced: not supported; ``True`` raises ``NotImplementedError``.
+        balanced: deprecated, use ``constraints``: balance the route loads
         scale: factor to scale lengths (LKH manual).
         runs: number of LKH runs (LKH manual).
         per_run_limit: [s] LKH per-run time limit.
@@ -985,12 +1164,25 @@ def lkh3(
             option to assess how missing-link penalties affect solution
             quality. Pass the meshed ``A`` to preserve stored lengths
             for links that route around obstacles.
-        warmstart: optional previous solution graph used to initialize the
-            tour. For multi-root instances each cluster receives the portion of
-            the warmstart attached to its root.
+        warmstart: solution topology S (radial, or ringed for a RINGED topology)
+            to seed the search and, for multi-root instances, to cluster the
+            terminals
+        ringed: deprecated, use ``constraints``: solve for rings
 
     Returns:
         Solution topology S.
+
+    Raises:
+        TypeError: both ``constraints`` and deprecated options are given.
+        NotImplementedError: the bounds ask for straight feeders, for
+            something unequal turbine power rules out (see above), or for an
+            odd exact feeder count of a root with rings.
+        ValueError: the bounds ask for more exact rings than ``T // 2``, or no
+            clustering satisfies them; LKH-3 finds no solution for a root, or
+            none within the bounds or without rogue links; or ``A`` is not
+            limited to the constraints' ``max_link_length``, or the solution
+            exceeds the limit of ``A``.
+        OWNWarmupFailed: the warm start is unusable.
     """
     R, T = A.graph['R'], A.graph['T']
     # An edgeless A requests the complete graph over all nodes.
@@ -1005,45 +1197,48 @@ def lkh3(
     A, capacity, power_attrs = quantized(
         A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
     )
-    inflow_by_node = nonunit_inflow(A)
-    if inflow_by_node and (ringed or balanced or R > 1):
-        raise NotImplementedError(
-            "lkh3() honours a terminal 'inflow' other than 1 only for an "
-            'unbalanced single-root radial solve: rings split by terminal count, '
-            "LKH-3's route-size bounds count nodes, and clusterize() partitions "
-            'by count.'
-        )
-    # TODO: reach parity with hgs_cvrp() on `balanced` and `vehicles_exact`.
-    #   hgs_cvrp() balances loads with slack nodes (depot clones of unit demand
-    #   that fill every route), which also lets it pin the route count exactly.
-    #   lkh3() only sets MTSP_MIN_SIZE, which LKH-3 ignores for TYPE=OVRP and
-    #   which the ringed and nonunitary-inflow solves leave at 0.
-    if balanced:
-        raise NotImplementedError(
-            'lkh3() cannot enforce balanced=True: the only lever it has, '
-            "LKH-3's MTSP_MIN_SIZE, is ignored for open routes (TYPE=OVRP) and "
-            'unused for rings. Use hgs_cvrp(balanced=True) instead.'
-        )
     inflow_total = total_inflow(A)
+    inflow_by_node = nonunit_inflow(A)
+    unit_inflow_only = (
+        "lkh3() honours a terminal 'inflow' other than 1 only for an "
+        'unbalanced single-root radial solve: rings split by terminal count, '
+        "LKH-3's route-size bounds count nodes, and clusterize() partitions "
+        'by count.'
+    )
+    if constraints is None and inflow_by_node and (ringed or balanced or R > 1):
+        raise NotImplementedError(unit_inflow_only)
+    bounds = resolve_bounds(
+        'lkh3',
+        constraints,
+        T=T,
+        R=R,
+        capacity=capacity,
+        inflow_total=inflow_total,
+        power_per_inflow=power_attrs.get('power_per_inflow'),
+        vehicles=vehicles,
+        vehicles_exact=False,
+        balanced=balanced,
+        ringed=ringed,
+    )
+    ringed = bounds.topology is Topology.RINGED
+    balanced = bounds.balanced
+    # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
+    solve_capacity = 2 * capacity if ringed else capacity
+    vehicles_min = math.ceil(inflow_total / solve_capacity)
+    groups_lb, groups_ub = bounds.groups_lb, bounds.groups_ub
+    fixed_above_min = groups_lb == groups_ub and groups_lb > vehicles_min
+    if inflow_by_node and (ringed or balanced or fixed_above_min or R > 1):
+        raise NotImplementedError(unit_inflow_only)
+    if ringed and (balanced or fixed_above_min) and groups_lb > T // 2:
+        raise ValueError(
+            f'Rings ({groups_lb}) above the maximum ({T // 2}) that gives every '
+            f'ring two or more of the {T} terminals.'
+        )
     demands = [inflow_by_node.get(t, 1) for t in range(T)] if inflow_by_node else ()
 
     def _route_load(route: list[int]) -> int:
         """Return total terminal demand, using the terminal count for unitary inflow."""
         return sum(demands[i] for i in route) if demands else len(route)
-
-    # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
-    solve_capacity = 2 * capacity if ringed else capacity
-    if vehicles is not None:
-        vehicles_min = math.ceil(inflow_total / solve_capacity)
-        if vehicles != vehicles_min and R > 1:
-            warn(
-                'For multi-root instances, the parameter vehicles (feeders) can '
-                'only be None or the minimum feasible: setting to the minimum.'
-            )
-        vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
-        feeders_above_min = vehicles - vehicles_min
-    else:
-        feeders_above_min = None
 
     if seed is None:
         seed = random.randrange(0, 2**31)
@@ -1055,39 +1250,59 @@ def lkh3(
         'runs': runs,
         'per_run_limit': per_run_limit,
         'complete': complete,
-        'feeders_above_min': feeders_above_min,
+        'feeders_above_min': None if groups_ub is None else groups_ub - vehicles_min,
+        'feeders_exact': groups_lb == groups_ub and (balanced or fixed_above_min),
         'balanced': balanced,
         'ringed': ringed,
         'repair': repair,
         'max_retries': max_retries,
         'fun_fingerprint': _lkh3_fun_fingerprint,
     }
-    solver_details_extra = {'seed': seed}
+    solver_details_extra = {'seed': seed, **root_details(bounds)}
 
     A_iter = A.copy()
     # Without repair, A need not contain mesh diagonals.
     diagonals = A.graph['diagonals'].copy() if repair else A.graph.get('diagonals', {})
     A_iter.graph['diagonals'] = diagonals
-    # for clustering() and _prune_links() to index d2roots (-R offset is indifferent):
-    if R > 1:
-        A_iter.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
-    else:
-        A_iter.graph['closest_root'] = np.full((T,), -1, dtype=np.int_)
-    add_link_blockmap(A_iter)
-    _prune_links(A_iter, math.ceil(2.4 * solve_capacity))
 
-    terminals_, vehicles_ = _setup_clusters(
+    warm_routes_ = None
+    if warmstart is not None:
+        warm_routes_ = routes_from_warmstart(warmstart, R, T)
+    terminals_, vehicles_, fleet_, pinned_ = _setup_clusters(
         A_iter,
         capacity=solve_capacity,
-        vehicles=vehicles,
-        inflow_total=inflow_total if inflow_by_node else None,
+        bounds=bounds,
+        inflow_total=inflow_total,
+        warm_routes_=warm_routes_,
     )
-    if warmstart is not None:
-        warmstart_tours = _initial_tours_from_warmstart(
-            warmstart, terminals_, vehicles_
-        )
-    else:
+    # A pinned root uses exactly its vehicles, which LKH-3 alone does not ensure
+    # (it may leave a vehicle unused). Radial routes are filled up with slack
+    # nodes (see _with_slack_nodes), as balanced as the routes can be. Rings
+    # are held by LKH-3's route-size bounds, which TYPE=CVRP enforces; they are
+    # balanced only under balance.
+    capacity_ = [solve_capacity] * R
+    num_slack_ = [0] * R
+    route_sizes_: list[tuple[int, int] | None] = [None] * R
+    for c, (terminals, vehicles_c, pinned) in enumerate(
+        zip(terminals_, vehicles_, pinned_)
+    ):
+        T_c = len(terminals)
+        if not pinned or T_c == 0:
+            continue
+        if ringed and not balanced:
+            lo, hi = 2, solve_capacity
+        else:
+            lo, hi = T_c // vehicles_c, -(-T_c // vehicles_c)
+            if not ringed:
+                _, _, num_slack_[c] = balanced_capacity(T_c, solve_capacity, vehicles_c)
+        route_sizes_[c] = (lo, hi)
+        capacity_[c] = hi
+    if warm_routes_ is None:
         warmstart_tours = [None] * R
+    else:
+        warmstart_tours = _initial_tours(
+            warm_routes_, terminals_, vehicles_, num_slack_, capacity_
+        )
 
     # Built once outside the retry loop. Rebuilt only after the crossings
     # branch (which mutates A_iter via remove_offending_crossings); the
@@ -1101,7 +1316,7 @@ def lkh3(
         outputs_ = _run_lkh_per_cluster(
             L_,
             name=name,
-            capacity=solve_capacity,
+            capacity_=capacity_,
             time_limit=time_limit,
             vehicles_=vehicles_,
             warmstart_tours=warmstart_tours,
@@ -1113,6 +1328,8 @@ def lkh3(
             precision=precision,
             seed=seed,
             ringed=ringed,
+            num_slack_=num_slack_,
+            route_sizes_=route_sizes_,
         )
         S = _build_solution(
             A_iter,
@@ -1132,7 +1349,7 @@ def lkh3(
     over_capacity_clusters: list[int] = []
     i = 0
     if not repair:
-        S, _ = _solve_and_repair()
+        S, outputs_ = _solve_and_repair()
     else:
         while True:
             S, outputs_ = _solve_and_repair()
@@ -1143,6 +1360,13 @@ def lkh3(
                 for ic, output in enumerate(outputs_)
                 if max((_route_load(r) for r in output['routes']), default=0)
                 > solve_capacity
+            ]
+            # a cluster at its fleet cap, or pinned, cannot get another vehicle
+            bumpable = [
+                ic
+                for ic in over_capacity_clusters
+                if not pinned_[ic]
+                and ((fleet := fleet_[ic]) is None or vehicles_[ic] < fleet)
             ]
             if over_capacity_clusters:
                 worst = max(
@@ -1155,7 +1379,11 @@ def lkh3(
                     f'max_load ({worst}) > capacity ({solve_capacity}). '
                     'Retrying with increased vehicles.'
                 )
-            if (not crossings and not over_capacity_clusters) or i == max_retries:
+            if (
+                (not crossings and not over_capacity_clusters)
+                or (over_capacity_clusters and not bumpable)
+                or i == max_retries
+            ):
                 break
             i += 1
             if over_capacity_clusters:
@@ -1163,10 +1391,14 @@ def lkh3(
                 # A_iter is not modified here, so L_ stays valid and the
                 # warmstart tour does not refer to edges with the w_clip
                 # sentinel weight.
-                for ic in over_capacity_clusters:
+                for ic in bumpable:
                     vehicles_[ic] += 1
-                warmstart_tours = _initial_tours_from_warmstart(
-                    S, terminals_, vehicles_
+                warmstart_tours = _initial_tours(
+                    routes_from_warmstart(S, R, T),
+                    terminals_,
+                    vehicles_,
+                    num_slack_,
+                    capacity_,
                 )
             else:
                 # remove_offending_crossings shrinks A_iter; rebuild L_ so the
@@ -1185,6 +1417,29 @@ def lkh3(
         S.graph['retries'] = i
         if crossings or over_capacity_clusters:
             warn('Solution remains invalid (max_retries reached)')
+    for r, output, terminals, vehicles_c, route_sizes in zip(
+        range(-R, 0), outputs_, terminals_, vehicles_, route_sizes_
+    ):
+        if route_sizes is None:
+            continue
+        sizes = [len(route) for route in output['routes'] if route]
+        lo, hi = route_sizes
+        stray_slack = output.get('stray_slack', 0)
+        flaws = []
+        if output['penalty'] != 0:
+            flaws.append(f'penalty {output["penalty"]}')
+        if len(sizes) != vehicles_c:
+            flaws.append(f'{len(sizes)} routes, not {vehicles_c}')
+        if any(not lo <= size <= hi for size in sizes):
+            flaws.append(f'route sizes {min(sizes)} to {max(sizes)}, not {lo} to {hi}')
+        if stray_slack:
+            flaws.append(f'{stray_slack} slack nodes off a route start')
+        if flaws:
+            raise ValueError(
+                f'LKH-3 found no solution within the bounds for root {r} '
+                f'({len(terminals)} terminals): {"; ".join(flaws)}. A longer '
+                '`time_limit` may help.'
+            )
     nx.set_node_attributes(S, inflow_by_node, 'inflow')
     if ringed:
         S.graph['topology'] = Topology.RINGED
@@ -1193,6 +1448,20 @@ def lkh3(
         S.graph['topology'] = Topology.RADIAL
         calcload(S)
 
+    if not complete:
+        rogue = [
+            (u, v) for u, v in S.edges if u >= 0 and v >= 0 and not A.has_edge(u, v)
+        ]
+        if rogue:
+            raise ValueError(
+                f'LKH-3 solution uses rogue links absent from the mesh: {rogue}. A '
+                'longer `time_limit` may help.'
+            )
+
+    if any(pinned_):
+        S.graph['solver_details']['capacity_effective'] = (
+            tuple(capacity_) if R > 1 else capacity_[0]
+        )
     # Encode against the original link set, before repair removed any links.
     S.graph.update(linkset_identity(S, A), **power_attrs)
     return S

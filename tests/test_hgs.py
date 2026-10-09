@@ -10,8 +10,11 @@ import numpy as np
 import pytest
 
 import optiwindnet.baselines.hgs as hgs_mod
-from optiwindnet.baselines._core import remove_offending_crossings
-from optiwindnet.baselines.hgs import _balanced_capacity
+from optiwindnet.baselines._core import (
+    balanced_capacity,
+    remove_offending_crossings,
+    routes_from_warmstart,
+)
 from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import linkbits_from_S
 from optiwindnet.identity import linkset_id, topology_id
@@ -93,7 +96,7 @@ def _make_A(T: int = 4, R: int = 1, edges=()) -> nx.Graph:
 @pytest.mark.parametrize('capacity', range(2, 20))
 def test_balanced_capacity_invariants(capacity):
     for T in range(1, 200):
-        capacity_eff, vehicles, num_slack = _balanced_capacity(T, capacity)
+        capacity_eff, vehicles, num_slack = balanced_capacity(T, capacity)
         # the requested capacity is never exceeded
         assert capacity_eff <= capacity
         # the feeder count stays at the minimum for the requested capacity
@@ -109,7 +112,7 @@ def test_balanced_capacity_invariants(capacity):
 def test_balanced_capacity_invariants_with_exact_vehicles(capacity):
     for T in range(1, 60):
         for vehicles in range(math.ceil(T / capacity), T + 1):
-            capacity_eff, vehicles_out, num_slack = _balanced_capacity(
+            capacity_eff, vehicles_out, num_slack = balanced_capacity(
                 T, capacity, vehicles
             )
             # the requested feeder count is honored ...
@@ -125,17 +128,17 @@ def test_balanced_capacity_invariants_with_exact_vehicles(capacity):
 def test_balanced_capacity_shrinks_when_slack_would_exceed_routes():
     # T=97, capacity=12 -> 9 vehicles but 11 slack nodes under the naive formula
     assert 9 * 12 - 97 >= math.ceil(97 / 12)
-    assert _balanced_capacity(97, 12) == (11, 9, 2)
+    assert balanced_capacity(97, 12) == (11, 9, 2)
     # a single decrement is not enough here: capacity 11 still yields slack 9 >= 2
-    assert _balanced_capacity(13, 12) == (7, 2, 1)
+    assert balanced_capacity(13, 12) == (7, 2, 1)
 
 
 def test_balanced_capacity_exact_fit_needs_no_slack():
-    assert _balanced_capacity(24, 12) == (12, 2, 0)
+    assert balanced_capacity(24, 12) == (12, 2, 0)
 
 
 def test_balanced_capacity_empty_cluster():
-    assert _balanced_capacity(0, 12) == (12, 0, 0)
+    assert balanced_capacity(0, 12) == (12, 0, 0)
 
 
 def _capture_do_hgs(monkeypatch, routes):
@@ -483,7 +486,7 @@ def test_routes_from_warmstart_walks_paths_and_branches_from_the_gate():
     S = _radial_S(1, 5, {-1: [[1, 0], [2, 3]]})
     S.add_edge(2, 4)  # branch: 2 -> {3, 4}
 
-    routes_ = hgs_mod._routes_from_warmstart(S, R=1, T=5)
+    routes_ = routes_from_warmstart(S, R=1, T=5)
 
     assert len(routes_) == 1
     path, branched = sorted(routes_[0])
@@ -496,7 +499,7 @@ def test_routes_from_warmstart_walks_paths_and_branches_from_the_gate():
 def test_routes_from_warmstart_walks_a_ring_from_gate_to_gate():
     S = ringed_S(1, [(-1, [3, 1, 0, 2])])
 
-    routes_ = hgs_mod._routes_from_warmstart(S, R=1, T=4)
+    routes_ = routes_from_warmstart(S, R=1, T=4)
 
     assert len(routes_[0]) == 1
     route = routes_[0][0]
@@ -509,7 +512,7 @@ def test_routes_from_warmstart_walks_a_ring_from_gate_to_gate():
 def test_routes_from_warmstart_groups_routes_by_root():
     S = _radial_S(2, 4, {-2: [[3], [0]], -1: [[2, 1]]})
 
-    routes_ = hgs_mod._routes_from_warmstart(S, R=2, T=4)
+    routes_ = routes_from_warmstart(S, R=2, T=4)
 
     assert sorted(routes_[0]) == [[0], [3]]
     assert routes_[1] == [[2, 1]]
@@ -530,7 +533,7 @@ def test_routes_from_warmstart_rejects_unusable_warmstart(mutate, match):
     mutate(S)
 
     with pytest.raises(OWNWarmupFailed, match=match):
-        hgs_mod._routes_from_warmstart(S, R=2, T=4)
+        routes_from_warmstart(S, R=2, T=4)
 
 
 def test_initial_routes_refer_to_distance_matrix_rows():
@@ -673,8 +676,8 @@ def _per_root(S):
     [
         # unlimited, neart's root -1 takes 6 feeders and 34 turbines
         (
-            {'max_substation_feeders': (None, 5), 'max_substation_loads': (None, 26)},
-            lambda feeders, load: feeders <= 5 and load <= 26,
+            {'max_substation_feeders': (None, 4), 'max_substation_loads': (None, 26)},
+            lambda feeders, load: feeders <= 4 and load <= 26,
         ),
         ({'substation_feeders': (None, 4)}, lambda feeders, load: feeders == 4),
     ],
