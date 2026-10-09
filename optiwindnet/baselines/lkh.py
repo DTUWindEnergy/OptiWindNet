@@ -363,13 +363,27 @@ def _do_lkh(
             '\n'.join((f'{k} = {v}' if v is not None else k) for k, v in params.items())
         )
         start_time = time.perf_counter()
-        result = subprocess.run(
-            ['LKH', params_fpath], capture_output=True, check=False
-        )  # LKH's exit code is not a reliable success signal; output is parsed instead
+        try:
+            # LKH's exit code is not a reliable success signal; output is parsed
+            result = subprocess.run(
+                ['LKH', params_fpath],
+                capture_output=True,
+                check=False,
+                # TOTAL_TIME_LIMIT counts preprocessing; if that alone takes up the
+                # limit, LKH completes no run and hangs instead of exiting. The
+                # margin covers wall time exceeding CPU time on a busy machine.
+                timeout=1.5 * time_limit + 2,
+            )
+            timed_out = False
+        except subprocess.TimeoutExpired as exc:
+            result = subprocess.CompletedProcess(
+                exc.cmd, -9, exc.stdout or b'', exc.stderr or b''
+            )
+            timed_out = True
         elapsed_time = time.perf_counter() - start_time
         output_fpath = os.path.join(tmpdir, output_fname)
         tour_fpath = os.path.join(tmpdir, tour_fname)
-        solution_parsed = Path(output_fpath).is_file()
+        solution_parsed = not timed_out and Path(output_fpath).is_file()
         if solution_parsed:
             with open(output_fpath, 'r') as f_sol:
                 penalty, minimum = next(f_sol).split(':')[-1][:-1].split('_')
@@ -377,7 +391,7 @@ def _do_lkh(
                 routes = [
                     [int(node) - 1 for node in line.split(' ')[1:-5]] for line in f_sol
                 ]
-        elif Path(tour_fpath).is_file():
+        elif not timed_out and Path(tour_fpath).is_file():
             # single-vehicle solve: LKH wrote a plain tour instead (it only
             # writes MTSP_SOLUTION_FILE for 2+ salesmen). LKH omits the tour
             # file altogether when it cannot satisfy the constraints, so its
@@ -404,6 +418,7 @@ def _do_lkh(
         'solution_time': _solution_time(log, minimum),
         'vehicles': vehicles,
         'seed': seed,
+        'timed_out': timed_out,
     }
 
     if not solution_parsed or result.stderr:
@@ -653,6 +668,12 @@ def _build_solution(
             raise ValueError(
                 f'LKH-3 found no solution for root {r} ({len(terminals)} '
                 f'terminals, {output["vehicles"]} vehicles).'
+                + (
+                    ' LKH-3 did not finish: `time_limit` may be shorter than its '
+                    'preprocessing.'
+                    if output.get('timed_out')
+                    else ''
+                )
             )
     multi = R > 1
     objective = sum(o['cost'] for o in outputs_)

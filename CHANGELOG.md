@@ -36,6 +36,7 @@
 
 ## Bug Fixes
 
+- **LKH-3 hang on short time limits:** `lkh3()` no longer blocks forever when `time_limit` is shorter than LKH-3's preprocessing, after which LKH-3 completed no run and never exited. The LKH-3 process is stopped after 1.5 × `time_limit` + 2 s of wall-clock time and `lkh3()` raises `ValueError`. [9d9a454a](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/9d9a454a)
 - **LKH-3 warm starts:** `lkh3(warmstart=S)` gave LKH-3 a single route holding every turbine, so the search did not start from the warm start. LKH-3 now starts from its routes; on multi-root locations its assignment of turbines to substations replaces the clustering, and an unusable warm start raises `OWNWarmupFailed`. [fd216bd8](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/fd216bd8)
 - **SCIP crash on freeing solvers:** freeing the second of two SCIP models that ran a concurrent solve no longer crashes the interpreter, on any platform. `SolverSCIP.get_solution()` frees the SCIP model, so `solve()` cannot be called after it, and a concurrent solve raises `RuntimeError` while another solver's model that ran one is alive: call `get_solution()` on that solver first, or pass `options={'concurrent': False}`. With `'parallel/maxnthreads'` set to 1, SCIP runs a plain `optimize()`. [a997f136](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/a997f136f3e4b72e583456f770ca09ee055d9cd4)
 
