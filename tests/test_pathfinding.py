@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
+import logging
 import math
 import pickle
 from pathlib import Path
@@ -156,6 +157,96 @@ def test_no_crossings_removes_tentative_tag():
     assert 'tentative' not in G_out.graph
     for _, _, d in G_out.edges(data=True):
         assert d.get('kind') != 'tentative'
+
+
+def test_pathfinder_allows_uncrossed_rogue_link(caplog):
+    wfn = tiny_wfn()
+    A = wfn.A.copy()
+    A.remove_edge(0, 1)
+    with caplog.at_level(logging.WARNING, logger='optiwindnet.converting'):
+        G = G_from_S(wfn.S, A)
+    assert 'Solution uses rogue links absent from the mesh: [(0, 1)].' in caplog.text
+
+    assert G.graph['rogue'] == [(0, 1)]
+    with caplog.at_level(logging.WARNING, logger='optiwindnet.pathfinding'):
+        finder = PathFinder(G, planar=wfn.P, A=A)
+    assert 'Routeset has rogue links; PathFinder may produce crossings.' in caplog.text
+    routed = finder.create_detours()
+    assert routed[0][1]['kind'] == 'rogue'
+
+
+@pytest.mark.parametrize('cloned_route', (False, True))
+def test_pathfinder_reports_crossing_on_rogue_link(cloned_route, caplog):
+    G = nx.Graph(
+        T=4,
+        B=0,
+        C=0,
+        D=0,
+        R=1,
+        VertexC=np.array([[0.0, 0.0], [2.0, 2.0], [0.0, 2.0], [2.0, 0.0], [-3.0, 0.0]]),
+        rogue=[(0, 1)],
+    )
+    G.add_edges_from([(-1, 0), (0, 1), (-1, 2), (2, 3)])
+    G[0][1]['kind'] = 'rogue'
+    G[2][3]['kind'] = 'detour'
+    if cloned_route:
+        G.graph.update(D=2, fnT=np.array([0, 1, 2, 3, 2, 3, -1]))
+        G.remove_edge(2, 3)
+        G.add_edge(4, 5, kind='detour')
+
+    with caplog.at_level(logging.WARNING, logger='optiwindnet.pathfinding'):
+        PathFinder._warn_routes_across_rogue_links(G)
+    other_edge = (4, 5) if cloned_route else (2, 3)
+    assert caplog.messages[-1].endswith(f'(0, 1) crosses {other_edge}')
+
+
+def test_pathfinder_does_not_attribute_other_crossings_to_rogue_link(caplog):
+    G = nx.Graph(
+        T=5,
+        B=0,
+        C=0,
+        D=0,
+        R=1,
+        VertexC=np.array(
+            [[0.0, 0.0], [0.0, 2.0], [1.0, 1.0], [1.0, 3.0], [2.0, 2.0], [0.0, -2.0]]
+        ),
+        rogue=[(0, 1)],
+    )
+    G.add_edges_from([(-1, 0), (0, 1), (1, 4), (-1, 2), (2, 3)])
+    G[0][1]['kind'] = 'rogue'
+    G[2][3]['kind'] = 'detour'
+
+    with caplog.at_level(logging.WARNING, logger='optiwindnet.pathfinding'):
+        PathFinder._warn_routes_across_rogue_links(G)
+    assert not caplog.messages
+
+
+@pytest.mark.parametrize(
+    'branch_node, splits', (((-1.0, 1.0), True), ((1.0, 0.5), False))
+)
+def test_pathfinder_classifies_detour_touch_at_rogue_endpoint(
+    branch_node, splits, caplog
+):
+    G = nx.Graph(
+        T=5,
+        B=0,
+        C=0,
+        D=1,
+        R=1,
+        VertexC=np.array(
+            [[0.0, -1.0], [0.0, 0.0], branch_node, [1.0, -1.0], [1.0, 1.0], [0.0, -2.0]]
+        ),
+        fnT=np.array([0, 1, 2, 3, 4, 1, -1]),
+        rogue=[(0, 1)],
+    )
+    G.add_edges_from([(-1, 0), (0, 1), (1, 2), (1, 3), (5, -1), (5, 4)])
+
+    with caplog.at_level(logging.WARNING, logger='optiwindnet.pathfinding'):
+        PathFinder._warn_routes_across_rogue_links(G)
+    if splits:
+        assert 'splits the branch at rogue endpoint 1' in caplog.messages[-1]
+    else:
+        assert not caplog.messages
 
 
 # ---------- crossing scenario (cables=1, each turbine gets a feeder) ----------

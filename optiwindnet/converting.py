@@ -9,6 +9,7 @@ to or from its bit and terse encodings. For a variant of the same kind, see
 :mod:`optiwindnet.transforming`.
 """
 
+import logging
 import math
 from itertools import chain
 
@@ -25,6 +26,8 @@ __all__ = (
     'G_from_S', 'L_from_G', 'L_from_site', 'S_from_G', 'S_from_linkbits',
     'S_from_terse_links', 'linkbits_from_S', 'terse_links_from_S',
 )  # fmt: skip
+
+_lggr = logging.getLogger(__name__)
 
 
 def linkbits_from_S(A: nx.Graph, S: nx.Graph) -> frozenbitarray:
@@ -206,6 +209,9 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
     contours or detours). ``S`` must have been created from the available links
     in ``A``, whose contour information is used to obtain a routeset ``G``
     (possibly with contours, but not with detours – use PathFinder afterward).
+
+    Warns:
+      UserWarning: if the topology contains links absent from the mesh.
     """
     R, T, B = (A.graph[k] for k in 'RTB')
     VertexC, d2roots, diagonals = (
@@ -452,6 +458,9 @@ def G_from_S(S: nx.Graph, A: nx.Graph) -> nx.Graph:
             rogue.append((s, t))
     if rogue:
         G.graph['rogue'] = rogue
+        _lggr.warning(
+            'Solution uses rogue links absent from the mesh: %s.', sorted(rogue)
+        )
 
     # Check on crossings between G's gates that are in A and G's edges
     diagonals = A.graph['diagonals']
