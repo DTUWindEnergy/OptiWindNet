@@ -4,7 +4,6 @@
 import logging
 import math
 import random
-import warnings
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
@@ -13,8 +12,8 @@ import hybgensea
 import networkx as nx
 import numpy as np
 
-from ..clustering import ClusterPlan, cluster_plan, plan_from_clusters
-from ..constraints import NetworkBounds, NetworkConstraints
+from ..clustering import cluster_plan, plan_from_clusters
+from ..constraints import NetworkConstraints
 from ..identity import fingerprint_function
 from ..loads import (
     DEFAULT_POWER_RTOL,
@@ -25,51 +24,21 @@ from ..loads import (
     total_inflow,
 )
 from ..repair import repair_routeset_path
-from ..types import FeederRoute, OWNWarmupFailed, Topology
+from ..types import OWNWarmupFailed, Topology
 from ._core import (
     add_branches_to_S,
-    clamp_vehicles_to_min,
+    balanced_capacity,
     linkset_identity,
     remove_offending_crossings,
+    resolve_bounds,
+    root_details,
+    root_fleet_,
+    routes_from_warmstart,
     scaled_length_block,
 )
 
 _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
-
-
-def _balanced_capacity(
-    T: int, capacity: int, vehicles: int | None = None
-) -> tuple[int, int, int]:
-    """Derive the slack-node parameters for a balanced solve of ``T`` terminals.
-
-    Slack nodes are depot clones that consume one unit of capacity each, so that
-    every route comes out exactly full (i.e. loads are balanced). They are only
-    reachable from the depot, hence a route may hold at most one of them.
-
-    Using the requested ``capacity`` directly would ask for more slack nodes than
-    there are routes whenever ``T < vehicles * (capacity - 1)``. Shrinking the
-    capacity to the smallest value that still fits ``T`` in ``vehicles`` routes
-    both restores ``num_slack < vehicles`` and makes the loads as even as
-    possible. The vehicle count is unaffected and the effective capacity never
-    exceeds the requested one, so the solution remains valid for ``capacity``.
-
-    Since the total demand ``T + num_slack`` equals ``vehicles * capacity_effective``,
-    every route is exactly full and none can be left empty: the feeder count comes
-    out exactly ``vehicles``. Passing ``vehicles`` explicitly (any value from
-    ``ceil(T / capacity)`` up to ``T``) is what pins the feeder count above its
-    minimum; if ``None``, the minimum is used.
-
-    Returns:
-        ``(capacity_effective, vehicles, num_slack)``
-    """
-    if T == 0:
-        return capacity, 0, 0
-    if vehicles is None:
-        vehicles = math.ceil(T / capacity)
-    capacity_effective = math.ceil(T / vehicles)
-    num_slack = vehicles * capacity_effective - T
-    return capacity_effective, vehicles, num_slack
 
 
 def _length_matrix(
@@ -171,68 +140,6 @@ def _solution_time(log, objective) -> float:
         return 0.0
 
 
-def _routes_from_warmstart(
-    warmstart: nx.Graph, R: int, T: int
-) -> list[list[list[int]]]:
-    """Walk the routes of a warm-start solution topology, grouped by root.
-
-    Each route lists the terminals of one feeder's subtree (radial) or of one
-    ring, in depth-first order from its gate: a path comes out from the gate to
-    its tail and a ring from one gate around to the other.
-
-    Raises:
-        OWNWarmupFailed: ``warmstart`` is not a topology over the same ``R`` roots and
-            ``T`` terminals, leaves terminals out of the routes, or has a route
-            that reaches two roots.
-    """
-    if (warmstart.graph.get('R'), warmstart.graph.get('T')) != (R, T):
-        raise OWNWarmupFailed(
-            f'Warm start has R={warmstart.graph.get("R")}, '
-            f'T={warmstart.graph.get("T")}, but the problem has R={R}, T={T}.'
-        )
-    alien = [n for n in warmstart.nodes if not -R <= n < T]
-    if alien:
-        raise OWNWarmupFailed(
-            f'Warm start has nodes {alien[:5]} that are neither terminals nor roots '
-            '(pass a solution topology S, not a routeset G).'
-        )
-    seen = set()
-    routes_ = []
-    for r in range(-R, 0):
-        routes = []
-        for gate in warmstart.neighbors(r):
-            if gate < 0:
-                raise OWNWarmupFailed(f'Warm start links root {r} to root {gate}.')
-            if gate in seen:
-                # the other gate of a ring already walked
-                continue
-            seen.add(gate)
-            route = []
-            stack = [gate]
-            while stack:
-                n = stack.pop()
-                route.append(n)
-                for nbr in warmstart.neighbors(n):
-                    if nbr < 0:
-                        if nbr != r:
-                            raise OWNWarmupFailed(
-                                f'Warm start route from root {r} reaches root '
-                                f'{nbr} at terminal {n}.'
-                            )
-                    elif nbr not in seen:
-                        seen.add(nbr)
-                        stack.append(nbr)
-            routes.append(route)
-        routes_.append(routes)
-    if len(seen) != T:
-        missing = sorted(set(range(T)) - seen)
-        raise OWNWarmupFailed(
-            f'Warm start leaves {len(missing)} terminals out of its routes '
-            f'(e.g. {missing[:5]}).'
-        )
-    return routes_
-
-
 def _initial_routes(
     routes: list[list[int]], n_from_i: np.ndarray, num_slack: int, capacity: int
 ) -> list[list[int]]:
@@ -317,7 +224,7 @@ def _solve_single_root(
 ):
     T, VertexC = A.graph['T'], A.graph['VertexC']
     if balanced:
-        capacity, vehicles, num_slack = _balanced_capacity(T, capacity, vehicles)
+        capacity, vehicles, num_slack = balanced_capacity(T, capacity, vehicles)
     else:
         num_slack = 0
     n_from_i = np.array([-1] + list(range(T)) + [-1] * num_slack, dtype=int)
@@ -387,7 +294,7 @@ def _solve_multi_root(
     ):
         if pinned:
             # the slack nodes fill every route: exactly `routes` of them
-            capacity_c, vehicles_c, num_slack_c = _balanced_capacity(
+            capacity_c, vehicles_c, num_slack_c = balanced_capacity(
                 len_cluster, capacity, routes
             )
         else:
@@ -476,93 +383,6 @@ def _process_results(A, keep_log, pinned, inputs_, outputs_):
 
     S.graph['max_load'] = max_load
     return S
-
-
-def _legacy_bounds(
-    T: int,
-    R: int,
-    capacity: int,
-    inflow_total: int,
-    vehicles: int | None,
-    vehicles_exact: bool,
-    balanced: bool,
-    ringed: bool,
-) -> NetworkBounds:
-    """Translate the deprecated count options of :func:`hgs_cvrp` into bounds.
-
-    The options keep their former checks and adjustments: an exact count needs
-    ``balanced``; with several roots, only the minimum count is honoured.
-    """
-    solve_capacity = 2 * capacity if ringed else capacity
-    vehicles_min: int = math.ceil(inflow_total / solve_capacity)
-    if vehicles_exact:
-        if vehicles is None:
-            raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
-        if not balanced:
-            raise NotImplementedError(
-                'An exact vehicles (feeders) count is only available with '
-                '`balanced`=True.'
-            )
-        if vehicles < vehicles_min:
-            raise ValueError(
-                f'Vehicles (feeders) number ({vehicles}) is below the minimum '
-                f'necessary ({vehicles_min}) for the given capacity ({capacity}).'
-            )
-        if vehicles > T:
-            raise ValueError(
-                f'Vehicles (feeders) number ({vehicles}) is above the number of '
-                f'terminals ({T}).'
-            )
-        if R > 1 and vehicles != vehicles_min:
-            raise ValueError(
-                'For multi-root instances, an exact vehicles (feeders) count is '
-                'only available at the minimum feasible value.'
-            )
-    elif vehicles is not None:
-        if vehicles != vehicles_min:
-            if balanced:
-                raise ValueError(
-                    'If `balanced`=True, the solver can only use the minimum number of '
-                    'vehicles (feeders) (you may just pass None), unless '
-                    '`vehicles_exact`=True.'
-                )
-            elif R > 1:
-                _warn(
-                    'For multi-root instances, the parameter vehicles (feeders) can '
-                    'only be None or the minimum feasible: setting to the minimum.'
-                )
-                vehicles = vehicles_min
-        vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
-    per_group = 2 if ringed else 1
-    count: dict[str, int | str] = {}
-    if vehicles is None:
-        if balanced:
-            count['feeders'] = 'min'
-    elif vehicles_exact or balanced:
-        count['feeders'] = per_group * vehicles
-    else:
-        count['max_feeders'] = per_group * vehicles
-    constraints = NetworkConstraints(
-        topology=Topology.RINGED if ringed else Topology.RADIAL,
-        balanced=balanced,
-        **count,  # pyrefly: ignore[bad-argument-type]
-    )
-    return constraints._resolve(T=T, R=R, capacity=capacity, inflow_total=inflow_total)
-
-
-def _fleet_(bounds: NetworkBounds, plan: ClusterPlan) -> list[int | None]:
-    """Fleet of each unpinned root: its budget, or its own cap if the farm has none."""
-    if bounds.feeders_ub is not None:
-        return list(plan.budget_)
-    per_group = bounds.feeders_per_group
-    return [
-        None if hi is None else hi // per_group
-        for hi in bounds.root_feeders_ub or (None,) * len(plan.budget_)
-    ]
-
-
-# the per-root bounds recorded in a solution's `solver_details`
-_ROOT_DETAILS = ('root_feeders_lb', 'root_feeders_ub', 'root_load_ub')
 
 
 def hgs_cvrp(
@@ -698,16 +518,6 @@ def hgs_cvrp(
         A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
     )
     inflow_total = total_inflow(A)
-    legacy = {
-        name
-        for name, value, default in (
-            ('vehicles', vehicles, None),
-            ('vehicles_exact', vehicles_exact, False),
-            ('balanced', balanced, False),
-            ('ringed', ringed, False),
-        )
-        if value != default
-    }
     inflow_by_node = nonunit_inflow(A)
     unit_inflow_only = (
         "hgs_cvrp() honours a terminal 'inflow' other than 1 only for an "
@@ -715,31 +525,21 @@ def hgs_cvrp(
         'minimum: rings split by terminal count, the balanced slack nodes are '
         'counted, and clusterize() partitions by count.'
     )
-    if constraints is None:
-        if inflow_by_node and (ringed or balanced or R > 1):
-            raise NotImplementedError(unit_inflow_only)
-        if legacy:
-            warnings.warn(
-                f'hgs_cvrp() options {sorted(legacy)} are deprecated: pass '
-                'constraints=NetworkConstraints(...) instead.',
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        bounds = _legacy_bounds(
-            T, R, capacity, inflow_total, vehicles, vehicles_exact, balanced, ringed
-        )
-    elif legacy:
-        raise TypeError(f'Give either constraints or the options {sorted(legacy)}.')
-    else:
-        bounds = constraints._resolve(
-            T=T,
-            R=R,
-            capacity=capacity,
-            inflow_total=inflow_total,
-            power_per_inflow=power_attrs.get('power_per_inflow'),
-        )
-    if bounds.feeder_route is FeederRoute.STRAIGHT:
-        raise NotImplementedError('hgs_cvrp() does not keep feeder routes straight.')
+    if constraints is None and inflow_by_node and (ringed or balanced or R > 1):
+        raise NotImplementedError(unit_inflow_only)
+    bounds = resolve_bounds(
+        'hgs_cvrp',
+        constraints,
+        T=T,
+        R=R,
+        capacity=capacity,
+        inflow_total=inflow_total,
+        power_per_inflow=power_attrs.get('power_per_inflow'),
+        vehicles=vehicles,
+        vehicles_exact=vehicles_exact,
+        balanced=balanced,
+        ringed=ringed,
+    )
     ringed = bounds.topology is Topology.RINGED
     balanced = bounds.balanced
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
@@ -761,12 +561,11 @@ def hgs_cvrp(
                 f'ring two or more of the {T} terminals.'
             )
     else:
-        A.graph['closest_root'] = -R + A.graph['d2roots'][:T].argmin(axis=1)
         pinned, vehicles = False, None
 
     warm_routes_ = None
     if warmstart is not None:
-        warm_routes_ = _routes_from_warmstart(warmstart, R, T)
+        warm_routes_ = routes_from_warmstart(warmstart, R, T)
         if R > 1:
             try:
                 plan = plan_from_clusters(
@@ -783,7 +582,7 @@ def hgs_cvrp(
     if R > 1 and plan is None:
         plan = cluster_plan(A, solve_capacity, bounds)
     if plan is not None:
-        fleet_ = _fleet_(bounds, plan)
+        fleet_ = root_fleet_(bounds, plan)
         pinned = any(plan.pinned_)
 
     if seed is None:
@@ -880,11 +679,7 @@ def hgs_cvrp(
         solver_details=dict(
             seed=seed,
             **S.graph['solver_details'],
-            **{
-                name: value
-                for name in _ROOT_DETAILS
-                if (value := getattr(bounds, name)) is not None
-            },
+            **root_details(bounds),
         ),
         **power_attrs,
     )
