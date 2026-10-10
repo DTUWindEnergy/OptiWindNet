@@ -2,6 +2,7 @@
 
 import shutil
 
+import networkx as nx
 import numpy as np
 import pytest
 
@@ -13,7 +14,7 @@ from optiwindnet.api import (
     WindFarmNetwork,
 )
 from optiwindnet.baselines.hgs import _length_matrix, hgs_cvrp
-from optiwindnet.baselines.lkh import lkh3
+from optiwindnet.baselines.lkh import _build_weight_matrix, lkh3
 from optiwindnet.heuristics import constructor
 from optiwindnet.interarraylib import _links_over_limit, links_over_length
 from optiwindnet.loads import calcload
@@ -213,6 +214,30 @@ def test_hgs_matrix_prices_over_limit_links_as_absent_ones(complete):
     clip = W_limited.max()
     assert (W_limited[W > _TOY_LIMIT] == clip).all()
     assert (W_limited[W <= _TOY_LIMIT] == W[W <= _TOY_LIMIT]).all()
+
+
+@pytest.mark.parametrize('complete', [False, True])
+def test_lkh_matrix_cuts_at_the_unrounded_lengths(complete):
+    # 100.6 is within the limit of 100.7 but rounds to 101, above it; 100.8 is
+    # over it. Link (0, 1) is stored in A, pair (0, 2) is only Euclidean.
+    VertexC = np.array([(100.6, 0.0), (0.0, 100.8), (201.2, 0.0), (0.0, 0.0)])
+    A = nx.Graph(T=3, R=1, VertexC=VertexC)
+    A.graph['d2roots'] = np.hypot(*VertexC.T)[:, None]
+    A.add_edge(0, 1, length=100.6)
+    w_clip = 999
+    L = _build_weight_matrix(
+        A,
+        [0, 1, 2],
+        -1,
+        scale=1.0,
+        complete=complete,
+        w_clip=w_clip,
+        link_length_ub=100.7,
+    )
+    assert L[0, 1] == 101
+    assert L[0, 2] == (101 if complete else w_clip)
+    assert L[1, 2] == w_clip
+    assert L[:-1, -1].tolist() == [101, w_clip, w_clip]
 
 
 def test_hgs_router_keeps_every_link_within_the_limit():
