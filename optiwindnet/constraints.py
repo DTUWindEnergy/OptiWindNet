@@ -312,7 +312,7 @@ class NetworkConstraints:
     ) -> NetworkBounds:
         """Check the constraints against a problem instance and bound it.
 
-        The instance is ``A`` (a location or available-links graph) at a cable
+        The instance is ``A`` (an available-links graph) at a cable
         capacity, given as for the routers' producers: ``capacity`` in inflow,
         or ``capacity_nominal`` in the unit of the turbine power, which is then
         quantized (see :func:`~optiwindnet.loads.quantized`). The bounds are
@@ -331,7 +331,7 @@ class NetworkConstraints:
         limits.
 
         Args:
-          A: location or available-links graph.
+          A: available-links graph.
           capacity: cable capacity, in inflow (per arm, for rings).
           capacity_nominal: cable capacity, in the unit of the turbine power,
             instead of ``capacity``.
