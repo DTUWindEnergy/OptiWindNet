@@ -20,7 +20,7 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import cluster_plan, plan_from_clusters
-from ..constraints import NetworkBounds, NetworkConstraints
+from ..constraints import NetworkBounds, NetworkConstraints, _check_link_length
 from ..identity import fingerprint_function
 from ..interarraylib import _links_over_limit
 from ..loads import (
@@ -1264,6 +1264,7 @@ def lkh3(
         ringed=ringed,
         link_length_ub=None if constraints is None else constraints._link_length_ub(A),
     )
+    _check_link_length(A, bounds)
     ringed = bounds.topology is Topology.RINGED
     balanced = bounds.balanced
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)

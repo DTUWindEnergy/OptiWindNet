@@ -90,10 +90,21 @@ def test_resolve_puts_the_limit_in_the_bounds_in_the_scale_of_A():
     )
 
 
-def test_resolve_refuses_a_limit_that_strands_turbines():
-    with pytest.raises(ValueError, match='unable to reach any substation'):
+def test_resolve_refuses_a_limit_that_isolates_turbines():
+    with pytest.raises(ValueError, match='without any link or feeder'):
         NetworkConstraints(max_link_length=1e-3).resolve(
             get_bundle('toy').A, capacity=_CAPACITY
+        )
+
+
+def test_resolve_refuses_a_limit_with_too_few_feeders():
+    # at 560, every toy turbine has a link within the limit, but only 4 have a
+    # feeder within it
+    A = get_bundle('toy').A
+    NetworkConstraints(max_link_length=560.0, feeders=4).resolve(A, capacity=_CAPACITY)
+    with pytest.raises(ValueError, match='fewer than the 5 subtrees'):
+        NetworkConstraints(max_link_length=560.0, feeders=5).resolve(
+            A, capacity=_CAPACITY
         )
 
 
@@ -212,14 +223,14 @@ def test_hgs_router_keeps_every_link_within_the_limit():
 
 
 def test_hgs_raises_on_a_solution_over_the_limit():
-    # capacity 1 makes every terminal its own subtree, so some feeder must be
-    # one the limit forbids
+    # 560 passes the checks of resolve() (4 turbines with a feeder within it, for
+    # 3 subtrees), but HGS-CVRP finds no toy network within it
     with pytest.raises(ValueError, match='within the link length limit'):
         hgs_cvrp(
             as_normalized(get_bundle('toy').A),
-            capacity=1,
+            capacity=_CAPACITY,
             time_limit=0.2,
-            constraints=_limit(),
+            constraints=NetworkConstraints(max_link_length=560.0),
             seed=0,
         )
 

@@ -23,7 +23,7 @@ import numpy as np
 from bitarray import bitarray, frozenbitarray
 from makefun import with_signature
 
-from ..constraints import NetworkBounds, NetworkConstraints
+from ..constraints import NetworkBounds, NetworkConstraints, _check_link_length
 from ..converting import G_from_S, S_from_linkbits
 from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
 from ..interarraylib import _links_over_limit, directed_links
@@ -809,6 +809,7 @@ class Solver(abc.ABC):
             power_per_inflow=self._power_attrs.get('power_per_inflow'),
             link_length_ub=constraints._link_length_ub(A),
         )
+        _check_link_length(A, self.bounds)
         if warmstart is not None and self.bounds.link_length_ub is not None:
             # a fixed variable is a bound, which backends do not check a warm
             # start against

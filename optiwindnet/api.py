@@ -23,7 +23,7 @@ from .api_utils import (
     parse_cables_input,
 )
 from .baselines.hgs import hgs_cvrp
-from .constraints import NetworkBounds, NetworkConstraints
+from .constraints import NetworkBounds, NetworkConstraints, _check_link_length
 from .converting import G_from_S, S_from_G, terse_links_from_S
 from .heuristics import constructor
 from .heuristics.constructor import _METHOD_TOPOLOGY as _EW_METHOD_TOPOLOGY
@@ -203,6 +203,7 @@ class Router(ABC):
             power_per_inflow=power_attrs.get('power_per_inflow'),
             link_length_ub=constraints._link_length_ub(A),
         )
+        _check_link_length(A, bounds)
         return _Resolved(capacity_kwargs, constraints, bounds, A_solve, capacity)
 
 
