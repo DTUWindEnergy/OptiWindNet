@@ -26,6 +26,7 @@ from .baselines.hgs import hgs_cvrp
 from .constraints import NetworkBounds, NetworkConstraints
 from .converting import G_from_S, S_from_G, terse_links_from_S
 from .heuristics import constructor
+from .heuristics.constructor import _METHOD_TOPOLOGY as _EW_METHOD_TOPOLOGY
 from .importer import (
     L_from_pbf,
     L_from_site,
@@ -1013,13 +1014,6 @@ class WindFarmNetwork:
         return info
 
 
-_EW_METHOD_TOPOLOGY = {
-    'esau_williams': Topology.BRANCHED,
-    'biased_EW': Topology.BRANCHED,
-    'rootlust': Topology.BRANCHED,
-    'radial_EW': Topology.RADIAL,
-    'ringed': Topology.RINGED,
-}
 _EW_TOPOLOGY_METHOD = {
     Topology.BRANCHED: 'rootlust',
     Topology.RADIAL: 'radial_EW',
