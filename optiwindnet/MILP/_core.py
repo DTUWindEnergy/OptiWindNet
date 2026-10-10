@@ -123,8 +123,9 @@ def _constraints_from_options(
     """Translate the options of :class:`ModelOptions` into network constraints.
 
     ``'min_plus<k>'`` adds ``k`` subtrees or rings to the minimum (``2 * k``
-    feeders if RINGED). The constraints drop an unenforceable ``balanced`` (the
-    feeder count not fixed) with a warning, as these options always did.
+    feeders if RINGED). For compatibility with :class:`ModelOptions`, the
+    constraints drop an unenforceable ``balanced`` (the feeder count not fixed)
+    with a warning instead of raising.
     """
     topology, feeder_limit = Topology(topology), FeederLimit(feeder_limit)
     per_group = 2 if topology is Topology.RINGED else 1
