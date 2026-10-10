@@ -170,7 +170,8 @@ class _OptionsConstraints(NetworkConstraints):
         warn(
             'Model option <balanced = True> requires a single possible feeder '
             'count, but the feeder limit allows a range: model will not enforce '
-            'balanced subtrees.'
+            "balanced subtrees. For an exact count, give feeder_limit='exactly' or "
+            'constraints=NetworkConstraints(feeders=..., balanced=True).'
         )
         return bounds
 

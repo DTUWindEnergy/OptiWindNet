@@ -22,6 +22,7 @@ from .api_utils import (
     merge_obs_into_border,
     parse_cables_input,
 )
+from .baselines._core import legacy_constraints
 from .baselines.hgs import hgs_cvrp
 from .constraints import NetworkBounds, NetworkConstraints, _check_link_length
 from .converting import G_from_S, S_from_G, terse_links_from_S
@@ -1206,9 +1207,9 @@ class HGSRouter(Router):
         Args:
           time_limit: Maximum runtime for a single HGS run (in seconds).
           feeder_limit: Deprecated, use the network constraints: maximum number
-              of feeders; the exact number if ``feeder_exact``. With
-              ``ringed=True``, it counts substation connections (two per ring)
-              and must be even.
+              of feeders; the exact number if ``feeder_exact`` or ``balanced``
+              (balance needs a fixed count). With ``ringed=True``, it counts
+              substation connections (two per ring) and must be even.
           feeder_exact: Deprecated, use the network constraints: whether
               ``feeder_limit`` is the exact number of feeders.
           max_retries: Maximum number of retries if a feasible solution is not found.
@@ -1240,18 +1241,8 @@ class HGSRouter(Router):
             _warn_deprecated_options('HGSRouter', legacy)
             if feeder_exact and feeder_limit is None:
                 raise ValueError('feeder_exact=True requires feeder_limit to be set.')
-            count: dict[str, int | str] = {}
-            if feeder_limit is None:
-                if balanced:
-                    count['feeders'] = 'min'
-            elif feeder_exact or balanced:
-                count['feeders'] = feeder_limit
-            else:
-                count['max_feeders'] = feeder_limit
-            self._legacy_constraints = NetworkConstraints(
-                topology=Topology.RINGED if ringed else Topology.RADIAL,
-                balanced=balanced,
-                **count,  # pyrefly: ignore[bad-argument-type]
+            self._legacy_constraints = legacy_constraints(
+                feeder_limit, feeder_exact, balanced, ringed
             )
         self.time_limit = time_limit
         self.verbose = verbose

@@ -595,7 +595,7 @@ def test_lkh3_multi_root_runs_one_call_per_cluster(monkeypatch):
     assert all(call['seed'] == 7 for call in captured_calls)
 
 
-def test_lkh3_multi_root_warns_when_vehicles_above_min(monkeypatch, caplog):
+def test_lkh3_multi_root_accepts_vehicles_above_min(monkeypatch, caplog):
     A = _make_A(T=4, R=2)
     A.graph['d2roots'] = np.ones((6, 2))
 
@@ -611,7 +611,7 @@ def test_lkh3_multi_root_warns_when_vehicles_above_min(monkeypatch, caplog):
 
     with pytest.warns(DeprecationWarning, match='vehicles'):
         lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, vehicles=4, repair=False)
-    assert 'multi-root' in caplog.text
+    assert 'multi-root' not in caplog.text
 
 
 def test_lkh3_records_identity_over_the_available_links(monkeypatch):

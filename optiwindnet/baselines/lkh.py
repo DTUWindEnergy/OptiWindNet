@@ -1153,8 +1153,7 @@ def lkh3(
 
     The options ``vehicles``, ``balanced`` and ``ringed`` are deprecated in
     favour of ``constraints``, which they are translated into: a maximum route
-    count (with several roots, only the minimum count), which ``balanced=True``
-    holds at the minimum.
+    count, or an exact one if ``balanced`` (balance needs a fixed count).
 
     Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
     radial solve without a count fixed above the minimum or balance.

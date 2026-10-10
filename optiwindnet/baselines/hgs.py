@@ -479,8 +479,8 @@ def hgs_cvrp(
 
     The options ``vehicles``, ``vehicles_exact``, ``balanced`` and ``ringed`` are
     deprecated in favour of ``constraints``, which they are translated into: a
-    maximum (or, if ``vehicles_exact``, exact) route count, which requires
-    ``balanced=True`` to be exact; with several roots, only the minimum count.
+    maximum route count, or an exact one if ``vehicles_exact`` or ``balanced``
+    (balance needs a fixed count).
 
     Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
     radial solve without a count fixed above the minimum or balance.
