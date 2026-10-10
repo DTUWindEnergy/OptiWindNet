@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from numbers import Integral, Real
-from typing import Any, cast
+from typing import Any
 
 import networkx as nx
 
@@ -159,6 +159,42 @@ class NetworkBounds:
                 self.root_feeders_ub,
                 self.root_load_ub,
             )
+        )
+
+
+def _check_link_length(A: nx.Graph, bounds: NetworkBounds) -> None:
+    """Refuse a link length limit that is out of scale for ``A``.
+
+    The checks are necessary conditions only, meant to catch a limit in the
+    wrong unit or scale: every terminal needs a link or a feeder within the
+    limit, and every subtree or ring needs a feeder within the limit to a
+    terminal of its own. Whether the terminals can reach the roots in strings
+    is left to the routers.
+
+    Raises:
+      ValueError: the limit leaves some terminal without any link or feeder, or
+        leaves fewer terminals with a feeder than the subtrees or rings needed.
+    """
+    ub = bounds.link_length_ub
+    if ub is None:
+        return
+    T = A.graph['T']
+    feedable_ = (A.graph['d2roots'][:T] <= ub).any(axis=1)
+    linked_ = feedable_.copy()
+    for u, v, length in A.edges(data='length'):
+        if u >= 0 and v >= 0 and length <= ub:
+            linked_[u] = linked_[v] = True
+    isolated = (~linked_).nonzero()[0].tolist()
+    if isolated:
+        raise ValueError(
+            f'max_link_length leaves {len(isolated)} turbine(s) without any link '
+            f'or feeder within it: {isolated[:10]}{"..." if len(isolated) > 10 else ""}'
+        )
+    num_feedable = int(feedable_.sum())
+    if num_feedable < bounds.groups_lb:
+        raise ValueError(
+            f'max_link_length leaves {num_feedable} turbine(s) with a feeder '
+            f'within it, fewer than the {bounds.groups_lb} subtrees or rings needed.'
         )
 
 
@@ -312,7 +348,7 @@ class NetworkConstraints:
     ) -> NetworkBounds:
         """Check the constraints against a problem instance and bound it.
 
-        The instance is ``A`` (a location or available-links graph) at a cable
+        The instance is ``A`` (an available-links graph) at a cable
         capacity, given as for the routers' producers: ``capacity`` in inflow,
         or ``capacity_nominal`` in the unit of the turbine power, which is then
         quantized (see :func:`~optiwindnet.loads.quantized`). The bounds are
@@ -331,7 +367,7 @@ class NetworkConstraints:
         limits.
 
         Args:
-          A: location or available-links graph.
+          A: available-links graph.
           capacity: cable capacity, in inflow (per arm, for rings).
           capacity_nominal: cable capacity, in the unit of the turbine power,
             instead of ``capacity``.
@@ -350,7 +386,7 @@ class NetworkConstraints:
             capacity_nominal=capacity_nominal,
             power_rtol=power_rtol,
         )
-        return self._resolve(
+        bounds = self._resolve(
             T=A.graph['T'],
             R=A.graph['R'],
             capacity=capacity_inflow,
@@ -358,6 +394,8 @@ class NetworkConstraints:
             power_per_inflow=power_attrs.get('power_per_inflow'),
             link_length_ub=self._link_length_ub(A),
         )
+        _check_link_length(A, bounds)
+        return bounds
 
     def _resolve(
         self,
@@ -516,40 +554,13 @@ class NetworkConstraints:
         """Return ``max_link_length`` in the scale of ``A``.
 
         The limit is in the unit of the coordinates, so it is scaled as ``A`` is
-        if ``A`` is normalized. Every terminal must keep a way to a root: a
-        feeder within the limit from some terminal it reaches through links of
-        ``A`` within the limit.
-
-        Raises:
-          ValueError: the limit leaves some terminals unable to reach a root.
+        if ``A`` is normalized.
         """
         if self.max_link_length is None:
             return None
         ub = self.max_link_length
         if A.graph.get('is_normalized', False):
             ub *= A.graph['norm_scale']
-        T = A.graph['T']
-        feedable_ = (A.graph['d2roots'][:T] <= ub).any(axis=1)
-        within = nx.Graph()
-        within.add_nodes_from(range(T))
-        within.add_edges_from(
-            (u, v)
-            for u, v, length in A.edges(data='length')
-            if u >= 0 and v >= 0 and length <= ub
-        )
-        components = cast('list[set[int]]', list(nx.connected_components(within)))
-        stranded = sorted(
-            n
-            for component in components
-            if not feedable_[list(component)].any()
-            for n in component
-        )
-        if stranded:
-            raise ValueError(
-                f'max_link_length={self.max_link_length:g} leaves {len(stranded)} '
-                f'turbine(s) unable to reach any substation: {stranded[:10]}'
-                f'{"..." if len(stranded) > 10 else ""}'
-            )
         return ub
 
     def _unlimited(self) -> bool:

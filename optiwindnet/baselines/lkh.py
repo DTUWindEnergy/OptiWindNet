@@ -20,7 +20,7 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import cluster_plan, plan_from_clusters
-from ..constraints import NetworkBounds, NetworkConstraints
+from ..constraints import NetworkBounds, NetworkConstraints, _check_link_length
 from ..identity import fingerprint_function
 from ..interarraylib import _links_over_limit
 from ..loads import (
@@ -145,19 +145,24 @@ def _build_weight_matrix(
 
     R = A.graph['R']
     root_col = R + root  # convert negative root id (-R..-1) to d2roots column index
-    d2root_scaled = np.round(A.graph['d2roots'][terminals, root_col] * scale)
+    d2root = A.graph['d2roots'][terminals, root_col]
+    d2root_scaled = np.round(d2root * scale)
     _check(float(d2root_scaled.max(initial=0.0)), 'depot distance')
 
     block, fill_max, edge_max = scaled_length_block(
-        A, terminals, scale=scale, complete=complete, absent=w_clip, dtype=np.int32
+        A,
+        terminals,
+        scale=scale,
+        complete=complete,
+        absent=w_clip,
+        dtype=np.int32,
+        link_length_ub=link_length_ub,
     )
     _check(fill_max, 'pairwise distance')
     _check(edge_max, 'edge length')
     if link_length_ub is not None:
-        # links and feeders over the limit get what an absent link gets
-        ub_scaled = link_length_ub * scale
-        block[block > ub_scaled] = w_clip
-        d2root_scaled[d2root_scaled > ub_scaled] = w_clip
+        # feeders over the limit get what an absent link gets
+        d2root_scaled[d2root > link_length_ub] = w_clip
 
     # only the upper triangle is passed to LKH, so the depot row and the diagonal
     # are left at the sentinel
@@ -1148,8 +1153,7 @@ def lkh3(
 
     The options ``vehicles``, ``balanced`` and ``ringed`` are deprecated in
     favour of ``constraints``, which they are translated into: a maximum route
-    count (with several roots, only the minimum count), which ``balanced=True``
-    holds at the minimum.
+    count, or an exact one if ``balanced`` (balance needs a fixed count).
 
     Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
     radial solve without a count fixed above the minimum or balance.
@@ -1259,6 +1263,7 @@ def lkh3(
         ringed=ringed,
         link_length_ub=None if constraints is None else constraints._link_length_ub(A),
     )
+    _check_link_length(A, bounds)
     ringed = bounds.topology is Topology.RINGED
     balanced = bounds.balanced
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)

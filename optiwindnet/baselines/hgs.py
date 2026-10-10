@@ -13,7 +13,7 @@ import networkx as nx
 import numpy as np
 
 from ..clustering import cluster_plan, plan_from_clusters
-from ..constraints import NetworkConstraints
+from ..constraints import NetworkConstraints, _check_link_length
 from ..identity import fingerprint_function
 from ..interarraylib import _links_over_limit
 from ..loads import (
@@ -479,8 +479,8 @@ def hgs_cvrp(
 
     The options ``vehicles``, ``vehicles_exact``, ``balanced`` and ``ringed`` are
     deprecated in favour of ``constraints``, which they are translated into: a
-    maximum (or, if ``vehicles_exact``, exact) route count, which requires
-    ``balanced=True`` to be exact; with several roots, only the minimum count.
+    maximum route count, or an exact one if ``vehicles_exact`` or ``balanced``
+    (balance needs a fixed count).
 
     Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
     radial solve without a count fixed above the minimum or balance.
@@ -572,6 +572,7 @@ def hgs_cvrp(
         ringed=ringed,
         link_length_ub=None if constraints is None else constraints._link_length_ub(A),
     )
+    _check_link_length(A, bounds)
     ringed = bounds.topology is Topology.RINGED
     balanced = bounds.balanced
     # a ring holds up to 2*capacity terminals (two arms of `capacity` each)

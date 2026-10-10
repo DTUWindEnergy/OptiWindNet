@@ -13,6 +13,7 @@ import optiwindnet.baselines.hgs as hgs_mod
 from optiwindnet.baselines._core import (
     balanced_capacity,
     remove_offending_crossings,
+    resolve_bounds,
     routes_from_warmstart,
 )
 from optiwindnet.constraints import NetworkConstraints
@@ -259,9 +260,8 @@ def test_balanced_exact_vehicles_with_slack(monkeypatch):
     ('kwargs', 'exception', 'match'),
     [
         ({'vehicles': None}, ValueError, 'requires `vehicles` to be set'),
-        ({'vehicles': 3, 'balanced': False}, NotImplementedError, '`balanced`=True'),
         ({'vehicles': 1}, ValueError, 'below the minimum necessary'),
-        ({'vehicles': 13}, ValueError, 'above the number of terminals'),
+        ({'vehicles': 13}, ValueError, 'above the maximum possible (12)'),
     ],
 )
 def test_exact_vehicles_validation(kwargs, exception, match):
@@ -277,17 +277,33 @@ def test_exact_vehicles_validation(kwargs, exception, match):
         )
 
 
-def test_exact_vehicles_rejected_above_minimum_for_multi_root():
-    with pytest.raises(ValueError, match='minimum feasible value'):
-        hgs_mod.hgs_cvrp(
-            _make_A(T=12, R=2),
+@pytest.mark.parametrize(
+    ('R', 'vehicles', 'exact', 'balanced', 'expected'),
+    [
+        # (feeders_lb, feeders_ub, balanced)
+        (1, 3, True, False, (3, 3, False)),
+        (1, 3, False, True, (3, 3, True)),
+        (1, 3, False, False, (2, 3, False)),
+        (2, 3, True, True, (3, 3, True)),
+        (2, 3, False, False, (2, 3, False)),
+    ],
+)
+def test_legacy_options_translate_into_counts(R, vehicles, exact, balanced, expected):
+    with pytest.warns(DeprecationWarning, match='deprecated'):
+        bounds = resolve_bounds(
+            'hgs_cvrp',
+            None,
+            T=12,
+            R=R,
             capacity=6,
-            time_limit=0.1,
-            vehicles=3,
-            vehicles_exact=True,
-            balanced=True,
-            repair=False,
+            inflow_total=12,
+            power_per_inflow=None,
+            vehicles=vehicles,
+            vehicles_exact=exact,
+            balanced=balanced,
+            ringed=False,
         )
+    assert (bounds.feeders_lb, bounds.feeders_ub, bounds.balanced) == expected
 
 
 @pytest.mark.parametrize('vehicles', (3, 5, 8))
@@ -323,18 +339,6 @@ def test_ringed_exact_vehicles_rejects_rings_below_two_terminals():
             vehicles_exact=True,
             balanced=True,
             ringed=True,
-            repair=False,
-        )
-
-
-def test_balanced_rejects_non_minimum_vehicles_without_exact_flag():
-    with pytest.raises(ValueError, match='vehicles_exact'):
-        hgs_mod.hgs_cvrp(
-            _make_A(T=12),
-            capacity=6,
-            time_limit=0.1,
-            vehicles=4,
-            balanced=True,
             repair=False,
         )
 
@@ -379,46 +383,11 @@ def test_solution_time_falls_back_to_total_runtime():
     assert hgs_mod._solution_time('Summary total 1.25', objective=999.0) == 1.25
 
 
-def test_unbalanced_vehicle_count_is_clamped_up(monkeypatch):
-    captured = _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
-
-    hgs_mod.hgs_cvrp(
-        _make_A(T=4),
-        capacity=2,
-        time_limit=0.1,
-        seed=1,
-        vehicles=1,
-        repair=False,
-    )
-
-    assert captured['vehicles'] == 2
-
-
-def test_multiroot_nonminimum_vehicle_count_is_reset(monkeypatch, caplog):
-    def fake_multi_root(*args, **kwargs):
-        inputs = (
-            [1, 1],
-            [6, 6],
-            [np.array([-2, *range(6)]), np.array([-1, *range(6, 12)])],
-            [0, 0],
-            [6, 6],
+def test_vehicles_below_the_minimum_raise():
+    with pytest.raises(ValueError, match=re.escape('below the minimum necessary (2)')):
+        hgs_mod.hgs_cvrp(
+            _make_A(T=4), capacity=2, time_limit=0.1, seed=1, vehicles=1, repair=False
         )
-        output = ([[1, 2, 3, 4, 5, 6]], 0.1, 0.1, 1.0, '', {})
-        return inputs, [output, output]
-
-    monkeypatch.setattr(hgs_mod, '_solve_multi_root', fake_multi_root)
-    with caplog.at_level('WARNING'):
-        S = hgs_mod.hgs_cvrp(
-            _make_A(T=12, R=2),
-            capacity=6,
-            time_limit=0.1,
-            vehicles=3,
-            seed=None,
-            repair=False,
-        )
-
-    assert S.graph['method_options']['feeders_above_min'] == 0
-    assert 'setting to the minimum' in caplog.text
 
 
 def test_remove_offending_crossing_keeps_absent_diagonal_mapping():

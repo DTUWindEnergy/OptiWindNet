@@ -25,90 +25,28 @@ _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
 
 
-def clamp_vehicles_to_min(vehicles: int, vehicles_min: int, capacity: int) -> int:
-    """Warn about and clamp a vehicles request below the feasible minimum."""
-    if vehicles < vehicles_min:
-        _warn(
-            'Vehicles (feeders) number (%d) too low for feasibility '
-            'with given capacity (%d). Setting to %d.',
-            vehicles,
-            capacity,
-            vehicles_min,
-        )
-        vehicles = vehicles_min
-    return vehicles
+def legacy_constraints(
+    feeders: int | None, exact: bool, balanced: bool, ringed: bool
+) -> NetworkConstraints:
+    """Translate the deprecated count options of the VRP routers into constraints.
 
-
-def legacy_bounds(
-    T: int,
-    R: int,
-    capacity: int,
-    inflow_total: int,
-    vehicles: int | None,
-    vehicles_exact: bool,
-    balanced: bool,
-    ringed: bool,
-) -> NetworkBounds:
-    """Translate the deprecated count options of the VRP solvers into bounds.
-
-    The options keep their former checks and adjustments: an exact count needs
-    ``balanced``; with several roots, only the minimum count is honoured.
+    ``feeders`` counts substation connections (two per ring). A count is exact
+    if ``exact`` or ``balanced`` (balance needs a fixed count), and a maximum
+    otherwise; without a count, ``balanced`` fixes the minimum.
     """
-    solve_capacity = 2 * capacity if ringed else capacity
-    vehicles_min: int = math.ceil(inflow_total / solve_capacity)
-    if vehicles_exact:
-        if vehicles is None:
-            raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
-        if not balanced:
-            raise NotImplementedError(
-                'An exact vehicles (feeders) count is only available with '
-                '`balanced`=True.'
-            )
-        if vehicles < vehicles_min:
-            raise ValueError(
-                f'Vehicles (feeders) number ({vehicles}) is below the minimum '
-                f'necessary ({vehicles_min}) for the given capacity ({capacity}).'
-            )
-        if vehicles > T:
-            raise ValueError(
-                f'Vehicles (feeders) number ({vehicles}) is above the number of '
-                f'terminals ({T}).'
-            )
-        if R > 1 and vehicles != vehicles_min:
-            raise ValueError(
-                'For multi-root instances, an exact vehicles (feeders) count is '
-                'only available at the minimum feasible value.'
-            )
-    elif vehicles is not None:
-        if vehicles != vehicles_min:
-            if balanced:
-                raise ValueError(
-                    'If `balanced`=True, the solver can only use the minimum number of '
-                    'vehicles (feeders) (you may just pass None), unless '
-                    '`vehicles_exact`=True.'
-                )
-            elif R > 1:
-                _warn(
-                    'For multi-root instances, the parameter vehicles (feeders) can '
-                    'only be None or the minimum feasible: setting to the minimum.'
-                )
-                vehicles = vehicles_min
-        vehicles = clamp_vehicles_to_min(vehicles, vehicles_min, capacity)
-    per_group = 2 if ringed else 1
     count: dict[str, int | str] = {}
-    if vehicles is None:
+    if feeders is None:
         if balanced:
             count['feeders'] = 'min'
-    elif vehicles_exact or balanced:
-        count['feeders'] = per_group * vehicles
+    elif exact or balanced:
+        count['feeders'] = feeders
     else:
-        count['max_feeders'] = per_group * vehicles
-    constraints = NetworkConstraints(
+        count['max_feeders'] = feeders
+    return NetworkConstraints(
         topology=Topology.RINGED if ringed else Topology.RADIAL,
         balanced=balanced,
         **count,  # pyrefly: ignore[bad-argument-type]
     )
-    return constraints._resolve(T=T, R=R, capacity=capacity, inflow_total=inflow_total)
 
 
 def resolve_bounds(
@@ -131,8 +69,13 @@ def resolve_bounds(
     Deprecated options that differ from their defaults raise a
     ``DeprecationWarning`` attributed to the caller of ``solver``.
 
+    The deprecated options translate as :func:`legacy_constraints` describes,
+    with ``vehicles`` counting routes (subtrees or rings).
+
     Raises:
         TypeError: both ``constraints`` and deprecated options are given.
+        ValueError: ``vehicles_exact`` without ``vehicles``, or the bounds do
+            not suit the instance.
         NotImplementedError: the bounds ask for straight feeders.
     """
     legacy = {
@@ -153,20 +96,25 @@ def resolve_bounds(
                 DeprecationWarning,
                 stacklevel=3,
             )
-        bounds = legacy_bounds(
-            T, R, capacity, inflow_total, vehicles, vehicles_exact, balanced, ringed
+        if vehicles_exact and vehicles is None:
+            raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
+        per_group = 2 if ringed else 1
+        constraints = legacy_constraints(
+            None if vehicles is None else per_group * vehicles,
+            vehicles_exact,
+            balanced,
+            ringed,
         )
     elif legacy:
         raise TypeError(f'Give either constraints or the options {sorted(legacy)}.')
-    else:
-        bounds = constraints._resolve(
-            T=T,
-            R=R,
-            capacity=capacity,
-            inflow_total=inflow_total,
-            power_per_inflow=power_per_inflow,
-            link_length_ub=link_length_ub,
-        )
+    bounds = constraints._resolve(
+        T=T,
+        R=R,
+        capacity=capacity,
+        inflow_total=inflow_total,
+        power_per_inflow=power_per_inflow,
+        link_length_ub=link_length_ub,
+    )
     if bounds.feeder_route is FeederRoute.STRAIGHT:
         raise NotImplementedError(f'{solver}() does not keep feeder routes straight.')
     return bounds
@@ -332,6 +280,7 @@ def scaled_length_block(
     complete: bool,
     absent: float,
     dtype: DTypeLike,
+    link_length_ub: float | None = None,
 ) -> tuple[np.ndarray, float, float]:
     """Build a scaled length matrix in the order given by ``terminals``.
 
@@ -342,7 +291,8 @@ def scaled_length_block(
     With ``complete=True``, initialize all pairs with their Euclidean distances,
     then overwrite entries for links in ``A`` with their stored lengths, which
     may include routes around obstacles. Round scaled lengths for integer
-    ``dtype`` values.
+    ``dtype`` values. Pairs longer than ``link_length_ub`` (unscaled, compared
+    before rounding) retain ``absent``.
 
     Returns:
         ``(block, fill_max, edge_max)`` containing the matrix and maximum scaled
@@ -353,10 +303,14 @@ def scaled_length_block(
     integral = np.issubdtype(np.dtype(dtype), np.integer)
     fill_max = 0.0
     if complete:
-        condensed = pdist(A.graph['VertexC'][terminals]) * scale
+        condensed = pdist(A.graph['VertexC'][terminals])
+        over = None if link_length_ub is None else condensed > link_length_ub
+        condensed *= scale
         fill_max = float(condensed.max(initial=0.0))
         if integral:
             np.round(condensed, out=condensed)
+        if over is not None:
+            condensed[over] = absent
         # Convert the condensed array before expanding it to save memory.
         block = squareform(condensed.astype(dtype, copy=False))
     else:
@@ -367,6 +321,9 @@ def scaled_length_block(
         iu = i_from_n.get(u)
         iv = i_from_n.get(v)
         if iu is None or iv is None:
+            continue
+        if link_length_ub is not None and length > link_length_ub:
+            block[iu, iv] = block[iv, iu] = absent
             continue
         scaled = length * scale
         edge_max = max(edge_max, scaled)
