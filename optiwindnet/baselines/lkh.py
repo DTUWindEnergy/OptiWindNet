@@ -145,19 +145,24 @@ def _build_weight_matrix(
 
     R = A.graph['R']
     root_col = R + root  # convert negative root id (-R..-1) to d2roots column index
-    d2root_scaled = np.round(A.graph['d2roots'][terminals, root_col] * scale)
+    d2root = A.graph['d2roots'][terminals, root_col]
+    d2root_scaled = np.round(d2root * scale)
     _check(float(d2root_scaled.max(initial=0.0)), 'depot distance')
 
     block, fill_max, edge_max = scaled_length_block(
-        A, terminals, scale=scale, complete=complete, absent=w_clip, dtype=np.int32
+        A,
+        terminals,
+        scale=scale,
+        complete=complete,
+        absent=w_clip,
+        dtype=np.int32,
+        link_length_ub=link_length_ub,
     )
     _check(fill_max, 'pairwise distance')
     _check(edge_max, 'edge length')
     if link_length_ub is not None:
-        # links and feeders over the limit get what an absent link gets
-        ub_scaled = link_length_ub * scale
-        block[block > ub_scaled] = w_clip
-        d2root_scaled[d2root_scaled > ub_scaled] = w_clip
+        # feeders over the limit get what an absent link gets
+        d2root_scaled[d2root > link_length_ub] = w_clip
 
     # only the upper triangle is passed to LKH, so the depot row and the diagonal
     # are left at the sentinel

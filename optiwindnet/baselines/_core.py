@@ -332,6 +332,7 @@ def scaled_length_block(
     complete: bool,
     absent: float,
     dtype: DTypeLike,
+    link_length_ub: float | None = None,
 ) -> tuple[np.ndarray, float, float]:
     """Build a scaled length matrix in the order given by ``terminals``.
 
@@ -342,7 +343,8 @@ def scaled_length_block(
     With ``complete=True``, initialize all pairs with their Euclidean distances,
     then overwrite entries for links in ``A`` with their stored lengths, which
     may include routes around obstacles. Round scaled lengths for integer
-    ``dtype`` values.
+    ``dtype`` values. Pairs longer than ``link_length_ub`` (unscaled, compared
+    before rounding) retain ``absent``.
 
     Returns:
         ``(block, fill_max, edge_max)`` containing the matrix and maximum scaled
@@ -353,10 +355,14 @@ def scaled_length_block(
     integral = np.issubdtype(np.dtype(dtype), np.integer)
     fill_max = 0.0
     if complete:
-        condensed = pdist(A.graph['VertexC'][terminals]) * scale
+        condensed = pdist(A.graph['VertexC'][terminals])
+        over = None if link_length_ub is None else condensed > link_length_ub
+        condensed *= scale
         fill_max = float(condensed.max(initial=0.0))
         if integral:
             np.round(condensed, out=condensed)
+        if over is not None:
+            condensed[over] = absent
         # Convert the condensed array before expanding it to save memory.
         block = squareform(condensed.astype(dtype, copy=False))
     else:
@@ -367,6 +373,9 @@ def scaled_length_block(
         iu = i_from_n.get(u)
         iv = i_from_n.get(v)
         if iu is None or iv is None:
+            continue
+        if link_length_ub is not None and length > link_length_ub:
+            block[iu, iv] = block[iv, iu] = absent
             continue
         scaled = length * scale
         edge_max = max(edge_max, scaled)
