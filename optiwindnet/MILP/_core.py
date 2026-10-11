@@ -198,8 +198,9 @@ def model_bounds(
     if bounds is None:
         if given:
             warnings.warn(
-                f'make_min_length_model() options {sorted(given)} are deprecated: '
-                'pass bounds=NetworkConstraints(...).resolve(A, capacity=...) instead.',
+                f'make_min_length_model() options {sorted(given)} are deprecated and '
+                'will be removed in v0.4.0: pass '
+                'bounds=NetworkConstraints(...).resolve(A, capacity=...) instead.',
                 DeprecationWarning,
                 stacklevel=3,
             )
@@ -296,7 +297,7 @@ def balance_bounds(
 class ModelOptions(dict):
     """Hold options for the modelling of the cable routing problem.
 
-    Deprecated, and constructing one warns: superseded by
+    Deprecated (removed in v0.4.0), and constructing one warns: superseded by
     :class:`~optiwindnet.constraints.NetworkConstraints`, which
     :meth:`to_constraints` translates the options into.
 
@@ -768,8 +769,8 @@ class Solver(abc.ABC):
           A: available links for the location
           constraints: network constraints (defaults to
             ``NetworkConstraints()``)
-          model_options: deprecated, use ``constraints``: tree properties - see
-            ModelOptions.help()
+          model_options: deprecated (removed in v0.4.0), use ``constraints``: tree
+            properties - see ModelOptions.help()
           capacity: maximum inflow of a subtree
           capacity_nominal: maximum power of a subtree, instead of ``capacity``
             (see :func:`~optiwindnet.loads.quantized`)
@@ -788,8 +789,8 @@ class Solver(abc.ABC):
             # a ModelOptions warned of its deprecation when it was made
             if not isinstance(model_options, ModelOptions):
                 warnings.warn(
-                    'set_problem(model_options=...) is deprecated: pass '
-                    'constraints=NetworkConstraints(...) instead.',
+                    'set_problem(model_options=...) is deprecated and will be removed '
+                    'in v0.4.0: pass constraints=NetworkConstraints(...) instead.',
                     DeprecationWarning,
                     stacklevel=2,
                 )

@@ -1151,9 +1151,10 @@ def lkh3(
     single route, which is offered enough routes to use as many as lower the
     cable length (within the root's own limit).
 
-    The options ``vehicles``, ``balanced`` and ``ringed`` are deprecated in
-    favour of ``constraints``, which they are translated into: a maximum route
-    count, or an exact one if ``balanced`` (balance needs a fixed count).
+    The options ``vehicles``, ``balanced`` and ``ringed`` are deprecated and
+    will be removed in v0.4.0: they are translated into ``constraints``, which
+    supersedes them, as a maximum route count, or an exact one if ``balanced``
+    (balance needs a fixed count).
 
     Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
     radial solve without a count fixed above the minimum or balance.
@@ -1190,12 +1191,14 @@ def lkh3(
         time_limit: [s] solver run time limit (per cluster).
         constraints: topology, counts and loads to keep (defaults to those of
             ``NetworkConstraints(topology='radial')``)
-        vehicles: deprecated, use ``constraints``: maximum number of routes
+        vehicles: deprecated (removed in v0.4.0), use ``constraints``: maximum number of
+            routes
         seed: random seed for reproducibility (if None, picks a random one).
         keep_log: attach solver log to the solution graph.
         repair: iteratively fix crossings (default True).
         max_retries: maximum repair iterations.
-        balanced: deprecated, use ``constraints``: balance the route loads
+        balanced: deprecated (removed in v0.4.0), use ``constraints``: balance the route
+            loads
         scale: factor to scale lengths (LKH manual).
         runs: number of LKH runs (LKH manual).
         per_run_limit: [s] LKH per-run time limit.
@@ -1210,7 +1213,7 @@ def lkh3(
         warmstart: solution topology S (radial, or ringed for a RINGED topology)
             to seed the search and, for multi-root instances, to cluster the
             terminals
-        ringed: deprecated, use ``constraints``: solve for rings
+        ringed: deprecated (removed in v0.4.0), use ``constraints``: solve for rings
 
     Returns:
         Solution topology S.

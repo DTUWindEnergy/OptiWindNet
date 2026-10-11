@@ -210,8 +210,8 @@ class Router(ABC):
 
 def _warn_deprecated_options(router: str, names: Sequence[str]) -> None:
     warnings.warn(
-        f'{router} options {sorted(names)} are deprecated: give the network '
-        'constraints=NetworkConstraints(...) instead.',
+        f'{router} options {sorted(names)} are deprecated and will be removed in '
+        'v0.4.0: give the network constraints=NetworkConstraints(...) instead.',
         DeprecationWarning,
         stacklevel=3,
     )
@@ -1072,8 +1072,8 @@ class EWRouter(Router):
 
         Args:
           maxiter: Maximum iterations.
-          feeder_route: Deprecated, use the network constraints: feeder routing
-            mode (``'segmented'`` or ``'straight'``).
+          feeder_route: Deprecated (removed in v0.4.0), use the network constraints:
+            feeder routing mode (``'segmented'`` or ``'straight'``).
           method: one of the **Available Methods** (defaults to the one of the
             topology).
           bias_margin: Fractional margin within which candidates are considered
@@ -1206,17 +1206,17 @@ class HGSRouter(Router):
 
         Args:
           time_limit: Maximum runtime for a single HGS run (in seconds).
-          feeder_limit: Deprecated, use the network constraints: maximum number
-              of feeders; the exact number if ``feeder_exact`` or ``balanced``
-              (balance needs a fixed count). With ``ringed=True``, it counts
-              substation connections (two per ring) and must be even.
-          feeder_exact: Deprecated, use the network constraints: whether
-              ``feeder_limit`` is the exact number of feeders.
+          feeder_limit: Deprecated (removed in v0.4.0), use the network constraints:
+              maximum number of feeders; the exact number if ``feeder_exact`` or
+              ``balanced`` (balance needs a fixed count). With ``ringed=True``, it
+              counts substation connections (two per ring) and must be even.
+          feeder_exact: Deprecated (removed in v0.4.0), use the network constraints:
+              whether ``feeder_limit`` is the exact number of feeders.
           max_retries: Maximum number of retries if a feasible solution is not found.
-          balanced: Deprecated, use the network constraints: whether to balance
-              turbines/loads across feeders.
-          ringed: Deprecated, use the network constraints: whether to produce a
-              RINGED topology (cycles) instead of a radial one.
+          balanced: Deprecated (removed in v0.4.0), use the network constraints: whether
+              to balance turbines/loads across feeders.
+          ringed: Deprecated (removed in v0.4.0), use the network constraints: whether
+              to produce a RINGED topology (cycles) instead of a radial one.
           seed: Set the seed of the pseudo-random number generator (reproducibility).
           verbose: Print the HGS-CVRP log while it runs (single substation only).
           **kwargs: Options common to all routers (see :class:`Router`).
@@ -1342,8 +1342,8 @@ class MILPRouter(Router):
           time_limit: Maximum runtime (seconds).
           mip_gap: Relative MIP optimality gap tolerance.
           solver_options: Extra solver-specific options.
-          model_options: Deprecated, use the network constraints: options for
-            the MILP model (see :class:`~optiwindnet.MILP.ModelOptions`).
+          model_options: Deprecated (removed in v0.4.0), use the network constraints:
+            options for the MILP model (see :class:`~optiwindnet.MILP.ModelOptions`).
           warmup: Whether to warm-start the model. When ``True`` (the default), the
               solver is primed with an available solution -- the one carried across
               successive :meth:`WindFarmNetwork.optimize` calls, or one built by a

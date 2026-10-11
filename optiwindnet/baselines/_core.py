@@ -91,8 +91,8 @@ def resolve_bounds(
     if constraints is None:
         if legacy:
             warnings.warn(
-                f'{solver}() options {sorted(legacy)} are deprecated: pass '
-                'constraints=NetworkConstraints(...) instead.',
+                f'{solver}() options {sorted(legacy)} are deprecated and will be '
+                'removed in v0.4.0: pass constraints=NetworkConstraints(...) instead.',
                 DeprecationWarning,
                 stacklevel=3,
             )

@@ -308,8 +308,9 @@ def make_min_length_model(
       bounds: topology, feeder route, counts and loads to enforce (see
         :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`); defaults
         to those of ``NetworkConstraints()``
-      topology, feeder_route, feeder_limit, balanced, max_feeders: deprecated,
-        use ``bounds``: the options of :class:`~optiwindnet.MILP.ModelOptions`
+      topology, feeder_route, feeder_limit, balanced, max_feeders: deprecated (removed
+        in v0.4.0), use ``bounds``: the options of
+        :class:`~optiwindnet.MILP.ModelOptions`
 
     Raises:
       ValueError: the bounds limit the load of the roots of a RINGED model.

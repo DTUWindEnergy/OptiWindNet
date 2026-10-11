@@ -478,9 +478,10 @@ def hgs_cvrp(
     an exact count, a route count other than it).
 
     The options ``vehicles``, ``vehicles_exact``, ``balanced`` and ``ringed`` are
-    deprecated in favour of ``constraints``, which they are translated into: a
-    maximum route count, or an exact one if ``vehicles_exact`` or ``balanced``
-    (balance needs a fixed count).
+    deprecated and will be removed in v0.4.0: they are translated into
+    ``constraints``, which supersedes them, as a maximum route count, or an
+    exact one if ``vehicles_exact`` or ``balanced`` (balance needs a fixed
+    count).
 
     Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
     radial solve without a count fixed above the minimum or balance.
@@ -500,14 +501,16 @@ def hgs_cvrp(
         time_limit: [s] solver run time limit
         constraints: topology, counts and loads to keep (defaults to those of
             ``NetworkConstraints(topology='radial')``)
-        vehicles: deprecated, use ``constraints``: maximum number of routes
-        vehicles_exact: deprecated, use ``constraints``: whether ``vehicles`` is
-            exact
+        vehicles: deprecated (removed in v0.4.0), use ``constraints``: maximum number of
+            routes
+        vehicles_exact: deprecated (removed in v0.4.0), use ``constraints``: whether
+            ``vehicles`` is exact
         seed: random seed for reproducibility
         keep_log: attach solver log to the solution graph
         repair: iteratively fix crossings (default True)
         max_retries: maximum repair iterations
-        balanced: deprecated, use ``constraints``: balance the route loads
+        balanced: deprecated (removed in v0.4.0), use ``constraints``: balance the route
+            loads
         complete: allow every terminal pair, using Euclidean distances for
             links absent from ``A``. Enabled automatically when ``A`` has no
             edges. Requires ``repair=False`` because mesh-based crossing
