@@ -333,7 +333,7 @@ def clusterize(
         hold
       bounds: count and load bounds, as resolved for the cable capacity (see
         :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`)
-      capacity: deprecated, use ``group_capacity``
+      capacity: deprecated (removed in v0.4.0), use ``group_capacity``
 
     Returns:
       One set of terminals per root, in root order (``-R`` to ``-1``).
@@ -348,7 +348,8 @@ def clusterize(
         if group_capacity is not None:
             raise TypeError('Give group_capacity, not capacity.')
         warnings.warn(
-            'clusterize(capacity=...) is deprecated: pass group_capacity=... instead.',
+            'clusterize(capacity=...) is deprecated and will be removed in v0.4.0: '
+            'pass group_capacity=... instead.',
             DeprecationWarning,
             stacklevel=2,
         )
