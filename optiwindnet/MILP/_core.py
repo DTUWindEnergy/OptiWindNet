@@ -364,8 +364,9 @@ class ModelOptions(dict):
         )
         def __init__(self, **kwargs):
             warnings.warn(
-                'ModelOptions is deprecated: give the network (or set_problem()) '
-                'constraints=NetworkConstraints(...) instead.',
+                'ModelOptions is deprecated and will be removed in v0.4.0: give the '
+                'network (or set_problem()) constraints=NetworkConstraints(...) '
+                'instead.',
                 DeprecationWarning,
                 stacklevel=3,
             )

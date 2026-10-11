@@ -2023,8 +2023,14 @@ def test_model_options_drop_an_unenforceable_balance(caplog, feeder_limit, feede
     assert 'will not enforce balanced subtrees' in caplog.text
 
 
+def _model_options(**options):
+    """Construct ModelOptions (removed in v0.4.0), checking that it warns."""
+    with pytest.warns(DeprecationWarning, match='ModelOptions is deprecated'):
+        return ModelOptions(**options)
+
+
 def test_translated_options_read_as_network_constraints():
-    translated = ModelOptions(
+    translated = _model_options(
         topology='ringed', feeder_limit='minimum'
     ).to_constraints()
     assert repr(translated) == repr(
@@ -2061,13 +2067,13 @@ def test_model_options_reject_what_the_constraints_reject():
 # ModelOptions is the contract: coerced on the way in, frozen thereafter
 # --------------------------------------------------------------------------- #
 def test_model_options_coerces_strings_to_enums():
-    opts = ModelOptions(topology='ringed', feeder_limit='minimum')
+    opts = _model_options(topology='ringed', feeder_limit='minimum')
     assert opts['topology'] is core.Topology.RINGED
     assert opts['feeder_limit'] is core.FeederLimit.MINIMUM
 
 
 def test_model_options_materializes_every_default():
-    assert set(ModelOptions()) == {
+    assert set(_model_options()) == {
         'topology', 'feeder_route', 'feeder_limit', 'balanced', 'max_feeders',
     }  # fmt: skip
 
@@ -2082,7 +2088,7 @@ def test_model_options_materializes_every_default():
 def test_model_options_rejects_wrong_scalar_type(kwargs, expected):
     """A str for an int option is a type error, not an enum lookup."""
     with pytest.raises(TypeError, match=expected):
-        ModelOptions(**kwargs)
+        _model_options(**kwargs)
 
 
 @pytest.mark.parametrize(
@@ -2099,14 +2105,14 @@ def test_model_options_rejects_wrong_scalar_type(kwargs, expected):
 )
 def test_model_options_is_immutable(mutate):
     """Mutation would bypass __init__'s coercion, so it is refused."""
-    opts = ModelOptions()
+    opts = _model_options()
     with pytest.raises(TypeError, match='immutable'):
         mutate(opts)
     assert opts['topology'] is core.Topology.BRANCHED
 
 
 def test_model_options_pickle_roundtrip_preserves_values_and_immutability():
-    options = ModelOptions(
+    options = _model_options(
         topology='ringed',
         feeder_route='straight',
         feeder_limit='exactly',
