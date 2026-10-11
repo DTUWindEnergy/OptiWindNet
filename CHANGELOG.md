@@ -1,6 +1,6 @@
-# v0.3.2 (unreleased)
+# v0.3.2
 
-[Commit history since v0.3.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.1...HEAD)
+[Commit history since v0.3.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.1...v0.3.2)
 
 ## Breaking Changes
 
