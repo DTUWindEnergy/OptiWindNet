@@ -295,15 +295,21 @@ def make_min_length_model(
     link_ |= {(t, r): m.addVar(f'link_{t}~r{-r}', 'B') for t, r in stars}
     if topology is Topology.RINGED:
         link_ |= {(r, t): m.addVar(f'link_r{-r}~{t}', 'B') for r, t in starsʹ}
-    for link in links_to_fix(A, bounds):
+    fixed = set(links_to_fix(A, bounds))
+    for link in fixed:
         m.fixVar(link_[link], 0)
     # 'M' (implied integral): single_out_link + flow_conserv pin flows to integers.
     # a link into v carries at most what leaves v less v's own inflow
     flow_ = {
         (u, v): m.addVar(f'flow_{u}~{v}', 'M', lb=0, ub=k - A.nodes[v].get('inflow', 1))
         for u, v in chain(E, Eʹ)
+        if (u, v) not in fixed
     }
-    flow_ |= {(t, r): m.addVar(f'flow_{t}~r{-r}', 'M', lb=0, ub=k) for t, r in stars}
+    flow_ |= {
+        (t, r): m.addVar(f'flow_{t}~r{-r}', 'M', lb=0, ub=k)
+        for t, r in stars
+        if (t, r) not in fixed
+    }
 
     ###############
     # Constraints #
@@ -315,12 +321,16 @@ def make_min_length_model(
 
     # enforce a single directed edge between each node pair
     for u, v in E:
+        if (u, v) in fixed:
+            continue
         m.addConsSOS1((link_[(u, v)], link_[(v, u)]), name=f'single_dir_link_{u}~{v}')
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
         Xings, passovers = _feeder_link_conflicts(A)
         for u, v, r, t in Xings.tolist():
+            if (u, v) in fixed or (t, r) in fixed:
+                continue
             if topology is Topology.RINGED:
                 m.addConsSOS1(
                     (link_[(u, v)], link_[(v, u)], link_[t, r], link_[r, t]),
@@ -334,17 +344,25 @@ def make_min_length_model(
 
         # a feeder over nodes conflicts with links on both of its sides
         for links, rhs, name in passover_rows(passovers, topology is Topology.RINGED):
-            m.addCons(sum(link_[link] for link in links) <= rhs, name=name)
+            active_links = [link for link in links if link not in fixed]
+            if len(active_links) <= rhs:
+                continue
+            m.addCons(sum(link_[link] for link in active_links) <= rhs, name=name)
 
     # edge-edge crossings
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):
+        active_Xing = [uv for uv in Xing if uv not in fixed]
+        if len(active_Xing) <= 1:
+            continue
         m.addConsSOS1(
-            sum(((link_[u, v], link_[v, u]) for u, v in Xing), ()),
+            sum(((link_[u, v], link_[v, u]) for u, v in active_Xing), ()),
             name=f'link_link_cross_{"_".join(f"{u}~{v}" for u, v in Xing)}',
         )
 
     # bind flow to link activation (only for edges with flow variables)
     for t, n in flowset:
+        if (t, n) in fixed:
+            continue
         _n = str(n) if n >= 0 else f'r{-n}'
         head_room = k if n < 0 else k - A.nodes[n].get('inflow', 1)
         m.addCons(
@@ -359,8 +377,9 @@ def make_min_length_model(
     # flow conservation with possibly nonunitary terminal inflow
     for t in _T:
         m.addCons(
-            sum((flow_[t, n] - flow_[n, t]) for n in A_terminals.neighbors(t))
-            + sum(flow_[t, r] for r in _R)
+            sum(flow_[t, n] for n in A_terminals.neighbors(t) if (t, n) in flow_)
+            - sum(flow_[n, t] for n in A_terminals.neighbors(t) if (n, t) in flow_)
+            + sum(flow_[t, r] for r in _R if (t, r) in flow_)
             == A.nodes[t].get('inflow', 1),
             name=f'flow_conserv_{t}',
         )
@@ -368,7 +387,7 @@ def make_min_length_model(
     # feeder count and per-root bounds
     for row in bound_rows(bounds, R, T):
         var_ = flow_ if row.flow else link_
-        row_sum = sum(var_[link] for link in row.links)
+        row_sum = sum(var_[link] for link in row.links if link in var_)
         if row.lb is not None and row.lb == row.ub:
             m.addCons(row_sum == row.lb, name=f'{row.name}_eq')
             continue
@@ -382,49 +401,57 @@ def make_min_length_model(
     # enforce balanced subtrees (subtree loads differ at most by one unit)
     if load_lb is not None:
         for t, r in stars:
-            m.addCons(
-                flow_[t, r] >= link_[t, r] * load_lb, name=f'balanced_lb_{t}~r{-r}'
-            )
+            if (t, r) in flow_:
+                m.addCons(
+                    flow_[t, r] >= link_[t, r] * load_lb, name=f'balanced_lb_{t}~r{-r}'
+                )
     if load_ub is not None:
         for t, r in stars:
-            m.addCons(
-                flow_[t, r] <= link_[t, r] * load_ub, name=f'balanced_ub_{t}~r{-r}'
-            )
+            if (t, r) in flow_:
+                m.addCons(
+                    flow_[t, r] <= link_[t, r] * load_ub, name=f'balanced_ub_{t}~r{-r}'
+                )
 
     # topology-specific incoming-edge constraints
     if topology is Topology.RADIAL:
         for t in _T:
-            # SOS1 takes the *list* of incoming terminal-link variables (at most
-            # one may be nonzero => simple paths), not their sum.
-            m.addConsSOS1(
-                [link_[n, t] for n in A_terminals.neighbors(t)], name=f'radial_{t}'
-            )
+            active_nbrs = [n for n in A_terminals.neighbors(t) if (n, t) not in fixed]
+            if len(active_nbrs) > 1:
+                # SOS1 takes the *list* of incoming terminal-link variables (at most
+                # one may be nonzero => simple paths), not their sum.
+                m.addConsSOS1([link_[n, t] for n in active_nbrs], name=f'radial_{t}')
     elif topology is Topology.RINGED:
         for t in _T:
+            active_nbrs = [n for n in A_terminals.neighbors(t) if (n, t) not in fixed]
+            active_roots = [r for r in _R if (r, t) not in fixed]
             m.addCons(
-                sum(link_[n, t] for n in A_terminals.neighbors(t))
-                + sum(link_[r, t] for r in _R)
+                sum(link_[n, t] for n in active_nbrs)
+                + sum(link_[r, t] for r in active_roots)
                 == 1,
                 name=f'ringed_{t}',
             )
 
     # assert all nodes are connected to some root
     m.addCons(
-        sum(flow_[t, r] for r in _R for t in _T) == inflow_total,
+        sum(flow_[t, r] for r in _R for t in _T if (t, r) in flow_) == inflow_total,
         name='total_inflow_sank',
     )
 
     # valid inequalities
     for t in _T:
         # incoming flow limit
-        m.addCons(
-            sum(flow_[n, t] for n in A_terminals.neighbors(t))
-            <= k - A.nodes[t].get('inflow', 1),
-            name=f'inflow_limit_{t}',
-        )
+        in_flows = [flow_[n, t] for n in A_terminals.neighbors(t) if (n, t) in flow_]
+        if in_flows:
+            m.addCons(
+                sum(in_flows) <= k - A.nodes[t].get('inflow', 1),
+                name=f'inflow_limit_{t}',
+            )
         # only one out-edge per terminal
+        out_links = [
+            n for n in chain(A_terminals.neighbors(t), _R) if (t, n) not in fixed
+        ]
         m.addCons(
-            sum(link_[t, n] for n in chain(A_terminals.neighbors(t), _R)) == 1,
+            sum(link_[t, n] for n in out_links) == 1,
             name=f'single_out_link_{t}',
         )
 

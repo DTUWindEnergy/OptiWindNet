@@ -160,6 +160,46 @@ def test_multi_root_fixed_links_are_not_repeated():
     assert _over_limit_feeders(A, 6000.0) <= set(fixed)
 
 
+def _check_solver_omits_flow_variables(
+    solver_name: str, limit: float, capacity: int
+) -> None:
+    from optiwindnet.constraints import NetworkConstraints
+    from optiwindnet.MILP import solver_factory
+    from optiwindnet.MILP._core import links_to_fix
+
+    from .sitecache import get_bundle
+
+    bundle = get_bundle('toy')
+    A = bundle.A
+    constraints = NetworkConstraints(max_link_length=limit)
+    bounds = constraints.resolve(A, capacity=capacity)
+    fixed = set(links_to_fix(A, bounds))
+    assert fixed
+    solver = solver_factory(solver_name)
+    solver.set_problem(bundle.P, A, capacity=capacity, constraints=constraints)
+    for link in fixed:
+        assert link in solver.metadata.link_
+        assert link not in solver.metadata.flow_
+
+
+@pytest.mark.parametrize(
+    'solver_name',
+    ['ortools.cp_sat', 'scip', 'highs', 'pyomo.highs'],
+    ids=['ortools', 'scip', 'highs', 'pyomo'],
+)
+def test_models_omit_flow_variables_for_fixed_links(solver_name, run_isolated):
+    result = run_isolated(
+        solver_name,
+        _check_solver_omits_flow_variables,
+        (solver_name, _TOY_LIMIT, _CAPACITY),
+        60,
+    )
+    if isinstance(result, BaseException):
+        if solver_unavailable(result):
+            pytest.skip(f'{solver_name} unavailable: {result}')
+        raise result
+
+
 def test_model_rejects_a_warm_start_over_the_limit():
     bundle = get_bundle('toy')
     A = bundle.A

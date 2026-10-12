@@ -345,12 +345,13 @@ def make_min_length_model(
     _R = range(-R, 0)
 
     E, Eʹ, stars, starsʹ = canonical_linksets(A_terminals, R, T, topology)
+    linkset = E + Eʹ + stars + starsʹ
 
     # Create model
     m = pyo.ConcreteModel()
     m.T = pyo.RangeSet(0, T - 1)
     m.R = pyo.RangeSet(-R, -1)
-    m.linkset = pyo.Set(initialize=E + Eʹ + stars + starsʹ)
+    m.linkset = pyo.Set(initialize=linkset)
 
     ##############
     # Parameters #
@@ -373,16 +374,20 @@ def make_min_length_model(
     #############
 
     m.link_ = pyo.Var(m.linkset, domain=pyo.Binary, initialize=0)
-    for link in links_to_fix(A, bounds):
+    fixed = set(links_to_fix(A, bounds))
+    for link in fixed:
         m.link_[link].fix(0)  # pyrefly: ignore[bad-index, missing-attribute]
 
     def flow_bounds(m, u, v):
         # a link into v carries at most what leaves v less v's own inflow
         return (0, (m.k if v < 0 else m.k - A.nodes[v].get('inflow', 1)))
 
+    flowset = linkset if topology != Topology.RINGED else E + Eʹ + stars
+    active_flowset = [link for link in flowset if link not in fixed]
+
     # continuous: cons_single_out_link + cons_flow_conserv pin flows to integers.
     m.flow_ = pyo.Var(
-        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
+        active_flowset,
         domain=pyo.NonNegativeReals,
         bounds=flow_bounds,
         initialize=0,
@@ -399,11 +404,13 @@ def make_min_length_model(
         )
 
     # enforce a single directed edge between each node pair
-    m.cons_single_dir_link = pyo.Constraint(
-        E,
-        rule=(lambda m, u, v: m.link_[u, v] + m.link_[v, u] <= 1),
-        name='single_dir_link',
-    )
+    active_E = [e for e in E if e not in fixed]
+    if active_E:
+        m.cons_single_dir_link = pyo.Constraint(
+            active_E,
+            rule=(lambda m, u, v: m.link_[u, v] + m.link_[v, u] <= 1),
+            name='single_dir_link',
+        )
 
     # feeder-edge crossings
     if feeder_route is FeederRoute.STRAIGHT:
@@ -419,19 +426,32 @@ def make_min_length_model(
                 return m.link_[u, v] + m.link_[v, u] + m.link_[t, r] <= 1
 
         Xings, passovers = _feeder_link_conflicts(A)
-        m.cons_feeder_cross = pyo.Constraint(
-            [tuple(Xing) for Xing in Xings.tolist()],
-            rule=feederXedge_rule,
-            name='feeder_cross',
-        )
+        active_Xings = [
+            tuple(Xing)
+            for Xing in Xings.tolist()
+            if (Xing[0], Xing[1]) not in fixed and (Xing[3], Xing[2]) not in fixed
+        ]
+        if active_Xings:
+            m.cons_feeder_cross = pyo.Constraint(
+                active_Xings,
+                rule=feederXedge_rule,
+                name='feeder_cross',
+            )
 
         # a feeder over nodes conflicts with links on both of its sides
-        rows = list(passover_rows(passovers, topology == Topology.RINGED))
+        rows = [
+            (links, rhs, name)
+            for links, rhs, name in passover_rows(
+                passovers, topology == Topology.RINGED
+            )
+            if len([l for l in links if l not in fixed]) > rhs
+        ]
         if rows:
             m.cons_feeder_passover = pyo.Constraint(
                 range(len(rows)),
                 rule=lambda m, i: (
-                    sum(m.link_[link] for link in rows[i][0]) <= rows[i][1]
+                    sum(m.link_[link] for link in rows[i][0] if link not in fixed)
+                    <= rows[i][1]
                 ),
                 name='feeder_passover',
             )
@@ -447,10 +467,11 @@ def make_min_length_model(
     doubleXings = []
     tripleXings = []
     for Xing in edgeset_edgeXing_iter(A.graph['diagonals']):
-        if len(Xing) == 2:
-            doubleXings.append(Xing)
-        else:
-            tripleXings.append(Xing)
+        active = [uv for uv in Xing if uv not in fixed]
+        if len(active) == 2:
+            doubleXings.append(active)
+        elif len(active) >= 3:
+            tripleXings.append(active)
     if doubleXings:
         m.cons_link_pair_cross = pyo.Constraint(
             doubleXings, rule=edgeXedge_rule, name='link_pair_cross'
@@ -462,7 +483,7 @@ def make_min_length_model(
 
     # bind flow to link activation
     m.cons_flow_ub = pyo.Constraint(
-        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
+        active_flowset,
         rule=(
             lambda m, u, v: (
                 m.flow_[(u, v)]
@@ -473,7 +494,7 @@ def make_min_length_model(
         name='flow_ub',
     )
     m.cons_flow_lb = pyo.Constraint(
-        m.linkset if topology != Topology.RINGED else E + Eʹ + stars,
+        active_flowset,
         rule=(
             lambda m, u, v: (
                 m.link_[(u, v)] * A.nodes[u].get('inflow', 1) <= m.flow_[(u, v)]
@@ -487,8 +508,17 @@ def make_min_length_model(
         m.T,
         rule=(
             lambda m, u: (
-                sum((m.flow_[u, v] - m.flow_[v, u]) for v in A_terminals.neighbors(u))
-                + sum(m.flow_[u, r] for r in _R)
+                sum(
+                    m.flow_[u, v]
+                    for v in A_terminals.neighbors(u)
+                    if (u, v) not in fixed
+                )
+                - sum(
+                    m.flow_[v, u]
+                    for v in A_terminals.neighbors(u)
+                    if (v, u) not in fixed
+                )
+                + sum(m.flow_[u, r] for r in _R if (u, r) not in fixed)
                 == A.nodes[u].get('inflow', 1)
             )
         ),
@@ -498,7 +528,11 @@ def make_min_length_model(
     # feeder count and per-root bounds
     for row in bound_rows(bounds, R, T):
         var_ = m.flow_ if row.flow else m.link_
-        row_sum = sum(var_[link] for link in row.links)  # pyrefly: ignore[bad-index, no-matching-overload]
+        row_sum = sum(  # pyrefly: ignore[no-matching-overload]
+            var_[link]  # pyrefly: ignore[bad-index]
+            for link in row.links
+            if not row.flow or link not in fixed
+        )
         if row.lb is not None and row.lb == row.ub:
             name = f'{row.name}_eq'
             setattr(
@@ -519,17 +553,16 @@ def make_min_length_model(
     load_lb, load_ub = balance_bounds(bounds, capacity)
 
     # enforce balanced subtrees (subtree loads differ at most by one unit)
-    if load_lb is not None:
+    active_stars = [(t, r) for t, r in stars if (t, r) not in fixed]
+    if load_lb is not None and active_stars:
         m.cons_balanced_lb = pyo.Constraint(
-            m.T,
-            m.R,
+            active_stars,
             rule=(lambda m, t, r: m.flow_[t, r] >= m.link_[t, r] * load_lb),
             name='balanced_lb',
         )
-    if load_ub is not None:
+    if load_ub is not None and active_stars:
         m.cons_balanced_ub = pyo.Constraint(
-            m.T,
-            m.R,
+            active_stars,
             rule=(lambda m, t, r: m.flow_[t, r] <= m.link_[t, r] * load_ub),
             name='balanced_ub',
         )
@@ -538,11 +571,15 @@ def make_min_length_model(
     if topology is Topology.RADIAL:
         # just need to limit incoming edges since the outgoing are
         # limited by the m.cons_single_out_link
+        def radial_rule(m, u):
+            active_nbrs = [v for v in A_terminals.neighbors(u) if (v, u) not in fixed]
+            if len(active_nbrs) > 1:
+                return sum(m.link_[v, u] for v in active_nbrs) <= 1
+            return pyo.Constraint.Skip
+
         m.cons_radial = pyo.Constraint(
             m.T,
-            rule=(
-                lambda m, u: sum(m.link_[v, u] for v in A_terminals.neighbors(u)) <= 1
-            ),
+            rule=radial_rule,
             name='radial',
         )
     elif topology is Topology.RINGED:
@@ -552,8 +589,12 @@ def make_min_length_model(
             m.T,
             rule=(
                 lambda m, t: (
-                    sum(m.link_[v, t] for v in A_terminals.neighbors(t))
-                    + sum(m.link_[r, t] for r in m.R)
+                    sum(
+                        m.link_[v, t]
+                        for v in A_terminals.neighbors(t)
+                        if (v, t) not in fixed
+                    )
+                    + sum(m.link_[r, t] for r in _R if (r, t) not in fixed)
                     == 1
                 )
             ),
@@ -562,26 +603,39 @@ def make_min_length_model(
 
     # assert all nodes are connected to some root
     m.cons_total_inflow_sank = pyo.Constraint(
-        rule=(lambda m: sum(m.flow_[t, r] for r in _R for t in _T) == inflow_total),
+        rule=(
+            lambda m: (
+                sum(m.flow_[t, r] for r in _R for t in _T if (t, r) not in fixed)
+                == inflow_total
+            )
+        ),
         name='total_inflow_sank',
     )
 
     # valid inequalities
+    def inflow_limit_rule(m, u):
+        in_flows = [
+            m.flow_[v, u] for v in A_terminals.neighbors(u) if (v, u) not in fixed
+        ]
+        if in_flows:
+            return sum(in_flows) <= m.k - A.nodes[u].get('inflow', 1)
+        return pyo.Constraint.Skip
+
     m.cons_inflow_limit = pyo.Constraint(
         m.T,
-        rule=(
-            lambda m, u: (
-                sum(m.flow_[v, u] for v in A_terminals.neighbors(u))
-                <= m.k - A.nodes[u].get('inflow', 1)
-            )
-        ),
+        rule=inflow_limit_rule,
         name='inflow_limit',
     )
     m.cons_single_out_link = pyo.Constraint(
         m.T,
         rule=(
             lambda m, u: (
-                sum(m.link_[u, v] for v in chain(A_terminals.neighbors(u), _R)) == 1
+                sum(
+                    m.link_[u, v]
+                    for v in chain(A_terminals.neighbors(u), _R)
+                    if (u, v) not in fixed
+                )
+                == 1
             )
         ),
         name='single_out_link',
