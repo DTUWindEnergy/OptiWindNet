@@ -3,10 +3,10 @@
 
 from typing import cast
 
-import condeltri as cdt  # pyrefly: ignore[missing-import]
 import networkx as nx
 import numpy as np
 import pytest
+import pythoncdt as cdt
 import shapely as shp
 
 from optiwindnet.geometric import CoordPairs, is_crossing

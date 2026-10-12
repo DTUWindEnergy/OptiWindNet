@@ -8,10 +8,10 @@ from collections import defaultdict
 from itertools import chain, combinations, pairwise, tee
 from typing import Literal, NewType, cast
 
-import condeltri as cdt
 import networkx as nx
 import numba as nb
 import numpy as np
+import pythoncdt as cdt
 import shapely as shp
 from scipy.spatial.distance import cdist
 

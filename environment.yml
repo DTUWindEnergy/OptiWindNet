@@ -7,7 +7,6 @@ dependencies:
   - absl-py>=2.0.0  # from ortools
   - bidict>=0.23.1
   - bitarray>=3.4.2
-  - condeltri>=0.0.6
   - darkdetect>=0.8.0
   - esy.osm.pbf>=0.1.1
   - hybgensea>=0.2.0
@@ -20,6 +19,7 @@ dependencies:
   - pandas>=2.0  # from ortools
   - peewee>=3.17
   - pyomo>=6.9.5
+  - pythoncdt>=2.0.0
   - pyyaml>=6.0.2
   - scipy>=1.15.2
   - shapely>=2.0.7

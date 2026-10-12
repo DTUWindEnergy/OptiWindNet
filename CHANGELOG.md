@@ -44,6 +44,10 @@
 - **Feeder touches:** the GEOS fallback of the crossing checks detects a feeder touching a node that lies off the feeder's line by a rounding error. [ef511861](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/ef511861)
 - **Rogue links:** a solution with links absent from the mesh warns, as do routed feeders that cross them. [f6f7b359](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/f6f7b359)
 
+## Refactoring & Maintenance
+
+- **Dependencies:** replace `condeltri` with `pythoncdt >=2.0.0` for constrained Delaunay triangulation.
+
 # v0.3.1
 
 [Commit history since v0.3.0](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.0...HEAD)
