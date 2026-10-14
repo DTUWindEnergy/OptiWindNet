@@ -543,13 +543,23 @@ def constructor(
 
     # END: alternative methods of selecting the best edge to expand components
 
+    if straight_feeder_route:
+        # Obstructed feeders are routed by PathFinder; their heading is not a route.
+        has_los__ = tuple(
+            bitarray(r not in A.nodes[t].get('los_d2root', {}) for t in _T)
+            for r in roots
+        )
+
     def blocked_feeders(u, v, sr_dropped, sr_kept):
         blocked__ = A[u][v]['blocked__']
         union = subtree_[sr_dropped] | subtree_[sr_kept]
         feeders = []
-        for r, blocked_, is_root_nb_ in zip(roots, blocked__, is_root_nb__):
+        for r, blocked_, is_root_nb_, has_los_ in zip(
+            roots, blocked__, is_root_nb__, has_los__
+        ):
             feeders.extend(
-                (r, n) for n in (is_root_nb_ & blocked_ & ~union).search(_ONE)
+                (r, n)
+                for n in (is_root_nb_ & blocked_ & has_los_ & ~union).search(_ONE)
             )
         return feeders
 

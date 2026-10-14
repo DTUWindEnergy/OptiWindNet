@@ -469,6 +469,9 @@ def _feeder_link_conflicts(A: nx.Graph) -> tuple[np.ndarray, np.ndarray]:
     side). For longer chains, every link touching the feeder is treated as
     crossing it.
 
+    Feeders recorded in ``los_d2root`` require obstacle routing and do not
+    constrain links against their line of sight. PathFinder routes them later.
+
     Args:
       A: Available-links graph.
 
@@ -482,7 +485,11 @@ def _feeder_link_conflicts(A: nx.Graph) -> tuple[np.ndarray, np.ndarray]:
         sides of it; the feeder, ⟨w1, a⟩, ⟨w2, b⟩ and, if ``w1 != w2``, the
         link ⟨w1, w2⟩ along the feeder cannot all be active.
     """
-    found = _feeder_intersections(A)
+    hooks = [
+        [n for n in range(A.graph['T']) if r not in A.nodes[n].get('los_d2root', {})]
+        for r in range(-A.graph['R'], 0)
+    ]
+    found = _feeder_intersections(A, hooks)
     kind = found[:, 4]
     crossings = [found[kind == _FEEDER_CROSS, :4]]
     # touches and links along, per feeder
