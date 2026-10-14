@@ -22,6 +22,7 @@ from .presenting import (
     describe_G,
 )
 from .themes import Colors
+from .types import NodeHighlight
 
 NODESIZE = 35
 NODESIZE_LABELED = 135
@@ -36,6 +37,7 @@ FONTSIZE_LOAD = 7
 FONTSIZE_ROOT_LABEL = 4
 FONTSIZE_INFO_BOX = 12
 FONTSIZE_LEGEND_STRIP = 6
+HIGHLIGHT_NODE_LINEWIDTH = 2.0
 
 
 def _is_ccw(X, Y):
@@ -64,6 +66,8 @@ def gplot(
     This function relies on matplotlib and networkx's drawing functions. If no
     Axes instance is provided, a Figure with a single Axes will be created.
     Extra arguments given to gplot() will be forwarded to Figure().
+    ``G.graph['_node_highlight']`` may contain a ``NodeHighlight`` to outline
+    selected turbines or substations and label them in the legend.
 
     Args:
       ax: Axes instance to plot into. If ``None``, opens a new figure.
@@ -188,11 +192,14 @@ def gplot(
         pos |= dict(zip(detour, VertexC[fnT[detour]]))
         pos |= dict(zip(contour, VertexC[fnT[contour]]))
 
-    # default value for subtree (i.e. color for unconnected nodes)
-    # is the last color of the tab20 colormap (i.e. 19)
-    node_colors = [
-        c.colors[G.nodes[n].get('subtree', 19) % len(c.colors)] for n in range(T)
-    ]
+    highlight: NodeHighlight | None = G.graph.get('_node_highlight')
+    highlighted_nodes = highlight.nodes if highlight is not None else ()
+    node_colors = []
+    for n in range(T):
+        subtree = G.nodes[n].get('subtree')
+        node_colors.append(
+            c.fallback_face if subtree is None else c.colors[subtree % len(c.colors)]
+        )
 
     edges_width = 1.0
     edges_capstyle = 'round'
@@ -227,37 +234,70 @@ def gplot(
             art.set_capstyle(edges_capstyle)  # type: ignore
 
     # draw nodes
+    highlighted_root = any(r in highlighted_nodes for r in roots)
     arts = nx.draw_networkx_nodes(
         G,
         pos,
         ax=ax,
         nodelist=roots,
-        linewidths=0.3,
+        linewidths=[
+            HIGHLIGHT_NODE_LINEWIDTH if r in highlighted_nodes else 0.3 for r in roots
+        ],
         node_color=c.root_face,
-        edgecolors=c.root_edge,
+        edgecolors=[
+            c.highlight_edge if r in highlighted_nodes else c.root_edge for r in roots
+        ],
         node_size=root_size,
         node_shape='s',
-        label='OSS',
+        label=None if highlighted_root else 'OSS',
     )
     arts.set_clip_on(False)
+    if highlighted_root:
+        ax.scatter(
+            [],
+            [],
+            s=root_size,
+            c=c.root_face,
+            edgecolors=c.root_edge,
+            linewidths=0.3,
+            marker='s',
+            label='OSS',
+        )
     for sides, scale, label, terminals in _terminal_groups(G):
+        terminal_size = node_size * scale**2 if sides else node_size
         arts = nx.draw_networkx_nodes(
             G,
             pos,
             nodelist=terminals if len(terminals) < T else range(T),
-            edgecolors=c.term_edge,
+            edgecolors=[
+                c.highlight_edge if t in highlighted_nodes else c.term_edge
+                for t in terminals
+            ],
             ax=ax,
-            label=label,
+            label=None,
             node_color=[node_colors[t] for t in terminals],
             # node_size is an area: square the circumradius scale
-            node_size=node_size * scale**2 if sides else node_size,
-            linewidths=0.3,
+            node_size=terminal_size,
+            linewidths=[
+                HIGHLIGHT_NODE_LINEWIDTH if t in highlighted_nodes else 0.3
+                for t in terminals
+            ],
         )
         if sides:
             # networkx cannot take a polygon tuple as node_shape: swap the path
             marker = MarkerStyle((sides, 0, 0))
             arts.set_paths([marker.get_path().transformed(marker.get_transform())])
         arts.set_clip_on(False)
+        ax.scatter(
+            [],
+            [],
+            s=terminal_size,
+            c=c.fallback_face,
+            edgecolors=c.term_edge,
+            linewidths=0.3,
+            marker=MarkerStyle((sides, 0, 0)) if sides else 'o',
+            label=label,
+        )
     if D:
         # draw rings around nodes that have Detour clones
         arts = nx.draw_networkx_nodes(
@@ -362,6 +402,18 @@ def gplot(
     else:
         info_art = None
     if legend:
+        if highlighted_nodes and highlight is not None:
+            highlighted_turbines = any(0 <= n < T for n in highlighted_nodes)
+            ax.scatter(
+                [],
+                [],
+                s=node_size,
+                c=c.fallback_face if highlighted_turbines else c.root_face,
+                edgecolors=c.highlight_edge,
+                linewidths=HIGHLIGHT_NODE_LINEWIDTH,
+                marker='o' if highlighted_turbines else 's',
+                label=highlight.label,
+            )
         # even if calling `legend()` twice, the info box remains
         ax.legend(
             ncol=8,

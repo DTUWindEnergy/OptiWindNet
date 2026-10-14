@@ -1,11 +1,20 @@
 # SPDX-License-Identifier: MIT
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
-"""Types shared across OptiWindNet's routing and solver layers."""
+"""Types shared across OptiWindNet's modules."""
 
+from collections.abc import Set as AbstractSet
 from enum import StrEnum, auto
+from typing import NamedTuple
 
-__all__ = ('FeederRoute', 'OWNWarmupFailed', 'Topology')
+__all__ = ('FeederRoute', 'NodeHighlight', 'OWNWarmupFailed', 'Topology')
+
+
+class NodeHighlight(NamedTuple):
+    """Nodes to emphasize in a plot and their legend label."""
+
+    label: str
+    nodes: AbstractSet[int]
 
 
 class Topology(StrEnum):

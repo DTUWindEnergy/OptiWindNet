@@ -21,6 +21,7 @@ from .presenting import (
     describe_G,
 )
 from .themes import Colors
+from .types import NodeHighlight
 
 __all__ = ('SvgRepr', 'svgplot', 'svgpplot')
 
@@ -51,6 +52,7 @@ _BORDER_WIDTH = 2
 _LINK_WIDTH = 4
 _LINK_TYPE_WIDTH_STEP = 3
 _NODE_EDGE_WIDTH = 2
+_HIGHLIGHT_NODE_EDGE_WIDTH = 5
 _DETOUR_RING_WIDTH = 4
 
 
@@ -155,6 +157,10 @@ class Drawable:
         self.infoboxE = []
         self.toplevelE = []
         self.G, self.landscape = G, landscape
+        self.node_highlight: NodeHighlight | None = G.graph.get('_node_highlight')
+        self.highlighted_nodes = (
+            self.node_highlight.nodes if self.node_highlight is not None else ()
+        )
         R, T, B = (G.graph[k] for k in 'RTB')
         self.R, self.T, self.B = R, T, B
         name = G.graph.get('name')
@@ -479,6 +485,15 @@ class Drawable:
                         r=node_radius,
                     )
                 )
+                if self.highlighted_nodes:
+                    self.reusableE.append(
+                        svg.Circle(
+                            id='wtg_highlight',
+                            stroke=c.highlight_edge,
+                            stroke_width=_HIGHLIGHT_NODE_EDGE_WIDTH,
+                            r=node_radius,
+                        )
+                    )
             else:
                 # same area as the circle, vertex pointing up
                 angles = 2 * np.pi * np.arange(sides) / sides
@@ -492,6 +507,15 @@ class Drawable:
                         points=(vertices.round(1) + 0.0).ravel().tolist(),
                     )
                 )
+                if self.highlighted_nodes:
+                    self.reusableE.append(
+                        svg.Polygon(
+                            id=f'wtg{sides}_highlight',
+                            stroke=c.highlight_edge,
+                            stroke_width=_HIGHLIGHT_NODE_EDGE_WIDTH,
+                            points=(vertices.round(1) + 0.0).ravel().tolist(),
+                        )
+                    )
         self.reusableE.extend(
             (
                 svg.Rect(
@@ -504,20 +528,36 @@ class Drawable:
                 ),
             )
         )
+        if self.highlighted_nodes:
+            self.reusableE.append(
+                svg.Rect(
+                    id='oss_highlight',
+                    fill=c.root_face,
+                    stroke=c.highlight_edge,
+                    stroke_width=_HIGHLIGHT_NODE_EDGE_WIDTH,
+                    width=root_side,
+                    height=root_side,
+                )
+            )
 
         # nodes
         subtrees = defaultdict(list)
-        for n, sub in G.nodes(data='subtree', default=19):
+        for n, sub in G.nodes(data='subtree', default=None):
             if 0 <= n < T:
                 subtrees[sub].append(n)
         terminals = []
         for sub, nodes in subtrees.items():
+            face = c.fallback_face if sub is None else c.colors[sub % len(c.colors)]
             terminals.append(
                 svg.G(
-                    fill=c.colors[sub % len(c.colors)],
+                    fill=face,
                     elements=[
                         svg.Use(
-                            href=href_from_terminal[n],
+                            href=(
+                                href_from_terminal[n] + '_highlight'
+                                if n in self.highlighted_nodes
+                                else href_from_terminal[n]
+                            ),
                             x=VertexS[n, 0],
                             y=VertexS[n, 1],
                         )
@@ -532,7 +572,11 @@ class Drawable:
                     id='OSSgrp',
                     elements=[
                         svg.Use(
-                            href='#oss',
+                            href=(
+                                '#oss_highlight'
+                                if r in self.highlighted_nodes
+                                else '#oss'
+                            ),
                             x=VertexS[r, 0] - root_side / 2,
                             y=VertexS[r, 1] - root_side / 2,
                         )
@@ -692,7 +736,24 @@ class Drawable:
         # 1. WTG (one item per power level)
         for sides, _, label, _ in self.terminal_groups:
             href = '#wtg' if sides == 0 else f'#wtg{sides}'
-            legend_items.append(('node', href, label, c.colors[0], 'terminal'))
+            legend_items.append(('node', href, label, c.fallback_face, 'terminal'))
+        if self.highlighted_nodes and self.node_highlight is not None:
+            highlighted_turbines = any(0 <= n < self.T for n in self.highlighted_nodes)
+            if highlighted_turbines:
+                sides = self.terminal_groups[0][0]
+                href = '#wtg_highlight' if sides == 0 else f'#wtg{sides}_highlight'
+                shape = 'terminal'
+            else:
+                href, shape = '#oss_highlight', 'rect'
+            legend_items.append(
+                (
+                    'highlight',
+                    href,
+                    self.node_highlight.label,
+                    c.fallback_face if highlighted_turbines else c.root_face,
+                    shape,
+                )
+            )
 
         # 2. OSS
         legend_items.append(('node', 'oss', 'OSS', c.root_face, 'rect'))
@@ -802,6 +863,20 @@ class Drawable:
                         )
                     elif shape == 'ring':
                         elements.append(svg.Use(href='#dt', x=x_pos + 20, y=y_pos))
+                elif item_type == 'highlight':
+                    _, name, label, color, shape = item
+                    if shape == 'terminal':
+                        elements.append(
+                            svg.Use(href=name, x=x_pos + 20, y=y_pos, fill=color)
+                        )
+                    else:
+                        elements.append(
+                            svg.Use(
+                                href=name,
+                                x=x_pos + 20 - self.root_side / 2,
+                                y=y_pos - self.root_side / 2,
+                            )
+                        )
                 elif item_type == 'edge':
                     _, _name, label, color, dash = item
                     attrs = {
@@ -888,6 +963,8 @@ def svgplot(
 
     Alternative to own.plotting.gplot() because matplotlib's svg backend does
     not make efficient use of SVG primitives.
+    ``G.graph['_node_highlight']`` may contain a ``NodeHighlight`` to outline
+    selected turbines or substations and label them in the legend.
 
     Args:
       G: graph to plot

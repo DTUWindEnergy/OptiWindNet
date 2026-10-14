@@ -16,6 +16,8 @@ class Colors:
     root_color: str
     root_edge: str
     term_edge: str
+    fallback_face: str
+    highlight_edge: str
     detour_ring: str
     border_face: str
 
@@ -77,6 +79,8 @@ class Colors:
             self.fg_color = 'white'
             self.bg_color = 'black'
             self.term_edge = 'none'
+            self.fallback_face = '#d0d0d0'
+            self.highlight_edge = '#0060ff'
             self.detour_ring = 'orange'
             self.border_face = '#111'
             self.root_face = 'lawngreen'
@@ -104,14 +108,27 @@ class Colors:
             self.fg_color = 'black'
             self.bg_color = 'white'
             self.term_edge = 'black'
+            self.fallback_face = '#d0d0d0'
+            self.highlight_edge = '#001080'
             self.detour_ring = 'deepskyblue'
             self.border_face = '#eee'
             self.root_face = 'black'
             self.root_edge = self.border_face
-        # matplotlib tab20
+        # First 20 colors from Colorcet's Glasbey palettes, rounded to RGB.
+        # https://colorcet.holoviz.org/user_guide/Categorical.html
+        # https://creativecommons.org/licenses/by/4.0/
         self.colors = (
-            '#1f77b4', '#aec7e8', '#ff7f0e', '#ffbb78', '#2ca02c',
-            '#98df8a', '#d62728', '#ff9896', '#9467bd', '#c5b0d5',
-            '#8c564b', '#c49c94', '#e377c2', '#f7b6d2', '#7f7f7f',
-            '#c7c7c7', '#bcbd22', '#dbdb8d', '#17becf', '#9edae5',
+            (
+                '#d70000', '#028800', '#b600ff', '#06acc6', '#98ff00',
+                '#ffa530', '#ff8fc8', '#79525f', '#00fecf', '#b0a5ff',
+                '#94ad84', '#9a6900', '#376a62', '#d3008c', '#fef58f',
+                '#c86f66', '#9ee3ff', '#00c946', '#a977ad', '#b8bb02',
+            )
+            if dark
+            else (
+                '#d70000', '#8c3cff', '#028800', '#00acc7', '#e7a500',
+                '#ff7fd1', '#6c004f', '#583b00', '#005759', '#15e18d',
+                '#0000dd', '#a2766a', '#bcb7ff', '#c004b9', '#645473',
+                '#790000', '#0774d8', '#739b7d', '#ff7852', '#004b00',
+            )
         )  # fmt: skip

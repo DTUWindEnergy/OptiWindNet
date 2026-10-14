@@ -56,7 +56,7 @@ from .presenting import _nominal_loads
 from .svg import SvgRepr, svgplot, svgpplot
 from .terse import LinkScope, TerseLinks
 from .transforming import as_normalized, as_stratified_vertices
-from .types import FeederRoute, Topology
+from .types import FeederRoute, NodeHighlight, Topology
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -740,17 +740,26 @@ class WindFarmNetwork:
         """Plot available links from planar embedding.
 
         Links longer than the constraints' ``max_link_length``, which no router
-        may use, are left out of the plot (``A`` itself keeps them).
+        may use, are left out of the plot (``A`` itself keeps them). Turbines
+        without an available direct feeder use the theme's highlight outline.
         """
         A = self.A
         max_link_length = (
             None if self._constraints is None else self._constraints.max_link_length
         )
         if max_link_length is not None:
+            T = A.graph['T']
+            no_feeder_nodes = frozenset(
+                np.flatnonzero(
+                    (A.graph['d2roots'][:T] > max_link_length).all(axis=1)
+                ).tolist()
+            )
             adj = A.adj
             A = nx.subgraph_view(
                 A, filter_edge=lambda u, v: adj[u][v]['length'] <= max_link_length
             )
+            A.graph = A.graph.copy()
+            A.graph['_node_highlight'] = NodeHighlight('no feeder', no_feeder_nodes)
         if 'ax' in kwargs:
             from .plotting import gplot
 
