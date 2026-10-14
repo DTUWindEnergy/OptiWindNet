@@ -524,8 +524,8 @@ def _chains(G: nx.Graph) -> Iterator[tuple[int, int, list[int]]]:
 
     Real nodes are terminals and roots (``n < T``); border vertices, contour and
     detour clones are not. A chain starts at a real node ``s``, runs through
-    non-real nodes only and ends at the next real node ``t``: it is a single
-    cable section bent around obstacles or detoured. ``path`` lists its nodes
+    non-real nodes only and ends at the next real node ``t``: it is the route
+    of one link bent around obstacles or detoured. ``path`` lists its nodes
     from ``s`` to ``t``. Each chain is yielded once, from its end that comes
     first in ascending node order.
 

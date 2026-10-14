@@ -78,7 +78,7 @@ def _record_nonstraight_root_distance(
     r: int,
     new_length: float,
 ) -> None:
-    """Store the original straight-root distance and replace it with a detoured one."""
+    """Store the straight-root distance and replace it with an obstacle-aware one."""
     los_d2root = A.nodes[n].get('los_d2root')
     if los_d2root is None:
         A.nodes[n]['los_d2root'] = {r: d2roots[n, r].item()}
@@ -1567,7 +1567,7 @@ def make_planar_embedding(
                         (3 * d2roots[n, r] + pruned_len) / 4,
                     )
                     continue
-                # do string pulling to estimate the detour length
+                # do string pulling to estimate the obstacle-avoiding length
                 debug('updating d2root of ⟨%d, %d⟩ (path %s)', r, n, path)
                 borders = tuple(p for p in path[1:-1] if p >= T)
                 if len(borders) == 1:

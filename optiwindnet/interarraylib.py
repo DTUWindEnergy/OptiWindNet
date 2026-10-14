@@ -287,7 +287,7 @@ def _links_over_limit(
     Args:
       S: solution topology.
       A: available-links graph, in the scale of ``link_length_ub``.
-      link_length_ub: maximum length of a single cable section.
+      link_length_ub: maximum routed length of an available link or feeder.
 
     Returns:
       The offending links of ``S``; empty if none.
@@ -311,11 +311,11 @@ def _links_over_limit(
 def links_over_length(
     G: nx.Graph, max_link_length: float | None = None
 ) -> list[tuple[int, int, float]]:
-    """List the cable sections of routeset ``G`` that exceed a length limit.
+    """List the links of routeset ``G`` whose routed lengths exceed a limit.
 
-    A cable section joins two terminals or a terminal and a root. Contour and
-    detour clones are bends within a section, so the segments they split are
-    summed back into it.
+    A link joins two terminals or a terminal and a root. Contour and detour
+    clones are bends within its route, so the segments they split are summed
+    into the length of that link's route.
 
     Args:
       G: routeset to check.
@@ -323,7 +323,7 @@ def links_over_length(
         omitted.
 
     Returns:
-      ``(u, v, length)`` per offending section, longest first; empty if none.
+      ``(u, v, length)`` per offending link, longest first; empty if none.
 
     Raises:
       ValueError: if no limit is given and ``G`` carries none.
@@ -333,7 +333,7 @@ def links_over_length(
         if max_link_length is None:
             raise ValueError('no max_link_length given and G carries none')
     T = G.graph['T']
-    sections = chain(
+    links = chain(
         ((u, v, length) for u, v, length in G.edges(data='length') if u < T and v < T),
         (
             (s, t, sum(G[a][b]['length'] for a, b in pairwise(path)))
@@ -341,8 +341,8 @@ def links_over_length(
         ),
     )
     return sorted(
-        (section for section in sections if section[2] > max_link_length),
-        key=lambda section: -section[2],
+        (link for link in links if link[2] > max_link_length),
+        key=lambda link: -link[2],
     )
 
 

@@ -129,8 +129,8 @@ class NetworkBounds:
     group_load_ub: int | None
     """Maximum load of a subtree or ring (``None`` if not balanced)."""
     link_length_ub: float | None = None
-    """Maximum length of a single cable section, in the scale of the graph the
-    bounds are resolved against (``None`` if unlimited)."""
+    """Maximum routed length of an available link or feeder in the scale of
+    the graph the bounds are resolved against (``None`` if unlimited)."""
 
     @property
     def groups_lb(self) -> int:
@@ -227,11 +227,11 @@ class NetworkConstraints:
     differ at most by one unit of the turbine power quantization. It requires
     the feeder count to be fixed, e.g. ``feeders='min'``.
 
-    ``max_link_length`` caps the length of each individual cable section
-    (feeders included), in the unit of the coordinates and measured as the
-    routers measure: a link that follows a contour around an obstacle is capped
-    along that contour. Detours created after the solve may still stretch a
-    feeder past the limit (see
+    ``max_link_length`` limits the maximum routed length of available links and
+    feeders in the unit of the coordinates. The available-links graph records
+    lengths that account for contours around obstacles. Detours are created
+    after optimization and are not represented in that graph; they may stretch
+    a link past the limit (see
     :func:`~optiwindnet.interarraylib.links_over_length`).
 
     Args:
@@ -243,7 +243,7 @@ class NetworkConstraints:
       max_substation_feeders: maximum number of feeders of each substation.
       max_substation_loads: maximum load of each substation.
       balanced: whether the subtree (or ring) loads must be balanced.
-      max_link_length: maximum length of a single cable section.
+      max_link_length: maximum routed length of an available link or feeder.
 
     Raises:
       ValueError: a value has the wrong form, or two constraints exclude each

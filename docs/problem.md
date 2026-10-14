@@ -74,14 +74,14 @@ _In use:_ {doc}`/notebooks/hi30_topologies` (Network/Router API) · {doc}`/noteb
 
 Beyond the architecture, the following choices define what counts as an acceptable network. They are stated together, with the topology, as the network's constraints (`NetworkConstraints`, given to `WindFarmNetwork` as `constraints`):
 
-- **Feeder routing:** allow detours made of multiple straight segments, or require straight feeders. Even with straight feeders, exclusion zones may introduce bends.
+- **Feeder routing:** allow a cable from a substation to bend to avoid crossing other cables, or require it to be straight where the site permits. Exclusion zones may force bends in either case.
 - **Feeder count of the wind farm:** leave the count unrestricted, bound it (`max_feeders`), or pin it to a particular value (`feeders`). Either can be absolute or relative to the minimum count required by the cable capacity (`'min'`, `'min+k'`). For rings, the count must be even because each ring uses two substation connections.
 - **Feeder count of each substation:** bound (`max_substation_feeders`) or pin (`substation_feeders`) the feeders of each substation, e.g. to the number of its switchgear bays; a substation may have one or the other. The counts of the substations must be compatible with that of the wind farm.
 - **Load of each substation:** bound the power each substation collects (`max_substation_loads`), in the unit of the turbine power.
 - **Balancing:** require the turbine counts of all subtrees (or rings) of the network to differ by at most one. This assumes equal turbine power and requires a pinned feeder count; it does not mean balancing unequal power outputs.
-- **Link length:** cap the length of each individual cable section (`max_link_length`), for sites where the shortest network reaches out with a cable too long to build. The cap applies per section, not per subtree, and is measured along the route, including contours around obstacles. Detours created after the solve may still stretch a feeder past it; `WindFarmNetwork.optimize()` warns when they do.
+- **Link length:** `max_link_length` sets a maximum length for each connection between turbines or between a substation and a turbine. The length includes bends around exclusion zones. Further bends may be needed to keep cables from crossing; if one such bend takes the finished cable route over the limit, `WindFarmNetwork.optimize()` warns.
 
-Per-substation values are either one value for every substation or one entry per substation, in the order of the substations (`None` leaves a substation free). With any substation bounded, every subtree stays on the substation it was solved for when detours are created. Constraints that cannot all be met raise an error before any optimization.
+Per-substation values are either one value for every substation or one entry per substation, in the order of the substations (`None` leaves a substation free). With any substation bounded, every subtree remains assigned to the same substation when cable routes are adjusted later. Constraints that cannot all be met raise an error before any optimization.
 
 These choices define the problem independently of the optimization method, but methods differ in which choices they can enforce. See [](/routers.md#which-constraints-each-approach-can-enforce).
 
@@ -91,7 +91,7 @@ _In use:_ {doc}`/notebooks/hi31_options` (Network/Router API) · {doc}`/notebook
 
 A low-cost network is often the practical goal. The built-in routers seek a short feasible network: their optimization objective is cable length, which often correlates strongly with total cable cost. When cable types have different prices per unit of length, the shortest feasible network need not be the cheapest.
 
-The routers select the electrical connections using the lengths of available links and feeders. Path-finding then adds any necessary detours to produce the physical cable routes, so their total cable length can exceed the objective value used by a solver. If priced cable types are supplied, _OptiWindNet_ assigns a type to each routed link according to its load and reports the sum of routed length times that type's price per unit of length. This is the **cost of the resulting network**, not a claim that its cost is minimal. See [](/reference/power.md#cable-specifications) for cable inputs and [](/routers.md#exact-optimization) for the meaning of a MILP optimality gap.
+The routers select the electrical connections using the lengths available at that stage. Cable routes may then be adjusted to avoid crossings, so their total length can exceed the objective value used by a solver. If priced cable types are supplied, _OptiWindNet_ assigns a type to each routed link according to its load and reports the sum of routed length times that type's price per unit of length. This is the **cost of the resulting network**, not a claim that its cost is minimal. See [](/reference/power.md#cable-specifications) for cable inputs and [](/routers.md#exact-optimization) for the meaning of a MILP optimality gap.
 
 _In use:_ {doc}`/notebooks/hi00_quickstart` (Network/Router API) · {doc}`/notebooks/lo00_quickstart` (Advanced API).
 
