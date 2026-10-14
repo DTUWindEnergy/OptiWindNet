@@ -555,9 +555,9 @@ def test_svgplot_legend_spans_full_width_unless_tight():
     svg_data = svgplot(G, legend=True).data
     assert _viewbox(svg_data)[3] == 1080 + 80
     assert min(_legend_xs(svg_data)) >= 30
-    # a tight viewBox wraps them into two rows under the drawing
+    # their variable widths also fit in one row under the tight drawing
     svg_data = svgplot(G, legend=True, tight=True).data
-    assert _viewbox(svg_data)[3] == 1080 + 80 + 50
+    assert _viewbox(svg_data)[3] == 1080 + 80
     assert all(0 <= x <= width for x in _legend_xs(svg_data))
 
 

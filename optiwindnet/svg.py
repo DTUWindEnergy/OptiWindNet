@@ -4,7 +4,7 @@
 import math
 from collections import defaultdict
 from collections.abc import Mapping
-from itertools import chain
+from itertools import chain, pairwise
 from types import MappingProxyType
 from typing import Any
 
@@ -744,65 +744,87 @@ class Drawable:
 
         # Layout metrics: rows span the viewBox (which a tight one fits to the
         # drawing), each centred under the drawing unless that crosses an edge
-        item_width, row_pitch = 180, 50
-        N = len(legend_items)
+        label_offset, entry_gap, label_size, row_pitch = 50, 24, 24, 50
+        # Average label width is approximated by 0.6 em per character.
+        char_width = label_size * 0.6
         margin = self.margin
         left, right = self.min_x + margin, self.w - self.min_x - margin
         center_x = (self.bottom_right_anchor['x'] + margin) / 2
-        per_row = max(1, (right - left) // item_width)
-        rows = -(-N // per_row)
-        self.viewBox.height = self.h + 80 + (rows - 1) * row_pitch
+        rows = [[]]
+        row_width = 0
+        for item in legend_items:
+            width = label_offset + char_width * len(item[2]) + entry_gap
+            if rows[-1] and row_width + width > right - left:
+                rows.append([])
+                row_width = 0
+            rows[-1].append((item, width))
+            row_width += width
+        # Shift trailing entries when doing so balances neighboring rows.
+        for earlier, later in pairwise(rows):
+            earlier_width = sum(width for _, width in earlier)
+            later_width = sum(width for _, width in later)
+            while len(earlier) > 1:
+                moved_width = earlier[-1][1]
+                imbalance = earlier_width - later_width
+                if later_width + moved_width > right - left or abs(imbalance) <= abs(
+                    imbalance - 2 * moved_width
+                ):
+                    break
+                later.insert(0, earlier.pop())
+                earlier_width -= moved_width
+                later_width += moved_width
+        self.viewBox.height = self.h + 80 + (len(rows) - 1) * row_pitch
 
         elements = []
         labels = []
-        for i, item in enumerate(legend_items):
-            row, col = divmod(i, per_row)
-            row_len = min(per_row, N - row * per_row)
-            row_width = row_len * item_width
+        for row, entries in enumerate(rows):
+            row_width = sum(width for _, width in entries)
             start_x = min(max(center_x - row_width / 2, left), right - row_width)
-            x_pos = start_x + col * item_width
+            x_pos = start_x
             y_pos = self.h + 40 + row * row_pitch
-            item_type = item[0]
-            label = ''
+            for item, width in entries:
+                item_type = item[0]
+                label = ''
 
-            if item_type == 'node':
-                _, name, label, color, shape = item
-                if shape == 'terminal':
-                    elements.append(
-                        svg.Use(href=name, x=x_pos + 20, y=y_pos, fill=color)
-                    )
-                elif shape == 'rect':
-                    elements.append(
-                        svg.Use(
-                            href='#oss',
-                            x=x_pos + 20 - self.root_side / 2,
-                            y=y_pos - self.root_side / 2,
+                if item_type == 'node':
+                    _, name, label, color, shape = item
+                    if shape == 'terminal':
+                        elements.append(
+                            svg.Use(href=name, x=x_pos + 20, y=y_pos, fill=color)
                         )
-                    )
-                elif shape == 'ring':
-                    elements.append(svg.Use(href='#dt', x=x_pos + 20, y=y_pos))
-            elif item_type == 'edge':
-                _, _name, label, color, dash = item
-                attrs = {
-                    'x1': x_pos,
-                    'y1': y_pos,
-                    'x2': x_pos + 40,
-                    'y2': y_pos,
-                    'stroke': color,
-                    'stroke_width': _LINK_WIDTH,
-                }
-                if dash:
-                    attrs['stroke_dasharray'] = dash
-                elements.append(svg.Line(**attrs))
+                    elif shape == 'rect':
+                        elements.append(
+                            svg.Use(
+                                href='#oss',
+                                x=x_pos + 20 - self.root_side / 2,
+                                y=y_pos - self.root_side / 2,
+                            )
+                        )
+                    elif shape == 'ring':
+                        elements.append(svg.Use(href='#dt', x=x_pos + 20, y=y_pos))
+                elif item_type == 'edge':
+                    _, _name, label, color, dash = item
+                    attrs = {
+                        'x1': x_pos,
+                        'y1': y_pos,
+                        'x2': x_pos + 40,
+                        'y2': y_pos,
+                        'stroke': color,
+                        'stroke_width': _LINK_WIDTH,
+                    }
+                    if dash:
+                        attrs['stroke_dasharray'] = dash
+                    elements.append(svg.Line(**attrs))
 
-            labels.append(svg.Text(x=x_pos + 50, y=y_pos, text=label))
+                labels.append(svg.Text(x=x_pos + label_offset, y=y_pos, text=label))
+                x_pos += width
 
         elements.append(
             svg.G(
                 id='legend_labels',
                 fill=c.fg_color,
                 extra={
-                    'font-size': '24',
+                    'font-size': str(label_size),
                     'font-family': 'sans-serif',
                     'dominant-baseline': 'central',
                 },
