@@ -161,7 +161,9 @@ def _solve(
     """
     L = getattr(load_repository(), location)
     P, A = make_planar_embedding(L)
-    S = hgs_cvrp(as_normalized(A), capacity=capacity, time_limit=time_limit)
+    S = hgs_cvrp(
+        as_normalized(A), NetworkConstraints(capacity=capacity), time_limit=time_limit
+    )
     straight = G_from_S(S, A)
     detoured = PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
     return A, straight, detoured
@@ -451,7 +453,7 @@ def routers(theme: str) -> str:
     L = routers_problem.load_location()
     ax.set_title(
         f'{L.name} · {L.graph["T"]} turbines · capacity {routers_problem.CAPACITY}'
-        f' · {routers_problem.MODEL_OPTIONS["topology"]}',
+        f' · {routers_problem.CONSTRAINTS.topology.value}',
         color=muted,
         fontsize=note_size,
         loc='left',

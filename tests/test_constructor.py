@@ -3,10 +3,10 @@
 
 """Tests for the unified constructive heuristic `optiwindnet.heuristics.constructor`.
 
-`constructor` replaced several near-duplicate heuristic modules. It exposes four
-methods ('esau_williams', 'biased_EW', 'rootlust', 'radial_EW') and the flags
-`weigh_detours` and `straight_feeder_route`. The production routers only ever
-reach `biased_EW`, so the other methods/flags need direct coverage here.
+`constructor` replaced several near-duplicate heuristic modules. It exposes the
+methods 'esau_williams', 'biased_EW', 'rootlust', 'radial_EW' and 'ringed', the
+flag `weigh_detours`, and takes the topology and feeder route from the network
+constraints. Every method and flag needs direct coverage here.
 
 Strategy (per the agreed plan): structural and capacity checks on the raw
 solution topology `S` for every method, plus a few end-to-end checks running the
@@ -20,6 +20,7 @@ import logging
 import networkx as nx
 import pytest
 
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import _rings_from_S, linkbits_from_S
 from optiwindnet.heuristics import constructor
 from optiwindnet.identity import topology_id
@@ -92,14 +93,18 @@ def test_constructor_topology_cases(case):
 @pytest.mark.parametrize('capacity', (3, 5, 8))
 def test_constructor_ringed_capacity_sweep(capacity):
     A = get_bundle('albatros').A
-    S = constructor(A, capacity=capacity, method='ringed')
+    S = constructor(
+        A, NetworkConstraints(capacity=capacity, topology='ringed'), method='ringed'
+    )
     assert_topology(S, Topology.RINGED, capacity)
     assert all(len(terminals) <= 2 * capacity for _, terminals in _rings_from_S(S))
 
 
 def test_constructor_ringed_multi_root_uses_every_root():
     A = get_bundle('neart').A
-    S = constructor(A, capacity=5, method='ringed')
+    S = constructor(
+        A, NetworkConstraints(capacity=5, topology='ringed'), method='ringed'
+    )
     assert_topology(S, Topology.RINGED, 5)
     roots_used = {root for roots, _ in _rings_from_S(S) for root in roots}
     assert roots_used == set(range(-A.graph['R'], 0))
@@ -108,20 +113,29 @@ def test_constructor_ringed_multi_root_uses_every_root():
 @pytest.mark.parametrize('bias_margin', (0.0, 0.1, 0.5))
 def test_constructor_ringed_bias_margin(bias_margin):
     A = get_bundle('albatros').A
-    S = constructor(A, capacity=5, method='ringed', bias_margin=bias_margin)
+    S = constructor(
+        A,
+        NetworkConstraints(capacity=5, topology='ringed'),
+        method='ringed',
+        bias_margin=bias_margin,
+    )
     assert_topology(S, Topology.RINGED, 5)
 
 
 def test_constructor_ringed_exact_double_capacity_boundary():
     A = get_bundle('example_location').A
-    S = constructor(A, capacity=6, method='ringed')
+    S = constructor(
+        A, NetworkConstraints(capacity=6, topology='ringed'), method='ringed'
+    )
     assert_topology(S, Topology.RINGED, 6)
     assert max(len(ring[1]) for ring in _rings_from_S(S)) <= 12
 
 
 def test_constructor_ringed_odd_site_exercises_single_terminal_ring():
     A = get_bundle('london').A
-    S = constructor(A, capacity=1, method='ringed')
+    S = constructor(
+        A, NetworkConstraints(capacity=1, topology='ringed'), method='ringed'
+    )
     assert_topology(S, Topology.RINGED, 1)
     assert any(len(terminals) == 1 for _, terminals in _rings_from_S(S))
 
@@ -131,7 +145,7 @@ def test_constructor_ringed_odd_site_exercises_single_terminal_ring():
 def test_output_is_capacitated_forest(mesh, method, capacity):
     _, A = mesh
     T = A.graph['T']
-    S = constructor(A, capacity=capacity, method=method)
+    S = constructor(A, NetworkConstraints(capacity=capacity), method=method)
 
     # spanning forest rooted at the substations: one parent edge per terminal
     assert nx.is_forest(S)
@@ -147,7 +161,7 @@ def test_output_is_capacitated_forest(mesh, method, capacity):
 @pytest.mark.parametrize('capacity', CAPACITIES)
 def test_no_terminal_terminal_crossings(mesh, method, capacity):
     _, A = mesh
-    S = constructor(A, capacity=capacity, method=method)
+    S = constructor(A, NetworkConstraints(capacity=capacity), method=method)
     crossings = terminal_terminal_crossings(S, A.graph['VertexC'])
     assert crossings == [], (
         f'{method} produced terminal-terminal crossings: {crossings}'
@@ -157,7 +171,7 @@ def test_no_terminal_terminal_crossings(mesh, method, capacity):
 @pytest.mark.parametrize('method', METHODS)
 def test_graph_metadata(mesh, method):
     _, A = mesh
-    S = constructor(A, capacity=5, method=method)
+    S = constructor(A, NetworkConstraints(capacity=5), method=method)
     assert S.graph['creator'] == 'constructor'
     assert S.graph['capacity'] == 5
     assert S.graph['iterations'] >= 1
@@ -176,7 +190,7 @@ def test_radial_produces_simple_paths(mesh, capacity):
     """
     _, A = mesh
     T = A.graph['T']
-    S = constructor(A, capacity=capacity, method='radial_EW')
+    S = constructor(A, NetworkConstraints(capacity=capacity), method='radial_EW')
     assert all(S.degree(t) <= 2 for t in range(T))
     assert 'num_insertions' in S.graph
 
@@ -184,7 +198,7 @@ def test_radial_produces_simple_paths(mesh, capacity):
 @pytest.mark.parametrize('method', BRANCHED_METHODS)
 def test_branched_methods_omit_num_insertions(mesh, method):
     _, A = mesh
-    S = constructor(A, capacity=5, method=method)
+    S = constructor(A, NetworkConstraints(capacity=5), method=method)
     assert 'num_insertions' not in S.graph
 
 
@@ -192,14 +206,16 @@ def test_branched_methods_omit_num_insertions(mesh, method):
 def test_rootlust_capacity_sweep_is_valid(mesh, capacity):
     """rootlust over several capacities exercises its triangle-swap fix path."""
     _, A = mesh
-    S = constructor(A, capacity=capacity, method='rootlust')
+    S = constructor(A, NetworkConstraints(capacity=capacity), method='rootlust')
     assert_topology(S, Topology.BRANCHED, capacity)
 
 
 def test_custom_rootlust_param(mesh):
     """An explicit `rootlust_` tuple is accepted and yields a valid topology."""
     _, A = mesh
-    S = constructor(A, capacity=5, method='rootlust', rootlust_=(0.1, 0.5))
+    S = constructor(
+        A, NetworkConstraints(capacity=5), method='rootlust', rootlust_=(0.1, 0.5)
+    )
     assert nx.is_forest(S)
     assert S.graph['max_load'] <= 5
 
@@ -211,28 +227,51 @@ def test_custom_rootlust_param(mesh):
 def test_straight_feeder_route_is_valid(mesh, method):
     _, A = mesh
     S = constructor(
-        A, capacity=5, method=method, weigh_detours=False, straight_feeder_route=True
+        A, NetworkConstraints(capacity=5, feeder_route='straight'), method=method
     )
     assert_topology(S, Topology.BRANCHED, 5)
 
 
-def test_straight_feeder_route_with_weigh_detours_warns(mesh, caplog):
-    _, A = mesh
-    with caplog.at_level(logging.WARNING, logger='optiwindnet.heuristics.constructor'):
-        constructor(
-            A,
-            capacity=5,
-            method='biased_EW',
-            weigh_detours=True,
-            straight_feeder_route=True,
-        )
-    assert any('weigh_detours' in r.getMessage() for r in caplog.records)
-
-
 def test_unsupported_method_raises(mesh):
     _, A = mesh
-    with pytest.raises(ValueError, match='Unsupported constructor method'):
-        constructor(A, capacity=5, method='not_a_method')
+    with pytest.raises(ValueError, match='not among the methods'):
+        constructor(A, NetworkConstraints(capacity=5), method='not_a_method')
+
+
+@pytest.mark.parametrize(
+    ('method', 'topology'),
+    (('ringed', Topology.BRANCHED), ('biased_EW', Topology.RADIAL)),
+)
+def test_method_outside_topology_raises(mesh, method, topology):
+    _, A = mesh
+    with pytest.raises(ValueError, match='networks, not'):
+        constructor(A, NetworkConstraints(capacity=5, topology=topology), method=method)
+
+
+@pytest.mark.parametrize(
+    ('topology', 'method'),
+    ((Topology.BRANCHED, 'rootlust'), (Topology.RADIAL, 'radial_EW')),
+)
+def test_method_defaults_to_topology(mesh, topology, method):
+    _, A = mesh
+    S = constructor(A, NetworkConstraints(capacity=5, topology=topology))
+    assert S.graph['method_options']['method'] == method
+
+
+@pytest.mark.parametrize(
+    'kwargs',
+    (
+        {'max_feeders': 'min+1'},
+        {'max_substation_feeders': 9},
+        {'feeders': 'min', 'balanced': True},
+        {'max_link_length': 1e9},
+    ),
+    ids=('max_feeders', 'substation_feeders', 'balanced', 'link_length'),
+)
+def test_bounds_the_heuristic_cannot_keep_raise(kwargs):
+    A = get_bundle('toy').A
+    with pytest.raises(NotImplementedError, match='does not limit'):
+        constructor(A, NetworkConstraints(capacity=5, **kwargs))
 
 
 def test_maxiter_failsafe_breaks_and_logs(mesh, caplog):
@@ -240,7 +279,9 @@ def test_maxiter_failsafe_breaks_and_logs(mesh, caplog):
     a (partially built) forest rather than hanging."""
     _, A = mesh
     with caplog.at_level(logging.ERROR, logger='optiwindnet.heuristics.constructor'):
-        S = constructor(A, capacity=5, method='biased_EW', maxiter=1)
+        S = constructor(
+            A, NetworkConstraints(capacity=5), method='biased_EW', maxiter=1
+        )
     assert any('maxiter' in r.getMessage() for r in caplog.records)
     assert nx.is_forest(S)
     assert S.number_of_edges() == A.graph['T']
@@ -249,7 +290,7 @@ def test_maxiter_failsafe_breaks_and_logs(mesh, caplog):
 def test_debug_logging_reports_heap_state(caplog):
     A = get_bundle('example_location').A
     with caplog.at_level(logging.DEBUG, logger='optiwindnet.heuristics.constructor'):
-        constructor(A, capacity=3, method='rootlust')
+        constructor(A, NetworkConstraints(capacity=3), method='rootlust')
     assert 'heap' in caplog.text
 
 
@@ -258,4 +299,4 @@ def test_constructor_rejects_non_unit_terminal_inflow():
     nx.set_node_attributes(A, {0: 2}, 'inflow')
 
     with pytest.raises(NotImplementedError, match='up to `capacity` terminals'):
-        constructor(A, capacity=5, method='biased_EW')
+        constructor(A, NetworkConstraints(capacity=5), method='biased_EW')

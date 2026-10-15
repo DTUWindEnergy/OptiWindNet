@@ -8,7 +8,7 @@ from dataclasses import replace
 from fractions import Fraction
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 import numpy as np
@@ -22,10 +22,10 @@ from .api_utils import (
     parse_cables_input,
 )
 from .baselines.hgs import hgs_cvrp
-from .constraints import NetworkBounds, NetworkConstraints, _check_link_length
+from .constraints import NetworkConstraints, _resolved
 from .converting import G_from_S, S_from_G, terse_links_from_S
 from .heuristics import constructor
-from .heuristics.constructor import _METHOD_TOPOLOGY as _EW_METHOD_TOPOLOGY
+from .heuristics.constructor import _METHOD_TOPOLOGY
 from .importer import (
     L_from_pbf,
     L_from_site,
@@ -41,9 +41,7 @@ from .loads import (
     _validated_capacity_nominal,
     _validated_rtol,
     nonunit_inflow,
-    quantized,
     set_terminal_power,
-    total_inflow,
     validate_terminal_power,
 )
 from .mesh import make_planar_embedding
@@ -76,16 +74,6 @@ __all__ = (
 )  # fmt: skip
 
 _EMPTY_BORDER = np.empty((0, 2), dtype=np.float64)
-
-
-class _Resolved(NamedTuple):
-    """The constraints of a solve, and what they resolve to."""
-
-    capacity_kwargs: dict[str, Any]
-    constraints: NetworkConstraints
-    bounds: NetworkBounds
-    A_solve: nx.Graph
-    capacity: int
 
 
 class Router(ABC):
@@ -125,8 +113,8 @@ class Router(ABC):
         P: nx.PlanarEmbedding,
         A: nx.Graph,
         cables: list[tuple[int, float | int]] | list[tuple[Fraction, float | int]],
-        cables_capacity: int | Fraction,
-        verbose: bool,
+        constraints: NetworkConstraints,
+        verbose: bool = False,
         **kwargs,
     ) -> tuple[nx.Graph, nx.Graph]:
         """Run the routing optimization.
@@ -135,62 +123,15 @@ class Router(ABC):
           P : Navigation mesh for the location.
           A : Graph of available links.
           cables: set of cable specifications as [(capacity, linear_cost), ...].
-          cables_capacity: highest cable capacity in cables (see
-            :meth:`_capacity_kwargs` for its unit).
+          constraints: Network constraints, cable capacity included (see
+            :class:`~optiwindnet.constraints.NetworkConstraints`); they are
+            resolved for ``A`` at the router's ``power_rtol``.
           verbose : Whether to print progress/logging info.
-          **kwargs : Additional router-specific parameters, among them
-            ``constraints``: the :class:`~optiwindnet.constraints.NetworkConstraints`
-            of the network (``None`` leaves them to the router's defaults).
+          **kwargs : Additional router-specific parameters.
 
         Returns:
           Tuple of (solution topology (selected links), optimized routeset).
         """
-
-    def _capacity_kwargs(
-        self, A: nx.Graph, cables_capacity: int | Fraction
-    ) -> dict[str, Any]:
-        """Return the producer arguments that state ``cables_capacity``.
-
-        The capacity is nominal if ``A`` has ``'power_unit'`` or ``'powers_set'``,
-        and inflow otherwise.
-        """
-        if 'power_unit' in A.graph or 'powers_set' in A.graph:
-            return {'capacity_nominal': cables_capacity, 'power_rtol': self.power_rtol}
-        return {'capacity': cables_capacity}
-
-    def _default_constraints(self) -> NetworkConstraints:
-        """Return the constraints of a network that has none."""
-        return NetworkConstraints()
-
-    def _resolve(
-        self,
-        A: nx.Graph,
-        cables_capacity: int | Fraction,
-        constraints: NetworkConstraints | None,
-    ) -> _Resolved:
-        """Resolve the constraints of the network against ``A`` and the capacity.
-
-        The constraints are those of the network or, if it has none, the
-        router's defaults.
-
-        Raises:
-          ValueError: the constraints do not suit the problem (see
-            :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
-        """
-        if constraints is None:
-            constraints = self._default_constraints()
-        capacity_kwargs = self._capacity_kwargs(A, cables_capacity)
-        A_solve, capacity, power_attrs = quantized(A, **capacity_kwargs)
-        bounds = constraints._resolve(
-            T=A.graph['T'],
-            R=A.graph['R'],
-            capacity=capacity,
-            inflow_total=total_inflow(A_solve),
-            power_per_inflow=power_attrs.get('power_per_inflow'),
-            link_length_ub=constraints._link_length_ub(A),
-        )
-        _check_link_length(A, bounds)
-        return _Resolved(capacity_kwargs, constraints, bounds, A_solve, capacity)
 
 
 def _validated_inflow(turbine_powers: Sequence | np.ndarray, T: int) -> list[int]:
@@ -267,14 +208,17 @@ class WindFarmNetwork:
             come from ``L`` if ``turbine_powers`` is omitted. A location ``L`` that
             declares a ``'power_unit'`` requires the same string, or None, in which
             case its power declarations are dropped.
-          constraints: Constraints on the network: topology, feeder route,
-            feeder counts, substation loads, load balance and link length (see
-            :class:`~optiwindnet.constraints.NetworkConstraints`). Per-substation
-            values follow the order of the substations (``substationsC``, or
-            roots ``-R`` to ``-1`` of ``L``); loads are in ``power_unit``, or in
-            inflow if ``power_unit`` is None. If None (default), the router's
-            defaults apply. With a ``max_link_length``, :meth:`optimize` warns
-            if detours stretch a link past it.
+          constraints: Constraints on the network: cable capacity, topology,
+            feeder route, feeder counts, substation loads, load balance and link
+            length (see :class:`~optiwindnet.constraints.NetworkConstraints`).
+            Per-substation values follow the order of the substations
+            (``substationsC``, or roots ``-R`` to ``-1`` of ``L``). Without a
+            capacity, the largest cable capacity applies (as ``capacity_nominal``
+            in ``power_unit``, or as ``capacity`` in inflow if ``power_unit`` is
+            None); a capacity above it raises ``ValueError`` when optimizing. If
+            None (default), only the cable capacity constrains the network. With
+            a ``max_link_length``, :meth:`optimize` warns if detours stretch a
+            link past it.
 
         **Cable Specs** (``capacity`` in inflow if ``power_unit`` is None, in
         ``power_unit`` otherwise):
@@ -566,7 +510,7 @@ class WindFarmNetwork:
 
     @property
     def constraints(self) -> NetworkConstraints | None:
-        "Constraints on the network (None leaves them to the router's defaults)."
+        "Constraints on the network (None for the cable capacity only)."
         return self._constraints
 
     @constraints.setter
@@ -577,6 +521,34 @@ class WindFarmNetwork:
                 f'{type(constraints).__name__}.'
             )
         self._constraints = constraints
+
+    def _solve_constraints(self) -> NetworkConstraints:
+        """Return the constraints to solve with, the cable capacity included.
+
+        Raises:
+          ValueError: the constraints' capacity exceeds the largest cable's.
+        """
+        constraints = self._constraints or NetworkConstraints()
+        cables_capacity = self.cables_capacity
+        nominal = 'power_unit' in self._L.graph
+        if constraints.capacity is None and constraints.capacity_nominal is None:
+            if nominal:
+                return replace(constraints, capacity_nominal=Fraction(cables_capacity))
+            return replace(constraints, capacity=int(cables_capacity))
+        if constraints.capacity_nominal is not None:
+            capacity = constraints.capacity_nominal
+        else:
+            capacity = constraints.capacity
+            assert capacity is not None
+            if nominal:
+                # a capacity in inflow of a farm whose cables are in power_unit
+                capacity *= self._L.graph.get('power_per_inflow', 1)
+        if capacity > cables_capacity:
+            raise ValueError(
+                f'The capacity of the constraints ({float(capacity):g}) exceeds that '
+                f'of the largest cable ({float(cables_capacity):g}).'
+            )
+        return constraints
 
     @property
     def router(self) -> Router:
@@ -808,7 +780,15 @@ class WindFarmNetwork:
             self._VertexC[-R:] = substationsC
             self._is_stale_PA = True
 
-        capacity_kwargs = self.router._capacity_kwargs(self._L, self.cables_capacity)
+        constraints = self._solve_constraints()
+        capacity_kwargs: dict[str, Any] = (
+            {'capacity': constraints.capacity}
+            if constraints.capacity is not None
+            else {
+                'capacity_nominal': constraints.capacity_nominal,
+                'power_rtol': self.router.power_rtol,
+            }
+        )
         if encoding.scope is LinkScope.ROUTESET:
             self._G = encoding.to_routeset(
                 self._L, **capacity_kwargs, creator='from_terse_links'
@@ -941,9 +921,8 @@ class WindFarmNetwork:
             P=self.P,
             A=self.A,
             cables=self._cables,
-            cables_capacity=self.cables_capacity,
+            constraints=self._solve_constraints(),
             verbose=verbose,
-            constraints=self._constraints,
             **warmstart,
         )
         self._is_stale_SG = False
@@ -989,20 +968,14 @@ class WindFarmNetwork:
         return info
 
 
-_EW_TOPOLOGY_METHOD = {
-    Topology.BRANCHED: 'rootlust',
-    Topology.RADIAL: 'radial_EW',
-    Topology.RINGED: 'ringed',
-}
-
-
 class EWRouter(Router):
     """A lightweight, ultra-fast router for electrical network optimization.
 
     * Uses a modified Esau-Williams (EW) heuristic (segmented or straight feeders).
     * Produces solutions in milliseconds, suitable for quick solutions or warm starts.
     * Keeps the topology and feeder route of the network constraints, but not
-      feeder counts, substation loads, balance or link length.
+      feeder counts, substation loads, balance or link length (see
+      :func:`~optiwindnet.heuristics.constructor`).
     """
 
     _summary_attrs = ('iterations',)
@@ -1040,7 +1013,6 @@ class EWRouter(Router):
         ``'rootlust'`` for branched, ``'radial_EW'`` for radial and ``'ringed'``
         for ringed networks. Choosing another one is an advanced option, which
         must build networks within the topology (a radial one within branched).
-        In a network without constraints, a chosen method sets the topology.
 
         Args:
           maxiter: Maximum iterations.
@@ -1058,65 +1030,25 @@ class EWRouter(Router):
         """
 
         super().__init__(**kwargs)
-        if method is not None and method not in _EW_METHOD_TOPOLOGY:
+        if method is not None and method not in _METHOD_TOPOLOGY:
             raise ValueError(
                 f'{method!r} is not among the methods of EWRouter: '
-                f'{tuple(_EW_METHOD_TOPOLOGY)}.'
+                f'{tuple(_METHOD_TOPOLOGY)}.'
             )
-
         self.verbose = verbose
         self.maxiter = maxiter
         self.method = method
         self.bias_margin = bias_margin
 
-    def _default_constraints(self) -> NetworkConstraints:
-        if self.method is None:
-            return NetworkConstraints()
-        return NetworkConstraints(topology=_EW_METHOD_TOPOLOGY[self.method])
-
-    def route(
-        self, P, A, cables, cables_capacity, verbose=False, constraints=None, **kwargs
-    ):
-        resolved = self._resolve(A, cables_capacity, constraints)
-        bounds = resolved.bounds
-        if bounds.feeders_ub is not None or bounds.has_root_bounds or bounds.balanced:
-            raise NotImplementedError(
-                'EWRouter does not limit feeder counts or substation loads, nor '
-                'balance loads: use HGSRouter or MILPRouter.'
-            )
-        if resolved.constraints.max_link_length is not None:
-            # each subtree is fed from its node closest to a root, so a subtree
-            # the limit cannot feed needs a different partition of the
-            # terminals, which the heuristic has no means to seek
-            raise NotImplementedError(
-                'EWRouter does not limit the link length: use HGSRouter or MILPRouter.'
-            )
-        method = self.method or _EW_TOPOLOGY_METHOD[bounds.topology]
-        method_topology = _EW_METHOD_TOPOLOGY[method]
-        if not (
-            method_topology is bounds.topology
-            # a radial network is within a branched topology
-            or (
-                method_topology is Topology.RADIAL
-                and bounds.topology is Topology.BRANCHED
-            )
-        ):
-            raise ValueError(
-                f'EWRouter method {method!r} builds {method_topology.value} networks, '
-                f'not {bounds.topology.value} ones.'
-            )
-        constructor_args: dict[str, Any] = {
-            'method': method,
-            'maxiter': self.maxiter,
-        }
-        if self.bias_margin is not None:
-            constructor_args['bias_margin'] = self.bias_margin
-        straight = bounds.feeder_route is FeederRoute.STRAIGHT
-        constructor_args.update(
-            weigh_detours=not straight, straight_feeder_route=straight
+    def route(self, P, A, cables, constraints, verbose=False, **kwargs):
+        S = constructor(
+            A,
+            constraints,
+            method=self.method,
+            power_rtol=self.power_rtol,
+            maxiter=self.maxiter,
+            bias_margin=self.bias_margin,
         )
-
-        S = constructor(A, **resolved.capacity_kwargs, **constructor_args)
         G_tentative = G_from_S(S, A)
 
         G = PathFinder(G_tentative, planar=P, A=A).create_detours()
@@ -1176,20 +1108,9 @@ class HGSRouter(Router):
         self.max_retries = max_retries
         self.seed = seed
 
-    def route(
-        self,
-        P,
-        A,
-        cables,
-        cables_capacity,
-        verbose=False,
-        S_warm=None,
-        constraints=None,
-        **kwargs,
-    ):
+    def route(self, P, A, cables, constraints, verbose=False, S_warm=None, **kwargs):
         verbose = verbose or self.verbose
-        resolved = self._resolve(A, cables_capacity, constraints)
-        bounds = resolved.bounds
+        bounds = _resolved(A, constraints, self.power_rtol)
 
         # seed HGS-CVRP with the carried solution if it has the topology sought
         ringed = bounds.topology is Topology.RINGED
@@ -1203,10 +1124,9 @@ class HGSRouter(Router):
             try:
                 S = hgs_cvrp(
                     as_normalized(A),
-                    **resolved.capacity_kwargs,
+                    bounds,
                     time_limit=self.time_limit,
                     max_retries=self.max_retries,
-                    constraints=resolved.constraints,
                     seed=self.seed,
                     log_callback=_print_log_line if verbose else None,
                     warmstart=warmstart,
@@ -1302,11 +1222,10 @@ class MILPRouter(Router):
         P,
         A,
         cables,
-        cables_capacity,
+        constraints,
         verbose=False,
         S_warm=None,
         num_retries: int = 2,
-        constraints=None,
         **kwargs,
     ):
         verbose = verbose or self.verbose
@@ -1315,28 +1234,19 @@ class MILPRouter(Router):
         # the model cannot take (topology, missing links, violated constraints) and the
         # loop below then warm-starts the model some other way.
         solver = self.solver
-        resolved = self._resolve(A, cables_capacity, constraints)
-        capacity_kwargs, constraints, bounds, A_solve, _ = resolved
-        has_nonunit_inflow = bool(nonunit_inflow(A_solve))
+        bounds = _resolved(A, constraints, self.power_rtol)
+        has_nonunit_inflow = bounds.inflow is not None
 
         if not self.warmup:
             # master switch off: solve cold, ignoring any carried/provided solution
             S_warm = None
         elif S_warm is None:
             # warm-starting on, nothing to reuse: build a warm start
-            S_warm = self._make_warmstart(
-                A, capacity_kwargs, A_solve, constraints, bounds
-            )
+            S_warm = self._make_warmstart(A, bounds)
 
         for _ in range(2):
             try:
-                solver.set_problem(
-                    P,
-                    A,
-                    constraints=constraints,
-                    warmstart=S_warm,
-                    **capacity_kwargs,
-                )
+                solver.set_problem(P, A, bounds, warmstart=S_warm)
                 break
             except OWNWarmupFailed:
                 if has_nonunit_inflow:
@@ -1344,15 +1254,13 @@ class MILPRouter(Router):
                         raise
                     S_warm = None
                     continue
-                S_warm = self._make_warmstart(
-                    A, capacity_kwargs, A_solve, constraints, bounds
-                )
+                S_warm = self._make_warmstart(A, bounds)
 
         else:
             # No available solution can warm-start this model, so solve it cold
             # rather than give up: a warm start is an optimization, not a requirement.
             _warning('Unable to warm-start model: solving without a warm start.')
-            solver.set_problem(P, A, constraints=constraints, **capacity_kwargs)
+            solver.set_problem(P, A, bounds)
 
         for _ in range(num_retries + 1):
             try:
@@ -1377,7 +1285,7 @@ class MILPRouter(Router):
 
         return S, G
 
-    def _make_warmstart(self, A, capacity_kwargs, A_solve, constraints, bounds):
+    def _make_warmstart(self, A, bounds):
         """Build a warm start matched to the model's topology and feeder limit.
 
         Called (only when ``warmup`` is enabled) to obtain a warm start the model
@@ -1404,11 +1312,7 @@ class MILPRouter(Router):
 
         Args:
           A: available-links graph, as given to :meth:`route`.
-          capacity_kwargs: capacity keyword arguments for the producers, which
-            quantize ``A`` themselves.
-          A_solve: ``A`` as quantized by :func:`~optiwindnet.loads.quantized`.
-          constraints: the constraints the model enforces.
-          bounds: their bounds for ``A_solve``.
+          bounds: the bounds the model enforces, resolved for ``A``.
 
         Returns:
           A topology to warm-start from, or ``None`` if none can be built.
@@ -1417,28 +1321,18 @@ class MILPRouter(Router):
             bounds.topology is Topology.BRANCHED
             and bounds.feeders_ub is None
             and not bounds.has_root_bounds
-            and not nonunit_inflow(A_solve)
-            and constraints.max_link_length is None
+            and bounds.inflow is None
+            and bounds.link_length_ub is None
         ):
-            straight = bounds.feeder_route is FeederRoute.STRAIGHT
-            return S_from_G(
-                constructor(
-                    A,
-                    **capacity_kwargs,
-                    method=self.default_heuristic,
-                    weigh_detours=not straight,
-                    straight_feeder_route=straight,
-                )
-            )
+            return S_from_G(constructor(A, bounds, method=self.default_heuristic))
         try:
             return hgs_cvrp(
                 as_normalized(A),
-                **capacity_kwargs,
+                # HGS-CVRP does not keep feeders straight: the model checks them
+                replace(bounds, feeder_route=FeederRoute.SEGMENTED),
                 # a built warm start must not outlast the solve it primes
                 time_limit=min(self.time_limit, self.warmup_time),
                 repair=True,
-                # HGS-CVRP does not keep feeders straight: the model checks them
-                constraints=replace(constraints, feeder_route=FeederRoute.SEGMENTED),
             )
         except (NotImplementedError, ValueError) as exc:
             _info('No warm start from HGS-CVRP: %s', exc)

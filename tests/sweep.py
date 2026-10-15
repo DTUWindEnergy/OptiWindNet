@@ -11,13 +11,15 @@ Only the variant call is timed; routing, validation and metrics come after.
 Example::
 
     from tests.sweep import EASY_CASES, run_sweep
+    from optiwindnet.constraints import NetworkConstraints
     from optiwindnet.heuristics import constructor
 
     def ew(t):
-        return constructor(t.A, t.capacity, method='esau_williams')
+        constraints = NetworkConstraints(capacity=t.capacity)
+        return constructor(t.A, constraints, method='esau_williams')
 
     def rootlust(t):
-        return constructor(t.A, t.capacity, method='rootlust')
+        return constructor(t.A, NetworkConstraints(capacity=t.capacity))
 
     variants = {'ew': ew, 'rootlust': rootlust}
     run_sweep(EASY_CASES[:10], variants, 'artifacts/sweep.sqlite')

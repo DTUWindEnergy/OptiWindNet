@@ -61,10 +61,8 @@ def test_constructor_excludes_only_the_obstructed_root(obstructed_root):
         A.nodes[2]['los_d2root'] = {obstructed_root: 3.0}
     S = constructor(
         A,
-        capacity=2,
+        NetworkConstraints(capacity=2, feeder_route='straight'),
         method='biased_EW',
-        straight_feeder_route=True,
-        weigh_detours=False,
     )
 
     assert S.has_edge(-2, 2)

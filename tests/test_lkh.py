@@ -12,7 +12,7 @@ import pytest
 
 import optiwindnet.baselines.lkh as lkh_mod
 from optiwindnet.clustering import ClusterPlan
-from optiwindnet.constraints import NetworkConstraints
+from optiwindnet.constraints import NetworkConstraints, _resolved
 from optiwindnet.converting import linkbits_from_S
 from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
@@ -126,7 +126,7 @@ def test_lkh3_clusters_multi_root_solve_by_the_warmstart(monkeypatch):
     with pytest.raises(ValueError, match='no solution'):
         lkh_mod.lkh3(
             _make_A(T=4, R=2),
-            capacity=3,
+            NetworkConstraints(capacity=3),
             time_limit=0.1,
             repair=False,
             warmstart=warmstart,
@@ -145,15 +145,18 @@ def test_lkh3_rejects_an_unusable_warmstart(monkeypatch):
     warmstart.add_edges_from([(-1, 0), (0, 1), (-1, 2)])  # terminal 3 left out
     with pytest.raises(OWNWarmupFailed, match='leaves 1 terminals out'):
         lkh_mod.lkh3(
-            _make_A(T=4), capacity=2, time_limit=0.1, repair=False, warmstart=warmstart
+            _make_A(T=4),
+            NetworkConstraints(capacity=2),
+            time_limit=0.1,
+            repair=False,
+            warmstart=warmstart,
         )
     warmstart.add_edge(-1, 3)  # three routes, over a maximum of two
     with pytest.raises(OWNWarmupFailed, match='more than the maximum of 2'):
         lkh_mod.lkh3(
             _make_A(T=4),
-            capacity=2,
+            NetworkConstraints(max_feeders=2, capacity=2),
             time_limit=0.1,
-            constraints=NetworkConstraints(max_feeders=2),
             repair=False,
             warmstart=warmstart,
         )
@@ -162,9 +165,18 @@ def test_lkh3_rejects_an_unusable_warmstart(monkeypatch):
 @pytest.mark.skipif(shutil.which('LKH') is None, reason='LKH not on PATH')
 def test_lkh3_warmstart_is_its_starting_point():
     A = as_normalized(get_bundle('example_location').A)
-    S0 = lkh_mod.lkh3(A, capacity=4, time_limit=1.0, seed=0, repair=False)
+    S0 = lkh_mod.lkh3(
+        A, NetworkConstraints(capacity=4), time_limit=1.0, seed=0, repair=False
+    )
 
-    S1 = lkh_mod.lkh3(A, capacity=4, time_limit=0.5, seed=1, repair=False, warmstart=S0)
+    S1 = lkh_mod.lkh3(
+        A,
+        NetworkConstraints(capacity=4),
+        time_limit=0.5,
+        seed=1,
+        repair=False,
+        warmstart=S0,
+    )
 
     assert S1.graph['objective'] <= S0.graph['objective'] + 1e-9
 
@@ -181,7 +193,9 @@ def test_lkh3_single_root_calls_do_lkh_with_expected_args(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=42, repair=False)
+    S = lkh_mod.lkh3(
+        A, NetworkConstraints(capacity=2), time_limit=0.1, seed=42, repair=False
+    )
 
     assert captured['L_shape'] == (5, 5)  # T_c + 1
     assert captured['vehicles'] == 2  # ceil(4/2) = 2
@@ -212,9 +226,8 @@ def test_lkh3_fills_radial_routes_with_slack_nodes(monkeypatch):
     calls = _capture_do_lkh(monkeypatch, [[[5, 0], [1, 2], [3, 4]]])
     S = lkh_mod.lkh3(
         _make_A(T=5),
-        capacity=2,
+        NetworkConstraints(feeders='min', balanced=True, capacity=2),
         time_limit=0.1,
-        constraints=NetworkConstraints(feeders='min', balanced=True),
         repair=False,
     )
     [call] = calls
@@ -231,9 +244,8 @@ def test_lkh3_bounds_the_ring_sizes_of_an_exact_count(monkeypatch):
     calls = _capture_do_lkh(monkeypatch, [[[0, 1], [2, 3], [4, 5]]])
     lkh_mod.lkh3(
         _make_A(T=6),
-        capacity=2,
+        NetworkConstraints(topology='ringed', feeders=6, capacity=2),
         time_limit=0.1,
-        constraints=NetworkConstraints(topology='ringed', feeders=6),
         repair=False,
     )
     [call] = calls
@@ -256,9 +268,8 @@ def test_lkh3_pins_only_the_roots_bounded_exactly(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     S = lkh_mod.lkh3(
         A,
-        capacity=2,
+        NetworkConstraints(substation_feeders=(None, 2), capacity=2),
         time_limit=0.1,
-        constraints=NetworkConstraints(substation_feeders=(None, 2)),
         repair=False,
     )
     pinned, free = calls['test_root-1'], calls['test_root-2']
@@ -288,9 +299,8 @@ def test_lkh3_raises_on_a_pinned_solution_off_the_bounds(monkeypatch, output, ma
     with pytest.raises(ValueError, match=match):
         lkh_mod.lkh3(
             _make_A(T=5),
-            capacity=2,
+            NetworkConstraints(feeders='min', balanced=True, capacity=2),
             time_limit=0.1,
-            constraints=NetworkConstraints(feeders='min', balanced=True),
             repair=False,
         )
 
@@ -299,9 +309,8 @@ def test_lkh3_refuses_more_exact_rings_than_terminal_pairs():
     with pytest.raises(ValueError, match='Rings \\(3\\) above the maximum \\(2\\)'):
         lkh_mod.lkh3(
             _make_A(T=5),
-            capacity=3,
+            NetworkConstraints(topology='ringed', feeders=6, capacity=3),
             time_limit=0.1,
-            constraints=NetworkConstraints(topology='ringed', feeders=6),
             repair=False,
         )
 
@@ -330,9 +339,8 @@ def test_lkh3_does_not_keep_feeders_straight():
     with pytest.raises(NotImplementedError, match='straight'):
         lkh_mod.lkh3(
             _make_A(T=4),
-            capacity=2,
+            NetworkConstraints(feeder_route='straight', capacity=2),
             time_limit=0.1,
-            constraints=NetworkConstraints(feeder_route='straight'),
             repair=False,
         )
 
@@ -358,9 +366,8 @@ def test_lkh3_offers_the_vehicles_the_bounds_allow(
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     lkh_mod.lkh3(
         _make_A(T=4),
-        capacity=capacity,
+        NetworkConstraints(max_feeders=max_feeders, capacity=capacity),
         time_limit=0.1,
-        constraints=NetworkConstraints(max_feeders=max_feeders),
         repair=False,
     )
     assert captured['vehicles'] == vehicles
@@ -373,10 +380,10 @@ def test_lkh3_keeps_the_substation_limits():
     A = as_normalized(get_bundle('neart', read_powers=False).A)
     # unlimited, neart's root -1 takes 5 feeders and 33 turbines
     constraints = NetworkConstraints(
-        max_substation_feeders=(None, 4), max_substation_loads=(None, 26)
+        capacity=7, max_substation_feeders=(None, 4), max_substation_loads=(None, 26)
     )
 
-    S = lkh_mod.lkh3(A, capacity=7, time_limit=1.0, seed=1, constraints=constraints)
+    S = lkh_mod.lkh3(A, constraints, time_limit=1.0, seed=1)
 
     assert S.degree[-1] <= 4 and S.nodes[-1]['load'] <= 26
     assert validate_topology(S, 7) == []
@@ -401,12 +408,10 @@ def test_lkh3_holds_exact_counts_and_balance(site, capacity, constraints):
 
     A = as_normalized(get_bundle(site, read_powers=False).A)
     R = A.graph['R']
-    constraints = NetworkConstraints(**constraints)
-    bounds = constraints.resolve(A, capacity=capacity)
+    constraints = NetworkConstraints(capacity=capacity, **constraints)
+    bounds = _resolved(A, constraints)
 
-    S = lkh_mod.lkh3(
-        A, capacity=capacity, time_limit=1.0, seed=1, constraints=constraints
-    )
+    S = lkh_mod.lkh3(A, constraints, time_limit=1.0, seed=1)
 
     assert validate_topology(S, capacity) == []
     feeders_ = [S.degree[r] for r in range(-R, 0)]
@@ -433,7 +438,9 @@ def test_lkh3_stops_lkh_that_hangs(monkeypatch):
 
     monkeypatch.setattr(lkh_mod.subprocess, 'run', hanging_run)
     with pytest.raises(ValueError, match='shorter than its preprocessing'):
-        lkh_mod.lkh3(_make_A(T=4), capacity=2, time_limit=0.1, repair=False)
+        lkh_mod.lkh3(
+            _make_A(T=4), NetworkConstraints(capacity=2), time_limit=0.1, repair=False
+        )
     assert timeouts == [1.5 * 0.1 + 2]
 
 
@@ -442,7 +449,9 @@ def test_lkh3_raises_when_lkh_finds_no_solution(monkeypatch):
         lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[], vehicles=1)
     )
     with pytest.raises(ValueError, match='no solution for root -1'):
-        lkh_mod.lkh3(_make_A(T=4), capacity=4, time_limit=0.1, repair=False)
+        lkh_mod.lkh3(
+            _make_A(T=4), NetworkConstraints(capacity=4), time_limit=0.1, repair=False
+        )
 
 
 def test_lkh3_caps_each_root_by_its_feeder_limit(monkeypatch):
@@ -457,9 +466,8 @@ def test_lkh3_caps_each_root_by_its_feeder_limit(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     S = lkh_mod.lkh3(
         A,
-        capacity=2,
+        NetworkConstraints(max_substation_feeders=(1, None), capacity=2),
         time_limit=0.1,
-        constraints=NetworkConstraints(max_substation_feeders=(1, None)),
         repair=False,
     )
     # each cluster fits within capacity: an allowance of its 2 terminals
@@ -478,7 +486,9 @@ def test_lkh3_seed_none_picks_random_seed(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=None, repair=False)
+    S = lkh_mod.lkh3(
+        A, NetworkConstraints(capacity=2), time_limit=0.1, seed=None, repair=False
+    )
 
     assert isinstance(captured['seed'], int)
     assert captured['seed'] >= 0
@@ -508,7 +518,7 @@ def test_lkh3_repairs_on_crossings(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', fake_repair)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1)
+    S = lkh_mod.lkh3(A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1)
     assert S.graph['retries'] == 1
     assert S.graph['_label'] == 'clean'
 
@@ -530,7 +540,9 @@ def test_lkh3_max_retries_warns(monkeypatch):
     warnings_seen = []
     monkeypatch.setattr(lkh_mod, 'warn', warnings_seen.append)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, max_retries=1)
+    S = lkh_mod.lkh3(
+        A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1, max_retries=1
+    )
     assert S.graph['retries'] == 1
     assert any('max_retries reached' in str(w) for w in warnings_seen)
 
@@ -549,7 +561,9 @@ def test_lkh3_repair_false_skips_repair_loop(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', fake_repair)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+    S = lkh_mod.lkh3(
+        A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1, repair=False
+    )
     assert repair_calls == []
     assert 'retries' not in S.graph
 
@@ -559,7 +573,7 @@ def test_lkh3_multi_root_runs_one_call_per_cluster(monkeypatch):
     A.graph['d2roots'] = np.ones((6, 2))
     captured_calls = []
 
-    def fake_cluster_plan(A_inner, group_capacity, bounds):
+    def fake_cluster_plan(A_inner, bounds):
         return ClusterPlan([{0, 1}, {2, 3}], (1, 1), (False, False))
 
     def fake_do_lkh(L, **kwargs):
@@ -570,7 +584,9 @@ def test_lkh3_multi_root_runs_one_call_per_cluster(monkeypatch):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=7, repair=False)
+    S = lkh_mod.lkh3(
+        A, NetworkConstraints(capacity=2), time_limit=0.1, seed=7, repair=False
+    )
     assert len(captured_calls) == 2
     # multi-root: solver_details aggregates per root
     assert S.graph['solver_details']['vehicles'] == (1, 1)
@@ -583,7 +599,7 @@ def test_lkh3_multi_root_accepts_vehicles_above_min(monkeypatch, caplog):
     A = _make_A(T=4, R=2)
     A.graph['d2roots'] = np.ones((6, 2))
 
-    def fake_cluster_plan(A_inner, group_capacity, bounds):
+    def fake_cluster_plan(A_inner, bounds):
         return ClusterPlan([{0, 1}, {2, 3}], (1, 1), (False, False))
 
     def fake_do_lkh(L, **kwargs):
@@ -595,11 +611,10 @@ def test_lkh3_multi_root_accepts_vehicles_above_min(monkeypatch, caplog):
 
     lkh_mod.lkh3(
         A,
-        capacity=2,
+        NetworkConstraints(capacity=2, max_feeders=4),
         time_limit=0.1,
         seed=1,
         repair=False,
-        constraints=NetworkConstraints(topology='radial', max_feeders=4),
     )
     assert 'multi-root' not in caplog.text
 
@@ -612,7 +627,7 @@ def test_lkh3_records_identity_over_the_available_links(monkeypatch):
     )
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1)
+    S = lkh_mod.lkh3(A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1)
 
     assert S.graph['_linkbits'] == linkbits_from_S(A, S)
     assert S.graph['_topology_id'] == topology_id(S.graph['_linkbits'])
@@ -631,7 +646,7 @@ def test_lkh3_raises_when_the_solution_leaves_A(monkeypatch):
 
     match = 'rogue links absent from the mesh: \\[\\(2, 3\\)\\]'
     with pytest.raises(ValueError, match=match):
-        lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1)
+        lkh_mod.lkh3(A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1)
 
 
 def test_lkh3_complete_that_stays_within_A_is_identified_over_A(monkeypatch):
@@ -642,7 +657,14 @@ def test_lkh3_complete_that_stays_within_A_is_identified_over_A(monkeypatch):
         lkh_mod, '_do_lkh', lambda L, **kw: _fake_output(routes=[[0, 1], [2, 3]])
     )
 
-    S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, complete=True, repair=False)
+    S = lkh_mod.lkh3(
+        A,
+        NetworkConstraints(capacity=2),
+        time_limit=0.1,
+        seed=1,
+        complete=True,
+        repair=False,
+    )
 
     assert S.graph['method_options']['complete']
     # the options that shape the solve are part of the stored method
@@ -664,7 +686,12 @@ def test_lkh3_complete_that_leaves_A_is_not_identified(monkeypatch, caplog):
 
     with caplog.at_level('WARNING'):
         S = lkh_mod.lkh3(
-            A, capacity=2, time_limit=0.1, seed=1, complete=True, repair=False
+            A,
+            NetworkConstraints(capacity=2),
+            time_limit=0.1,
+            seed=1,
+            complete=True,
+            repair=False,
         )
 
     assert '_linkbits' not in S.graph
@@ -680,7 +707,9 @@ def test_lkh3_edgeless_A_implies_complete(monkeypatch, caplog):
     )
 
     with caplog.at_level('WARNING'):
-        S = lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+        S = lkh_mod.lkh3(
+            A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1, repair=False
+        )
 
     assert S.graph['method_options']['complete']
     assert '_linkbits' not in S.graph
@@ -690,7 +719,9 @@ def test_lkh3_edgeless_A_implies_complete(monkeypatch, caplog):
 def test_lkh3_complete_is_refused_together_with_repair():
     A = _make_A(T=4, edges=[(0, 1, 1.0), (2, 3, 1.0)])
     with pytest.raises(NotImplementedError, match='complete graph over all nodes'):
-        lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, complete=True)
+        lkh_mod.lkh3(
+            A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1, complete=True
+        )
 
 
 def test_build_weight_matrix_single_root_shape_and_depot_column():
@@ -780,7 +811,12 @@ def test_lkh3_sends_one_unit_of_demand_per_unitary_terminal(monkeypatch):
     T = A.graph['T']
 
     with pytest.raises(ValueError, match='no solution'):
-        lkh_mod.lkh3(as_normalized(A), capacity=5, time_limit=0.1, repair=False)
+        lkh_mod.lkh3(
+            as_normalized(A),
+            NetworkConstraints(capacity=5),
+            time_limit=0.1,
+            repair=False,
+        )
 
     demands = _demand_section(captured['problem'])
     assert demands == {**{t + 1: 1 for t in range(T)}, T + 1: 0}
@@ -794,9 +830,8 @@ def test_lkh3_searches_with_special_moves(monkeypatch, topology):
     with pytest.raises(ValueError, match='no solution'):
         lkh_mod.lkh3(
             as_normalized(get_bundle('toy').A),
-            capacity=5,
+            NetworkConstraints(topology=topology, capacity=5),
             time_limit=0.1,
-            constraints=NetworkConstraints(topology=topology),
             repair=False,
         )
 
@@ -811,7 +846,7 @@ def test_lkh3_declares_terminal_inflow_as_demand(monkeypatch):
     nx.set_node_attributes(A, inflow, 'inflow')
 
     with pytest.raises(ValueError, match='no solution'):
-        lkh_mod.lkh3(A, capacity=8, time_limit=0.1, repair=False)
+        lkh_mod.lkh3(A, NetworkConstraints(capacity=8), time_limit=0.1, repair=False)
 
     demands = _demand_section(captured['problem'])
     assert demands == {**{t + 1: inflow[t] for t in range(T)}, T + 1: 0}
@@ -831,20 +866,16 @@ def test_lkh3_rejects_non_unit_terminal_inflow_it_cannot_honour():
 
     with pytest.raises(NotImplementedError, match='single-root radial solve'):
         lkh_mod.lkh3(
-            A,
-            capacity=5,
-            time_limit=1.0,
-            constraints=NetworkConstraints(topology='ringed'),
+            A, NetworkConstraints(capacity=5, topology='ringed'), time_limit=1.0
         )
     with pytest.raises(NotImplementedError, match='single-root radial solve'):
         lkh_mod.lkh3(
             A,
-            capacity=5,
+            NetworkConstraints(capacity=5, feeders=3, balanced=True),
             time_limit=1.0,
-            constraints=NetworkConstraints(feeders=3, balanced=True),
         )
 
     Amr = as_normalized(get_bundle('neart').A.copy())
     nx.set_node_attributes(Amr, {0: 2}, 'inflow')
     with pytest.raises(NotImplementedError, match='single-root radial solve'):
-        lkh_mod.lkh3(Amr, capacity=5, time_limit=1.0)
+        lkh_mod.lkh3(Amr, NetworkConstraints(capacity=5), time_limit=1.0)

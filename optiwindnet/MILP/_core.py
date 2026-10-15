@@ -8,7 +8,6 @@ import os
 import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass, field
-from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -17,18 +16,14 @@ import networkx as nx
 import numpy as np
 from bitarray import bitarray, frozenbitarray
 
-from ..constraints import NetworkBounds, NetworkConstraints, _check_link_length
+from ..constraints import NetworkBounds, NetworkConstraints, _resolved
 from ..converting import G_from_S, S_from_linkbits
 from ..identity import _CANONICAL_TERMINAL_LINKS, topology_id
 from ..interarraylib import _links_over_limit, directed_links
 from ..loads import (
-    DEFAULT_POWER_RTOL,
     calcload,
     nonunit_inflow,
-    quantized,
     split_rings_and_calc_loads,
-    total_inflow,
-    validate_terminal_power,
 )
 from ..pathfinding import PathFinder
 from ..types import OWNWarmupFailed, Topology
@@ -81,31 +76,34 @@ class OWNSolutionNotFound(Exception):
 _Link = tuple[int, int]
 
 
-def model_bounds(
-    A: nx.Graph, capacity: int, bounds: NetworkBounds | None
-) -> NetworkBounds:
-    """Return the bounds a model builder enforces.
+def check_model_bounds(bounds: NetworkBounds) -> None:
+    """Refuse the bounds a model builder cannot enforce.
 
-    Without ``bounds``, the defaults of
-    :class:`~optiwindnet.constraints.NetworkConstraints` apply.
+    A RINGED model splits each ring into two arms of at most ``capacity`` each,
+    which it expresses by doubling the capacity of a single path. That holds only
+    while every terminal weighs the same: with nonunitary inflow, a path within
+    twice the capacity need not divide into two arms that each fit within it, so
+    the model would admit rings that no pair of cables can carry.
 
     Raises:
       ValueError: the bounds limit the load of the roots of a RINGED model, whose
         rings may connect to two roots.
+      NotImplementedError: the bounds are RINGED and the terminals declare an
+        inflow other than one unit.
     """
-    if bounds is None:
-        bounds = NetworkConstraints()._resolve(
-            T=A.graph['T'],
-            R=A.graph['R'],
-            capacity=capacity,
-            inflow_total=total_inflow(A),
-        )
-    if bounds.topology is Topology.RINGED and bounds.root_load_ub is not None:
+    if bounds.topology is not Topology.RINGED:
+        return
+    if bounds.root_load_ub is not None:
         raise ValueError(
             'Substation load limits are not available for RINGED MILP models: '
             'the two feeders of a ring may connect it to two substations.'
         )
-    return bounds
+    if bounds.inflow is not None:
+        raise NotImplementedError(
+            "a RINGED model cannot honour a terminal 'inflow' other than 1: a ring "
+            'within twice the capacity is not guaranteed to split into two arms '
+            'that each fit within it'
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,18 +165,16 @@ def bound_rows(bounds: NetworkBounds, R: int, T: int) -> Iterator[BoundRow]:
             )
 
 
-def balance_bounds(
-    bounds: NetworkBounds, capacity: int
-) -> tuple[int | None, int | None]:
+def balance_bounds(bounds: NetworkBounds) -> tuple[int | None, int | None]:
     """Return the load bounds of a feeder under balance, if they bind.
 
-    Bounds at the extremes (``1`` and ``capacity``, which is per ring if RINGED)
-    are already implied by the flow variable's own bounds and are ``None``.
+    Bounds at the extremes (``1`` and the group capacity) are already implied by
+    the flow variable's own bounds and are ``None``.
     """
     lb, ub = bounds.group_load_lb, bounds.group_load_ub
     return (
         lb if lb is not None and lb > 1 else None,
-        ub if ub is not None and ub < capacity else None,
+        ub if ub is not None and ub < bounds.group_capacity else None,
     )
 
 
@@ -319,13 +315,10 @@ def linkbits_from_directed(
 
 @dataclass(slots=True)
 class ModelMetadata:
-    R: int
-    T: int
-    capacity: int
+    bounds: NetworkBounds
     linkset: tuple[_Link, ...]
     link_: Mapping[_Link, Any]
     flow_: Mapping[_Link, Any]
-    topology: Topology
     fun_fingerprint: dict[str, str | bytes]
     weight_: tuple[float, ...] = ()
     solution_hint: dict[Any, float] = field(default_factory=dict)
@@ -370,30 +363,6 @@ class SolutionInfo:
         return f'SolutionInfo(\n{body})'
 
 
-def check_inflow_support(A: nx.Graph, topology: Topology) -> int:
-    """Validate terminal power and return total inflow for the model.
-
-    A RINGED model splits each ring into two arms of at most ``capacity`` each,
-    which it expresses by doubling the capacity of a single path. That holds only
-    while every terminal weighs the same: with nonunitary inflow, a path within twice
-    the capacity need not divide into two arms that each fit within it, so the
-    model would admit rings that no pair of cables can carry.
-
-    Raises:
-        NotImplementedError: ``topology`` is RINGED and the terminals declare an
-          inflow other than one unit.
-    """
-    validate_terminal_power(A)
-    total = total_inflow(A)
-    if topology is Topology.RINGED and total != A.graph['T']:
-        raise NotImplementedError(
-            "a RINGED model cannot honour a terminal 'inflow' other than 1: a ring "
-            'within twice the capacity is not guaranteed to split into two arms '
-            'that each fit within it'
-        )
-    return total
-
-
 def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
     """Reject a warm start whose topology the model cannot start from.
 
@@ -406,7 +375,7 @@ def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
         OWNWarmupFailed: ``S``'s topology is one this model cannot start from, or
           is not a ``Topology``.
     """
-    mt = metadata.topology
+    mt = metadata.bounds.topology
     st = S.graph['topology']
     if not isinstance(st, Topology):
         raise OWNWarmupFailed(
@@ -464,13 +433,10 @@ class Solver(abc.ABC):
     solver: Any
     options: dict[str, Any]
     stopping: dict[str, Any]
-    constraints: NetworkConstraints
     bounds: NetworkBounds
     solution_info: SolutionInfo
     applied_options: dict[str, Any]
     _incumbent_linkbits: frozenbitarray
-    # graph attributes recording the power basis of the solve (see `set_problem()`)
-    _power_attrs: Mapping[str, Any] = MappingProxyType({})
 
     @property
     def incumbent_linkbits(self) -> frozenbitarray:
@@ -500,50 +466,29 @@ class Solver(abc.ABC):
         self,
         P: nx.PlanarEmbedding,
         A: nx.Graph,
+        constraints: NetworkConstraints | NetworkBounds,
         *,
-        constraints: NetworkConstraints | None = None,
-        capacity: int | None = None,
-        capacity_nominal: float | Fraction | None = None,
-        power_rtol: float = DEFAULT_POWER_RTOL,
+        power_rtol: float | None = None,
         warmstart: nx.Graph | None = None,
     ) -> None:
-        """Define the problem geometry, available links and tree properties.
+        """Define the problem geometry, available links and network constraints.
 
         Args:
           P: planar embedding of the location
           A: available links for the location
-          constraints: network constraints (defaults to
-            ``NetworkConstraints()``)
-          capacity: maximum inflow of a subtree
-          capacity_nominal: maximum power of a subtree, instead of ``capacity``
-            (see :func:`~optiwindnet.loads.quantized`)
-          power_rtol: quantization tolerance of unequal turbine power
+          constraints: network constraints, cable capacity included, or the
+            bounds resolved from them (see
+            :class:`~optiwindnet.constraints.NetworkBounds`)
+          power_rtol: quantization tolerance of unequal turbine power (only
+            with ``constraints``)
           warmstart: initial feasible solution to pass to solver
 
         Raises:
-          ValueError: the constraints do not suit the problem (see
-            :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
+          ValueError: the constraints do not suit the problem.
           OWNWarmupFailed: ``warmstart`` has a link over the link length limit.
         """
-        if constraints is None:
-            constraints = NetworkConstraints()
-        A, self.capacity, self._power_attrs = quantized(
-            A,
-            capacity=capacity,
-            capacity_nominal=capacity_nominal,
-            power_rtol=power_rtol,
-        )
+        self.bounds = _resolved(A, constraints, power_rtol)
         self.P, self.A = P, A
-        self.constraints = constraints
-        self.bounds = constraints._resolve(
-            T=A.graph['T'],
-            R=A.graph['R'],
-            capacity=self.capacity,
-            inflow_total=total_inflow(A),
-            power_per_inflow=self._power_attrs.get('power_per_inflow'),
-            link_length_ub=constraints._link_length_ub(A),
-        )
-        _check_link_length(A, self.bounds)
         if warmstart is not None and self.bounds.link_length_ub is not None:
             # a fixed variable is a bound, which backends do not check a warm
             # start against
@@ -553,7 +498,7 @@ class Solver(abc.ABC):
                     f'warmup_model() failed: S link {over_limit[0]} is over the '
                     'link length limit'
                 )
-        inflow = nonunit_inflow(A)
+        inflow = self.bounds.nonunit_inflow
         if warmstart is not None and nonunit_inflow(warmstart) != inflow:
             # a warm start quantized otherwise carries loads in other inflow
             warmstart = warmstart.copy()
@@ -690,9 +635,9 @@ class Solver(abc.ABC):
         reading each binary variable once and collapsing the directed blocks with
         bit operations yields a solver-independent solution representation.
         """
-        metadata = self.metadata
-        feeder_link_count = metadata.R * metadata.T
-        ringed = self.bounds.topology is Topology.RINGED
+        metadata, bounds = self.metadata, self.bounds
+        feeder_link_count = bounds.R * bounds.T
+        ringed = bounds.topology is Topology.RINGED
         terminal_link_count = (
             len(metadata.linkset) - feeder_link_count * (1 + ringed)
         ) // 2
@@ -709,15 +654,15 @@ class Solver(abc.ABC):
     def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
         """Decode link bits and calculate loads from terminal inflow.
 
-        A RINGED model only ever carries unitary inflow (:func:`check_inflow_support`
+        A RINGED model only ever carries unitary inflow (:func:`check_model_bounds`
         refuses the rest), which is what its terminal-counting arm split needs.
         """
-        metadata = self.metadata
-        topology = self.bounds.topology
+        bounds = self.bounds
+        topology = bounds.topology
         A = self.A
         S = S_from_linkbits(linkbits, A)
         # Preserve terminal inflow so validation can reproduce the loads.
-        nx.set_node_attributes(S, nonunit_inflow(A), 'inflow')
+        nx.set_node_attributes(S, bounds.nonunit_inflow, 'inflow')
         if topology is Topology.RINGED:
             # the bits close every ring: this only splits the arms and
             # derives their loads, in the form every ringed producer uses
@@ -726,13 +671,13 @@ class Solver(abc.ABC):
             calcload(S)
         S.graph.update(
             topology=topology,
-            capacity=metadata.capacity,
+            capacity=bounds.capacity,
             _linkbits=linkbits,
             _topology_id=topology_id(linkbits),
             _linkset_id=A.graph['_linkset_id'],
             creator='MILP.' + self.name,
             solver_details={},
-            **self._power_attrs,
+            **bounds.power_attrs,
         )
         return S
 

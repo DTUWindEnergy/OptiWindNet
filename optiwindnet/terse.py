@@ -460,10 +460,9 @@ class TerseLinks(Sequence[int]):
             inflow, power_attrs = {}, {}
         else:
             self._check_site_dimensions(A, 'RT')
-            A, capacity, power_attrs = _quantized_site(
+            capacity, power_attrs, inflow = _quantized_site(
                 A, capacity, capacity_nominal, power_rtol
             )
-            inflow = nonunit_inflow(A)
         S = nx.Graph(T=self.T, R=self.R, topology=self.topology, **graph_attrs)
         S.graph.update(power_attrs)
         S.add_nodes_from(range(-self.R, 0), kind='oss')
@@ -515,10 +514,11 @@ class TerseLinks(Sequence[int]):
             and fingerprint_coordinates(L.graph['VertexC'])[0] != self.nodeset_digest
         ):
             raise ValueError('location geometry does not match the routed encoding')
-        L, capacity, power_attrs = _quantized_site(
+        capacity, power_attrs, inflow = _quantized_site(
             L, capacity, capacity_nominal, power_rtol
         )
         G = nx.create_empty_copy(L, with_data=True)
+        nx.set_node_attributes(G, inflow, 'inflow')
         G.graph.update(
             topology=self.topology,
             C=self.C,
@@ -569,11 +569,13 @@ def _quantized_site(
     capacity: int | None,
     capacity_nominal: float | Fraction | None,
     power_rtol: float,
-) -> tuple[nx.Graph, int | None, dict[str, Any]]:
+) -> tuple[int | None, dict[str, Any], dict[int, int]]:
     """Quantize ``site`` as :func:`~optiwindnet.loads.quantized`, capacity optional.
 
-    Without either capacity, ``site`` is used unquantized and the returned
-    capacity is ``None``, which is valid only if ``site`` declares no unequal power.
+    Returns the capacity in inflow, the graph attributes that record the
+    quantization, and the terminal inflow other than one, by terminal. Without
+    either capacity, ``site`` is used unquantized and the returned capacity is
+    ``None``, which is valid only if ``site`` declares no unequal power.
     """
     if capacity is None and capacity_nominal is None:
         if 'powers_set' in site.graph:
@@ -581,10 +583,12 @@ def _quantized_site(
                 'site declares unequal turbine power: pass capacity_nominal.'
             )
         validate_terminal_power(site)
-        return site, None, {}
-    return quantized(
+        return None, {}, nonunit_inflow(site)
+    capacity, power_attrs, inflow_ = quantized(
         site,
         capacity=capacity,
         capacity_nominal=capacity_nominal,
         power_rtol=power_rtol,
     )
+    inflow = {} if inflow_ is None else {t: k for t, k in enumerate(inflow_) if k != 1}
+    return capacity, power_attrs, inflow

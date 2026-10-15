@@ -127,12 +127,11 @@ def build_milp_warmstart(
     try:
         S = hgs_cvrp(
             as_normalized(A),
-            capacity=capacity,
+            replace(constraints, capacity=capacity, feeder_route=FeederRoute.SEGMENTED),
             time_limit=warmstart_time_limit,
             seed=warmstart_seed,
             repair=True,
             max_retries=warmstart_max_retries,
-            constraints=replace(constraints, feeder_route=FeederRoute.SEGMENTED),
         )
     except (NotImplementedError, ValueError):
         S = None
@@ -168,14 +167,13 @@ def _build_constructor_warmstart(
     capacity = case.capacity
     topology = case.constraints.topology
     method = _constructor_method(topology)
-    weigh_detours = case.constraints.feeder_route is FeederRoute.SEGMENTED
-    straight_feeder_route = not weigh_detours
+    feeder_route = case.constraints.feeder_route
     S = constructor(
         A,
-        capacity=capacity,
+        NetworkConstraints(
+            capacity=capacity, topology=topology, feeder_route=feeder_route
+        ),
         method=method,
-        weigh_detours=weigh_detours,
-        straight_feeder_route=straight_feeder_route,
     )
     assert_topology(S, topology, capacity)
     return S, {
@@ -183,8 +181,7 @@ def _build_constructor_warmstart(
         'options': {
             'capacity': capacity,
             'method': method,
-            'weigh_detours': weigh_detours,
-            'straight_feeder_route': straight_feeder_route,
+            'feeder_route': feeder_route.value,
         },
     }
 
@@ -242,8 +239,7 @@ def solve_milp_reference(
             solver.set_problem(
                 P,
                 A,
-                capacity=case.capacity,
-                constraints=case.constraints,
+                replace(case.constraints, capacity=case.capacity),
                 warmstart=warmstart,
             )
         except OWNWarmupFailed as exc:

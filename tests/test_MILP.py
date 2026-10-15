@@ -4,6 +4,7 @@
 import importlib
 import logging
 import math
+from dataclasses import replace
 from typing import Any, ClassVar
 
 import networkx as nx
@@ -13,9 +14,8 @@ from bitarray import frozenbitarray
 
 import optiwindnet.MILP._core as core
 from optiwindnet import MILP
-from optiwindnet.constraints import NetworkConstraints
+from optiwindnet.constraints import NetworkConstraints, _resolved
 from optiwindnet.identity import linkset_id, topology_id
-from optiwindnet.loads import total_inflow
 from optiwindnet.MILP import solver_factory
 from optiwindnet.types import Topology
 
@@ -61,9 +61,7 @@ def _fake_bounds(**constraints):
 
 def _toy_bounds(A, capacity=_CAPACITY, **constraints):
     """Resolve network constraints into the bounds a model builder takes."""
-    return NetworkConstraints(**constraints)._resolve(
-        T=A.graph['T'], R=A.graph['R'], capacity=capacity, inflow_total=total_inflow(A)
-    )
+    return _resolved(A, NetworkConstraints(capacity=capacity, **constraints))
 
 
 def _build_toy_ringed_from_bounds(module_name):
@@ -74,11 +72,9 @@ def _build_toy_ringed_from_bounds(module_name):
     make_min_length_model = importlib.import_module(module_name).make_min_length_model
     A = get_bundle('toy').A
 
-    _, metadata = make_min_length_model(
-        A, _CAPACITY, _toy_bounds(A, topology=Topology.RINGED)
-    )
+    _, metadata = make_min_length_model(A, _toy_bounds(A, topology=Topology.RINGED))
     ring_vars = sum(1 for u, _ in metadata.linkset if u < 0)
-    stored_enum = metadata.topology is Topology.RINGED
+    stored_enum = metadata.bounds.topology is Topology.RINGED
     return ring_vars, stored_enum
 
 
@@ -92,12 +88,12 @@ def _build_ringed_and_branched_weighted(module_name):
     A = get_bundle('toy').A.copy()
     nx.set_node_attributes(A, {0: 2}, 'inflow')
     try:
-        make_min_length_model(A, _CAPACITY, _toy_bounds(A, topology=Topology.RINGED))
+        make_min_length_model(A, _toy_bounds(A, topology=Topology.RINGED))
     except NotImplementedError as exc:
         refusal = str(exc)
     else:
         refusal = 'accepted'
-    make_min_length_model(A, _CAPACITY, _toy_bounds(A, topology=Topology.BRANCHED))
+    make_min_length_model(A, _toy_bounds(A, topology=Topology.BRANCHED))
     return refusal
 
 
@@ -115,7 +111,7 @@ def _two_root_toy_A():
 def _build_two_root_linkset(module_name, topology):
     make_min_length_model = importlib.import_module(module_name).make_min_length_model
     A = _two_root_toy_A()
-    _, metadata = make_min_length_model(A, _CAPACITY, _toy_bounds(A, topology=topology))
+    _, metadata = make_min_length_model(A, _toy_bounds(A, topology=topology))
     mapping_order = tuple(metadata.link_)
     values_match_keys = all(
         metadata.link_[link] is var
@@ -135,9 +131,11 @@ def _warmup_with_uncoerced_topology():
     from optiwindnet.MILP.ortools import make_min_length_model, warmup_model
 
     A = get_bundle('toy').A
-    S = S_from_G(constructor(A, capacity=_CAPACITY, method='radial_EW'))
+    S = S_from_G(
+        constructor(A, NetworkConstraints(capacity=_CAPACITY), method='radial_EW')
+    )
     model, metadata = make_min_length_model(
-        A, _CAPACITY, _toy_bounds(A, topology=Topology.BRANCHED)
+        A, _toy_bounds(A, topology=Topology.BRANCHED)
     )
     warmup_model(model, metadata, S)  # RADIAL warm-starts a BRANCHED model
 
@@ -160,12 +158,7 @@ def _solve_toy_solution(solver_name, topology):
     bundle = get_bundle('toy')
     P, A = bundle.P, bundle.A
     solver = solver_factory(solver_name)
-    solver.set_problem(
-        P,
-        A,
-        capacity=_CAPACITY,
-        constraints=NetworkConstraints(topology=topology),
-    )
+    solver.set_problem(P, A, NetworkConstraints(topology=topology, capacity=_CAPACITY))
     solution_info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
     S, _ = solver.get_solution()
     E, _, stars, _ = core.canonical_linksets(
@@ -195,10 +188,7 @@ def _get_solution_before_solve(solver_name):
     P, A = bundle.P, bundle.A
     solver = solver_factory(solver_name)
     solver.set_problem(
-        P,
-        A,
-        capacity=_CAPACITY,
-        constraints=NetworkConstraints(feeder_route='straight'),
+        P, A, NetworkConstraints(feeder_route='straight', capacity=_CAPACITY)
     )
     return solver.get_solution()
 
@@ -243,9 +233,9 @@ def _test_cbcbox_warmstart_job():
     bundle = get_bundle('toy')
     P, A = bundle.P, bundle.A
     solver = solver_factory('ortools.cbcbox')
-    warmstart = constructor(A, _CAPACITY)
+    warmstart = constructor(A, NetworkConstraints(capacity=_CAPACITY))
     solver.set_problem(
-        P, A, capacity=_CAPACITY, constraints=NetworkConstraints(), warmstart=warmstart
+        P, A, NetworkConstraints(capacity=_CAPACITY), warmstart=warmstart
     )
     assert solver.metadata.warmed_by == 'constructor'
     info = solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
@@ -309,9 +299,7 @@ def _job_cbcbox_read_solution(tmp_path, link_value):
 
     solver = solver_factory('ortools.cbcbox')
     bundle = get_bundle('toy')
-    solver.set_problem(
-        bundle.P, bundle.A, capacity=_CAPACITY, constraints=NetworkConstraints()
-    )
+    solver.set_problem(bundle.P, bundle.A, NetworkConstraints(capacity=_CAPACITY))
     link = next(iter(solver.metadata.link_.values()))
     flow = next(iter(solver.metadata.flow_.values()))
     path = tmp_path / 'problem.soln'
@@ -793,21 +781,16 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
     A.graph['_linkset_id'] = linkset_id(A)
     linkset = E + Eʹ + stars + starsʹ
     links = {link: link in active_links for link in linkset}
-    metadata = SimpleNamespace(
-        R=R,
-        T=n,
-        capacity=math.ceil(n / 2),
-        linkset=linkset,
-        topology=Topology.RINGED,
-        link_=links,
-        flow_=flows,
+    metadata = SimpleNamespace(linkset=linkset, link_=links, flow_=flows)
+    bounds = NetworkConstraints(topology='ringed')._resolve(
+        T=n, R=R, capacity=math.ceil(n / 2)
     )
 
     class FakeSolver:
         name = 'fake'
-        bounds = _fake_bounds(topology=Topology.RINGED)
         A: nx.Graph
         metadata: object
+        bounds: object
         _power_attrs: ClassVar[dict] = {}
 
         @staticmethod
@@ -821,6 +804,7 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
     fake = FakeSolver()
     fake.A = A
     fake.metadata = metadata
+    fake.bounds = bounds
     # what solve() records, then what get_solution() rebuilds from it
     linkbits = core.Solver._linkbits_from_mip_sol(
         fake  # pyrefly: ignore[bad-argument-type]
@@ -830,7 +814,7 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
         linkbits,
     )
 
-    assert_topology(S, Topology.RINGED, metadata.capacity)
+    assert_topology(S, Topology.RINGED, bounds.capacity)
     active_edges = {frozenset(link) for link in active_links}
     assert S.graph['_linkbits'] == frozenbitarray(
         frozenset(link) in active_edges for link in E + stars
@@ -863,16 +847,13 @@ def test_forest_mip_decoder_derives_loads_from_terminal_inflow(topology, inflow)
     class FakeSolver:
         name = 'fake'
         flow_reads = 0
-        bounds = _fake_bounds(topology=topology)
-        _power_attrs: ClassVar[dict] = {}
 
         def __init__(self):
             self.A = A
+            self.bounds = NetworkConstraints(topology=topology)._resolve(
+                T=3, R=2, capacity=6, inflow=inflow
+            )
             self.metadata = SimpleNamespace(
-                R=2,
-                T=3,
-                capacity=6,
-                topology=topology,
                 linkset=linkset,
                 link_={link: link in flows for link in linkset},
                 flow_=flows,
@@ -939,16 +920,13 @@ def test_ringed_mip_decoder_never_reads_flow_variables():
     class FakeSolver:
         name = 'fake'
         flow_reads = 0
-        bounds = _fake_bounds(topology=Topology.RINGED)
-        _power_attrs: ClassVar[dict] = {}
 
         def __init__(self):
             self.A = A
+            self.bounds = NetworkConstraints(topology='ringed')._resolve(
+                T=n, R=R, capacity=sum(inflow)
+            )
             self.metadata = SimpleNamespace(
-                R=R,
-                T=n,
-                capacity=sum(inflow),
-                topology=Topology.RINGED,
                 linkset=linkset,
                 link_={link: link in active for link in linkset},
                 flow_=flows,
@@ -972,7 +950,7 @@ def test_ringed_mip_decoder_never_reads_flow_variables():
     )
 
     assert fake.flow_reads == 0
-    assert_topology(S, Topology.RINGED, fake.metadata.capacity)
+    assert_topology(S, Topology.RINGED, fake.bounds.capacity)
     assert S.nodes[root]['load'] == n
     assert 'inflow' not in S.nodes[0]
 
@@ -983,7 +961,7 @@ def test_ringed_warmstart_is_accepted_by_scip():
     constraints = NetworkConstraints(topology='ringed')
     try:
         warm_solver = solver_factory('scip')
-        warm_solver.set_problem(P, A, capacity=3, constraints=constraints)
+        warm_solver.set_problem(P, A, replace(constraints, capacity=3))
         warm_solver.solve(time_limit=10, mip_gap=0.05)
         S, _ = warm_solver.get_solution()
     except BaseException as exc:
@@ -992,7 +970,7 @@ def test_ringed_warmstart_is_accepted_by_scip():
         raise
 
     solver = solver_factory('scip')
-    solver.set_problem(P, A, capacity=3, constraints=constraints, warmstart=S)
+    solver.set_problem(P, A, replace(constraints, capacity=3), warmstart=S)
     assert solver.metadata.warmed_by == S.graph['creator']
 
 
@@ -1009,20 +987,21 @@ def _warmup_toy_with(feeders, warm_source):
 
     A = get_bundle('toy').A
     if warm_source == 'constructor':
-        S = S_from_G(constructor(A, capacity=_CAPACITY, method='rootlust'))
+        S = S_from_G(
+            constructor(A, NetworkConstraints(capacity=_CAPACITY), method='rootlust')
+        )
     else:
         S = hgs_cvrp(
             as_normalized(A),
-            capacity=_CAPACITY,
-            time_limit=0.2,
-            constraints=NetworkConstraints(
-                topology='radial', max_feeders=math.ceil(A.graph['T'] / _CAPACITY)
+            NetworkConstraints(
+                capacity=_CAPACITY,
+                topology='radial',
+                max_feeders=math.ceil(A.graph['T'] / _CAPACITY),
             ),
+            time_limit=0.2,
         )
     S_feeders = sum(S.degree[r] for r in range(-A.graph['R'], 0))
-    model, metadata = make_min_length_model(
-        A, _CAPACITY, _toy_bounds(A, feeders=feeders)
-    )
+    model, metadata = make_min_length_model(A, _toy_bounds(A, feeders=feeders))
     try:
         warmup_model(model, metadata, S)
     except OWNWarmupFailed as exc:
@@ -1067,11 +1046,11 @@ def _make_warmstart_toy(constraints):
 
     A = get_bundle('toy').A
     router = MILPRouter(solver_name='ortools', time_limit=1, mip_gap=0.01)
-    bounds = constraints.resolve(A, capacity=_CAPACITY)
-    S = router._make_warmstart(A, {'capacity': _CAPACITY}, A, constraints, bounds)
+    bounds = _resolved(A, replace(constraints, capacity=_CAPACITY))
+    S = router._make_warmstart(A, bounds)
     # unitary inflow: a warm start is always built
     assert S is not None
-    model, metadata = make_min_length_model(A, _CAPACITY, bounds)
+    model, metadata = make_min_length_model(A, bounds)
     warmup_model(model, metadata, S)
     return metadata.warmed_by
 
@@ -1161,14 +1140,8 @@ def _warmup_time_budget_toy(warmup_time):
             mip_gap=0.05,
             warmup_time=warmup_time,
         )
-        constraints = NetworkConstraints(feeders='min')
-        router._make_warmstart(
-            A,
-            {'capacity': _CAPACITY},
-            A,
-            constraints,
-            constraints.resolve(A, capacity=_CAPACITY),
-        )
+        constraints = NetworkConstraints(feeders='min', capacity=_CAPACITY)
+        router._make_warmstart(A, _resolved(A, constraints))
     finally:
         api.hgs_cvrp = original
     return captured.get('time_limit')
@@ -1203,7 +1176,9 @@ def test_scip_warmstart_rejects_pinned_feeder_mismatch():
 
     bundle = get_bundle('toy')
     A = bundle.A
-    S = S_from_G(constructor(A, capacity=_CAPACITY, method='rootlust'))
+    S = S_from_G(
+        constructor(A, NetworkConstraints(capacity=_CAPACITY), method='rootlust')
+    )
     # toy needs 3 feeders at capacity 5 and the constructor uses 4
     assert sum(S.degree[r] for r in range(-A.graph['R'], 0)) == 4
 
@@ -1215,10 +1190,7 @@ def test_scip_warmstart_rejects_pinned_feeder_mismatch():
         raise
 
     solver.set_problem(
-        bundle.P,
-        A,
-        capacity=_CAPACITY,
-        constraints=NetworkConstraints(feeders='min'),
+        bundle.P, A, NetworkConstraints(feeders='min', capacity=_CAPACITY)
     )
     with pytest.raises(MILP.OWNWarmupFailed, match='violates some model constraint'):
         warmup_model(solver.model, solver.metadata, S)
@@ -1258,9 +1230,7 @@ def _solved_scip(**options):
         if solver_unavailable(exc):
             pytest.skip(f'scip unavailable: {exc}')
         raise
-    solver.set_problem(
-        bundle.P, bundle.A, capacity=_CAPACITY, constraints=NetworkConstraints()
-    )
+    solver.set_problem(bundle.P, bundle.A, NetworkConstraints(capacity=_CAPACITY))
     # concurrency needs more than one thread, whatever the host's core count
     solver.solve(
         time_limit=_RUNTIME, mip_gap=_GAP, options={'parallel/maxnthreads': 2} | options
@@ -1448,10 +1418,7 @@ def _solve_toy_balanced(solver_name, max_feeders):
     P, A = bundle.P, bundle.A
     solver = solver_factory(solver_name)
     solver.set_problem(
-        P,
-        A,
-        capacity=_CAPACITY,
-        constraints=NetworkConstraints(feeders=max_feeders, balanced=True),
+        P, A, NetworkConstraints(feeders=max_feeders, balanced=True, capacity=_CAPACITY)
     )
     solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
     S, _ = solver.get_solution()
@@ -1498,9 +1465,7 @@ def _solve_feeder_over_turbine(solver_name):
     )
     P, A = make_planar_embedding(L)
     solver = solver_factory(solver_name)
-    solver.set_problem(
-        P, A, capacity=2, constraints=NetworkConstraints(feeder_route='straight')
-    )
+    solver.set_problem(P, A, NetworkConstraints(feeder_route='straight', capacity=2))
     solver.solve(time_limit=_RUNTIME, mip_gap=0.0)
     S, _ = solver.get_solution()
     return sorted((min(u, v), max(u, v)) for u, v in S.edges)
@@ -1656,9 +1621,7 @@ def _highs_toy_solver():
 
     bundle = get_bundle('toy')
     solver = SolverHiGHS()
-    solver.set_problem(
-        bundle.P, bundle.A, capacity=_CAPACITY, constraints=NetworkConstraints()
-    )
+    solver.set_problem(bundle.P, bundle.A, NetworkConstraints(capacity=_CAPACITY))
     return solver
 
 
@@ -1722,10 +1685,10 @@ def test_highs_warmup_rejects_solutions_that_violate_the_model(feeders, accepted
     from optiwindnet.MILP.highs import make_min_length_model, warmup_model
 
     A = get_bundle('toy').A
-    S = S_from_G(constructor(A, capacity=_CAPACITY, method='rootlust'))
-    model, metadata = make_min_length_model(
-        A, _CAPACITY, _toy_bounds(A, feeders=feeders)
+    S = S_from_G(
+        constructor(A, NetworkConstraints(capacity=_CAPACITY), method='rootlust')
     )
+    model, metadata = make_min_length_model(A, _toy_bounds(A, feeders=feeders))
     if accepted:
         warmup_model(model, metadata, S)
         assert metadata.warmed_by == 'constructor'
@@ -1932,7 +1895,7 @@ def _bounds(T, capacity, bounds=None, balanced=True, **constraints):
     return (
         bounds.groups_lb,
         bounds.groups_ub,
-        *core.balance_bounds(bounds, capacity),
+        *core.balance_bounds(bounds),
     )
 
 
@@ -2034,42 +1997,36 @@ def test_warmup_model_rejects_an_uncoerced_topology(ortools_worker):
 
 
 def test_feeder_bounds_scale_with_total_inflow_not_terminal_count():
-    def bounds(inflow_total=None, **constraints):
+    def bounds(inflow=None, **constraints):
         return NetworkConstraints(**constraints)._resolve(
-            T=6, R=1, capacity=3, inflow_total=inflow_total
+            T=6, R=1, capacity=3, inflow=inflow
         )
 
+    double = (2,) * 6
     # 6 terminals of one unit each: 2 cables of capacity 3
     assert bounds().feeders_lb == 2
     # the same 6 terminals sourcing 12 units need twice the cables
-    assert bounds(inflow_total=12).feeders_lb == 4
-    # omitting inflow_total is the same as one unit per terminal
-    assert bounds(feeders='min', balanced=True) == bounds(
-        inflow_total=6, feeders='min', balanced=True
-    )
+    assert bounds(double).feeders_lb == 4
     # balanced load bounds are in inflow units too: 12 over 4 feeders
-    b = bounds(inflow_total=12, feeders=4, balanced=True)
-    assert core.balance_bounds(b, 3) == (3, None)
+    b = bounds(double, feeders=4, balanced=True)
+    assert core.balance_bounds(b) == (3, None)
     # Each feeder needs a terminal, regardless of total inflow.
     with pytest.raises(ValueError, match='above the maximum possible'):
-        bounds(inflow_total=12, feeders=7)
+        bounds(double, feeders=7)
 
 
 @pytest.mark.parametrize('topology', ('radial', 'branched', 'ringed'))
 def test_only_a_ringed_model_refuses_unequal_terminal_inflow(topology):
     """A ring within twice the capacity need not split into two arms that fit."""
-    from optiwindnet.MILP._core import check_inflow_support
-
-    A = nx.Graph(T=6)
-    A.add_nodes_from(range(6))
-    A.nodes[0]['inflow'] = 4
+    constraints = NetworkConstraints(topology=topology)
+    inflow = (4,) + (1,) * 5
+    bounds = constraints._resolve(T=6, R=1, capacity=5, inflow=inflow)
     if topology == 'ringed':
         with pytest.raises(NotImplementedError, match='RINGED model cannot honour'):
-            check_inflow_support(A, Topology(topology))
+            core.check_model_bounds(bounds)
     else:
-        assert check_inflow_support(A, Topology(topology)) == 9
-    A.nodes[0]['inflow'] = 1
-    assert check_inflow_support(A, Topology(topology)) == 6
+        core.check_model_bounds(bounds)
+    core.check_model_bounds(constraints._resolve(T=6, R=1, capacity=5))
 
 
 @pytest.mark.parametrize(
@@ -2208,10 +2165,7 @@ def test_highs_keeps_the_substation_limits(constraints, feeders, loads):
     bundle = get_bundle('neart', read_powers=False)
     solver = SolverHiGHS()
     solver.set_problem(
-        bundle.P,
-        bundle.A,
-        capacity=7,
-        constraints=NetworkConstraints(**constraints),
+        bundle.P, bundle.A, NetworkConstraints(**constraints, capacity=7)
     )
     solver.solve(time_limit=3, mip_gap=0.05)
     _, G = solver.get_solution()
@@ -2231,7 +2185,7 @@ def test_ringed_models_refuse_substation_loads():
         T=A.graph['T'], R=A.graph['R'], capacity=_CAPACITY
     )
     with pytest.raises(ValueError, match='not available for RINGED MILP'):
-        core.model_bounds(A, _CAPACITY, bounds)
+        core.check_model_bounds(bounds)
 
 
 def test_milp_warmstart_keeps_the_substation_limits():
@@ -2239,13 +2193,11 @@ def test_milp_warmstart_keeps_the_substation_limits():
 
     A = get_bundle('neart', read_powers=False).A
     constraints = NetworkConstraints(
-        max_substation_feeders=(None, 5), max_substation_loads=(None, 26)
+        capacity=7, max_substation_feeders=(None, 5), max_substation_loads=(None, 26)
     )
     router = MILPRouter(solver_name='highs', time_limit=1, mip_gap=0.05)
 
-    S = router._make_warmstart(
-        A, {'capacity': 7}, A, constraints, constraints.resolve(A, capacity=7)
-    )
+    S = router._make_warmstart(A, _resolved(A, constraints))
 
     assert S is not None and S.graph['creator'] == 'baselines.hgs'
     assert S.degree[-1] <= 5 and S.nodes[-1]['load'] <= 26

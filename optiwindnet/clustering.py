@@ -10,7 +10,7 @@ import networkx as nx
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-from .constraints import NetworkBounds
+from .constraints import NetworkBounds, NetworkConstraints, _resolved
 
 __all__ = ('clusterize',)
 
@@ -153,9 +153,7 @@ def _best_budget(
     return best
 
 
-def _limits(
-    R: int, T: int, group_capacity: int, bounds: NetworkBounds | None
-) -> tuple[_Limits, int, int]:
+def _limits(bounds: NetworkBounds) -> tuple[_Limits, int, int]:
     """Translate ``bounds`` into per-root limits and the range of the route count.
 
     Routes are subtrees or rings, which stay on a single root here.
@@ -163,12 +161,7 @@ def _limits(
     Raises:
       NotImplementedError: a root's exact feeder count is odd for rings.
     """
-    min_routes = math.ceil(T / group_capacity)
-    if bounds is None:
-        limits = _Limits(
-            group_capacity, (0,) * R, (T,) * R, (T,) * R, (False,) * R, 1, None
-        )
-        return limits, min_routes, T
+    R, T, min_routes = bounds.R, bounds.T, bounds.groups_min
     per_group = bounds.feeders_per_group
     lo_ = bounds.root_feeders_lb or (0,) * R
     if any(lo % per_group for lo in lo_):
@@ -187,20 +180,20 @@ def _limits(
     )
     groups_lb, groups_ub = bounds.groups_lb, bounds.groups_ub
     # a count fixed above the minimum is only held by solving with fixed routes
-    pin_all = bounds.balanced or (groups_lb == groups_ub and groups_lb > min_routes)
+    pin_all = bounds.balanced or bounds.fixed_above_min
     pinned_ = tuple(pin_all or (lo > 0 and lo == hi) for lo, hi in zip(lo_, hi_))
     balance = (
         (bounds.group_load_lb, bounds.group_load_ub)
         if bounds.group_load_lb is not None and bounds.group_load_ub is not None
         else None
     )
-    limits = _Limits(group_capacity, lo_, hi_, load_cap_, pinned_, per_group, balance)
+    limits = _Limits(
+        bounds.group_capacity, lo_, hi_, load_cap_, pinned_, per_group, balance
+    )
     return limits, max(groups_lb, min_routes), T if groups_ub is None else groups_ub
 
 
-def cluster_plan(
-    A: nx.Graph, group_capacity: int, bounds: NetworkBounds | None = None
-) -> ClusterPlan:
+def cluster_plan(A: nx.Graph, bounds: NetworkBounds) -> ClusterPlan:
     """Partition the terminals of ``A`` among the roots, within ``bounds``.
 
     See :func:`clusterize`, which returns the clusters of this plan. Each root
@@ -215,22 +208,23 @@ def cluster_plan(
         exact feeder count is odd for rings.
       ValueError: no clustering satisfies the bounds.
     """
-    R, T = (A.graph[k] for k in 'RT')
-    if any(data.get('inflow', 1) != 1 for n, data in A.nodes(data=True) if n >= 0):
+    R, T, group_capacity = bounds.R, bounds.T, bounds.group_capacity
+    if bounds.inflow is not None:
         raise NotImplementedError(
             "clusterize() partitions by terminal count: terminal 'inflow' other "
             'than 1 is not available.'
         )
     d2roots = A.graph['d2roots']
-    limits, routes_lb, routes_ub = _limits(R, T, group_capacity, bounds)
+    limits, routes_lb, routes_ub = _limits(bounds)
 
     cluster_: list[set[int]] = [set() for _ in range(R)]
     for n, c in enumerate(d2roots[:T].argmin(axis=1).tolist()):
         cluster_[c].add(n)
     voronoi = tuple(math.ceil(len(cluster) / group_capacity) for cluster in cluster_)
-    if (bounds is None or not (bounds.has_root_bounds or any(limits.pinned_))) and sum(
-        voronoi
-    ) == routes_lb:
+    if (
+        not (bounds.has_root_bounds or any(limits.pinned_))
+        and sum(voronoi) == routes_lb
+    ):
         # the closest-root partition already wastes no route: it is optimal
         return ClusterPlan(cluster_, voronoi, limits.pinned_)
 
@@ -250,9 +244,7 @@ def cluster_plan(
 
 
 def plan_from_clusters(
-    A: nx.Graph,
-    group_capacity: int,
-    bounds: NetworkBounds | None,
+    bounds: NetworkBounds,
     cluster_: list[set[int]],
     budget_: tuple[int, ...],
 ) -> ClusterPlan:
@@ -263,8 +255,8 @@ def plan_from_clusters(
       NotImplementedError: a root's exact feeder count is odd for rings.
       ValueError: the route counts or the clusters break the bounds.
     """
-    R, T = (A.graph[k] for k in 'RT')
-    limits, routes_lb, routes_ub = _limits(R, T, group_capacity, bounds)
+    R = bounds.R
+    limits, routes_lb, routes_ub = _limits(bounds)
     if not routes_lb <= sum(budget_) <= routes_ub:
         raise ValueError(
             f'{sum(budget_)} routes, outside the range of {routes_lb} to {routes_ub}.'
@@ -280,19 +272,17 @@ def plan_from_clusters(
 
 
 def clusterize(
-    A: nx.Graph,
-    group_capacity: int,
-    bounds: NetworkBounds | None = None,
+    A: nx.Graph, constraints: NetworkConstraints | NetworkBounds
 ) -> list[set[int]]:
     """Partition the terminals of ``A`` into one cluster per root.
 
     A group is a route of the clustered problem: a subtree, or a whole ring.
-    ``group_capacity`` is the most terminals one group may hold, so it is twice
+    The group capacity is the most terminals one group may hold, so it is twice
     the cable capacity for rings. Terminals are counted: an inflow other than 1
     is not available.
 
-    Without ``bounds``, clustering never costs the location a feeder (``K`` the
-    group capacity)::
+    Without count or load bounds, clustering never costs the location a feeder
+    (``K`` the group capacity)::
 
         Σ_c ceil(T_c / K) == ceil(T / K)
 
@@ -306,10 +296,11 @@ def clusterize(
     ``R - 1``), and ``_assign()`` deals the terminals out exactly for each. The
     cheapest one wins.
 
-    ``bounds`` limit the routes and the terminals of each root, and the routes of
-    the whole farm. The budgets then start at the closest-root ones, clipped to
-    each root's limits, and the total number of routes grows one at a time from
-    the fewest the bounds allow until a budget holds every terminal. Under
+    Count and load bounds limit the routes and the terminals of each root, and
+    the routes of the whole farm. The budgets then start at the closest-root
+    ones, clipped to each root's limits, and the total number of routes grows one
+    at a time from the fewest the bounds allow until a budget holds every
+    terminal. Under
     balance (see :class:`~optiwindnet.constraints.NetworkBounds`), each root
     takes between its routes times the minimum and times the maximum load of a
     route, so that the routes of every root can be balanced to loads within
@@ -326,10 +317,8 @@ def clusterize(
 
     Args:
       A: available-links graph, needs graph attributes ``R``, ``T`` and ``d2roots``
-      group_capacity: maximum number of terminals a group (subtree or ring) may
-        hold
-      bounds: count and load bounds, as resolved for the cable capacity (see
-        :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`)
+      constraints: network constraints, cable capacity included, or the bounds
+        resolved from them
 
     Returns:
       One set of terminals per root, in root order (``-R`` to ``-1``).
@@ -337,6 +326,7 @@ def clusterize(
     Raises:
       NotImplementedError: a terminal has an inflow other than 1, or a root's
         exact feeder count is odd for rings.
-      ValueError: no clustering satisfies the bounds.
+      ValueError: no clustering satisfies the bounds, or see
+        :class:`~optiwindnet.constraints.NetworkConstraints`.
     """
-    return cluster_plan(A, group_capacity, bounds).cluster_
+    return cluster_plan(A, _resolved(A, constraints)).cluster_

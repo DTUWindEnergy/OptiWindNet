@@ -13,6 +13,7 @@ from typing import Literal
 
 import pytest
 
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import G_from_S
 from optiwindnet.heuristics import constructor
 from optiwindnet.pathfinding import PathFinder
@@ -33,7 +34,11 @@ CASES = [('toy', 5), ('example_location', 3, {'method': 'rootlust'})]
 
 
 def ew(t: Task):
-    return constructor(t.A, t.capacity, method=t.options.get('method', 'esau_williams'))
+    return constructor(
+        t.A,
+        NetworkConstraints(capacity=t.capacity),
+        method=t.options.get('method', 'esau_williams'),
+    )
 
 
 def ew_routed(t: Task):
@@ -116,7 +121,7 @@ def test_concurrent_sweep(
     def closure(t: Task):
         # closures are not picklable; the process executor must still run them
         assert t.threads == 1
-        return constructor(t.A, t.capacity, method=method)
+        return constructor(t.A, NetworkConstraints(capacity=t.capacity), method=method)
 
     def slow(t: Task):
         time.sleep(0.1)
@@ -145,7 +150,9 @@ def test_report_compares_runs_and_refuses_code_change(
     db_path = tmp_path / 'sweep.sqlite'
 
     def rootlust(t: Task):
-        return constructor(t.A, t.capacity, method='rootlust')
+        return constructor(
+            t.A, NetworkConstraints(capacity=t.capacity), method='rootlust'
+        )
 
     run_sweep(CASES[:1], {'ew': ew}, db_path, run_id='before', verbose=False)
     run_sweep(CASES[:1], {'ew': rootlust}, db_path, run_id='after', verbose=False)

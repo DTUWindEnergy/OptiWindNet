@@ -14,7 +14,12 @@ from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.heuristics import constructor
 from optiwindnet.transforming import as_normalized
 
-from .cases import BaselineCase, ConstructorCase, case_node_id, expected_topology
+from .cases import (
+    BaselineCase,
+    ConstructorCase,
+    case_node_id,
+    expected_topology,
+)
 from .helpers import run_with_retry, terminal_terminal_crossings
 from .sitecache import get_bundle
 from .topology_assertions import assert_topology
@@ -26,11 +31,13 @@ def constructor_topology(case: ConstructorCase):
     A = get_bundle(case.site).A
     return constructor(
         A,
-        capacity=case.capacity,
+        NetworkConstraints(
+            capacity=case.capacity,
+            topology=expected_topology(case),
+            feeder_route=case.feeder_route,
+        ),
         method=case.method,
         bias_margin=case.bias_margin,
-        weigh_detours=case.feeder_route.value == 'segmented',
-        straight_feeder_route=case.feeder_route.value == 'straight',
     )
 
 
@@ -46,14 +53,14 @@ def _baseline_topology(case: BaselineCase, solve: Callable[..., nx.Graph]) -> nx
     return run_with_retry(
         lambda time_limit: solve(
             A,
-            capacity=case.capacity,
-            time_limit=time_limit,
-            constraints=NetworkConstraints(
+            NetworkConstraints(
+                capacity=case.capacity,
                 topology=expected_topology(case),
                 # balance needs a fixed count
                 feeders='min' if case.balanced else None,
                 balanced=case.balanced,
             ),
+            time_limit=time_limit,
             seed=case.seed,
         ),
         check,

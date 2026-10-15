@@ -5,7 +5,6 @@ import logging
 import math
 import time
 from collections import defaultdict
-from fractions import Fraction
 from itertools import chain, tee
 
 import networkx as nx
@@ -13,6 +12,7 @@ from bitarray import bitarray
 from bitarray.util import ones, zeros
 from scipy.stats import rankdata
 
+from ..constraints import NetworkBounds, NetworkConstraints, _resolved
 from ..converting import linkbits_from_S
 from ..crossings import edge_conflicts
 from ..geometric import (
@@ -21,13 +21,10 @@ from ..geometric import (
 from ..identity import fingerprint_function, topology_id
 from ..interarraylib import add_link_blockmap, add_terminal_closest_root
 from ..loads import (
-    DEFAULT_POWER_RTOL,
     calcload,
-    nonunit_inflow,
-    quantized,
     split_rings_and_calc_loads,
 )
-from ..types import Topology
+from ..types import FeederRoute, Topology
 from .priorityqueue import PriorityQueue
 
 __all__ = ()
@@ -50,6 +47,12 @@ _METHOD_TOPOLOGY = {
     'ringed': Topology.RINGED,
 }
 
+_TOPOLOGY_METHOD = {
+    Topology.BRANCHED: 'rootlust',
+    Topology.RADIAL: 'radial_EW',
+    Topology.RINGED: 'ringed',
+}
+
 # empirically obtained coefficients
 _rootlust_coefs = (
     # rootlust_0 = [0] + [1]/capacity
@@ -61,16 +64,14 @@ _rootlust_coefs = (
 
 def constructor(
     Aʹ: nx.Graph,
-    capacity: int | None = None,
-    method: str = 'rootlust',
+    constraints: NetworkConstraints | NetworkBounds,
+    method: str | None = None,
     *,
-    capacity_nominal: float | Fraction | None = None,
-    power_rtol: float = DEFAULT_POWER_RTOL,
+    power_rtol: float | None = None,
     rootlust_: tuple[float, float] | None = None,
     maxiter: int = 10000,
     bias_margin: float | None = None,
     weigh_detours: bool = True,
-    straight_feeder_route: bool = False,
     keep_log: bool = False,
     blockage_link_cos_lim: float = 0.85,  # 30°
     blockage_link_feeder_lim: float = 2.0,
@@ -90,10 +91,16 @@ def constructor(
     This means that even the method named ``'esau_williams'`` does not match exactly
     the paper's description, but the similarities are still substantial.
 
-    Note that constructor cannot be constrained in the number of feeders and that only
-    method ``'radial_EW'`` is constrained to producing radial topologies (i.e. subtrees
-    are always simple paths) as opposed to the branched topologies produced by the
-    others.
+    ``constraints`` give the cable capacity, the topology and the feeder route, or
+    are the bounds resolved from them (see
+    :class:`~optiwindnet.constraints.NetworkBounds`). The heuristic
+    keeps no feeder count, substation limit, balance or link length limit.
+
+    The method follows the topology: ``'rootlust'`` for branched, ``'radial_EW'``
+    for radial and ``'ringed'`` for ringed networks. Another method must build
+    networks within the topology: only method ``'radial_EW'`` is constrained to
+    producing radial topologies (i.e. subtrees are always simple paths), which are
+    also within the branched topology of the others.
 
     Available Methods:
       ``'esau_williams'``
@@ -116,41 +123,73 @@ def constructor(
 
     Args:
       Aʹ: available links graph
-      capacity: max inflow of a subtree
-      method: choice of method (see Available Methods)
-      capacity_nominal: max power of a subtree, instead of ``capacity`` (see
-        :func:`~optiwindnet.loads.quantized`)
-      power_rtol: quantization tolerance of unequal turbine power
+      constraints: network constraints, cable capacity included, or the bounds
+        resolved from them
+      method: choice of method (see Available Methods), defaulting to the one of
+        the topology
+      power_rtol: quantization tolerance of unequal turbine power (only with
+        ``constraints``)
       bias_margin: (biased_EW | radial_EW | ringed) fractional margin within
         which candidates are equivalent, resolving the quasi-tie root-ward. For
         ``'ringed'`` the margin is a fraction of the best union ``saving`` (not
         the edge ``extent``, since the ringed saving also depends on the peer
         feeders). Defaults to 0.02.
       weigh_detours: (!= esau_williams) only add edges whose tradeoff is not
-        outweighted by detours
-      straight_feeder_route: prevent crossings of feeders
-        (incompatible with ``weigh_detours=True``)
+        outweighted by detours (ignored for straight feeder routes, which
+        prevent crossings of feeders instead)
       maxiter: fail-safe to avoid locking in an infinite loop
 
     Returns:
       Solution topology S.
+
+    Raises:
+      NotImplementedError: the bounds limit feeder counts, substation loads or
+        link lengths, or balance loads, or the terminals declare an inflow
+        other than one unit.
+      ValueError: ``method`` is unknown or builds networks outside the topology.
     """
-    Aʹ, capacity, power_attrs = quantized(
-        Aʹ, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
-    )
-    if nonunit_inflow(Aʹ):
+    bounds = _resolved(Aʹ, constraints, power_rtol)
+    if bounds.feeders_ub is not None or bounds.has_root_bounds or bounds.balanced:
+        raise NotImplementedError(
+            'constructor() does not limit feeder counts or substation loads, nor '
+            'balance loads.'
+        )
+    if bounds.link_length_ub is not None:
+        # each subtree is fed from its node closest to a root, so a subtree
+        # the limit cannot feed needs a different partition of the
+        # terminals, which the heuristic has no means to seek
+        raise NotImplementedError('constructor() does not limit the link length.')
+    if method is None:
+        method = _TOPOLOGY_METHOD[bounds.topology]
+    elif method not in _METHOD_TOPOLOGY:
+        raise ValueError(
+            f'{method!r} is not among the methods of constructor(): '
+            f'{tuple(_METHOD_TOPOLOGY)}.'
+        )
+    method_topology = _METHOD_TOPOLOGY[method]
+    # a radial network is within a branched topology
+    if not (
+        method_topology is bounds.topology
+        or (method_topology is Topology.RADIAL and bounds.topology is Topology.BRANCHED)
+    ):
+        raise ValueError(
+            f'Method {method!r} builds {method_topology.value} networks, not '
+            f'{bounds.topology.value} ones.'
+        )
+    if bounds.inflow is not None:
         raise NotImplementedError(
             'constructor() fills a subtree up to `capacity` terminals, so it '
             "cannot honour a terminal 'inflow' other than 1."
         )
 
     start_time = time.perf_counter()
-    if straight_feeder_route and weigh_detours:
-        _warn(
-            'Setting `weigh_detours` to False because `straight_feeder_route=True` '
-            'was requested. Set `weigh_detours=False` to suppress this message.'
-        )
-        weigh_detours = False
+    # A ring is two radial arms sharing one root, joined at their tails. Build a
+    # simple path of up to 2*capacity terminals (each arm holds at most
+    # `capacity`); the path is closed into a ring at finalization, with the
+    # zero-load link placed at the load midpoint so neither arm exceeds capacity.
+    capacity = bounds.group_capacity
+    straight_feeder_route = bounds.feeder_route is FeederRoute.STRAIGHT
+    weigh_detours = weigh_detours and not straight_feeder_route
     R, T = (Aʹ.graph[k] for k in 'RT')
     _T = range(T)
     ringed = method == 'ringed'
@@ -158,13 +197,6 @@ def constructor(
     radial_like = method in ('radial_EW', 'ringed')
     if bias_margin is None:
         bias_margin = _DEFAULT_BIAS_MARGIN
-    capacity_report = capacity
-    if ringed:
-        # A ring is two radial arms sharing one root, joined at their tails. Build
-        # a simple path of up to 2*capacity terminals (each arm holds at most
-        # `capacity`); the path is closed into a ring at finalization, with the
-        # zero-load link placed at the load midpoint so neither arm exceeds capacity.
-        capacity *= 2
     VertexC = Aʹ.graph['VertexC'].tolist()
     diagonals = Aʹ.graph['diagonals']
     d2roots = Aʹ.graph['d2roots']
@@ -1025,7 +1057,7 @@ def constructor(
     linkbits = linkbits_from_S(Aʹ, S)
     S.graph.update(
         runtime=time.perf_counter() - start_time,
-        capacity=capacity_report,
+        capacity=bounds.capacity,
         _linkbits=linkbits,
         _topology_id=topology_id(linkbits),
         _linkset_id=Aʹ.graph['_linkset_id'],
@@ -1035,7 +1067,7 @@ def constructor(
             'method': method,
             'fun_fingerprint': _constructor_fun_fingerprint,
         },
-        **power_attrs,
+        **bounds.power_attrs,
     )
     if radial_like:
         S.graph['num_insertions'] = num_insertions

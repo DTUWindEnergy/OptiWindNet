@@ -15,6 +15,7 @@ from optiwindnet.api import (
 )
 from optiwindnet.baselines.hgs import _length_matrix, hgs_cvrp
 from optiwindnet.baselines.lkh import _build_weight_matrix, lkh3
+from optiwindnet.constraints import _resolved
 from optiwindnet.heuristics import constructor
 from optiwindnet.interarraylib import _links_over_limit, links_over_length
 from optiwindnet.loads import calcload
@@ -42,7 +43,7 @@ def _scip():
 
 
 def _limit(**kwargs):
-    return NetworkConstraints(max_link_length=_TOY_LIMIT, **kwargs)
+    return NetworkConstraints(max_link_length=_TOY_LIMIT, capacity=_CAPACITY, **kwargs)
 
 
 def _toy_wfn(router=None):
@@ -83,18 +84,19 @@ def test_constraints_reject_an_invalid_limit(bad):
 
 def test_resolve_puts_the_limit_in_the_bounds_in_the_scale_of_A():
     A = get_bundle('toy').A
-    assert NetworkConstraints().resolve(A, capacity=_CAPACITY).link_length_ub is None
-    assert _limit().resolve(A, capacity=_CAPACITY).link_length_ub == _TOY_LIMIT
+    assert _resolved(A, NetworkConstraints(capacity=_CAPACITY)).link_length_ub is None
+    assert _resolved(A, _limit()).link_length_ub == _TOY_LIMIT
     normalized = as_normalized(A)
-    assert _limit().resolve(normalized, capacity=_CAPACITY).link_length_ub == (
+    assert _resolved(normalized, _limit()).link_length_ub == (
         pytest.approx(_TOY_LIMIT * A.graph['norm_scale'])
     )
 
 
 def test_resolve_refuses_a_limit_that_isolates_turbines():
     with pytest.raises(ValueError, match='without any link or feeder'):
-        NetworkConstraints(max_link_length=1e-3).resolve(
-            get_bundle('toy').A, capacity=_CAPACITY
+        _resolved(
+            get_bundle('toy').A,
+            NetworkConstraints(capacity=_CAPACITY, max_link_length=1e-3),
         )
 
 
@@ -102,10 +104,12 @@ def test_resolve_refuses_a_limit_with_too_few_feeders():
     # at 560, every toy turbine has a link within the limit, but only 4 have a
     # feeder within it
     A = get_bundle('toy').A
-    NetworkConstraints(max_link_length=560.0, feeders=4).resolve(A, capacity=_CAPACITY)
+    _resolved(
+        A, NetworkConstraints(capacity=_CAPACITY, max_link_length=560.0, feeders=4)
+    )
     with pytest.raises(ValueError, match='fewer than the 5 subtrees'):
-        NetworkConstraints(max_link_length=560.0, feeders=5).resolve(
-            A, capacity=_CAPACITY
+        _resolved(
+            A, NetworkConstraints(capacity=_CAPACITY, max_link_length=560.0, feeders=5)
         )
 
 
@@ -121,14 +125,8 @@ def test_numeric_resolve_requires_the_limit_in_the_scale_of_A():
 def test_the_limit_leaves_A_unchanged():
     A = get_bundle('toy').A
     edges, graph_keys = set(A.edges), set(A.graph)
-    _limit().resolve(A, capacity=_CAPACITY)
-    hgs_cvrp(
-        as_normalized(A),
-        capacity=_CAPACITY,
-        time_limit=0.2,
-        constraints=_limit(),
-        seed=0,
-    )
+    _resolved(A, _limit())
+    hgs_cvrp(as_normalized(A), _limit(), time_limit=0.2, seed=0)
     assert set(A.edges) == edges
     assert set(A.graph) == graph_keys
 
@@ -139,7 +137,7 @@ def test_the_limit_leaves_A_unchanged():
 @pytest.mark.parametrize('topology', ['branched', 'ringed'])
 def test_models_fix_the_over_limit_links_and_feeders(topology):
     A = get_bundle('toy').A
-    bounds = _limit(topology=topology).resolve(A, capacity=_CAPACITY)
+    bounds = _resolved(A, _limit(topology=topology))
     links = _over_limit_links(A, _TOY_LIMIT)
     feeders = _over_limit_feeders(A, _TOY_LIMIT)
     assert links and feeders, 'the limit is meant to bind both'
@@ -153,7 +151,9 @@ def test_models_fix_the_over_limit_links_and_feeders(topology):
 
 def test_multi_root_fixed_links_are_not_repeated():
     A = get_bundle('morayeast').A
-    bounds = NetworkConstraints(max_link_length=6000.0).resolve(A, capacity=_CAPACITY)
+    bounds = _resolved(
+        A, NetworkConstraints(capacity=_CAPACITY, max_link_length=6000.0)
+    )
     fixed = list(links_to_fix(A, bounds))
     assert len(fixed) == len(set(fixed))
     assert set(nonclosest_feeders(A)) <= set(fixed)
@@ -171,12 +171,12 @@ def _check_solver_omits_flow_variables(
 
     bundle = get_bundle('toy')
     A = bundle.A
-    constraints = NetworkConstraints(max_link_length=limit)
-    bounds = constraints.resolve(A, capacity=capacity)
+    constraints = NetworkConstraints(max_link_length=limit, capacity=capacity)
+    bounds = _resolved(A, constraints)
     fixed = set(links_to_fix(A, bounds))
     assert fixed
     solver = solver_factory(solver_name)
-    solver.set_problem(bundle.P, A, capacity=capacity, constraints=constraints)
+    solver.set_problem(bundle.P, A, constraints)
     for link in fixed:
         assert link in solver.metadata.link_
         assert link not in solver.metadata.flow_
@@ -203,7 +203,7 @@ def test_models_omit_flow_variables_for_fixed_links(solver_name, run_isolated):
 def test_model_rejects_a_warm_start_over_the_limit():
     bundle = get_bundle('toy')
     A = bundle.A
-    S = constructor(A, capacity=_CAPACITY)
+    S = constructor(A, NetworkConstraints(capacity=_CAPACITY))
     # re-root one subtree at a terminal beyond the limit: the topology stays a
     # tree, so only the limit can reject it
     forbidden = int(np.flatnonzero(A.graph['d2roots'][:, -1] > _TOY_LIMIT)[0])
@@ -215,11 +215,11 @@ def test_model_rejects_a_warm_start_over_the_limit():
     assert _links_over_limit(S, A, _TOY_LIMIT)
 
     with pytest.raises(OWNWarmupFailed, match='link length limit'):
-        _scip().set_problem(
-            bundle.P, A, capacity=_CAPACITY, constraints=_limit(), warmstart=S
-        )
+        _scip().set_problem(bundle.P, A, _limit(), warmstart=S)
     # the very same topology is a valid warm start without the limit
-    _scip().set_problem(bundle.P, A, capacity=_CAPACITY, warmstart=S)
+    _scip().set_problem(
+        bundle.P, A, NetworkConstraints(capacity=_CAPACITY), warmstart=S
+    )
 
 
 def test_milp_router_enforces_the_limit_on_every_link():
@@ -288,14 +288,13 @@ def test_hgs_router_keeps_every_link_within_the_limit():
 
 
 def test_hgs_raises_on_a_solution_over_the_limit():
-    # 560 passes the checks of resolve() (4 turbines with a feeder within it, for
+    # 560 passes the checks of _resolved() (4 turbines with a feeder within it, for
     # 3 subtrees), but HGS-CVRP finds no toy network within it
     with pytest.raises(ValueError, match='within the link length limit'):
         hgs_cvrp(
             as_normalized(get_bundle('toy').A),
-            capacity=_CAPACITY,
+            NetworkConstraints(capacity=_CAPACITY, max_link_length=560.0),
             time_limit=0.2,
-            constraints=NetworkConstraints(max_link_length=560.0),
             seed=0,
         )
 
@@ -304,13 +303,7 @@ def test_lkh_keeps_every_link_within_the_limit():
     if shutil.which('LKH') is None:
         pytest.skip('LKH executable not on PATH')
     A = get_bundle('toy').A
-    S = lkh3(
-        as_normalized(A),
-        capacity=_CAPACITY,
-        time_limit=1,
-        constraints=_limit(),
-        seed=1,
-    )
+    S = lkh3(as_normalized(A), _limit(), time_limit=1, seed=1)
     for u, v in S.edges:
         assert _section_length(A, u, v) <= _TOY_LIMIT
 

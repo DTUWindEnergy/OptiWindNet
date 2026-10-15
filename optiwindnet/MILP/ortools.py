@@ -27,10 +27,9 @@ from ._core import (
     balance_bounds,
     bound_rows,
     canonical_linksets,
-    check_inflow_support,
+    check_model_bounds,
     check_warmstart_topology,
     links_to_fix,
-    model_bounds,
     passover_rows,
     physical_core_count,
     warmstart_links,
@@ -107,7 +106,7 @@ class SolverORTools(Solver, PoolHandler):
         return self._value_map[var.id]
 
     def _set_model(self, warmstart: nx.Graph | None) -> None:
-        model, metadata = make_min_length_model(self.A, self.capacity, self.bounds)
+        model, metadata = make_min_length_model(self.A, self.bounds)
         self.model, self.metadata = model, metadata
         if warmstart is not None:
             warmup_model(model, metadata, warmstart)
@@ -311,8 +310,7 @@ class SolverORTools(Solver, PoolHandler):
 
 def make_min_length_model(
     A: nx.Graph,
-    capacity: int,
-    bounds: NetworkBounds | None = None,
+    bounds: NetworkBounds,
 ) -> tuple[mathopt.Model, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -320,26 +318,23 @@ def make_min_length_model(
 
     Args:
       A: graph with the available links to choose from
-      capacity: maximum link flow capacity
-      bounds: topology, feeder route, counts and loads to enforce (see
-        :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`); defaults
-        to those of ``NetworkConstraints()``
+      bounds: capacity, topology, feeder route, counts and loads to enforce
+        (see :class:`~optiwindnet.constraints.NetworkBounds`)
 
     Raises:
       ValueError: the bounds limit the load of the roots of a RINGED model.
+      NotImplementedError: the bounds are RINGED with nonunitary inflow.
     """
-    bounds = model_bounds(A, capacity, bounds)
+    check_model_bounds(bounds)
     topology, feeder_route = bounds.topology, bounds.feeder_route
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    inflow_total = check_inflow_support(A, topology)
+    inflow_total, inflow_ = bounds.inflow_total, bounds.inflow_
 
-    # For RINGED, double the internal capacity; store original for metadata.
-    ring_capacity = capacity
-    if topology is Topology.RINGED:
-        capacity = 2 * capacity
+    # a ring holds two arms of `bounds.capacity` each
+    capacity = bounds.group_capacity
 
     # Sets
     _T = range(T)
@@ -384,9 +379,7 @@ def make_min_length_model(
     # continuous: single_out_link + flow_conserv pin flows to integers.
     # a link into v carries at most what leaves v less v's own inflow
     flow_ = {
-        (u, v): m.add_variable(
-            lb=0, ub=k - A.nodes[v].get('inflow', 1), name=f'flow_{u}~{v}'
-        )
+        (u, v): m.add_variable(lb=0, ub=k - inflow_[v], name=f'flow_{u}~{v}')
         for u, v in chain(E, Eʹ)
         if (u, v) not in fixed
     }
@@ -454,14 +447,14 @@ def make_min_length_model(
         if (t, n) in fixed:
             continue
         _n = str(n) if n >= 0 else f'r{-n}'
-        head_room = k if n < 0 else k - A.nodes[n].get('inflow', 1)
+        head_room = k if n < 0 else k - inflow_[n]
         m.add_linear_constraint(
             expr=flow_[t, n] - head_room * link_[t, n],
             ub=0,
             name=f'flow_zero_{t}~{_n}',
         )
         m.add_linear_constraint(
-            expr=flow_[t, n] - A.nodes[t].get('inflow', 1) * link_[t, n],
+            expr=flow_[t, n] - inflow_[t] * link_[t, n],
             lb=0,
             name=f'flow_nonzero_{t}~{_n}',
         )
@@ -472,7 +465,7 @@ def make_min_length_model(
             sum(flow_[t, n] for n in A_terminals.neighbors(t) if (t, n) in flow_)
             - sum(flow_[n, t] for n in A_terminals.neighbors(t) if (n, t) in flow_)
             + sum(flow_[t, r] for r in _R if (t, r) in flow_)
-            == A.nodes[t].get('inflow', 1),
+            == inflow_[t],
             name=f'flow_conserv_{t}',
         )
 
@@ -488,7 +481,7 @@ def make_min_length_model(
         if row.ub is not None:
             m.add_linear_constraint(row_sum <= row.ub, name=f'{row.name}_ub')
 
-    load_lb, load_ub = balance_bounds(bounds, k)
+    load_lb, load_ub = balance_bounds(bounds)
 
     # enforce balanced subtrees (subtree loads differ at most by one unit)
     if load_lb is not None:
@@ -538,7 +531,7 @@ def make_min_length_model(
         if in_flows:
             m.add_linear_constraint(
                 expr=sum(in_flows),
-                ub=k - A.nodes[t].get('inflow', 1),
+                ub=k - inflow_[t],
                 name=f'inflow_limit_{t}',
             )
         # only one out-edge per terminal
@@ -561,13 +554,10 @@ def make_min_length_model(
     ##################
 
     metadata = ModelMetadata(
-        R,
-        T,
-        ring_capacity,
+        bounds,
         linkset,
         link_,
         flow_,
-        topology,
         _make_min_length_model_fingerprint,
         weight_=weight_,
     )

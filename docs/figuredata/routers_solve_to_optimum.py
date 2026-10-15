@@ -54,8 +54,7 @@ def main() -> None:
     solver.set_problem(
         P,
         A,
-        capacity=problem.CAPACITY,
-        constraints=problem.CONSTRAINTS,
+        problem.CONSTRAINTS,
         warmstart=S_warm,
     )
     if args.dry_run:

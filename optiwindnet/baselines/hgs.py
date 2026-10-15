@@ -2,27 +2,21 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import math
 import random
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from fractions import Fraction
 
 import hybgensea
 import networkx as nx
 import numpy as np
 
 from ..clustering import cluster_plan, plan_from_clusters
-from ..constraints import NetworkConstraints, _check_link_length
+from ..constraints import NetworkBounds, NetworkConstraints
 from ..identity import fingerprint_function
 from ..interarraylib import _links_over_limit
 from ..loads import (
-    DEFAULT_POWER_RTOL,
     calcload,
-    nonunit_inflow,
-    quantized,
     split_rings_and_calc_loads,
-    total_inflow,
 )
 from ..repair import repair_routeset_path
 from ..types import OWNWarmupFailed, Topology
@@ -31,11 +25,11 @@ from ._core import (
     balanced_capacity,
     linkset_identity,
     remove_offending_crossings,
-    resolve_bounds,
     root_details,
     root_fleet_,
     routes_from_warmstart,
     scaled_length_block,
+    vrp_bounds,
 )
 
 _lggr = logging.getLogger(__name__)
@@ -235,6 +229,7 @@ def _solve_single_root(
     complete=False,
     warm_routes_=None,
     link_length_ub=None,
+    inflow_by_node=None,
 ):
     T, VertexC = A.graph['T'], A.graph['VertexC']
     if balanced:
@@ -255,7 +250,6 @@ def _solve_single_root(
     coordinates = np.hstack((rootC, VertexC[:T].T, *((rootC,) * num_slack)))
 
     demands = None
-    inflow_by_node = nonunit_inflow(A)
     if inflow_by_node:
         # The depot precedes the terminals in the demand array.
         # hgs_cvrp() rejects balanced solves with nonunitary inflow.
@@ -413,12 +407,10 @@ def _process_results(A, keep_log, pinned, inputs_, outputs_):
 
 def hgs_cvrp(
     A: nx.Graph,
+    constraints: NetworkConstraints | NetworkBounds,
     *,
-    capacity: int | None = None,
-    capacity_nominal: float | Fraction | None = None,
-    power_rtol: float = DEFAULT_POWER_RTOL,
     time_limit: float,
-    constraints: NetworkConstraints | None = None,
+    power_rtol: float | None = None,
     seed: int | None = None,
     keep_log: bool = False,
     repair: bool = True,
@@ -437,9 +429,11 @@ def hgs_cvrp(
     is doubled internally (``2 * capacity``) so each of the ring's two arms holds
     at most ``capacity`` terminals.
 
-    ``constraints`` give the topology (RADIAL or BRANCHED yield radial layouts)
-    and the count and load bounds, which are resolved after the turbine power is
-    quantized (see :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
+    ``constraints`` give the cable capacity, the topology (RADIAL or BRANCHED
+    yield radial layouts) and the count and load bounds, which are resolved after
+    the turbine power is quantized (see
+    :class:`~optiwindnet.constraints.NetworkBounds`), or are the
+    bounds already resolved.
     Each vehicle is one route: a subtree with one feeder, or a ring with two (one
     per arm). Feeder routes are not kept straight (``FeederRoute.STRAIGHT`` is
     refused).
@@ -484,13 +478,11 @@ def hgs_cvrp(
 
     Args:
         A: available-links graph. No edges implies ``complete=True``
-        capacity: maximum vehicle capacity, in inflow
-        capacity_nominal: maximum vehicle capacity, in nominal power, instead of
-            ``capacity`` (see :func:`~optiwindnet.loads.quantized`)
-        power_rtol: quantization tolerance of unequal turbine power
+        constraints: network constraints, cable capacity included, or the bounds
+            resolved from them
         time_limit: [s] solver run time limit
-        constraints: topology, counts and loads to keep (defaults to those of
-            ``NetworkConstraints(topology='radial')``)
+        power_rtol: quantization tolerance of unequal turbine power (only with
+            ``constraints``)
         seed: random seed for reproducibility
         keep_log: attach solver log to the solution graph
         repair: iteratively fix crossings (default True)
@@ -522,57 +514,26 @@ def hgs_cvrp(
     """
     R = A.graph['R']
     T = A.graph['T']
-    # An edgeless A requests the complete graph over all nodes.
-    complete = complete or A.number_of_edges() == 0
-    if complete and repair:
-        raise NotImplementedError(
-            'hgs_cvrp() cannot repair a solve over the complete graph over all nodes: '
-            "crossing detection and repair read A's planar embedding and "
-            'diagonals, which say nothing about a link absent from A. Pass '
-            'repair=False (the solution may then cross itself).'
-        )
-    A, capacity, power_attrs = quantized(
-        A, capacity=capacity, capacity_nominal=capacity_nominal, power_rtol=power_rtol
-    )
-    inflow_total = total_inflow(A)
-    inflow_by_node = nonunit_inflow(A)
-    unit_inflow_only = (
-        "hgs_cvrp() honours a terminal 'inflow' other than 1 only for an "
-        'unbalanced single-root radial solve without a count fixed above the '
-        'minimum: rings split by terminal count, the balanced slack nodes are '
-        'counted, and clusterize() partitions by count.'
-    )
-    bounds = resolve_bounds(
+    bounds, complete = vrp_bounds(
         'hgs_cvrp',
+        A,
         constraints,
-        T=T,
-        R=R,
-        capacity=capacity,
-        inflow_total=inflow_total,
-        power_per_inflow=power_attrs.get('power_per_inflow'),
-        link_length_ub=None if constraints is None else constraints._link_length_ub(A),
+        power_rtol,
+        complete=complete,
+        repair=repair,
+        counted_by='the balanced slack nodes are counted',
     )
-    _check_link_length(A, bounds)
+    inflow_by_node = bounds.nonunit_inflow
     ringed = bounds.topology is Topology.RINGED
     balanced = bounds.balanced
-    # a ring holds up to 2*capacity terminals (two arms of `capacity` each)
-    solve_capacity = 2 * capacity if ringed else capacity
-    vehicles_min = math.ceil(inflow_total / solve_capacity)
+    solve_capacity = bounds.group_capacity
     groups_lb, groups_ub = bounds.groups_lb, bounds.groups_ub
-    fixed_above_min = groups_lb == groups_ub and groups_lb > vehicles_min
-    if inflow_by_node and (ringed or balanced or fixed_above_min or R > 1):
-        raise NotImplementedError(unit_inflow_only)
 
     plan = fleet_ = None
     if R == 1:
         # the root's bounds are within those of the farm
-        pinned = balanced or fixed_above_min
+        pinned = balanced or bounds.fixed_above_min
         vehicles = groups_lb if pinned else groups_ub
-        if pinned and ringed and groups_lb > T // 2:
-            raise ValueError(
-                f'Rings ({groups_lb}) above the maximum ({T // 2}) that gives every '
-                f'ring two or more of the {T} terminals.'
-            )
     else:
         pinned, vehicles = False, None
 
@@ -582,8 +543,6 @@ def hgs_cvrp(
         if R > 1:
             try:
                 plan = plan_from_clusters(
-                    A,
-                    solve_capacity,
                     bounds,
                     [{n for route in routes for n in route} for routes in warm_routes_],
                     tuple(len(routes) for routes in warm_routes_),
@@ -593,7 +552,7 @@ def hgs_cvrp(
                     f'The warm start breaks the bounds: {exc}'
                 ) from exc
     if R > 1 and plan is None:
-        plan = cluster_plan(A, solve_capacity, bounds)
+        plan = cluster_plan(A, bounds)
     if plan is not None:
         fleet_ = root_fleet_(bounds, plan)
         pinned = any(plan.pinned_)
@@ -618,6 +577,7 @@ def hgs_cvrp(
                 complete,
                 warm_routes_=warm_routes_,
                 link_length_ub=bounds.link_length_ub,
+                inflow_by_node=inflow_by_node,
             )
         else:
             results_ = _solve_multi_root(
@@ -686,13 +646,15 @@ def hgs_cvrp(
     S.graph.update(
         T=T,
         R=R,
-        capacity=capacity,
+        capacity=bounds.capacity,
         **linkset_identity(S, A_orig),
         creator='baselines.hgs',
         method_options=dict(
             solver_name='HGS-CVRP',
             complete=complete,
-            feeders_above_min=None if groups_ub is None else groups_ub - vehicles_min,
+            feeders_above_min=None
+            if groups_ub is None
+            else groups_ub - bounds.groups_min,
             feeders_exact=groups_lb == groups_ub and pinned,
             balanced=balanced,
             ringed=ringed,
@@ -706,7 +668,7 @@ def hgs_cvrp(
             **S.graph['solver_details'],
             **root_details(bounds),
         ),
-        **power_attrs,
+        **bounds.power_attrs,
     )
     return S
 

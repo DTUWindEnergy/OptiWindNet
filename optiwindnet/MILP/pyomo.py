@@ -30,10 +30,9 @@ from ._core import (
     balance_bounds,
     bound_rows,
     canonical_linksets,
-    check_inflow_support,
+    check_model_bounds,
     check_warmstart_topology,
     links_to_fix,
-    model_bounds,
     passover_rows,
     physical_core_count,
     warmstart_links,
@@ -95,7 +94,7 @@ class SolverPyomo(Solver):
         return round(var.value)
 
     def _set_model(self, warmstart: nx.Graph | None) -> None:
-        model, metadata = make_min_length_model(self.A, self.capacity, self.bounds)
+        model, metadata = make_min_length_model(self.A, self.bounds)
         self.model, self.metadata = model, metadata
         if warmstart is not None and self.solver.warm_start_capable():
             warmup_model(model, metadata, warmstart)
@@ -206,7 +205,7 @@ class SolverPyomoAppsi(Solver):
         return round(var.value)
 
     def _set_model(self, warmstart: nx.Graph | None) -> None:
-        model, metadata = make_min_length_model(self.A, self.capacity, self.bounds)
+        model, metadata = make_min_length_model(self.A, self.bounds)
         self.model, self.metadata = model, metadata
         if warmstart is not None and self.solver.warm_start_capable():
             warmup_model(model, metadata, warmstart)
@@ -288,8 +287,7 @@ class SolverPyomoAppsi(Solver):
 
 def make_min_length_model(
     A: nx.Graph,
-    capacity: int,
-    bounds: NetworkBounds | None = None,
+    bounds: NetworkBounds,
 ) -> tuple[pyo.ConcreteModel, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -297,27 +295,23 @@ def make_min_length_model(
 
     Args:
       A: graph with the available links to choose from
-      capacity: maximum link flow capacity
-      bounds: topology, feeder route, counts and loads to enforce (see
-        :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`); defaults
-        to those of ``NetworkConstraints()``
+      bounds: capacity, topology, feeder route, counts and loads to enforce
+        (see :class:`~optiwindnet.constraints.NetworkBounds`)
 
     Raises:
       ValueError: the bounds limit the load of the roots of a RINGED model.
+      NotImplementedError: the bounds are RINGED with nonunitary inflow.
     """
-    bounds = model_bounds(A, capacity, bounds)
+    check_model_bounds(bounds)
     topology, feeder_route = bounds.topology, bounds.feeder_route
     R = A.graph['R']
     T = A.graph['T']
     d2roots = A.graph['d2roots']
     A_terminals = nx.subgraph_view(A, filter_node=lambda n: n >= 0)
-    inflow_total = check_inflow_support(A, topology)
+    inflow_total, inflow_ = bounds.inflow_total, bounds.inflow_
 
-    # For RINGED, double the internal capacity so each ring can hold up to
-    # 2×capacity turbines (capacity per arm); store original for metadata.
-    ring_capacity = capacity
-    if topology is Topology.RINGED:
-        capacity = 2 * capacity
+    # a ring holds two arms of `bounds.capacity` each
+    capacity = bounds.group_capacity
 
     # Sets
     _T = range(T)
@@ -359,7 +353,7 @@ def make_min_length_model(
 
     def flow_bounds(m, u, v):
         # a link into v carries at most what leaves v less v's own inflow
-        return (0, (m.k if v < 0 else m.k - A.nodes[v].get('inflow', 1)))
+        return (0, (m.k if v < 0 else m.k - inflow_[v]))
 
     flowset = linkset if topology != Topology.RINGED else E + Eʹ + stars
     active_flowset = [link for link in flowset if link not in fixed]
@@ -466,19 +460,14 @@ def make_min_length_model(
         rule=(
             lambda m, u, v: (
                 m.flow_[(u, v)]
-                <= m.link_[(u, v)]
-                * (m.k if v < 0 else m.k - A.nodes[v].get('inflow', 1))
+                <= m.link_[(u, v)] * (m.k if v < 0 else m.k - inflow_[v])
             )
         ),
         name='flow_ub',
     )
     m.cons_flow_lb = pyo.Constraint(
         active_flowset,
-        rule=(
-            lambda m, u, v: (
-                m.link_[(u, v)] * A.nodes[u].get('inflow', 1) <= m.flow_[(u, v)]
-            )
-        ),
+        rule=(lambda m, u, v: m.link_[(u, v)] * inflow_[u] <= m.flow_[(u, v)]),
         name='flow_lb',
     )
 
@@ -498,7 +487,7 @@ def make_min_length_model(
                     if (v, u) not in fixed
                 )
                 + sum(m.flow_[u, r] for r in _R if (u, r) not in fixed)
-                == A.nodes[u].get('inflow', 1)
+                == inflow_[u]
             )
         ),
         name='flow_conserv',
@@ -529,7 +518,7 @@ def make_min_length_model(
                 m, f'cons_{name}', pyo.Constraint(expr=row_sum <= row.ub, name=name)
             )
 
-    load_lb, load_ub = balance_bounds(bounds, capacity)
+    load_lb, load_ub = balance_bounds(bounds)
 
     # enforce balanced subtrees (subtree loads differ at most by one unit)
     active_stars = [(t, r) for t, r in stars if (t, r) not in fixed]
@@ -597,7 +586,7 @@ def make_min_length_model(
             m.flow_[v, u] for v in A_terminals.neighbors(u) if (v, u) not in fixed
         ]
         if in_flows:
-            return sum(in_flows) <= m.k - A.nodes[u].get('inflow', 1)
+            return sum(in_flows) <= m.k - inflow_[u]
         return pyo.Constraint.Skip
 
     m.cons_inflow_limit = pyo.Constraint(
@@ -634,16 +623,13 @@ def make_min_length_model(
     ##################
 
     metadata = ModelMetadata(
-        R,
-        T,
-        ring_capacity,
+        bounds,
         # pyomo types model attribute access as `Component | IndexedComponent`;
         # these three are the Set and Vars built above, which support the
         # mapping protocol ModelMetadata needs
         m.linkset,  # pyrefly: ignore[bad-argument-type]
         m.link_,  # pyrefly: ignore[bad-argument-type]
         m.flow_,  # pyrefly: ignore[bad-argument-type]
-        topology,
         _make_min_length_model_fingerprint,
     )
 
