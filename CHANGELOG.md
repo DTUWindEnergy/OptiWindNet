@@ -1,3 +1,12 @@
+# v0.4.0 (unreleased)
+
+[Commit history since v0.3.2](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.2...main)
+
+## Removed Deprecated APIs
+
+- **Constraint options:** `ModelOptions`, `FeederLimit`, the count and topology options of the routers, `Solver.set_problem()`, `make_min_length_model()`, `hgs_cvrp()` and `lkh3()`, and `clusterize(capacity)` were removed; state them with `NetworkConstraints`. [a02e71da](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/a02e71da)
+- **Older aliases:** the relocated `interarraylib` re-exports, `optiwindnet.fingerprint`, `crossings.gateXing_iter()`, `WindFarmNetwork.from_yaml()` and `turbinate(rounds)` were removed. [a02e71da](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/a02e71da)
+
 # v0.3.2
 
 [Commit history since v0.3.1](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.1...v0.3.2)
