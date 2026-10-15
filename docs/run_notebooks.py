@@ -18,6 +18,11 @@ to include them. A notebook is classified as MILP if any code cell mentions
 ``MILPRouter``, ``solver_factory``, ``ortools.cp_sat``, or other MILP
 solver tags from ``MILP_PATTERN``.
 
+Pass ``--theme`` (or ``--darkdetect-theme``) to force the ``darkdetect``
+package to report a defined theme (``dark`` or ``light``): a line run at
+kernel startup overrides its functions, leaving the notebook's cells and
+execution counts untouched.
+
 Pass ``--changed`` to select only notebooks that differ from the current
 branch's HEAD or are untracked.
 """
@@ -69,6 +74,9 @@ MILP_PATTERN = re.compile(
 MPL_PATTERN = re.compile(
     r'\b(?:gplot|pplot|matplotlib|pyplot|plt\.[a-zA-Z_]|mpl\.rcParams)'
 )
+ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
+#: Lines of a failing cell's traceback to print.
+TRACEBACK_TAIL = 5
 MPL_SETUP_CODE = (
     '# transient setup injected by docs/run_notebooks.py for stable SVG output\n'
     'import matplotlib as mpl\n'
@@ -76,6 +84,29 @@ MPL_SETUP_CODE = (
     '%config InlineBackend.print_figure_kwargs = '
     '{"metadata": {"Date": None, "Creator": "OptiWindNet"}}\n'
 )
+
+
+def darkdetect_exec_line(theme: str) -> str:
+    """Return a kernel startup line making ``darkdetect`` report ``theme``.
+
+    optiwindnet reads the system theme through ``darkdetect.isDark()``, so
+    overriding the package's top-level functions suffices.
+    """
+    is_dark = theme == 'dark'
+    return (
+        'import darkdetect as _darkdetect; '
+        f'_darkdetect.theme = lambda: {"Dark" if is_dark else "Light"!r}; '
+        f'_darkdetect.isDark = lambda: {is_dark}; '
+        f'_darkdetect.isLight = lambda: {not is_dark}; '
+        'del _darkdetect'
+    )
+
+
+def kernel_arguments(args: argparse.Namespace) -> list[str]:
+    """Return the command-line arguments of the kernel that runs the notebooks."""
+    if args.theme is None:
+        return []
+    return [f'--IPKernelApp.exec_lines={[darkdetect_exec_line(args.theme)]!r}']
 
 
 def cell_source(cell: nbformat.NotebookNode) -> str:
@@ -286,11 +317,17 @@ def run(args: argparse.Namespace) -> int:
                 resources={'metadata': {'path': str(NB_DIR)}},
                 config=kernel_config,
                 kernel_manager_class=CurveKernelManager,
+                extra_arguments=kernel_arguments(args),
             )
             client.execute()
         except CellExecutionError as exc:
             elapsed = time.monotonic() - t0
             print(f'  -> {rel}  FAIL  {elapsed:6.1f}s  {exc.ename}: {exc.evalue}')
+            # an exception raised while displaying a result (e.g. in __repr__)
+            # reaches nbclient without its name, so the traceback has the cause
+            lines = ANSI_ESCAPE.sub('', exc.traceback).rstrip().splitlines()
+            for line in lines[-TRACEBACK_TAIL:]:
+                print(f'     {line}')
             failures.append((path, f'{exc.ename}: {exc.evalue}'))
             continue
         except Exception as exc:  # noqa: BLE001 -- report any notebook failure
@@ -365,6 +402,15 @@ def argument_parser() -> argparse.ArgumentParser:
         '--no-mpl-setup',
         action='store_true',
         help='skip injection of matplotlib SVG-stability setup',
+    )
+    p.add_argument(
+        '--theme',
+        '--darkdetect-theme',
+        dest='theme',
+        choices=['dark', 'light'],
+        type=str.lower,
+        default=None,
+        help='force darkdetect to report a defined theme ("dark" or "light")',
     )
     p.add_argument(
         '--prettify-svg',
