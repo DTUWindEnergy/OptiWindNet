@@ -8,11 +8,9 @@ from importlib.metadata import PackageNotFoundError, distribution
 from importlib.util import find_spec
 from pathlib import Path
 
+from ..types import FeederRoute
 from ._core import (
-    FeederLimit,
-    FeederRoute,
     ModelMetadata,
-    ModelOptions,
     OWNSolutionNotFound,
     OWNWarmupFailed,
     SolutionInfo,
@@ -21,7 +19,7 @@ from ._core import (
 )
 
 __all__ = (
-    'FeederLimit', 'FeederRoute', 'ModelMetadata', 'ModelOptions',
+    'FeederRoute', 'ModelMetadata',
     'OWNSolutionNotFound', 'OWNWarmupFailed', 'SolutionInfo', 'Solver',
     'Topology', 'solver_factory',
 )  # fmt: skip

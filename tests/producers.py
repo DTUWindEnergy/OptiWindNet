@@ -4,12 +4,13 @@
 """Process-local caches for expensive, read-only producer topology fixtures."""
 
 from collections.abc import Callable
-from functools import cache, partial
+from functools import cache
 
 import networkx as nx
 
 from optiwindnet.baselines.hgs import hgs_cvrp
 from optiwindnet.baselines.lkh import lkh3
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.heuristics import constructor
 from optiwindnet.transforming import as_normalized
 
@@ -47,7 +48,12 @@ def _baseline_topology(case: BaselineCase, solve: Callable[..., nx.Graph]) -> nx
             A,
             capacity=case.capacity,
             time_limit=time_limit,
-            ringed=case.ringed,
+            constraints=NetworkConstraints(
+                topology=expected_topology(case),
+                # balance needs a fixed count
+                feeders='min' if case.balanced else None,
+                balanced=case.balanced,
+            ),
             seed=case.seed,
         ),
         check,
@@ -59,7 +65,7 @@ def _baseline_topology(case: BaselineCase, solve: Callable[..., nx.Graph]) -> nx
 @cache
 def hgs_topology(case: BaselineCase) -> nx.Graph:
     """Produce a typed HGS case once for topology and PathFinder consumers."""
-    return _baseline_topology(case, partial(hgs_cvrp, balanced=case.balanced))
+    return _baseline_topology(case, hgs_cvrp)
 
 
 @cache

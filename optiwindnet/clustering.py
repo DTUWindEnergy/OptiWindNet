@@ -2,7 +2,6 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
-import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from itertools import combinations_with_replacement
@@ -282,10 +281,8 @@ def plan_from_clusters(
 
 def clusterize(
     A: nx.Graph,
-    group_capacity: int | None = None,
+    group_capacity: int,
     bounds: NetworkBounds | None = None,
-    *,
-    capacity: int | None = None,
 ) -> list[set[int]]:
     """Partition the terminals of ``A`` into one cluster per root.
 
@@ -333,27 +330,13 @@ def clusterize(
         hold
       bounds: count and load bounds, as resolved for the cable capacity (see
         :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`)
-      capacity: deprecated (removed in v0.4.0), use ``group_capacity``
 
     Returns:
       One set of terminals per root, in root order (``-R`` to ``-1``).
 
     Raises:
-      TypeError: neither or both of ``group_capacity`` and ``capacity`` are given.
       NotImplementedError: a terminal has an inflow other than 1, or a root's
         exact feeder count is odd for rings.
       ValueError: no clustering satisfies the bounds.
     """
-    if capacity is not None:
-        if group_capacity is not None:
-            raise TypeError('Give group_capacity, not capacity.')
-        warnings.warn(
-            'clusterize(capacity=...) is deprecated and will be removed in v0.4.0: '
-            'pass group_capacity=... instead.',
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        group_capacity = capacity
-    if group_capacity is None:
-        raise TypeError('clusterize() requires group_capacity.')
     return cluster_plan(A, group_capacity, bounds).cluster_

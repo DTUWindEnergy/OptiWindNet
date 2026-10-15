@@ -21,7 +21,7 @@ Usage::
 import argparse
 import time
 
-from optiwindnet.MILP import ModelOptions, solver_factory
+from optiwindnet.MILP import solver_factory
 
 from . import routers_problem as problem
 
@@ -107,7 +107,7 @@ def main() -> None:
         P,
         A,
         capacity=problem.CAPACITY,
-        constraints=ModelOptions(**problem.MODEL_OPTIONS).to_constraints(),
+        constraints=problem.CONSTRAINTS,
         warmstart=S_warm,
     )
     samples, improvements = subscribe(solver)

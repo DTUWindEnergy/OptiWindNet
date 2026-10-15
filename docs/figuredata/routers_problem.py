@@ -17,6 +17,7 @@ from typing import Any
 
 import numpy as np
 
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.identity import fingerprint_coordinates
 
 HERE = Path(__file__).resolve().parent
@@ -29,13 +30,25 @@ LOCATION = 'doggerB'
 #: Maximum number of terminals per feeder.
 CAPACITY = 8
 
-#: MILP model options used for the optimum proof and MILP solver run.
+#: Serialized configuration used by the committed figure data's fingerprint.
 MODEL_OPTIONS: dict[str, Any] = {
     'topology': 'branched',
     'feeder_route': 'segmented',
     'feeder_limit': 'min_plus1',
     'balanced': False,
 }
+
+_extra_feeders = int(MODEL_OPTIONS['feeder_limit'].removeprefix('min_plus'))
+if MODEL_OPTIONS['topology'] == 'ringed':
+    _extra_feeders *= 2
+
+#: Network constraints used for the optimum proof and MILP solver run.
+CONSTRAINTS = NetworkConstraints(
+    topology=MODEL_OPTIONS['topology'],
+    feeder_route=MODEL_OPTIONS['feeder_route'],
+    max_feeders=f'min+{_extra_feeders}',
+    balanced=MODEL_OPTIONS['balanced'],
+)
 
 #: Meta-heuristic time limits sampled for the figure, in seconds.
 HGS_TIME_LIMITS = (0.1, 0.5, 2.5, 12.5)

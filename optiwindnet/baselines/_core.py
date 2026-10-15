@@ -5,7 +5,6 @@
 
 import logging
 import math
-import warnings
 from collections import defaultdict
 from collections.abc import Sequence
 from fractions import Fraction
@@ -25,30 +24,6 @@ _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
 
 
-def legacy_constraints(
-    feeders: int | None, exact: bool, balanced: bool, ringed: bool
-) -> NetworkConstraints:
-    """Translate the deprecated count options of the VRP routers into constraints.
-
-    ``feeders`` counts substation connections (two per ring). A count is exact
-    if ``exact`` or ``balanced`` (balance needs a fixed count), and a maximum
-    otherwise; without a count, ``balanced`` fixes the minimum.
-    """
-    count: dict[str, int | str] = {}
-    if feeders is None:
-        if balanced:
-            count['feeders'] = 'min'
-    elif exact or balanced:
-        count['feeders'] = feeders
-    else:
-        count['max_feeders'] = feeders
-    return NetworkConstraints(
-        topology=Topology.RINGED if ringed else Topology.RADIAL,
-        balanced=balanced,
-        **count,  # pyrefly: ignore[bad-argument-type]
-    )
-
-
 def resolve_bounds(
     solver: str,
     constraints: NetworkConstraints | None,
@@ -58,55 +33,19 @@ def resolve_bounds(
     capacity: int,
     inflow_total: int,
     power_per_inflow: Fraction | None,
-    vehicles: int | None,
-    vehicles_exact: bool,
-    balanced: bool,
-    ringed: bool,
     link_length_ub: float | None = None,
 ) -> NetworkBounds:
-    """Resolve the bounds of a VRP solve from ``constraints`` or deprecated options.
+    """Resolve the bounds of a VRP solve from ``constraints``.
 
-    Deprecated options that differ from their defaults raise a
-    ``DeprecationWarning`` attributed to the caller of ``solver``.
-
-    The deprecated options translate as :func:`legacy_constraints` describes,
-    with ``vehicles`` counting routes (subtrees or rings).
+    Without ``constraints``, those of ``NetworkConstraints(topology='radial')``
+    apply.
 
     Raises:
-        TypeError: both ``constraints`` and deprecated options are given.
-        ValueError: ``vehicles_exact`` without ``vehicles``, or the bounds do
-            not suit the instance.
+        ValueError: the bounds do not suit the instance.
         NotImplementedError: the bounds ask for straight feeders.
     """
-    legacy = {
-        name
-        for name, value, default in (
-            ('vehicles', vehicles, None),
-            ('vehicles_exact', vehicles_exact, False),
-            ('balanced', balanced, False),
-            ('ringed', ringed, False),
-        )
-        if value != default
-    }
     if constraints is None:
-        if legacy:
-            warnings.warn(
-                f'{solver}() options {sorted(legacy)} are deprecated and will be '
-                'removed in v0.4.0: pass constraints=NetworkConstraints(...) instead.',
-                DeprecationWarning,
-                stacklevel=3,
-            )
-        if vehicles_exact and vehicles is None:
-            raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
-        per_group = 2 if ringed else 1
-        constraints = legacy_constraints(
-            None if vehicles is None else per_group * vehicles,
-            vehicles_exact,
-            balanced,
-            ringed,
-        )
-    elif legacy:
-        raise TypeError(f'Give either constraints or the options {sorted(legacy)}.')
+        constraints = NetworkConstraints(topology=Topology.RADIAL)
     bounds = constraints._resolve(
         T=T,
         R=R,

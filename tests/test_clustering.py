@@ -341,14 +341,6 @@ def test_caps_hold_on_the_bundled_multiroot_locations(multiroot_instances):
         assert len(cluster_[busiest]) <= load_caps[busiest], handle
 
 
-def test_capacity_is_a_deprecated_name_of_group_capacity():
-    A = _make_A(np.array([[1.0, 2.0]] * 6))
-    with pytest.warns(DeprecationWarning, match='group_capacity'):
-        assert clusterize(A, capacity=4) == clusterize(A, 4)
-    with pytest.raises(TypeError, match='not capacity'):
-        clusterize(A, 4, capacity=4)
-
-
 def test_unequal_inflow_is_not_available():
     A = _make_A(np.array([[1.0, 2.0]] * 6))
     A.add_node(0, inflow=2)

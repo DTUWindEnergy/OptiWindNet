@@ -2,7 +2,6 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import math
-import warnings
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from itertools import combinations, pairwise
@@ -528,35 +527,6 @@ def _feeder_link_conflicts(A: nx.Graph) -> tuple[np.ndarray, np.ndarray]:
     flip = np.flatnonzero(crossings[:, 0] > crossings[:, 1])
     crossings[flip, :2] = crossings[flip, 1::-1]
     return crossings, np.array(passovers, dtype=np.int64).reshape(-1, 6)
-
-
-def gateXing_iter(
-    G: nx.Graph, *, hooks: Iterable | None = None
-) -> Iterator[tuple[tuple[int, int], tuple[int, int]]]:
-    """Iterate over all crossings between gates and edges in G.
-
-    Deprecated: internal function, to be removed in v0.4.0.
-
-    Args:
-      G: Routeset or edgeset (A) to examine.
-      hooks: Nodes to check, grouped by root in subsequences from root ``-R``
-        to ``-1``. If ``None``, every terminal is checked against every root.
-
-    Returns:
-      Iterator over pairs of (edge, gate) that cross (each a 2-tuple of nodes).
-    """
-    warnings.warn(
-        'optiwindnet.crossings.gateXing_iter is deprecated and will be removed in '
-        'v0.4.0; it is internal and has no public replacement',
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    # touching counts as crossing, lying along does not
-    return (
-        ((min(a, b), max(a, b)), (root, n))
-        for a, b, root, n, kind, _ in _feeder_intersections(G, hooks).tolist()
-        if kind != _FEEDER_ALONG
-    )
 
 
 def find_routeset_crossings(G: nx.Graph) -> list[tuple[int, int, int, int]]:

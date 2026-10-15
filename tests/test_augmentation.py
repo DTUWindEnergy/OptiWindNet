@@ -291,26 +291,6 @@ def test_turbinate_builds_graph_with_spaced_turbines():
         assert np.all(dr >= d - 1e-9)
 
 
-def test_turbinate_rounds_is_deprecated():
-    square_side = 10
-    T_req = 18
-    d = 2.0
-    rootsC = np.array([[5.0, 5.0]])
-    borderC = _square(square_side, square_side)
-    L = _make_graph(borderC, rootsC)
-
-    with pytest.deprecated_call():
-        L2 = aug.turbinate(L, T=T_req, d=d, max_iter=50_000, rounds=4)
-
-    V = L2.graph['VertexC']
-    R = L2.graph['R']
-    T_out = V.shape[0] - len(L.graph['border']) - R
-    assert T_out == T_req
-
-
-# -------------------------------
-# iCDF_factory
-# -------------------------------
 def test_iCDF_factory_monotonic_and_bounds():
     T_min, T_max, eta, d_lb = 50, 200, 0.6, 0.045
     iCDF = aug.iCDF_factory(T_min, T_max, eta, d_lb)

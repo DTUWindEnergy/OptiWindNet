@@ -2,9 +2,8 @@
 # https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/
 
 import logging
-import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from fractions import Fraction
 from itertools import pairwise
@@ -22,7 +21,6 @@ from .api_utils import (
     merge_obs_into_border,
     parse_cables_input,
 )
-from .baselines._core import legacy_constraints
 from .baselines.hgs import hgs_cvrp
 from .constraints import NetworkBounds, NetworkConstraints, _check_link_length
 from .converting import G_from_S, S_from_G, terse_links_from_S
@@ -49,8 +47,7 @@ from .loads import (
     validate_terminal_power,
 )
 from .mesh import make_planar_embedding
-from .MILP import ModelOptions, OWNSolutionNotFound, OWNWarmupFailed, solver_factory
-from .MILP._core import _constraints_from_options
+from .MILP import OWNSolutionNotFound, OWNWarmupFailed, solver_factory
 from .pathfinding import PathFinder
 from .presenting import _nominal_loads
 from .svg import SvgRepr, svgplot, svgpplot
@@ -69,12 +66,12 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 _error, _warning, _info = _logger.error, _logger.warning, _logger.info
 
-# `NetworkConstraints`, `ModelOptions` and `load_repository` are defined elsewhere but
+# `NetworkConstraints` and `load_repository` are defined elsewhere but
 # belong to this module's surface: the notebooks reach for them as
 # `from optiwindnet.api import ...`. Naming them here puts them in this page's outline,
 # pointing at where they are documented.
 __all__ = (
-    'EWRouter', 'HGSRouter', 'MILPRouter', 'ModelOptions', 'NetworkConstraints',
+    'EWRouter', 'HGSRouter', 'MILPRouter', 'NetworkConstraints',
     'Router', 'WindFarmNetwork', 'load_repository',
 )  # fmt: skip
 
@@ -100,8 +97,6 @@ class Router(ABC):
     _summary_attrs: tuple[str, ...]
     _repr_attrs: tuple[str, ...] = ()
     power_rtol: float = DEFAULT_POWER_RTOL
-    # constraints given through deprecated options of the router
-    _legacy_constraints: NetworkConstraints | None = None
 
     def __init__(self, power_rtol: float = DEFAULT_POWER_RTOL, **kwargs) -> None:
         """Set the options common to all routers.
@@ -175,24 +170,14 @@ class Router(ABC):
     ) -> _Resolved:
         """Resolve the constraints of the network against ``A`` and the capacity.
 
-        The constraints are those of the network or, if it has none, those given
-        through the router's deprecated options, or the router's defaults.
+        The constraints are those of the network or, if it has none, the
+        router's defaults.
 
         Raises:
-          TypeError: the network has constraints and the router has deprecated
-            options that state constraints too.
           ValueError: the constraints do not suit the problem (see
             :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
         """
-        if self._legacy_constraints is not None:
-            if constraints is not None:
-                raise TypeError(
-                    f'{type(self).__name__} was given deprecated options that state '
-                    'network constraints, but the network has constraints of its '
-                    'own: drop those options.'
-                )
-            constraints = self._legacy_constraints
-        elif constraints is None:
+        if constraints is None:
             constraints = self._default_constraints()
         capacity_kwargs = self._capacity_kwargs(A, cables_capacity)
         A_solve, capacity, power_attrs = quantized(A, **capacity_kwargs)
@@ -206,15 +191,6 @@ class Router(ABC):
         )
         _check_link_length(A, bounds)
         return _Resolved(capacity_kwargs, constraints, bounds, A_solve, capacity)
-
-
-def _warn_deprecated_options(router: str, names: Sequence[str]) -> None:
-    warnings.warn(
-        f'{router} options {sorted(names)} are deprecated and will be removed in '
-        'v0.4.0: give the network constraints=NetworkConstraints(...) instead.',
-        DeprecationWarning,
-        stacklevel=3,
-    )
 
 
 def _validated_inflow(turbine_powers: Sequence | np.ndarray, T: int) -> list[int]:
@@ -648,18 +624,6 @@ class WindFarmNetwork:
         return cls(L=L_from_yaml(filepath), **kwargs)
 
     @classmethod
-    def from_yaml(cls, filepath: Path | str, **kwargs):
-        """Deprecated: use :meth:`from_own_yaml` instead."""
-        import warnings
-
-        warnings.warn(
-            'from_yaml() is deprecated, use from_own_yaml() instead.',
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return cls.from_own_yaml(filepath, **kwargs)
-
-    @classmethod
     def from_pbf(cls, filepath: Path | str, **kwargs):
         """Create a WindFarmNetwork instance from a .OSM.PBF file."""
         return cls(L=L_from_pbf(filepath), **kwargs)
@@ -1042,12 +1006,11 @@ class EWRouter(Router):
     """
 
     _summary_attrs = ('iterations',)
-    _repr_attrs = ('method', 'maxiter', 'feeder_route', 'bias_margin')
+    _repr_attrs = ('method', 'maxiter', 'bias_margin')
 
     def __init__(
         self,
         maxiter: int = 10_000,
-        feeder_route: str | None = None,
         method: str | None = None,
         bias_margin: float | None = None,
         verbose: bool = False,
@@ -1081,8 +1044,6 @@ class EWRouter(Router):
 
         Args:
           maxiter: Maximum iterations.
-          feeder_route: Deprecated (removed in v0.4.0), use the network constraints:
-            feeder routing mode (``'segmented'`` or ``'straight'``).
           method: one of the **Available Methods** (defaults to the one of the
             topology).
           bias_margin: Fractional margin within which candidates are considered
@@ -1102,18 +1063,9 @@ class EWRouter(Router):
                 f'{method!r} is not among the methods of EWRouter: '
                 f'{tuple(_EW_METHOD_TOPOLOGY)}.'
             )
-        if feeder_route is not None:
-            _warn_deprecated_options('EWRouter', ('feeder_route',))
-            self._legacy_constraints = NetworkConstraints(
-                topology=(
-                    Topology.DEFAULT if method is None else _EW_METHOD_TOPOLOGY[method]
-                ),
-                feeder_route=feeder_route,
-            )
 
         self.verbose = verbose
         self.maxiter = maxiter
-        self.feeder_route = feeder_route
         self.method = method
         self.bias_margin = bias_margin
 
@@ -1194,19 +1146,12 @@ class HGSRouter(Router):
     """
 
     _summary_attrs = ('runtime',)
-    _repr_attrs = (
-        'time_limit', 'feeder_limit', 'feeder_exact', 'max_retries',
-        'balanced', 'ringed', 'seed',
-    )  # fmt: skip
+    _repr_attrs = ('time_limit', 'max_retries', 'seed')
 
     def __init__(
         self,
         time_limit: float,
-        feeder_limit: int | None = None,
-        feeder_exact: bool = False,
         max_retries: int = 10,
-        balanced: bool = False,
-        ringed: bool = False,
         seed: int | None = None,
         verbose: bool = False,
         **kwargs,
@@ -1215,17 +1160,7 @@ class HGSRouter(Router):
 
         Args:
           time_limit: Maximum runtime for a single HGS run (in seconds).
-          feeder_limit: Deprecated (removed in v0.4.0), use the network constraints:
-              maximum number of feeders; the exact number if ``feeder_exact`` or
-              ``balanced`` (balance needs a fixed count). With ``ringed=True``, it
-              counts substation connections (two per ring) and must be even.
-          feeder_exact: Deprecated (removed in v0.4.0), use the network constraints:
-              whether ``feeder_limit`` is the exact number of feeders.
           max_retries: Maximum number of retries if a feasible solution is not found.
-          balanced: Deprecated (removed in v0.4.0), use the network constraints: whether
-              to balance turbines/loads across feeders.
-          ringed: Deprecated (removed in v0.4.0), use the network constraints: whether
-              to produce a RINGED topology (cycles) instead of a radial one.
           seed: Set the seed of the pseudo-random number generator (reproducibility).
           verbose: Print the HGS-CVRP log while it runs (single substation only).
           **kwargs: Options common to all routers (see :class:`Router`).
@@ -1236,30 +1171,9 @@ class HGSRouter(Router):
         """
         # Call the base class initialization
         super().__init__(**kwargs)
-        legacy = [
-            name
-            for name, value in (
-                ('feeder_limit', feeder_limit is not None),
-                ('feeder_exact', feeder_exact),
-                ('balanced', balanced),
-                ('ringed', ringed),
-            )
-            if value
-        ]
-        if legacy:
-            _warn_deprecated_options('HGSRouter', legacy)
-            if feeder_exact and feeder_limit is None:
-                raise ValueError('feeder_exact=True requires feeder_limit to be set.')
-            self._legacy_constraints = legacy_constraints(
-                feeder_limit, feeder_exact, balanced, ringed
-            )
         self.time_limit = time_limit
         self.verbose = verbose
         self.max_retries = max_retries
-        self.feeder_limit = feeder_limit
-        self.feeder_exact = feeder_exact
-        self.balanced = balanced
-        self.ringed = ringed
         self.seed = seed
 
     def route(
@@ -1336,7 +1250,6 @@ class MILPRouter(Router):
         time_limit: float,
         mip_gap: float,
         solver_options: dict | None = None,
-        model_options: Mapping[str, Any] | None = None,
         warmup: bool = True,
         warmup_time: float = 0.2,
         verbose: bool = False,
@@ -1351,8 +1264,6 @@ class MILPRouter(Router):
           time_limit: Maximum runtime (seconds).
           mip_gap: Relative MIP optimality gap tolerance.
           solver_options: Extra solver-specific options.
-          model_options: Deprecated (removed in v0.4.0), use the network constraints:
-            options for the MILP model (see :class:`~optiwindnet.MILP.ModelOptions`).
           warmup: Whether to warm-start the model. When ``True`` (the default), the
               solver is primed with an available solution -- the one carried across
               successive :meth:`WindFarmNetwork.optimize` calls, or one built by a
@@ -1372,12 +1283,6 @@ class MILPRouter(Router):
         self.mip_gap = mip_gap
         self.solver_name = solver_name
         self.solver_options = solver_options or {}
-        self.model_options = model_options
-        if model_options is not None:
-            # a ModelOptions warned of its deprecation when it was made
-            if not isinstance(model_options, ModelOptions):
-                _warn_deprecated_options('MILPRouter', ('model_options',))
-            self._legacy_constraints = _constraints_from_options(**model_options)
         self.warmup = warmup
         self.warmup_time = warmup_time
         self.verbose = verbose

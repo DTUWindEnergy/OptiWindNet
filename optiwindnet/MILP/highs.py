@@ -15,9 +15,8 @@ from scipy.sparse import csc_array, csr_array
 
 from ..crossings import _feeder_link_conflicts, edgeset_edgeXing_iter
 from ..identity import fingerprint_function
+from ..types import FeederRoute
 from ._core import (
-    FeederLimit,
-    FeederRoute,
     ModelMetadata,
     NetworkBounds,
     OWNSolutionNotFound,
@@ -171,12 +170,6 @@ def make_min_length_model(
     A: nx.Graph,
     capacity: int,
     bounds: NetworkBounds | None = None,
-    *,
-    topology: Topology | str | None = None,
-    feeder_route: FeederRoute | str | None = None,
-    feeder_limit: FeederLimit | str | None = None,
-    balanced: bool | None = None,
-    max_feeders: int | None = None,
 ) -> tuple[highspy.Highs, ModelMetadata]:
     """Make discrete optimization model over link set A.
 
@@ -188,25 +181,11 @@ def make_min_length_model(
       bounds: topology, feeder route, counts and loads to enforce (see
         :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`); defaults
         to those of ``NetworkConstraints()``
-      topology, feeder_route, feeder_limit, balanced, max_feeders: deprecated (removed
-        in v0.4.0), use ``bounds``: the options of
-        :class:`~optiwindnet.MILP.ModelOptions`
 
     Raises:
       ValueError: the bounds limit the load of the roots of a RINGED model.
     """
-    bounds = model_bounds(
-        A,
-        capacity,
-        bounds,
-        {
-            'topology': topology,
-            'feeder_route': feeder_route,
-            'feeder_limit': feeder_limit,
-            'balanced': balanced,
-            'max_feeders': max_feeders,
-        },
-    )
+    bounds = model_bounds(A, capacity, bounds)
     topology, feeder_route = bounds.topology, bounds.feeder_route
     R = A.graph['R']
     T = A.graph['T']

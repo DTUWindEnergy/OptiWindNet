@@ -14,8 +14,8 @@ from typing import Any, ClassVar
 import networkx as nx
 from bitarray import frozenbitarray
 
+from ..types import FeederRoute
 from ._core import (
-    FeederRoute,
     OWNSolutionNotFound,
     PoolHandler,
     SolutionInfo,

@@ -419,15 +419,11 @@ def hgs_cvrp(
     power_rtol: float = DEFAULT_POWER_RTOL,
     time_limit: float,
     constraints: NetworkConstraints | None = None,
-    vehicles: int | None = None,
-    vehicles_exact: bool = False,
     seed: int | None = None,
     keep_log: bool = False,
     repair: bool = True,
     max_retries: int = 10,
-    balanced: bool = False,
     complete: bool = False,
-    ringed: bool = False,
     log_callback: Callable | None = None,
     warmstart: nx.Graph | None = None,
 ) -> nx.Graph:
@@ -477,12 +473,6 @@ def hgs_cvrp(
     routes HGS-CVRP rejects (over capacity, more routes than the fleet, or, for
     an exact count, a route count other than it).
 
-    The options ``vehicles``, ``vehicles_exact``, ``balanced`` and ``ringed`` are
-    deprecated and will be removed in v0.4.0: they are translated into
-    ``constraints``, which supersedes them, as a maximum route count, or an
-    exact one if ``vehicles_exact`` or ``balanced`` (balance needs a fixed
-    count).
-
     Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
     radial solve without a count fixed above the minimum or balance.
 
@@ -501,16 +491,10 @@ def hgs_cvrp(
         time_limit: [s] solver run time limit
         constraints: topology, counts and loads to keep (defaults to those of
             ``NetworkConstraints(topology='radial')``)
-        vehicles: deprecated (removed in v0.4.0), use ``constraints``: maximum number of
-            routes
-        vehicles_exact: deprecated (removed in v0.4.0), use ``constraints``: whether
-            ``vehicles`` is exact
         seed: random seed for reproducibility
         keep_log: attach solver log to the solution graph
         repair: iteratively fix crossings (default True)
         max_retries: maximum repair iterations
-        balanced: deprecated (removed in v0.4.0), use ``constraints``: balance the route
-            loads
         complete: allow every terminal pair, using Euclidean distances for
             links absent from ``A``. Enabled automatically when ``A`` has no
             edges. Requires ``repair=False`` because mesh-based crossing
@@ -528,7 +512,6 @@ def hgs_cvrp(
         Solution topology S
 
     Raises:
-        TypeError: both ``constraints`` and deprecated options are given.
         NotImplementedError: the bounds ask for straight feeders, for something
             unequal turbine power rules out (see below), or for an odd exact
             feeder count of a root with rings.
@@ -559,8 +542,6 @@ def hgs_cvrp(
         'minimum: rings split by terminal count, the balanced slack nodes are '
         'counted, and clusterize() partitions by count.'
     )
-    if constraints is None and inflow_by_node and (ringed or balanced or R > 1):
-        raise NotImplementedError(unit_inflow_only)
     bounds = resolve_bounds(
         'hgs_cvrp',
         constraints,
@@ -569,10 +550,6 @@ def hgs_cvrp(
         capacity=capacity,
         inflow_total=inflow_total,
         power_per_inflow=power_attrs.get('power_per_inflow'),
-        vehicles=vehicles,
-        vehicles_exact=vehicles_exact,
-        balanced=balanced,
-        ringed=ringed,
         link_length_ub=None if constraints is None else constraints._link_length_ub(A),
     )
     _check_link_length(A, bounds)

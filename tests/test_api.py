@@ -90,14 +90,15 @@ def test_ewrouter_forwards_constructor_options(monkeypatch, feeder_route):
         )(),
     )
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
-    router = EWRouter(
-        method='ringed',
-        maxiter=17,
-        bias_margin=0.25,
-        feeder_route=feeder_route,
-    )
+    router = EWRouter(method='ringed', maxiter=17, bias_margin=0.25)
 
-    router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
+    router.route(
+        solved.P,
+        solved.A,
+        solved.cables,
+        solved.cables_capacity,
+        constraints=NetworkConstraints(topology='ringed', feeder_route=feeder_route),
+    )
 
     assert calls == [
         (
@@ -115,16 +116,16 @@ def test_ewrouter_forwards_constructor_options(monkeypatch, feeder_route):
 
 
 @pytest.mark.parametrize(
-    ('ringed', 'feeder_limit', 'expected_vehicles'),
+    ('ringed', 'feeders', 'expected_groups'),
     [
         (True, 4, 2),
         (False, 3, 3),
-        (True, None, None),
-        (False, None, None),
+        (True, 'min', None),
+        (False, 'min', None),
     ],
 )
 def test_hgsrouter_forwards_low_level_options(
-    monkeypatch, ringed, feeder_limit, expected_vehicles
+    monkeypatch, ringed, feeders, expected_groups
 ):
     solved = tiny_wfn()
     captured = {}
@@ -143,18 +144,17 @@ def test_hgsrouter_forwards_low_level_options(
         )(),
     )
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
-    router = HGSRouter(
-        time_limit=0.4,
-        feeder_limit=feeder_limit,
-        # an exact count needs a count
-        feeder_exact=feeder_limit is not None,
-        max_retries=7,
-        balanced=True,
-        ringed=ringed,
-        seed=11,
-    )
+    router = HGSRouter(time_limit=0.4, max_retries=7, seed=11)
 
-    router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
+    router.route(
+        solved.P,
+        solved.A,
+        solved.cables,
+        solved.cables_capacity,
+        constraints=NetworkConstraints(
+            topology='ringed' if ringed else 'radial', feeders=feeders, balanced=True
+        ),
+    )
 
     constraints = captured.pop('constraints')
     bounds = constraints.resolve(solved.A, capacity=solved.cables_capacity)
@@ -170,8 +170,8 @@ def test_hgsrouter_forwards_low_level_options(
     assert bounds.balanced
     # balanced: the count is exact, the minimum unless given
     assert bounds.groups_lb == bounds.groups_ub
-    if expected_vehicles is not None:
-        assert bounds.groups_lb == expected_vehicles
+    if expected_groups is not None:
+        assert bounds.groups_lb == expected_groups
 
 
 @pytest.mark.parametrize(
@@ -243,10 +243,15 @@ def test_hgsrouter_forwards_warmstart_of_matching_topology(
         )(),
     )
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
-    router = HGSRouter(time_limit=0.1, ringed=ringed)
+    router = HGSRouter(time_limit=0.1)
 
     router.route(
-        solved.P, solved.A, solved.cables, solved.cables_capacity, S_warm=S_warm
+        solved.P,
+        solved.A,
+        solved.cables,
+        solved.cables_capacity,
+        S_warm=S_warm,
+        constraints=NetworkConstraints(topology='ringed' if ringed else 'radial'),
     )
 
     assert captured['warmstart'] is (S_warm if forwarded else None)
@@ -287,14 +292,15 @@ def test_hgsrouter_solves_cold_when_the_warmstart_is_unusable(monkeypatch, caplo
 
 
 def test_hgsrouter_reoptimization_survives_a_tighter_feeder_limit():
-    two_feeders = HGSRouter(
-        time_limit=0.1, feeder_limit=2, feeder_exact=True, balanced=True, seed=0
-    )
-    wfn = tiny_wfn(router=two_feeders)
+    router = HGSRouter(time_limit=0.1, seed=0)
+    wfn = tiny_wfn(optimize=False)
+    wfn.constraints = NetworkConstraints(feeders=2, balanced=True)
+    wfn.optimize(router=router)
     assert wfn.S.degree[-1] == 2
 
     # the carried solution has more routes than the new fleet allows
-    wfn.optimize(router=HGSRouter(time_limit=0.1, feeder_limit=1, seed=0))
+    wfn.constraints = NetworkConstraints(max_feeders=1)
+    wfn.optimize(router=router)
 
     assert wfn.S.degree[-1] == 1
 
@@ -316,9 +322,9 @@ def test_hgsrouter_reoptimization_is_warm_started(monkeypatch):
     assert warmstarts[0] is S_first
 
 
-def test_hgsrouter_rejects_odd_ringed_feeder_limit():
+def test_ringed_constraints_reject_an_odd_feeder_count():
     with pytest.raises(ValueError, match='even number of feeders'):
-        HGSRouter(time_limit=0.4, feeder_limit=3, ringed=True)
+        NetworkConstraints(topology='ringed', feeders=3)
 
 
 @pytest.mark.parametrize(
@@ -564,13 +570,6 @@ def test_from_own_yaml_loads_own_yaml_file():
 
         assert wfn.L.graph['T'] == 12
         assert wfn.L.graph['R'] == 1
-
-
-def test_deprecated_from_yaml_warns():
-    with pytest.warns(DeprecationWarning, match='from_own_yaml'):
-        wfn = WindFarmNetwork.from_yaml(str(_LOCATION_FILE), cables=4)
-
-    assert wfn.L.graph['T'] == 12
 
 
 def test_from_own_yaml_missing_path(tmp_path):
@@ -853,13 +852,29 @@ def test_S_and_G_raise_before_optimize():
     'router',
     [
         EWRouter(),
-        EWRouter(feeder_route='straight'),
         HGSRouter(time_limit=0.5, seed=0),
-        HGSRouter(time_limit=0.5, feeder_limit=1, max_retries=3, balanced=True, seed=0),
     ],
 )
-def test_wfn_inexact_routers_smoke(router):
+@pytest.mark.parametrize(
+    'constraints',
+    [
+        NetworkConstraints(),
+        NetworkConstraints(feeder_route='straight'),
+        NetworkConstraints(feeders='min', balanced=True),
+    ],
+    ids=('free', 'straight', 'balanced'),
+)
+def test_wfn_inexact_routers_smoke(router, constraints):
     wfn = tiny_wfn()
+    wfn.constraints = constraints
+    if isinstance(router, EWRouter) and constraints.balanced:
+        with pytest.raises(NotImplementedError, match='HGSRouter or MILPRouter'):
+            wfn.optimize(router=router)
+        return
+    if isinstance(router, HGSRouter) and constraints.feeder_route.value == 'straight':
+        with pytest.raises(NotImplementedError, match='straight'):
+            wfn.optimize(router=router)
+        return
     terse = wfn.optimize(router=router)
     assert len(terse) == wfn.S.graph['T']
 
@@ -1033,23 +1048,6 @@ def test_ewrouter_follows_the_topology(topology, method, expected):
 def test_ewrouter_method_must_suit_the_topology():
     wfn = _neart_wfn(EWRouter(method='ringed'), NetworkConstraints())
     with pytest.raises(ValueError, match="'ringed' builds ringed networks"):
-        wfn.optimize()
-
-
-@pytest.mark.parametrize(
-    'router',
-    [
-        lambda: EWRouter(feeder_route='straight'),
-        lambda: HGSRouter(time_limit=0.1, ringed=True),
-        lambda: MILPRouter(
-            solver_name='highs', time_limit=1, mip_gap=0.1, model_options={}
-        ),
-    ],
-)
-def test_deprecated_router_options_conflict_with_network_constraints(router):
-    with pytest.warns(DeprecationWarning, match='constraints=NetworkConstraints'):
-        wfn = _neart_wfn(router(), NetworkConstraints())
-    with pytest.raises(TypeError, match='drop those options'):
         wfn.optimize()
 
 

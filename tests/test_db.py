@@ -5,7 +5,7 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from optiwindnet.api import HGSRouter, WindFarmNetwork
+from optiwindnet.api import HGSRouter, NetworkConstraints, WindFarmNetwork
 from optiwindnet.converting import S_from_G
 from optiwindnet.db import (
     G_from_routeset,
@@ -187,8 +187,12 @@ def test_G_from_routeset_ringed(tmp_path, locations):
         # capacity 5 yields both rings (split zero-load links) and detour clones, so
         # this exercises the ring route-sequence together with the clone nodes.
         capacity = 5
-        wfn = WindFarmNetwork(cables=capacity, L=locations.albatros)
-        wfn.optimize(router=HGSRouter(time_limit=0.5, ringed=True, seed=0))
+        wfn = WindFarmNetwork(
+            cables=capacity,
+            L=locations.albatros,
+            constraints=NetworkConstraints(topology='ringed'),
+        )
+        wfn.optimize(router=HGSRouter(time_limit=0.5, seed=0))
         G = wfn.G
         T = G.graph['T']
         C, D = (G.graph.get(k) or 0 for k in 'CD')

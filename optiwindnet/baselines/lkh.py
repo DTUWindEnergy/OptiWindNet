@@ -1095,18 +1095,15 @@ def lkh3(
     power_rtol: float = DEFAULT_POWER_RTOL,
     time_limit: float,
     constraints: NetworkConstraints | None = None,
-    vehicles: int | None = None,
     seed: int | None = None,
     keep_log: bool = False,
     repair: bool = True,
     max_retries: int = 10,
-    balanced: bool = False,
     scale: float = 1e5,
     runs: int = 50,
     per_run_limit: float = 15.0,
     precision: int = 1000,
     complete: bool = False,
-    ringed: bool = False,
     warmstart: nx.Graph | None = None,
 ) -> nx.Graph:
     """Solve the O/CVRP using LKH-3 with links from ``A``.
@@ -1151,11 +1148,6 @@ def lkh3(
     single route, which is offered enough routes to use as many as lower the
     cable length (within the root's own limit).
 
-    The options ``vehicles``, ``balanced`` and ``ringed`` are deprecated and
-    will be removed in v0.4.0: they are translated into ``constraints``, which
-    supersedes them, as a maximum route count, or an exact one if ``balanced``
-    (balance needs a fixed count).
-
     Unequal turbine power (nonunitary inflow) is only honoured by a single-root,
     radial solve without a count fixed above the minimum or balance.
 
@@ -1191,14 +1183,10 @@ def lkh3(
         time_limit: [s] solver run time limit (per cluster).
         constraints: topology, counts and loads to keep (defaults to those of
             ``NetworkConstraints(topology='radial')``)
-        vehicles: deprecated (removed in v0.4.0), use ``constraints``: maximum number of
-            routes
         seed: random seed for reproducibility (if None, picks a random one).
         keep_log: attach solver log to the solution graph.
         repair: iteratively fix crossings (default True).
         max_retries: maximum repair iterations.
-        balanced: deprecated (removed in v0.4.0), use ``constraints``: balance the route
-            loads
         scale: factor to scale lengths (LKH manual).
         runs: number of LKH runs (LKH manual).
         per_run_limit: [s] LKH per-run time limit.
@@ -1213,13 +1201,11 @@ def lkh3(
         warmstart: solution topology S (radial, or ringed for a RINGED topology)
             to seed the search and, for multi-root instances, to cluster the
             terminals
-        ringed: deprecated (removed in v0.4.0), use ``constraints``: solve for rings
 
     Returns:
         Solution topology S.
 
     Raises:
-        TypeError: both ``constraints`` and deprecated options are given.
         NotImplementedError: the bounds ask for straight feeders, for
             something unequal turbine power rules out (see above), or for an
             odd exact feeder count of a root with rings.
@@ -1250,8 +1236,6 @@ def lkh3(
         "LKH-3's route-size bounds count nodes, and clusterize() partitions "
         'by count.'
     )
-    if constraints is None and inflow_by_node and (ringed or balanced or R > 1):
-        raise NotImplementedError(unit_inflow_only)
     bounds = resolve_bounds(
         'lkh3',
         constraints,
@@ -1260,10 +1244,6 @@ def lkh3(
         capacity=capacity,
         inflow_total=inflow_total,
         power_per_inflow=power_attrs.get('power_per_inflow'),
-        vehicles=vehicles,
-        vehicles_exact=False,
-        balanced=balanced,
-        ringed=ringed,
         link_length_ub=None if constraints is None else constraints._link_length_ub(A),
     )
     _check_link_length(A, bounds)

@@ -556,10 +556,28 @@ def test_producers_record_the_quantization_on_S():
     ('producer', 'kwargs'),
     (
         (constructor, {}),
-        (hgs_cvrp, {'ringed': True, 'time_limit': 0.1}),
-        (hgs_cvrp, {'balanced': True, 'time_limit': 0.1}),
-        (lkh3, {'ringed': True, 'time_limit': 0.1}),
-        (lkh3, {'balanced': True, 'time_limit': 0.1}),
+        (
+            hgs_cvrp,
+            {'constraints': NetworkConstraints(topology='ringed'), 'time_limit': 0.1},
+        ),
+        (
+            hgs_cvrp,
+            {
+                'constraints': NetworkConstraints(feeders=2, balanced=True),
+                'time_limit': 0.1,
+            },
+        ),
+        (
+            lkh3,
+            {'constraints': NetworkConstraints(topology='ringed'), 'time_limit': 0.1},
+        ),
+        (
+            lkh3,
+            {
+                'constraints': NetworkConstraints(feeders=2, balanced=True),
+                'time_limit': 0.1,
+            },
+        ),
     ),
 )
 def test_heuristics_reject_unsupported_modes_with_unequal_power(producer, kwargs):

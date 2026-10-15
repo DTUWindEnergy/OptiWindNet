@@ -3,7 +3,6 @@
 
 import logging
 import math
-import warnings
 from collections.abc import Callable, Sequence
 from itertools import pairwise
 from typing import cast
@@ -692,7 +691,6 @@ def turbinate(
     root_clearance: float | None = None,
     plot: bool = False,
     max_iter: int = 100_000,
-    rounds: int | None = None,
     single_run: bool = False,
 ) -> nx.Graph:
     """Fills the location ``L`` with ``T`` turbines spaced at least ``d`` apart.
@@ -710,21 +708,11 @@ def turbinate(
       root_clearance: minimum spacing from turbine to substation (if not given,
         ``d`` is used)
       max_iter: total placement iteration budget.
-      rounds: deprecated multiplier for ``max_iter``.
       single_run: whether to disable adaptive restarts.
 
     Returns:
       A location with randomly placed turbines (the number may be lower than T)
     """
-    if rounds is not None:
-        warnings.warn(
-            'turbinate(rounds=...) is deprecated, pass a higher max_iter '
-            'instead. Increasing max_iter to max_iter*rounds.',
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        max_iter *= rounds
-
     VertexC = L.graph['VertexC']
     border = L.graph['border']
     R = L.graph['R']

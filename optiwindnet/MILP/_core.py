@@ -6,22 +6,16 @@ import logging
 import math
 import os
 import sys
-import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import asdict, dataclass, field, replace
-from enum import StrEnum, auto
+from dataclasses import asdict, dataclass, field
 from fractions import Fraction
-from inspect import cleandoc
-from itertools import chain
 from pathlib import Path
-from textwrap import indent
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import networkx as nx
 import numpy as np
 from bitarray import bitarray, frozenbitarray
-from makefun import with_signature
 
 from ..constraints import NetworkBounds, NetworkConstraints, _check_link_length
 from ..converting import G_from_S, S_from_linkbits
@@ -37,7 +31,7 @@ from ..loads import (
     validate_terminal_power,
 )
 from ..pathfinding import PathFinder
-from ..types import FeederRoute, OWNWarmupFailed, Topology
+from ..types import OWNWarmupFailed, Topology
 
 _lggr = logging.getLogger(__name__)
 error, info, warn = _lggr.error, _lggr.info, _lggr.warning
@@ -84,134 +78,28 @@ class OWNSolutionNotFound(Exception):
     pass
 
 
-class FeederLimit(StrEnum):
-    """Whether to limit the number of feeders. Both ``'specified'`` (an upper
-    bound) and ``'exactly'`` (an exact count) require the additional kwarg
-    ``'max_feeders'``. Option ``'balanced'`` is only enforceable if the feeder
-    count is pinned to a single value, i.e. ``'minimum'`` or ``'exactly'``.
-
-    Nonunitary terminal inflow rule out ``'minimum'`` and the ``'min_plus*'`` modes,
-    whose bounds come from a minimum feeder count that indivisible terminal
-    inflow may not reach.
-    """
-
-    UNLIMITED = auto()
-    EXACTLY = auto()
-    SPECIFIED = auto()
-    MINIMUM = auto()
-    MIN_PLUS1 = auto()
-    MIN_PLUS2 = auto()
-    MIN_PLUS3 = auto()
-    DEFAULT = UNLIMITED
-
-
 _Link = tuple[int, int]
-
-_FEEDER_LIMITS_FROM_MINIMUM = (
-    FeederLimit.MINIMUM, FeederLimit.MIN_PLUS1,
-    FeederLimit.MIN_PLUS2, FeederLimit.MIN_PLUS3,
-)  # fmt: skip
-
-
-def _constraints_from_options(
-    topology: Topology | str = Topology.DEFAULT,
-    feeder_route: FeederRoute | str = FeederRoute.DEFAULT,
-    feeder_limit: FeederLimit | str = FeederLimit.DEFAULT,
-    balanced: bool = False,
-    max_feeders: int = 0,
-) -> NetworkConstraints:
-    """Translate the options of :class:`ModelOptions` into network constraints.
-
-    ``'min_plus<k>'`` adds ``k`` subtrees or rings to the minimum (``2 * k``
-    feeders if RINGED). For compatibility with :class:`ModelOptions`, the
-    constraints drop an unenforceable ``balanced`` (the feeder count not fixed)
-    with a warning instead of raising.
-    """
-    topology, feeder_limit = Topology(topology), FeederLimit(feeder_limit)
-    per_group = 2 if topology is Topology.RINGED else 1
-    feeders: int | str | None = None
-    most_feeders: int | str | None = None
-    if feeder_limit is FeederLimit.EXACTLY:
-        feeders = max_feeders
-    elif feeder_limit is FeederLimit.SPECIFIED:
-        most_feeders = max_feeders
-    elif feeder_limit is FeederLimit.MINIMUM:
-        feeders = 'min'
-    elif feeder_limit in _FEEDER_LIMITS_FROM_MINIMUM:
-        most_feeders = f'min+{per_group * int(feeder_limit.value[-1])}'
-    return _OptionsConstraints(
-        topology=topology,
-        feeder_route=feeder_route,
-        feeders=feeders,
-        max_feeders=most_feeders,
-        balanced=balanced,
-    )
-
-
-class _OptionsConstraints(NetworkConstraints):
-    """Network constraints translated from :class:`ModelOptions`.
-
-    They resolve an unenforceable balance (a feeder count that is not fixed)
-    into no balance, with a warning, instead of raising.
-    """
-
-    def __repr__(self) -> str:
-        # it stands for the NetworkConstraints that the options translate into
-        return 'NetworkConstraints' + super().__repr__().removeprefix(
-            type(self).__qualname__
-        )
-
-    def _resolve(self, **kwargs) -> NetworkBounds:
-        if not self.balanced or self.feeders is not None:
-            return super()._resolve(**kwargs)
-        bounds = replace(self, balanced=False)._resolve(**kwargs)
-        if bounds.feeders_lb == bounds.feeders_ub:
-            return super()._resolve(**kwargs)
-        warn(
-            'Model option <balanced = True> requires a single possible feeder '
-            'count, but the feeder limit allows a range: model will not enforce '
-            "balanced subtrees. For an exact count, give feeder_limit='exactly' or "
-            'constraints=NetworkConstraints(feeders=..., balanced=True).'
-        )
-        return bounds
 
 
 def model_bounds(
-    A: nx.Graph,
-    capacity: int,
-    bounds: NetworkBounds | None,
-    legacy: Mapping[str, Any],
+    A: nx.Graph, capacity: int, bounds: NetworkBounds | None
 ) -> NetworkBounds:
     """Return the bounds a model builder enforces.
 
-    ``legacy`` holds the builder's deprecated keyword arguments (the options of
-    :class:`ModelOptions`), of which only those not ``None`` count. Without
-    ``bounds`` or ``legacy`` options, the defaults of
+    Without ``bounds``, the defaults of
     :class:`~optiwindnet.constraints.NetworkConstraints` apply.
 
     Raises:
-      TypeError: both ``bounds`` and ``legacy`` options are given.
       ValueError: the bounds limit the load of the roots of a RINGED model, whose
         rings may connect to two roots.
     """
-    given = {key: value for key, value in legacy.items() if value is not None}
     if bounds is None:
-        if given:
-            warnings.warn(
-                f'make_min_length_model() options {sorted(given)} are deprecated and '
-                'will be removed in v0.4.0: pass '
-                'bounds=NetworkConstraints(...).resolve(A, capacity=...) instead.',
-                DeprecationWarning,
-                stacklevel=3,
-            )
-        bounds = _constraints_from_options(**given)._resolve(
+        bounds = NetworkConstraints()._resolve(
             T=A.graph['T'],
             R=A.graph['R'],
             capacity=capacity,
             inflow_total=total_inflow(A),
         )
-    elif given:
-        raise TypeError(f'Give either bounds or the options {sorted(given)}.')
     if bounds.topology is Topology.RINGED and bounds.root_load_ub is not None:
         raise ValueError(
             'Substation load limits are not available for RINGED MILP models: '
@@ -292,148 +180,6 @@ def balance_bounds(
         lb if lb is not None and lb > 1 else None,
         ub if ub is not None and ub < capacity else None,
     )
-
-
-class ModelOptions(dict):
-    """Hold options for the modelling of the cable routing problem.
-
-    Deprecated (removed in v0.4.0), and constructing one warns: superseded by
-    :class:`~optiwindnet.constraints.NetworkConstraints`, which
-    :meth:`to_constraints` translates the options into.
-
-    Use ModelOptions.help() to get the options and their permitted and default
-    values. Use ModelOptions() without any parameters to use the defaults.
-    """
-
-    hints: ClassVar[dict[str, type]] = {
-        _identifier_from_class_name(kind): kind
-        for kind in (Topology, FeederRoute, FeederLimit)
-    }
-    # this has to be kept in sync with make_min_length_model()
-    simple: ClassVar[dict[str, tuple]] = {
-        'balanced': (
-            bool,
-            False,
-            (
-                'Whether to enforce balanced subtrees (subtree loads differ at most '
-                'by one unit).'
-            ),
-        ),
-        'max_feeders': (
-            int,
-            0,
-            (
-                'Number of feeders: the maximum if <feeder_limit = "specified">, '
-                'the exact count if <feeder_limit = "exactly">'
-            ),
-        ),
-    }
-
-    # `with_signature` rewrites `__init__` at import time so that `help()`,
-    # `inspect.signature` and IDE introspection show the real options. Type
-    # checkers cannot follow that, so the same signature is declared statically
-    # under TYPE_CHECKING -- keep the two in sync (they are both derived from
-    # `hints` and `simple`).
-    if TYPE_CHECKING:
-
-        def __init__(
-            self,
-            *,
-            topology: Topology | str = ...,
-            feeder_route: FeederRoute | str = ...,
-            feeder_limit: FeederLimit | str = ...,
-            balanced: bool = ...,
-            max_feeders: int = ...,
-        ) -> None: ...
-    else:
-
-        @with_signature(
-            '__init__(self, *, '
-            + ', '.join(
-                chain(
-                    (
-                        f'{k}: {v.__name__} = "{v.DEFAULT.value}"'
-                        for k, v in hints.items()
-                    ),
-                    (
-                        f'{name}: {kind.__name__} = {default}'
-                        for name, (kind, default, _) in simple.items()
-                    ),
-                )
-            )
-            + ')'
-        )
-        def __init__(self, **kwargs):
-            warnings.warn(
-                'ModelOptions is deprecated and will be removed in v0.4.0: give the '
-                'network (or set_problem()) constraints=NetworkConstraints(...) '
-                'instead.',
-                DeprecationWarning,
-                stacklevel=3,
-            )
-            # dispatch on the key, not on the value's type: a str passed for an
-            # int option is a type error, not an enum to look up
-            for k, v in kwargs.items():
-                kind = self.hints.get(k)
-                if kind is not None:
-                    kwargs[k] = kind(v)
-                else:
-                    expected = self.simple[k][0]
-                    if not isinstance(v, expected):
-                        raise TypeError(
-                            f'{k} must be {expected.__name__}, got '
-                            f'{type(v).__name__}: {v!r}'
-                        )
-
-            super().__init__(kwargs)
-
-    # Options are a value object: every value is coerced and every key is
-    # present once __init__ returns, and the whole library reads them on that
-    # basis (`is Topology.RINGED` is false for a plain 'ringed' str). Mutating
-    # the mapping afterwards would bypass the coercion, so it is refused --
-    # build a new instance instead.
-    def _immutable(self, *args, **kwargs):
-        raise TypeError(
-            f'{type(self).__name__} is immutable: construct a new one instead of '
-            'modifying it in place'
-        )
-
-    __setitem__ = __delitem__ = __ior__ = _immutable
-    clear = pop = popitem = setdefault = update = _immutable
-
-    @classmethod
-    def _from_pickle(cls, values):
-        # restoring options is not a new use of them
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', DeprecationWarning)
-            return cls(**values)
-
-    def __reduce__(self):
-        return type(self)._from_pickle, (dict(self),)
-
-    def to_constraints(self) -> NetworkConstraints:
-        """Translate the options into network constraints.
-
-        ``feeder_limit='min_plus<k>'`` becomes ``max_feeders='min+<k>'``, with
-        ``k`` doubled for RINGED (a ring has two feeders). An unenforceable
-        ``balanced`` is dropped with a warning.
-        """
-        return _constraints_from_options(**self)
-
-    @classmethod
-    def help(cls):
-        for k, v in cls.hints.items():
-            doc = indent(cleandoc(v.__doc__ or ''), '    ')
-            print(
-                f'{k} in {{'
-                + ', '.join(
-                    f'"{m}"' for n, m in v.__members__.items() if n != 'DEFAULT'
-                )
-                + f'}} default: {cls.hints[k].DEFAULT.value}\n'
-                f'{doc}\n'
-            )
-        for name, (kind, default, desc) in cls.simple.items():
-            print(f'{name} [{kind.__name__}] default: {default}\n    {desc}\n')
 
 
 def canonical_linksets(
@@ -756,7 +502,6 @@ class Solver(abc.ABC):
         A: nx.Graph,
         *,
         constraints: NetworkConstraints | None = None,
-        model_options: Mapping[str, Any] | None = None,
         capacity: int | None = None,
         capacity_nominal: float | Fraction | None = None,
         power_rtol: float = DEFAULT_POWER_RTOL,
@@ -769,8 +514,6 @@ class Solver(abc.ABC):
           A: available links for the location
           constraints: network constraints (defaults to
             ``NetworkConstraints()``)
-          model_options: deprecated (removed in v0.4.0), use ``constraints``: tree
-            properties - see ModelOptions.help()
           capacity: maximum inflow of a subtree
           capacity_nominal: maximum power of a subtree, instead of ``capacity``
             (see :func:`~optiwindnet.loads.quantized`)
@@ -778,24 +521,11 @@ class Solver(abc.ABC):
           warmstart: initial feasible solution to pass to solver
 
         Raises:
-          TypeError: both ``constraints`` and ``model_options`` are given.
           ValueError: the constraints do not suit the problem (see
             :meth:`~optiwindnet.constraints.NetworkConstraints.resolve`).
           OWNWarmupFailed: ``warmstart`` has a link over the link length limit.
         """
-        if model_options is not None:
-            if constraints is not None:
-                raise TypeError('Give either constraints or model_options, not both.')
-            # a ModelOptions warned of its deprecation when it was made
-            if not isinstance(model_options, ModelOptions):
-                warnings.warn(
-                    'set_problem(model_options=...) is deprecated and will be removed '
-                    'in v0.4.0: pass constraints=NetworkConstraints(...) instead.',
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-            constraints = _constraints_from_options(**model_options)
-        elif constraints is None:
+        if constraints is None:
             constraints = NetworkConstraints()
         A, self.capacity, self._power_attrs = quantized(
             A,

@@ -326,22 +326,6 @@ def test_initial_tours_open_the_routes_with_slack_nodes():
     assert tours == [[6, 1, 8, 2, 3, 9, 4, 5, 7]]
 
 
-def test_lkh3_deprecates_its_count_options(monkeypatch):
-    _capture_do_lkh(monkeypatch, [[[0, 1, 2], [3, 4]]])
-    A = _make_A(T=5)
-    with pytest.warns(DeprecationWarning, match='vehicles'):
-        lkh_mod.lkh3(A, capacity=5, time_limit=0.1, vehicles=2, repair=False)
-    with pytest.raises(TypeError, match='either constraints or the options'):
-        lkh_mod.lkh3(
-            A,
-            capacity=2,
-            time_limit=0.1,
-            constraints=NetworkConstraints(),
-            ringed=True,
-            repair=False,
-        )
-
-
 def test_lkh3_does_not_keep_feeders_straight():
     with pytest.raises(NotImplementedError, match='straight'):
         lkh_mod.lkh3(
@@ -609,8 +593,14 @@ def test_lkh3_multi_root_accepts_vehicles_above_min(monkeypatch, caplog):
     monkeypatch.setattr(lkh_mod, '_do_lkh', fake_do_lkh)
     monkeypatch.setattr(lkh_mod, 'repair_routeset_path', lambda S, A, ringed=False: S)
 
-    with pytest.warns(DeprecationWarning, match='vehicles'):
-        lkh_mod.lkh3(A, capacity=2, time_limit=0.1, seed=1, vehicles=4, repair=False)
+    lkh_mod.lkh3(
+        A,
+        capacity=2,
+        time_limit=0.1,
+        seed=1,
+        repair=False,
+        constraints=NetworkConstraints(topology='radial', max_feeders=4),
+    )
     assert 'multi-root' not in caplog.text
 
 
@@ -840,9 +830,19 @@ def test_lkh3_rejects_non_unit_terminal_inflow_it_cannot_honour():
     nx.set_node_attributes(A, {0: 2}, 'inflow')
 
     with pytest.raises(NotImplementedError, match='single-root radial solve'):
-        lkh_mod.lkh3(A, capacity=5, time_limit=1.0, ringed=True)
+        lkh_mod.lkh3(
+            A,
+            capacity=5,
+            time_limit=1.0,
+            constraints=NetworkConstraints(topology='ringed'),
+        )
     with pytest.raises(NotImplementedError, match='single-root radial solve'):
-        lkh_mod.lkh3(A, capacity=5, time_limit=1.0, balanced=True)
+        lkh_mod.lkh3(
+            A,
+            capacity=5,
+            time_limit=1.0,
+            constraints=NetworkConstraints(feeders=3, balanced=True),
+        )
 
     Amr = as_normalized(get_bundle('neart').A.copy())
     nx.set_node_attributes(Amr, {0: 2}, 'inflow')

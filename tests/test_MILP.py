@@ -4,7 +4,6 @@
 import importlib
 import logging
 import math
-import pickle
 from typing import Any, ClassVar
 
 import networkx as nx
@@ -17,7 +16,7 @@ from optiwindnet import MILP
 from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.loads import total_inflow
-from optiwindnet.MILP import ModelOptions, solver_factory
+from optiwindnet.MILP import solver_factory
 from optiwindnet.types import Topology
 
 from .cases import (
@@ -67,13 +66,11 @@ def _toy_bounds(A, capacity=_CAPACITY, **constraints):
     )
 
 
-def _build_toy_ringed_from_bounds_and_options(module_name):
-    """Build the toy RINGED model from bounds, then from the deprecated option.
+def _build_toy_ringed_from_bounds(module_name):
+    """Build the toy RINGED model from bounds.
 
-    Returns ``(ring_vars, stored_the_enum, ring_vars_from_option, warned)``.
+    Returns ``(ring_vars, stored_the_enum)``.
     """
-    import warnings
-
     make_min_length_model = importlib.import_module(module_name).make_min_length_model
     A = get_bundle('toy').A
 
@@ -82,17 +79,7 @@ def _build_toy_ringed_from_bounds_and_options(module_name):
     )
     ring_vars = sum(1 for u, _ in metadata.linkset if u < 0)
     stored_enum = metadata.topology is Topology.RINGED
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter('always')
-        _, metadata = make_min_length_model(A, _CAPACITY, topology='ringed')
-    warned = any(issubclass(w.category, DeprecationWarning) for w in caught)
-    return (
-        ring_vars,
-        stored_enum,
-        sum(1 for u, _ in metadata.linkset if u < 0),
-        warned,
-    )
+    return ring_vars, stored_enum
 
 
 def _build_ringed_and_branched_weighted(module_name):
@@ -1028,7 +1015,9 @@ def _warmup_toy_with(feeders, warm_source):
             as_normalized(A),
             capacity=_CAPACITY,
             time_limit=0.2,
-            vehicles=math.ceil(A.graph['T'] / _CAPACITY),
+            constraints=NetworkConstraints(
+                topology='radial', max_feeders=math.ceil(A.graph['T'] / _CAPACITY)
+            ),
         )
     S_feeders = sum(S.degree[r] for r in range(-A.graph['R'], 0))
     model, metadata = make_min_length_model(
@@ -2006,148 +1995,6 @@ def test_max_feeders_is_an_upper_bound():
 
 
 @pytest.mark.parametrize(
-    ('feeder_limit', 'feeders_ub'),
-    [
-        ('unlimited', None),
-        ('min_plus1', 4),
-        ('min_plus2', 5),
-        ('min_plus3', 6),
-    ],
-)
-def test_model_options_drop_an_unenforceable_balance(caplog, feeder_limit, feeders_ub):
-    with caplog.at_level(logging.WARNING, logger=core.__name__):
-        bounds = core._constraints_from_options(
-            feeder_limit=feeder_limit, balanced=True
-        )._resolve(T=12, R=1, capacity=5)
-        assert _bounds(12, 5, bounds) == (3, feeders_ub, None, None)
-    assert 'will not enforce balanced subtrees' in caplog.text
-
-
-def _model_options(**options):
-    """Construct ModelOptions (removed in v0.4.0), checking that it warns."""
-    with pytest.warns(DeprecationWarning, match='ModelOptions is deprecated'):
-        return ModelOptions(**options)
-
-
-def test_translated_options_read_as_network_constraints():
-    translated = _model_options(
-        topology='ringed', feeder_limit='minimum'
-    ).to_constraints()
-    assert repr(translated) == repr(
-        NetworkConstraints(topology='ringed', feeders='min')
-    )
-
-
-def test_model_options_min_plus_counts_rings():
-    bounds = core._constraints_from_options(
-        topology='ringed', feeder_limit='min_plus1'
-    )._resolve(T=12, R=1, capacity=5)
-    # two rings minimum, plus one ring
-    assert (bounds.groups_lb, bounds.groups_ub) == (2, 3)
-    assert (bounds.feeders_lb, bounds.feeders_ub) == (4, 6)
-
-
-def _resolve_options(R=1, inflow_total=None, **options):
-    # T=12, capacity=5: at least 3 radial subtrees or 2 rings
-    return core._constraints_from_options(**options)._resolve(
-        T=12, R=R, capacity=5, inflow_total=inflow_total
-    )
-
-
-def test_model_options_reject_what_the_constraints_reject():
-    with pytest.raises(ValueError, match='below the minimum'):
-        _resolve_options(feeder_limit='exactly', max_feeders=2)
-    with pytest.raises(ValueError, match='even'):
-        _resolve_options(topology='ringed', feeder_limit='exactly', max_feeders=5)
-    with pytest.raises(ValueError, match='relative to the minimum'):
-        _resolve_options(inflow_total=14, feeder_limit='minimum')
-
-
-# --------------------------------------------------------------------------- #
-# ModelOptions is the contract: coerced on the way in, frozen thereafter
-# --------------------------------------------------------------------------- #
-def test_model_options_coerces_strings_to_enums():
-    opts = _model_options(topology='ringed', feeder_limit='minimum')
-    assert opts['topology'] is core.Topology.RINGED
-    assert opts['feeder_limit'] is core.FeederLimit.MINIMUM
-
-
-def test_model_options_materializes_every_default():
-    assert set(_model_options()) == {
-        'topology', 'feeder_route', 'feeder_limit', 'balanced', 'max_feeders',
-    }  # fmt: skip
-
-
-@pytest.mark.parametrize(
-    ('kwargs', 'expected'),
-    [
-        ({'max_feeders': '3'}, 'max_feeders must be int'),
-        ({'balanced': 'yes'}, 'balanced must be bool'),
-    ],
-)
-def test_model_options_rejects_wrong_scalar_type(kwargs, expected):
-    """A str for an int option is a type error, not an enum lookup."""
-    with pytest.raises(TypeError, match=expected):
-        _model_options(**kwargs)
-
-
-@pytest.mark.parametrize(
-    'mutate',
-    [
-        lambda o: o.__setitem__('topology', 'ringed'),
-        lambda o: o.__delitem__('topology'),
-        lambda o: o.update(topology='ringed'),
-        lambda o: o.pop('topology'),
-        lambda o: o.popitem(),
-        lambda o: o.setdefault('topology', 'ringed'),
-        lambda o: o.clear(),
-    ],
-)
-def test_model_options_is_immutable(mutate):
-    """Mutation would bypass __init__'s coercion, so it is refused."""
-    opts = _model_options()
-    with pytest.raises(TypeError, match='immutable'):
-        mutate(opts)
-    assert opts['topology'] is core.Topology.BRANCHED
-
-
-def test_model_options_pickle_roundtrip_preserves_values_and_immutability():
-    options = _model_options(
-        topology='ringed',
-        feeder_route='straight',
-        feeder_limit='exactly',
-        balanced=True,
-        max_feeders=3,
-    )
-
-    restored = pickle.loads(pickle.dumps(options))
-
-    assert type(restored) is ModelOptions
-    assert restored == options
-    assert restored['topology'] is Topology.RINGED
-    with pytest.raises(TypeError, match='immutable'):
-        restored['balanced'] = False
-
-
-def test_set_problem_takes_deprecated_model_options(P_A_toy):
-    """A plain dict of model options builds the same model as the constraints."""
-    P, A = P_A_toy
-
-    def ring_var_count(**kwargs):
-        solver = solver_factory('highs')
-        solver.set_problem(P, A, capacity=_CAPACITY, **kwargs)
-        assert solver.constraints.topology is Topology.RINGED
-        return sum(1 for u, _ in solver.metadata.linkset if u < 0)
-
-    with pytest.warns(DeprecationWarning, match='model_options'):
-        from_mapping = ring_var_count(model_options={'topology': 'ringed'})
-    from_constraints = ring_var_count(constraints=NetworkConstraints('ringed'))
-    assert from_mapping == from_constraints > 0
-    with pytest.raises(TypeError, match='either constraints or model_options'):
-        ring_var_count(constraints=NetworkConstraints(), model_options={})
-
-
-@pytest.mark.parametrize(
     ('module_name', 'solver_name'),
     [
         ('optiwindnet.MILP.ortools', 'ortools.cp_sat'),
@@ -2157,23 +2004,20 @@ def test_set_problem_takes_deprecated_model_options(P_A_toy):
     ],
     ids=('ortools', 'scip', 'highs', 'pyomo'),
 )
-def test_make_min_length_model_takes_deprecated_options(
+def test_make_min_length_model_builds_rings_from_bounds(
     run_isolated, module_name, solver_name
 ):
-    """The builders take bounds, and still build from the options they replace."""
     result = run_isolated(
-        solver_name, _build_toy_ringed_from_bounds_and_options, (module_name,), 60
+        solver_name, _build_toy_ringed_from_bounds, (module_name,), 60
     )
     if isinstance(result, BaseException):
         if solver_unavailable(result):
             pytest.skip(f'{solver_name} unavailable: {result}')
         raise result
 
-    ring_vars, stored_enum, ring_vars_from_option, warned = result
+    ring_vars, stored_enum = result
     assert ring_vars > 0
     assert stored_enum
-    assert ring_vars_from_option == ring_vars
-    assert warned
 
 
 def test_warmup_model_rejects_an_uncoerced_topology(ortools_worker):
@@ -2187,13 +2031,6 @@ def test_warmup_model_rejects_an_uncoerced_topology(ortools_worker):
         raise result
 
     assert result == 'must be a Topology member'
-
-
-def test_model_options_help(capsys):
-    ModelOptions.help()
-    captured = capsys.readouterr()
-    assert 'topology' in captured.out
-    assert 'feeder_route' in captured.out
 
 
 def test_feeder_bounds_scale_with_total_inflow_not_terminal_count():
@@ -2256,19 +2093,6 @@ def test_milp_builders_refuse_a_ringed_model_of_nonunit_inflow(
             pytest.skip(f'{solver_name} unavailable: {result}')
         raise result
     assert 'RINGED model cannot honour' in result
-
-
-@pytest.mark.parametrize(
-    'feeder_limit', ('minimum', 'min_plus1', 'min_plus2', 'min_plus3')
-)
-def test_model_options_reject_minimum_derived_limits_for_nonunit_inflow(feeder_limit):
-    """ceil(W/κ) ignores that a terminal's inflow cannot be split among feeders."""
-    # three terminals of 2 units each and a capacity of 3: ceil(6/3) = 2 feeders,
-    # yet no two of those terminals fit a single cable, so 3 feeders are needed
-    with pytest.raises(ValueError, match='relative to the minimum'):
-        core._constraints_from_options(feeder_limit=feeder_limit)._resolve(
-            T=3, R=1, capacity=3, inflow_total=6
-        )
 
 
 def test_pool_handler_methods():
@@ -2407,7 +2231,7 @@ def test_ringed_models_refuse_substation_loads():
         T=A.graph['T'], R=A.graph['R'], capacity=_CAPACITY
     )
     with pytest.raises(ValueError, match='not available for RINGED MILP'):
-        core.model_bounds(A, _CAPACITY, bounds, {})
+        core.model_bounds(A, _CAPACITY, bounds)
 
 
 def test_milp_warmstart_keeps_the_substation_limits():
@@ -2425,27 +2249,3 @@ def test_milp_warmstart_keeps_the_substation_limits():
 
     assert S is not None and S.graph['creator'] == 'baselines.hgs'
     assert S.degree[-1] <= 5 and S.nodes[-1]['load'] <= 26
-
-
-def test_model_options_warn_where_they_are_made():
-    import warnings
-
-    from optiwindnet.api import MILPRouter
-
-    with pytest.warns(DeprecationWarning, match='ModelOptions is deprecated'):
-        options = ModelOptions(topology='radial')
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter('always')
-        # made already: neither the router nor unpickling warns again
-        MILPRouter(
-            solver_name='highs', time_limit=1, mip_gap=0.1, model_options=options
-        )
-        pickle.loads(pickle.dumps(options))
-    assert not [w for w in caught if issubclass(w.category, DeprecationWarning)]
-    with pytest.warns(DeprecationWarning, match='MILPRouter options'):
-        MILPRouter(
-            solver_name='highs',
-            time_limit=1,
-            mip_gap=0.1,
-            model_options={'topology': 'radial'},
-        )
