@@ -10,17 +10,19 @@ The graphs these notebooks pass between functions — `L`, `P`, `A`, `S` and `G`
 
 ## Updating code written for v0.3.0
 
-Import graph conversions from `optiwindnet.converting`, load calculations from `optiwindnet.loads`, graph transformations from `optiwindnet.transforming`, validation from `optiwindnet.validating`, compact link encodings from `optiwindnet.terse`, and text descriptions from `optiwindnet.presenting`. Their old `interarraylib` aliases are deprecated and scheduled for removal in v0.4.0. Fingerprinting functions move from `optiwindnet.fingerprint` to `optiwindnet.identity`.
+Import graph conversions from `optiwindnet.converting`, load calculations from `optiwindnet.loads`, graph transformations from `optiwindnet.transforming`, validation from `optiwindnet.validating`, compact link encodings from `optiwindnet.terse`, and text descriptions from `optiwindnet.presenting`; their `interarraylib` aliases are removed. Fingerprinting functions are in `optiwindnet.identity` (the `optiwindnet.fingerprint` module is removed).
 
-Pass every `Solver.set_problem()` argument after `P` and `A` by keyword:
+The producers take the network constraints, cable capacity included, right after their graphs; pass the remaining arguments by keyword:
 
 ```python
-solver.set_problem(P, A, capacity=capacity, constraints=constraints, warmstart=S)
+constraints = NetworkConstraints(capacity=8, topology='radial')
+S = hgs_cvrp(as_normalized(A), constraints, time_limit=2)
+solver.set_problem(P, A, constraints, warmstart=S)
 ```
 
 Use `solver.get_solution()` for the topology and routed graph. The removed `get_incumbent_topology()` method is replaced, for advanced uses that intentionally skip routing, by decoding `solver.incumbent_linkbits` with `S_from_linkbits()`. This recovers connectivity only: restore the topology type, capacity and terminal inflow, then calculate loads before using or validating it. {doc}`/notebooks/lo32_clustering` demonstrates the ringed, unit-inflow case. `SolutionInfo.topology_id` identifies the model incumbent; a solution pool can deliver a different topology after ranking by routed length.
 
-Import `NetworkConstraints` from `optiwindnet.constraints` and pass it as `constraints=` to `Solver.set_problem()` or `hgs_cvrp()`. The backend `make_min_length_model()` functions and `clusterize()` work one level lower, on the `NetworkBounds` that `NetworkConstraints.resolve(A, capacity=...)` returns (with the same capacity arguments as `hgs_cvrp()`). `clusterize()` takes `group_capacity` as its second argument: the most turbines a subtree or a whole ring may hold, so twice the cable capacity for rings.
+Import `NetworkConstraints` from `optiwindnet.constraints`. It gives `constructor()`, `hgs_cvrp()`, `lkh3()`, `Solver.set_problem()` and `clusterize()` the cable capacity, as `capacity` (integer inflow) or `capacity_nominal` (unit of the declared turbine power), along with the topology, feeder route, counts and loads. `constructor()` defaults its method from the topology and takes the feeder route from the constraints, replacing its `straight_feeder_route` option. `clusterize()` derives the most turbines a group may hold from the constraints: twice the cable capacity for rings. The backend `make_min_length_model()` functions work one level lower, on the `NetworkBounds` that `Solver.set_problem()` resolves the constraints to and keeps as `solver.bounds`. A custom `Router` implements `route(P, A, cables, constraints, verbose=False, **kwargs)`, whose constraints carry the capacity of the largest cable.
 
 For power declarations, use `set_terminal_power()` for nominal ratings and `'inflow'` for integer demands. Graphs that used `'power'` for integer demands need that attribute renamed. Imported locations read nominal powers by default; use `read_powers=False` for turbine-count examples, or follow [](/reference/power.md#advanced-api) for nominal capacities and [](/reference/power.md#router-support) for router restrictions.
 

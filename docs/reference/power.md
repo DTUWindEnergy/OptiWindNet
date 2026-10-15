@@ -31,7 +31,7 @@ Supply cable capacities in the units established by [](#power-inputs-and-default
 
 Only the last form supplies prices for reporting a network cost. All built-in routers optimize cable length using the largest capacity, including when prices are supplied. Cable types are assigned afterwards: each link receives the first type in increasing capacity order that can carry its load. Use costs that are nondecreasing with capacity if this is to select the cheapest feasible type. A shorter network need not have a lower cost when its loads require more expensive cables.
 
-In the Advanced API, pass `capacity` (integer inflow) or `capacity_nominal` (declared power units) to the routing function, following [](#quantization-contract), then use `assign_cables()` with `(capacity, linear_cost)` pairs to price the routed result.
+In the Advanced API, give the routing function `NetworkConstraints` with `capacity` (integer inflow) or `capacity_nominal` (declared power units), following [](#quantization-contract), then use `assign_cables()` with `(capacity, linear_cost)` pairs to price the routed result.
 
 _In use:_ {doc}`/notebooks/hi11_data_input` (Network/Router API).
 
@@ -95,14 +95,14 @@ The integer-injection helpers are `nonunit_inflow()` and `total_inflow()`.
 
 ### Quantization contract
 
-`constructor()`, `hgs_cvrp()`, `lkh3()` and `Solver.set_problem()` accept exactly one of these capacity arguments:
+`constructor()`, `hgs_cvrp()`, `lkh3()` and `Solver.set_problem()` take the cable capacity from their `NetworkConstraints`, which hold exactly one of these fields:
 
-| Argument                                  | Requirement on `A`            |
+| Field                                     | Requirement on `A`            |
 | ----------------------------------------- | ----------------------------- |
 | `capacity` (integer inflow)               | No unequal-power declaration. |
 | `capacity_nominal` (declared power units) | A power declaration.          |
 
-These entry points quantize through `quantized(A, *, capacity=None, capacity_nominal=None, power_rtol)`. It validates `A` and returns `(A_solve, capacity, attrs)`, where `A_solve` is a copy of `A` whose terminals carry quantized `inflow` if the powers are unequal. The topology `S` records `power_per_inflow`, `capacity`, `capacity_nominal` and `power_rtol`.
+These entry points quantize through `quantized(A, *, capacity=None, capacity_nominal=None, power_rtol)`, with the tolerance given as their `power_rtol` argument. It validates `A` and returns `(capacity, attrs, inflow)`: the integer capacity, the attributes that record the quantization, and the quantized inflow of each terminal (`None` if every terminal injects one unit). `A` is neither copied nor changed. The topology `S` records `power_per_inflow`, `capacity`, `capacity_nominal` and `power_rtol`.
 
 The underlying `quantize_for_capacity(powers_set, capacity_nominal, power_rtol)` returns `(inflow_by_power, power_per_inflow, capacity)`. It chooses the coarsest exact rational `power_per_inflow` satisfying both rules:
 
