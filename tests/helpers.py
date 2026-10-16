@@ -14,7 +14,6 @@ import numpy as np
 
 from optiwindnet.api import WindFarmNetwork
 from optiwindnet.constraints import NetworkConstraints
-from optiwindnet.converting import _rings_from_S
 from optiwindnet.geometric import is_crossing
 from optiwindnet.loads import _add_ring_to_S
 from optiwindnet.MILP import (
@@ -22,6 +21,7 @@ from optiwindnet.MILP import (
     SolutionInfo,
     solver_factory,
 )
+from optiwindnet.terse import _walk_ring_routes
 
 from .sitecache import get_bundle
 
@@ -101,13 +101,13 @@ def run_milp_solve_with_retry(
     constraints: NetworkConstraints,
     time_limit: float,
     mip_gap: float,
-    warmstart: nx.Graph | None = None,
+    warmstart: nx.DiGraph | None = None,
     retry_on_suboptimal: bool = False,
-) -> tuple[SolutionInfo, nx.Graph, str]:
+) -> tuple[SolutionInfo, nx.DiGraph, str]:
     """Execute solver.solve with retry on failure or non-optimal solve."""
     solve_options = TEST_ONLY_SOLVER_OPTIONS.get(solver_name, {})
 
-    def _single_solve(limit: float) -> tuple[SolutionInfo, nx.Graph, str]:
+    def _single_solve(limit: float) -> tuple[SolutionInfo, nx.DiGraph, str]:
         solver = solver_factory(solver_name)
         solver.set_problem(P, A, constraints, warmstart=warmstart)
         info = solver.solve(time_limit=limit, mip_gap=mip_gap, options=solve_options)
@@ -140,7 +140,7 @@ def run_milp_solve_with_retry(
     return _single_solve(fallback_limit)
 
 
-def solve_milp_case(case: 'MILPCase') -> tuple[SolutionInfo, nx.Graph]:
+def solve_milp_case(case: 'MILPCase') -> tuple[SolutionInfo, nx.DiGraph]:
     """Solve a typed MILP case and return its outcome and routed topology."""
     bundle = get_bundle(case.site)
     info, S, _ = run_milp_solve_with_retry(
@@ -475,12 +475,14 @@ def ringed_S(R, ringspec):
     Every ring here has both feeders on one root; bridging rings are covered by
     the topology encoding tests.
     """
-    S = nx.Graph(R=R, T=sum(len(o) for _, o in ringspec))
+    S = nx.DiGraph(R=R, T=sum(len(o) for _, o in ringspec))
     S.add_nodes_from(range(-R, 0))
     for i, (root, ordered) in enumerate(ringspec):
         _add_ring_to_S(S, (root, root), ordered, subtree=i, A=None)
     for r in range(-R, 0):
-        S.nodes[r]['load'] = sum(S.nodes[n]['load'] for n in S[r])
+        S.nodes[r]['load'] = sum(
+            data['load'] for _, _, data in S.in_edges(r, data=True)
+        )
     # _add_ring_to_S sets every load but leaves the flag to its caller
     S.graph['has_loads'] = True
     S.graph['max_load'] = max(data['load'] for _, _, data in S.edges(data=True))
@@ -488,4 +490,6 @@ def ringed_S(R, ringspec):
 
 
 def ring_sets(S):
-    return {(r, frozenset(o)) for r, o in _rings_from_S(S)}
+    return {
+        ((root, close), frozenset(walk)) for root, walk, close in _walk_ring_routes(S)
+    }

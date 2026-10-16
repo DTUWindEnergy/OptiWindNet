@@ -53,7 +53,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return self._value_map[var.name]
 
-    def _set_model(self, warmstart: nx.Graph | None) -> None:
+    def _set_model(self, warmstart: nx.DiGraph | None) -> None:
         "Build the model, keeping the Gurobi license in use until get_solution()."
         self.solver = pyo.SolverFactory(
             'gurobi_persistent',
@@ -112,7 +112,7 @@ class SolverGurobi(SolverPyomo, PoolHandler):
         # solve() reads the incumbent through here, so the license must stay in use
         return self._read_incumbent_linkbits_from_pool()
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
         if A is None:
             A = self.A
         P = self.P

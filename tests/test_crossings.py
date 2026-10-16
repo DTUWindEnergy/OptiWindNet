@@ -12,12 +12,15 @@ from optiwindnet.crossings import (
     _FEEDER_TOUCH,
     _feeder_intersections,
     _feeder_link_conflicts,
+    _geometry_graph,
     _routeset_polylines,
     edge_crossings,
     find_geometric_crossings,
     find_routeset_crossings,
     get_interferences_list,
 )
+from optiwindnet.loads import calcload
+from optiwindnet.types import Topology
 from optiwindnet.utils import BiMap
 from optiwindnet.validating import validate_routeset
 
@@ -75,7 +78,7 @@ def test_get_interferences_list():
     crossings_1 = get_interferences_list(
         Edge=np.array(G.edges), VertexC=VertexC, fnT=fnT
     )
-    expected = [((0, 12, -1, 11), None)]
+    expected = [((0, 13, -1, 11), None)]
     assert check_interferences(crossings_1, expected)
 
     # with detours
@@ -124,7 +127,7 @@ def test_find_routeset_crossings():
     G.add_edge(-1, 11)
     Xings = find_routeset_crossings(G)
     assert len(Xings) == 1
-    assert set(Xings[0]) == {0, 12, -1, 11}
+    assert set(Xings[0]) == {0, 13, -1, 11}
 
     # with detours
     assert find_routeset_crossings(tiny_wfn(cables=1).G) == []
@@ -147,7 +150,7 @@ def test_validate_routeset():
 def test_validate_routeset_reports_a_disconnected_terminal():
     """Removing a link strands a terminal: reported, not raised."""
     G = tiny_wfn().G
-    G.remove_edge(0, 12)
+    G.remove_edge(13, 0)
 
     violations = validate_routeset(G)
     assert violations
@@ -340,6 +343,7 @@ def test_find_geometric_crossings_reports_degenerate_route():
     crossings = find_geometric_crossings(G)
 
     assert any(crossing['kind'] == 'degenerate' for crossing in crossings)
+    G = nx.DiGraph(G)
     G.graph.update(capacity=1, topology='branched', has_loads=False)
     violations = validate_routeset(G)
     assert any('has degenerate geometry' in violation for violation in violations)
@@ -893,3 +897,23 @@ def test_feeder_link_conflicts_are_conservative_on_longer_chains(frame):
         (2, 5, -1, 3),
     }
     assert not any(row[1] == 3 for row in passovers.tolist())
+
+
+@pytest.mark.parametrize('crossing', (False, True))
+def test_geometric_crossings_fold_singleton_feeder_pairs(crossing):
+    G = nx.DiGraph(
+        T=2,
+        R=2,
+        B=0,
+        capacity=1,
+        topology=Topology.RINGED,
+        VertexC=np.array([(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)]),
+    )
+    for turbine, root in ((0, -2 if crossing else -1), (1, -1 if crossing else -2)):
+        length = np.linalg.norm(G.graph['VertexC'][turbine] - G.graph['VertexC'][root])
+        G.add_edge(turbine, root, length=length, load=1)
+        G.add_edge(root, turbine, length=length, load=0)
+    calcload(G)
+    findings = find_geometric_crossings(G)
+    assert bool(findings) is crossing
+    assert findings == find_geometric_crossings(_geometry_graph(G))

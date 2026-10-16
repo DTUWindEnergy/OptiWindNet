@@ -205,8 +205,8 @@ def _exercise_ortools_retrieval_branch(feeder_route):
     solver.P, solver.A = P, A
     solver.bounds = _fake_bounds(feeder_route=feeder_route)
     calls = []
-    S = nx.Graph(source='best-objective')
-    G = nx.Graph()
+    S = nx.DiGraph(source='best-objective')
+    G = nx.DiGraph()
 
     def investigate(P, A):
         assert P is solver.P
@@ -348,7 +348,7 @@ class _FakePool(core.PoolHandler):
 
     def _investigate_pool(
         self, P: nx.PlanarEmbedding, A: nx.Graph
-    ) -> tuple[nx.Graph, nx.Graph]:
+    ) -> tuple[nx.DiGraph, nx.DiGraph]:
         self.investigations += 1
         raise AssertionError('incumbent retrieval must not investigate the pool')
 
@@ -612,7 +612,7 @@ def test_pool_investigation_ranks_detoured_candidates(
             self.S = S
 
         def create_detours(self):
-            G = nx.Graph()
+            G = nx.DiGraph()
             G.add_edge(0, 1, length=lengths[self.S.graph['candidate']])
             if self.S.graph['candidate'] in undetoured:
                 G.nodes[0]['load'] = 3
@@ -714,7 +714,7 @@ def test_ringed_warmstart_links_conserve_flow(n, bridging):
         flow_=flow_,
         topology=Topology.RINGED,
     )
-    S = nx.Graph(R=R, T=n)
+    S = nx.DiGraph(R=R, T=n)
     S.add_nodes_from(roots)
     _add_ring_to_S(
         S,
@@ -815,6 +815,15 @@ def test_ringed_mip_decoder_uses_linkbits(n, bridging, descending_lengths):
     )
 
     assert_topology(S, Topology.RINGED, bounds.capacity)
+    assert S.is_directed()
+    assert S.number_of_edges() == n + 1
+    assert all('reverse' not in attrs for _, _, attrs in S.edges(data=True))
+
+    def length(u, v):
+        return A[u][v]['length'] if min(u, v) >= 0 else 10.0
+
+    nx.set_edge_attributes(S, {edge: length(*edge) for edge in S.edges}, 'length')
+    assert S.size(weight='length') == sum(length(*link) for link in active_links)
     active_edges = {frozenset(link) for link in active_links}
     assert S.graph['_linkbits'] == frozenbitarray(
         frozenset(link) in active_edges for link in E + stars
@@ -881,7 +890,7 @@ def test_forest_mip_decoder_derives_loads_from_terminal_inflow(topology, inflow)
     assert S.nodes[-1]['load'] == inflow0 + inflow1 + inflow2
     assert S.graph['max_load'] == inflow0 + inflow1 + inflow2
     for (u, v), load in flows.items():
-        assert S[u][v] == {'load': load, 'reverse': u < v}
+        assert S[u][v] == {'load': load}
         expected = {'load': load, 'subtree': 0}
         if inflow is not None and inflow[u] != 1:
             expected['inflow'] = inflow[u]
@@ -1284,7 +1293,7 @@ def test_pyomo_solution_retrieval_glue(monkeypatch, module_name, class_name, P_A
     module = importlib.import_module(module_name)
     solver = object.__new__(getattr(module, class_name))
     P, A = P_A_toy
-    S, G_tentative, G = nx.Graph(), nx.Graph(), nx.Graph()
+    S, G_tentative, G = nx.DiGraph(), nx.Graph(), nx.Graph()
     available = A
     solver.P, solver.A = P, A
     solver.bounds = _fake_bounds()
@@ -1323,7 +1332,7 @@ def test_pool_backend_solution_retrieval_branches(
     module = importlib.import_module(module_name)
     solver = object.__new__(getattr(module, class_name))
     P, A = P_A_toy
-    S, G_tentative, G = nx.Graph(), nx.Graph(), nx.Graph()
+    S, G_tentative, G = nx.DiGraph(), nx.Graph(), nx.Graph()
     calls = []
     available = A
     solver.P, solver.A = P, A
@@ -1423,7 +1432,7 @@ def _solve_toy_balanced(solver_name, max_feeders):
     solver.solve(time_limit=_RUNTIME, mip_gap=_GAP)
     S, _ = solver.get_solution()
     R = S.graph['R']
-    return sorted(S.nodes[t]['load'] for r in range(-R, 0) for t in S.neighbors(r))
+    return sorted(S.nodes[t]['load'] for r in range(-R, 0) for t in S.predecessors(r))
 
 
 @pytest.mark.parametrize('solver_name', ['ortools.cp_sat', 'highs', 'scip'])

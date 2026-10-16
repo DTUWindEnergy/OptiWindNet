@@ -18,12 +18,13 @@ from scipy.stats import rankdata
 from .crossings import (
     _FEEDER_ALONG,
     _feeder_intersections,
+    _geometry_graph,
     _split_branch_nodes,
     get_interferences_list,
 )
 from .geometric import rotation_checkers_factory
 from .interarraylib import scaffolded
-from .loads import bfs_subtree_loads
+from .loads import _branch_loads
 from .mesh import planar_flipped_by_routeset
 from .types import Topology
 
@@ -134,14 +135,14 @@ def _sorted3(a: int, b: int, c: int) -> tuple[int, int, int]:
 
 
 def _compact_stunt_clones(
-    G: nx.Graph,
+    G: nx.DiGraph,
     *,
     T: int,
     B: int,
     clone_idx: int,
     clone2prime: list[int],
     stunts_primes: list[int] | None,
-) -> tuple[nx.Graph, int, int, list[int]]:
+) -> tuple[nx.DiGraph, int, int, list[int]]:
     """Remove stunt-id gaps and map their clones to the original primes.
 
     ``B`` and ``clone_idx`` use the planar embedding's numbering, in which
@@ -308,7 +309,7 @@ class PathFinder:
 
     def __init__(
         self,
-        Gʹ: nx.Graph,
+        Gʹ: nx.DiGraph,
         planar: nx.PlanarEmbedding,
         A: nx.Graph,
         *,
@@ -342,6 +343,7 @@ class PathFinder:
         self.turn_limit = turn_limit
         self.iterations = 0
         G = Gʹ.copy()
+        self.geometry = geometry = G.to_undirected(as_view=True)
         R, T, B = (A.graph[k] for k in 'RTB')
         C = G.graph.get('C', 0)
         assert not G.graph.get('D'), 'Gʹ has already has detours.'
@@ -360,7 +362,13 @@ class PathFinder:
             hooks_by_root = []
             for r in range(-R, 0):
                 feeders = {
-                    n for n in G.neighbors(r) if G[r][n].get('kind') == 'tentative'
+                    n
+                    for n in geometry.neighbors(r)
+                    if any(
+                        G[u][v].get('kind') == 'tentative'
+                        for u, v in ((r, n), (n, r))
+                        if G.has_edge(u, v)
+                    )
                 }
                 tentative.extend((r, n) for n in feeders)
                 hooks_by_root.append(
@@ -385,7 +393,7 @@ class PathFinder:
         Xings.extend(
             (r, n)
             for r in range(-R, 0)
-            for n in G.neighbors(r)
+            for n in geometry.neighbors(r)
             if 'los_d2root' in A.nodes[n] and r in A.nodes[n]['los_d2root']
         )
 
@@ -863,7 +871,7 @@ class PathFinder:
     def _scan_sector_from_opposite(self, prime: int, opposite: int) -> int:
         """Uncached sector scan for one ``(prime, opposite)`` pair."""
         T = self.T
-        G = self.G
+        G = self.geometry
         # pyrefly: ignore[missing-attribute]
         P_adj = self.P._adj
         tentative = self.tentative
@@ -906,7 +914,7 @@ class PathFinder:
         T = self.T
         ST = self.ST
         R = self.R
-        G = self.G
+        G = self.geometry
         tentative = self.tentative
 
         sector_by_prime_opposite: dict[int, dict[int, int]] = {}
@@ -1017,7 +1025,7 @@ class PathFinder:
         P = self.P
         # pyrefly: ignore[missing-attribute]
         P_adj = P._adj
-        G = self.G
+        G = self.geometry
         edges_G_primes = self.edges_G_primes
         constraint_edges = P.graph['constraint_edges']
         if prime in G.nodes and len(G._adj[prime]) == 0:  # type: ignore
@@ -2285,6 +2293,8 @@ class PathFinder:
         each crossing between a rogue link and a detour or feeder edge, and for
         each detour clone that splits the branch at a rogue link's endpoint.
         """
+        if isinstance(G, nx.DiGraph):
+            G = _geometry_graph(G)
         rogue = G.graph.get('rogue')
         if not rogue:
             return
@@ -2344,7 +2354,7 @@ class PathFinder:
                         split_nodes,
                     )
 
-    def create_detours(self) -> nx.Graph:
+    def create_detours(self) -> nx.DiGraph:
         """Reroute all feeder edges in G with crossings using detour paths.
 
         Returns:
@@ -2355,9 +2365,9 @@ class PathFinder:
 
         if not Xings:
             for r, n in tentative:
-                # remove the 'tentative' kind
-                if 'kind' in G[r][n]:
-                    del G[r][n]['kind']
+                for u, v in ((r, n), (n, r)):
+                    if G.has_edge(u, v):
+                        G[u][v].pop('kind', None)
             if 'tentative' in G.graph:
                 del G.graph['tentative']
 
@@ -2397,17 +2407,16 @@ class PathFinder:
             subtree_id_from_n[n] = subtree_id
 
         for r, n in set(Xings):
-            tentative.remove((r, n))
+            tentative.discard((r, n))
             subtree_id = subtree_id_from_n[n]
             subtree = subtree_from_subtree_id[subtree_id]
-            subtree_load = G.nodes[n]['load']
             # where a feeder may re-hook depends on the declared topology
             hook_candidates = (
                 [n]
                 if self.topology is Topology.RINGED
                 else [n for n in subtree if n < T]
                 if self.topology is Topology.BRANCHED
-                else [n, next(h for h in subtree if len(G._adj[h]) == 1)]  # type: ignore
+                else [n, next(h for h in subtree if G.in_degree[h] == 0)]  # type: ignore
             )
             debug('hook_candidates: %s', hook_candidates)
 
@@ -2448,78 +2457,77 @@ class PathFinder:
             if len(path) < 2:
                 error('no path found for %d-%d', r, n)
                 continue
-            added_clones = len(path) - 2
-            Clone = list(range(clone_idx, clone_idx + added_clones))
-            clone_idx += added_clones
-            clone2prime.extend(path[1:-1])
-            G.add_nodes_from(
-                (
-                    c,
-                    {
-                        'label': str(c),
-                        'kind': 'detour',
-                        'subtree': subtree_id,
-                        'load': subtree_load,
-                    },
-                )
-                for c in Clone
-            )
-            if [n, r] != path:
-                # TODO: adapt this for contoured feeders
-                #       maybe that's the place to prune contour clones
-                G.remove_edge(r, n)
-                if r != path[-1]:
-                    debug(
-                        'root changed from %d to %d for subtree of feeder %d, '
-                        'now hooked to %d',
-                        r,
-                        path[-1],
-                        n,
-                        path[0],
-                    )
-                    subtree_load = G.nodes[n]['load']
-                    G.nodes[r]['load'] -= subtree_load
-                    G.nodes[path[-1]]['load'] += subtree_load
-                G.add_weighted_edges_from(
-                    zip(path[:1] + Clone, Clone + path[-1:], dists),
-                    weight='length',
-                    load=subtree_load,
-                )
-                for _, _, edgeD in G.edges(Clone, data=True):
-                    edgeD.update(kind='detour', reverse=True)
-                G[Clone[-1] if Clone else path[-2]][path[-1]]['reverse'] = False
-            else:
-                del G[n][r]['kind']
-                debug(
-                    'feeder %d–%d touches a node (touched node does not become'
-                    ' a detour).',
-                    n,
-                    r,
-                )
+            # a singleton's zero-load closing feeder is rerouted alongside its
+            # loaded feeder, carrying nothing
+            loaded = G[n][r]['load'] if G.has_edge(n, r) else 0
             if n != path[0]:
-                # the hook changed: update 'load' attributes of edges/nodes
-                debug('hook changed from %d to %d: recalculating loads', n, path[0])
-
-                for node in subtree:
-                    del G.nodes[node]['load']
-
-                if Clone:
-                    parent = Clone[0]
-                    ref_load = subtree_load
-                    G.nodes[parent]['load'] = 0
-                else:
-                    parent = path[-1]
-                    ref_load = G.nodes[parent]['load']
-                    G.nodes[parent]['load'] = ref_load - subtree_load
-                total_parent_load = bfs_subtree_loads(G, parent, [path[0]], subtree_id)
-                assert total_parent_load == ref_load, (
-                    f'detour {n}–{path[0]}: load calculated '
-                    f'({total_parent_load}) != expected load ({ref_load})'
+                rehook = nx.shortest_path(G.to_undirected(as_view=True), n, path[0])
+                for parent, child in pairwise(rehook):
+                    attrs = G[child][parent].copy()
+                    G.remove_edge(child, parent)
+                    G.add_edge(parent, child, **attrs)
+            Clone = []
+            # the node the hook drains into, once the loaded arc is rerouted
+            hook_sink = path[1]
+            for source, sink in ((n, r), (r, n)):
+                if not G.has_edge(source, sink):
+                    continue
+                attrs = G[source][sink].copy()
+                attrs.pop('kind', None)
+                load = attrs['load']
+                added_clones = len(path) - 2
+                Clone = list(range(clone_idx, clone_idx + added_clones))
+                clone_idx += added_clones
+                clone2prime.extend(path[1:-1])
+                G.add_nodes_from(
+                    (
+                        c,
+                        {
+                            'label': str(c),
+                            'kind': 'detour',
+                            'subtree': subtree_id,
+                            'load': load,
+                        },
+                    )
+                    for c in Clone
                 )
-
+                G.remove_edge(source, sink)
+                cable_path = path[:1] + Clone + path[-1:]
+                lengths = dists
+                if source == r:
+                    cable_path = cable_path[::-1]
+                    lengths = dists[::-1]
+                else:
+                    hook_sink = cable_path[1]
+                for (u, v), length in zip(pairwise(cable_path), lengths):
+                    G.add_edge(
+                        u,
+                        v,
+                        **{
+                            **attrs,
+                            'length': length,
+                            **({'kind': 'detour'} if Clone else {}),
+                        },
+                    )
+            if loaded and r != path[-1]:
+                G.nodes[r]['load'] -= loaded
+                G.nodes[path[-1]]['load'] += loaded
+            if loaded and n != path[0]:
+                # the detour segments carry the subtree's load as assigned
+                # above; only the branch below the new hook is recalculated
+                expected = G.nodes[hook_sink]['load']
+                G.nodes[hook_sink]['load'] = expected - loaded
+                _branch_loads(G, path[0], hook_sink, subtree_id)
+                total = G.nodes[hook_sink]['load']
+                assert total == expected, (
+                    f'detour {n}–{path[0]}: load calculated ({total}) != '
+                    f'expected load ({expected})'
+                )
         # former tentative feeders that were not in Xings cease to be tentative
         for r, n in tentative:
-            del G[r][n]['kind']
+            for u, v in ((r, n), (n, r)):
+                if G.has_edge(u, v):
+                    G[u][v].pop('kind', None)
 
         if failed_detours:
             warn('Failed: %s', failed_detours)

@@ -154,7 +154,9 @@ def test_G_from_routeset(tmp_path):
         assert id == 1
 
         rs = RouteSet.get_by_id(id)
-        assert rs.feeders_per_root == [len(G[root]) for root in range(-G.graph['R'], 0)]
+        assert rs.feeders_per_root == [
+            G.degree[root] for root in range(-G.graph['R'], 0)
+        ]
         assert all(not key.startswith('_') for key in rs.misc)
     G_rs = G_from_routeset(rs)
 
@@ -243,6 +245,32 @@ def test_L_from_nodeset_detours(tmp_path):
         assert np.allclose(L2.graph['VertexC'], L.graph['VertexC'])
 
 
+def test_G_from_routeset_tags_stored_links_in_either_orientation(tmp_path):
+    """Stored tentative and rogue pairs name links, whose arcs point either way."""
+    G = tiny_wfn(router=HGSRouter(time_limit=0.1)).G.copy()
+    T = G.graph['T']
+    feeder = next(iter(G.in_edges(-1)))
+    rogue = next((u, v) for u, v in G.edges if 0 <= v < u < T)
+    G.edges[feeder]['kind'] = 'tentative'
+    G.edges[rogue]['kind'] = 'rogue'
+    # listed as G_from_S lists them: root first, and lower id first
+    G.graph['tentative'] = [feeder[::-1]]
+    G.graph['rogue'] = [rogue[::-1]]
+
+    with database_connection(tmp_path / 'db_test.sqlite', create_db=True):
+        rs = RouteSet.get_by_id(store_G(G))
+        assert list(rs.tentative) == list(feeder[::-1])
+        assert list(rs.rogue) == list(rogue[::-1])
+        G_rs = G_from_routeset(rs)
+
+    kinds = {
+        (u, v): kind
+        for u, v, kind in G_rs.edges(data='kind')
+        if kind in ('tentative', 'rogue')
+    }
+    assert kinds == {feeder: 'tentative', rogue: 'rogue'}
+
+
 def test_G_from_routeset_detours(tmp_path):
     dbfile = tmp_path / 'db_test.sqlite'
 
@@ -257,7 +285,9 @@ def test_G_from_routeset_detours(tmp_path):
         assert id == 1
 
         rs = RouteSet.get_by_id(id)
-        assert rs.feeders_per_root == [len(G[root]) for root in range(-G.graph['R'], 0)]
+        assert rs.feeders_per_root == [
+            G.degree[root] for root in range(-G.graph['R'], 0)
+        ]
     G_rs = G_from_routeset(rs)
 
     ignored_keys = {

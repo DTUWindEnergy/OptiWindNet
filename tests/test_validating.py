@@ -24,8 +24,8 @@ from .helpers import ringed_S, tiny_wfn
 # --------------------------------------------------------------------------- #
 def _radial_S(T, links):
     """A radial S over ``links``, with loads and orientation from calcload."""
-    S = nx.Graph(R=1, T=T, topology=Topology.RADIAL)
-    S.add_edges_from(links)
+    S = nx.DiGraph(R=1, T=T, topology=Topology.RADIAL)
+    S.add_edges_from((v, u) for u, v in links)
     calcload(S)
     return S
 
@@ -55,7 +55,7 @@ def test_validate_topology_requires_loads():
 
 
 def test_validate_topology_checks_shape_without_loads():
-    S = nx.Graph(R=1, T=3, topology=Topology.RADIAL, has_loads=False)
+    S = nx.DiGraph(R=1, T=3, topology=Topology.RADIAL, has_loads=False)
     S.add_edges_from([(-1, 0), (0, 1), (1, 2), (0, 2)])
 
     violations = validate_topology(S)
@@ -64,15 +64,12 @@ def test_validate_topology_checks_shape_without_loads():
     assert 'radial topology must be a forest' in violations
 
 
-def test_validate_topology_rejects_forest_without_reverse():
-    """The positional forest encoding reads link orientation off ``'reverse'``."""
+def test_validate_topology_rejects_arc_away_from_root():
     S = _radial_S(3, [(-1, 0), (0, 1), (1, 2)])
-    for _, _, edgeD in S.edges(data=True):
-        del edgeD['reverse']
-
-    violations = validate_topology(S)
-    assert len(violations) == 1
-    assert 'missing the "reverse" flag' in violations[0]
+    attrs = S[1][0].copy()
+    S.remove_edge(1, 0)
+    S.add_edge(0, 1, **attrs)
+    assert any('outgoing positive-load arc' in v for v in validate_topology(S))
 
 
 def test_validate_topology_rejects_stranded_terminal():
@@ -81,10 +78,10 @@ def test_validate_topology_rejects_stranded_terminal():
     A stranded terminal sits in its own component without growing a cycle, so
     neither the forest check nor the simple-path one sees it.
     """
-    S = nx.Graph(R=1, T=4, topology=Topology.RADIAL, has_loads=True, max_load=3)
-    S.add_edge(-1, 0, load=3, reverse=False)
-    S.add_edge(0, 1, load=2, reverse=False)
-    S.add_edge(1, 2, load=1, reverse=False)
+    S = nx.DiGraph(R=1, T=4, topology=Topology.RADIAL, has_loads=True, max_load=3)
+    S.add_edge(0, -1, load=3)
+    S.add_edge(1, 0, load=2)
+    S.add_edge(2, 1, load=1)
     S.add_node(3)
     S.nodes[-1]['load'] = 3
     for terminal, load in ((0, 3), (1, 2), (2, 1)):
@@ -99,10 +96,10 @@ def test_validate_topology_rejects_terminal_absent_from_S():
 
     Asking for its degree used to raise instead of reporting.
     """
-    S = nx.Graph(R=1, T=4, topology=Topology.RADIAL, has_loads=True, max_load=3)
-    S.add_edge(-1, 0, load=3, reverse=False)
-    S.add_edge(0, 1, load=2, reverse=False)
-    S.add_edge(1, 2, load=1, reverse=False)
+    S = nx.DiGraph(R=1, T=4, topology=Topology.RADIAL, has_loads=True, max_load=3)
+    S.add_edge(0, -1, load=3)
+    S.add_edge(1, 0, load=2)
+    S.add_edge(2, 1, load=1)
     S.nodes[-1]['load'] = 3
     for terminal, load in ((0, 3), (1, 2), (2, 1)):
         S.nodes[terminal]['load'] = load
@@ -119,7 +116,7 @@ def test_validate_topology_rejects_misplaced_zero_load_link():
     """
     S = ringed_S(1, [(-1, [0, 1, 2, 3])])
     assert S[1][2]['load'] == 0
-    S[0][1]['load'], S[1][2]['load'] = 0, 1
+    S[1][0]['load'], S[1][2]['load'] = 0, 1
 
     violations = validate_topology(S)
     assert any('opens between 0 and 1' in violation for violation in violations)
@@ -127,15 +124,15 @@ def test_validate_topology_rejects_misplaced_zero_load_link():
 
 
 def test_validate_topology_rejects_a_component_with_two_roots():
-    S = nx.Graph(R=2, T=2, topology=Topology.BRANCHED, has_loads=False)
+    S = nx.DiGraph(R=2, T=2, topology=Topology.BRANCHED, has_loads=False)
     S.add_edges_from([(-2, 0), (0, 1), (1, -1)])
 
     assert 'component contains multiple roots: [-2, -1]' in validate_topology(S)
 
 
 def test_validate_topology_reports_every_shape_violation():
-    S = nx.Graph(R=1, T=3, topology=Topology.RADIAL, has_loads=True, max_load=3)
-    S.add_edges_from([(-1, 0), (0, 1), (0, 2), (1, 2)], load=1, reverse=False)
+    S = nx.DiGraph(R=1, T=3, topology=Topology.RADIAL, has_loads=True, max_load=3)
+    S.add_edges_from([(-1, 0), (0, 1), (0, 2), (1, 2)], load=1)
     S.nodes[-1]['load'] = 3
     for terminal in range(3):
         S.nodes[terminal]['load'] = 1

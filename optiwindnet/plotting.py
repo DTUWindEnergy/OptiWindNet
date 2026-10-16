@@ -3,7 +3,7 @@
 
 from collections.abc import Sequence
 from itertools import chain, product
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -230,6 +230,7 @@ def gplot(
                 alpha=c.kind2alpha[edge_kind],
                 edge_color=c.kind2color[edge_kind],
                 ax=ax,
+                arrows=False,
             )
             art.set_capstyle(edges_capstyle)  # type: ignore
 
@@ -317,7 +318,7 @@ def gplot(
     label_options: dict[str, Any]
     if G.graph.get('has_loads', False) and node_tag in ('load', 'load_nominal'):
         if node_tag == 'load_nominal':
-            nominal = _nominal_loads(G)
+            nominal = _nominal_loads(cast(nx.DiGraph, G))
             labels = {
                 n: '-' if (load := nominal.get(n)) is None else f'{float(load):g}'
                 for n in range(-R, T)

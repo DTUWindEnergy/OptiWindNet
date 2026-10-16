@@ -117,7 +117,7 @@ def build_milp_warmstart(
     warmstart_time_limit: float,
     warmstart_seed: int,
     warmstart_max_retries: int,
-) -> tuple[nx.Graph, dict[str, object]]:
+) -> tuple[nx.DiGraph, dict[str, object]]:
     """Choose a warm-start producer that meets the constraints, preferring HGS."""
     capacity = case.capacity
     constraints = case.constraints
@@ -162,7 +162,7 @@ def build_milp_warmstart(
 def _build_constructor_warmstart(
     A: nx.Graph,
     case: MILPCase,
-) -> tuple[nx.Graph, dict[str, object]]:
+) -> tuple[nx.DiGraph, dict[str, object]]:
     """Build the topology-appropriate deterministic fallback warm start."""
     capacity = case.capacity
     topology = case.constraints.topology

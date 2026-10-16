@@ -4,7 +4,6 @@
 """Conversions among the location, topology, routeset and encoded forms."""
 
 import copy
-import itertools
 import logging
 import pickle
 
@@ -20,7 +19,6 @@ from optiwindnet.converting import (
     S_from_G,
     S_from_linkbits,
     S_from_terse_links,
-    _rings_from_S,
     linkbits_from_S,
     terse_links_from_S,
 )
@@ -37,27 +35,13 @@ from .helpers import ring_sets, ringed_S, tiny_wfn
 from .sitecache import get_bundle
 
 
-@pytest.mark.parametrize('n', range(1, 13))
-@pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
-def test_private_rings_from_S_roundtrip(n, bridging):
-    R = 2 if bridging else 1
-    S = nx.Graph(R=R, T=n)
-    S.add_nodes_from(range(-R, 0))
-    roots = (-1, -2) if bridging else (-1, -1)
-    _add_ring_to_S(S, roots, list(range(n)), subtree=0, A=None)
-
-    recovered_roots, ordered = _rings_from_S(S)[0]
-    assert set(recovered_roots) == set(roots)
-    assert set(ordered) == set(range(n))
-
-
 def test_linkbits_from_S_uses_canonical_edge_and_feeder_order():
     A = nx.Graph(T=3, R=2)
     A.add_edges_from(((2, 1), (2, 0), (1, 0)))
     A.graph['_canonical_terminal_links'] = np.array(
         ((0, 1), (0, 2), (1, 2)), dtype=np.uint32
     )
-    S = nx.Graph(((2, 0), (-1, 1), (-2, 2)))
+    S = nx.DiGraph(((2, 0), (-1, 1), (-2, 2)))
 
     linkbits = linkbits_from_S(A, S)
 
@@ -67,7 +51,7 @@ def test_linkbits_from_S_uses_canonical_edge_and_feeder_order():
 
 def test_linkbits_from_S_requires_canonical_terminal_links():
     A = nx.Graph(T=3, R=1)
-    S = nx.Graph(((0, 2), (-1, 1)))
+    S = nx.DiGraph(((0, 2), (-1, 1)))
 
     with pytest.raises(KeyError, match='_canonical_terminal_links'):
         linkbits_from_S(A, S)
@@ -75,7 +59,7 @@ def test_linkbits_from_S_requires_canonical_terminal_links():
 
 def test_linkbits_from_S_empty_terminal_linkset_has_only_feeders():
     A = nx.Graph(T=3, R=1, _canonical_terminal_links=np.empty((0, 2), np.uint32))
-    S = nx.Graph(((-1, 0), (-1, 1), (-1, 2)))
+    S = nx.DiGraph(((-1, 0), (-1, 1), (-1, 2)))
 
     assert linkbits_from_S(A, S) == frozenbitarray('111')
     S.add_edge(0, 1)
@@ -93,45 +77,21 @@ def test_S_from_linkbits_uses_canonical_edge_and_feeder_order(bits_type, endian)
     )
     bits = bits_type('010000110', endian=endian)
 
-    S = S_from_linkbits(bits, A)
+    S = S_from_linkbits(bits, A, topology=Topology.BRANCHED)
 
     assert {frozenset(edge) for edge in S.edges} == {
         frozenset(edge) for edge in ((0, 2), (-1, 1), (-2, 2))
     }
     assert set(S) == set(range(-2, 3))
-    assert S.graph == {'T': 3, 'R': 2}
-    assert all(not attrs for _, attrs in S.nodes(data=True))
+    assert S.is_directed()
+    assert S.graph['topology'] is Topology.BRANCHED
     assert linkbits_from_S(A, S) == bits
 
 
-@pytest.mark.parametrize('terminal_edges', ((), ((0, 2),), ((0, 1), (0, 2), (1, 2))))
-def test_S_from_linkbits_roundtrip_every_link(terminal_edges):
-    A = nx.Graph(T=3, R=2)
-    A.add_edges_from(terminal_edges)
-    A.graph['_canonical_terminal_links'] = np.array(
-        terminal_edges, dtype=np.uint32
-    ).reshape(-1, 2)
-    nbits = len(terminal_edges) + 6
-    for position in range(nbits):
-        bits = bitarray(nbits)
-        bits.setall(0)
-        bits[position] = 1
-        S = S_from_linkbits(bits, A)
-        assert S.number_of_edges() == 1
-        assert linkbits_from_S(A, S) == bits
-
-
-@pytest.mark.parametrize('R, T', ((2, 3), (1, 1), (1, 0), (0, 0), (0, 3)))
-def test_S_from_linkbits_preserves_isolated_nodes(R, T):
-    A = nx.Graph(R=R, T=T)
-    A.graph['_canonical_terminal_links'] = np.array(
-        list(itertools.combinations(range(T), 2)), dtype=np.uint32
-    ).reshape(-1, 2)
-    bits = frozenbitarray('0' * (T * (T - 1) // 2 + R * T))
-    S = S_from_linkbits(bits, A)
-    assert set(S) == set(range(-R, T))
-    assert S.number_of_edges() == 0
-    assert linkbits_from_S(A, S) == bits
+def test_S_from_linkbits_refuses_a_terminal_without_an_outgoing_arc():
+    A = nx.Graph(R=1, T=1, _canonical_terminal_links=np.empty((0, 2), np.uint32))
+    with pytest.raises(ValueError, match='outgoing positive-load arc'):
+        S_from_linkbits(bitarray('0'), A, topology=Topology.BRANCHED)
 
 
 @pytest.mark.parametrize('nbits', (0, 5, 7))
@@ -141,7 +101,7 @@ def test_S_from_linkbits_rejects_wrong_bit_count(nbits):
         ((0, 1), (0, 2), (1, 2)), dtype=np.uint32
     )
     with pytest.raises(ValueError, match=f'Expected 6 link bits for A, got {nbits}'):
-        S_from_linkbits(frozenbitarray('0' * nbits), A)
+        S_from_linkbits(frozenbitarray('0' * nbits), A, topology=Topology.BRANCHED)
 
 
 def test_L_from_site():
@@ -227,10 +187,10 @@ def test_S_from_G():
     ]
 
     expected_edges = [
-        (-1, 0, {'load': 4, 'reverse': False}),
-        (0, 1, {'load': 3, 'reverse': False}),
-        (1, 2, {'load': 2, 'reverse': False}),
-        (2, 3, {'load': 1, 'reverse': False}),
+        (0, -1, {'load': 4}),
+        (1, 0, {'load': 3}),
+        (2, 1, {'load': 2}),
+        (3, 2, {'load': 1}),
     ]
 
     S = S_from_G(G)
@@ -275,10 +235,10 @@ def test_S_from_G_carries_terminal_inflow():
 
 
 def test_S_from_G_rejects_a_route_node_that_is_not_part_of_a_chain():
-    G = nx.Graph(R=1, T=2, capacity=2, topology=Topology.BRANCHED)
+    G = nx.DiGraph(R=1, T=2, capacity=2, topology=Topology.BRANCHED)
     G.add_edges_from([(0, 2), (2, 1), (2, -1)])
 
-    with pytest.raises(ValueError, match='route from -1 is not a chain at 2'):
+    with pytest.raises(ValueError, match='route from 0 is not a directed chain'):
         S_from_G(G)
 
 
@@ -290,7 +250,7 @@ def test_G_from_S(caplog):
 
     # 1) basic test
     G = G_from_S(S, A)
-    expected = [(0, 12), (-1, 0), (1, 13), (1, 2), (2, 3), (12, 13)]
+    expected = [(0, -1), (1, 12), (12, 13), (13, 0), (2, 1), (3, 2)]
     assert all(uv in G.edges for uv in expected)
 
     # No tentative/rogue
@@ -312,8 +272,8 @@ def test_G_from_S(caplog):
     S_sc = copy.deepcopy(S)
     A_sc[0][2]['shortcuts'] = [9]
     A_sc[2][-1]['shortcuts'] = [9]
-    S_sc.add_edge(0, 2, load=1, reverse=False)
-    S_sc.add_edge(2, -1, load=1, reverse=False)
+    S_sc.add_edge(0, 2, load=1)
+    S_sc.add_edge(2, -1, load=1)
     G = G_from_S(S_sc, A_sc)
 
     assert (0, 2) in G.edges
@@ -328,7 +288,7 @@ def test_G_from_S(caplog):
         S_copy = copy.deepcopy(S_sc)
 
         # Add only the current edge
-        S_copy.add_edge(s, t, load=1, reverse=False)
+        S_copy.add_edge(s, t, load=1)
         S_copy.nodes[s]['subtree'] = 0
         S_copy.nodes[t]['subtree'] = 0
 
@@ -356,7 +316,7 @@ def test_G_from_S(caplog):
         S_copy = copy.deepcopy(S_sc)
 
         # Add only the current edge
-        S_copy.add_edge(s, t, load=1, reverse=False)
+        S_copy.add_edge(s, t, load=1)
         S_copy.nodes[s]['subtree'] = 0
         S_copy.nodes[t]['subtree'] = 0
 
@@ -385,7 +345,7 @@ def test_G_from_S_expands_a_contoured_ring_zero_load_link():
         if 0 <= u < T and 0 <= v < T and midpath
     )
     root = -1
-    S = nx.Graph(
+    S = nx.DiGraph(
         T=T,
         R=R,
         topology=Topology.RINGED,
@@ -397,9 +357,9 @@ def test_G_from_S_expands_a_contoured_ring_zero_load_link():
     S.add_nodes_from(range(T))
     S.add_node(u, load=1, subtree=0)
     S.add_node(v, load=1, subtree=0)
-    S.add_edge(root, u, load=1, reverse=False)
-    S.add_edge(u, v, load=0, reverse=False)
-    S.add_edge(v, root, load=1, reverse=False)
+    S.add_edge(u, root, load=1)
+    S.add_edge(u, v, load=0)
+    S.add_edge(v, root, load=1)
 
     G = G_from_S(S, A)
 
@@ -561,7 +521,7 @@ def test_terse_links_ringed_preserves_zero_load_link(longer, expected_zero_load_
     A = nx.Graph()
     A.add_edge(0, 1, length=10.0 if longer == 0 else 1.0)
     A.add_edge(1, 2, length=10.0 if longer == 1 else 1.0)
-    S = nx.Graph(R=1, T=3)
+    S = nx.DiGraph(R=1, T=3)
     S.add_node(-1)
     _add_ring_to_S(S, (-1, -1), [0, 1, 2], subtree=0, A=A)
     S.nodes[-1]['load'] = sum(S.nodes[n]['load'] for n in S[-1])
@@ -592,8 +552,8 @@ def test_terse_links_forest_still_positional():
 )
 def test_terse_links_carries_forest_architecture(topology, links):
     """Identical-length forest encodings retain their architecture metadata."""
-    S = nx.Graph(R=1, T=3, topology=topology)
-    S.add_edges_from(links)
+    S = nx.DiGraph(R=1, T=3, topology=topology)
+    S.add_edges_from((v, u) for u, v in links)
     calcload(S)
 
     terse = terse_links_from_S(S)

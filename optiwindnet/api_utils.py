@@ -127,7 +127,6 @@ def extract_network_as_array(G):
 
     def iter_edges():
         for s, t, edgeD in G.edges(data=True):
-            s, t = (s, t) if ((s < t) == edgeD['reverse']) else (t, s)
             values = [edgeD[key] for key in value_keys]
             yield s, t, *values
 

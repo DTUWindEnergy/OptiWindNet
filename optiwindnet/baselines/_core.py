@@ -16,6 +16,7 @@ from scipy.spatial.distance import pdist, squareform
 from ..clustering import ClusterPlan
 from ..constraints import NetworkBounds, NetworkConstraints, _resolved
 from ..converting import linkbits_from_S
+from ..crossings import _geometry_graph
 from ..identity import _LINKSET_ID, _invalidate_canonical_linkset, topology_id
 from ..types import FeederRoute, OWNWarmupFailed, Topology
 
@@ -119,6 +120,8 @@ def routes_from_warmstart(warmstart: nx.Graph, R: int, T: int) -> list[list[list
             ``T`` terminals, leaves terminals out of the routes, or has a route
             that reaches two roots.
     """
+    if isinstance(warmstart, nx.DiGraph):
+        warmstart = _geometry_graph(warmstart)
     if (warmstart.graph.get('R'), warmstart.graph.get('T')) != (R, T):
         raise OWNWarmupFailed(
             f'Warm start has R={warmstart.graph.get("R")}, '
@@ -230,10 +233,7 @@ def add_branches_to_S(S, branches, root, subtree_id_start):
             subtree=subtree_id,
         )
         prev = [root] + branch_list[:-1]
-        reverses = tuple(u < v for u, v in zip(branch_list, prev))
-        edgeD = (
-            {'load': load, 'reverse': reverse} for load, reverse in zip(loads, reverses)
-        )
+        edgeD = ({'load': load} for load in loads)
         S.add_edges_from(zip(prev, branch_list, edgeD))
         subtree_id += 1
     return max_load, subtree_id

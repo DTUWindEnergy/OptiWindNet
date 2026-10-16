@@ -8,20 +8,20 @@ from itertools import pairwise
 
 import networkx as nx
 
-from .converting import S_from_G, _rings_from_S
+from .converting import S_from_G
 from .loads import calcload
+from .terse import _walk_ring_routes
 from .types import Topology
 
 __all__ = ('validate_routeset', 'validate_topology')
 
 
 def _validate_ringed(
-    S: nx.Graph, capacity: int | None, *, check_loads: bool
+    S: nx.DiGraph, capacity: int | None, *, check_loads: bool
 ) -> list[str]:
     """Return RINGED shape, capacity and load violations in ``S``."""
     violations = []
     T = S.graph['T']
-
     # topology-graph ring edges are pure geometry: they carry no edge 'kind'
     kinds = {d.get('kind') for _, _, d in S.edges(data=True)} - {None}
     if kinds:
@@ -29,22 +29,20 @@ def _validate_ringed(
             f'ring edges must not carry a kind, got {sorted(map(str, kinds))}'
         )
 
-    rings = _rings_from_S(S)
+    rings = list(_walk_ring_routes(S))
 
     # the rings partition the terminal set: every terminal in exactly one ring
-    covered = sorted(t for _, ordered in rings for t in ordered)
+    covered = sorted(t for _, ordered, _ in rings for t in ordered)
     if covered != list(range(T)):
         violations.append('rings must partition the terminals')
 
-    # two feeders per ring, except a lone terminal hanging off a single root
     n_feeders = sum(1 for u, v in S.edges if u < 0 or v < 0)
-    expected = sum(
-        1 if len(ordered) == 1 and rs[0] == rs[1] else 2 for rs, ordered in rings
-    )
+    expected = 2 * len(rings)
     if n_feeders != expected:
         violations.append(f'expected {expected} feeders, got {n_feeders}')
 
-    for roots, ordered in rings:
+    for root, ordered, close in rings:
+        roots = (root, close)
         n = len(ordered)
         arm = math.ceil(n / 2)
         # a ring holds up to 2*capacity terminals (two arms of ceil(n / 2))
@@ -71,7 +69,7 @@ def _validate_ringed(
         opens = [
             i
             for i, (u, v) in enumerate(pairwise(ordered))
-            if S.has_edge(u, v) and S[u][v]['load'] == 0
+            if (S[u][v] if S.has_edge(u, v) else S[v][u])['load'] == 0
         ]
         if len(opens) != (1 if n > 1 else 0):
             violations.append(
@@ -93,7 +91,7 @@ def _validate_ringed(
     return violations
 
 
-def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
+def validate_topology(S: nx.DiGraph, capacity: int | None = None) -> list[str]:
     """Check the nodes, links, loads and declared topology of ``S``.
 
     The declared topology determines the shape checks: RINGED topologies are
@@ -144,16 +142,11 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     loads_present = all('load' in data for _, data in S.nodes(data=True)) and all(
         'load' in data for _, _, data in S.edges(data=True)
     )
-    unoriented = sorted(
-        (u, v) for u, v, data in S.edges(data=True) if 'reverse' not in data
-    )
-    loads_complete = has_loads and not missing and loads_present and not unoriented
+    loads_complete = has_loads and not missing and loads_present
     if not has_loads:
         violations.append('topology carries no loads')
     elif not loads_present:
         violations.append('topology has incomplete load attributes')
-    if unoriented:
-        violations.append(f'links missing the "reverse" flag: {unoriented}')
 
     if loads_complete:
         reference = S.copy()
@@ -171,9 +164,7 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
     # --- topology shape ------------------------------------------------------
     if topology is Topology.RINGED:
         bad_degrees = sorted(
-            (t, S.degree(t))
-            for t in terminals & S.nodes
-            if S.degree(t) != 2 and not (S.degree(t) == 1 and next(iter(S[t])) in roots)
+            (t, S.degree(t)) for t in terminals & S.nodes if S.degree(t) != 2
         )
         if bad_degrees:
             violations.append(f'invalid ring terminal degrees: {bad_degrees}')
@@ -185,7 +176,7 @@ def validate_topology(S: nx.Graph, capacity: int | None = None) -> list[str]:
         # every terminal is served by some root: a forest may leave a terminal
         # stranded in a component of its own without ever growing a cycle
         served = set()
-        for component in nx.connected_components(S):
+        for component in nx.connected_components(S.to_undirected(as_view=True)):
             component_roots = roots.intersection(component)
             if component_roots:
                 served |= component
@@ -218,12 +209,6 @@ def _load_mismatches(G: nx.Graph, Gʹ: nx.Graph) -> list[str]:
             violations.append(
                 f'link {u}–{v} states load {edgeD.get("load")}, carries {refD["load"]}'
             )
-        # 'reverse' orients the link for terse_links and the flow formulations
-        if edgeD.get('reverse') != refD['reverse']:
-            violations.append(
-                f'link {u}–{v} states reverse={edgeD.get("reverse")}, flows '
-                f'reverse={refD["reverse"]}'
-            )
     for node, nodeD in G.nodes(data=True):
         refD = Gʹ.nodes[node]
         if nodeD.get('load') != refD.get('load'):
@@ -234,7 +219,7 @@ def _load_mismatches(G: nx.Graph, Gʹ: nx.Graph) -> list[str]:
     return violations
 
 
-def validate_routeset(G: nx.Graph) -> list[str]:
+def validate_routeset(G: nx.DiGraph) -> list[str]:
     """Check the electrical, topological and geometric validity of routeset ``G``.
 
     Stored loads and orientations are compared with values calculated on a

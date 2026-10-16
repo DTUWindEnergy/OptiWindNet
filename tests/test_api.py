@@ -614,7 +614,7 @@ def test_map_detour_vertex_empty_if_no_detours_smoke():
     wfn = tiny_wfn()
     map_detour = wfn.map_detour_vertex()
     assert isinstance(map_detour, dict)
-    assert map_detour == {12: 8, 13: 11}
+    assert map_detour == {12: 11, 13: 8}
 
 
 def test_plots():

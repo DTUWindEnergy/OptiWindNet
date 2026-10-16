@@ -23,7 +23,6 @@ from ..interarraylib import _links_over_limit, directed_links
 from ..loads import (
     calcload,
     nonunit_inflow,
-    split_rings_and_calc_loads,
 )
 from ..pathfinding import PathFinder
 from ..types import OWNWarmupFailed, Topology
@@ -363,7 +362,7 @@ class SolutionInfo:
         return f'SolutionInfo(\n{body})'
 
 
-def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
+def check_warmstart_topology(metadata: ModelMetadata, S: nx.DiGraph) -> None:
     """Reject a warm start whose topology the model cannot start from.
 
     A model accepts its own topology, plus RADIAL into BRANCHED (a path is a
@@ -389,7 +388,7 @@ def check_warmstart_topology(metadata: ModelMetadata, S: nx.Graph) -> None:
 
 
 def warmstart_links(
-    metadata: ModelMetadata, S: nx.Graph
+    metadata: ModelMetadata, S: nx.DiGraph
 ) -> Iterator[tuple[Any, Any | None, int]]:
     """Yield ``(link_var, flow_var, flow)`` for every link ``S`` activates.
 
@@ -469,7 +468,7 @@ class Solver(abc.ABC):
         constraints: NetworkConstraints | NetworkBounds,
         *,
         power_rtol: float | None = None,
-        warmstart: nx.Graph | None = None,
+        warmstart: nx.DiGraph | None = None,
     ) -> None:
         """Define the problem geometry, available links and network constraints.
 
@@ -509,12 +508,12 @@ class Solver(abc.ABC):
         self._set_model(warmstart)
 
     @abc.abstractmethod
-    def _set_model(self, warmstart: nx.Graph | None) -> None:
+    def _set_model(self, warmstart: nx.DiGraph | None) -> None:
         "Build the model of ``A``, ``capacity`` and ``bounds``."
 
     def _create_detours(
-        self, S: nx.Graph, P: nx.PlanarEmbedding, A: nx.Graph
-    ) -> nx.Graph:
+        self, S: nx.DiGraph, P: nx.PlanarEmbedding, A: nx.Graph
+    ) -> nx.DiGraph:
         """Create the detours of the solution topology ``S`` with PathFinder.
 
         Under per-root bounds, every subtree stays connected to its root in ``S``,
@@ -575,12 +574,12 @@ class Solver(abc.ABC):
         info('>>> Solution <<<\n%s\n', solution_info)
         return solution_info
 
-    def _incumbent_topology(self) -> nx.Graph:
+    def _incumbent_topology(self) -> nx.DiGraph:
         """Rebuild the incumbent topology from the link bits ``solve()`` recorded."""
         return self._S_from_linkbits(self.incumbent_linkbits)
 
     @abc.abstractmethod
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
         """Output solution topology S and routeset G.
 
         Args:
@@ -651,7 +650,7 @@ class Solver(abc.ABC):
             ringed=ringed,
         )
 
-    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
+    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.DiGraph:
         """Decode link bits and calculate loads from terminal inflow.
 
         A RINGED model only ever carries unitary inflow (:func:`check_model_bounds`
@@ -660,14 +659,10 @@ class Solver(abc.ABC):
         bounds = self.bounds
         topology = bounds.topology
         A = self.A
-        S = S_from_linkbits(linkbits, A)
+        S = S_from_linkbits(linkbits, A, topology=topology)
         # Preserve terminal inflow so validation can reproduce the loads.
-        nx.set_node_attributes(S, bounds.nonunit_inflow, 'inflow')
-        if topology is Topology.RINGED:
-            # the bits close every ring: this only splits the arms and
-            # derives their loads, in the form every ringed producer uses
-            split_rings_and_calc_loads(S, A)
-        else:
+        if bounds.nonunit_inflow:
+            nx.set_node_attributes(S, bounds.nonunit_inflow, 'inflow')
             calcload(S)
         S.graph.update(
             topology=topology,
@@ -697,8 +692,10 @@ class PoolHandler(abc.ABC):
     if TYPE_CHECKING:
         # supplied by the `Solver` every `PoolHandler` is mixed into
         _linkbits_from_mip_sol: Callable[[], frozenbitarray]
-        _S_from_linkbits: Callable[[frozenbitarray], nx.Graph]
-        _create_detours: Callable[[nx.Graph, nx.PlanarEmbedding, nx.Graph], nx.Graph]
+        _S_from_linkbits: Callable[[frozenbitarray], nx.DiGraph]
+        _create_detours: Callable[
+            [nx.DiGraph, nx.PlanarEmbedding, nx.Graph], nx.DiGraph
+        ]
 
     @abc.abstractmethod
     def _objective_at(self, index: int) -> float:
@@ -725,7 +722,7 @@ class PoolHandler(abc.ABC):
 
     def _investigate_pool(
         self, P: nx.PlanarEmbedding, A: nx.Graph
-    ) -> tuple[nx.Graph, nx.Graph]:
+    ) -> tuple[nx.DiGraph, nx.DiGraph]:
         """Go through the solver's solutions checking which has the shortest length
         after applying the detours with PathFinder.
 

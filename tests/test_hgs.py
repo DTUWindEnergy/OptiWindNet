@@ -250,7 +250,7 @@ def test_balanced_exact_vehicles_with_slack(monkeypatch):
     assert S.degree[-1] == vehicles
     assert S.nodes[-1]['load'] == T
     # balanced: loads differ at most by one unit
-    assert sorted(S.nodes[t]['load'] for t in S.neighbors(-1)) == [2, 2, 3, 3]
+    assert sorted(S.nodes[t]['load'] for t in S.predecessors(-1)) == [2, 2, 3, 3]
 
 
 @pytest.mark.parametrize(
@@ -390,7 +390,7 @@ def test_hgs_honours_non_unit_terminal_inflow_on_a_single_root_radial_solve():
         seed=1,
     )
 
-    subtree_loads = [S.nodes[t]['load'] for t in S.neighbors(-1)]
+    subtree_loads = [S.nodes[t]['load'] for t in S.predecessors(-1)]
     assert max(subtree_loads) <= 8  # capacity is a inflow budget, not a count
     assert sum(subtree_loads) == sum(inflow.values())
     # the solution carries the inflow its loads were derived from
@@ -451,8 +451,10 @@ def test_routes_from_warmstart_walks_a_ring_from_gate_to_gate():
     route = routes_[0][0]
     # a single route around the ring, starting and ending at its two gates
     assert sorted(route) == [0, 1, 2, 3]
-    assert {route[0], route[-1]} == set(S.neighbors(-1))
-    assert all(S.has_edge(u, v) for u, v in itertools.pairwise(route))
+    assert {route[0], route[-1]} == set(S.predecessors(-1))
+    assert all(
+        S.has_edge(u, v) or S.has_edge(v, u) for u, v in itertools.pairwise(route)
+    )
 
 
 def test_routes_from_warmstart_groups_routes_by_root():
@@ -651,7 +653,7 @@ def test_hgs_balances_the_subtrees_of_every_substation_alike():
 
     S = hgs_mod.hgs_cvrp(A, constraints, time_limit=0.5, seed=1)
 
-    loads = [S.nodes[n]['load'] for r in (-2, -1) for n in S.neighbors(r)]
+    loads = [S.nodes[n]['load'] for r in (-2, -1) for n in S.predecessors(r)]
     assert len(loads) == bounds.groups_lb
     assert all(load_lb <= load <= load_ub for load in loads)
 

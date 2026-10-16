@@ -15,6 +15,7 @@ from ..constraints import NetworkBounds, NetworkConstraints
 from ..identity import fingerprint_function
 from ..interarraylib import _links_over_limit
 from ..loads import (
+    _orient_tree,
     calcload,
     split_rings_and_calc_loads,
 )
@@ -402,7 +403,7 @@ def _process_results(A, keep_log, pinned, inputs_, outputs_):
         S.nodes[r]['load'] = root_load
 
     S.graph['max_load'] = max_load
-    return S
+    return _orient_tree(S)
 
 
 def hgs_cvrp(
@@ -418,7 +419,7 @@ def hgs_cvrp(
     complete: bool = False,
     log_callback: Callable | None = None,
     warmstart: nx.Graph | None = None,
-) -> nx.Graph:
+) -> nx.DiGraph:
     """Solves the O/CVRP using HGS-CVRP with links from ``A``.
 
     Wraps HybGenSea, which provides bindings to the HGS-CVRP library (Hybrid
@@ -637,7 +638,7 @@ def hgs_cvrp(
     nx.set_node_attributes(S, inflow_by_node, 'inflow')
     if ringed:
         S.graph['topology'] = Topology.RINGED
-        split_rings_and_calc_loads(S, A_orig)
+        S = split_rings_and_calc_loads(S, A_orig)
     else:
         S.graph['topology'] = Topology.RADIAL
         calcload(S)

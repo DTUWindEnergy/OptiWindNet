@@ -8,7 +8,7 @@ import pytest
 
 from optiwindnet import repair
 from optiwindnet.api import WindFarmNetwork
-from optiwindnet.loads import calcload
+from optiwindnet.loads import _orient_tree, calcload
 from optiwindnet.repair import gate_and_leaf_path, list_path
 
 from .helpers import assert_graph_equal
@@ -29,7 +29,7 @@ def LA():
     return wfn.L, wfn.A  # (L has nodes/attrs incl. -1; A is available links)
 
 
-def create_S_from_edges(L: nx.Graph, edges: list[tuple[int, int]]) -> nx.Graph:
+def create_S_from_edges(L: nx.Graph, edges: list[tuple[int, int]]) -> nx.DiGraph:
     """
     Build S using L's node set & attributes, then add the given undirected edges.
     """
@@ -37,6 +37,7 @@ def create_S_from_edges(L: nx.Graph, edges: list[tuple[int, int]]) -> nx.Graph:
     S.graph.update(R=L.graph['R'], T=L.graph['T'])
     S.add_nodes_from(L.nodes(data=True))  # keep -1 root and node attrs
     S.add_edges_from(edges)
+    S = _orient_tree(S)
     calcload(S)  # populate 'load'/'subtree' used by repair
     return S
 

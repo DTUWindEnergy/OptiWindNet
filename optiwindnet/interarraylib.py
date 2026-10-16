@@ -13,9 +13,10 @@ import numba as nb
 import numpy as np
 from bitarray import bitarray
 
-from .converting import _chains, _rings_from_S
+from .converting import _chains
 from .geometric import angle_helpers, rotate
 from .loads import _rationalize, calcload
+from .terse import _walk_ring_routes
 from .types import Topology
 
 _lggr = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ __all__ = (
 
 
 def assign_cables(
-    G: nx.Graph,
+    G: nx.DiGraph,
     cables: Sequence[tuple[int | float | Fraction, float | int]],
     currency: str = '€',
 ):
@@ -148,12 +149,10 @@ def count_diagonals(S: nx.Graph, A: nx.Graph) -> int:
     return extended
 
 
-def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
+def directed_links(S: nx.DiGraph) -> Iterator[tuple[int, int, int]]:
     """Yield ``(source, sink, flow)`` for every link of ``S``.
 
-    Forest topologies read each link's orientation off its ``'reverse'`` flag
-    (see the note above :func:`bfs_subtree_loads`), so ``flow`` is just the
-    link's load.
+    Forest topologies use each cable arc's direction and load directly.
 
     A RINGED ``S`` -- as declared by ``S.graph['topology']`` -- stores each ring
     split into two arms at a zero-load link, which is not how a flow
@@ -161,7 +160,7 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
     terminals, fed by a flowless closing feeder at one end and draining through
     a feeder carrying the whole ring at the other. Such rings are *radialized*
     into that chain here (walking across the zero-load link with
-    :func:`~optiwindnet.converting._rings_from_S`), so the zero-load link
+    :func:`~optiwindnet.terse._walk_ring_routes`), so the zero-load link
     becomes an ordinary flow-carrying link.
 
     A ring bridging two roots drains through the one feeding the head of the
@@ -176,12 +175,9 @@ def directed_links(S: nx.Graph) -> Iterator[tuple[int, int, int]]:
       ``flow`` is 0 for links carrying no current: a ring's closing feeder.
     """
     if S.graph['topology'] is not Topology.RINGED:
-        for u, v, edgeD in S.edges(data=True):
-            source, sink = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
-            yield source, sink, edgeD['load']
+        yield from S.edges(data='load')
         return
-    for root, chain_ in _rings_from_S(S):
-        head_root, tail_root = root
+    for head_root, chain_, tail_root in _walk_ring_routes(S):
         n = len(chain_)
         # the ring drains through chain_[0], whose feeder carries all of it, and
         # closes on the far feeder. A lone terminal needs no special case: it is

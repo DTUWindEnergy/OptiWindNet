@@ -85,7 +85,7 @@ def L_from_nodeset(nodeset: NodeSet, handle: str | None = None) -> nx.Graph:
     return L
 
 
-def G_from_routeset(routeset: RouteSet) -> nx.Graph:
+def G_from_routeset(routeset: RouteSet) -> nx.DiGraph:
     """Translate a RouteSet database entry to a routeset graph.
 
     Args:
@@ -145,12 +145,14 @@ def G_from_routeset(routeset: RouteSet) -> nx.Graph:
     calc_length = G.size(weight='length')
     if abs(calc_length / routeset.length - 1) > 1e-5:
         G.graph['length_mismatch_on_db_read'] = calc_length - routeset.length
-    if routeset.rogue:
-        for u, v in zip(routeset.rogue[::2], routeset.rogue[1::2]):
-            G[u][v]['kind'] = 'rogue'
-    if routeset.tentative:
-        for r, n in zip(routeset.tentative[::2], routeset.tentative[1::2]):
-            G[r][n]['kind'] = 'tentative'
+    # stored pairs name links, not arcs: tag whichever orientations are present
+    # (a singleton ring's two feeders share one pair)
+    for kind in ('rogue', 'tentative'):
+        pairs = getattr(routeset, kind) or ()
+        for u, v in zip(pairs[::2], pairs[1::2]):
+            for arc in ((u, v), (v, u)):
+                if G.has_edge(*arc):
+                    G.edges[arc]['kind'] = kind
     return G
 
 
@@ -284,7 +286,7 @@ def oddtypes_to_serializable(obj):
         return obj
 
 
-def pack_G(G: nx.Graph) -> dict[str, Any]:
+def pack_G(G: nx.DiGraph) -> dict[str, Any]:
     """Return graph data as fields of a :class:`RouteSet` record.
 
     Raises:
@@ -326,7 +328,7 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
         'length': length,
         'creator': G.graph['creator'],
         'runtime': G.graph['runtime'],
-        'feeders_per_root': [len(G[root]) for root in range(-R, 0)],
+        'feeders_per_root': [G.degree[root] for root in range(-R, 0)],
         'misc': misc,
         'edges': terse.tolist(),
     }
@@ -348,7 +350,7 @@ def pack_G(G: nx.Graph) -> dict[str, Any]:
     return packed_G
 
 
-def store_G(G: nx.Graph) -> int:
+def store_G(G: nx.DiGraph) -> int:
     """Store ``G``'s data to a new :class:`RouteSet` record in the database.
 
     If the NodeSet or Method are not yet in the database, they will be added.

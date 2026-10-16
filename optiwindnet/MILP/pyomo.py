@@ -93,7 +93,7 @@ class SolverPyomo(Solver):
     def _flow_val(self, var: Any) -> int:
         return round(var.value)
 
-    def _set_model(self, warmstart: nx.Graph | None) -> None:
+    def _set_model(self, warmstart: nx.DiGraph | None) -> None:
         model, metadata = make_min_length_model(self.A, self.bounds)
         self.model, self.metadata = model, metadata
         if warmstart is not None and self.solver.warm_start_capable():
@@ -172,12 +172,12 @@ class SolverPyomo(Solver):
         model.solutions.load_from(result)
         return self._linkbits_from_mip_sol()
 
-    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
+    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.DiGraph:
         S = super()._S_from_linkbits(linkbits)
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         return S
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
         P = self.P
         if A is None:
             A = self.A
@@ -204,7 +204,7 @@ class SolverPyomoAppsi(Solver):
     def _flow_val(self, var: Any) -> int:
         return round(var.value)
 
-    def _set_model(self, warmstart: nx.Graph | None) -> None:
+    def _set_model(self, warmstart: nx.DiGraph | None) -> None:
         model, metadata = make_min_length_model(self.A, self.bounds)
         self.model, self.metadata = model, metadata
         if warmstart is not None and self.solver.warm_start_capable():
@@ -270,12 +270,12 @@ class SolverPyomoAppsi(Solver):
         result.solution_loader.load_vars()
         return self._linkbits_from_mip_sol()
 
-    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.Graph:
+    def _S_from_linkbits(self, linkbits: frozenbitarray) -> nx.DiGraph:
         S = super()._S_from_linkbits(linkbits)
         S.graph['fun_fingerprint'] = _make_min_length_model_fingerprint
         return S
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
         P = self.P
         if A is None:
             A = self.A
@@ -640,7 +640,7 @@ _make_min_length_model_fingerprint = fingerprint_function(make_min_length_model)
 
 
 def warmup_model(
-    model: pyo.ConcreteModel, metadata: ModelMetadata, S: nx.Graph
+    model: pyo.ConcreteModel, metadata: ModelMetadata, S: nx.DiGraph
 ) -> pyo.ConcreteModel:
     """Set initial solution into ``model``.
 

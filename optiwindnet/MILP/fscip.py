@@ -53,7 +53,7 @@ class SolverFSCIP(Solver, PoolHandler):
         # SCIP solution values are floats and may be slightly off.
         return round(self._value_map[var])
 
-    def _set_model(self, warmstart: nx.Graph | None) -> None:
+    def _set_model(self, warmstart: nx.DiGraph | None) -> None:
         model, metadata = make_min_length_model(self.A, self.bounds)
         self.var_from_name = {
             var.name: var
@@ -283,7 +283,7 @@ class SolverFSCIP(Solver, PoolHandler):
     def _read_incumbent_linkbits(self) -> frozenbitarray:
         return self._read_incumbent_linkbits_from_pool()
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
         if A is None:
             A = self.A
         P, bounds = self.P, self.bounds

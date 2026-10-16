@@ -69,7 +69,7 @@ class SolverHiGHS(Solver, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return round(self._value_map[var.index])
 
-    def _set_model(self, warmstart: nx.Graph | None) -> None:
+    def _set_model(self, warmstart: nx.DiGraph | None) -> None:
         model, metadata = make_min_length_model(self.A, self.bounds)
         self.model, self.metadata = model, metadata
         if warmstart is not None:
@@ -148,7 +148,7 @@ class SolverHiGHS(Solver, PoolHandler):
     def _read_incumbent_linkbits(self) -> frozenbitarray:
         return self._read_incumbent_linkbits_from_pool()
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
         if A is None:
             A = self.A
         P, bounds = self.P, self.bounds
@@ -461,7 +461,7 @@ def _solution_violations(
 
 
 def warmup_model(
-    model: highspy.Highs, metadata: ModelMetadata, S: nx.Graph
+    model: highspy.Highs, metadata: ModelMetadata, S: nx.DiGraph
 ) -> highspy.Highs:
     """Set initial solution into ``model``.
 

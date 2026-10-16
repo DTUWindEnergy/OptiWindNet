@@ -41,12 +41,14 @@ def constructor_topology(case: ConstructorCase):
     )
 
 
-def _baseline_topology(case: BaselineCase, solve: Callable[..., nx.Graph]) -> nx.Graph:
+def _baseline_topology(
+    case: BaselineCase, solve: Callable[..., nx.DiGraph]
+) -> nx.DiGraph:
     """Produce a baseline case, retrying with a longer limit if it is invalid."""
     A = as_normalized(get_bundle(case.site).A)
     VertexC = A.graph['VertexC']
 
-    def check(S: nx.Graph) -> None:
+    def check(S: nx.DiGraph) -> None:
         assert_topology(S, expected_topology(case), case.capacity)
         assert terminal_terminal_crossings(S, VertexC) == []
 
@@ -70,12 +72,12 @@ def _baseline_topology(case: BaselineCase, solve: Callable[..., nx.Graph]) -> nx
 
 
 @cache
-def hgs_topology(case: BaselineCase) -> nx.Graph:
+def hgs_topology(case: BaselineCase) -> nx.DiGraph:
     """Produce a typed HGS case once for topology and PathFinder consumers."""
     return _baseline_topology(case, hgs_cvrp)
 
 
 @cache
-def lkh_topology(case: BaselineCase) -> nx.Graph:
+def lkh_topology(case: BaselineCase) -> nx.DiGraph:
     """Produce a typed LKH-3 case once (requires the ``LKH`` executable)."""
     return _baseline_topology(case, lkh3)

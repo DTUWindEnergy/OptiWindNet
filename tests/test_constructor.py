@@ -21,9 +21,10 @@ import networkx as nx
 import pytest
 
 from optiwindnet.constraints import NetworkConstraints
-from optiwindnet.converting import _rings_from_S, linkbits_from_S
+from optiwindnet.converting import linkbits_from_S
 from optiwindnet.heuristics import constructor
 from optiwindnet.identity import topology_id
+from optiwindnet.terse import _walk_ring_routes
 from optiwindnet.types import Topology
 
 from .cases import (
@@ -97,7 +98,7 @@ def test_constructor_ringed_capacity_sweep(capacity):
         A, NetworkConstraints(capacity=capacity, topology='ringed'), method='ringed'
     )
     assert_topology(S, Topology.RINGED, capacity)
-    assert all(len(terminals) <= 2 * capacity for _, terminals in _rings_from_S(S))
+    assert all(len(walk) <= 2 * capacity for _, walk, _ in _walk_ring_routes(S))
 
 
 def test_constructor_ringed_multi_root_uses_every_root():
@@ -106,7 +107,9 @@ def test_constructor_ringed_multi_root_uses_every_root():
         A, NetworkConstraints(capacity=5, topology='ringed'), method='ringed'
     )
     assert_topology(S, Topology.RINGED, 5)
-    roots_used = {root for roots, _ in _rings_from_S(S) for root in roots}
+    roots_used = {
+        root for open_, _, close in _walk_ring_routes(S) for root in (open_, close)
+    }
     assert roots_used == set(range(-A.graph['R'], 0))
 
 
@@ -128,7 +131,7 @@ def test_constructor_ringed_exact_double_capacity_boundary():
         A, NetworkConstraints(capacity=6, topology='ringed'), method='ringed'
     )
     assert_topology(S, Topology.RINGED, 6)
-    assert max(len(ring[1]) for ring in _rings_from_S(S)) <= 12
+    assert max(len(walk) for _, walk, _ in _walk_ring_routes(S)) <= 12
 
 
 def test_constructor_ringed_odd_site_exercises_single_terminal_ring():
@@ -137,7 +140,7 @@ def test_constructor_ringed_odd_site_exercises_single_terminal_ring():
         A, NetworkConstraints(capacity=1, topology='ringed'), method='ringed'
     )
     assert_topology(S, Topology.RINGED, 1)
-    assert any(len(terminals) == 1 for _, terminals in _rings_from_S(S))
+    assert any(len(walk) == 1 for _, walk, _ in _walk_ring_routes(S))
 
 
 @pytest.mark.parametrize('method', METHODS)

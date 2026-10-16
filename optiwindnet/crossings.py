@@ -21,7 +21,45 @@ from .geometric import (
     polyline_rays_at_point,
     rays_alternate,
 )
+from .terse import _walk_ring_routes
+from .types import Topology
 from .utils import BiMap
+
+
+def _geometry_graph(G: nx.DiGraph) -> nx.Graph:
+    """Project physical cable arcs onto undirected geometric occupancy.
+
+    Opposite feeders with the same prime path occupy one geometric route.
+    The electrical graph is retained independently and is never modified.
+    """
+    omitted = set()
+    removed = set()
+    T = G.graph['T']
+    fnT = G.graph.get('fnT')
+    prime = (lambda n: int(fnT[n])) if fnT is not None else (lambda n: n)
+    if G.graph.get('topology') == Topology.RINGED and all(
+        G.degree[n] == 2 for n in G if n >= 0
+    ):
+        for root, walk, close in _walk_ring_routes(G):
+            terminals = [i for i, node in enumerate(walk) if node < T]
+            if root != close or len(terminals) != 1:
+                continue
+            i = terminals[0]
+            left, right = [root, *walk[: i + 1]], [*walk[i:], close]
+            if list(map(prime, left)) != list(map(prime, reversed(right))):
+                continue
+            if G.has_edge(root, walk[0]) and G[root][walk[0]].get('load') == 0:
+                left, right = list(reversed(right)), list(reversed(left))
+            for u, v in pairwise(right):
+                omitted.add(
+                    (u, v) if G.has_edge(u, v) and G[u][v].get('load') == 0 else (v, u)
+                )
+            removed.update(right[1:-1])
+    return nx.subgraph_view(
+        G,
+        filter_node=lambda n: n not in removed,
+        filter_edge=lambda u, v: (u, v) not in omitted,
+    ).to_undirected(as_view=True)
 
 
 @dataclass(frozen=True)
@@ -186,6 +224,8 @@ def edge_conflicts(u: int, v: int, diagonals: BiMap) -> Iterator[tuple[int, int]
 def edge_crossings(
     u: int, v: int, G: nx.Graph, diagonals: BiMap
 ) -> list[tuple[int, int]]:
+    if isinstance(G, nx.DiGraph):
+        G = _geometry_graph(G)
     u, v = (u, v) if u < v else (v, u)
     st = diagonals.get((u, v))
     conflicting = []
@@ -376,6 +416,8 @@ def _feeder_intersections(G: nx.Graph, hooks: Iterable | None = None) -> np.ndar
     Raises:
       IndexError: if an edge end or hook has no angle rank wrt the roots.
     """
+    if isinstance(G, nx.DiGraph):
+        G = _geometry_graph(G)
     R, T, VertexC = (G.graph[k] for k in ('R', 'T', 'VertexC'))
     fnT = G.graph.get('fnT')
     angle_rank__ = G.graph.get('angle_rank__', None)
@@ -551,6 +593,8 @@ def find_routeset_crossings(G: nx.Graph) -> list[tuple[int, int, int, int]]:
       edge ⟨u, v⟩ crosses edge ⟨s, t⟩; ``u == v`` means the detour at ``u``
       splits the branch between ``s`` and ``t``.
     """
+    if isinstance(G, nx.DiGraph):
+        G = _geometry_graph(G)
     T, B = (G.graph[k] for k in 'TB')
     C, D = (G.graph.get(k, 0) for k in 'CD')
     VertexC = G.graph['VertexC']
@@ -584,6 +628,8 @@ def find_routeset_crossings(G: nx.Graph) -> list[tuple[int, int, int, int]]:
     # check detour nodes for branch-splitting
     d_start = T + B + C
     for d, d_ in enumerate(fnT[d_start : d_start + D].tolist(), start=d_start):
+        if d not in G:
+            continue
         if d_ >= T or G.degree[d_] == 1:
             # either the detour node is over a border vertex or the node is a leaf:
             #   no branch splitting possible
@@ -855,6 +901,8 @@ def _detour_splits(
         return {}
     splits: dict[int, tuple[int, tuple[int, int]]] = {}
     for d in range(T + B + C, T + B + C + D):
+        if d not in G:
+            continue
         prime = int(fnT[d])
         if prime not in G or not 0 <= prime < T:
             continue
@@ -1212,6 +1260,8 @@ def find_geometric_crossings(
       - ``geometry``: WKT string of the offending Shapely geometry (Point,
         MultiPoint, LineString, MultiLineString, …).
     """
+    if isinstance(G, nx.DiGraph):
+        G = _geometry_graph(G)
     VertexC = G.graph['VertexC']
     fnT = _routeset_fnT(G)
     polylines = _routeset_polylines(G)
@@ -1466,6 +1516,8 @@ def list_edge_crossings(
     Returns:
       list of 2-tuple (crossing) of 2-tuple (edge, ordered)
     """
+    if isinstance(S, nx.DiGraph):
+        S = _geometry_graph(S)
     eeXings = []
     checked = set()
     diagonals = A.graph['diagonals']

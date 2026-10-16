@@ -650,7 +650,7 @@ def test_nominal_cables_are_assigned_by_nominal_load():
     wfn = _mixed_wfn()
     wfn.update_from_terse_links(np.array([-1, -1]))
     # 1 MW fits the 1 MW cable; 1.25 MW needs the 2.5 MW one
-    assert {v: d['cable'] for _, v, d in wfn.G.edges(data=True)} == {0: 0, 1: 1}
+    assert {u: d['cable'] for u, _, d in wfn.G.edges(data=True)} == {0: 0, 1: 1}
 
 
 # --- round trips and storage ---
@@ -714,7 +714,7 @@ def test_huge_fraction_power_survives_exactly():
     assert wfn.G.graph['power_per_inflow'] == power
     assert wfn.G.graph['power_quantization_inexact'] is False
     assert [wfn.G.nodes[t]['power'] for t in range(2)] == [power, 2 * power]
-    assert 'load_nominal' not in wfn.G[-1][0]
+    assert 'load_nominal' not in wfn.G[0][-1]
     assert sorted(wfn.get_network()['load']) == [float(2 * power), float(3 * power)]
     assert WindFarmNetwork(
         L=L_from_G(wfn.G), cables=4, power_unit='MW'

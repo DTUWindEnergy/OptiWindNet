@@ -309,7 +309,7 @@ def load_provisional_milp_references(
 def solve_milp_reference_execution(
     execution: MILPReferenceExecution,
     reference: MILPReference,
-) -> tuple[SolutionInfo, nx.Graph, str]:
+) -> tuple[SolutionInfo, nx.DiGraph, str]:
     """Run one 1 s cold or warm MILP reference execution."""
     case = execution.case
     if case.time_limit != TEST_TIME_LIMIT:

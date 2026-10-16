@@ -74,11 +74,11 @@ def test_assign_cables():
             ), f'Edge {u, v} cost mismatch: {expectedD["cost"]} != {actualD["cost"]}'
 
     expected_1 = [
-        (0, 12, {'cable': 2, 'cost': 107.70329614269008}),
-        (-1, 0, {'cable': 2, 'cost': 200.0}),
-        (1, 13, {'cable': 2, 'cost': 141.4213562373095}),
-        (1, 2, {'cable': 1, 'cost': 150.0}),
-        (2, 3, {'cable': 0, 'cost': 200.0}),
+        (13, 0, {'cable': 2, 'cost': 107.70329614269008}),
+        (0, -1, {'cable': 2, 'cost': 200.0}),
+        (1, 12, {'cable': 2, 'cost': 141.4213562373095}),
+        (2, 1, {'cable': 1, 'cost': 150.0}),
+        (3, 2, {'cable': 0, 'cost': 200.0}),
         (12, 13, {'cable': 2, 'cost': 60.0}),
     ]
 
@@ -114,8 +114,8 @@ def test_assign_cables():
 
 
 def test_assign_cables_prices_ring_zero_load_link():
-    G = nx.Graph(max_load=1)
-    G.add_edge(-1, 0, load=1, length=2.0)
+    G = nx.DiGraph(max_load=1)
+    G.add_edge(0, -1, load=1, length=2.0)
     G.add_edge(0, 1, load=0, length=3.0)
 
     assign_cables(G, [(1, 4.0)])
@@ -127,7 +127,7 @@ def test_assign_cables_prices_ring_zero_load_link():
 @pytest.mark.parametrize('inexact', (False, True))
 @pytest.mark.parametrize('capacities', ((6.6,), (6.6, 10)))
 def test_assign_cables_nominal_float_boundary(inexact, capacities):
-    G = nx.Graph(
+    G = nx.DiGraph(
         T=1,
         R=1,
         capacity_nominal=Fraction(33, 5),
@@ -135,13 +135,13 @@ def test_assign_cables_nominal_float_boundary(inexact, capacities):
         power_quantization_inexact=inexact,
     )
     G.add_node(0, power=Fraction(33, 5), inflow=1)
-    G.add_edge(-1, 0, load=1, length=2.0)
+    G.add_edge(0, -1, load=1, length=2.0)
     cables = [(capacity, 100 * (i + 1)) for i, capacity in enumerate(capacities)]
 
     assign_cables(G, cables)
 
-    assert G[-1][0]['cable'] == 0
-    assert G[-1][0]['cost'] == 200
+    assert G[0][-1]['cable'] == 0
+    assert G[0][-1]['cost'] == 200
     assert G.graph['cables'] is cables
 
 
@@ -181,17 +181,17 @@ def test_update_lengths():
     G = wfn.G.copy()
 
     expected_lengths = [
-        (0, 12, 0.5385164807134504),
+        (13, 0, 0.5385164807134504),
         (0, -1, 1.0),
-        (1, 13, 0.7071067811865476),
-        (1, 2, 1.0),
-        (2, 3, 2.0),
+        (1, 12, 0.7071067811865476),
+        (2, 1, 1.0),
+        (3, 2, 2.0),
         (12, 13, 0.30000000000000004),
     ]
 
     # remove some of lengths from G
     del G.edges[0, -1]['length']
-    del G.edges[2, 3]['length']
+    del G.edges[3, 2]['length']
 
     update_lengths(G)
 

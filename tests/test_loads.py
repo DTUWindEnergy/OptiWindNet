@@ -8,13 +8,13 @@ import math
 from fractions import Fraction
 
 import networkx as nx
+import numpy as np
 import pytest
 
 from optiwindnet.api_utils import extract_network_as_array
-from optiwindnet.converting import _rings_from_S
 from optiwindnet.loads import (
     _add_ring_to_S,
-    bfs_subtree_loads,
+    _branch_loads,
     calcload,
     nonunit_inflow,
     split_rings_and_calc_loads,
@@ -22,14 +22,15 @@ from optiwindnet.loads import (
 )
 from optiwindnet.MILP import Topology
 from optiwindnet.presenting import _nominal_loads
-from optiwindnet.validating import validate_topology
+from optiwindnet.terse import _walk_ring_routes
+from optiwindnet.validating import validate_routeset, validate_topology
 
 from .helpers import tiny_wfn
 
 
 @pytest.mark.parametrize('n', range(1, 13))
 def test_private_add_ring_to_S_canonical_shape(n):
-    S = nx.Graph(R=1, T=n)
+    S = nx.DiGraph(R=1, T=n)
     S.add_node(-1)
     _add_ring_to_S(S, (-1, -1), list(range(n)), subtree=0, A=None)
 
@@ -40,11 +41,11 @@ def test_private_add_ring_to_S_canonical_shape(n):
     arm_load = math.ceil(n / 2)
     assert max(data['load'] for *_, data in S.edges(data=True)) == arm_load
     if n == 1:
-        assert feeders == [1] and zero_load_links == []
+        assert sorted(feeders) == [0, 1] and len(zero_load_links) == 1
     else:
         assert sorted(feeders) == [n - arm_load, arm_load]
         assert len(zero_load_links) == 1
-    assert sum(S.nodes[t]['load'] for t in S.neighbors(-1)) == n
+    assert sum(data['load'] for _, _, data in S.in_edges(-1, data=True)) == n
     assert {S.nodes[t]['subtree'] for t in range(n)} == {0}
 
 
@@ -60,19 +61,19 @@ def _path_form_S(R, paths):
 
 def test_split_rings_and_calc_loads_single_and_multi_root():
     one = _path_form_S(1, [(-1, [0, 1, 2]), (-1, [3, 4])])
-    split_rings_and_calc_loads(one, nx.Graph())
+    one = split_rings_and_calc_loads(one, nx.Graph())
     assert validate_topology(one, capacity=2) == []
     assert one.graph['topology'] is Topology.RINGED
     assert one.nodes[-1]['load'] == 5
 
     multi = _path_form_S(2, [(-2, [0, 1]), (-1, [2, 3, 4, 5]), (-1, [6])])
-    split_rings_and_calc_loads(multi, nx.Graph())
+    multi = split_rings_and_calc_loads(multi, nx.Graph())
     assert validate_topology(multi, capacity=3) == []
     by_root = {
         root: {
-            frozenset(ordered)
-            for roots, ordered in _rings_from_S(multi)
-            if roots == (root, root)
+            frozenset(walk)
+            for open_, walk, close in _walk_ring_routes(multi)
+            if open_ == close == root
         }
         for root in (-2, -1)
     }
@@ -102,10 +103,10 @@ def test_calcload():
 
 def _chain_S(T, inflow=None):
     """One root feeding a single chain of ``T`` terminals."""
-    S = nx.Graph(R=1, T=T)
+    S = nx.DiGraph(R=1, T=T)
     S.add_node(-1)
-    S.add_edge(-1, 0)
-    S.add_edges_from(itertools.pairwise(range(T)))
+    S.add_edge(0, -1)
+    S.add_edges_from((v, u) for u, v in itertools.pairwise(range(T)))
     if inflow is not None:
         nx.set_node_attributes(S, dict(enumerate(inflow)), 'inflow')
     return S
@@ -118,7 +119,7 @@ def test_calcload_sources_declared_terminal_inflow():
     calcload(S)
 
     # each link carries the inflow of everything beyond it, feeder included
-    assert [S[u][v]['load'] for u, v in ((2, 3), (1, 2), (0, 1), (-1, 0))] == [
+    assert [S[u][v]['load'] for u, v in ((3, 2), (2, 1), (1, 0), (0, -1))] == [
         4, 5, 8, 10,
     ]  # fmt: skip
     assert S.nodes[-1]['load'] == sum(inflow)
@@ -140,18 +141,61 @@ def test_calcload_without_inflow_attributes_counts_terminals():
 def test_calcload_reports_a_terminal_no_root_reaches():
     """Traversal coverage is checked by terminal count, independently of inflow."""
     S = _chain_S(4, (2, 3, 1, 4))
-    S.remove_edge(2, 3)  # terminal 3 is now cut off from every root
+    S.remove_edge(3, 2)  # terminal 3 is now cut off from every root
 
-    with pytest.raises(ValueError, match='reached 3 terminals, not T = 4'):
+    with pytest.raises(ValueError, match='one outgoing positive-load arc'):
         calcload(S)
 
 
-def test_bfs_subtree_loads_sources_declared_terminal_inflow():
+def test_private_branch_loads_sources_declared_terminal_inflow():
     S = _chain_S(3, (2, 3, 1))
+    S.nodes[-1]['load'] = 0
 
-    assert bfs_subtree_loads(S, -1, [0], subtree=0) == 6
+    assert _branch_loads(S, 0, -1, subtree=0) == 3
+    assert S.nodes[-1]['load'] == 6
     assert S.nodes[0]['load'] == 6
     assert S.nodes[1]['load'] == 4
+
+
+def test_calcload_rejects_a_loaded_clone_without_an_outgoing_cable():
+    G = nx.DiGraph([(0, 2), (1, 0)], R=1, T=2)
+    G.add_node(-1)
+    with pytest.raises(ValueError, match='node 2 must have one outgoing'):
+        calcload(G)
+
+
+@pytest.mark.parametrize('cycle', [[(0, 1), (1, 0)], [(2, 3), (3, 2)]])
+def test_calcload_rejects_disconnected_positive_load_cycles(cycle):
+    G = _chain_S(2)
+    if cycle[0][0] == 0:
+        G.remove_edge(0, -1)
+    G.add_edges_from(cycle)
+    with pytest.raises(ValueError, match='positive-load arcs contain a directed cycle'):
+        calcload(G)
+
+
+def test_calcload_preserves_clones_inside_a_zero_load_cable():
+    G = nx.DiGraph(T=2, R=1, power_per_inflow=Fraction(1, 2))
+    G.add_edges_from([(0, -1), (1, -1)])
+    nx.add_path(G, (0, 2, 3, 1), load=0)
+    G.nodes[2].update(kind='contour', load=99, subtree=7)
+    G.nodes[3].update(kind='contour', load=99, subtree=7)
+
+    calcload(G)
+    calcload(G, nominal=True)
+
+    for node in (2, 3):
+        assert G.nodes[node] == {
+            'kind': 'contour',
+            'load': 0,
+            'load_nominal': 0,
+            'subtree': 7,
+        }
+    for source, sink in ((0, 2), (2, 3), (3, 1)):
+        assert G[source][sink] == {'load': 0, 'load_nominal': 0}
+    assert G.nodes[-1]['load'] == 2
+    assert G.nodes[-1]['load_nominal'] == 1
+    assert G.graph['max_load'] == 1
 
 
 def test_terminal_inflow_reports_only_the_departures_from_unitary_inflow():
@@ -162,10 +206,43 @@ def test_terminal_inflow_reports_only_the_departures_from_unitary_inflow():
     assert nonunit_inflow(_chain_S(4)) == {}
 
 
+@pytest.mark.parametrize('topology', (Topology.RADIAL, Topology.BRANCHED))
+def test_calcload_carries_flow_and_nominal_loads_through_a_feeder_clone(topology):
+    G = nx.DiGraph(
+        T=1,
+        R=1,
+        B=1,
+        C=1,
+        capacity=1,
+        topology=topology,
+        power_per_inflow=2,
+        VertexC=np.array([(3.0, 0.0), (1.0, 1.0), (0.0, 0.0)]),
+        fnT=np.array([0, 1, 1, -1]),
+        name='feeder_clone',
+        handle='feeder_clone',
+        border=np.array([], dtype=int),
+        creator='test',
+        runtime=0.0,
+    )
+    G.add_node(-1, kind='oss')
+    G.add_node(0, kind='wtg', power=2)
+    G.add_node(2, kind='contour')
+    G.add_edge(0, 2, length=math.sqrt(5), kind='contour')
+    G.add_edge(2, -1, length=math.sqrt(2), kind='contour')
+
+    calcload(G)
+    calcload(G, nominal=True)
+
+    assert G.nodes[-1]['load'] == 1
+    assert G.nodes[-1]['load_nominal'] == 2
+    assert G.number_of_edges() == 2
+    assert validate_routeset(G) == []
+
+
 def test_nominal_export_preserves_integer_loads_with_clones_and_open_ring():
-    G = nx.Graph(R=2, T=4, power_per_inflow=Fraction(1, 2))
-    G.add_edges_from([(-2, 4), (4, 0), (0, 1), (0, 2), (-1, 3)])
-    G.add_edge(2, 3, load=0, reverse=True)
+    G = nx.DiGraph(R=2, T=4, power_per_inflow=Fraction(1, 2))
+    G.add_edges_from([(4, -2), (0, 4), (1, 0), (2, 0), (3, -1)])
+    G.add_edge(2, 3, load=0)
     nx.set_node_attributes(G, {0: 2, 1: 2, 2: 4, 3: 3}, 'inflow')
     nx.set_node_attributes(G, {0: 1.01, 1: 1.0, 2: 2.01, 3: 1.49}, 'power')
     for _, _, attrs in G.edges(data=True):
@@ -208,7 +285,7 @@ def test_exact_nominal_loads_scale_integer_loads_without_touching_the_graph(
     def unexpected_traversal(*args, **kwargs):
         pytest.fail('Exact nominal loads must use existing integer loads.')
 
-    monkeypatch.setattr('optiwindnet.loads._bfs_loads_walk', unexpected_traversal)
+    monkeypatch.setattr('optiwindnet.presenting.calcload', unexpected_traversal)
     nominal = _nominal_loads(G)
     assert nominal == {-1: Fraction(5, 2), 0: Fraction(5, 2), 1: Fraction(3, 2)}
     assert nx.utils.graphs_equal(G, original)
@@ -221,15 +298,15 @@ def test_inexact_nominal_loads_use_partial_declarations_and_refresh():
     assert G.graph['power_quantization_inexact'] is True
     calcload(G)
     assert _nominal_loads(G) == {-1: Fraction(201, 100), 0: Fraction(201, 100), 1: 1}
-    assert G[-1][0]['load_nominal'] == Fraction(201, 100)
-    assert G[0][1]['load_nominal'] == 1
+    assert G[0][-1]['load_nominal'] == Fraction(201, 100)
+    assert G[1][0]['load_nominal'] == 1
 
-    G.remove_edge(0, 1)
-    G.add_edge(-1, 1)
+    G.remove_edge(1, 0)
+    G.add_edge(1, -1)
     calcload(G)
     calcload(G, nominal=True)
-    assert G[-1][0]['load_nominal'] == Fraction(101, 100)
-    assert G[-1][1]['load_nominal'] == 1
+    assert G[0][-1]['load_nominal'] == Fraction(101, 100)
+    assert G[1][-1]['load_nominal'] == 1
     assert G.nodes[-1]['load_nominal'] == Fraction(201, 100)
     assert G.graph['max_load'] == 1
 
@@ -243,7 +320,7 @@ def test_inexact_flag_detects_errors_that_cancel():
     calcload(G)
     calcload(G, nominal=True)
     assert G.nodes[-1]['load_nominal'] == 2
-    assert G[0][1]['load_nominal'] == Fraction(99, 100)
+    assert G[1][0]['load_nominal'] == Fraction(99, 100)
 
     G.nodes[0]['power'] = G.nodes[1]['power'] = Fraction(1)
     validate_terminal_power(G)
@@ -260,9 +337,9 @@ def test_nominal_calcload_refreshes_and_falls_back_to_inflow():
 
     calcload(G, nominal=True)
 
-    assert G[-1][0]['load_nominal'] == Fraction(251, 100)
-    assert G[-1][0]['load'] == G.graph['max_load'] == 5
+    assert G[0][-1]['load_nominal'] == Fraction(251, 100)
+    assert G[0][-1]['load'] == G.graph['max_load'] == 5
     # an undeclared terminal is worth its inflow times power_per_inflow
     del G.nodes[1]['power']
     calcload(G, nominal=True)
-    assert G[-1][0]['load_nominal'] == Fraction(101, 100) + 3 * Fraction(1, 2)
+    assert G[0][-1]['load_nominal'] == Fraction(101, 100) + 3 * Fraction(1, 2)

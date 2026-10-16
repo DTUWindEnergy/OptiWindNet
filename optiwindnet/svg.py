@@ -6,12 +6,13 @@ from collections import defaultdict
 from collections.abc import Mapping
 from itertools import chain, pairwise
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 import networkx as nx
 import numpy as np
 import svg
 
+from .converting import _chains
 from .geometric import rotate
 from .presenting import (
     _format_length,
@@ -390,7 +391,7 @@ class Drawable:
             self.edgesE.append(svg.G(id='overlay', elements=kind_groups))
 
     def add_detours(self, size_selector: int = 0):
-        G, R, T, B = self.G, self.R, self.T, self.B
+        G, T, B = self.G, self.T, self.B
         C, D = (G.graph.get(k, 0) for k in 'CD')
         fnT, c, VertexS = self.fnT, self.c, self.VertexS
         # reusable ring for indicating clone-vertices
@@ -407,22 +408,13 @@ class Drawable:
 
         # Detour edges as polylines (to align the dashes among overlapping lines)
         points__ = defaultdict(list)
-        for r in range(-R, 0):
-            detoured = [n for n in G.neighbors(r) if n >= T + B + C]
-            for t in detoured:
-                s = r
-                hops = [s, fnT[t]]
-                while True:
-                    nbr = set(G.neighbors(t))
-                    nbr.remove(s)
-                    u = nbr.pop()
-                    hops.append(fnT[u])
-                    if u < T:
-                        break
-                    s, t = t, u
-                points__[G[s][t].get('cable', None)].append(
-                    ' '.join(str(c) for c in VertexS[hops].flat)
-                )
+        for source, _, path in _chains(G):
+            if not any(n >= T + B + C for n in path):
+                continue
+            cable = G[source][path[1]].get('cable')
+            points__[cable].append(
+                ' '.join(str(coord) for coord in VertexS[fnT[path]].flat)
+            )
         common_attr: dict[str, Any] = {
             'stroke': c.kind2color['detour'],
             'stroke_dasharray': [18, 15],
@@ -591,7 +583,9 @@ class Drawable:
             has_loads = G.graph.get('has_loads', False)
             power_per_inflow = G.graph.get('power_per_inflow', 1)
             nominal = (
-                _nominal_loads(G) if has_loads and node_tag == 'load_nominal' else {}
+                _nominal_loads(cast(nx.DiGraph, G))
+                if has_loads and node_tag == 'load_nominal'
+                else {}
             )
 
             def get_label(n):
