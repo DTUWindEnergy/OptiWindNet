@@ -18,7 +18,7 @@ from optiwindnet.baselines.lkh import _build_weight_matrix, lkh3
 from optiwindnet.constraints import _resolved
 from optiwindnet.heuristics import constructor
 from optiwindnet.interarraylib import _links_over_limit, links_over_length
-from optiwindnet.loads import calcload
+from optiwindnet.loads import _orient_tree, calcload
 from optiwindnet.MILP import OWNWarmupFailed, solver_factory
 from optiwindnet.MILP._core import links_to_fix, nonclosest_feeders
 from optiwindnet.svg import SvgRepr
@@ -208,9 +208,11 @@ def test_model_rejects_a_warm_start_over_the_limit():
     # tree, so only the limit can reject it
     forbidden = int(np.flatnonzero(A.graph['d2roots'][:, -1] > _TOY_LIMIT)[0])
     subtree = S.nodes[forbidden]['subtree']
-    (hook,) = (n for n in S[-1] if S.nodes[n]['subtree'] == subtree)
+    (hook,) = (n for n in S.predecessors(-1) if S.nodes[n]['subtree'] == subtree)
+    S = S.to_undirected()
     S.remove_edge(-1, hook)
     S.add_edge(-1, forbidden)
+    S = _orient_tree(S)
     calcload(S)
     assert _links_over_limit(S, A, _TOY_LIMIT)
 

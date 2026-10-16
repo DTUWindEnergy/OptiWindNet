@@ -6,8 +6,8 @@ import logging
 
 import networkx as nx
 
-from .crossings import edge_conflicts, list_edge_crossings
-from .loads import calcload
+from .crossings import _geometry_graph, edge_conflicts, list_edge_crossings
+from .loads import _orient_tree, calcload
 
 __all__ = ('repair_routeset_path',)
 
@@ -300,11 +300,15 @@ def _apply_choice(
         S.add_edge(root, gate, length=d2roots[gate, root])
     # the repair invalidates current load attributes -> recalculate them
     # TODO: do it in a smarter way by updating only affected subtrees
-    calcload(S)
+    oriented = _orient_tree(S)
+    calcload(oriented)
+    nx.set_node_attributes(S, dict(oriented.nodes(data=True)))
     return S
 
 
-def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx.Graph:
+def repair_routeset_path(
+    Sʹ: nx.DiGraph, A: nx.Graph, ringed: bool = False
+) -> nx.DiGraph:
     # naming: suffix _path as opposed to _tree -> Sʹ is non-branching
     """
 
@@ -329,7 +333,7 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx
         )
         return Sʹ
     diagonals = A.graph['diagonals']
-    S = Sʹ.copy()
+    S = _geometry_graph(Sʹ).copy()
 
     def not_crossing(choice):
         # reads from parent scope: diagonals, S
@@ -416,4 +420,6 @@ def repair_routeset_path(Sʹ: nx.Graph, A: nx.Graph, ringed: bool = False) -> nx
     if outstanding_crossings:
         S.graph['num_crossings'] = len(outstanding_crossings)
         S.graph['outstanding_crossings'] = outstanding_crossings
+    S = _orient_tree(S)
+    calcload(S)
     return S

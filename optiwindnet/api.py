@@ -116,7 +116,7 @@ class Router(ABC):
         constraints: NetworkConstraints,
         verbose: bool = False,
         **kwargs,
-    ) -> tuple[nx.Graph, nx.Graph]:
+    ) -> tuple[nx.DiGraph, nx.DiGraph]:
         """Run the routing optimization.
 
         Args:
@@ -459,14 +459,14 @@ class WindFarmNetwork:
         return self._A
 
     @property
-    def S(self) -> nx.Graph:
+    def S(self) -> nx.DiGraph:
         "Solution topology (selected links)."
         if self._is_stale_SG:
             raise RuntimeError('Call the `optimize()` method to update S.')
         return self._S
 
     @property
-    def G(self) -> nx.Graph:
+    def G(self) -> nx.DiGraph:
         "Optimized network with cable routes and types."
         if self._is_stale_SG:
             raise RuntimeError('Call the `optimize()` method to update G.')

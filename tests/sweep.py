@@ -84,7 +84,7 @@ from optiwindnet.converting import (
     linkbits_from_S,
 )
 from optiwindnet.identity import linkset_id
-from optiwindnet.loads import calcload, nonunit_inflow, split_rings_and_calc_loads
+from optiwindnet.loads import calcload, nonunit_inflow
 from optiwindnet.MILP._core import physical_core_count
 from optiwindnet.pathfinding import PathFinder
 from optiwindnet.types import Topology
@@ -266,7 +266,7 @@ class Task:
 @dataclass(frozen=True, slots=True)
 class _Job:
     variant: str
-    fn: Callable[[Task], nx.Graph]
+    fn: Callable[[Task], nx.DiGraph]
     fingerprint: str
     site: str
     capacity: int
@@ -430,7 +430,7 @@ def _pending_jobs(
 
 def run_sweep(
     cases: Iterable[tuple],
-    variants: Mapping[str, Callable[[Task], nx.Graph]],
+    variants: Mapping[str, Callable[[Task], nx.DiGraph]],
     db_path: Path | str,
     *,
     run_id: str | None = None,
@@ -598,7 +598,7 @@ def run_sweep(
     return run_id
 
 
-def load_solution(db_path: Path | str, row_id: int) -> tuple[nx.Graph, SiteBundle]:
+def load_solution(db_path: Path | str, row_id: int) -> tuple[nx.DiGraph, SiteBundle]:
     """Rebuild the topology ``S`` recorded in a result row, with its site.
 
     ``S`` has loads, ``capacity`` and ``topology`` set, so the routeset can be
@@ -626,13 +626,10 @@ def load_solution(db_path: Path | str, row_id: int) -> tuple[nx.Graph, SiteBundl
     A = bundle.A
     if linkset_id(A) != row['linkset_id']:
         raise ValueError(f'available links of {row["site"]!r} changed since the run')
-    S = S_from_linkbits(deserialize(row['linkbits']), A)
     topology = Topology(json.loads(row['extras']).get('topology', 'branched'))
+    S = S_from_linkbits(deserialize(row['linkbits']), A, topology=topology)
     nx.set_node_attributes(S, nonunit_inflow(A), 'inflow')
-    if topology is Topology.RINGED:
-        split_rings_and_calc_loads(S, A)
-    else:
-        calcload(S)
+    calcload(S)
     S.graph.update(topology=topology, capacity=row['capacity'])
     return S, bundle
 

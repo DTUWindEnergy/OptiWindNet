@@ -16,7 +16,6 @@ import numpy as np
 from .types import Topology
 
 __all__ = (
-    'bfs_subtree_loads',
     'calcload',
     'nonunit_inflow',
     'quantize_for_capacity',
@@ -551,134 +550,72 @@ def set_terminal_power(
     validate_terminal_power(L)
 
 
-# A link's ``'reverse'`` flag orients it independently of the node order it
-# happens to be stored in. Current flows from the terminal that sources it to the
-# root that sinks it, and readers recover that direction with::
-#
-#     u, v = (u, v) if ((u < v) == edgeD['reverse']) else (v, u)
-#
-# which yields ``(source, sink)`` for either stored order. So every writer sets
-# ``reverse = source < sink``. Beware of writing ``load[u] < load[v]`` instead: it
-# only matches while ``u < v`` holds, and silently mis-orients links stored the
-# other way round. Feeders are never reversed, the sink being a root and a root's
-# id negative; links carrying ``load=0`` (a ring's zero-load link) have no current and
-# so no direction to encode.
-def _bfs_loads_walk(_adj, _node, T, visited, queue, power_per_inflow=None) -> int:
-    """Descend the subtrees seeded in ``queue``, appending every node reached.
-
-    Each ``queue`` entry is ``(node, parent, edgeD, parentD, subtree)``, with
-    ``edgeD`` the ⟨parent, node⟩ link data and ``parentD`` the parent's node
-    data. Queue (BFS) order places every node before its descendants, which is
-    what :func:`_bfs_loads_unwind` relies on. Every node gets the base its
-    descendants' loads are added to in the target attribute; the accumulation
-    happens on the way back up. Subtree ids are assigned only for routing loads.
-
-    A terminal contributes its inflow, defaulting to one. With
-    ``power_per_inflow`` given, it contributes its declared ``'power'``,
-    defaulting to its inflow times ``power_per_inflow``, and the target becomes
-    ``'load_nominal'``.
-    A clone contributes zero. Internal nodes retain any existing target value,
-    as needed by callers that clear only part of the graph, such as
-    :func:`as_hooked_to_nearest`. Leaves restart from their own contribution.
-
-    Returns:
-      Number of terminals reached. Callers use this count to check traversal
-      coverage independently of the terminals' inflow.
-    """
-    target = 'load' if power_per_inflow is None else 'load_nominal'
-    i = 0
-    terminals = 0
-    while i < len(queue):
-        node, parent, _, _, subtree = queue[i]
-        i += 1
-        nodeD = _node[node]
-        if power_per_inflow is None:
-            nodeD['subtree'] = subtree
-        stop = len(queue)
-        for nbr, edgeD in _adj[node].items():
-            # a load=0 link is a ring zero-load link: never traverse across it
-            if nbr == parent or edgeD.get('load') == 0:
-                continue
-            if nbr in visited:
-                raise ValueError(f'node {nbr} reached twice: not a tree below {node}')
-            visited.add(nbr)
-            queue.append((nbr, node, edgeD, nodeD, subtree))
-        if node < T:
-            default = (
-                nodeD.get('inflow', 1)
-                if power_per_inflow is None
-                else nodeD.get('power', nodeD.get('inflow', 1) * power_per_inflow)
-            )
-            terminals += 1
-        else:
-            default = 0
-        nodeD[target] = default if len(queue) == stop else nodeD.get(target, default)
-    return terminals
+def _orient_tree(candidate: nx.Graph) -> nx.DiGraph:
+    """Orient an optimizer's undirected tree candidate toward its roots."""
+    geometry = candidate.to_undirected(as_view=True)
+    S = nx.DiGraph()
+    S.graph.update(candidate.graph)
+    S.add_nodes_from(candidate.nodes(data=True))
+    for root in range(-candidate.graph['R'], 0):
+        for parent, child in nx.bfs_edges(geometry, root):
+            S.add_edge(child, parent, **geometry[parent][child])
+    if S.number_of_edges() != candidate.number_of_edges():
+        raise ValueError('candidate must be a forest with one root per component')
+    return S
 
 
-def _bfs_loads_unwind(_node, queue, target='load') -> None:
-    """Accumulate the loads of the traversal recorded in ``queue``.
+def _branch_loads(
+    G: nx.DiGraph, head: int, sink: int, subtree: int, *, nominal: bool = False
+) -> int:
+    """Accumulate the branch that drains from ``head`` into ``sink``.
 
-    Reversed BFS order visits every node after all of its descendants, so each
-    node's load is complete before it is added to its parent's.
-    """
-    for node, parent, edgeD, parentD, _ in reversed(queue):
-        load = _node[node][target]
-        # the child sources the current, the parent sinks it (towards the root)
-        edgeD[target] = load
-        if target == 'load':
-            edgeD['reverse'] = node < parent
-        parentD[target] += load
-
-
-def bfs_subtree_loads(G, parent, children, subtree, visited=None):
-    """Descend the subtree, updating edge and node attributes.
-
-    Meant to be called by :func:`calcload`, but can be used independently (e.g.
-    from PathFinder). Nodes must not have a ``'load'`` attribute.
+    The branch holds ``head`` and every node whose positive-load arcs lead to
+    it. Each node in it is reset to its own contribution, then the branch is
+    accumulated leaves first: every outgoing arc receives its source's load and
+    adds it to its sink, ``sink`` included. ``sink`` must already hold a load.
 
     Args:
-      G: graph to traverse.
-      parent: node the traversal descends from.
-      children: nodes of ``G`` to descend into.
-      subtree: subtree id to assign to every node visited.
-      visited: nodes already claimed by this traversal; pass one set across
-        several calls to keep them from claiming a node twice. A fresh set is
-        used when omitted.
+      G: directed solution to update in place.
+      head: node whose outgoing positive-load arc enters ``sink``.
+      sink: node receiving the branch.
+      subtree: subtree id for the branch's nodes (ignored with ``nominal``).
+      nominal: accumulate ``load_nominal`` as :func:`calcload` does.
 
     Returns:
-      Load of ``parent`` after accumulating its descendants' loads, including
-      its own inflow if it is a terminal.
+      Number of nodes in the branch.
 
     Raises:
-      ValueError: a node is reached twice, so the traversal is not descending a
-        tree -- ``G`` holds a cycle, or two roots reach the same node.
+      ValueError: a branch node does not have exactly one outgoing positive-load
+        arc.
     """
     T = G.graph['T']
-    if visited is None:
-        visited = {parent}
-    _adj, _node = G._adj, G._node
-    nodeD = _node[parent]
-    # Terminals contribute their declared inflow, defaulting to one.
-    # Roots and clones contribute zero.
-    default = nodeD.get('inflow', 1) if 0 <= parent < T else 0
-    if not children:
-        nodeD['load'] = default
-        return default
-    nodeD['load'] = nodeD.get('load', default)
-    adjP = _adj[parent]
-    queue = []
-    for child in children:
-        if child in visited:
-            raise ValueError(f'node {child} reached twice: not a tree below {parent}')
-        visited.add(child)
-        queue.append((child, parent, adjP[child], nodeD, subtree))
-    _bfs_loads_walk(_adj, _node, T, visited, queue)
-    _bfs_loads_unwind(_node, queue)
-    return nodeD['load']
+    target = 'load_nominal' if nominal else 'load'
+    scale = Fraction(G.graph.get('power_per_inflow', 1)) if nominal else 1
+    # Raw dictionaries avoid allocating NetworkX views inside the traversal.
+    # pyrefly: ignore[missing-attribute]
+    nodes, pred, succ = G._node, G._pred, G._succ
+    queue = [(head, succ[head][sink], nodes[sink])]
+    for node, _, _ in queue:
+        data = nodes[node]
+        # the arc the node was queued through is positive: check only the others
+        out = succ[node]
+        if len(out) > 1 and sum(a.get('load') != 0 for a in out.values()) > 1:
+            raise ValueError(f'node {node} must have one outgoing positive-load arc')
+        own = data.get('inflow', 1) if 0 <= node < T else 0
+        data[target] = data.get('power', own * scale) if nominal else own
+        for child, attrs in pred[node].items():
+            if attrs.get('load') != 0:
+                queue.append((child, attrs, data))
+    for node, arc, sink_data in reversed(queue):
+        load = nodes[node][target]
+        arc[target] = load
+        sink_data[target] += load
+        if not nominal:
+            nodes[node]['subtree'] = subtree
+    return len(queue)
 
 
-def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
+def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> nx.DiGraph:
     """Close path-form ring arms into canonical rings and compute their loads.
 
     Only the ringed builders (HGS, LKH and the ``method='ringed'`` constructor)
@@ -698,17 +635,18 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
     # single-feeder path to its tail, then close it into a canonical ring; a tail
     # already touching a root bridges two roots (r1, r2).
     R = S.graph['R']
+    candidate = S.to_undirected(as_view=True)
     paths: list[tuple[tuple[int, int], list[int]]] = []
     seen: set[int] = set()  # first terminal of each ring already walked
     for root in range(-R, 0):
-        for gate in S[root]:
+        for gate in candidate[root]:
             if gate in seen:
                 # bridging ring: already walked from its other subroot's root
                 continue
             ordered = [gate]
             back, fwd = root, gate
             while True:
-                nbrs = [n for n in S[fwd] if n != back]
+                nbrs = [n for n in candidate[fwd] if n != back]
                 if not nbrs:
                     break
                 (nxt,) = nbrs  # ValueError here means S has a branching subtree
@@ -721,10 +659,11 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
             end_roots = [
                 r
                 for r in range(-R, 0)
-                if r in S[tn] and (len(ordered) > 1 or r != root)
+                if r in candidate[tn] and (len(ordered) > 1 or r != root)
             ]
             end_root = end_roots[0] if end_roots else root
             paths.append(((root, end_root), ordered))
+    S = nx.DiGraph(S)
     S.remove_edges_from(list(S.edges))
     max_load = 0
     for subtree_id, (roots, ordered) in enumerate(paths):
@@ -734,93 +673,71 @@ def split_rings_and_calc_loads(S: nx.Graph, A: nx.Graph) -> None:
         # a load=0 feeder carries no current, so it adds nothing to its root
         # (the zero-load link of a bridging stub is a feeder, not an interior link)
         S.nodes[root]['load'] = sum(
-            S.nodes[n]['load'] for n in S[root] if S[root][n]['load'] != 0
+            d['load'] for _, _, d in S.in_edges(root, data=True)
         )
     S.graph['max_load'] = max_load
     S.graph['has_loads'] = True
+    return S
 
 
-def calcload(G: nx.Graph, *, nominal: bool = False) -> None:
-    """Calculate link loads and update edge and node attributes of ``G``.
+def calcload(G: nx.DiGraph, *, nominal: bool = False) -> None:
+    """Accumulate turbine contributions along the arcs of a directed solution.
 
-    ``G`` must already be in final form (a forest, or a ring-form graph whose
-    ``load=0`` zero-load links are present). A breadth-first traversal of each root's
-    subtree propagates the loads, treating ``load=0`` links (ring zero-load links) as
-    breaks. Each node's subtree id and outgoing load land on its ``'subtree'`` /
-    ``'load'`` attributes. Edge loads, root loads, and the graph's ``'max_load'``
-    and ``'has_loads'`` attributes are set.
-
-    With ``nominal``, only ``'load_nominal'`` is updated on nodes and edges;
-    integer loads, subtree ids, edge directions, and graph metadata are retained.
-    Ring breaks are always identified by ``'load' == 0``.
-
-    The traversal must reach all ``T`` terminals, regardless of their contribution.
-    Ring construction — closing path-form arms into rings — lives in
-    :func:`split_rings_and_calc_loads`, which the ringed builders call instead.
+    Positive-load arcs form trees toward roots. Zero-load arcs mark ring breaks
+    and do not carry current. Turbines contribute their declared inflow, or one;
+    roots and route clones contribute zero. Arc direction is preserved.
 
     Args:
-        G: Forest or ring-form graph to update.
-        nominal: Accumulate declared terminal ``'power'`` into ``'load_nominal'``
-            instead of integer inflow into ``'load'``. Terminals without a
-            declaration contribute their inflow times ``'power_per_inflow'``.
-            Only worth the traversal when quantization is inexact: exact
-            quantization makes nominal loads ``'load'`` times ``'power_per_inflow'``.
+      G: directed solution to update in place.
+      nominal: refresh only ``load_nominal`` from terminal power, falling back
+        to inflow times ``power_per_inflow``. Integer loads and subtree ids are
+        retained. Otherwise, refresh loads, subtree ids, ``max_load`` and
+        ``has_loads``.
+
+    Raises:
+      ValueError: positive-load arcs contain a cycle, leave a turbine without
+        an outgoing cable, branch toward multiple parents, or leave a root.
     """
-    R, T = (G.graph[k] for k in 'RT')
-    power_per_inflow = Fraction(G.graph.get('power_per_inflow', 1)) if nominal else None
+    R, T = G.graph['R'], G.graph['T']
     target = 'load_nominal' if nominal else 'load'
-    # the raw dicts: indexing G[u][v] and G.nodes[n] instead would rebuild a
-    # view object on every access, which dominates the cost of this traversal
     # pyrefly: ignore[missing-attribute]
-    _adj, _node = G._adj, G._node
-    for data in _node.values():
-        data.pop(target, None)
-
-    # one set across every root: a node claimed by two roots is reported too
-    visited = set(range(-R, 0))
-    queue = []
-    subroots = []
-    subtree = 0
-    for root in range(-R, 0):
-        rootD = _node[root]
-        rootD[target] = 0
-        for subroot, edgeD in _adj[root].items():
-            # A load=0 feeder (degenerate multi-root ring zero-load link) carries
-            # no load.
-            if edgeD.get('load') == 0:
-                continue
-            if subroot in visited:
+    nodes, pred, succ = G._node, G._pred, G._succ
+    # Nodes reached from a root are reset by _branch_loads(); this pass resets
+    # roots and the rest (clones within a zero-load cable).
+    positive = 0
+    for node, data in nodes.items():
+        degree = 0
+        for attrs in succ[node].values():
+            if attrs.get('load') == 0:
+                attrs[target] = 0
+            else:
+                degree += 1
+        positive += degree
+        if node < 0:
+            if degree:
+                raise ValueError(f'root {node} has an outgoing positive-load arc')
+            data[target] = 0
+        elif not degree:
+            if node < T or any(a.get('load') != 0 for a in pred[node].values()):
                 raise ValueError(
-                    f'node {subroot} reached twice: not a tree below {root}'
+                    f'node {node} must have one outgoing positive-load arc'
                 )
-            visited.add(subroot)
-            queue.append((subroot, root, edgeD, rootD, subtree))
-            subroots.append(subroot)
-            subtree += 1
-    terminals = _bfs_loads_walk(_adj, _node, T, visited, queue, power_per_inflow)
-    _bfs_loads_unwind(_node, queue, target)
+            data[target] = 0
 
-    max_load = max((_node[subroot][target] for subroot in subroots), default=0)
-    if len(_node) > T + R:
-        # Clones inside a routed ring's open cable are separated from both arms by
-        # load=0 segments. They intentionally carry no current and are therefore
-        # not reached by the root traversals above.
-        for node, nodeD in _node.items():
-            if (
-                node >= T
-                and target not in nodeD
-                and all(edgeD.get('load') == 0 for edgeD in _adj[node].values())
-            ):
-                nodeD[target] = 0
-    if terminals != T:
-        raise ValueError(f'root traversals reached {terminals} terminals, not T = {T}')
-    if nominal:
-        for _, _, edgeD in G.edges(data=True):
-            if edgeD.get('load') == 0:
-                edgeD[target] = 0
-    else:
-        G.graph['has_loads'] = True
-        G.graph['max_load'] = max_load
+    subtree = reached = max_load = 0
+    for root in range(-R, 0):
+        for gate, feeder in pred[root].items():
+            if feeder.get('load') == 0:
+                continue
+            reached += _branch_loads(G, gate, root, subtree, nominal=nominal)
+            subtree += 1
+            max_load = max(max_load, nodes[gate][target])
+    # every node keeps one outgoing positive-load arc, so any arc that no root
+    # reaches lies on, or drains into, a directed cycle
+    if reached != positive:
+        raise ValueError('positive-load arcs contain a directed cycle')
+    if not nominal:
+        G.graph.update(has_loads=True, max_load=max_load)
 
 
 def _ring_split_position(ordered: list[int], A: nx.Graph | None = None) -> int:
@@ -838,7 +755,7 @@ def _ring_split_position(ordered: list[int], A: nx.Graph | None = None) -> int:
 
 
 def _add_ring_to_S(
-    S: nx.Graph,
+    S: nx.DiGraph,
     roots: tuple[int, int],
     ordered: list[int],
     subtree: int,
@@ -850,9 +767,9 @@ def _add_ring_to_S(
     at their tail ends; it bridges two substations when ``r1 != r2``. ``ordered``
     is the terminal sequence ``[t1, ..., tn]`` walked along the ring, so that
     ``t1`` and ``tn`` are the feeder-connected terminals. Both feeders
-    ``(r1, t1)`` and ``(r2, tn)`` are real, load-bearing cables; the ring's single
-    zero-load link is the edge at the load midpoint, marked by ``load=0`` (a real
-    cable, no current flows through it).
+    ``(t1, r1)`` and ``(tn, r2)`` are physical cables. The zero-load cable sits
+    at the load midpoint; in a singleton ring it is the closing feeder from
+    ``r2`` to the turbine. A same-root singleton retains both opposite arcs.
 
     Arm 1 (the ``t1`` side) gets ``m = ceil(n / 2)`` terminals, so each arm holds at
     most ``ceil(n / 2)`` — i.e. half of the doubled ring capacity. When the ring has
@@ -860,7 +777,7 @@ def _add_ring_to_S(
     edges yielding balanced arms; if ``A`` is provided, the longer of the two is
     chosen as the zero-load link.
 
-    Node ``'load'``/``'subtree'`` and edge ``'load'``/``'reverse'`` are all set
+    Node ``'load'``/``'subtree'`` and arc ``'load'`` attributes are set
     here; the caller is responsible for the root node's aggregate load.
 
     Args:
@@ -872,35 +789,27 @@ def _add_ring_to_S(
       A: optional available-links graph, used to pick the longer split edge on
         odd-node rings.
     """
-    # the builder declares the shape it establishes
     S.graph['topology'] = Topology.RINGED
+
     r1, r2 = roots
     n = len(ordered)
     if n == 1:
-        # Degenerate ring: a single terminal has feeder(s) on it.
         S.add_node(ordered[0], load=1, subtree=subtree)
-        S.add_edge(r1, ordered[0], load=1, reverse=False)
-        if r1 != r2:
-            S.add_edge(r2, ordered[0], load=0, reverse=False)
+        S.add_edge(ordered[0], r1, load=1)
+        S.add_edge(r2, ordered[0], load=0)
         return
     m = _ring_split_position(ordered, A)
     # Node loads: arm 1 nodes ordered[0..m-1] carry m..1; arm 2 nodes
     # ordered[m..n-1] carry 1..(n - m) toward their own feeder.
     for i, t in enumerate(ordered):
         S.add_node(t, load=(m - i if i < m else i - m + 1), subtree=subtree)
-    # Two feeders (both real cables) and the interior edges. A feeder sinks into
-    # its root, whose id is negative, so it is never reversed.
-    S.add_edge(r1, ordered[0], load=m, reverse=False)
-    S.add_edge(r2, ordered[-1], load=n - m, reverse=False)
+    S.add_edge(ordered[0], r1, load=m)
+    S.add_edge(ordered[-1], r2, load=n - m)
     for i in range(n - 1):
         u, v = ordered[i], ordered[i + 1]
         if i == m - 1:
-            # zero-load link of the ring: real cable, no current (marked by load=0),
-            # so it has no flow direction to encode
-            S.add_edge(u, v, load=0, reverse=False)
+            S.add_edge(min(u, v), max(u, v), load=0)
         else:
             load = m - 1 - i if i < m else i - m + 1
-            # current flows towards the arm's feeder, i.e. towards the heavier end
-            u_lighter = S.nodes[u]['load'] < S.nodes[v]['load']
-            source, sink = (u, v) if u_lighter else (v, u)
-            S.add_edge(u, v, load=load, reverse=source < sink)
+            source, sink = (v, u) if i < m else (u, v)
+            S.add_edge(source, sink, load=load)

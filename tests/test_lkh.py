@@ -234,7 +234,7 @@ def test_lkh3_fills_radial_routes_with_slack_nodes(monkeypatch):
     assert call['asymmetric'] and call['L'].shape == (7, 7)
     assert (call['capacity'], call['vehicles']) == (2, 3)
     assert S.degree[-1] == 3
-    assert sorted(S.nodes[n]['load'] for n in S.neighbors(-1)) == [1, 2, 2]
+    assert sorted(S.nodes[n]['load'] for n in S.predecessors(-1)) == [1, 2, 2]
     assert S.graph['method_options']['feeders_exact']
     assert S.graph['solver_details']['capacity_effective'] == 2
 
@@ -423,7 +423,7 @@ def test_lkh3_holds_exact_counts_and_balance(site, capacity, constraints):
     ):
         assert lo <= feeders <= (feeders if hi is None else hi)
     if bounds.balanced and bounds.topology is not Topology.RINGED:
-        loads = [S.nodes[n]['load'] for r in range(-R, 0) for n in S.neighbors(r)]
+        loads = [S.nodes[n]['load'] for r in range(-R, 0) for n in S.predecessors(r)]
         assert bounds.group_load_lb <= min(loads)
         assert max(loads) <= bounds.group_load_ub
 

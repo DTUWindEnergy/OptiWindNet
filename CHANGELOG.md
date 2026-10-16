@@ -2,6 +2,17 @@
 
 [Commit history since v0.3.2](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/compare/v0.3.2...main)
 
+## Breaking Changes
+
+### Network–Router API
+
+- **Single-turbine rings:** a ring returning to its own substation keeps both feeder cables, so lengths, costs and feeder counts include its closing feeder. Stored totals of such rings differ when read back. [22659c78](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/22659c78)
+
+### Advanced API
+
+- **Directed solutions:** topologies `S` and routesets `G` are `nx.DiGraph` with arcs in the direction of current, replacing the `'reverse'` edge attribute. `S_from_linkbits()` requires `topology=`, and `split_rings_and_calc_loads()` returns the solution. [22659c78](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/22659c78)
+- **Partial load updates:** `loads.bfs_subtree_loads()` is removed; use `calcload()` to recalculate a solution's loads. [22659c78](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/22659c78)
+
 ## Removed Deprecated APIs
 
 - **Constraint options:** `ModelOptions`, `FeederLimit`, the count and topology options of the routers, `Solver.set_problem()`, `make_min_length_model()`, `hgs_cvrp()` and `lkh3()`, and `clusterize(capacity)` were removed; state them with `NetworkConstraints`. [a02e71da](https://gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet/-/commit/a02e71da)

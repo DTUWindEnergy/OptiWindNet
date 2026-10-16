@@ -21,6 +21,7 @@ from ..geometric import (
 from ..identity import fingerprint_function, topology_id
 from ..interarraylib import add_link_blockmap, add_terminal_closest_root
 from ..loads import (
+    _orient_tree,
     calcload,
     split_rings_and_calc_loads,
 )
@@ -76,7 +77,7 @@ def constructor(
     blockage_link_cos_lim: float = 0.85,  # 30°
     blockage_link_feeder_lim: float = 2.0,
     blockage_subtree_feeder_lim: float = 2.5,
-) -> nx.Graph:
+) -> nx.DiGraph:
     """Create a network using a constructive greedy heuristic.
 
     The overall structure of the constructive algorithm is based on:
@@ -1050,8 +1051,9 @@ def constructor(
     S.graph['topology'] = _METHOD_TOPOLOGY[method]
     # ringed: close each path subtree into a ring (adds zero-load links); else set loads
     if ringed:
-        split_rings_and_calc_loads(S, Aʹ)
+        S = split_rings_and_calc_loads(S, Aʹ)
     else:
+        S = _orient_tree(S)
         calcload(S)
     # algorithm finished, store some info in the graph object
     linkbits = linkbits_from_S(Aʹ, S)

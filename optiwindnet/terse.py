@@ -8,7 +8,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from fractions import Fraction
-from itertools import pairwise
+from itertools import chain, pairwise
 from typing import Any
 
 import networkx as nx
@@ -88,74 +88,65 @@ def _parse_ring_routes(seq: Sequence[int]) -> list[tuple[int, list[int], int]]:
     return routes
 
 
-def _walk_ring(G: nx.Graph, root: int, subroot: int) -> tuple[list[int], int]:
-    """Walk a ring from one root feeder to the other."""
-    walk = [subroot]
-    previous, current = root, subroot
-    while True:
-        neighbours = [node for node in G[current] if node != previous]
-        if not neighbours:
-            return walk, root
-        if len(neighbours) != 1:
-            raise ValueError(
-                f'ring node {current} is not degree-2 (neighbours {neighbours})'
-            )
-        (next_,) = neighbours
-        if next_ < 0:
-            return walk, next_
-        walk.append(next_)
-        previous, current = current, next_
-
-
-def _ring_routes_from_graph(
-    G: nx.Graph, R: int, T: int
-) -> list[tuple[int, list[int], int]]:
-    """Extract canonical ring routes from either a topology or routeset graph."""
-    routes: list[tuple[int, list[int], int]] = []
-    visited_feeders: set[tuple[int, int]] = set()
-    for root in range(-R, 0):
-        for subroot in sorted(G[root]):
-            if (root, subroot) in visited_feeders:
+def _walk_ring_routes(G: nx.DiGraph) -> Iterator[tuple[int, list[int], int]]:
+    """Yield root-to-root ring walks, preserving opposite cable arcs."""
+    visited = set()
+    for root in range(-G.graph['R'], 0):
+        if root not in G:
+            continue
+        for first in chain(G.out_edges(root), G.in_edges(root)):
+            if first in visited:
                 continue
-            walk, close = _walk_ring(G, root, subroot)
-            visited_feeders.add((root, walk[0]))
-            visited_feeders.add((close, walk[-1]))
-            open_ = root
+            edge, previous, walk = first, root, []
+            while True:
+                if edge in visited:
+                    raise ValueError('ring revisits a cable before reaching a root')
+                visited.add(edge)
+                node = edge[1] if edge[0] == previous else edge[0]
+                if node < 0:
+                    break
+                walk.append(node)
+                onward = [
+                    arc
+                    for arc in chain(G.out_edges(node), G.in_edges(node))
+                    if arc != edge
+                ]
+                if len(onward) != 1:
+                    raise ValueError(f'ring node {node} must have two incident cables')
+                previous, edge = node, onward[0]
+            yield root, walk, node
 
-            terminal_positions = [i for i, node in enumerate(walk) if node < T]
-            terminal_count = len(terminal_positions)
-            if terminal_count == 0:
-                raise ValueError('ring route contains no terminals')
-            if terminal_count == 1 and close != open_:
-                if G[open_][walk[0]].get('load') == 0:
-                    open_, close = close, open_
-                    walk.reverse()
-            elif terminal_count > 1:
-                open_boundaries = []
-                for boundary, (left, right) in enumerate(pairwise(terminal_positions)):
-                    segment = zip(walk[left:right], walk[left + 1 : right + 1])
-                    if all(G[u][v].get('load') == 0 for u, v in segment):
-                        open_boundaries.append(boundary)
-                if len(open_boundaries) != 1:
-                    raise ValueError(
-                        'ring must have one open terminal-to-terminal link; '
-                        f'found {len(open_boundaries)}'
-                    )
-                if open_boundaries[0] != math.ceil(terminal_count / 2) - 1:
-                    walk.reverse()
-                    open_, close = close, open_
-            routes.append((open_, walk, close))
+
+def _ring_routes_from_graph(G: nx.DiGraph, T: int) -> list[tuple[int, list[int], int]]:
+    """Extract canonical root-to-root walks from physical cable arcs."""
+    routes = []
+    for open_, walk, close in _walk_ring_routes(G):
+        positions = [i for i, n in enumerate(walk) if n < T]
+        if len(positions) == 1:
+            reverse = G.has_edge(open_, walk[0]) and G[open_][walk[0]].get('load') == 0
+        else:
+            boundaries = [
+                i
+                for i, (left, right) in enumerate(pairwise(positions))
+                if all(
+                    (G[u][v] if G.has_edge(u, v) else G[v][u]).get('load') == 0
+                    for u, v in pairwise(walk[left : right + 1])
+                )
+            ]
+            if len(boundaries) != 1:
+                raise ValueError('ring must have one open terminal-to-terminal link')
+            reverse = boundaries[0] != math.ceil(len(positions) / 2) - 1
+        if reverse:
+            open_, close = close, open_
+            walk.reverse()
+        routes.append((open_, walk, close))
     return routes
 
 
 def _parent_links_from_graph(G: nx.Graph, T: int, B: int, clone_count: int):
     targets: list[int | None] = [None] * (T + clone_count)
     for u, v, edge_data in G.edges(data=True):
-        reverse = edge_data.get('reverse')
-        if reverse is None:
-            raise ValueError('reverse must not be None')
-        u, v = (u, v) if u < v else (v, u)
-        source, target = (u, v) if reverse else (v, u)
+        source, target = u, v
         slot = source if source < T else source - B
         if not 0 <= slot < len(targets):
             raise ValueError(f'parent source {source} is outside the encoded node set')
@@ -306,7 +297,7 @@ class TerseLinks(Sequence[int]):
     @classmethod
     def from_topology(
         cls,
-        S: nx.Graph,
+        S: nx.DiGraph,
         *,
         nodeset_digest: bytes | None = None,
     ) -> 'TerseLinks':
@@ -314,7 +305,7 @@ class TerseLinks(Sequence[int]):
         topology = S.graph['topology']
         R, T = (S.graph[key] for key in 'RT')
         if topology is Topology.RINGED:
-            links = _compress_ring_routes(_ring_routes_from_graph(S, R, T))
+            links = _compress_ring_routes(_ring_routes_from_graph(S, T))
         else:
             links = _parent_links_from_graph(S, T, B=0, clone_count=0)
         return cls(
@@ -327,7 +318,7 @@ class TerseLinks(Sequence[int]):
         )
 
     @classmethod
-    def from_routeset(cls, G: nx.Graph) -> 'TerseLinks':
+    def from_routeset(cls, G: nx.DiGraph) -> 'TerseLinks':
         """Encode routed solution ``G``, including its clone mapping."""
         if not G.graph.get('has_loads'):
             G = G.copy()
@@ -336,7 +327,7 @@ class TerseLinks(Sequence[int]):
         R, T, B = (G.graph[key] for key in 'RTB')
         C, D = (G.graph.get(key, 0) or 0 for key in 'CD')
         if topology is Topology.RINGED:
-            links = _compress_ring_routes(_ring_routes_from_graph(G, R, T))
+            links = _compress_ring_routes(_ring_routes_from_graph(G, T))
         else:
             links = _parent_links_from_graph(G, T, B, C + D)
         clone2prime = tuple(int(x) for x in G.graph['fnT'][T + B : -R]) if C + D else ()
@@ -394,25 +385,24 @@ class TerseLinks(Sequence[int]):
         for open_, walk, close in _parse_ring_routes(self.links):
             terminal_positions = [i for i, node in enumerate(walk) if node < self.T]
             terminal_count = len(terminal_positions)
-            chain = [open_, *walk]
-            if terminal_count > 1 or close != open_:
-                chain.append(close)
-            open_edges: set[frozenset[int]] = set()
-            if terminal_count == 1 and close != open_:
-                open_edges.add(frozenset((walk[-1], close)))
-            elif terminal_count > 1:
-                midpoint = math.ceil(terminal_count / 2)
-                left = terminal_positions[midpoint - 1]
-                right = terminal_positions[midpoint]
-                open_edges.update(
-                    frozenset(edge) for edge in pairwise(walk[left : right + 1])
-                )
-            for u, v in pairwise(chain):
-                yield _EdgeSpec(
-                    u,
-                    v,
-                    is_open=frozenset((u, v)) in open_edges,
-                )
+            chain = [open_, *walk, close]
+            split_left = terminal_positions[(terminal_count + 1) // 2 - 1]
+            split_right = (
+                terminal_positions[(terminal_count + 1) // 2]
+                if terminal_count > 1
+                else len(chain) - 2
+            )
+            for i, (u, v) in enumerate(pairwise(chain)):
+                is_open = split_left + 1 <= i <= split_right
+                if terminal_count == 1:
+                    is_open = i > split_left
+                if (
+                    i <= split_left
+                    or terminal_count == 1
+                    or (is_open and walk[split_left] > walk[split_right])
+                ):
+                    u, v = v, u
+                yield _EdgeSpec(u, v, is_open=is_open)
 
     def _check_site_dimensions(self, site: nx.Graph, keys: str) -> None:
         for key in keys:
@@ -430,7 +420,7 @@ class TerseLinks(Sequence[int]):
         capacity_nominal: float | Fraction | None = None,
         power_rtol: float = DEFAULT_POWER_RTOL,
         **graph_attrs,
-    ) -> nx.Graph:
+    ) -> nx.DiGraph:
         """Reconstruct topology ``S``, quantizing the power of site ``A``.
 
         An encoding carries no inflow. With ``A``, the terminal inflows and the
@@ -463,14 +453,14 @@ class TerseLinks(Sequence[int]):
             capacity, power_attrs, inflow = _quantized_site(
                 A, capacity, capacity_nominal, power_rtol
             )
-        S = nx.Graph(T=self.T, R=self.R, topology=self.topology, **graph_attrs)
+        S = nx.DiGraph(T=self.T, R=self.R, topology=self.topology, **graph_attrs)
         S.graph.update(power_attrs)
         S.add_nodes_from(range(-self.R, 0), kind='oss')
         S.add_nodes_from(range(self.T), kind='wtg')
         nx.set_node_attributes(S, inflow, 'inflow')
         validate_terminal_power(S)
         for edge in self._edge_specs():
-            attrs = {'load': 0, 'reverse': False} if edge.is_open else {}
+            attrs = {'load': 0} if edge.is_open else {}
             S.add_edge(edge.u, edge.v, **attrs)
 
         calcload(S)
@@ -485,7 +475,7 @@ class TerseLinks(Sequence[int]):
         capacity_nominal: float | Fraction | None = None,
         power_rtol: float = DEFAULT_POWER_RTOL,
         **graph_attrs,
-    ) -> nx.Graph:
+    ) -> nx.DiGraph:
         """Reconstruct routeset ``G`` against location graph ``L``.
 
         The power of ``L`` is quantized as in :meth:`to_topology`.
@@ -517,7 +507,9 @@ class TerseLinks(Sequence[int]):
         capacity, power_attrs, inflow = _quantized_site(
             L, capacity, capacity_nominal, power_rtol
         )
-        G = nx.create_empty_copy(L, with_data=True)
+        G = nx.DiGraph()
+        G.graph.update(L.graph)
+        G.add_nodes_from(L.nodes(data=True))
         nx.set_node_attributes(G, inflow, 'inflow')
         G.graph.update(
             topology=self.topology,
@@ -550,7 +542,7 @@ class TerseLinks(Sequence[int]):
         for edge, length in zip(edges, lengths):
             attrs = {'length': length}
             if edge.is_open:
-                attrs.update(load=0, reverse=False)
+                attrs['load'] = 0
             G.add_edge(edge.u, edge.v, **attrs)
 
         for _, _, edge_data in G.edges(contour_nodes, data=True):

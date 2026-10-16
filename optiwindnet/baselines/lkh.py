@@ -23,6 +23,7 @@ from ..constraints import NetworkBounds, NetworkConstraints
 from ..identity import fingerprint_function
 from ..interarraylib import _links_over_limit
 from ..loads import (
+    _orient_tree,
     calcload,
     split_rings_and_calc_loads,
 )
@@ -670,7 +671,7 @@ def _build_solution(
     keep_log: bool,
     method_options: dict,
     solver_details_extra: dict,
-) -> nx.Graph:
+) -> nx.DiGraph:
     """Assemble the final solution graph S from per-root LKH outputs.
 
     Raises:
@@ -738,7 +739,7 @@ def _build_solution(
         S.nodes[r]['load'] = root_load
 
     S.graph['max_load'] = max_load
-    return S
+    return _orient_tree(S)
 
 
 def _lkh(
@@ -755,7 +756,7 @@ def _lkh(
     keep_log: bool = False,
     seed: int | None = None,
     initial_tour_nodes: list[int] | None = None,
-) -> nx.Graph:
+) -> nx.DiGraph:
     """Low-level single-root Lin-Kernighan-Helsgaun (LKH-3) solver.
 
     Open Capacitated Vehicle Routing Problem on a single depot. ``A`` must be
@@ -1091,7 +1092,7 @@ def lkh3(
     precision: int = 1000,
     complete: bool = False,
     warmstart: nx.Graph | None = None,
-) -> nx.Graph:
+) -> nx.DiGraph:
     """Solve the O/CVRP using LKH-3 with links from ``A``.
 
     Wraps the LKH-3 executable, which is not distributed with OptiWindNet.
@@ -1298,7 +1299,7 @@ def lkh3(
     )
     name = A_iter.graph.get('name', 'unnamed')
 
-    def _solve_and_repair() -> tuple[nx.Graph, list[dict]]:
+    def _solve_and_repair() -> tuple[nx.DiGraph, list[dict]]:
         outputs_ = _run_lkh_per_cluster(
             L_,
             name=name,
@@ -1430,14 +1431,16 @@ def lkh3(
     nx.set_node_attributes(S, inflow_by_node, 'inflow')
     if ringed:
         S.graph['topology'] = Topology.RINGED
-        split_rings_and_calc_loads(S, A)
+        S = split_rings_and_calc_loads(S, A)
     else:
         S.graph['topology'] = Topology.RADIAL
         calcload(S)
 
     if not complete:
         rogue = [
-            (u, v) for u, v in S.edges if u >= 0 and v >= 0 and not A.has_edge(u, v)
+            tuple(sorted((u, v)))
+            for u, v in S.edges
+            if u >= 0 and v >= 0 and not A.has_edge(u, v)
         ]
         if rogue:
             raise ValueError(

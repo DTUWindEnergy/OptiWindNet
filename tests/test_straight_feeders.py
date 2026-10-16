@@ -38,11 +38,11 @@ def test_hi31_straight_feeders_do_not_block_links_by_obstructed_headings():
     assert -1 in A.nodes[9]['los_d2root']
     for u, v in ((6, 8), (16, 17)):
         assert A[u][v]['blocked__'][-1][9]
-        assert wfn.S.has_edge(u, v)
+        assert wfn.S.has_edge(u, v) or wfn.S.has_edge(v, u)
     # Feeder -1→10 has LOS and still prevents the link 12–13.
     assert -1 not in A.nodes[10].get('los_d2root', {})
     assert A[12][13]['blocked__'][-1][10]
-    assert wfn.S.has_edge(-1, 10)
+    assert wfn.S.has_edge(10, -1)
     assert not wfn.S.has_edge(12, 13)
     assert validate_routeset(wfn.G) == []
 
@@ -65,8 +65,8 @@ def test_constructor_excludes_only_the_obstructed_root(obstructed_root):
         method='biased_EW',
     )
 
-    assert S.has_edge(-2, 2)
-    assert S.has_edge(0, 1) == (obstructed_root == -2)
+    assert S.has_edge(2, -2)
+    assert (S.has_edge(0, 1) or S.has_edge(1, 0)) == (obstructed_root == -2)
 
 
 @pytest.mark.parametrize('obstructed_root', (None, -2, -1))

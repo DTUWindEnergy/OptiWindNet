@@ -5,7 +5,7 @@
 
 import networkx as nx
 
-from optiwindnet.converting import _rings_from_S
+from optiwindnet.terse import _walk_ring_routes
 from optiwindnet.types import Topology
 from optiwindnet.validating import validate_topology
 
@@ -20,7 +20,7 @@ def assert_golden_topology_id(topology_id: bytes, key: str) -> None:
     )
 
 
-def assert_topology(S: nx.Graph, expected: Topology, capacity: int) -> None:
+def assert_topology(S: nx.DiGraph, expected: Topology, capacity: int) -> None:
     """Validate the common topology contract without invoking PathFinder."""
     expected = Topology(expected)
     R, T = (S.graph[key] for key in 'RT')
@@ -42,7 +42,7 @@ def assert_topology(S: nx.Graph, expected: Topology, capacity: int) -> None:
     elif expected is Topology.BRANCHED:
         assert nx.is_forest(S)
     else:
-        rings = _rings_from_S(S)
+        rings = list(_walk_ring_routes(S))
         assert rings
-        roots_used = {root for roots, _ in rings for root in roots}
+        roots_used = {root for open_, _, close in rings for root in (open_, close)}
         assert roots_used <= set(range(-R, 0))

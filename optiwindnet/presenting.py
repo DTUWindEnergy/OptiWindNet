@@ -88,7 +88,7 @@ def _format_nominal_power(attrs: Mapping, power_per_inflow: Fraction | int) -> s
     return _format_inflow_as_power(attrs.get('inflow', 1), power_per_inflow)
 
 
-def _nominal_loads(G: nx.Graph) -> dict[int, Fraction]:
+def _nominal_loads(G: nx.DiGraph) -> dict[int, Fraction]:
     """Map each node to the nominal power its outgoing cable carries.
 
     Exact quantization scales the integer loads, so the mapping is derived

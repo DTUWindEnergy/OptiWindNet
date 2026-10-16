@@ -9,35 +9,54 @@ import pytest
 
 from optiwindnet.identity import fingerprint_coordinates
 from optiwindnet.loads import _add_ring_to_S, calcload
-from optiwindnet.terse import LinkScope, TerseLinks
+from optiwindnet.terse import LinkScope, TerseLinks, _walk_ring_routes
 from optiwindnet.types import Topology
-from optiwindnet.validating import validate_routeset
+from optiwindnet.validating import validate_routeset, validate_topology
 
 from .helpers import canonical_edges, tiny_wfn
 
 
+@pytest.mark.parametrize('bridging', (False, True))
 @pytest.mark.parametrize('n', range(1, 11))
-def test_topology_encoding_preserves_bridging_ring(n):
-    S = nx.Graph(R=2, T=n, topology=Topology.RINGED)
-    S.add_nodes_from((-2, -1))
-    _add_ring_to_S(S, (-1, -2), list(range(n)), subtree=0, A=None)
+def test_topology_encoding_preserves_ring_arcs_and_loads(n, bridging):
+    R = 2 if bridging else 1
+    S = nx.DiGraph(R=R, T=n, topology=Topology.RINGED)
+    S.add_nodes_from(range(-R, 0))
+    _add_ring_to_S(S, (-1, -R), list(range(n)), subtree=0, A=None)
     calcload(S)
 
     encoded = TerseLinks.from_topology(S)
     restored = encoded.to_topology()
 
-    assert set(map(frozenset, restored.edges)) == set(map(frozenset, S.edges))
+    assert dict(restored.edges.items()) == dict(S.edges.items())
+    assert validate_topology(restored) == []
     assert TerseLinks.from_topology(restored) == encoded
 
 
-def _ring_with_cloned_open_link() -> tuple[nx.Graph, nx.Graph]:
+@pytest.mark.parametrize('n', range(1, 13))
+@pytest.mark.parametrize('bridging', (False, True), ids=('one-root', 'bridging'))
+def test_private_walk_ring_routes_roundtrip(n, bridging):
+    R = 2 if bridging else 1
+    S = nx.DiGraph(R=R, T=n)
+    S.add_nodes_from(range(-R, 0))
+    roots = (-1, -2) if bridging else (-1, -1)
+    _add_ring_to_S(S, roots, list(range(n)), subtree=0, A=None)
+
+    ((open_, ordered, close),) = _walk_ring_routes(S)
+    assert {open_, close} == set(roots)
+    assert set(ordered) == set(range(n))
+
+
+def _ring_with_cloned_open_link() -> tuple[nx.Graph, nx.DiGraph]:
     """Return a site and routed ring whose open cable follows a contour clone."""
     VertexC = np.array([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (0.5, 0.5), (0.0, 1.0)])
     L = nx.Graph(R=1, T=3, B=1, VertexC=VertexC)
     L.add_nodes_from(range(3), kind='wtg')
     L.add_node(-1, kind='oss')
 
-    G = nx.create_empty_copy(L, with_data=True)
+    G = nx.DiGraph()
+    G.graph.update(L.graph)
+    G.add_nodes_from(L.nodes(data=True))
     G.graph.update(
         C=1,
         D=0,
@@ -49,20 +68,20 @@ def _ring_with_cloned_open_link() -> tuple[nx.Graph, nx.Graph]:
     G.add_node(4, kind='contour', load=0)
     G.add_edges_from(
         [
-            (-1, 0, {'load': 1, 'reverse': False}),
-            (0, 4, {'load': 0, 'reverse': False, 'kind': 'contour'}),
-            (4, 1, {'load': 0, 'reverse': False, 'kind': 'contour'}),
-            (1, 2, {'load': 2, 'reverse': False}),
-            (2, -1, {'load': 2, 'reverse': False}),
+            (0, -1, {'load': 1}),
+            (0, 4, {'load': 0, 'kind': 'contour'}),
+            (4, 1, {'load': 0, 'kind': 'contour'}),
+            (1, 2, {'load': 2}),
+            (2, -1, {'load': 2}),
         ]
     )
     return L, G
 
 
 def test_topology_encoding_keeps_unused_roots():
-    S = nx.Graph(R=3, T=2, topology=Topology.RADIAL)
+    S = nx.DiGraph(R=3, T=2, topology=Topology.RADIAL)
     S.add_nodes_from(range(-3, 0))
-    S.add_edges_from([(-1, 0), (0, 1)])
+    S.add_edges_from([(0, -1), (1, 0)])
     calcload(S)
 
     encoding = TerseLinks.from_topology(S)

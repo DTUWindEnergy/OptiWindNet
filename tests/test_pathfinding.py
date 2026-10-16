@@ -173,7 +173,7 @@ def test_pathfinder_allows_uncrossed_rogue_link(caplog):
         finder = PathFinder(G, planar=wfn.P, A=A)
     assert 'Routeset has rogue links; PathFinder may produce crossings.' in caplog.text
     routed = finder.create_detours()
-    assert routed[0][1]['kind'] == 'rogue'
+    assert routed[1][0]['kind'] == 'rogue'
 
 
 @pytest.mark.parametrize('cloned_route', (False, True))
@@ -268,7 +268,7 @@ def test_no_crossing_fast_path_detags_tentative_feeders():
     G = finder.create_detours()
 
     assert 'tentative' not in G.graph
-    assert all('kind' not in G[root][node] for root, node in finder.tentative)
+    assert all('kind' not in G[node][root] for root, node in finder.tentative)
 
 
 def test_pathfinder_detects_crossings():
@@ -290,7 +290,7 @@ def test_pathfinder_detects_crossings():
 def test_label_free_shortened_contour_is_not_an_ordinary_route(monkeypatch):
     """A fully shortened contour contributes only its expanded fence edges."""
     G_tent, P, A = _make_crossing_case()
-    G_tent.add_edge(0, 2, length=A[0][2]['length'], load=1, reverse=False)
+    G_tent.add_edge(0, 2, length=A[0][2]['length'], load=1)
     G_tent.graph['shortened_contours'] = {(0, 2): ([9], [])}
 
     flipped_edge_sets = []
@@ -496,7 +496,7 @@ def test_pathfinder_ringed_topology():
     """Detouring preserves connectivity and zero-load links for a ringed input."""
     wfn = tiny_wfn()
     T, R = (wfn.A.graph[key] for key in 'TR')
-    S = nx.Graph(
+    S = nx.DiGraph(
         T=T,
         R=R,
         topology=Topology.RINGED,
@@ -570,7 +570,7 @@ def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
     stunt_nodes = set(range(T + B_A - len(stunt_primes), T + B_A))
 
     def minimal_routeset(gate, leaf):
-        S = nx.Graph(
+        S = nx.DiGraph(
             R=R,
             T=T,
             capacity=T,
@@ -582,8 +582,8 @@ def test_no_crossing_pathfinder_compacts_stunt_contour_clone():
         S.add_node(-1, load=2)
         S.add_node(gate, load=2, subtree=0)
         S.add_node(leaf, load=1, subtree=0)
-        S.add_edge(-1, gate, load=2, reverse=False)
-        S.add_edge(gate, leaf, load=1, reverse=False)
+        S.add_edge(gate, -1, load=2)
+        S.add_edge(leaf, gate, load=1)
         return S
 
     stunt_edges = [
@@ -740,7 +740,7 @@ def _terminal_roots(G):
     roots = {}
     for r in range(-R, 0):
         H = G.subgraph(n for n in G if n >= 0 or n == r)
-        component = nx.node_connected_component(H, r)
+        component = nx.ancestors(H, r) | {r}
         roots.update((n, r) for n in range(T) if n in component)
     return roots
 

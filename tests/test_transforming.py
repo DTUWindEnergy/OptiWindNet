@@ -5,7 +5,9 @@
 
 import networkx as nx
 import numpy as np
+import pytest
 
+from optiwindnet.loads import calcload
 from optiwindnet.transforming import (
     as_hooked_to_head,
     as_hooked_to_nearest,
@@ -241,20 +243,58 @@ def test_as_hooked_to_nearest():
     assert G2.graph['tentative'] == expected
 
 
+@pytest.mark.parametrize(
+    ('rehook', 'hooks'),
+    [(as_hooked_to_head, (0, 3)), (as_hooked_to_nearest, (1, 4))],
+)
+@pytest.mark.parametrize('tentative', [None, [(-1, 2)], [], [(-1, 5), (-1, 2)]])
+def test_rehook_feeder_selection(rehook, hooks, tentative):
+    G = nx.DiGraph(T=6, R=1)
+    nx.add_path(G, (0, 1, 2, -1), length=10, kind='original', cable=7)
+    nx.add_path(G, (3, 4, 5, -1), length=10, kind='original', cable=7)
+    calcload(G)
+    if tentative is not None:
+        G.graph['tentative'] = tentative
+    original = G.copy()
+    selected = [2, 5] if tentative is None else [old for _, old in tentative]
+    d2roots = np.array([[2.0], [1.0], [3.0], [2.0], [1.0], [3.0]])
+
+    H = rehook(G, d2roots)
+
+    expected_hooks = dict(zip((2, 5), hooks))
+    assert H.graph['tentative'] == [(-1, expected_hooks[old]) for old in selected]
+    for old, hook, start in zip((2, 5), hooks, (0, 3)):
+        if old in selected:
+            assert H[hook][-1] == {
+                'length': d2roots[hook, -1],
+                'kind': 'tentative',
+                'cable': 7,
+                'load': 3,
+            }
+            for node in range(start, start + 3):
+                assert nx.has_path(H, node, hook)
+        else:
+            for source, sink in ((start, start + 1), (start + 1, old), (old, -1)):
+                assert H[source][sink] == G[source][sink]
+    assert H.nodes[-1]['load'] == 6
+    assert all(attrs['cable'] == 7 for _, _, attrs in H.edges(data=True))
+    assert_graph_equal(G, original)
+
+
 def test_as_hooked_to_nearest_clears_clone_loads():
     """A clone inside the rehooked subtree must not keep its previous load.
 
     ``as_hooked_to_nearest()`` accepts a routeset, whose subtrees may contain
-    clones. Their loads are stale once the subtree is rehooked, and
-    ``bfs_subtree_loads()`` reads a surviving one back as the node's base load.
+    clones. Their loads are stale once the subtree is rehooked and must be
+    recalculated along with the terminals'.
     """
     # -1 — 3 — 2 — 4(clone) — 1 — 0, hooked at 3 but 0 is the nearest to the root
     T, R, clone = 4, 1, 4
-    G = nx.Graph(R=R, T=T, has_loads=True, max_load=4)
+    G = nx.DiGraph(R=R, T=T, has_loads=True, max_load=4)
     G.add_node(-1, kind='oss', load=4)
     G.add_nodes_from(range(T), kind='wtg')
     G.add_node(clone, kind='contour')
-    nx.add_path(G, (-1, 3, 2, clone, 1, 0))
+    nx.add_path(G, (0, 1, clone, 2, 3, -1))
     for node, load in ((3, 4), (2, 3), (clone, 2), (1, 2), (0, 1)):
         G.nodes[node].update(load=load, subtree=0)
     for u, v in G.edges:

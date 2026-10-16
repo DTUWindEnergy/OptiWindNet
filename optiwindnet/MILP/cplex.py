@@ -45,7 +45,7 @@ class SolverCplex(SolverPyomo, PoolHandler):
     def _flow_val(self, var: Any) -> int:
         return round(self._value_map[var.name])
 
-    def _set_model(self, warmstart: nx.Graph | None) -> None:
+    def _set_model(self, warmstart: nx.DiGraph | None) -> None:
         super()._set_model(warmstart)
         self.solver.set_instance(self.model)
 
@@ -68,7 +68,7 @@ class SolverCplex(SolverPyomo, PoolHandler):
         self._prepare_solution_pool()
         return self._read_incumbent_linkbits_from_pool()
 
-    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.Graph, nx.Graph]:
+    def get_solution(self, A: nx.Graph | None = None) -> tuple[nx.DiGraph, nx.DiGraph]:
         if A is None:
             A = self.A
         P, bounds = self.P, self.bounds
