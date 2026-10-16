@@ -88,7 +88,7 @@ The result is not what the options asked for
 : Check the router's supported options and their combination rules. Some unsupported combinations raise errors; others are ignored with a warning, including MILP balancing without a pinned feeder count. See [](/problem.md#problem-options).
 
 An imported location rejects integer `capacity`
-: The graph may declare unequal turbine power. Pass `capacity_nominal` to a compatible low-level router, or load with `read_powers=False` to count turbines. See [](/reference/power.md#quantization-contract).
+: The graph may declare unequal turbine power. Give a compatible low-level router `NetworkConstraints(capacity_nominal=...)`, or load with `read_powers=False` to count turbines. See [](/reference/power.md#quantization-contract).
 
 Switching MILP backends raises `RuntimeError`
 : OR-Tools cannot share a process with standalone HiGHS or SCIP packages. Restart the kernel or use separate processes; see [](/reference/solvers.md#switching-backends-in-a-notebook).

@@ -10,8 +10,8 @@ import networkx as nx
 import pyomo.environ as pyo
 from bitarray import frozenbitarray
 
+from ..types import FeederRoute
 from ._core import (
-    FeederRoute,
     OWNSolutionNotFound,
     PoolHandler,
     SolutionInfo,

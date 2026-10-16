@@ -169,7 +169,7 @@ Two things need protecting from `never`, both with Prettier's own fences:
 .venv/bin/python docs/run_notebooks.py --kernel <name> --changed
 ```
 
-It executes, then normalizes the JSON so diffs stay small (drops transient metadata, renumbers execution counts, prettifies SVG, marks long-output cells `scrolled`). MILP notebooks are skipped unless `--milp` or explicit paths are given, because they are slow.
+It executes, then normalizes the JSON so diffs stay small (drops transient metadata, renumbers execution counts, prettifies SVG, marks long-output cells `scrolled`). MILP notebooks are skipped unless `--milp` or explicit paths are given, because they are slow. Pass `--theme {dark,light}` to force `darkdetect` to report a defined theme regardless of the host OS environment.
 
 ### Editing notebook JSON by hand
 

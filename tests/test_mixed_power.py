@@ -15,7 +15,7 @@ from optiwindnet import loads
 from optiwindnet.api import EWRouter, HGSRouter, MILPRouter, WindFarmNetwork
 from optiwindnet.baselines.hgs import hgs_cvrp
 from optiwindnet.baselines.lkh import lkh3
-from optiwindnet.constraints import NetworkConstraints
+from optiwindnet.constraints import NetworkConstraints, _resolved
 from optiwindnet.converting import G_from_S, L_from_G, S_from_G
 from optiwindnet.db.storage import pack_G
 from optiwindnet.heuristics.constructor import constructor
@@ -27,7 +27,6 @@ from optiwindnet.loads import (
     quantize_for_capacity,
     quantized,
     set_terminal_power,
-    total_inflow,
     validate_terminal_power,
 )
 from optiwindnet.mesh import make_planar_embedding
@@ -299,16 +298,13 @@ def test_validate_terminal_power_normalizes_and_flags_inexact_quantization():
     assert L.graph['power_quantization_inexact'] is False
 
 
-def test_quantized_quantizes_unequal_power_on_a_copy():
+def test_quantized_quantizes_unequal_power_leaving_A_unchanged():
     _, A = make_planar_embedding(_mixed_wfn().L)
     before = nx.to_dict_of_dicts(A), dict(A.graph), dict(A.nodes(data=True))
 
-    A_solve, capacity, attrs = quantized(A, capacity_nominal=2.5, power_rtol=0)
-    assert A_solve is not A
+    capacity, attrs, inflow = quantized(A, capacity_nominal=2.5, power_rtol=0)
     assert (nx.to_dict_of_dicts(A), dict(A.graph), dict(A.nodes(data=True))) == before
-    assert [A_solve.nodes[t]['inflow'] for t in range(2)] == [4, 5]
-    assert A_solve.graph['power_per_inflow'] == Fraction(1, 4)
-    assert A_solve.graph['power_quantization_inexact'] is False
+    assert inflow == (4, 5)
     assert capacity == 10
     assert attrs == {
         'power_per_inflow': Fraction(1, 4),
@@ -317,16 +313,16 @@ def test_quantized_quantizes_unequal_power_on_a_copy():
     }
 
 
-def test_quantized_uses_uniform_power_in_place():
+def test_quantized_takes_uniform_power_as_declared():
     wfn = WindFarmNetwork(cables=20, power_unit='MW', turbine_powers=[8, 8], **_SITE)
-    A = wfn.A
-    A_solve, capacity, attrs = quantized(A, capacity_nominal=Fraction(39, 2))
-    assert A_solve is A
-    assert capacity == 2
+    capacity, attrs, inflow = quantized(wfn.A, capacity_nominal=Fraction(39, 2))
+    assert (capacity, inflow) == (2, None)
     assert attrs['power_per_inflow'] == 8
-    # integer capacities need no declared power
+    # integer capacities need no declared power, and keep the declared inflow
     L = _bare_L()
-    assert quantized(L, capacity=3) == (L, 3, {})
+    assert quantized(L, capacity=3) == (3, {}, None)
+    L.nodes[1]['inflow'] = 2
+    assert quantized(L, capacity=3) == (3, {}, (1, 2))
 
 
 @pytest.mark.parametrize(
@@ -534,7 +530,7 @@ def test_producers_record_the_quantization_on_S():
     A = WindFarmNetwork(
         cables=_GRID_CABLES, power_unit='MW', turbine_powers=_GRID_POWERS, **_GRID
     ).A
-    S = hgs_cvrp(A, capacity_nominal=40, time_limit=0.5, seed=2)
+    S = hgs_cvrp(A, NetworkConstraints(capacity_nominal=40), time_limit=0.5, seed=2)
     assert {
         k: S.graph[k] for k in ('capacity', 'capacity_nominal', 'power_per_inflow')
     } == {
@@ -547,27 +543,29 @@ def test_producers_record_the_quantization_on_S():
     uniform = WindFarmNetwork(
         cables=40, power_unit='MW', turbine_powers=[8.0] * 12, **_GRID
     ).A
-    S = constructor(uniform, capacity_nominal=40, power_rtol=0)
+    S = constructor(uniform, NetworkConstraints(capacity_nominal=40), power_rtol=0)
     assert (S.graph['capacity'], S.graph['power_per_inflow']) == (5, 8)
     assert S.graph['capacity_nominal'] == 40 and S.graph['power_rtol'] == 0
 
 
 @pytest.mark.parametrize(
-    ('producer', 'kwargs'),
+    ('producer', 'constraints', 'kwargs'),
     (
-        (constructor, {}),
-        (hgs_cvrp, {'ringed': True, 'time_limit': 0.1}),
-        (hgs_cvrp, {'balanced': True, 'time_limit': 0.1}),
-        (lkh3, {'ringed': True, 'time_limit': 0.1}),
-        (lkh3, {'balanced': True, 'time_limit': 0.1}),
+        (constructor, {}, {}),
+        (hgs_cvrp, {'topology': 'ringed'}, {'time_limit': 0.1}),
+        (hgs_cvrp, {'feeders': 2, 'balanced': True}, {'time_limit': 0.1}),
+        (lkh3, {'topology': 'ringed'}, {'time_limit': 0.1}),
+        (lkh3, {'feeders': 2, 'balanced': True}, {'time_limit': 0.1}),
     ),
 )
-def test_heuristics_reject_unsupported_modes_with_unequal_power(producer, kwargs):
+def test_heuristics_reject_unsupported_modes_with_unequal_power(
+    producer, constraints, kwargs
+):
     A = _mixed_wfn().A
     with pytest.raises(NotImplementedError, match="'inflow' other than 1"):
-        producer(A, capacity_nominal=2.5, **kwargs)
+        producer(A, NetworkConstraints(capacity_nominal=2.5, **constraints), **kwargs)
     with pytest.raises(ValueError, match='pass capacity_nominal'):
-        producer(A, capacity=5, **kwargs)
+        producer(A, NetworkConstraints(capacity=5, **constraints), **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -588,29 +586,24 @@ def test_milp_rejects_unsupported_models_with_unequal_power(constraints, error, 
     wfn = _mixed_wfn()
     with pytest.raises(error, match=match):
         solver.set_problem(
-            wfn.P,
-            wfn.A,
-            constraints=NetworkConstraints(**constraints),
-            capacity_nominal=2.5,
+            wfn.P, wfn.A, NetworkConstraints(capacity_nominal=2.5, **constraints)
         )
 
 
 def test_milp_warmstart_is_built_only_for_plain_radial_solves():
     wfn = _mixed_wfn()
     A = wfn.A
-    capacity_kwargs = {'capacity_nominal': Fraction(5, 2), 'power_rtol': 0.01}
-    A_solve, capacity, _ = quantized(A, **capacity_kwargs)
 
     def warmstart(**kwargs):
         router = MILPRouter('highs', time_limit=1, mip_gap=0.01)
-        constraints = NetworkConstraints(**kwargs)
-        bounds = constraints.resolve(A, **capacity_kwargs)
-        return router._make_warmstart(A, capacity_kwargs, A_solve, constraints, bounds)
+        constraints = NetworkConstraints(capacity_nominal=Fraction(5, 2), **kwargs)
+        bounds = _resolved(A, constraints, 0.01)
+        return router._make_warmstart(A, bounds), bounds.capacity
 
-    S_warm = warmstart(topology='radial')
+    S_warm, capacity = warmstart(topology='radial')
     assert S_warm is not None and S_warm.graph['max_load'] <= capacity
-    assert warmstart(topology='ringed') is None
-    assert warmstart(balanced=True, feeders=2) is None
+    assert warmstart(topology='ringed')[0] is None
+    assert warmstart(balanced=True, feeders=2)[0] is None
 
 
 # --- cable reassignment ---
@@ -893,15 +886,47 @@ def test_gplot_terminal_shapes_per_power_level():
 
 def test_constraints_resolve_with_the_quantization_of_the_solve():
     A = _mixed_wfn().A
-    capacity_kwargs = {'capacity_nominal': Fraction(5, 2), 'power_rtol': 0.01}
-    A_solve, capacity, power_attrs = quantized(A, **capacity_kwargs)
-    constraints = NetworkConstraints(max_substation_loads=Fraction(5, 2))
-    bounds = constraints.resolve(A, **capacity_kwargs)
-    assert bounds == constraints._resolve(
-        T=A.graph['T'],
-        R=A.graph['R'],
-        capacity=capacity,
-        inflow_total=total_inflow(A_solve),
-        power_per_inflow=power_attrs['power_per_inflow'],
+    capacity, power_attrs, inflow = quantized(
+        A, capacity_nominal=Fraction(5, 2), power_rtol=0.01
     )
+    constraints = NetworkConstraints(
+        max_substation_loads=Fraction(5, 2), capacity_nominal=Fraction(5, 2)
+    )
+    bounds = _resolved(A, constraints, 0.01)
+    assert (bounds.capacity, bounds.inflow) == (capacity, inflow)
+    assert bounds.power_attrs == power_attrs
     assert bounds.root_load_ub == (capacity,) * A.graph['R']
+
+
+def test_constraints_capacity_in_turbines_is_compared_in_power_unit():
+    wfn = WindFarmNetwork(
+        cables=40, power_unit='MW', turbine_powers=[8.0] * 12, **_GRID
+    )
+    wfn.constraints = NetworkConstraints(capacity=6)  # 48 MW
+    with pytest.raises(ValueError, match='exceeds that of the largest cable'):
+        wfn.optimize()
+    wfn.constraints = NetworkConstraints(capacity=4)  # 32 MW
+    wfn.optimize()
+    assert wfn.G.graph['max_load'] <= 4
+
+
+@pytest.mark.parametrize(
+    'router',
+    [
+        HGSRouter(time_limit=0.5, seed=1),
+        MILPRouter('highs', time_limit=2, mip_gap=0.05),
+    ],
+    ids=('hgs', 'milp'),
+)
+def test_routing_unequal_power_leaves_A_unchanged(router):
+    wfn = WindFarmNetwork(
+        cables=_GRID_CABLES,
+        power_unit='MW',
+        turbine_powers=_GRID_POWERS,
+        router=router,
+        **_GRID,
+    )
+    A = wfn.A
+    before = dict(A.graph), {n: dict(data) for n, data in A.nodes(data=True)}
+    wfn.optimize()
+    assert (dict(A.graph), {n: dict(data) for n, data in A.nodes(data=True)}) == before

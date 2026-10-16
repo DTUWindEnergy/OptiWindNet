@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from optiwindnet import pathfinding
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import G_from_S, S_from_G
 from optiwindnet.geometric import is_crossing
 from optiwindnet.interarraylib import assign_cables
@@ -650,7 +651,7 @@ def test_spanning_chain_detours_crossing_free():
 
     bundle = get_bundle('yi_2019', single_root=True)
     P, A = bundle.P, bundle.A
-    S = constructor(A, capacity=8, method='rootlust')
+    S = constructor(A, NetworkConstraints(capacity=8), method='rootlust')
     G_tent = G_from_S(S, A)
     pf = PathFinder(G_tent, planar=P, A=A)
 
@@ -750,7 +751,7 @@ def test_allow_root_change_false_keeps_subtree_roots():
 
     bundle = get_bundle('cazzaro_2022G140', read_powers=False)
     P, A = bundle.P, bundle.A
-    S = constructor(A, capacity=9)
+    S = constructor(A, NetworkConstraints(capacity=9))
     roots = _terminal_roots(G_from_S(S, A))
 
     G_default = PathFinder(G_from_S(S, A), planar=P, A=A).create_detours()
@@ -768,7 +769,7 @@ def test_incumbents_are_shared_unless_per_root():
 
     bundle = get_bundle('cazzaro_2022G140', read_powers=False)
     P, A = bundle.P, bundle.A
-    S = constructor(A, capacity=9)
+    S = constructor(A, NetworkConstraints(capacity=9))
 
     def distinct_lists(pf):
         return len({id(v) for v in pf.best_pn_by_root.values()})

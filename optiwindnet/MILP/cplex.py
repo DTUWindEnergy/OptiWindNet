@@ -8,7 +8,8 @@ import networkx as nx
 import pyomo.environ as pyo
 from bitarray import frozenbitarray
 
-from ._core import FeederRoute, OWNSolutionNotFound, PoolHandler
+from ..types import FeederRoute
+from ._core import OWNSolutionNotFound, PoolHandler
 from .pyomo import SolverPyomo
 
 __all__ = ()

@@ -18,6 +18,7 @@ Usage::
 """
 
 from optiwindnet.baselines.hgs import hgs_cvrp
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.converting import G_from_S
 from optiwindnet.heuristics import constructor
 from optiwindnet.terse import TerseLinks
@@ -42,13 +43,13 @@ def main() -> None:
         solutions[key] = S
 
     for method in problem.EW_METHODS:
-        S = constructor(A, capacity=problem.CAPACITY, method=method)
+        S = constructor(A, NetworkConstraints(capacity=problem.CAPACITY), method=method)
         retain(method, S)
     for time_limit in problem.HGS_TIME_LIMITS:
         # Match `HGSRouter` by normalizing the graph as recommended by `hgs_cvrp()`.
         S = hgs_cvrp(
             as_normalized(A),
-            capacity=problem.CAPACITY,
+            NetworkConstraints(capacity=problem.CAPACITY),
             time_limit=time_limit,
             seed=problem.HGS_SEED,
         )

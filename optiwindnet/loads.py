@@ -344,14 +344,14 @@ def quantized(
     capacity: int | None = None,
     capacity_nominal: float | Fraction | None = None,
     power_rtol: float = DEFAULT_POWER_RTOL,
-) -> tuple[nx.Graph, int, dict[str, Any]]:
+) -> tuple[int, dict[str, Any], tuple[int, ...] | None]:
     """Validate the power of ``A`` and quantize it for a solve.
 
     Exactly one of ``capacity`` and ``capacity_nominal`` is given. ``capacity``
     is in inflow and requires ``A`` to declare no unequal power.
     ``capacity_nominal`` is in the unit of the power ``A`` declares; unequal
-    powers are quantized for it (see :func:`quantize_for_capacity`) on a copy of
-    ``A`` whose terminals get ``'inflow'``.
+    powers are quantized for it (see :func:`quantize_for_capacity`). ``A`` is
+    left unchanged.
 
     Args:
       A: location or available-links graph.
@@ -360,24 +360,38 @@ def quantized(
       power_rtol: quantization tolerance, used with ``capacity_nominal``.
 
     Returns:
-      The graph to solve over, the capacity in inflow, and the graph attributes
-      that record the quantization on the solution.
+      The capacity in inflow, the graph attributes that record the quantization
+      on the solution, and the inflow of each terminal, or ``None`` if every
+      terminal injects one unit. The inflow is the quantized one for unequal
+      power, and the one ``A`` declares otherwise.
 
     Raises:
       ValueError: both or neither capacity is given, the capacity does not suit
         the power ``A`` declares, or the quantization fails.
     """
-    validate_terminal_power(A)
     graph = A.graph
+    T = graph['T']
+    # a graph without power declarations is validated where it is built; the
+    # validation writes normalized values, so it runs on a copy of the
+    # terminals and graph attributes, leaving A unchanged
+    if 'power_per_inflow' in graph or 'powers_set' in graph:
+        terminals = nx.Graph(**graph)
+        terminals.add_nodes_from((t, dict(A.nodes[t])) for t in range(T))
+        validate_terminal_power(terminals)
+        graph = terminals.graph
+    else:
+        terminals = A
     powers_set = graph.get('powers_set')
     if (capacity is None) == (capacity_nominal is None):
         raise ValueError('Exactly one of capacity and capacity_nominal must be given.')
+    declared_ = tuple(A.nodes[t].get('inflow', 1) for t in range(T))
+    declared = declared_ if any(inflow != 1 for inflow in declared_) else None
     if capacity_nominal is None:
         if powers_set is not None:
             raise ValueError('A declares unequal turbine power: pass capacity_nominal.')
         if capacity is None or not _is_positive_integer(capacity):
             raise ValueError(f'capacity must be a positive integer: got {capacity!r}.')
-        return A, int(capacity), {}
+        return int(capacity), {}, declared
     if powers_set is None and 'power_per_inflow' not in graph:
         raise ValueError('capacity_nominal requires A to declare turbine power.')
     powers = powers_set or (Fraction(graph['power_per_inflow']),)
@@ -396,14 +410,10 @@ def quantized(
         'power_rtol': power_rtol,
     }
     if powers_set is None:
-        return A, integer_capacity, attrs
-    solved = A.copy()
+        return integer_capacity, attrs, declared
     inflow_by_power = dict(zip(powers, inflow))
-    for t in range(graph['T']):
-        solved.nodes[t]['inflow'] = inflow_by_power[solved.nodes[t]['power']]
-    solved.graph['power_per_inflow'] = power_per_inflow
-    validate_terminal_power(solved)
-    return solved, integer_capacity, attrs
+    inflow_ = tuple(inflow_by_power[terminals.nodes[t]['power']] for t in range(T))
+    return integer_capacity, attrs, inflow_ if any(k != 1 for k in inflow_) else None
 
 
 def total_inflow(G: nx.Graph) -> int:

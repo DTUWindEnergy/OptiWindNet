@@ -14,8 +14,8 @@ from typing import Any, ClassVar
 import networkx as nx
 from bitarray import frozenbitarray
 
+from ..types import FeederRoute
 from ._core import (
-    FeederRoute,
     OWNSolutionNotFound,
     PoolHandler,
     SolutionInfo,
@@ -54,7 +54,7 @@ class SolverFSCIP(Solver, PoolHandler):
         return round(self._value_map[var])
 
     def _set_model(self, warmstart: nx.Graph | None) -> None:
-        model, metadata = make_min_length_model(self.A, self.capacity, self.bounds)
+        model, metadata = make_min_length_model(self.A, self.bounds)
         self.var_from_name = {
             var.name: var
             for var in chain(metadata.link_.values(), metadata.flow_.values())

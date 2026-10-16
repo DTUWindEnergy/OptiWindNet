@@ -13,10 +13,9 @@ import optiwindnet.baselines.hgs as hgs_mod
 from optiwindnet.baselines._core import (
     balanced_capacity,
     remove_offending_crossings,
-    resolve_bounds,
     routes_from_warmstart,
 )
-from optiwindnet.constraints import NetworkConstraints
+from optiwindnet.constraints import NetworkConstraints, _resolved
 from optiwindnet.converting import linkbits_from_S
 from optiwindnet.identity import linkset_id, topology_id
 from optiwindnet.transforming import as_normalized
@@ -51,7 +50,7 @@ def test_hgs_small_site_capacity_boundaries(capacity):
     A = get_bundle('example_location').A
     S = hgs_mod.hgs_cvrp(
         as_normalized(A),
-        capacity=capacity,
+        NetworkConstraints(capacity=capacity),
         time_limit=DEFAULT_BASELINE_TIME_LIMIT,
         seed=0,
     )
@@ -63,9 +62,8 @@ def test_hgs_ringed_capacity_boundaries(capacity):
     A = get_bundle('albatros').A
     S = hgs_mod.hgs_cvrp(
         as_normalized(A),
-        capacity=capacity,
+        NetworkConstraints(capacity=capacity, topology='ringed'),
         time_limit=0.5,
-        ringed=True,
         seed=0,
     )
     assert_topology(S, Topology.RINGED, capacity)
@@ -177,10 +175,11 @@ def test_balanced_solve_passes_effective_capacity_and_keeps_requested_one(monkey
 
     S = hgs_mod.hgs_cvrp(
         _make_A(T=T),
-        capacity=capacity,
+        NetworkConstraints(
+            capacity=capacity, topology='radial', feeders='min', balanced=True
+        ),
         time_limit=0.1,
         seed=1,
-        balanced=True,
         repair=False,
     )
 
@@ -204,12 +203,11 @@ def test_balanced_exact_vehicles_above_minimum(monkeypatch):
 
     S = hgs_mod.hgs_cvrp(
         _make_A(T=T),
-        capacity=capacity,
+        NetworkConstraints(
+            capacity=capacity, topology='radial', feeders=vehicles, balanced=True
+        ),
         time_limit=0.1,
         seed=1,
-        vehicles=vehicles,
-        vehicles_exact=True,
-        balanced=True,
         repair=False,
     )
 
@@ -238,12 +236,11 @@ def test_balanced_exact_vehicles_with_slack(monkeypatch):
 
     S = hgs_mod.hgs_cvrp(
         _make_A(T=T),
-        capacity=capacity,
+        NetworkConstraints(
+            capacity=capacity, topology='radial', feeders=vehicles, balanced=True
+        ),
         time_limit=0.1,
         seed=1,
-        vehicles=vehicles,
-        vehicles_exact=True,
-        balanced=True,
         repair=False,
     )
 
@@ -257,53 +254,20 @@ def test_balanced_exact_vehicles_with_slack(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ('kwargs', 'exception', 'match'),
+    ('feeders', 'match'),
     [
-        ({'vehicles': None}, ValueError, 'requires `vehicles` to be set'),
-        ({'vehicles': 1}, ValueError, 'below the minimum necessary'),
-        ({'vehicles': 13}, ValueError, 'above the maximum possible (12)'),
+        (1, 'below the minimum necessary'),
+        (13, 'above the maximum possible (12)'),
     ],
 )
-def test_exact_vehicles_validation(kwargs, exception, match):
-    kwargs = {'balanced': True} | kwargs
-    with pytest.raises(exception, match=re.escape(match)):
+def test_exact_feeder_count_validation(feeders, match):
+    with pytest.raises(ValueError, match=re.escape(match)):
         hgs_mod.hgs_cvrp(
             _make_A(T=12),
-            capacity=6,
+            NetworkConstraints(capacity=6, feeders=feeders, balanced=True),
             time_limit=0.1,
-            vehicles_exact=True,
             repair=False,
-            **kwargs,
         )
-
-
-@pytest.mark.parametrize(
-    ('R', 'vehicles', 'exact', 'balanced', 'expected'),
-    [
-        # (feeders_lb, feeders_ub, balanced)
-        (1, 3, True, False, (3, 3, False)),
-        (1, 3, False, True, (3, 3, True)),
-        (1, 3, False, False, (2, 3, False)),
-        (2, 3, True, True, (3, 3, True)),
-        (2, 3, False, False, (2, 3, False)),
-    ],
-)
-def test_legacy_options_translate_into_counts(R, vehicles, exact, balanced, expected):
-    with pytest.warns(DeprecationWarning, match='deprecated'):
-        bounds = resolve_bounds(
-            'hgs_cvrp',
-            None,
-            T=12,
-            R=R,
-            capacity=6,
-            inflow_total=12,
-            power_per_inflow=None,
-            vehicles=vehicles,
-            vehicles_exact=exact,
-            balanced=balanced,
-            ringed=False,
-        )
-    assert (bounds.feeders_lb, bounds.feeders_ub, bounds.balanced) == expected
 
 
 @pytest.mark.parametrize('vehicles', (3, 5, 8))
@@ -312,13 +276,11 @@ def test_ringed_exact_vehicles_pins_ring_count(vehicles):
     A = get_bundle('albatros').A
     S = hgs_mod.hgs_cvrp(
         as_normalized(A),
-        capacity=3,
+        NetworkConstraints(
+            capacity=3, topology='ringed', feeders=2 * vehicles, balanced=True
+        ),
         time_limit=0.5,
         seed=0,
-        vehicles=vehicles,
-        vehicles_exact=True,
-        balanced=True,
-        ringed=True,
     )
     assert_topology(S, Topology.RINGED, 3)
     # two feeders per ring
@@ -333,12 +295,10 @@ def test_ringed_exact_vehicles_rejects_rings_below_two_terminals():
     with pytest.raises(ValueError, match=re.escape('above the maximum (6)')):
         hgs_mod.hgs_cvrp(
             _make_A(T=12),
-            capacity=6,
+            NetworkConstraints(
+                capacity=6, topology='ringed', feeders=14, balanced=True
+            ),
             time_limit=0.1,
-            vehicles=7,
-            vehicles_exact=True,
-            balanced=True,
-            ringed=True,
             repair=False,
         )
 
@@ -347,7 +307,11 @@ def test_unbalanced_solve_uses_requested_capacity(monkeypatch):
     captured = _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
 
     S = hgs_mod.hgs_cvrp(
-        _make_A(T=4), capacity=2, time_limit=0.1, seed=1, balanced=False, repair=False
+        _make_A(T=4),
+        NetworkConstraints(capacity=2, topology='radial'),
+        time_limit=0.1,
+        seed=1,
+        repair=False,
     )
 
     assert captured['capacity'] == 2
@@ -362,7 +326,9 @@ def test_hgs_edgeless_A_solves_complete_and_is_not_identified(monkeypatch, caplo
     A = _make_A(T=4)
 
     with caplog.at_level('WARNING'):
-        S = hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, repair=False)
+        S = hgs_mod.hgs_cvrp(
+            A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1, repair=False
+        )
 
     assert A.number_of_edges() == 0
     assert S.graph['method_options']['complete']
@@ -376,7 +342,7 @@ def test_hgs_edgeless_A_solves_complete_and_is_not_identified(monkeypatch, caplo
 def test_hgs_complete_is_refused_together_with_repair():
     A = _make_A(T=4)
     with pytest.raises(NotImplementedError, match='complete graph over all nodes'):
-        hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1)
+        hgs_mod.hgs_cvrp(A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1)
 
 
 def test_solution_time_falls_back_to_total_runtime():
@@ -386,7 +352,11 @@ def test_solution_time_falls_back_to_total_runtime():
 def test_vehicles_below_the_minimum_raise():
     with pytest.raises(ValueError, match=re.escape('below the minimum necessary (2)')):
         hgs_mod.hgs_cvrp(
-            _make_A(T=4), capacity=2, time_limit=0.1, seed=1, vehicles=1, repair=False
+            _make_A(T=4),
+            NetworkConstraints(capacity=2, topology='radial', max_feeders=1),
+            time_limit=0.1,
+            seed=1,
+            repair=False,
         )
 
 
@@ -413,7 +383,12 @@ def test_hgs_honours_non_unit_terminal_inflow_on_a_single_root_radial_solve():
     inflow = {t: 1 + (t % 3) for t in range(A.graph['T'])}
     nx.set_node_attributes(A, inflow, 'inflow')
 
-    S = hgs_mod.hgs_cvrp(A, capacity=8, time_limit=DEFAULT_BASELINE_TIME_LIMIT, seed=1)
+    S = hgs_mod.hgs_cvrp(
+        A,
+        NetworkConstraints(capacity=8),
+        time_limit=DEFAULT_BASELINE_TIME_LIMIT,
+        seed=1,
+    )
 
     subtree_loads = [S.nodes[t]['load'] for t in S.neighbors(-1)]
     assert max(subtree_loads) <= 8  # capacity is a inflow budget, not a count
@@ -426,8 +401,8 @@ def test_hgs_honours_non_unit_terminal_inflow_on_a_single_root_radial_solve():
 @pytest.mark.parametrize(
     ('site', 'options'),
     (
-        ('toy', {'ringed': True}),
-        ('toy', {'balanced': True}),
+        ('toy', {'topology': 'ringed'}),
+        ('toy', {'feeders': 2, 'balanced': True}),
         ('neart', {}),  # multi-root: clusterize() partitions by terminal count
     ),
 )
@@ -437,7 +412,9 @@ def test_hgs_rejects_non_unit_terminal_inflow_it_cannot_honour(site, options):
 
     with pytest.raises(NotImplementedError, match='single-root radial solve'):
         hgs_mod.hgs_cvrp(
-            A, capacity=8, time_limit=DEFAULT_BASELINE_TIME_LIMIT, **options
+            A,
+            NetworkConstraints(capacity=8, **options),
+            time_limit=DEFAULT_BASELINE_TIME_LIMIT,
         )
 
 
@@ -548,7 +525,9 @@ def test_hgs_seeds_only_the_first_solve_of_the_repair_loop(monkeypatch):
     A = _make_A(T=4, edges=[(0, 1, 1.0), (2, 3, 1.0), (1, 2, 1.0)])
     warmstart = _radial_S(1, 4, {-1: [[3, 2], [0, 1]]})
 
-    hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, seed=1, warmstart=warmstart)
+    hgs_mod.hgs_cvrp(
+        A, NetworkConstraints(capacity=2), time_limit=0.1, seed=1, warmstart=warmstart
+    )
 
     assert captured['initial_routes'] == [[[4, 3], [1, 2]], None]
 
@@ -565,7 +544,7 @@ def test_hgs_clusters_multi_root_solve_by_the_warmstart(monkeypatch):
 
     S = hgs_mod.hgs_cvrp(
         _make_A(T=4, R=2),
-        capacity=3,
+        NetworkConstraints(capacity=3),
         time_limit=0.1,
         seed=1,
         repair=False,
@@ -582,11 +561,8 @@ def test_hgs_rejects_warmstart_clustering_off_the_exact_vehicle_count():
     with pytest.raises(OWNWarmupFailed, match='3 routes, outside the range of 2 to 2'):
         hgs_mod.hgs_cvrp(
             _make_A(T=4, R=2),
-            capacity=2,
+            NetworkConstraints(capacity=2, topology='radial', feeders=2, balanced=True),
             time_limit=0.1,
-            vehicles=2,
-            vehicles_exact=True,
-            balanced=True,
             repair=False,
             warmstart=warmstart,
         )
@@ -599,26 +575,31 @@ def test_hgs_raises_on_warmstart_hgs_cvrp_rejects():
     warmstart = _radial_S(1, T, {-1: [list(range(T))]})
 
     with pytest.raises(OWNWarmupFailed, match='exceeds the vehicle capacity'):
-        hgs_mod.hgs_cvrp(A, capacity=3, time_limit=0.1, seed=0, warmstart=warmstart)
+        hgs_mod.hgs_cvrp(
+            A,
+            NetworkConstraints(capacity=3),
+            time_limit=0.1,
+            seed=0,
+            warmstart=warmstart,
+        )
 
 
 @pytest.mark.parametrize(
     ('site', 'options'),
     [
         ('example_location', {}),
-        ('albatros', {'ringed': True}),
-        ('albatros', {'balanced': True}),
+        ('albatros', {'topology': 'ringed'}),
+        ('albatros', {'feeders': 'min', 'balanced': True}),
         ('neart', {}),
     ],
 )
 def test_hgs_warmstart_never_ends_worse_than_its_seed(site, options):
     A = as_normalized(get_bundle(site).A)
-    S0 = hgs_mod.hgs_cvrp(
-        A, capacity=4, time_limit=0.2, seed=0, repair=False, **options
-    )
+    constraints = NetworkConstraints(capacity=4, **options)
+    S0 = hgs_mod.hgs_cvrp(A, constraints, time_limit=0.2, seed=0, repair=False)
 
     S1 = hgs_mod.hgs_cvrp(
-        A, capacity=4, time_limit=0.1, seed=1, repair=False, warmstart=S0, **options
+        A, constraints, time_limit=0.1, seed=1, repair=False, warmstart=S0
     )
 
     assert S1.graph['objective'] <= S0.graph['objective'] + 1e-9
@@ -633,7 +614,7 @@ def test_hgs_warmstart_never_ends_worse_than_its_seed(site, options):
 # --------------------------------------------------------------------------
 def _neart_A_and_constraints(**kwargs):
     A = as_normalized(get_bundle('neart', read_powers=False).A)
-    return A, NetworkConstraints(**kwargs)
+    return A, NetworkConstraints(capacity=7, **kwargs)
 
 
 def _per_root(S):
@@ -656,7 +637,7 @@ def test_hgs_keeps_the_substation_limits(constraints, expected):
 
     A, constraints = _neart_A_and_constraints(**constraints)
 
-    S = hgs_mod.hgs_cvrp(A, capacity=7, time_limit=0.5, seed=1, constraints=constraints)
+    S = hgs_mod.hgs_cvrp(A, constraints, time_limit=0.5, seed=1)
 
     assert expected(*_per_root(S)[1])
     assert validate_topology(S, 7) == []
@@ -665,40 +646,17 @@ def test_hgs_keeps_the_substation_limits(constraints, expected):
 
 def test_hgs_balances_the_subtrees_of_every_substation_alike():
     A, constraints = _neart_A_and_constraints(feeders='min', balanced=True)
-    bounds = constraints.resolve(A, capacity=7)
+    bounds = _resolved(A, constraints)
     load_lb, load_ub = bounds.group_load_lb, bounds.group_load_ub
 
-    S = hgs_mod.hgs_cvrp(A, capacity=7, time_limit=0.5, seed=1, constraints=constraints)
+    S = hgs_mod.hgs_cvrp(A, constraints, time_limit=0.5, seed=1)
 
     loads = [S.nodes[n]['load'] for r in (-2, -1) for n in S.neighbors(r)]
     assert len(loads) == bounds.groups_lb
     assert all(load_lb <= load <= load_ub for load in loads)
 
 
-def test_hgs_cvrp_deprecates_its_count_options(monkeypatch):
-    _capture_do_hgs(monkeypatch, [[1, 2], [3, 4]])
-    A = _make_A(T=4)
-    with pytest.warns(DeprecationWarning, match='balanced'):
-        hgs_mod.hgs_cvrp(A, capacity=2, time_limit=0.1, balanced=True, repair=False)
-    constraints = NetworkConstraints(feeders='min', balanced=True)
-    with pytest.raises(TypeError, match='either constraints or the options'):
-        hgs_mod.hgs_cvrp(
-            A,
-            capacity=2,
-            time_limit=0.1,
-            constraints=constraints,
-            ringed=True,
-            repair=False,
-        )
-
-
 def test_hgs_cvrp_does_not_keep_feeders_straight():
-    constraints = NetworkConstraints(feeder_route='straight')
+    constraints = NetworkConstraints(feeder_route='straight', capacity=2)
     with pytest.raises(NotImplementedError, match='straight'):
-        hgs_mod.hgs_cvrp(
-            _make_A(T=4),
-            capacity=2,
-            time_limit=0.1,
-            constraints=constraints,
-            repair=False,
-        )
+        hgs_mod.hgs_cvrp(_make_A(T=4), constraints, time_limit=0.1, repair=False)

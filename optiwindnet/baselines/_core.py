@@ -5,10 +5,8 @@
 
 import logging
 import math
-import warnings
 from collections import defaultdict
 from collections.abc import Sequence
-from fractions import Fraction
 
 import networkx as nx
 import numpy as np
@@ -16,7 +14,7 @@ from numpy.typing import DTypeLike
 from scipy.spatial.distance import pdist, squareform
 
 from ..clustering import ClusterPlan
-from ..constraints import NetworkBounds, NetworkConstraints
+from ..constraints import NetworkBounds, NetworkConstraints, _resolved
 from ..converting import linkbits_from_S
 from ..identity import _LINKSET_ID, _invalidate_canonical_linkset, topology_id
 from ..types import FeederRoute, OWNWarmupFailed, Topology
@@ -25,99 +23,68 @@ _lggr = logging.getLogger(__name__)
 _warn = _lggr.warning
 
 
-def legacy_constraints(
-    feeders: int | None, exact: bool, balanced: bool, ringed: bool
-) -> NetworkConstraints:
-    """Translate the deprecated count options of the VRP routers into constraints.
-
-    ``feeders`` counts substation connections (two per ring). A count is exact
-    if ``exact`` or ``balanced`` (balance needs a fixed count), and a maximum
-    otherwise; without a count, ``balanced`` fixes the minimum.
-    """
-    count: dict[str, int | str] = {}
-    if feeders is None:
-        if balanced:
-            count['feeders'] = 'min'
-    elif exact or balanced:
-        count['feeders'] = feeders
-    else:
-        count['max_feeders'] = feeders
-    return NetworkConstraints(
-        topology=Topology.RINGED if ringed else Topology.RADIAL,
-        balanced=balanced,
-        **count,  # pyrefly: ignore[bad-argument-type]
-    )
-
-
-def resolve_bounds(
+def vrp_bounds(
     solver: str,
-    constraints: NetworkConstraints | None,
+    A: nx.Graph,
+    constraints: NetworkConstraints | NetworkBounds,
+    power_rtol: float | None,
     *,
-    T: int,
-    R: int,
-    capacity: int,
-    inflow_total: int,
-    power_per_inflow: Fraction | None,
-    vehicles: int | None,
-    vehicles_exact: bool,
-    balanced: bool,
-    ringed: bool,
-    link_length_ub: float | None = None,
-) -> NetworkBounds:
-    """Resolve the bounds of a VRP solve from ``constraints`` or deprecated options.
+    complete: bool,
+    repair: bool,
+    counted_by: str,
+) -> tuple[NetworkBounds, bool]:
+    """Resolve the bounds of a VRP solve, refusing what the VRP solvers cannot keep.
 
-    Deprecated options that differ from their defaults raise a
-    ``DeprecationWarning`` attributed to the caller of ``solver``.
+    An edgeless ``A`` requests the complete graph over all nodes, so the
+    returned ``complete`` is true for it.
 
-    The deprecated options translate as :func:`legacy_constraints` describes,
-    with ``vehicles`` counting routes (subtrees or rings).
+    Args:
+      solver: name of the calling function, for the messages.
+      A: available-links graph.
+      constraints: network constraints or bounds (see
+        :func:`~optiwindnet.constraints._resolved`).
+      power_rtol: quantization tolerance of unequal turbine power.
+      complete: whether the solve is over the complete graph.
+      repair: whether crossings are repaired.
+      counted_by: what of the solver counts terminals (for the message).
+
+    Returns:
+      The bounds and whether the solve is over the complete graph.
 
     Raises:
-        TypeError: both ``constraints`` and deprecated options are given.
-        ValueError: ``vehicles_exact`` without ``vehicles``, or the bounds do
-            not suit the instance.
-        NotImplementedError: the bounds ask for straight feeders.
+      NotImplementedError: a repair over the complete graph, straight feeders,
+        or a terminal inflow other than one beyond an unbalanced single-root
+        radial solve without a count fixed above the minimum.
+      ValueError: the bounds fix more rings than ``T // 2``, which would leave
+        a ring with fewer than two terminals.
     """
-    legacy = {
-        name
-        for name, value, default in (
-            ('vehicles', vehicles, None),
-            ('vehicles_exact', vehicles_exact, False),
-            ('balanced', balanced, False),
-            ('ringed', ringed, False),
+    complete = complete or A.number_of_edges() == 0
+    if complete and repair:
+        raise NotImplementedError(
+            f'{solver}() cannot repair a solve over the complete graph over all '
+            "nodes: crossing detection and repair read A's planar embedding and "
+            'diagonals, which say nothing about a link absent from A. Pass '
+            'repair=False (the solution may then cross itself).'
         )
-        if value != default
-    }
-    if constraints is None:
-        if legacy:
-            warnings.warn(
-                f'{solver}() options {sorted(legacy)} are deprecated and will be '
-                'removed in v0.4.0: pass constraints=NetworkConstraints(...) instead.',
-                DeprecationWarning,
-                stacklevel=3,
-            )
-        if vehicles_exact and vehicles is None:
-            raise ValueError('`vehicles_exact`=True requires `vehicles` to be set.')
-        per_group = 2 if ringed else 1
-        constraints = legacy_constraints(
-            None if vehicles is None else per_group * vehicles,
-            vehicles_exact,
-            balanced,
-            ringed,
-        )
-    elif legacy:
-        raise TypeError(f'Give either constraints or the options {sorted(legacy)}.')
-    bounds = constraints._resolve(
-        T=T,
-        R=R,
-        capacity=capacity,
-        inflow_total=inflow_total,
-        power_per_inflow=power_per_inflow,
-        link_length_ub=link_length_ub,
-    )
+    bounds = _resolved(A, constraints, power_rtol)
     if bounds.feeder_route is FeederRoute.STRAIGHT:
         raise NotImplementedError(f'{solver}() does not keep feeder routes straight.')
-    return bounds
+    ringed = bounds.topology is Topology.RINGED
+    pinned = bounds.balanced or bounds.fixed_above_min
+    if bounds.inflow is not None and (ringed or pinned or bounds.R > 1):
+        raise NotImplementedError(
+            f"{solver}() honours a terminal 'inflow' other than 1 only for an "
+            'unbalanced single-root radial solve without a count fixed above the '
+            f'minimum: rings split by terminal count, {counted_by}, and '
+            'clusterize() partitions by count.'
+        )
+    T, groups_lb = bounds.T, bounds.groups_lb
+    if ringed and pinned and groups_lb > T // 2:
+        raise ValueError(
+            f'Rings ({groups_lb}) above the maximum ({T // 2}) that gives every '
+            f'ring two or more of the {T} terminals.'
+        )
+    return bounds, complete
 
 
 def root_fleet_(bounds: NetworkBounds, plan: ClusterPlan) -> list[int | None]:

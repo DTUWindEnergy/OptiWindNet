@@ -22,7 +22,7 @@ from optiwindnet.api import (
 from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.MILP import OWNWarmupFailed
 from optiwindnet.svg import SvgRepr
-from optiwindnet.types import Topology
+from optiwindnet.types import FeederRoute, Topology
 
 from .helpers import tiny_wfn
 
@@ -36,13 +36,13 @@ class _RecordingRouter(Router):
         self.result = result
         self.calls = []
 
-    def route(self, P, A, cables, cables_capacity, verbose=False, **kwargs):
+    def route(self, P, A, cables, constraints, verbose=False, **kwargs):
         self.calls.append(
             {
                 'P': P,
                 'A': A,
                 'cables': cables,
-                'cables_capacity': cables_capacity,
+                'constraints': constraints,
                 'verbose': verbose,
                 **kwargs,
             }
@@ -60,7 +60,7 @@ def test_optimize_forwards_inputs_and_warmstart_state():
     assert first['P'] is wfn.P
     assert first['A'] is wfn.A
     assert first['cables'] == wfn.cables
-    assert first['cables_capacity'] == wfn.cables_capacity
+    assert first['constraints'] == NetworkConstraints(capacity=int(wfn.cables_capacity))
     assert first['verbose'] is True
     assert 'S_warm' not in first
     assert wfn.S is solved.S and wfn.G is solved.G
@@ -76,8 +76,8 @@ def test_ewrouter_forwards_constructor_options(monkeypatch, feeder_route):
     solved = tiny_wfn()
     calls = []
 
-    def fake_constructor(A, **kwargs):
-        calls.append((A, kwargs))
+    def fake_constructor(A, constraints, **kwargs):
+        calls.append((A, constraints, kwargs))
         return solved.S
 
     monkeypatch.setattr(api, 'constructor', fake_constructor)
@@ -90,47 +90,46 @@ def test_ewrouter_forwards_constructor_options(monkeypatch, feeder_route):
         )(),
     )
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
-    router = EWRouter(
-        method='ringed',
-        maxiter=17,
-        bias_margin=0.25,
+    router = EWRouter(method='ringed', maxiter=17, bias_margin=0.25)
+    constraints = NetworkConstraints(
+        capacity=int(solved.cables_capacity),
+        topology='ringed',
         feeder_route=feeder_route,
     )
 
-    router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
+    router.route(solved.P, solved.A, solved.cables, constraints)
 
     assert calls == [
         (
             solved.A,
+            constraints,
             {
-                'capacity': solved.cables_capacity,
                 'method': 'ringed',
+                'power_rtol': router.power_rtol,
                 'maxiter': 17,
                 'bias_margin': 0.25,
-                'weigh_detours': feeder_route == 'segmented',
-                'straight_feeder_route': feeder_route == 'straight',
             },
         )
     ]
 
 
 @pytest.mark.parametrize(
-    ('ringed', 'feeder_limit', 'expected_vehicles'),
+    ('ringed', 'feeders', 'expected_groups'),
     [
         (True, 4, 2),
         (False, 3, 3),
-        (True, None, None),
-        (False, None, None),
+        (True, 'min', None),
+        (False, 'min', None),
     ],
 )
 def test_hgsrouter_forwards_low_level_options(
-    monkeypatch, ringed, feeder_limit, expected_vehicles
+    monkeypatch, ringed, feeders, expected_groups
 ):
     solved = tiny_wfn()
     captured = {}
 
-    def fake_hgs(A, **kwargs):
-        captured.update(kwargs)
+    def fake_hgs(A, bounds, **kwargs):
+        captured.update(kwargs, bounds=bounds)
         return solved.S
 
     monkeypatch.setattr(api, 'hgs_cvrp', fake_hgs)
@@ -143,35 +142,31 @@ def test_hgsrouter_forwards_low_level_options(
         )(),
     )
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
-    router = HGSRouter(
-        time_limit=0.4,
-        feeder_limit=feeder_limit,
-        # an exact count needs a count
-        feeder_exact=feeder_limit is not None,
-        max_retries=7,
+    router = HGSRouter(time_limit=0.4, max_retries=7, seed=11)
+    constraints = NetworkConstraints(
+        capacity=int(solved.cables_capacity),
+        topology='ringed' if ringed else 'radial',
+        feeders=feeders,
         balanced=True,
-        ringed=ringed,
-        seed=11,
     )
 
-    router.route(solved.P, solved.A, solved.cables, solved.cables_capacity)
+    router.route(solved.P, solved.A, solved.cables, constraints)
 
-    constraints = captured.pop('constraints')
-    bounds = constraints.resolve(solved.A, capacity=solved.cables_capacity)
+    bounds = captured.pop('bounds')
     assert captured == {
-        'capacity': solved.cables_capacity,
         'time_limit': 0.4,
         'max_retries': 7,
         'seed': 11,
         'log_callback': None,
         'warmstart': None,
     }
+    assert bounds.capacity == solved.cables_capacity
     assert bounds.topology is (Topology.RINGED if ringed else Topology.RADIAL)
     assert bounds.balanced
     # balanced: the count is exact, the minimum unless given
     assert bounds.groups_lb == bounds.groups_ub
-    if expected_vehicles is not None:
-        assert bounds.groups_lb == expected_vehicles
+    if expected_groups is not None:
+        assert bounds.groups_lb == expected_groups
 
 
 @pytest.mark.parametrize(
@@ -183,7 +178,7 @@ def test_hgsrouter_verbose_streams_log(
 ):
     solved = tiny_wfn()
 
-    def fake_hgs(A, *, log_callback, **kwargs):
+    def fake_hgs(A, bounds, *, log_callback, **kwargs):
         assert (log_callback is not None) == streamed
         if log_callback is not None:
             log_callback('It 1 | T(s) 0.01\n')
@@ -205,7 +200,7 @@ def test_hgsrouter_verbose_streams_log(
         solved.P,
         solved.A,
         solved.cables,
-        solved.cables_capacity,
+        NetworkConstraints(capacity=int(solved.cables_capacity)),
         verbose=route_verbose,
     )
 
@@ -229,7 +224,7 @@ def test_hgsrouter_forwards_warmstart_of_matching_topology(
     S_warm.graph['topology'] = warm_topology
     captured = {}
 
-    def fake_hgs(A, **kwargs):
+    def fake_hgs(A, bounds, **kwargs):
         captured.update(kwargs)
         return solved.S
 
@@ -243,11 +238,12 @@ def test_hgsrouter_forwards_warmstart_of_matching_topology(
         )(),
     )
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
-    router = HGSRouter(time_limit=0.1, ringed=ringed)
-
-    router.route(
-        solved.P, solved.A, solved.cables, solved.cables_capacity, S_warm=S_warm
+    router = HGSRouter(time_limit=0.1)
+    constraints = NetworkConstraints(
+        capacity=int(solved.cables_capacity), topology='ringed' if ringed else 'radial'
     )
+
+    router.route(solved.P, solved.A, solved.cables, constraints, S_warm=S_warm)
 
     assert captured['warmstart'] is (S_warm if forwarded else None)
 
@@ -256,7 +252,7 @@ def test_hgsrouter_solves_cold_when_the_warmstart_is_unusable(monkeypatch, caplo
     solved = tiny_wfn()
     warmstarts = []
 
-    def fake_hgs(A, *, warmstart, **kwargs):
+    def fake_hgs(A, bounds, *, warmstart, **kwargs):
         warmstarts.append(warmstart)
         if warmstart is not None:
             raise OWNWarmupFailed('rejected')
@@ -278,7 +274,11 @@ def test_hgsrouter_solves_cold_when_the_warmstart_is_unusable(monkeypatch, caplo
 
     with caplog.at_level('WARNING'):
         S, _ = router.route(
-            solved.P, solved.A, solved.cables, solved.cables_capacity, S_warm=S_warm
+            solved.P,
+            solved.A,
+            solved.cables,
+            NetworkConstraints(capacity=int(solved.cables_capacity)),
+            S_warm=S_warm,
         )
 
     assert warmstarts == [S_warm, None]
@@ -287,14 +287,15 @@ def test_hgsrouter_solves_cold_when_the_warmstart_is_unusable(monkeypatch, caplo
 
 
 def test_hgsrouter_reoptimization_survives_a_tighter_feeder_limit():
-    two_feeders = HGSRouter(
-        time_limit=0.1, feeder_limit=2, feeder_exact=True, balanced=True, seed=0
-    )
-    wfn = tiny_wfn(router=two_feeders)
+    router = HGSRouter(time_limit=0.1, seed=0)
+    wfn = tiny_wfn(optimize=False)
+    wfn.constraints = NetworkConstraints(feeders=2, balanced=True)
+    wfn.optimize(router=router)
     assert wfn.S.degree[-1] == 2
 
     # the carried solution has more routes than the new fleet allows
-    wfn.optimize(router=HGSRouter(time_limit=0.1, feeder_limit=1, seed=0))
+    wfn.constraints = NetworkConstraints(max_feeders=1)
+    wfn.optimize(router=router)
 
     assert wfn.S.degree[-1] == 1
 
@@ -305,9 +306,9 @@ def test_hgsrouter_reoptimization_is_warm_started(monkeypatch):
     warmstarts = []
     hgs_cvrp = api.hgs_cvrp
 
-    def spy_hgs(A, **kwargs):
+    def spy_hgs(A, bounds, **kwargs):
         warmstarts.append(kwargs['warmstart'])
-        return hgs_cvrp(A, **kwargs)
+        return hgs_cvrp(A, bounds, **kwargs)
 
     monkeypatch.setattr(api, 'hgs_cvrp', spy_hgs)
     wfn.optimize()
@@ -316,9 +317,9 @@ def test_hgsrouter_reoptimization_is_warm_started(monkeypatch):
     assert warmstarts[0] is S_first
 
 
-def test_hgsrouter_rejects_odd_ringed_feeder_limit():
+def test_ringed_constraints_reject_an_odd_feeder_count():
     with pytest.raises(ValueError, match='even number of feeders'):
-        HGSRouter(time_limit=0.4, feeder_limit=3, ringed=True)
+        NetworkConstraints(topology='ringed', feeders=3)
 
 
 @pytest.mark.parametrize(
@@ -377,7 +378,6 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
         lambda name: factory_calls.append(name) or fake,
     )
     monkeypatch.setattr(api, 'assign_cables', lambda G, cables: None)
-    constraints = NetworkConstraints(topology='ringed', feeder_route='straight')
     router = MILPRouter(
         solver_name='fake',
         time_limit=9,
@@ -385,28 +385,27 @@ def test_milprouter_constructs_and_forwards_to_solver(monkeypatch):
         solver_options={'threads': 1},
     )
 
+    constraints = NetworkConstraints(
+        capacity=int(solved.cables_capacity), topology='ringed', feeder_route='straight'
+    )
+
     S, G = router.route(
         solved.P,
         solved.A,
         solved.cables,
-        solved.cables_capacity,
+        constraints,
         S_warm=solved.S,
         num_retries=4,
         verbose=True,
-        constraints=constraints,
     )
 
     assert factory_calls == ['fake']
-    assert fake.problem_calls == [
-        (
-            (solved.P, solved.A),
-            {
-                'constraints': constraints,
-                'capacity': solved.cables_capacity,
-                'warmstart': solved.S,
-            },
-        )
-    ]
+    [((P, A, bounds), problem_kwargs)] = fake.problem_calls
+    assert P is solved.P and A is solved.A
+    assert problem_kwargs == {'warmstart': solved.S}
+    assert bounds.capacity == solved.cables_capacity
+    assert bounds.topology is Topology.RINGED
+    assert bounds.feeder_route is FeederRoute.STRAIGHT
     assert fake.solve_calls == [
         {
             'time_limit': 9,
@@ -564,13 +563,6 @@ def test_from_own_yaml_loads_own_yaml_file():
 
         assert wfn.L.graph['T'] == 12
         assert wfn.L.graph['R'] == 1
-
-
-def test_deprecated_from_yaml_warns():
-    with pytest.warns(DeprecationWarning, match='from_own_yaml'):
-        wfn = WindFarmNetwork.from_yaml(str(_LOCATION_FILE), cables=4)
-
-    assert wfn.L.graph['T'] == 12
 
 
 def test_from_own_yaml_missing_path(tmp_path):
@@ -853,13 +845,29 @@ def test_S_and_G_raise_before_optimize():
     'router',
     [
         EWRouter(),
-        EWRouter(feeder_route='straight'),
         HGSRouter(time_limit=0.5, seed=0),
-        HGSRouter(time_limit=0.5, feeder_limit=1, max_retries=3, balanced=True, seed=0),
     ],
 )
-def test_wfn_inexact_routers_smoke(router):
+@pytest.mark.parametrize(
+    'constraints',
+    [
+        NetworkConstraints(),
+        NetworkConstraints(feeder_route='straight'),
+        NetworkConstraints(feeders='min', balanced=True),
+    ],
+    ids=('free', 'straight', 'balanced'),
+)
+def test_wfn_inexact_routers_smoke(router, constraints):
     wfn = tiny_wfn()
+    wfn.constraints = constraints
+    if isinstance(router, EWRouter) and constraints.balanced:
+        with pytest.raises(NotImplementedError, match='does not limit'):
+            wfn.optimize(router=router)
+        return
+    if isinstance(router, HGSRouter) and constraints.feeder_route.value == 'straight':
+        with pytest.raises(NotImplementedError, match='straight'):
+            wfn.optimize(router=router)
+        return
     terse = wfn.optimize(router=router)
     assert len(terse) == wfn.S.graph['T']
 
@@ -943,7 +951,7 @@ def test_milp_router_warmup_fallback_and_retry_exhaustion(monkeypatch):
         def __init__(self):
             self.metadata = type('Meta', (), {'warmed_by': ''})()
 
-        def set_problem(self, P, A, *, constraints, warmstart=None, **capacity):
+        def set_problem(self, P, A, bounds, *, warmstart=None):
             if warmstart is not None and not getattr(self, '_passed_warmup', False):
                 self._passed_warmup = True
                 raise OWNWarmupFailed('Warmup failed')
@@ -957,7 +965,11 @@ def test_milp_router_warmup_fallback_and_retry_exhaustion(monkeypatch):
     solved = tiny_wfn()
     with pytest.raises(OWNSolutionNotFound, match='after 1 retries'):
         router.route(
-            solved.P, solved.A, solved.cables, solved.cables_capacity, num_retries=1
+            solved.P,
+            solved.A,
+            solved.cables,
+            NetworkConstraints(capacity=int(solved.cables_capacity)),
+            num_retries=1,
         )
 
 
@@ -1011,7 +1023,7 @@ def test_milprouter_keeps_the_network_constraints():
 
 def test_ewrouter_refuses_counts_and_loads():
     wfn = _neart_wfn(EWRouter())
-    with pytest.raises(NotImplementedError, match='HGSRouter or MILPRouter'):
+    with pytest.raises(NotImplementedError, match='does not limit'):
         wfn.optimize()
 
 
@@ -1036,23 +1048,17 @@ def test_ewrouter_method_must_suit_the_topology():
         wfn.optimize()
 
 
-@pytest.mark.parametrize(
-    'router',
-    [
-        lambda: EWRouter(feeder_route='straight'),
-        lambda: HGSRouter(time_limit=0.1, ringed=True),
-        lambda: MILPRouter(
-            solver_name='highs', time_limit=1, mip_gap=0.1, model_options={}
-        ),
-    ],
-)
-def test_deprecated_router_options_conflict_with_network_constraints(router):
-    with pytest.warns(DeprecationWarning, match='constraints=NetworkConstraints'):
-        wfn = _neart_wfn(router(), NetworkConstraints())
-    with pytest.raises(TypeError, match='drop those options'):
-        wfn.optimize()
-
-
 def test_network_constraints_must_be_network_constraints():
     with pytest.raises(TypeError, match='NetworkConstraints instance'):
         _neart_wfn(EWRouter(), {'topology': 'ringed'})
+
+
+def test_constraints_capacity_must_fit_the_largest_cable():
+    wfn = tiny_wfn(optimize=False)  # largest cable: 4 turbines
+    wfn.constraints = NetworkConstraints(capacity=int(wfn.cables_capacity) + 1)
+    with pytest.raises(ValueError, match='exceeds that of the largest cable'):
+        wfn.optimize()
+    wfn.constraints = NetworkConstraints(capacity=2)
+    wfn.optimize()
+    assert wfn.S.graph['capacity'] == 2
+    assert wfn.G.graph['max_load'] <= 2

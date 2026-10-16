@@ -12,11 +12,13 @@ Generated results are stored in two small files that identify their problem.
 import json
 import pickle
 from collections.abc import Iterable
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from optiwindnet.constraints import NetworkConstraints
 from optiwindnet.identity import fingerprint_coordinates
 
 HERE = Path(__file__).resolve().parent
@@ -29,13 +31,14 @@ LOCATION = 'doggerB'
 #: Maximum number of terminals per feeder.
 CAPACITY = 8
 
-#: MILP model options used for the optimum proof and MILP solver run.
-MODEL_OPTIONS: dict[str, Any] = {
-    'topology': 'branched',
-    'feeder_route': 'segmented',
-    'feeder_limit': 'min_plus1',
-    'balanced': False,
-}
+#: Network constraints used for the optimum proof and MILP solver run.
+CONSTRAINTS = NetworkConstraints(
+    capacity=CAPACITY,
+    topology='branched',
+    feeder_route='segmented',
+    max_feeders='min+1',
+    balanced=False,
+)
 
 #: Meta-heuristic time limits sampled for the figure, in seconds.
 HGS_TIME_LIMITS = (0.1, 0.5, 2.5, 12.5)
@@ -73,8 +76,7 @@ def fingerprint(L=None) -> dict[str, Any]:
     return {
         'location': LOCATION,
         'nodeset_digest': nodeset_digest(L),
-        'capacity': CAPACITY,
-        'model_options': MODEL_OPTIONS,
+        'constraints': asdict(CONSTRAINTS),
         'ew_methods': EW_METHODS,
         'hgs_time_limits': HGS_TIME_LIMITS,
         'hgs_seed': HGS_SEED,
@@ -101,10 +103,12 @@ def problem_id() -> str:
 
 def describe(L) -> str:
     g = L.graph
-    return (
-        f'{L.name} [{LOCATION}]: T={g["T"]} R={g["R"]} B={g["B"]} '
-        f'capacity={CAPACITY}, model={MODEL_OPTIONS}'
+    constraints = ', '.join(
+        f'{name}={value}'
+        for name, value in asdict(CONSTRAINTS).items()
+        if value is not None
     )
+    return f'{L.name} [{LOCATION}]: T={g["T"]} R={g["R"]} B={g["B"]} {constraints}'
 
 
 def setup():

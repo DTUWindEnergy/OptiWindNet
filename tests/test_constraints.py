@@ -1,9 +1,10 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from fractions import Fraction
 
 import pytest
 
-from optiwindnet.constraints import NetworkConstraints
+from optiwindnet.constraints import NetworkConstraints, _resolved
+from optiwindnet.transforming import as_normalized
 from optiwindnet.types import FeederRoute, Topology
 
 
@@ -152,14 +153,13 @@ def test_substation_loads_in_inflow_and_in_power():
 
 
 def test_relative_counts_need_equal_turbine_power():
+    inflow = (2,) * 6 + (1,) * 14  # 26 in all
     with pytest.raises(ValueError, match='relative'):
-        NetworkConstraints(feeders='min')._resolve(
-            T=20, R=1, capacity=5, inflow_total=26
-        )
-    b = NetworkConstraints(max_feeders=8)._resolve(
-        T=20, R=1, capacity=5, inflow_total=26
-    )
+        NetworkConstraints(feeders='min')._resolve(T=20, R=1, capacity=5, inflow=inflow)
+    b = NetworkConstraints(max_feeders=8)._resolve(T=20, R=1, capacity=5, inflow=inflow)
     assert (b.feeders_lb, b.feeders_ub) == (6, 8)
+    assert (b.inflow_total, b.groups_min) == (26, 6)
+    assert b.nonunit_inflow == dict.fromkeys(range(6), 2)
 
 
 def test_balanced_needs_a_fixed_count():
@@ -183,11 +183,62 @@ def test_balanced_subtrees_must_fit_the_substation_load():
         nc._resolve(T=20, R=2, capacity=5)
 
 
-def test_resolve_reads_the_instance_from_the_graph():
+def test_resolved_reads_the_instance_from_the_graph():
     from .sitecache import get_bundle
 
     A = get_bundle('toy').A
-    constraints = NetworkConstraints(feeders='min', balanced=True)
-    assert constraints.resolve(A, capacity=5) == constraints._resolve(
-        T=A.graph['T'], R=A.graph['R'], capacity=5
+    constraints = NetworkConstraints(feeders='min', balanced=True, capacity=5)
+    assert _resolved(A, constraints) == replace(
+        constraints._resolve(T=A.graph['T'], R=A.graph['R'], capacity=5),
+        linkset_id=A.graph['_linkset_id'],
     )
+
+
+def test_capacity_is_given_once_and_validated():
+    assert NetworkConstraints(capacity_nominal=7.5).capacity_nominal == Fraction(15, 2)
+    with pytest.raises(ValueError, match='either capacity or capacity_nominal'):
+        NetworkConstraints(capacity=5, capacity_nominal=5)
+    for capacity in (0, 2.5, True):
+        with pytest.raises(ValueError, match='positive integer'):
+            NetworkConstraints(capacity=capacity)  # pyrefly: ignore[bad-argument-type]
+
+
+def test_resolved_requires_a_capacity():
+    from .sitecache import get_bundle
+
+    with pytest.raises(ValueError, match='need a cable capacity'):
+        _resolved(get_bundle('toy').A, NetworkConstraints())
+
+
+def test_bounds_derive_the_group_quantities():
+    b = NetworkConstraints(topology='ringed', feeders='min+2')._resolve(
+        T=20, R=1, capacity=3
+    )
+    assert (b.group_capacity, b.groups_min, b.groups_lb) == (6, 4, 5)
+    assert b.fixed_above_min
+    assert (b.inflow_total, b.inflow_, b.nonunit_inflow) == (20, (1,) * 20, {})
+    assert b.power_attrs == {}
+
+
+def test_resolved_takes_bounds_for_the_same_graph_only():
+    from .sitecache import get_bundle
+
+    A = get_bundle('toy').A
+    bounds = _resolved(A, NetworkConstraints(capacity=5))
+    assert _resolved(A, bounds) is bounds
+    with pytest.raises(TypeError, match='power_rtol'):
+        _resolved(A, bounds, power_rtol=0.1)
+    other = get_bundle('example_location').A
+    with pytest.raises(ValueError, match='another graph'):
+        _resolved(other, bounds)
+
+
+def test_resolved_bounds_follow_the_scale_of_the_graph():
+    from .sitecache import get_bundle
+
+    A = get_bundle('toy').A
+    bounds = _resolved(A, NetworkConstraints(capacity=5, max_link_length=1e6))
+    A_norm = as_normalized(A)
+    rescaled = _resolved(A_norm, bounds)
+    assert rescaled.link_length_ub == pytest.approx(1e6 * A_norm.graph['norm_scale'])
+    assert rescaled.length_scale == A_norm.graph['norm_scale']

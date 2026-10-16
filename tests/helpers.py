@@ -6,6 +6,7 @@ import math
 import warnings
 from collections import Counter
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import networkx as nx
@@ -97,7 +98,6 @@ def run_milp_solve_with_retry(
     A: nx.Graph,
     *,
     solver_name: str,
-    capacity: int,
     constraints: NetworkConstraints,
     time_limit: float,
     mip_gap: float,
@@ -109,13 +109,7 @@ def run_milp_solve_with_retry(
 
     def _single_solve(limit: float) -> tuple[SolutionInfo, nx.Graph, str]:
         solver = solver_factory(solver_name)
-        solver.set_problem(
-            P,
-            A,
-            capacity=capacity,
-            constraints=constraints,
-            warmstart=warmstart,
-        )
+        solver.set_problem(P, A, constraints, warmstart=warmstart)
         info = solver.solve(time_limit=limit, mip_gap=mip_gap, options=solve_options)
         if info.termination.lower() != 'optimal' and (
             info.bound is None or not math.isfinite(info.bound)
@@ -153,8 +147,7 @@ def solve_milp_case(case: 'MILPCase') -> tuple[SolutionInfo, nx.Graph]:
         bundle.P,
         bundle.A,
         solver_name=case.solver_name,
-        capacity=case.capacity,
-        constraints=case.constraints,
+        constraints=replace(case.constraints, capacity=case.capacity),
         time_limit=case.time_limit,
         mip_gap=case.mip_gap,
         retry_on_suboptimal=case.exact_golden,
