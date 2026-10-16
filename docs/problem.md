@@ -152,6 +152,10 @@ In the routeset view, detours are dashed, turbines in the same subtree share a c
 
 _Topology_ can mean either the selected connection graph `S` or the network architecture (branched, radial or ringed). The phrase "topology `S`" refers to the graph.
 
+Solution topologies `S` and routed solutions `G` are NetworkX `DiGraph` objects. Each arc represents one physical cable and points in its electrical flow direction; a zero-load ring cable points from the lower to the higher id of the two nodes it links (two turbines, or the substation and the turbine of a one-turbine ring), and any clones along its route follow that direction. A one-turbine ring returning to the same substation has two opposite feeder arcs, so ordinary edge iteration, weighted size and total root degree account for both cables. Navigation meshes `P` and available links `A` retain their existing representations.
+
+Use predecessors to walk outward from a substation, successors to follow flow toward it, and total degree to count its physical feeders. Solution arcs carry no `reverse` attribute. Canonical linkbits record geometric link incidence; decoding them with `S_from_linkbits()` also requires the topology architecture to recover electrical arcs and the closing feeder of a singleton ring. Terse and database encodings retain their existing fields and reconstruct directed solutions; historical stored totals may differ where they counted a singleton's two feeders as one.
+
 _In use:_ {doc}`/notebooks/hi10_windfarmnetwork` and {doc}`/notebooks/hi14_plotting` (Network/Router API) · {doc}`/notebooks/lo30_topologies` and {doc}`/notebooks/lo14_plotting` (Advanced API).
 
 ## Further detail
