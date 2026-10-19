@@ -1,3 +1,0 @@
-conda install --channel conda-forge optiwindnet pyscipopt coin-or-cbc
-conda install --channel gurobi gurobi
-pip install ortools
